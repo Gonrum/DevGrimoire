@@ -4,6 +4,7 @@ import { ProjectsModule } from './projects/projects.module';
 import { TodosModule } from './todos/todos.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
+import { ChangelogModule } from './changelog/changelog.module';
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
@@ -17,6 +18,7 @@ if (!MONGODB_URI) {
     TodosModule,
     SessionsModule,
     KnowledgeModule,
+    ChangelogModule,
   ],
 })
 export class AppModule {}

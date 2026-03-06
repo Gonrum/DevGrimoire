@@ -317,6 +317,12 @@ function TodoCard({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) {
       {todo.description && (
         <p className="text-xs text-gray-500 mt-1 line-clamp-3">{todo.description}</p>
       )}
+      <p className="text-xs text-gray-600 mt-1">
+        {new Date(todo.createdAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+        {todo.updatedAt !== todo.createdAt && (
+          <span> · bearbeitet {new Date(todo.updatedAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })}</span>
+        )}
+      </p>
       {todo.tags.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-2">
           {todo.tags.map((tag) => (

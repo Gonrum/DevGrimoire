@@ -28,4 +28,8 @@ export class CreateProjectDto {
   @IsString()
   @IsOptional()
   instructions?: string;
+
+  @IsArray()
+  @IsOptional()
+  components?: { name: string; version: string; path?: string }[];
 }

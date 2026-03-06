@@ -13,6 +13,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export interface ProjectComponent {
+  name: string;
+  version: string;
+  path?: string;
+}
+
 export interface Project {
   _id: string;
   name: string;
@@ -22,6 +28,18 @@ export interface Project {
   repository?: string;
   active: boolean;
   instructions?: string;
+  components: ProjectComponent[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChangelogEntry {
+  _id: string;
+  projectId: string;
+  version?: string;
+  changes: string[];
+  summary?: string;
+  component?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -124,5 +142,16 @@ export const api = {
       request<Knowledge>(`/knowledge/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/knowledge/${id}`, { method: 'DELETE' }),
+  },
+  changelog: {
+    list: (projectId: string, limit?: number) => {
+      const params = new URLSearchParams({ projectId });
+      if (limit) params.set('limit', String(limit));
+      return request<ChangelogEntry[]>(`/changelog?${params}`);
+    },
+    create: (data: Partial<ChangelogEntry>) =>
+      request<ChangelogEntry>('/changelog', { method: 'POST', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/changelog/${id}`, { method: 'DELETE' }),
   },
 };

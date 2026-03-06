@@ -7,6 +7,7 @@ import { ProjectsService } from './projects/projects.service';
 import { TodosService } from './todos/todos.service';
 import { SessionsService } from './sessions/sessions.service';
 import { KnowledgeService } from './knowledge/knowledge.service';
+import { ChangelogService } from './changelog/changelog.service';
 
 function requireString(args: Record<string, unknown>, field: string): string {
   const val = args[field];
@@ -59,6 +60,7 @@ export interface McpServices {
   todosService: TodosService;
   sessionsService: SessionsService;
   knowledgeService: KnowledgeService;
+  changelogService: ChangelogService;
 }
 
 const tools = [
@@ -74,6 +76,7 @@ const tools = [
         techStack: { type: 'array', items: { type: 'string' }, description: 'Technologies used' },
         repository: { type: 'string', description: 'Git repository URL' },
         instructions: { type: 'string', description: 'Instructions for Claude on how to work with this project' },
+        components: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, version: { type: 'string' }, path: { type: 'string' } }, required: ['name', 'version'] }, description: 'Monorepo components with versions (e.g. API v1.2, Frontend v2.0)' },
       },
       required: ['name'],
     },
@@ -113,6 +116,7 @@ const tools = [
         repository: { type: 'string' },
         active: { type: 'boolean' },
         instructions: { type: 'string', description: 'Instructions for Claude on how to work with this project' },
+        components: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, version: { type: 'string' }, path: { type: 'string' } }, required: ['name', 'version'] }, description: 'Monorepo components with versions' },
       },
       required: ['id'],
     },
@@ -157,7 +161,7 @@ const tools = [
   },
   {
     name: 'todo_update',
-    description: 'Update a todo (e.g. change status, priority)',
+    description: 'Update a todo (e.g. change status, priority). IMPORTANT: Status transitions must follow the order open -> in_progress -> review -> done (one step at a time, forward or backward). Skipping steps will be rejected.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -284,10 +288,63 @@ const tools = [
       required: ['id'],
     },
   },
+  {
+    name: 'changelog_add',
+    description: 'Add a changelog entry for a project (version, changes, component)',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        version: { type: 'string', description: 'Version number (e.g. 1.2.0)' },
+        changes: { type: 'array', items: { type: 'string' }, description: 'List of changes made' },
+        summary: { type: 'string', description: 'Brief summary of the release/changes' },
+        component: { type: 'string', description: 'Component name for monorepos (e.g. API, Frontend)' },
+      },
+      required: ['projectId', 'changes'],
+    },
+  },
+  {
+    name: 'changelog_list',
+    description: 'List changelog entries for a project',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        limit: { type: 'number', description: 'Number of entries to return (default 50)' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'changelog_update',
+    description: 'Update a changelog entry (version, changes, summary, component)',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Changelog entry MongoDB ID' },
+        version: { type: 'string', description: 'Version number' },
+        changes: { type: 'array', items: { type: 'string' }, description: 'List of changes' },
+        summary: { type: 'string', description: 'Brief summary' },
+        component: { type: 'string', description: 'Component name for monorepos' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'changelog_delete',
+    description: 'Delete a changelog entry',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Changelog entry MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -307,6 +364,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             techStack: optionalStringArray(a, 'techStack'),
             repository: optionalString(a, 'repository'),
             instructions: optionalString(a, 'instructions'),
+            components: a.components as any,
           });
           break;
         case 'project_list':
@@ -334,6 +392,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             repository: optionalString(a, 'repository'),
             active: optionalBoolean(a, 'active'),
             instructions: optionalString(a, 'instructions'),
+            components: a.components as any,
           });
           break;
         case 'project_delete': {
@@ -343,6 +402,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             todosService.removeByProject(id),
             sessionsService.removeByProject(id),
             knowledgeService.removeByProject(id),
+            changelogService.removeByProject(id),
           ]);
           result = { deleted: true, id };
           break;
@@ -429,6 +489,33 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         case 'knowledge_delete':
           await knowledgeService.remove(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
+          break;
+        case 'changelog_add':
+          result = await changelogService.create({
+            projectId: requireString(a, 'projectId'),
+            version: optionalString(a, 'version'),
+            changes: a.changes as string[],
+            summary: optionalString(a, 'summary'),
+            component: optionalString(a, 'component'),
+          });
+          break;
+        case 'changelog_list':
+          result = await changelogService.findByProject(
+            requireString(a, 'projectId'),
+            optionalNumber(a, 'limit'),
+          );
+          break;
+        case 'changelog_update':
+          result = await changelogService.update(requireString(a, 'id'), {
+            version: optionalString(a, 'version'),
+            changes: optionalStringArray(a, 'changes'),
+            summary: optionalString(a, 'summary'),
+            component: optionalString(a, 'component'),
+          });
+          break;
+        case 'changelog_delete':
+          await changelogService.remove(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
           break;
         default:

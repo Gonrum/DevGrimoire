@@ -13,6 +13,7 @@ import { ProjectsService } from './projects/projects.service';
 import { TodosService } from './todos/todos.service';
 import { SessionsService } from './sessions/sessions.service';
 import { KnowledgeService } from './knowledge/knowledge.service';
+import { ChangelogService } from './changelog/changelog.service';
 import { registerMcpTools, McpServices } from './mcp-tools';
 
 function createMcpServer(services: McpServices): Server {
@@ -42,6 +43,7 @@ async function bootstrap() {
     todosService: app.get(TodosService),
     sessionsService: app.get(SessionsService),
     knowledgeService: app.get(KnowledgeService),
+    changelogService: app.get(ChangelogService),
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};

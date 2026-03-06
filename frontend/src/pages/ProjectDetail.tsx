@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { api, Project, Todo, Session, Knowledge } from '../api/client';
+import { api, Project, Todo, Session, Knowledge, ChangelogEntry } from '../api/client';
 import TodoBoard from '../components/TodoBoard';
 import SessionList from '../components/SessionList';
 import KnowledgeList from '../components/KnowledgeList';
+import ChangelogList from '../components/ChangelogList';
 
-type Tab = 'todos' | 'sessions' | 'knowledge';
+type Tab = 'todos' | 'sessions' | 'knowledge' | 'changelog';
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
@@ -13,6 +14,7 @@ export default function ProjectDetail() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [knowledge, setKnowledge] = useState<Knowledge[]>([]);
+  const [changelog, setChangelog] = useState<ChangelogEntry[]>([]);
   const [tab, setTab] = useState<Tab>('todos');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -29,13 +31,15 @@ export default function ProjectDetail() {
       api.todos.list({ projectId: id }),
       api.sessions.list(id, 20),
       api.knowledge.list(id),
+      api.changelog.list(id),
     ])
-      .then(([p, t, s, k]) => {
+      .then(([p, t, s, k, cl]) => {
         if (controller.signal.aborted) return;
         setProject(p);
         setTodos(t);
         setSessions(s);
         setKnowledge(k);
+        setChangelog(cl);
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
@@ -67,6 +71,7 @@ export default function ProjectDetail() {
     { key: 'todos', label: 'Todos', count: todos.filter((t) => t.status !== 'done').length },
     { key: 'sessions', label: 'Sessions', count: sessions.length },
     { key: 'knowledge', label: 'Wissen', count: knowledge.length },
+    { key: 'changelog', label: 'Changelog', count: changelog.length },
   ];
 
   return (
@@ -100,6 +105,8 @@ export default function ProjectDetail() {
         <div className="flex flex-wrap gap-2 text-sm text-gray-500">
           {project.path && <span>Pfad: {project.path}</span>}
           {project.repository && <span>Repo: {project.repository}</span>}
+          <span>Erstellt: {new Date(project.createdAt).toLocaleDateString('de-DE')}</span>
+          <span>Aktualisiert: {new Date(project.updatedAt).toLocaleDateString('de-DE')}</span>
         </div>
         {project.techStack.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
@@ -109,6 +116,19 @@ export default function ProjectDetail() {
                 className="text-xs bg-blue-900/40 text-blue-300 px-2 py-0.5 rounded"
               >
                 {t}
+              </span>
+            ))}
+          </div>
+        )}
+        {project.components && project.components.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-2">
+            {project.components.map((c) => (
+              <span
+                key={c.name}
+                className="text-xs bg-purple-900/40 text-purple-300 px-2 py-0.5 rounded"
+              >
+                {c.name} <span className="text-purple-400 font-mono">v{c.version}</span>
+                {c.path && <span className="text-purple-500 ml-1">({c.path})</span>}
               </span>
             ))}
           </div>
@@ -146,6 +166,7 @@ export default function ProjectDetail() {
       )}
       {tab === 'sessions' && <SessionList sessions={sessions} />}
       {tab === 'knowledge' && <KnowledgeList entries={knowledge} />}
+      {tab === 'changelog' && <ChangelogList entries={changelog} />}
     </div>
   );
 }

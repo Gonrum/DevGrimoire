@@ -1,6 +1,12 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 
+export class ProjectComponent {
+  name: string;
+  version: string;
+  path?: string;
+}
+
 export type ProjectDocument = HydratedDocument<Project>;
 
 @Schema({ timestamps: true })
@@ -25,6 +31,9 @@ export class Project {
 
   @Prop()
   instructions: string;
+
+  @Prop({ type: [{ name: String, version: String, path: String }], default: [] })
+  components: ProjectComponent[];
 }
 
 export const ProjectSchema = SchemaFactory.createForClass(Project);
