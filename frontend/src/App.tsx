@@ -43,7 +43,7 @@ function App() {
     <ToastProvider>
     <div className="min-h-screen flex flex-col">
       <header className="bg-gray-900 border-b border-gray-800 px-4 sm:px-6 py-3 sm:py-4">
-        <div className="max-w-7xl mx-auto flex items-center gap-3 sm:gap-6">
+        <div className="flex items-center gap-3 sm:gap-6">
           <NavLink to="/" className="text-lg sm:text-xl font-bold text-white tracking-tight shrink-0">
             ClaudeVault
           </NavLink>
@@ -71,7 +71,7 @@ function App() {
           </div>
         </div>
       </header>
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-4 sm:py-8">
+      <main className="flex-1 w-full px-4 sm:px-6 py-4 sm:py-8">
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />

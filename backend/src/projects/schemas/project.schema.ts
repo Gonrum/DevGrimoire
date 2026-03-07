@@ -29,6 +29,9 @@ export class Project {
   @Prop({ default: true })
   active: boolean;
 
+  @Prop({ default: false })
+  favorite: boolean;
+
   @Prop()
   instructions: string;
 

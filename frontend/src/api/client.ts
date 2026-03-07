@@ -27,6 +27,7 @@ export interface Project {
   techStack: string[];
   repository?: string;
   active: boolean;
+  favorite: boolean;
   instructions?: string;
   components: ProjectComponent[];
   createdAt: string;

@@ -25,6 +25,10 @@ export class CreateProjectDto {
   @IsOptional()
   active?: boolean;
 
+  @IsBoolean()
+  @IsOptional()
+  favorite?: boolean;
+
   @IsString()
   @IsOptional()
   instructions?: string;

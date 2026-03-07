@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, Project } from '../api/client';
 import { useDashboardEvents } from '../hooks/useProjectEvents';
+import { useToast } from '../components/Toast';
 
 function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
@@ -113,6 +114,7 @@ export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { showError } = useToast();
 
   const loadProjects = () => {
     api.projects
@@ -121,6 +123,22 @@ export default function Dashboard() {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   };
+
+  const toggleFavorite = async (e: React.MouseEvent, project: Project) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await api.projects.update(project._id, { favorite: !project.favorite });
+      loadProjects();
+    } catch (err: any) {
+      showError(err.message || 'Favorit konnte nicht geändert werden');
+    }
+  };
+
+  const sortedProjects = [...projects].sort((a, b) => {
+    if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
+    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+  });
 
   useEffect(() => {
     loadProjects();
@@ -147,14 +165,29 @@ export default function Dashboard() {
         </p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {projects.map((p) => (
+          {sortedProjects.map((p) => (
             <Link
               key={p._id}
               to={`/projects/${p._id}`}
               className="block bg-gray-900 border border-gray-800 rounded-lg p-5 hover:border-blue-500 transition-colors"
             >
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-lg font-semibold">{p.name}</h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => toggleFavorite(e, p)}
+                    className={`text-lg leading-none transition-colors ${
+                      p.favorite
+                        ? 'text-yellow-400 hover:text-yellow-300'
+                        : 'text-gray-700 hover:text-yellow-400'
+                    }`}
+                    title={p.favorite ? 'Favorit entfernen' : 'Als Favorit markieren'}
+                    aria-label={p.favorite ? 'Favorit entfernen' : 'Als Favorit markieren'}
+                  >
+                    {p.favorite ? '\u2605' : '\u2606'}
+                  </button>
+                  <h2 className="text-lg font-semibold">{p.name}</h2>
+                </div>
                 <span
                   className={`text-xs px-2 py-0.5 rounded-full ${
                     p.active
