@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, Project } from '../api/client';
+import { useDashboardEvents } from '../hooks/useProjectEvents';
 
 function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
@@ -65,7 +66,7 @@ function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
         rows={2}
         className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
       />
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <input
           type="text"
           placeholder="Pfad (optional)"
@@ -124,6 +125,8 @@ export default function Dashboard() {
   useEffect(() => {
     loadProjects();
   }, []);
+
+  useDashboardEvents(() => loadProjects());
 
   if (loading) return <p className="text-gray-500">Laden...</p>;
   if (error) {

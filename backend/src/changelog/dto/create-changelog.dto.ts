@@ -1,7 +1,7 @@
-import { IsString, IsOptional, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsArray, IsMongoId } from 'class-validator';
 
 export class CreateChangelogDto {
-  @IsString()
+  @IsMongoId()
   projectId: string;
 
   @IsString()

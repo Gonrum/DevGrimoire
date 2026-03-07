@@ -14,6 +14,9 @@ import { TodosService } from './todos/todos.service';
 import { SessionsService } from './sessions/sessions.service';
 import { KnowledgeService } from './knowledge/knowledge.service';
 import { ChangelogService } from './changelog/changelog.service';
+import { MilestonesService } from './milestones/milestones.service';
+import { ActivitiesService } from './activities/activities.service';
+import { PushService } from './push/push.service';
 import { registerMcpTools, McpServices } from './mcp-tools';
 
 function createMcpServer(services: McpServices): Server {
@@ -44,6 +47,9 @@ async function bootstrap() {
     sessionsService: app.get(SessionsService),
     knowledgeService: app.get(KnowledgeService),
     changelogService: app.get(ChangelogService),
+    milestonesService: app.get(MilestonesService),
+    activitiesService: app.get(ActivitiesService),
+    pushService: app.get(PushService),
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};
@@ -130,7 +136,7 @@ async function bootstrap() {
   // =========================================================================
   app.setGlobalPrefix('api');
   app.enableCors({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: process.env.CORS_ORIGIN || 'http://localhost:8080',
   });
   app.useGlobalPipes(
     new ValidationPipe({

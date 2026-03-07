@@ -1,21 +1,34 @@
-import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { api, Project, Todo, Session, Knowledge, ChangelogEntry } from '../api/client';
+import { useEffect, useState, useCallback } from 'react';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity } from '../api/client';
 import TodoBoard from '../components/TodoBoard';
 import SessionList from '../components/SessionList';
 import KnowledgeList from '../components/KnowledgeList';
 import ChangelogList from '../components/ChangelogList';
+import MilestoneList from '../components/MilestoneList';
+import ActivityList from '../components/ActivityList';
+import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents';
 
-type Tab = 'todos' | 'sessions' | 'knowledge' | 'changelog';
+type Tab = 'todos' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity';
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [knowledge, setKnowledge] = useState<Knowledge[]>([]);
   const [changelog, setChangelog] = useState<ChangelogEntry[]>([]);
-  const [tab, setTab] = useState<Tab>('todos');
+  const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [tab, setTab] = useState<Tab>(() => (searchParams.get('tab') as Tab) || 'todos');
+  useEffect(() => {
+    if (searchParams.has('tab')) {
+      setTab(searchParams.get('tab') as Tab);
+      searchParams.delete('tab');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,14 +45,18 @@ export default function ProjectDetail() {
       api.sessions.list(id, 20),
       api.knowledge.list(id),
       api.changelog.list(id),
+      api.milestones.list(id),
+      api.activities.list(id, 100),
     ])
-      .then(([p, t, s, k, cl]) => {
+      .then(([p, t, s, k, cl, ms, act]) => {
         if (controller.signal.aborted) return;
         setProject(p);
         setTodos(t);
         setSessions(s);
         setKnowledge(k);
         setChangelog(cl);
+        setMilestones(ms);
+        setActivities(act);
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
@@ -51,6 +68,25 @@ export default function ProjectDetail() {
 
     return () => controller.abort();
   }, [id]);
+
+  const handleSSEEvent = useCallback(
+    (event: ProjectChangeEvent) => {
+      if (!id) return;
+      const refetchers: Record<string, () => void> = {
+        todo: () => api.todos.list({ projectId: id }).then(setTodos),
+        session: () => api.sessions.list(id, 20).then(setSessions),
+        knowledge: () => api.knowledge.list(id).then(setKnowledge),
+        changelog: () => api.changelog.list(id).then(setChangelog),
+        milestone: () => api.milestones.list(id).then(setMilestones),
+        project: () => api.projects.get(id).then(setProject),
+      };
+      refetchers[event.entity]?.();
+      api.activities.list(id, 100).then(setActivities);
+    },
+    [id],
+  );
+
+  useProjectEvents(id, handleSSEEvent);
 
   if (loading) return <p className="text-gray-500">Laden...</p>;
   if (error) {
@@ -69,9 +105,11 @@ export default function ProjectDetail() {
 
   const tabs: { key: Tab; label: string; count: number }[] = [
     { key: 'todos', label: 'Todos', count: todos.filter((t) => t.status !== 'done').length },
+    { key: 'milestones', label: 'Milestones', count: milestones.filter((m) => m.status !== 'done').length },
     { key: 'sessions', label: 'Sessions', count: sessions.length },
     { key: 'knowledge', label: 'Wissen', count: knowledge.length },
     { key: 'changelog', label: 'Changelog', count: changelog.length },
+    { key: 'activity', label: 'Aktivität', count: activities.length },
   ];
 
   return (
@@ -81,8 +119,8 @@ export default function ProjectDetail() {
       </Link>
 
       <div className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <h1 className="text-2xl font-bold">{project.name}</h1>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
+          <h1 className="text-xl sm:text-2xl font-bold">{project.name}</h1>
           <span
             className={`text-xs px-2 py-0.5 rounded-full ${
               project.active
@@ -102,7 +140,7 @@ export default function ProjectDetail() {
         {project.description && (
           <p className="text-gray-400 mb-2">{project.description}</p>
         )}
-        <div className="flex flex-wrap gap-2 text-sm text-gray-500">
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs sm:text-sm text-gray-500">
           {project.path && <span>Pfad: {project.path}</span>}
           {project.repository && <span>Repo: {project.repository}</span>}
           <span>Erstellt: {new Date(project.createdAt).toLocaleDateString('de-DE')}</span>
@@ -135,21 +173,21 @@ export default function ProjectDetail() {
         )}
       </div>
 
-      <div className="border-b border-gray-800 mb-6">
-        <nav className="flex gap-6">
+      <div className="border-b border-gray-800 mb-6 -mx-4 sm:mx-0 px-4 sm:px-0 overflow-x-auto">
+        <nav className="flex gap-4 sm:gap-6 min-w-max">
           {tabs.map((t) => (
             <button
               key={t.key}
               type="button"
               onClick={() => setTab(t.key)}
-              className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+              className={`pb-3 text-xs sm:text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
                 tab === t.key
                   ? 'border-blue-500 text-blue-400'
                   : 'border-transparent text-gray-500 hover:text-gray-300'
               }`}
             >
               {t.label}
-              <span className="ml-1.5 text-xs bg-gray-800 px-1.5 py-0.5 rounded-full">
+              <span className="ml-1 sm:ml-1.5 text-xs bg-gray-800 px-1 sm:px-1.5 py-0.5 rounded-full">
                 {t.count}
               </span>
             </button>
@@ -160,13 +198,23 @@ export default function ProjectDetail() {
       {tab === 'todos' && (
         <TodoBoard
           todos={todos}
+          milestones={milestones}
           projectId={id!}
           onUpdate={() => api.todos.list({ projectId: id }).then(setTodos)}
+        />
+      )}
+      {tab === 'milestones' && (
+        <MilestoneList
+          milestones={milestones}
+          todos={todos}
+          projectId={id!}
+          onUpdate={() => api.milestones.list(id!).then(setMilestones)}
         />
       )}
       {tab === 'sessions' && <SessionList sessions={sessions} />}
       {tab === 'knowledge' && <KnowledgeList entries={knowledge} />}
       {tab === 'changelog' && <ChangelogList entries={changelog} />}
+      {tab === 'activity' && <ActivityList activities={activities} />}
     </div>
   );
 }

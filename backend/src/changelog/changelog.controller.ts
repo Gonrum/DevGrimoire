@@ -12,6 +12,7 @@ import {
 import { ChangelogService } from './changelog.service';
 import { CreateChangelogDto } from './dto/create-changelog.dto';
 import { UpdateChangelogDto } from './dto/update-changelog.dto';
+import { ValidateProjectIdPipe } from '../common/pipes/validate-project-id.pipe';
 
 @Controller('changelog')
 export class ChangelogController {
@@ -19,7 +20,7 @@ export class ChangelogController {
 
   @Post()
   @HttpCode(201)
-  create(@Body() dto: CreateChangelogDto) {
+  create(@Body(ValidateProjectIdPipe) dto: CreateChangelogDto) {
     return this.changelogService.create(dto);
   }
 

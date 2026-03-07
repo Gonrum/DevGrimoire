@@ -30,4 +30,13 @@ export class CreateTodoDto {
   @IsString({ each: true })
   @IsOptional()
   tags?: string[];
+
+  @IsMongoId()
+  @IsOptional()
+  milestoneId?: string;
+
+  @IsArray()
+  @IsMongoId({ each: true })
+  @IsOptional()
+  blockedBy?: string[];
 }

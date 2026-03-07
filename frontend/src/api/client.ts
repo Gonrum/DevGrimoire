@@ -58,7 +58,22 @@ export interface Todo {
   status: 'open' | 'in_progress' | 'review' | 'done';
   priority: 'low' | 'medium' | 'high' | 'critical';
   tags: string[];
+  milestoneId?: string;
+  blockedBy: string[];
+  archived: boolean;
   comments: TodoComment[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Milestone {
+  _id: string;
+  projectId: string;
+  name: string;
+  description?: string;
+  status: 'open' | 'in_progress' | 'done';
+  dueDate?: string;
+  archived: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -81,6 +96,16 @@ export interface Knowledge {
   tags: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Activity {
+  _id: string;
+  projectId: string;
+  entity: string;
+  action: string;
+  entityId?: string;
+  summary?: string;
+  createdAt: string;
 }
 
 export const api = {
@@ -153,5 +178,33 @@ export const api = {
       request<ChangelogEntry>('/changelog', { method: 'POST', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/changelog/${id}`, { method: 'DELETE' }),
+  },
+  push: {
+    getVapidKey: () => request<{ publicKey: string }>('/push/vapid-public-key'),
+    subscribe: (subscription: PushSubscriptionJSON) =>
+      request<{ ok: boolean }>('/push/subscribe', { method: 'POST', body: JSON.stringify(subscription) }),
+    unsubscribe: (endpoint: string) =>
+      request<{ ok: boolean }>('/push/subscribe', { method: 'DELETE', body: JSON.stringify({ endpoint }) }),
+  },
+  activities: {
+    list: (projectId: string, limit?: number) => {
+      const params = new URLSearchParams({ projectId });
+      if (limit) params.set('limit', String(limit));
+      return request<Activity[]>(`/activities?${params}`);
+    },
+  },
+  milestones: {
+    list: (projectId: string, status?: string) => {
+      const params = new URLSearchParams({ projectId });
+      if (status) params.set('status', status);
+      return request<Milestone[]>(`/milestones?${params}`);
+    },
+    get: (id: string) => request<Milestone>(`/milestones/${id}`),
+    create: (data: Partial<Milestone>) =>
+      request<Milestone>('/milestones', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<Milestone>) =>
+      request<Milestone>(`/milestones/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/milestones/${id}`, { method: 'DELETE' }),
   },
 };

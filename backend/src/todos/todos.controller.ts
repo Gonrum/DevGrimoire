@@ -13,6 +13,7 @@ import { TodosService } from './todos.service';
 import { CreateTodoDto } from './dto/create-todo.dto';
 import { UpdateTodoDto } from './dto/update-todo.dto';
 import { TodoStatus } from './schemas/todo.schema';
+import { ValidateProjectIdPipe } from '../common/pipes/validate-project-id.pipe';
 
 @Controller('todos')
 export class TodosController {
@@ -20,7 +21,7 @@ export class TodosController {
 
   @Post()
   @HttpCode(201)
-  create(@Body() dto: CreateTodoDto) {
+  create(@Body(ValidateProjectIdPipe) dto: CreateTodoDto) {
     return this.todosService.create(dto);
   }
 

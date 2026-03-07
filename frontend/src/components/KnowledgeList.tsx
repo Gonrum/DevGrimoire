@@ -1,4 +1,5 @@
 import { Knowledge } from '../api/client';
+import Markdown from './Markdown';
 
 export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
   if (entries.length === 0) {
@@ -18,7 +19,7 @@ export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
               {new Date(e.updatedAt).toLocaleDateString('de-DE')}
             </span>
           </div>
-          <p className="text-sm text-gray-400 whitespace-pre-wrap">{e.content}</p>
+          <Markdown className="text-gray-400">{e.content}</Markdown>
           {e.tags.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-3">
               {e.tags.map((tag) => (

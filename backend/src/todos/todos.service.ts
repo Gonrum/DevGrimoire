@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
 import { Todo, TodoDocument, TodoStatus } from './schemas/todo.schema';
 import { CreateTodoDto } from './dto/create-todo.dto';
 import { UpdateTodoDto } from './dto/update-todo.dto';
+import { PROJECT_CHANGED } from '../events/project-event';
 
 const STATUS_ORDER: TodoStatus[] = [
   TodoStatus.OPEN,
@@ -16,6 +18,7 @@ const STATUS_ORDER: TodoStatus[] = [
 export class TodosService {
   constructor(
     @InjectModel(Todo.name) private todoModel: Model<TodoDocument>,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   private validateStatusTransition(current: TodoStatus, next: TodoStatus): void {
@@ -24,6 +27,8 @@ export class TodosService {
     const diff = nextIdx - currentIdx;
 
     if (diff === 0) return;
+    // Allow reopening: done -> open
+    if (current === TodoStatus.DONE && next === TodoStatus.OPEN) return;
     if (diff !== 1 && diff !== -1) {
       const arrow = STATUS_ORDER.join(' -> ');
       throw new BadRequestException(
@@ -39,7 +44,15 @@ export class TodosService {
   }
 
   async create(dto: CreateTodoDto): Promise<TodoDocument> {
-    return this.todoModel.create(dto);
+    const todo = await this.todoModel.create(dto);
+    this.eventEmitter.emit(PROJECT_CHANGED, {
+      projectId: todo.projectId.toString(),
+      entity: 'todo',
+      action: 'created',
+      entityId: todo._id.toString(),
+      summary: `Todo "${todo.title}" erstellt`,
+    });
+    return todo;
   }
 
   async findAll(filters: {
@@ -69,12 +82,30 @@ export class TodosService {
       .findByIdAndUpdate(id, dto, { new: true })
       .exec();
     if (!todo) throw new NotFoundException(`Todo ${id} not found`);
+    const changes: string[] = [];
+    if (dto.status) changes.push(`Status → ${dto.status}`);
+    if (dto.priority) changes.push(`Priorität → ${dto.priority}`);
+    if (dto.title) changes.push(`Titel geändert`);
+    this.eventEmitter.emit(PROJECT_CHANGED, {
+      projectId: todo.projectId.toString(),
+      entity: 'todo',
+      action: 'updated',
+      entityId: id,
+      summary: `Todo "${todo.title}" aktualisiert${changes.length ? ': ' + changes.join(', ') : ''}`,
+    });
     return todo;
   }
 
   async remove(id: string): Promise<void> {
     const result = await this.todoModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException(`Todo ${id} not found`);
+    this.eventEmitter.emit(PROJECT_CHANGED, {
+      projectId: result.projectId.toString(),
+      entity: 'todo',
+      action: 'deleted',
+      entityId: id,
+      summary: `Todo "${result.title}" gelöscht`,
+    });
   }
 
   async addComment(id: string, text: string, author = 'user'): Promise<TodoDocument> {
@@ -86,6 +117,13 @@ export class TodosService {
       )
       .exec();
     if (!todo) throw new NotFoundException(`Todo ${id} not found`);
+    this.eventEmitter.emit(PROJECT_CHANGED, {
+      projectId: todo.projectId.toString(),
+      entity: 'todo',
+      action: 'updated',
+      entityId: id,
+      summary: `Kommentar von ${author} zu "${todo.title}"`,
+    });
     return todo;
   }
 

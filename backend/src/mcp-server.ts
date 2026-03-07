@@ -7,6 +7,9 @@ import { TodosService } from './todos/todos.service';
 import { SessionsService } from './sessions/sessions.service';
 import { KnowledgeService } from './knowledge/knowledge.service';
 import { ChangelogService } from './changelog/changelog.service';
+import { MilestonesService } from './milestones/milestones.service';
+import { ActivitiesService } from './activities/activities.service';
+import { PushService } from './push/push.service';
 import { registerMcpTools } from './mcp-tools';
 
 async function bootstrap() {
@@ -25,6 +28,9 @@ async function bootstrap() {
     sessionsService: app.get(SessionsService),
     knowledgeService: app.get(KnowledgeService),
     changelogService: app.get(ChangelogService),
+    milestonesService: app.get(MilestonesService),
+    activitiesService: app.get(ActivitiesService),
+    pushService: app.get(PushService),
   });
 
   const transport = new StdioServerTransport();

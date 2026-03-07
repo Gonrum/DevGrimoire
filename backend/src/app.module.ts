@@ -1,10 +1,17 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ProjectsModule } from './projects/projects.module';
 import { TodosModule } from './todos/todos.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { ChangelogModule } from './changelog/changelog.module';
+import { MilestonesModule } from './milestones/milestones.module';
+import { EventsModule } from './events/events.module';
+import { ActivitiesModule } from './activities/activities.module';
+import { PushModule } from './push/push.module';
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
@@ -14,11 +21,20 @@ if (!MONGODB_URI) {
 @Module({
   imports: [
     MongooseModule.forRoot(MONGODB_URI),
+    EventEmitterModule.forRoot(),
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     ProjectsModule,
     TodosModule,
     SessionsModule,
     KnowledgeModule,
     ChangelogModule,
+    MilestonesModule,
+    EventsModule,
+    ActivitiesModule,
+    PushModule,
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

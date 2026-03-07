@@ -13,6 +13,7 @@ import {
 import { KnowledgeService } from './knowledge.service';
 import { CreateKnowledgeDto } from './dto/create-knowledge.dto';
 import { UpdateKnowledgeDto } from './dto/update-knowledge.dto';
+import { ValidateProjectIdPipe } from '../common/pipes/validate-project-id.pipe';
 
 @Controller('knowledge')
 export class KnowledgeController {
@@ -20,7 +21,7 @@ export class KnowledgeController {
 
   @Post()
   @HttpCode(201)
-  create(@Body() dto: CreateKnowledgeDto) {
+  create(@Body(ValidateProjectIdPipe) dto: CreateKnowledgeDto) {
     return this.knowledgeService.create(dto);
   }
 

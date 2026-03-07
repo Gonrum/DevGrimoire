@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { SessionsService } from './sessions.service';
 import { CreateSessionDto } from './dto/create-session.dto';
+import { ValidateProjectIdPipe } from '../common/pipes/validate-project-id.pipe';
 
 @Controller('sessions')
 export class SessionsController {
@@ -17,7 +18,7 @@ export class SessionsController {
 
   @Post()
   @HttpCode(201)
-  create(@Body() dto: CreateSessionDto) {
+  create(@Body(ValidateProjectIdPipe) dto: CreateSessionDto) {
     return this.sessionsService.create(dto);
   }
 

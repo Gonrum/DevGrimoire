@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsArray, IsMongoId, IsBoolean } from 'class-validator';
 import { TodoStatus, TodoPriority } from '../schemas/todo.schema';
 
 export class UpdateTodoDto {
@@ -22,4 +22,17 @@ export class UpdateTodoDto {
   @IsString({ each: true })
   @IsOptional()
   tags?: string[];
+
+  @IsMongoId()
+  @IsOptional()
+  milestoneId?: string;
+
+  @IsArray()
+  @IsMongoId({ each: true })
+  @IsOptional()
+  blockedBy?: string[];
+
+  @IsBoolean()
+  @IsOptional()
+  archived?: boolean;
 }

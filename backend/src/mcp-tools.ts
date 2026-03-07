@@ -8,6 +8,9 @@ import { TodosService } from './todos/todos.service';
 import { SessionsService } from './sessions/sessions.service';
 import { KnowledgeService } from './knowledge/knowledge.service';
 import { ChangelogService } from './changelog/changelog.service';
+import { MilestonesService } from './milestones/milestones.service';
+import { ActivitiesService } from './activities/activities.service';
+import { PushService } from './push/push.service';
 
 function requireString(args: Record<string, unknown>, field: string): string {
   const val = args[field];
@@ -61,6 +64,9 @@ export interface McpServices {
   sessionsService: SessionsService;
   knowledgeService: KnowledgeService;
   changelogService: ChangelogService;
+  milestonesService: MilestonesService;
+  activitiesService: ActivitiesService;
+  pushService: PushService;
 }
 
 const tools = [
@@ -144,6 +150,8 @@ const tools = [
         status: { type: 'string', enum: ['open', 'in_progress', 'review', 'done'] },
         priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
         tags: { type: 'array', items: { type: 'string' } },
+        milestoneId: { type: 'string', description: 'Milestone MongoDB ID to associate with' },
+        blockedBy: { type: 'array', items: { type: 'string' }, description: 'Array of Todo MongoDB IDs that block this todo' },
       },
       required: ['projectId', 'title'],
     },
@@ -171,6 +179,9 @@ const tools = [
         status: { type: 'string', enum: ['open', 'in_progress', 'review', 'done'] },
         priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
         tags: { type: 'array', items: { type: 'string' } },
+        milestoneId: { type: 'string', description: 'Milestone MongoDB ID to associate with' },
+        blockedBy: { type: 'array', items: { type: 'string' }, description: 'Array of Todo MongoDB IDs that block this todo' },
+        archived: { type: 'boolean', description: 'Archive or unarchive a todo' },
       },
       required: ['id'],
     },
@@ -341,10 +352,88 @@ const tools = [
       required: ['id'],
     },
   },
+  {
+    name: 'milestone_create',
+    description: 'Create a milestone (feature/epic) for a project. Use milestones to group related todos together.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        name: { type: 'string', description: 'Milestone name' },
+        description: { type: 'string', description: 'Milestone description' },
+        status: { type: 'string', enum: ['open', 'in_progress', 'done'] },
+        dueDate: { type: 'string', description: 'Due date (ISO 8601)' },
+      },
+      required: ['projectId', 'name'],
+    },
+  },
+  {
+    name: 'milestone_list',
+    description: 'List milestones for a project',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        status: { type: 'string', enum: ['open', 'in_progress', 'done'], description: 'Filter by status' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'milestone_get',
+    description: 'Get a milestone by ID',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Milestone MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'milestone_update',
+    description: 'Update a milestone',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Milestone MongoDB ID' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        status: { type: 'string', enum: ['open', 'in_progress', 'done'] },
+        dueDate: { type: 'string', description: 'Due date (ISO 8601)' },
+        archived: { type: 'boolean', description: 'Archive or unarchive a milestone' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'milestone_delete',
+    description: 'Delete a milestone',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Milestone MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'notify_user',
+    description: 'Send a push notification to the user via the ClaudeVault PWA. Use this to inform the user about completed tasks, important updates, or when you need their attention.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        title: { type: 'string', description: 'Notification title' },
+        body: { type: 'string', description: 'Notification body text' },
+        url: { type: 'string', description: 'URL to open when notification is clicked (e.g. /projects/abc123)' },
+      },
+      required: ['title', 'body'],
+    },
+  },
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -403,6 +492,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             sessionsService.removeByProject(id),
             knowledgeService.removeByProject(id),
             changelogService.removeByProject(id),
+            milestonesService.removeByProject(id),
+            activitiesService.removeByProject(id),
           ]);
           result = { deleted: true, id };
           break;
@@ -415,6 +506,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             status: optionalString(a, 'status') as any,
             priority: optionalString(a, 'priority') as any,
             tags: optionalStringArray(a, 'tags'),
+            milestoneId: optionalString(a, 'milestoneId'),
+            blockedBy: optionalStringArray(a, 'blockedBy'),
           });
           break;
         case 'todo_list':
@@ -430,6 +523,9 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             status: optionalString(a, 'status') as any,
             priority: optionalString(a, 'priority') as any,
             tags: optionalStringArray(a, 'tags'),
+            milestoneId: optionalString(a, 'milestoneId'),
+            blockedBy: optionalStringArray(a, 'blockedBy'),
+            archived: optionalBoolean(a, 'archived'),
           });
           break;
         case 'todo_delete':
@@ -517,6 +613,44 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'changelog_delete':
           await changelogService.remove(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
+          break;
+        case 'milestone_create':
+          result = await milestonesService.create({
+            projectId: requireString(a, 'projectId'),
+            name: requireString(a, 'name'),
+            description: optionalString(a, 'description'),
+            status: optionalString(a, 'status') as any,
+            dueDate: optionalString(a, 'dueDate'),
+          });
+          break;
+        case 'milestone_list':
+          result = await milestonesService.findByProject(
+            requireString(a, 'projectId'),
+            optionalString(a, 'status') as any,
+          );
+          break;
+        case 'milestone_get':
+          result = await milestonesService.findById(requireString(a, 'id'));
+          break;
+        case 'milestone_update':
+          result = await milestonesService.update(requireString(a, 'id'), {
+            name: optionalString(a, 'name'),
+            description: optionalString(a, 'description'),
+            status: optionalString(a, 'status') as any,
+            dueDate: optionalString(a, 'dueDate'),
+            archived: optionalBoolean(a, 'archived'),
+          });
+          break;
+        case 'milestone_delete':
+          await milestonesService.remove(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
+          break;
+        case 'notify_user':
+          result = await pushService.sendNotification(
+            requireString(a, 'title'),
+            requireString(a, 'body'),
+            optionalString(a, 'url'),
+          );
           break;
         default:
           return errorResult(`Unknown tool: ${name}`);

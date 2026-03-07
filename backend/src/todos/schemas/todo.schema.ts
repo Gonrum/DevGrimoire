@@ -49,8 +49,17 @@ export class Todo {
   @Prop({ type: [String], default: [] })
   tags: string[];
 
+  @Prop({ type: Types.ObjectId, ref: 'Milestone' })
+  milestoneId: Types.ObjectId;
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Todo' }], default: [] })
+  blockedBy: Types.ObjectId[];
+
   @Prop({ type: [TodoComment], default: [] })
   comments: TodoComment[];
+
+  @Prop({ default: false })
+  archived: boolean;
 }
 
 export const TodoSchema = SchemaFactory.createForClass(Todo);
