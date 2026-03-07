@@ -10,10 +10,12 @@ export default function Docs() {
         <p className="text-gray-400 leading-relaxed">
           ClaudeVault gibt Claude (dem AI-Assistenten) ein persistentes
           Gedächtnis für deine Projekte. Claude kann Projekte tracken,
-          Todos verwalten, Arbeitssessions dokumentieren und Wissen
-          abspeichern &mdash; alles über das{' '}
+          Todos und Milestones verwalten, Arbeitssessions dokumentieren,
+          Wissen abspeichern, Changelogs pflegen und verschlüsselte
+          Secrets verwalten &mdash; alles über das{' '}
           <span className="text-gray-200">Model Context Protocol (MCP)</span>.
-          Dieses Web-Frontend zeigt dir, was Claude gespeichert hat.
+          Dieses Web-Frontend zeigt dir, was Claude gespeichert hat,
+          und ermöglicht eigene Verwaltung.
         </p>
       </section>
 
@@ -37,13 +39,24 @@ export default function Docs() {
           <Code>{`git clone <repo-url> ClaudeVault
 cd ClaudeVault
 cp .env.example .env
-# .env anpassen (MongoDB Passwort ändern)`}</Code>
+# .env anpassen: MongoDB Passwort, Auth-Credentials, Encryption Key`}</Code>
+          <p className="text-gray-500 text-sm mt-2">
+            Wichtige Variablen in <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">.env</code>:
+          </p>
+          <div className="mt-2 space-y-1 text-sm text-gray-400">
+            <div className="flex gap-2"><code className="text-yellow-400 shrink-0">MONGO_ROOT_PASSWORD</code> <span className="text-gray-600">MongoDB-Passwort</span></div>
+            <div className="flex gap-2"><code className="text-yellow-400 shrink-0">AUTH_USERNAME / AUTH_PASSWORD</code> <span className="text-gray-600">Login-Credentials (optional, ohne = Auth deaktiviert)</span></div>
+            <div className="flex gap-2"><code className="text-yellow-400 shrink-0">JWT_SECRET</code> <span className="text-gray-600">Geheimnis für JWT-Signierung</span></div>
+            <div className="flex gap-2"><code className="text-yellow-400 shrink-0">SECRETS_ENCRYPTION_KEY</code> <span className="text-gray-600">AES-256-Key für Secrets (64 Hex-Zeichen)</span></div>
+          </div>
+          <Code>{`# Encryption Key generieren:
+openssl rand -hex 32`}</Code>
         </Step>
 
         <Step n={2} title="Docker Stack starten">
           <Code>{`docker compose up -d`}</Code>
           <p className="text-gray-500 text-sm mt-2">
-            Startet MongoDB, Backend (REST API) und Frontend (nginx).
+            Startet MongoDB (Replica Set), Backend (REST API) und Frontend (nginx).
           </p>
         </Step>
 
@@ -55,6 +68,42 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
             Der MCP-Server läuft lokal via stdio, nicht im Docker Container.
           </p>
         </Step>
+      </section>
+
+      <section className="mb-10">
+        <h2 className="text-lg font-semibold text-blue-400 mb-3">
+          Authentifizierung
+        </h2>
+        <p className="text-gray-400 text-sm mb-4">
+          ClaudeVault unterstützt optionale Single-User-Authentifizierung.
+          Wenn <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">AUTH_USERNAME</code> und{' '}
+          <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">AUTH_PASSWORD</code> gesetzt sind,
+          werden alle REST-API-Endpunkte geschützt.
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <div className="flex gap-3">
+            <span className="text-gray-300 shrink-0 w-36">Access Token</span>
+            <span>JWT, 15 Minuten gültig, wird im Speicher gehalten</span>
+          </div>
+          <div className="flex gap-3">
+            <span className="text-gray-300 shrink-0 w-36">Refresh Token</span>
+            <span>Opak, 7 Tage gültig, in MongoDB mit TTL-Index, Rotation bei Nutzung</span>
+          </div>
+          <div className="flex gap-3">
+            <span className="text-gray-300 shrink-0 w-36">SSE</span>
+            <span>Authentifizierung via <code className="bg-gray-800 px-1 rounded">?token=...</code> Query-Parameter</span>
+          </div>
+          <div className="flex gap-3">
+            <span className="text-gray-300 shrink-0 w-36">MCP Server</span>
+            <span>Nicht geschützt (stdio, nur lokal)</span>
+          </div>
+        </div>
+        <div className="bg-yellow-900/20 border border-yellow-800/50 rounded-lg p-4 mt-4">
+          <p className="text-yellow-400 text-sm">
+            Ohne gesetzte Credentials ist die Authentifizierung komplett deaktiviert &mdash;
+            alle Endpunkte sind frei zugänglich.
+          </p>
+        </div>
       </section>
 
       <section className="mb-10">
@@ -74,13 +123,15 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
       "command": "node",
       "args": ["/pfad/zu/ClaudeVault/backend/dist/mcp-server.js"],
       "env": {
-        "MONGODB_URI": "mongodb://user:pass@localhost:27017/claudevault?authSource=admin"
+        "MONGODB_URI": "mongodb://user:pass@localhost:27017/claudevault?authSource=admin&directConnection=true"
       }
     }
   }
 }`}</Code>
         <p className="text-gray-500 text-sm mt-2">
           Danach Claude Code neu starten, damit der MCP-Server geladen wird.
+          <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded ml-1">directConnection=true</code>{' '}
+          ist nötig für das Replica Set.
         </p>
 
         <h3 className="text-sm font-medium text-gray-300 mt-6 mb-2">
@@ -99,7 +150,7 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
       "command": "node",
       "args": ["/pfad/zu/ClaudeVault/backend/dist/mcp-server.js"],
       "env": {
-        "MONGODB_URI": "mongodb://user:pass@localhost:27017/claudevault?authSource=admin"
+        "MONGODB_URI": "mongodb://user:pass@localhost:27017/claudevault?authSource=admin&directConnection=true"
       }
     }
   }
@@ -121,7 +172,7 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
           Verfügbare MCP-Tools
         </h2>
         <p className="text-gray-400 text-sm mb-4">
-          Nach dem Anbinden stehen Claude 16 Tools zur Verfügung:
+          Nach dem Anbinden stehen Claude 27 Tools zur Verfügung:
         </p>
 
         <ToolGroup title="Projekte" tools={[
@@ -133,10 +184,19 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
         ]} />
 
         <ToolGroup title="Todos" tools={[
-          { name: 'todo_create', desc: 'Neues Todo anlegen (Status, Priorität, Tags)' },
+          { name: 'todo_create', desc: 'Neues Todo anlegen (Status, Priorität, Tags, Milestone)' },
           { name: 'todo_list', desc: 'Todos filtern nach Projekt/Status' },
-          { name: 'todo_update', desc: 'Todo-Status oder Priorität ändern' },
+          { name: 'todo_update', desc: 'Todo-Status, Priorität, Dependencies ändern' },
           { name: 'todo_delete', desc: 'Todo löschen' },
+          { name: 'todo_comment', desc: 'Kommentar an ein Todo anhängen' },
+        ]} />
+
+        <ToolGroup title="Milestones" tools={[
+          { name: 'milestone_create', desc: 'Milestone/Epic anlegen' },
+          { name: 'milestone_list', desc: 'Milestones eines Projekts auflisten' },
+          { name: 'milestone_get', desc: 'Einzelnen Milestone abrufen' },
+          { name: 'milestone_update', desc: 'Milestone aktualisieren' },
+          { name: 'milestone_delete', desc: 'Milestone löschen' },
         ]} />
 
         <ToolGroup title="Sessions" tools={[
@@ -150,6 +210,30 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
           { name: 'knowledge_list', desc: 'Alle Einträge eines Projekts auflisten' },
           { name: 'knowledge_update', desc: 'Eintrag aktualisieren' },
           { name: 'knowledge_delete', desc: 'Eintrag löschen' },
+        ]} />
+
+        <ToolGroup title="Changelog" tools={[
+          { name: 'changelog_add', desc: 'Changelog-Eintrag hinzufügen (Version, Changes, Component)' },
+          { name: 'changelog_list', desc: 'Changelog eines Projekts auflisten' },
+          { name: 'changelog_update', desc: 'Changelog-Eintrag aktualisieren' },
+          { name: 'changelog_delete', desc: 'Changelog-Eintrag löschen' },
+        ]} />
+
+        <ToolGroup title="Umgebungen & Secrets" tools={[
+          { name: 'environment_create', desc: 'Umgebung anlegen (dev, staging, prod) mit Variablen' },
+          { name: 'environment_list', desc: 'Umgebungen eines Projekts auflisten' },
+          { name: 'environment_get', desc: 'Einzelne Umgebung mit allen Variablen' },
+          { name: 'environment_update', desc: 'Umgebung aktualisieren' },
+          { name: 'environment_delete', desc: 'Umgebung löschen' },
+          { name: 'secret_set', desc: 'Secret anlegen/aktualisieren (AES-256-GCM verschlüsselt)' },
+          { name: 'secret_get', desc: 'Secret mit entschlüsseltem Wert abrufen' },
+          { name: 'secret_list', desc: 'Secrets auflisten (nur Keys, keine Werte)' },
+          { name: 'secret_delete', desc: 'Secret löschen' },
+          { name: 'environment_export', desc: 'Variablen + Secrets als Key=Value exportieren (.env Format)' },
+        ]} />
+
+        <ToolGroup title="Sonstiges" tools={[
+          { name: 'notify_user', desc: 'Push-Benachrichtigung an den User senden (PWA)' },
         ]} />
       </section>
 
@@ -197,9 +281,9 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
           <p className="text-gray-400 text-sm">
             Das Dashboard ist unter{' '}
             <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">
-              http://jetson:5173
+              http://jetson
             </code>{' '}
-            erreichbar.
+            erreichbar (Port 80).
           </p>
         </Step>
 
@@ -253,7 +337,7 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
       "command": "node",
       "args": ["/pfad/zu/ClaudeVault/backend/dist/mcp-server.js"],
       "env": {
-        "MONGODB_URI": "mongodb://user:pass@localhost:27017/claudevault?authSource=admin"
+        "MONGODB_URI": "mongodb://user:pass@localhost:27017/claudevault?authSource=admin&directConnection=true"
       }
     }
   }
@@ -263,10 +347,49 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
 
       <section className="mb-10">
         <h2 className="text-lg font-semibold text-blue-400 mb-3">
+          Secrets & Verschlüsselung
+        </h2>
+        <p className="text-gray-400 text-sm mb-4">
+          Secrets werden mit AES-256-GCM verschlüsselt in MongoDB gespeichert.
+          Jedes Secret hat einen eigenen zufälligen IV.
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <div className="flex gap-3">
+            <span className="text-gray-300 shrink-0 w-36">Algorithmus</span>
+            <span>AES-256-GCM (Authenticated Encryption)</span>
+          </div>
+          <div className="flex gap-3">
+            <span className="text-gray-300 shrink-0 w-36">Key</span>
+            <span><code className="bg-gray-800 px-1 rounded">SECRETS_ENCRYPTION_KEY</code> (64 Hex-Zeichen = 32 Bytes)</span>
+          </div>
+          <div className="flex gap-3">
+            <span className="text-gray-300 shrink-0 w-36">Speicherformat</span>
+            <span><code className="bg-gray-800 px-1 rounded">iv:authTag:ciphertext</code> (alles Hex)</span>
+          </div>
+          <div className="flex gap-3">
+            <span className="text-gray-300 shrink-0 w-36">List-Endpoint</span>
+            <span>Gibt nur Keys + Beschreibung zurück, niemals Werte</span>
+          </div>
+          <div className="flex gap-3">
+            <span className="text-gray-300 shrink-0 w-36">Entschlüsselung</span>
+            <span>Nur via <code className="bg-gray-800 px-1 rounded">GET /api/secrets/:id</code> oder <code className="bg-gray-800 px-1 rounded">secret_get</code> MCP-Tool</span>
+          </div>
+        </div>
+        <div className="bg-yellow-900/20 border border-yellow-800/50 rounded-lg p-4 mt-4">
+          <p className="text-yellow-400 text-sm">
+            Ohne gesetzten <code className="bg-gray-800 px-1 rounded">SECRETS_ENCRYPTION_KEY</code> ist das
+            Secrets-Feature deaktiviert. Beim Versuch ein Secret zu speichern wird ein Fehler zurückgegeben.
+          </p>
+        </div>
+      </section>
+
+      <section className="mb-10">
+        <h2 className="text-lg font-semibold text-blue-400 mb-3">
           REST API
         </h2>
         <p className="text-gray-400 text-sm mb-4">
-          Das Backend stellt auch eine REST API bereit, die vom Frontend genutzt wird:
+          Das Backend stellt eine REST API unter <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">/api</code> bereit.
+          Bei aktivierter Auth benötigen alle Endpunkte (außer <code className="bg-gray-800 px-1 rounded">/api/auth/*</code>) einen gültigen JWT Bearer Token.
         </p>
         <div className="overflow-x-auto">
           <table className="text-sm w-full">
@@ -278,6 +401,10 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
               </tr>
             </thead>
             <tbody className="text-gray-400">
+              <Endpoint method="POST" path="/api/auth/login" desc="Login (Username + Password)" />
+              <Endpoint method="POST" path="/api/auth/refresh" desc="Token erneuern" />
+              <Endpoint method="POST" path="/api/auth/logout" desc="Logout (Refresh Token löschen)" />
+              <Endpoint method="GET" path="/api/auth/status" desc="Auth-Status prüfen" />
               <Endpoint method="GET" path="/api/projects" desc="Alle Projekte" />
               <Endpoint method="POST" path="/api/projects" desc="Projekt anlegen" />
               <Endpoint method="GET" path="/api/projects/:id" desc="Einzelnes Projekt" />
@@ -285,8 +412,15 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
               <Endpoint method="DELETE" path="/api/projects/:id" desc="Projekt löschen" />
               <Endpoint method="GET" path="/api/todos?projectId=&status=" desc="Todos filtern" />
               <Endpoint method="POST" path="/api/todos" desc="Todo anlegen" />
+              <Endpoint method="GET" path="/api/todos/:id" desc="Einzelnes Todo" />
               <Endpoint method="PUT" path="/api/todos/:id" desc="Todo aktualisieren" />
               <Endpoint method="DELETE" path="/api/todos/:id" desc="Todo löschen" />
+              <Endpoint method="POST" path="/api/todos/:id/comments" desc="Kommentar hinzufügen" />
+              <Endpoint method="GET" path="/api/milestones?projectId=" desc="Milestones auflisten" />
+              <Endpoint method="POST" path="/api/milestones" desc="Milestone anlegen" />
+              <Endpoint method="GET" path="/api/milestones/:id" desc="Einzelner Milestone" />
+              <Endpoint method="PUT" path="/api/milestones/:id" desc="Milestone aktualisieren" />
+              <Endpoint method="DELETE" path="/api/milestones/:id" desc="Milestone löschen" />
               <Endpoint method="GET" path="/api/sessions?projectId=" desc="Sessions abrufen" />
               <Endpoint method="GET" path="/api/sessions/latest/:projectId" desc="Letzte Session" />
               <Endpoint method="POST" path="/api/sessions" desc="Session speichern" />
@@ -295,6 +429,21 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
               <Endpoint method="POST" path="/api/knowledge" desc="Wissen speichern" />
               <Endpoint method="PUT" path="/api/knowledge/:id" desc="Wissen aktualisieren" />
               <Endpoint method="DELETE" path="/api/knowledge/:id" desc="Wissen löschen" />
+              <Endpoint method="GET" path="/api/changelog?projectId=" desc="Changelog auflisten" />
+              <Endpoint method="POST" path="/api/changelog" desc="Changelog-Eintrag anlegen" />
+              <Endpoint method="DELETE" path="/api/changelog/:id" desc="Changelog-Eintrag löschen" />
+              <Endpoint method="GET" path="/api/environments?projectId=" desc="Umgebungen auflisten" />
+              <Endpoint method="POST" path="/api/environments" desc="Umgebung anlegen" />
+              <Endpoint method="GET" path="/api/environments/:id" desc="Einzelne Umgebung" />
+              <Endpoint method="PUT" path="/api/environments/:id" desc="Umgebung aktualisieren" />
+              <Endpoint method="DELETE" path="/api/environments/:id" desc="Umgebung löschen" />
+              <Endpoint method="GET" path="/api/secrets?projectId=&environmentId=" desc="Secrets auflisten (ohne Werte)" />
+              <Endpoint method="POST" path="/api/secrets" desc="Secret anlegen" />
+              <Endpoint method="GET" path="/api/secrets/:id" desc="Secret entschlüsselt abrufen" />
+              <Endpoint method="PUT" path="/api/secrets/:id" desc="Secret aktualisieren" />
+              <Endpoint method="DELETE" path="/api/secrets/:id" desc="Secret löschen" />
+              <Endpoint method="GET" path="/api/activities?projectId=" desc="Aktivitäten auflisten" />
+              <Endpoint method="GET" path="/api/events/:projectId" desc="SSE Live-Updates" />
             </tbody>
           </table>
         </div>
@@ -317,7 +466,10 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
 └──────────────┘   via nginx    │  └───────────┘  └───────────┘  │  └─────────┘
                                 │                                 │
                                 │         NestJS Backend           │
-                                └─────────────────────────────────┘`}</Code>
+                                └─────────────────────────────────┘
+
+Module: projects, todos, milestones, sessions, knowledge, changelog,
+        environments, secrets, activities, auth, push, events`}</Code>
       </section>
     </div>
   );
