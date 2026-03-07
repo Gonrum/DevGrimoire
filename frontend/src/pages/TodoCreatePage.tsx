@@ -55,7 +55,7 @@ export default function TodoCreatePage() {
 
       <h1 className="text-xl font-bold mb-6">Neuer Task</h1>
 
-      <form onSubmit={handleSubmit} className="max-w-2xl space-y-4">
+      <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-4">
         <div>
           <label className="block text-xs text-gray-500 mb-1">Titel *</label>
           <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Task-Titel"

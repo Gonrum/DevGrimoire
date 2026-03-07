@@ -160,12 +160,12 @@ export default function TodoDetailPage() {
       <Link to={`/projects/${id}`} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; Zurück zum Projekt</Link>
 
       {editing ? (
-        <div className="max-w-2xl">
+        <div className="max-w-3xl mx-auto">
           <h2 className="text-lg font-semibold mb-4">Task bearbeiten</h2>
           <TodoEditForm todo={todo} onSaved={() => { setEditing(false); loadTodo(); }} onCancel={() => setEditing(false)} />
         </div>
       ) : (
-        <div className="max-w-2xl">
+        <div className="max-w-3xl mx-auto">
           <h1 className="text-xl font-bold mb-3">{todo.title}</h1>
 
           <div className="flex flex-wrap items-center gap-2 mb-4">

@@ -1,6 +1,6 @@
 export default function Docs() {
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-8">Dokumentation</h1>
 
       <section className="mb-10">

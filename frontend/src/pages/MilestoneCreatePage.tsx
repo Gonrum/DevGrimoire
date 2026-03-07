@@ -33,7 +33,7 @@ export default function MilestoneCreatePage() {
 
       <h1 className="text-xl font-bold mb-6">Neuer Milestone</h1>
 
-      <form onSubmit={handleSubmit} className="max-w-2xl space-y-4">
+      <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-4">
         <div>
           <label className="block text-xs text-gray-500 mb-1">Name *</label>
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Milestone-Name"
