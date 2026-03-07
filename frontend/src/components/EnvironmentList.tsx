@@ -245,11 +245,10 @@ export default function EnvironmentList({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-300">Umgebungen</h3>
+      <div className="flex items-center gap-3 mb-4">
         {!creating ? (
-          <button type="button" onClick={() => setCreating(true)} className="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors">
-            + Umgebung
+          <button type="button" onClick={() => setCreating(true)} className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
+            + Neue Umgebung
           </button>
         ) : (
           <form onSubmit={handleCreate} className="flex gap-2">
