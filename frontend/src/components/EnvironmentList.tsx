@@ -220,16 +220,36 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
   );
 }
 
+export function SecretsList({ projectId }: { projectId: string }) {
+  const [secrets, setSecrets] = useState<SecretListItem[]>([]);
+
+  const load = () => { api.secrets.list(projectId, '').then(setSecrets).catch(() => {}); };
+  useEffect(() => { load(); }, [projectId]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 mb-4">
+        <SecretAddForm projectId={projectId} onAdded={load} />
+      </div>
+      {secrets.length > 0 ? (
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+          {secrets.map((s) => (
+            <SecretRow key={s._id} secret={s} onDelete={load} />
+          ))}
+        </div>
+      ) : <p className="text-gray-500 text-sm">Noch keine Secrets. Lege eines an oder nutze MCP (<code className="text-xs bg-gray-800 px-1 rounded">secret_set</code>).</p>}
+    </div>
+  );
+}
+
 export default function EnvironmentList({ projectId }: { projectId: string }) {
   const { showError } = useToast();
   const [environments, setEnvironments] = useState<Environment[]>([]);
-  const [globalSecrets, setGlobalSecrets] = useState<SecretListItem[]>([]);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
 
   const load = () => {
     api.environments.list(projectId).then(setEnvironments).catch(() => {});
-    api.secrets.list(projectId, '').then(setGlobalSecrets).catch(() => {});
   };
 
   useEffect(() => { load(); }, [projectId]);
@@ -266,18 +286,6 @@ export default function EnvironmentList({ projectId }: { projectId: string }) {
       {environments.length === 0 && (
         <p className="text-gray-500 text-sm">Noch keine Umgebungen. Lege eine an oder nutze MCP (<code className="text-xs bg-gray-800 px-1 rounded">environment_create</code>).</p>
       )}
-
-      <div className="mt-6">
-        <h3 className="text-sm font-semibold text-gray-300 mb-3">Globale Secrets (ohne Umgebung)</h3>
-        {globalSecrets.length > 0 ? (
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-            {globalSecrets.map((s) => (
-              <SecretRow key={s._id} secret={s} onDelete={load} />
-            ))}
-          </div>
-        ) : <p className="text-xs text-gray-600">Keine globalen Secrets</p>}
-        <SecretAddForm projectId={projectId} onAdded={load} />
-      </div>
     </div>
   );
 }
