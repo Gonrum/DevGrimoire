@@ -17,6 +17,8 @@ import { ChangelogService } from './changelog/changelog.service';
 import { MilestonesService } from './milestones/milestones.service';
 import { ActivitiesService } from './activities/activities.service';
 import { PushService } from './push/push.service';
+import { EnvironmentsService } from './environments/environments.service';
+import { SecretsService } from './secrets/secrets.service';
 import { registerMcpTools, McpServices } from './mcp-tools';
 
 function createMcpServer(services: McpServices): Server {
@@ -50,6 +52,8 @@ async function bootstrap() {
     milestonesService: app.get(MilestonesService),
     activitiesService: app.get(ActivitiesService),
     pushService: app.get(PushService),
+    environmentsService: app.get(EnvironmentsService),
+    secretsService: app.get(SecretsService),
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};

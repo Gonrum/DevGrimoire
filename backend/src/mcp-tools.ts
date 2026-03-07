@@ -11,6 +11,8 @@ import { ChangelogService } from './changelog/changelog.service';
 import { MilestonesService } from './milestones/milestones.service';
 import { ActivitiesService } from './activities/activities.service';
 import { PushService } from './push/push.service';
+import { EnvironmentsService } from './environments/environments.service';
+import { SecretsService } from './secrets/secrets.service';
 
 function requireString(args: Record<string, unknown>, field: string): string {
   const val = args[field];
@@ -67,6 +69,8 @@ export interface McpServices {
   milestonesService: MilestonesService;
   activitiesService: ActivitiesService;
   pushService: PushService;
+  environmentsService: EnvironmentsService;
+  secretsService: SecretsService;
 }
 
 const tools = [
@@ -430,10 +434,133 @@ const tools = [
       required: ['title', 'body'],
     },
   },
+  {
+    name: 'environment_create',
+    description: 'Create a project environment (e.g. dev, staging, prod) with key-value variables',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        name: { type: 'string', description: 'Environment name (e.g. dev, staging, prod)' },
+        variables: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, value: { type: 'string' } }, required: ['key', 'value'] }, description: 'Key-value pairs for environment variables' },
+        active: { type: 'boolean', description: 'Whether environment is active (default true)' },
+      },
+      required: ['projectId', 'name'],
+    },
+  },
+  {
+    name: 'environment_list',
+    description: 'List all environments for a project',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'environment_get',
+    description: 'Get a single environment with all its variables',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Environment MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'environment_update',
+    description: 'Update an environment (name, variables, active status)',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Environment MongoDB ID' },
+        name: { type: 'string' },
+        variables: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, value: { type: 'string' } }, required: ['key', 'value'] } },
+        active: { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'environment_delete',
+    description: 'Delete an environment',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Environment MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'secret_set',
+    description: 'Create or update an encrypted secret for a project. Secrets are stored with AES-256-GCM encryption. Use environmentId to scope to a specific environment, or omit for project-global secrets.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        environmentId: { type: 'string', description: 'Environment MongoDB ID (optional, omit for project-global)' },
+        key: { type: 'string', description: 'Secret name (e.g. DB_PASSWORD, API_KEY)' },
+        value: { type: 'string', description: 'Secret value (will be encrypted)' },
+        description: { type: 'string', description: 'Optional description of the secret' },
+      },
+      required: ['projectId', 'key', 'value'],
+    },
+  },
+  {
+    name: 'secret_get',
+    description: 'Get a single secret with its decrypted value',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Secret MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'secret_list',
+    description: 'List secrets for a project (keys and descriptions only, NO values). Use secret_get to retrieve individual values.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        environmentId: { type: 'string', description: 'Filter by environment ID' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'secret_delete',
+    description: 'Delete a secret',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Secret MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'environment_export',
+    description: 'Export all variables and decrypted secrets of an environment as key=value pairs (useful for .env file generation)',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        environmentId: { type: 'string', description: 'Environment MongoDB ID' },
+        includeGlobalSecrets: { type: 'boolean', description: 'Include project-global secrets (default true)' },
+      },
+      required: ['projectId', 'environmentId'],
+    },
+  },
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -494,6 +621,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             changelogService.removeByProject(id),
             milestonesService.removeByProject(id),
             activitiesService.removeByProject(id),
+            environmentsService.removeByProject(id),
+            secretsService.removeByProject(id),
           ]);
           result = { deleted: true, id };
           break;
@@ -652,6 +781,76 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             optionalString(a, 'url'),
           );
           break;
+        case 'environment_create':
+          result = await environmentsService.create({
+            projectId: requireString(a, 'projectId'),
+            name: requireString(a, 'name'),
+            variables: a.variables as any,
+            active: optionalBoolean(a, 'active'),
+          });
+          break;
+        case 'environment_list':
+          result = await environmentsService.findByProject(requireString(a, 'projectId'));
+          break;
+        case 'environment_get':
+          result = await environmentsService.findById(requireString(a, 'id'));
+          break;
+        case 'environment_update':
+          result = await environmentsService.update(requireString(a, 'id'), {
+            name: optionalString(a, 'name'),
+            variables: a.variables as any,
+            active: optionalBoolean(a, 'active'),
+          });
+          break;
+        case 'environment_delete':
+          await environmentsService.delete(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
+          break;
+        case 'secret_set':
+          result = await secretsService.create({
+            projectId: requireString(a, 'projectId'),
+            environmentId: optionalString(a, 'environmentId'),
+            key: requireString(a, 'key'),
+            value: requireString(a, 'value'),
+            description: optionalString(a, 'description'),
+          });
+          break;
+        case 'secret_get':
+          result = await secretsService.findById(requireString(a, 'id'));
+          break;
+        case 'secret_list':
+          result = await secretsService.findByProject(
+            requireString(a, 'projectId'),
+            optionalString(a, 'environmentId'),
+          );
+          break;
+        case 'secret_delete':
+          await secretsService.delete(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
+          break;
+        case 'environment_export': {
+          const projectId = requireString(a, 'projectId');
+          const envId = requireString(a, 'environmentId');
+          const includeGlobal = optionalBoolean(a, 'includeGlobalSecrets') !== false;
+          const env = await environmentsService.findById(envId);
+          const envSecrets = await secretsService.getDecryptedForEnvironment(projectId, envId);
+          const globalSecrets = includeGlobal
+            ? await secretsService.getDecryptedForEnvironment(projectId, '')
+            : [];
+          const lines: string[] = [];
+          lines.push(`# Environment: ${env.name}`);
+          for (const v of env.variables) lines.push(`${v.key}=${v.value}`);
+          if (globalSecrets.length > 0) {
+            lines.push('# Global Secrets');
+            for (const s of globalSecrets) lines.push(`${s.key}=${s.value}`);
+          }
+          if (envSecrets.length > 0) {
+            lines.push(`# ${env.name} Secrets`);
+            for (const s of envSecrets) lines.push(`${s.key}=${s.value}`);
+          }
+          result = { environment: env.name, export: lines.join('\n') };
+          break;
+        }
         default:
           return errorResult(`Unknown tool: ${name}`);
       }

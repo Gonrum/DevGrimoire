@@ -138,6 +138,35 @@ export interface Activity {
   createdAt: string;
 }
 
+export interface EnvVariable {
+  key: string;
+  value: string;
+}
+
+export interface Environment {
+  _id: string;
+  projectId: string;
+  name: string;
+  variables: EnvVariable[];
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SecretListItem {
+  _id: string;
+  projectId: string;
+  environmentId: string | null;
+  key: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SecretWithValue extends SecretListItem {
+  value: string;
+}
+
 export const api = {
   projects: {
     list: (active?: boolean) =>
@@ -236,5 +265,30 @@ export const api = {
       request<Milestone>(`/milestones/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/milestones/${id}`, { method: 'DELETE' }),
+  },
+  environments: {
+    list: (projectId: string) =>
+      request<Environment[]>(`/environments?projectId=${projectId}`),
+    get: (id: string) => request<Environment>(`/environments/${id}`),
+    create: (data: Partial<Environment>) =>
+      request<Environment>('/environments', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<Environment>) =>
+      request<Environment>(`/environments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/environments/${id}`, { method: 'DELETE' }),
+  },
+  secrets: {
+    list: (projectId: string, environmentId?: string) => {
+      const params = new URLSearchParams({ projectId });
+      if (environmentId) params.set('environmentId', environmentId);
+      return request<SecretListItem[]>(`/secrets?${params}`);
+    },
+    get: (id: string) => request<SecretWithValue>(`/secrets/${id}`),
+    create: (data: { projectId: string; environmentId?: string; key: string; value: string; description?: string }) =>
+      request<SecretListItem>('/secrets', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: { key?: string; value?: string; description?: string }) =>
+      request<SecretListItem>(`/secrets/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/secrets/${id}`, { method: 'DELETE' }),
   },
 };

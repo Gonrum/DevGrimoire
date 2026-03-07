@@ -7,9 +7,10 @@ import KnowledgeList from '../components/KnowledgeList';
 import ChangelogList from '../components/ChangelogList';
 import MilestoneList from '../components/MilestoneList';
 import ActivityList from '../components/ActivityList';
+import EnvironmentList from '../components/EnvironmentList';
 import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents';
 
-type Tab = 'todos' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity';
+type Tab = 'todos' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments';
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
@@ -109,6 +110,7 @@ export default function ProjectDetail() {
     { key: 'sessions', label: 'Sessions', count: sessions.length },
     { key: 'knowledge', label: 'Wissen', count: knowledge.length },
     { key: 'changelog', label: 'Changelog', count: changelog.length },
+    { key: 'environments', label: 'Umgebungen', count: 0 },
     { key: 'activity', label: 'Aktivität', count: activities.length },
   ];
 
@@ -214,6 +216,7 @@ export default function ProjectDetail() {
       {tab === 'sessions' && <SessionList sessions={sessions} />}
       {tab === 'knowledge' && <KnowledgeList entries={knowledge} />}
       {tab === 'changelog' && <ChangelogList entries={changelog} />}
+      {tab === 'environments' && <EnvironmentList projectId={id!} />}
       {tab === 'activity' && <ActivityList activities={activities} />}
     </div>
   );
