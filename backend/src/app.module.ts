@@ -12,6 +12,8 @@ import { MilestonesModule } from './milestones/milestones.module';
 import { EventsModule } from './events/events.module';
 import { ActivitiesModule } from './activities/activities.module';
 import { PushModule } from './push/push.module';
+import { AuthModule } from './auth/auth.module';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
@@ -32,9 +34,11 @@ if (!MONGODB_URI) {
     EventsModule,
     ActivitiesModule,
     PushModule,
+    AuthModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
 })
 export class AppModule {}

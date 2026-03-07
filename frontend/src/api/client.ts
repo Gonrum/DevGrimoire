@@ -1,10 +1,39 @@
 const BASE_URL = '/api';
 
+let getAccessToken: (() => string | null) | null = null;
+let onUnauthorized: (() => Promise<boolean>) | null = null;
+
+export function configureAuth(
+  tokenGetter: () => string | null,
+  refreshHandler: () => Promise<boolean>,
+) {
+  getAccessToken = tokenGetter;
+  onUnauthorized = refreshHandler;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = getAccessToken?.();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  let res = await fetch(`${BASE_URL}${path}`, {
     ...options,
+    headers: { ...headers, ...(options?.headers as Record<string, string>) },
   });
+
+  // Auto-refresh on 401
+  if (res.status === 401 && onUnauthorized) {
+    const refreshed = await onUnauthorized();
+    if (refreshed) {
+      const newToken = getAccessToken?.();
+      if (newToken) headers['Authorization'] = `Bearer ${newToken}`;
+      res = await fetch(`${BASE_URL}${path}`, {
+        ...options,
+        headers: { ...headers, ...(options?.headers as Record<string, string>) },
+      });
+    }
+  }
+
   if (!res.ok) {
     const error = await res.json().catch(() => ({ message: res.statusText }));
     throw new Error(error.message || res.statusText);

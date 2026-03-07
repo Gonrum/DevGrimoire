@@ -43,6 +43,9 @@ services:
       MONGODB_URI: ${MONGODB_URI}
       PORT: 3000
       CORS_ORIGIN: http://localhost
+      AUTH_USERNAME: ${AUTH_USERNAME:-}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
@@ -50,7 +53,7 @@ services:
       mongodb-init:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/projects || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/auth/status || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

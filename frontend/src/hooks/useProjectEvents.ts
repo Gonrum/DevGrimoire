@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useAuth } from './useAuth';
 
 export interface ProjectChangeEvent {
   projectId: string;
@@ -9,7 +10,7 @@ export interface ProjectChangeEvent {
 
 type EventHandler = (event: ProjectChangeEvent) => void;
 
-function useSSE(url: string | null, onEvent: EventHandler) {
+function useSSE(url: string | null, onEvent: EventHandler, token: string | null) {
   const handlerRef = useRef(onEvent);
   handlerRef.current = onEvent;
 
@@ -19,7 +20,9 @@ function useSSE(url: string | null, onEvent: EventHandler) {
   useEffect(() => {
     if (!url) return;
 
-    const eventSource = new EventSource(url);
+    const sep = url.includes('?') ? '&' : '?';
+    const fullUrl = token ? `${url}${sep}token=${token}` : url;
+    const eventSource = new EventSource(fullUrl);
 
     eventSource.onmessage = (msg) => {
       const event: ProjectChangeEvent = JSON.parse(msg.data);
@@ -38,19 +41,22 @@ function useSSE(url: string | null, onEvent: EventHandler) {
       if (timerRef.current) clearTimeout(timerRef.current);
       pendingRef.current.clear();
     };
-  }, [url]);
+  }, [url, token]);
 }
 
 export function useProjectEvents(
   projectId: string | undefined,
   onEvent: EventHandler,
 ) {
+  const { getAccessToken } = useAuth();
   useSSE(
     projectId ? `/api/events?projectId=${projectId}` : null,
     onEvent,
+    getAccessToken(),
   );
 }
 
 export function useDashboardEvents(onEvent: EventHandler) {
-  useSSE('/api/events', onEvent);
+  const { getAccessToken } = useAuth();
+  useSSE('/api/events', onEvent, getAccessToken());
 }
