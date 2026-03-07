@@ -75,13 +75,15 @@ function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () 
   );
 }
 
-function SecretAddForm({ projectId, environmentId, onAdded }: { projectId: string; environmentId?: string; onAdded: () => void }) {
+function SecretAddForm({ projectId, environmentId, onAdded, onCancel }: { projectId: string; environmentId?: string; onAdded: () => void; onCancel?: () => void }) {
   const { showError } = useToast();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(onCancel !== undefined);
   const [key, setKey] = useState('');
   const [value, setValue] = useState('');
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const handleClose = () => { setOpen(false); onCancel?.(); };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,7 +91,8 @@ function SecretAddForm({ projectId, environmentId, onAdded }: { projectId: strin
     setSaving(true);
     try {
       await api.secrets.create({ projectId, environmentId, key: key.trim(), value, description: description.trim() || undefined });
-      setKey(''); setValue(''); setDescription(''); setOpen(false);
+      setKey(''); setValue(''); setDescription('');
+      handleClose();
       onAdded();
     } catch (err: any) { showError(err.message); } finally { setSaving(false); }
   };
@@ -105,7 +108,7 @@ function SecretAddForm({ projectId, environmentId, onAdded }: { projectId: strin
       <input type="text" placeholder="Beschreibung (optional)" value={description} onChange={(e) => setDescription(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-blue-500" />
       <div className="flex gap-2">
         <button type="submit" disabled={saving || !key.trim() || !value} className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded">Speichern</button>
-        <button type="button" onClick={() => setOpen(false)} className="text-xs px-2 py-1 bg-gray-800 text-gray-400 rounded">Abbrechen</button>
+        <button type="button" onClick={handleClose} className="text-xs px-2 py-1 bg-gray-800 text-gray-400 rounded">Abbrechen</button>
       </div>
     </form>
   );
@@ -222,6 +225,7 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
 
 export function SecretsList({ projectId }: { projectId: string }) {
   const [secrets, setSecrets] = useState<SecretListItem[]>([]);
+  const [creating, setCreating] = useState(false);
 
   const load = () => { api.secrets.list(projectId, '').then(setSecrets).catch(() => {}); };
   useEffect(() => { load(); }, [projectId]);
@@ -229,7 +233,13 @@ export function SecretsList({ projectId }: { projectId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3 mb-4">
-        <SecretAddForm projectId={projectId} onAdded={load} />
+        {!creating ? (
+          <button type="button" onClick={() => setCreating(true)} className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
+            + Neues Secret
+          </button>
+        ) : (
+          <SecretAddForm projectId={projectId} onAdded={() => { setCreating(false); load(); }} onCancel={() => setCreating(false)} />
+        )}
       </div>
       {secrets.length > 0 ? (
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
