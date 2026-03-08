@@ -19,6 +19,9 @@ export class Secret {
 
   @Prop()
   description: string;
+
+  @Prop({ type: String, default: 'variable' })
+  type: string;
 }
 
 export const SecretSchema = SchemaFactory.createForClass(Secret);

@@ -6,6 +6,8 @@ import ProjectSettings from './pages/ProjectSettings';
 import TodoDetailPage from './pages/TodoDetailPage';
 import TodoCreatePage from './pages/TodoCreatePage';
 import MilestoneCreatePage from './pages/MilestoneCreatePage';
+import EnvironmentCreatePage from './pages/EnvironmentCreatePage';
+import SecretCreatePage from './pages/SecretCreatePage';
 import Docs from './pages/Docs';
 import Login from './pages/Login';
 import { usePushNotifications } from './hooks/usePushNotifications';
@@ -142,6 +144,8 @@ function AppShell() {
           <Route path="/projects/:id/todos/new" element={<TodoCreatePage />} />
           <Route path="/projects/:id/todos/:todoId" element={<TodoDetailPage />} />
           <Route path="/projects/:id/milestones/new" element={<MilestoneCreatePage />} />
+          <Route path="/projects/:id/environments/new" element={<EnvironmentCreatePage />} />
+          <Route path="/projects/:id/secrets/new" element={<SecretCreatePage />} />
           <Route path="/projects/:id/settings" element={<ProjectSettings />} />
           <Route path="/docs" element={<Docs />} />
           <Route path="*" element={<NotFound />} />

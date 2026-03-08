@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { api, Environment, SecretListItem } from '../api/client';
 import { useToast } from './Toast';
 
@@ -10,9 +11,23 @@ const ENV_COLORS: Record<string, string> = {
   production: 'bg-red-900/40 text-red-300',
 };
 
+const SECRET_TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  variable: { label: 'Variable', color: 'bg-gray-700 text-gray-300' },
+  password: { label: 'Passwort', color: 'bg-orange-900/40 text-orange-300' },
+  token: { label: 'Token', color: 'bg-purple-900/40 text-purple-300' },
+  ssh_key: { label: 'SSH Key', color: 'bg-cyan-900/40 text-cyan-300' },
+  certificate: { label: 'Zertifikat', color: 'bg-yellow-900/40 text-yellow-300' },
+  file: { label: 'Datei', color: 'bg-blue-900/40 text-blue-300' },
+};
+
 function EnvBadge({ name }: { name: string }) {
   const color = ENV_COLORS[name.toLowerCase()] || 'bg-gray-800 text-gray-300';
   return <span className={`text-xs px-2 py-0.5 rounded-full ${color}`}>{name}</span>;
+}
+
+function SecretTypeBadge({ type }: { type: string }) {
+  const info = SECRET_TYPE_LABELS[type] || SECRET_TYPE_LABELS.variable;
+  return <span className={`text-xs px-1.5 py-0.5 rounded ${info.color}`}>{info.label}</span>;
 }
 
 function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () => void }) {
@@ -47,6 +62,7 @@ function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-mono text-gray-200">{secret.key}</span>
+          <SecretTypeBadge type={secret.type || 'variable'} />
           {secret.description && <span className="text-xs text-gray-500 truncate">{secret.description}</span>}
         </div>
         {revealed && (
@@ -114,6 +130,43 @@ function SecretAddForm({ projectId, environmentId, onAdded, onCancel }: { projec
   );
 }
 
+function ServerInfo({ env }: { env: Environment }) {
+  const hasServer = env.host || env.port || env.user || env.url;
+  if (!hasServer) return null;
+
+  return (
+    <div className="mb-3">
+      <h4 className="text-xs font-medium text-gray-500 uppercase mb-2">Server</h4>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        {env.host && (
+          <div className="flex gap-2">
+            <span className="text-gray-500">Host:</span>
+            <span className="font-mono text-gray-300">{env.host}</span>
+          </div>
+        )}
+        {env.port && (
+          <div className="flex gap-2">
+            <span className="text-gray-500">Port:</span>
+            <span className="font-mono text-gray-300">{env.port}</span>
+          </div>
+        )}
+        {env.user && (
+          <div className="flex gap-2">
+            <span className="text-gray-500">User:</span>
+            <span className="font-mono text-gray-300">{env.user}</span>
+          </div>
+        )}
+        {env.url && (
+          <div className="flex gap-2 col-span-2">
+            <span className="text-gray-500">URL:</span>
+            <a href={env.url} target="_blank" rel="noopener noreferrer" className="font-mono text-blue-400 hover:text-blue-300 truncate">{env.url}</a>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; projectId: string; onUpdate: () => void }) {
   const { showError } = useToast();
   const [secrets, setSecrets] = useState<SecretListItem[]>([]);
@@ -153,6 +206,7 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
       <div className="flex items-center gap-3 p-4 cursor-pointer" onClick={() => setExpanded(!expanded)}>
         <span className="text-gray-500 text-xs">{expanded ? '\u25BC' : '\u25B6'}</span>
         <EnvBadge name={env.name} />
+        {env.description && <span className="text-xs text-gray-500 truncate hidden sm:inline">{env.description}</span>}
         <span className="text-sm text-gray-400">
           {env.variables.length} Variablen
         </span>
@@ -168,6 +222,8 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
 
       {expanded && (
         <div className="border-t border-gray-800 p-4 space-y-4">
+          <ServerInfo env={env} />
+
           <div>
             <div className="flex items-center justify-between mb-2">
               <h4 className="text-xs font-medium text-gray-500 uppercase">Variablen</h4>
@@ -225,7 +281,6 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
 
 export function SecretsList({ projectId }: { projectId: string }) {
   const [secrets, setSecrets] = useState<SecretListItem[]>([]);
-  const [creating, setCreating] = useState(false);
 
   const load = () => { api.secrets.list(projectId, '').then(setSecrets).catch(() => {}); };
   useEffect(() => { load(); }, [projectId]);
@@ -233,13 +288,9 @@ export function SecretsList({ projectId }: { projectId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3 mb-4">
-        {!creating ? (
-          <button type="button" onClick={() => setCreating(true)} className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
-            + Neues Secret
-          </button>
-        ) : (
-          <SecretAddForm projectId={projectId} onAdded={() => { setCreating(false); load(); }} onCancel={() => setCreating(false)} />
-        )}
+        <Link to={`/projects/${projectId}/secrets/new`} className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
+          + Neues Secret
+        </Link>
       </div>
       {secrets.length > 0 ? (
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
@@ -253,10 +304,7 @@ export function SecretsList({ projectId }: { projectId: string }) {
 }
 
 export default function EnvironmentList({ projectId }: { projectId: string }) {
-  const { showError } = useToast();
   const [environments, setEnvironments] = useState<Environment[]>([]);
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState('');
 
   const load = () => {
     api.environments.list(projectId).then(setEnvironments).catch(() => {});
@@ -264,29 +312,12 @@ export default function EnvironmentList({ projectId }: { projectId: string }) {
 
   useEffect(() => { load(); }, [projectId]);
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim()) return;
-    try {
-      await api.environments.create({ projectId, name: newName.trim() });
-      setNewName(''); setCreating(false); load();
-    } catch (err: any) { showError(err.message); }
-  };
-
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3 mb-4">
-        {!creating ? (
-          <button type="button" onClick={() => setCreating(true)} className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
-            + Neue Umgebung
-          </button>
-        ) : (
-          <form onSubmit={handleCreate} className="flex gap-2">
-            <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="z.B. dev, staging, prod" className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-blue-500 w-40" autoFocus />
-            <button type="submit" disabled={!newName.trim()} className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded">Erstellen</button>
-            <button type="button" onClick={() => setCreating(false)} className="text-xs px-2 py-1 bg-gray-800 text-gray-400 rounded">Abbrechen</button>
-          </form>
-        )}
+        <Link to={`/projects/${projectId}/environments/new`} className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
+          + Neue Umgebung
+        </Link>
       </div>
 
       {environments.map((env) => (

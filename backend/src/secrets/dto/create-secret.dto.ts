@@ -1,4 +1,6 @@
-import { IsString, IsOptional, IsMongoId } from 'class-validator';
+import { IsString, IsOptional, IsMongoId, IsIn } from 'class-validator';
+
+const SECRET_TYPES = ['variable', 'password', 'token', 'ssh_key', 'certificate', 'file'] as const;
 
 export class CreateSecretDto {
   @IsMongoId()
@@ -17,4 +19,9 @@ export class CreateSecretDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  @IsString()
+  @IsIn(SECRET_TYPES)
+  @IsOptional()
+  type?: string;
 }

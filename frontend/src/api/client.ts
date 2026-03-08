@@ -147,11 +147,18 @@ export interface Environment {
   _id: string;
   projectId: string;
   name: string;
+  description?: string;
+  host?: string;
+  port?: number;
+  user?: string;
+  url?: string;
   variables: EnvVariable[];
   active: boolean;
   createdAt: string;
   updatedAt: string;
 }
+
+export type SecretType = 'variable' | 'password' | 'token' | 'ssh_key' | 'certificate' | 'file';
 
 export interface SecretListItem {
   _id: string;
@@ -159,6 +166,7 @@ export interface SecretListItem {
   environmentId: string | null;
   key: string;
   description?: string;
+  type: SecretType;
   createdAt: string;
   updatedAt: string;
 }
@@ -284,9 +292,9 @@ export const api = {
       return request<SecretListItem[]>(`/secrets?${params}`);
     },
     get: (id: string) => request<SecretWithValue>(`/secrets/${id}`),
-    create: (data: { projectId: string; environmentId?: string; key: string; value: string; description?: string }) =>
+    create: (data: { projectId: string; environmentId?: string; key: string; value: string; description?: string; type?: SecretType }) =>
       request<SecretListItem>('/secrets', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: string, data: { key?: string; value?: string; description?: string }) =>
+    update: (id: string, data: { key?: string; value?: string; description?: string; type?: SecretType }) =>
       request<SecretListItem>(`/secrets/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/secrets/${id}`, { method: 'DELETE' }),

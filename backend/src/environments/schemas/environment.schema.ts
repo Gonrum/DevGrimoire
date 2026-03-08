@@ -16,6 +16,21 @@ export class Environment {
   @Prop({ required: true })
   name: string;
 
+  @Prop()
+  description: string;
+
+  @Prop()
+  host: string;
+
+  @Prop({ type: Number })
+  port: number;
+
+  @Prop()
+  user: string;
+
+  @Prop()
+  url: string;
+
   @Prop({ type: [{ key: String, value: String }], default: [] })
   variables: EnvVariable[];
 

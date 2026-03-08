@@ -12,6 +12,7 @@ export interface SecretListItem {
   environmentId: string | null;
   key: string;
   description?: string;
+  type: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -36,6 +37,7 @@ export class SecretsService {
         $set: {
           encryptedValue,
           description: dto.description,
+          type: dto.type || 'variable',
           projectId: dto.projectId,
           environmentId: dto.environmentId || null,
           key: dto.key,
@@ -70,6 +72,7 @@ export class SecretsService {
 
     if (dto.key !== undefined) secret.key = dto.key;
     if (dto.description !== undefined) secret.description = dto.description;
+    if (dto.type !== undefined) secret.type = dto.type;
     if (dto.value !== undefined) {
       if (!this.encryptionService.isEnabled()) {
         throw new BadRequestException('Secrets encryption not configured');
@@ -110,6 +113,7 @@ export class SecretsService {
       environmentId: obj.environmentId,
       key: obj.key,
       description: obj.description,
+      type: obj.type || 'variable',
       createdAt: (obj as any).createdAt,
       updatedAt: (obj as any).updatedAt,
     };
