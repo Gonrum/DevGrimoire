@@ -112,7 +112,7 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
           Verfügbare MCP-Tools
         </h2>
         <p className="text-gray-400 text-sm mb-4">
-          Nach dem Anbinden stehen Claude 27 Tools zur Verfügung:
+          Nach dem Anbinden stehen Claude 49 Tools zur Verfügung:
         </p>
 
         <ToolGroup title="Projekte" tools={[
@@ -126,6 +126,7 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
         <ToolGroup title="Todos" tools={[
           { name: 'todo_create', desc: 'Neues Todo anlegen (Status, Priorität, Tags, Milestone)' },
           { name: 'todo_list', desc: 'Todos filtern nach Projekt/Status' },
+          { name: 'todo_get', desc: 'Einzelnes Todo mit Details und Kommentaren' },
           { name: 'todo_update', desc: 'Todo-Status, Priorität, Dependencies ändern' },
           { name: 'todo_delete', desc: 'Todo löschen' },
           { name: 'todo_comment', desc: 'Kommentar an ein Todo anhängen' },
@@ -148,6 +149,7 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
           { name: 'knowledge_save', desc: 'Wissenseintrag speichern (Architektur, Patterns, Notizen)' },
           { name: 'knowledge_search', desc: 'Volltextsuche in der Wissensbasis' },
           { name: 'knowledge_list', desc: 'Alle Einträge eines Projekts auflisten' },
+          { name: 'knowledge_get', desc: 'Einzelnen Wissenseintrag mit vollem Inhalt abrufen' },
           { name: 'knowledge_update', desc: 'Eintrag aktualisieren' },
           { name: 'knowledge_delete', desc: 'Eintrag löschen' },
         ]} />
@@ -155,8 +157,23 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
         <ToolGroup title="Changelog" tools={[
           { name: 'changelog_add', desc: 'Changelog-Eintrag hinzufügen (Version, Changes, Component)' },
           { name: 'changelog_list', desc: 'Changelog eines Projekts auflisten' },
+          { name: 'changelog_get', desc: 'Einzelnen Changelog-Eintrag abrufen' },
           { name: 'changelog_update', desc: 'Changelog-Eintrag aktualisieren' },
           { name: 'changelog_delete', desc: 'Changelog-Eintrag löschen' },
+        ]} />
+
+        <ToolGroup title="Handbuch" tools={[
+          { name: 'manual_save', desc: 'Projekthandbuch speichern/aktualisieren (Markdown)' },
+          { name: 'manual_get', desc: 'Projekthandbuch abrufen' },
+        ]} />
+
+        <ToolGroup title="Recherche" tools={[
+          { name: 'research_save', desc: 'Recherche-Eintrag speichern (Quellen, Erkenntnisse)' },
+          { name: 'research_search', desc: 'Volltextsuche in Recherche-Einträgen' },
+          { name: 'research_list', desc: 'Recherche-Einträge eines Projekts auflisten' },
+          { name: 'research_get', desc: 'Einzelnen Recherche-Eintrag abrufen' },
+          { name: 'research_update', desc: 'Recherche-Eintrag aktualisieren' },
+          { name: 'research_delete', desc: 'Recherche-Eintrag löschen' },
         ]} />
 
         <ToolGroup title="Umgebungen & Secrets" tools={[
@@ -173,7 +190,9 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
         ]} />
 
         <ToolGroup title="Sonstiges" tools={[
-          { name: 'notify_user', desc: 'Push-Benachrichtigung an den User senden (PWA)' },
+          { name: 'notify_user', desc: 'Benachrichtigung an den User senden' },
+          { name: 'system_instructions_get', desc: 'Globale Agent-Instruktionen abrufen' },
+          { name: 'system_instructions_set', desc: 'Globale Agent-Instruktionen setzen' },
         ]} />
       </section>
 
