@@ -197,6 +197,15 @@ export interface SecretWithValue extends SecretListItem {
   value: string;
 }
 
+export interface Notification {
+  _id: string;
+  title: string;
+  body: string;
+  url?: string;
+  read: boolean;
+  createdAt: string;
+}
+
 export const api = {
   projects: {
     list: (active?: boolean) =>
@@ -326,6 +335,20 @@ export const api = {
       request<Manual | null>(`/manuals?projectId=${projectId}`),
     save: (data: { projectId: string; content: string; title?: string }) =>
       request<Manual>('/manuals', { method: 'PUT', body: JSON.stringify(data) }),
+  },
+  notifications: {
+    list: (limit?: number, unreadOnly?: boolean) => {
+      const params = new URLSearchParams();
+      if (limit) params.set('limit', String(limit));
+      if (unreadOnly) params.set('unreadOnly', 'true');
+      return request<Notification[]>(`/notifications?${params}`);
+    },
+    unreadCount: () =>
+      request<{ count: number }>('/notifications/unread-count'),
+    markAsRead: (id: string) =>
+      request<Notification>(`/notifications/${id}/read`, { method: 'PUT' }),
+    markAllAsRead: () =>
+      request<void>('/notifications/read-all', { method: 'PUT' }),
   },
   settings: {
     get: (key: string) =>

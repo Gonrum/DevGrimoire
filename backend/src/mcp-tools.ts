@@ -16,6 +16,7 @@ import { SecretsService } from './secrets/secrets.service';
 import { ManualsService } from './manuals/manuals.service';
 import { ResearchService } from './research/research.service';
 import { SettingsService } from './settings/settings.service';
+import { NotificationsService } from './notifications/notifications.service';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 
 function requireString(args: Record<string, unknown>, field: string): string {
@@ -101,6 +102,7 @@ export interface McpServices {
   manualsService: ManualsService;
   researchService: ResearchService;
   settingsService: SettingsService;
+  notificationsService: NotificationsService;
 }
 
 const tools = [
@@ -759,7 +761,7 @@ const tools = [
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -1013,13 +1015,15 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           await milestonesService.remove(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
           break;
-        case 'notify_user':
-          result = await pushService.sendNotification(
-            requireString(a, 'title'),
-            requireString(a, 'body'),
-            optionalString(a, 'url'),
-          );
+        case 'notify_user': {
+          const nTitle = requireString(a, 'title');
+          const nBody = requireString(a, 'body');
+          const nUrl = optionalString(a, 'url');
+          const notification = await notificationsService.create(nTitle, nBody, nUrl);
+          const pushResult = await pushService.sendNotification(nTitle, nBody, nUrl);
+          result = { notificationId: notification._id.toString(), push: pushResult };
           break;
+        }
         case 'environment_create':
           result = await environmentsService.create({
             projectId: requireString(a, 'projectId'),

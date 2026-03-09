@@ -11,7 +11,7 @@ import SecretCreatePage from './pages/SecretCreatePage';
 import Docs from './pages/Docs';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
-import { usePushNotifications } from './hooks/usePushNotifications';
+import NotificationBell from './components/NotificationBell';
 import { ToastProvider } from './components/Toast';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { configureAuth } from './api/client';
@@ -28,22 +28,6 @@ function NotFound() {
   );
 }
 
-function PushToggle() {
-  const { supported, subscribed, loading, subscribe, unsubscribe } = usePushNotifications();
-  if (!supported) return null;
-
-  return (
-    <button
-      type="button"
-      onClick={subscribed ? unsubscribe : subscribe}
-      disabled={loading}
-      className={`text-sm px-2 py-1 rounded transition-colors ${subscribed ? 'text-blue-400 hover:text-blue-300' : 'text-gray-500 hover:text-gray-300'}`}
-      title={subscribed ? 'Push-Benachrichtigungen deaktivieren' : 'Push-Benachrichtigungen aktivieren'}
-    >
-      {subscribed ? '\u{1F514}' : '\u{1F515}'}
-    </button>
-  );
-}
 
 function LogoutButton() {
   const { authEnabled, logout } = useAuth();
@@ -141,7 +125,7 @@ function AppShell() {
             </NavLink>
           </nav>
           <div className="ml-auto flex items-center gap-3">
-            <PushToggle />
+            <NotificationBell />
             <LogoutButton />
           </div>
         </div>

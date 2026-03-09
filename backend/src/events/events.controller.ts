@@ -4,6 +4,7 @@ import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 import { Observable, Subject, filter, map } from 'rxjs';
 import { PROJECT_CHANGED, ProjectChangeEvent } from './project-event';
+import { NOTIFICATION_CREATED } from '../notifications/notifications.service';
 
 interface MessageEvent {
   data: string;
@@ -121,10 +122,23 @@ export class EventsController implements OnModuleInit, OnModuleDestroy {
     this.events$.next(event);
   }
 
+  @OnEvent(NOTIFICATION_CREATED)
+  handleNotificationCreated(event: { id: string; title: string; body: string }) {
+    this.events$.next({
+      projectId: '__global__',
+      entity: 'notification',
+      action: 'created',
+      entityId: event.id,
+      summary: event.title,
+    });
+  }
+
   @Sse()
   sse(@Query('projectId') projectId?: string): Observable<MessageEvent> {
     return this.events$.pipe(
       filter((event) => {
+        // Notification events go to ALL clients
+        if (event.entity === 'notification') return true;
         if (projectId) return event.projectId === projectId;
         return event.entity === 'project';
       }),
