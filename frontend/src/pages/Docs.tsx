@@ -253,7 +253,7 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
           <Code>{`docker compose up -d`}</Code>
           <p className="text-gray-500 text-sm mt-2">
             Auf dem Rechner, der ClaudeVault hostet (z.B.{' '}
-            <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">jetson</code>).
+            <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">[server]</code>).
           </p>
         </Step>
 
@@ -266,12 +266,12 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
   "mcpServers": {
     "claudevault": {
       "type": "sse",
-      "url": "http://jetson/sse"
+      "url": "http://[server]/sse"
     }
   }
 }`}</Code>
           <p className="text-gray-500 text-sm mt-2">
-            Ersetze <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">jetson</code> durch
+            Ersetze <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">[server]</code> durch
             den Hostnamen oder die IP des Servers. Das ist alles &mdash; kein Node.js,
             kein Klonen des Repos nötig. Alles läuft über Port 80 (nginx).
           </p>
@@ -281,7 +281,7 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
           <p className="text-gray-400 text-sm">
             Das Dashboard ist unter der gleichen Adresse erreichbar:{' '}
             <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">
-              http://jetson
+              http://[server]
             </code>{' '}
             (Port 80).
           </p>
