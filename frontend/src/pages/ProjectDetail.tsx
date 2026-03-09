@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry } from '../api/client';
+import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem } from '../api/client';
 import TodoBoard from '../components/TodoBoard';
 import SessionList from '../components/SessionList';
 import KnowledgeList from '../components/KnowledgeList';
@@ -25,6 +25,8 @@ export default function ProjectDetail() {
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [research, setResearch] = useState<ResearchEntry[]>([]);
+  const [environments, setEnvironments] = useState<Environment[]>([]);
+  const [secrets, setSecrets] = useState<SecretListItem[]>([]);
   const [manualKey, setManualKey] = useState(0);
   const [tab, setTab] = useState<Tab>(() => (searchParams.get('tab') as Tab) || 'todos');
   useEffect(() => {
@@ -53,8 +55,10 @@ export default function ProjectDetail() {
       api.milestones.list(id),
       api.activities.list(id, 100),
       api.research.list(id),
+      api.environments.list(id),
+      api.secrets.list(id),
     ])
-      .then(([p, t, s, k, cl, ms, act, res]) => {
+      .then(([p, t, s, k, cl, ms, act, res, env, sec]) => {
         if (controller.signal.aborted) return;
         setProject(p);
         setTodos(t);
@@ -64,6 +68,8 @@ export default function ProjectDetail() {
         setMilestones(ms);
         setActivities(act);
         setResearch(res);
+        setEnvironments(env);
+        setSecrets(sec);
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
@@ -88,6 +94,8 @@ export default function ProjectDetail() {
         project: () => api.projects.get(id).then(setProject),
         manual: () => setManualKey((k) => k + 1),
         research: () => api.research.list(id).then(setResearch),
+        environment: () => api.environments.list(id).then(setEnvironments),
+        secret: () => api.secrets.list(id).then(setSecrets),
       };
       refetchers[event.entity]?.();
       api.activities.list(id, 100).then(setActivities);
@@ -120,8 +128,8 @@ export default function ProjectDetail() {
     { key: 'changelog', label: 'Changelog', count: changelog.length },
     { key: 'manual', label: 'Handbuch', count: 0 },
     { key: 'research', label: 'Recherche', count: research.length },
-    { key: 'environments', label: 'Umgebungen', count: 0 },
-    { key: 'secrets', label: 'Secrets', count: 0 },
+    { key: 'environments', label: 'Umgebungen', count: environments.length },
+    { key: 'secrets', label: 'Secrets', count: secrets.length },
     { key: 'activity', label: 'Aktivität', count: activities.length },
   ];
 

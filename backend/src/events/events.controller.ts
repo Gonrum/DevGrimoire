@@ -19,6 +19,8 @@ const COLLECTION_ENTITY_MAP: Record<string, ProjectChangeEvent['entity']> = {
   milestones: 'milestone',
   manuals: 'manual',
   researches: 'research',
+  environments: 'environment',
+  secrets: 'secret',
 };
 
 const OPERATION_ACTION_MAP: Record<string, ProjectChangeEvent['action']> = {
