@@ -266,24 +266,24 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
   "mcpServers": {
     "claudevault": {
       "type": "sse",
-      "url": "http://jetson:3200/sse"
+      "url": "http://jetson/sse"
     }
   }
 }`}</Code>
           <p className="text-gray-500 text-sm mt-2">
             Ersetze <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">jetson</code> durch
             den Hostnamen oder die IP des Servers. Das ist alles &mdash; kein Node.js,
-            kein Klonen des Repos nötig.
+            kein Klonen des Repos nötig. Alles läuft über Port 80 (nginx).
           </p>
         </Step>
 
         <Step n={3} title="Web-Frontend aufrufen">
           <p className="text-gray-400 text-sm">
-            Das Dashboard ist unter{' '}
+            Das Dashboard ist unter der gleichen Adresse erreichbar:{' '}
             <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">
               http://jetson
             </code>{' '}
-            erreichbar (Port 80).
+            (Port 80).
           </p>
         </Step>
 
