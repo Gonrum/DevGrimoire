@@ -228,10 +228,17 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
   "mcpServers": {
     "claudevault": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://[server]/sse"]
+      "args": ["-y", "mcp-remote", "http://[server]/sse", "--allow-http"]
     }
   }
 }`}</Code>
+          <div className="bg-yellow-900/20 border border-yellow-800/50 rounded-lg p-3 mt-2">
+            <p className="text-yellow-400 text-xs">
+              <code className="bg-gray-800 px-1 rounded">--allow-http</code> ist nötig, da{' '}
+              <code className="bg-gray-800 px-1 rounded">mcp-remote</code> standardmäßig nur HTTPS erlaubt.
+              Für Produktionsumgebungen empfehlen wir HTTPS mit einem Reverse Proxy.
+            </p>
+          </div>
           <p className="text-gray-500 text-sm mt-2">
             <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">mcp-remote</code> wird
             beim ersten Start automatisch installiert. Pfad zur Config: macOS{' '}
