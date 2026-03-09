@@ -34,6 +34,8 @@ function optionalString(args: Record<string, unknown>, field: string): string | 
 function optionalStringArray(args: Record<string, unknown>, field: string): string[] | undefined {
   const val = args[field];
   if (val === undefined || val === null) return undefined;
+  // Accept a single string and wrap it in an array
+  if (typeof val === 'string') return [val];
   if (!Array.isArray(val) || !val.every((v) => typeof v === 'string')) {
     throw new Error(`${field} must be an array of strings`);
   }
