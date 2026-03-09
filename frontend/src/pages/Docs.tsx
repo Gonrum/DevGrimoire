@@ -106,66 +106,6 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
         </div>
       </section>
 
-      <section className="mb-10">
-        <h2 className="text-lg font-semibold text-blue-400 mb-3">
-          MCP-Server anbinden
-        </h2>
-
-        <h3 className="text-sm font-medium text-gray-300 mt-4 mb-2">
-          Claude Code CLI
-        </h3>
-        <p className="text-gray-400 text-sm mb-2">
-          Füge folgendes in <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">~/.claude.json</code> ein:
-        </p>
-        <Code>{`{
-  "mcpServers": {
-    "claudevault": {
-      "command": "node",
-      "args": ["/pfad/zu/ClaudeVault/backend/dist/mcp-server.js"],
-      "env": {
-        "MONGODB_URI": "mongodb://user:pass@localhost:27017/claudevault?authSource=admin&directConnection=true"
-      }
-    }
-  }
-}`}</Code>
-        <p className="text-gray-500 text-sm mt-2">
-          Danach Claude Code neu starten, damit der MCP-Server geladen wird.
-          <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded ml-1">directConnection=true</code>{' '}
-          ist nötig für das Replica Set.
-        </p>
-
-        <h3 className="text-sm font-medium text-gray-300 mt-6 mb-2">
-          Claude Desktop App
-        </h3>
-        <p className="text-gray-400 text-sm mb-2">
-          Füge folgendes in{' '}
-          <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">
-            claude_desktop_config.json
-          </code>{' '}
-          ein:
-        </p>
-        <Code>{`{
-  "mcpServers": {
-    "claudevault": {
-      "command": "node",
-      "args": ["/pfad/zu/ClaudeVault/backend/dist/mcp-server.js"],
-      "env": {
-        "MONGODB_URI": "mongodb://user:pass@localhost:27017/claudevault?authSource=admin&directConnection=true"
-      }
-    }
-  }
-}`}</Code>
-        <p className="text-gray-500 text-sm mt-2">
-          Pfad zur Config: macOS{' '}
-          <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">
-            ~/Library/Application Support/Claude/claude_desktop_config.json
-          </code>
-          , Linux{' '}
-          <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">
-            ~/.config/Claude/claude_desktop_config.json
-          </code>
-        </p>
-      </section>
 
       <section className="mb-10">
         <h2 className="text-lg font-semibold text-blue-400 mb-3">
@@ -257,10 +197,9 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
           </p>
         </Step>
 
-        <Step n={2} title="MCP-Config auf dem Client-Rechner">
+        <Step n={2} title="Claude Code CLI (Remote)">
           <p className="text-gray-400 text-sm mb-2">
-            In <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">~/.claude.json</code> oder{' '}
-            <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">claude_desktop_config.json</code>:
+            In <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">~/.claude.json</code>:
           </p>
           <Code>{`{
   "mcpServers": {
@@ -271,9 +210,45 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
   }
 }`}</Code>
           <p className="text-gray-500 text-sm mt-2">
+            Claude Code unterstützt SSE nativ &mdash; kein Node.js nötig auf dem Client.
+          </p>
+        </Step>
+
+        <Step n={3} title="Claude Desktop App (Remote)">
+          <p className="text-gray-400 text-sm mb-2">
+            Claude Desktop unterstützt nur stdio-basierte MCP-Server.
+            Für Remote-Verbindungen wird{' '}
+            <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">mcp-remote</code>{' '}
+            als Bridge benötigt (Node.js muss installiert sein).
+          </p>
+          <p className="text-gray-400 text-sm mb-2">
+            In <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">claude_desktop_config.json</code>:
+          </p>
+          <Code>{`{
+  "mcpServers": {
+    "claudevault": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://[server]/sse"]
+    }
+  }
+}`}</Code>
+          <p className="text-gray-500 text-sm mt-2">
+            <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">mcp-remote</code> wird
+            beim ersten Start automatisch installiert. Pfad zur Config: macOS{' '}
+            <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">
+              ~/Library/Application Support/Claude/claude_desktop_config.json
+            </code>
+            , Linux{' '}
+            <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">
+              ~/.config/Claude/claude_desktop_config.json
+            </code>
+          </p>
+        </Step>
+
+        <Step n={4} title="Web-Frontend aufrufen">
+          <p className="text-gray-400 text-sm mb-2">
             Ersetze <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded">[server]</code> durch
-            den Hostnamen oder die IP des Servers. Das ist alles &mdash; kein Node.js,
-            kein Klonen des Repos nötig. Alles läuft über Port 80 (nginx).
+            den Hostnamen oder die IP des Servers. Alles läuft über Port 80 (nginx).
           </p>
         </Step>
 
