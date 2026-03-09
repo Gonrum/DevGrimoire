@@ -21,6 +21,7 @@ import { EnvironmentsService } from './environments/environments.service';
 import { SecretsService } from './secrets/secrets.service';
 import { ManualsService } from './manuals/manuals.service';
 import { ResearchService } from './research/research.service';
+import { SettingsService } from './settings/settings.service';
 import { registerMcpTools, McpServices } from './mcp-tools';
 
 function createMcpServer(services: McpServices): Server {
@@ -58,6 +59,7 @@ async function bootstrap() {
     secretsService: app.get(SecretsService),
     manualsService: app.get(ManualsService),
     researchService: app.get(ResearchService),
+    settingsService: app.get(SettingsService),
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};

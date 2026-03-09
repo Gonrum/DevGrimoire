@@ -327,6 +327,15 @@ export const api = {
     save: (data: { projectId: string; content: string; title?: string }) =>
       request<Manual>('/manuals', { method: 'PUT', body: JSON.stringify(data) }),
   },
+  settings: {
+    get: (key: string) =>
+      request<{ key: string; value: string | null }>(`/settings/${key}`),
+    set: (key: string, value: string) =>
+      request<{ key: string; value: string }>(`/settings/${key}`, {
+        method: 'PUT',
+        body: JSON.stringify({ value }),
+      }),
+  },
   research: {
     list: (projectId: string) =>
       request<ResearchEntry[]>(`/research?projectId=${projectId}`),

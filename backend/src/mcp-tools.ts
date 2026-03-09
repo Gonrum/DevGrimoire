@@ -15,6 +15,8 @@ import { EnvironmentsService } from './environments/environments.service';
 import { SecretsService } from './secrets/secrets.service';
 import { ManualsService } from './manuals/manuals.service';
 import { ResearchService } from './research/research.service';
+import { SettingsService } from './settings/settings.service';
+import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 
 function requireString(args: Record<string, unknown>, field: string): string {
   const val = args[field];
@@ -98,6 +100,7 @@ export interface McpServices {
   secretsService: SecretsService;
   manualsService: ManualsService;
   researchService: ResearchService;
+  settingsService: SettingsService;
 }
 
 const tools = [
@@ -732,10 +735,31 @@ const tools = [
       required: ['id'],
     },
   },
+  {
+    name: 'system_instructions_get',
+    description: 'IMPORTANT: Call this tool at the start of every session to learn how to work with ClaudeVault correctly. Returns global agent instructions and optionally project-specific instructions.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Optional project ID to include project-specific instructions alongside global ones' },
+      },
+    },
+  },
+  {
+    name: 'system_instructions_set',
+    description: 'Update the global agent instructions. Use this when the user asks you to change how agents should behave.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        instructions: { type: 'string', description: 'New global agent instructions in Markdown format' },
+      },
+      required: ['instructions'],
+    },
+  },
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -1132,6 +1156,33 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           await researchService.remove(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
           break;
+        case 'system_instructions_get': {
+          const instructions = await settingsService.getOrDefault(
+            AGENT_INSTRUCTIONS_KEY,
+            DEFAULT_AGENT_INSTRUCTIONS,
+          );
+          const projectId = optionalString(a, 'projectId');
+          if (projectId) {
+            const project = await projectsService.findById(projectId);
+            if (project?.instructions) {
+              result = {
+                globalInstructions: instructions,
+                projectInstructions: project.instructions,
+              };
+              break;
+            }
+          }
+          result = { globalInstructions: instructions };
+          break;
+        }
+        case 'system_instructions_set': {
+          await settingsService.set(
+            AGENT_INSTRUCTIONS_KEY,
+            requireString(a, 'instructions'),
+          );
+          result = { updated: true };
+          break;
+        }
         default:
           return errorResult(`Unknown tool: ${name}`);
       }

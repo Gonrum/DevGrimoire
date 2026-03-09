@@ -9,6 +9,7 @@ import MilestoneCreatePage from './pages/MilestoneCreatePage';
 import EnvironmentCreatePage from './pages/EnvironmentCreatePage';
 import SecretCreatePage from './pages/SecretCreatePage';
 import Docs from './pages/Docs';
+import Settings from './pages/Settings';
 import Login from './pages/Login';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { ToastProvider } from './components/Toast';
@@ -130,6 +131,14 @@ function AppShell() {
             >
               Docs
             </NavLink>
+            <NavLink
+              to="/settings"
+              className={({ isActive }) =>
+                isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
+              }
+            >
+              Einstellungen
+            </NavLink>
           </nav>
           <div className="ml-auto flex items-center gap-3">
             <PushToggle />
@@ -148,6 +157,7 @@ function AppShell() {
           <Route path="/projects/:id/secrets/new" element={<SecretCreatePage />} />
           <Route path="/projects/:id/settings" element={<ProjectSettings />} />
           <Route path="/docs" element={<Docs />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>

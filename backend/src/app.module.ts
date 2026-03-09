@@ -18,6 +18,7 @@ import { EnvironmentsModule } from './environments/environments.module';
 import { SecretsModule } from './secrets/secrets.module';
 import { ManualsModule } from './manuals/manuals.module';
 import { ResearchModule } from './research/research.module';
+import { SettingsModule } from './settings/settings.module';
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
@@ -43,6 +44,7 @@ if (!MONGODB_URI) {
     SecretsModule,
     ManualsModule,
     ResearchModule,
+    SettingsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
