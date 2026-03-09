@@ -9,7 +9,7 @@ export class RefreshToken {
   token: string;
 
   @Prop({ required: true })
-  username: string;
+  userId: string;
 
   @Prop({ required: true })
   expiresAt: Date;

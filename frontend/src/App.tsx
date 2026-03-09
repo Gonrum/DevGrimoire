@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Routes, Route, NavLink, Link } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
+import ProjectsOverview from './pages/ProjectsOverview';
 import ProjectDetail from './pages/ProjectDetail';
 import ProjectSettings from './pages/ProjectSettings';
 import TodoDetailPage from './pages/TodoDetailPage';
@@ -11,8 +12,11 @@ import SecretCreatePage from './pages/SecretCreatePage';
 import Docs from './pages/Docs';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
+import UserManagement from './pages/UserManagement';
+import Profile from './pages/Profile';
 import NotificationBell from './components/NotificationBell';
 import ConnectionStatus from './components/ConnectionStatus';
+import GlobalSearch from './components/GlobalSearch';
 import { ToastProvider } from './components/Toast';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { configureAuth } from './api/client';
@@ -29,27 +33,36 @@ function NotFound() {
   );
 }
 
-
-function LogoutButton() {
-  const { authEnabled, logout } = useAuth();
+function UserMenu() {
+  const { authEnabled, user, logout } = useAuth();
   if (!authEnabled) return null;
 
   return (
-    <button
-      type="button"
-      onClick={logout}
-      className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
-      title="Abmelden"
-    >
-      Abmelden
-    </button>
+    <div className="flex items-center gap-2">
+      <NavLink
+        to="/profile"
+        className={({ isActive }) =>
+          `text-sm transition-colors ${isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'}`
+        }
+        title="Profil"
+      >
+        {user?.username || 'Profil'}
+      </NavLink>
+      <button
+        type="button"
+        onClick={logout}
+        className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
+        title="Abmelden"
+      >
+        Abmelden
+      </button>
+    </div>
   );
 }
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, authEnabled, loading, getAccessToken } = useAuth();
 
-  // Wire up the API client with auth
   useEffect(() => {
     const REFRESH_TOKEN_KEY = 'claudevault_refresh_token';
     configureAuth(
@@ -66,7 +79,6 @@ function AuthGate({ children }: { children: React.ReactNode }) {
           if (!res.ok) return false;
           const data = await res.json();
           localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
-          // The AuthProvider will update the token via its own refresh logic
           return true;
         } catch {
           return false;
@@ -91,6 +103,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 function AppShell() {
+  const { user, authEnabled } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
   return (
     <div className="min-h-screen flex flex-col">
       <header className="bg-gray-900 border-b border-gray-800 px-4 sm:px-6 py-3 sm:py-4">
@@ -109,6 +124,25 @@ function AppShell() {
               Dashboard
             </NavLink>
             <NavLink
+              to="/projects"
+              end
+              className={({ isActive }) =>
+                isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
+              }
+            >
+              Projekte
+            </NavLink>
+            {authEnabled && isAdmin && (
+              <NavLink
+                to="/admin/users"
+                className={({ isActive }) =>
+                  isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
+                }
+              >
+                Benutzer
+              </NavLink>
+            )}
+            <NavLink
               to="/docs"
               className={({ isActive }) =>
                 isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
@@ -126,15 +160,17 @@ function AppShell() {
             </NavLink>
           </nav>
           <div className="ml-auto flex items-center gap-3">
+            <GlobalSearch />
             <ConnectionStatus />
             <NotificationBell />
-            <LogoutButton />
+            <UserMenu />
           </div>
         </div>
       </header>
       <main className="flex-1 w-full px-4 sm:px-6 py-4 sm:py-8">
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/projects" element={<ProjectsOverview />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route path="/projects/:id/todos/new" element={<TodoCreatePage />} />
           <Route path="/projects/:id/todos/:todoId" element={<TodoDetailPage />} />
@@ -142,6 +178,8 @@ function AppShell() {
           <Route path="/projects/:id/environments/new" element={<EnvironmentCreatePage />} />
           <Route path="/projects/:id/secrets/new" element={<SecretCreatePage />} />
           <Route path="/projects/:id/settings" element={<ProjectSettings />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/admin/users" element={<UserManagement />} />
           <Route path="/docs" element={<Docs />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<NotFound />} />

@@ -28,9 +28,17 @@ export class TodosController {
   @Get()
   findAll(
     @Query('projectId') projectId?: string,
-    @Query('status') status?: TodoStatus,
+    @Query('status') status?: string,
   ) {
-    return this.todosService.findAll({ projectId, status });
+    // Support comma-separated status values: ?status=in_progress,review
+    const statusFilter = status
+      ? (status.split(',') as TodoStatus[])
+      : [];
+    return this.todosService.findAll({
+      projectId,
+      status: statusFilter.length === 1 ? statusFilter[0] : undefined,
+      statuses: statusFilter.length > 1 ? statusFilter : undefined,
+    });
   }
 
   @Get(':id')

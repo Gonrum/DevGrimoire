@@ -24,10 +24,15 @@ export class ProjectsController {
   }
 
   @Get()
-  findAll(@Query('active') active?: string) {
+  findAll(
+    @Query('active') active?: string,
+    @Query('favorite') favorite?: string,
+  ) {
     const activeFilter =
       active !== undefined ? active === 'true' : undefined;
-    return this.projectsService.findAll(activeFilter);
+    const favoriteFilter =
+      favorite !== undefined ? favorite === 'true' : undefined;
+    return this.projectsService.findAll(activeFilter, favoriteFilter);
   }
 
   @Get(':id')

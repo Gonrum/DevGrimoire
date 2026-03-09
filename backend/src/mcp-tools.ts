@@ -785,7 +785,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           });
           break;
         case 'project_list': {
-          const projects = await projectsService.findAll(optionalBoolean(a, 'active'));
+          const projects = await projectsService.findAll(optionalBoolean(a, 'active'), optionalBoolean(a, 'favorite'));
           result = compactList(projects as any, ['instructions', 'components', '__v']);
           break;
         }

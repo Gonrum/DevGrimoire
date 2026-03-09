@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Get } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Get, Patch, Req } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
@@ -32,5 +32,22 @@ export class AuthController {
   @Get('status')
   async status() {
     return this.authService.getAuthStatus();
+  }
+
+  @Get('profile')
+  async getProfile(@Req() req: any) {
+    return this.authService.findUserById(req.user.userId);
+  }
+
+  @Patch('profile')
+  async updateProfile(@Req() req: any, @Body() body: { username?: string; email?: string }) {
+    return this.authService.updateProfile(req.user.userId, body);
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  async changePassword(@Req() req: any, @Body() body: { oldPassword: string; newPassword: string }) {
+    await this.authService.changePassword(req.user.userId, body.oldPassword, body.newPassword);
+    return { message: 'Passwort geändert' };
   }
 }

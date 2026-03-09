@@ -206,10 +206,35 @@ export interface Notification {
   createdAt: string;
 }
 
+export interface UserInfo {
+  _id: string;
+  username: string;
+  email?: string;
+  role: 'admin' | 'user';
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SearchResult {
+  type: 'todo' | 'knowledge' | 'changelog' | 'research' | 'milestone';
+  id: string;
+  projectId: string;
+  title: string;
+  snippet: string;
+  status?: string;
+  priority?: string;
+}
+
 export const api = {
   projects: {
-    list: (active?: boolean) =>
-      request<Project[]>(`/projects${active !== undefined ? `?active=${active}` : ''}`),
+    list: (filters?: { active?: boolean; favorite?: boolean }) => {
+      const params = new URLSearchParams();
+      if (filters?.active !== undefined) params.set('active', String(filters.active));
+      if (filters?.favorite !== undefined) params.set('favorite', String(filters.favorite));
+      const qs = params.toString();
+      return request<Project[]>(`/projects${qs ? `?${qs}` : ''}`);
+    },
     get: (id: string) => request<Project>(`/projects/${id}`),
     create: (data: Partial<Project>) =>
       request<Project>('/projects', { method: 'POST', body: JSON.stringify(data) }),
@@ -369,5 +394,33 @@ export const api = {
       request<ResearchEntry>(`/research/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/research/${id}`, { method: 'DELETE' }),
+  },
+  search: {
+    query: (q: string, projectId?: string, limit?: number) => {
+      const params = new URLSearchParams({ q });
+      if (projectId) params.set('projectId', projectId);
+      if (limit) params.set('limit', String(limit));
+      return request<SearchResult[]>(`/search?${params}`);
+    },
+  },
+  users: {
+    list: () => request<UserInfo[]>('/users'),
+    get: (id: string) => request<UserInfo>(`/users/${id}`),
+    create: (data: { username: string; email?: string; password: string; role?: string }) =>
+      request<UserInfo>('/users', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<UserInfo>) =>
+      request<UserInfo>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/users/${id}`, { method: 'DELETE' }),
+  },
+  profile: {
+    get: () => request<UserInfo>('/auth/profile'),
+    update: (data: { username?: string; email?: string }) =>
+      request<UserInfo>('/auth/profile', { method: 'PATCH', body: JSON.stringify(data) }),
+    changePassword: (oldPassword: string, newPassword: string) =>
+      request<{ message: string }>('/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ oldPassword, newPassword }),
+      }),
   },
 };

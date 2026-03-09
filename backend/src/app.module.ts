@@ -14,12 +14,14 @@ import { ActivitiesModule } from './activities/activities.module';
 import { PushModule } from './push/push.module';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { RolesGuard } from './auth/guards/roles.guard';
 import { EnvironmentsModule } from './environments/environments.module';
 import { SecretsModule } from './secrets/secrets.module';
 import { ManualsModule } from './manuals/manuals.module';
 import { ResearchModule } from './research/research.module';
 import { SettingsModule } from './settings/settings.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { SearchModule } from './search/search.module';
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
@@ -47,10 +49,12 @@ if (!MONGODB_URI) {
     ResearchModule,
     SettingsModule,
     NotificationsModule,
+    SearchModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
 export class AppModule {}

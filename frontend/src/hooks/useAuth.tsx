@@ -1,9 +1,16 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from 'react';
 
+interface UserInfo {
+  userId: string;
+  username: string;
+  role: string;
+}
+
 interface AuthState {
   isAuthenticated: boolean;
   authEnabled: boolean | null;
   loading: boolean;
+  user: UserInfo | null;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   getAccessToken: () => string | null;
@@ -13,32 +20,46 @@ const AuthContext = createContext<AuthState>(null!);
 
 const REFRESH_TOKEN_KEY = 'claudevault_refresh_token';
 
+function parseJwtPayload(token: string): any {
+  try {
+    return JSON.parse(atob(token.split('.')[1]));
+  } catch {
+    return null;
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authEnabled, setAuthEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<UserInfo | null>(null);
   const accessTokenRef = useRef<string | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  const setTokenAndUser = (accessToken: string) => {
+    accessTokenRef.current = accessToken;
+    const payload = parseJwtPayload(accessToken);
+    if (payload) {
+      setUser({ userId: payload.sub, username: payload.username, role: payload.role });
+    }
+  };
+
   const scheduleRefresh = useCallback((expiresInMs: number) => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    // Refresh 1 minute before expiry
     const delay = Math.max(expiresInMs - 60_000, 5_000);
     refreshTimerRef.current = setTimeout(() => {
       refreshTokens().catch(() => {
         accessTokenRef.current = null;
         setIsAuthenticated(false);
+        setUser(null);
       });
     }, delay);
   }, []);
 
   const parseTokenExpiry = (token: string): number => {
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      return (payload.exp * 1000) - Date.now();
-    } catch {
-      return 14 * 60 * 1000; // fallback 14min
-    }
+    const payload = parseJwtPayload(token);
+    if (payload?.exp) return (payload.exp * 1000) - Date.now();
+    return 14 * 60 * 1000;
   };
 
   const refreshTokens = useCallback(async () => {
@@ -57,13 +78,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const data = await res.json();
-    accessTokenRef.current = data.accessToken;
+    setTokenAndUser(data.accessToken);
     localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
     setIsAuthenticated(true);
     scheduleRefresh(parseTokenExpiry(data.accessToken));
   }, [scheduleRefresh]);
 
-  // Check auth status on mount
   useEffect(() => {
     (async () => {
       try {
@@ -77,13 +97,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // Try to restore session via refresh token
         const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
         if (refreshToken) {
           await refreshTokens();
         }
       } catch {
-        // Backend not reachable — assume auth enabled
         setAuthEnabled(true);
       }
       setLoading(false);
@@ -107,7 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const data = await res.json();
-    accessTokenRef.current = data.accessToken;
+    setTokenAndUser(data.accessToken);
     localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
     setIsAuthenticated(true);
     scheduleRefresh(parseTokenExpiry(data.accessToken));
@@ -129,12 +147,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(REFRESH_TOKEN_KEY);
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     setIsAuthenticated(false);
+    setUser(null);
   };
 
   const getAccessToken = () => accessTokenRef.current;
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, authEnabled, loading, login, logout, getAccessToken }}>
+    <AuthContext.Provider value={{ isAuthenticated, authEnabled, loading, user, login, logout, getAccessToken }}>
       {children}
     </AuthContext.Provider>
   );

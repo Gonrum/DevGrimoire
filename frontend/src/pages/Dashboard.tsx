@@ -1,127 +1,36 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, Project } from '../api/client';
+import { api, Project, Todo } from '../api/client';
 import { useDashboardEvents } from '../hooks/useProjectEvents';
 import { useToast } from '../components/Toast';
-
-function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [path, setPath] = useState('');
-  const [repository, setRepository] = useState('');
-  const [techStack, setTechStack] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setSaving(true);
-    try {
-      await api.projects.create({
-        name: name.trim(),
-        description: description.trim() || undefined,
-        path: path.trim() || undefined,
-        repository: repository.trim() || undefined,
-        techStack: techStack.split(',').map((t) => t.trim()).filter(Boolean),
-      });
-      setName('');
-      setDescription('');
-      setPath('');
-      setRepository('');
-      setTechStack('');
-      setOpen(false);
-      onCreated();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="mb-6 px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
-      >
-        + Neues Projekt
-      </button>
-    );
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="mb-6 bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 max-w-xl">
-      <h3 className="text-sm font-semibold text-gray-300">Neues Projekt anlegen</h3>
-      <input
-        type="text"
-        placeholder="Projektname *"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
-        autoFocus
-      />
-      <textarea
-        placeholder="Beschreibung (optional)"
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        rows={2}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
-      />
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <input
-          type="text"
-          placeholder="Pfad (optional)"
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
-        />
-        <input
-          type="text"
-          placeholder="Repository URL (optional)"
-          value={repository}
-          onChange={(e) => setRepository(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
-        />
-      </div>
-      <input
-        type="text"
-        placeholder="Tech Stack (kommagetrennt, z.B. React, Node.js)"
-        value={techStack}
-        onChange={(e) => setTechStack(e.target.value)}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
-      />
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={saving || !name.trim()}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded transition-colors"
-        >
-          {saving ? 'Speichern...' : 'Erstellen'}
-        </button>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="px-3 py-1.5 text-sm bg-gray-800 hover:bg-gray-700 text-gray-400 rounded transition-colors"
-        >
-          Abbrechen
-        </button>
-      </div>
-    </form>
-  );
-}
+import { STATUS_LABELS, STATUS_COLORS, PRIORITY_COLORS, PRIORITY_LABELS } from '../components/todo-utils';
 
 export default function Dashboard() {
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [favorites, setFavorites] = useState<Project[]>([]);
+  const [activeTodos, setActiveTodos] = useState<Todo[]>([]);
+  const [projectMap, setProjectMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { showError } = useToast();
 
-  const loadProjects = () => {
-    api.projects
-      .list()
-      .then(setProjects)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+  const loadData = async () => {
+    try {
+      const [favProjects, allProjects, todos] = await Promise.all([
+        api.projects.list({ favorite: true }),
+        api.projects.list(),
+        api.todos.list({ status: 'in_progress,review' }),
+      ]);
+      setFavorites(favProjects);
+      // Build project name map for todo display
+      const map: Record<string, string> = {};
+      for (const p of allProjects) map[p._id] = p.name;
+      setProjectMap(map);
+      setActiveTodos(todos);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const toggleFavorite = async (e: React.MouseEvent, project: Project) => {
@@ -129,22 +38,17 @@ export default function Dashboard() {
     e.stopPropagation();
     try {
       await api.projects.update(project._id, { favorite: !project.favorite });
-      loadProjects();
+      loadData();
     } catch (err: any) {
       showError(err.message || 'Favorit konnte nicht geändert werden');
     }
   };
 
-  const sortedProjects = [...projects].sort((a, b) => {
-    if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
-    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-  });
-
   useEffect(() => {
-    loadProjects();
+    loadData();
   }, []);
 
-  useDashboardEvents(() => loadProjects());
+  useDashboardEvents(() => loadData());
 
   if (loading) return <p className="text-gray-500">Laden...</p>;
   if (error) {
@@ -157,73 +61,121 @@ export default function Dashboard() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-6">Projekte</h1>
-      <ProjectCreateForm onCreated={loadProjects} />
-      {projects.length === 0 ? (
-        <p className="text-gray-500">
-          Noch keine Projekte. Lege eins über das Formular oder per MCP an.
-        </p>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {sortedProjects.map((p) => (
-            <Link
-              key={p._id}
-              to={`/projects/${p._id}`}
-              className="block bg-gray-900 border border-gray-800 rounded-lg p-5 hover:border-blue-500 transition-colors"
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={(e) => toggleFavorite(e, p)}
-                    className={`text-lg leading-none transition-colors ${
-                      p.favorite
-                        ? 'text-yellow-400 hover:text-yellow-300'
-                        : 'text-gray-700 hover:text-yellow-400'
-                    }`}
-                    title={p.favorite ? 'Favorit entfernen' : 'Als Favorit markieren'}
-                    aria-label={p.favorite ? 'Favorit entfernen' : 'Als Favorit markieren'}
-                  >
-                    {p.favorite ? '\u2605' : '\u2606'}
-                  </button>
-                  <h2 className="text-lg font-semibold">{p.name}</h2>
-                </div>
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full ${
-                    p.active
-                      ? 'bg-green-900 text-green-300'
-                      : 'bg-gray-800 text-gray-500'
-                  }`}
-                >
-                  {p.active ? 'aktiv' : 'inaktiv'}
-                </span>
-              </div>
-              {p.description && (
-                <p className="text-sm text-gray-400 mb-3 line-clamp-2">
-                  {p.description}
-                </p>
-              )}
-              {p.techStack.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {p.techStack.map((t) => (
-                    <span
-                      key={t}
-                      className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded"
-                    >
-                      {t}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <p className="text-xs text-gray-600 mt-3">
-                Erstellt: {new Date(p.createdAt).toLocaleDateString('de-DE')}
-                {' · '}
-                Aktualisiert: {new Date(p.updatedAt).toLocaleDateString('de-DE')}
-              </p>
-            </Link>
-          ))}
+      {/* Favoriten-Projekte */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <Link
+            to="/projects"
+            className="text-sm text-gray-400 hover:text-blue-400 transition-colors"
+          >
+            Alle Projekte &rarr;
+          </Link>
         </div>
-      )}
+
+        {favorites.length === 0 ? (
+          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center">
+            <p className="text-gray-500 mb-2">Keine Favoriten-Projekte vorhanden.</p>
+            <Link
+              to="/projects"
+              className="text-sm text-blue-400 hover:text-blue-300"
+            >
+              Projekte als Favorit markieren
+            </Link>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {favorites.map((p) => (
+              <Link
+                key={p._id}
+                to={`/projects/${p._id}`}
+                className="block bg-gray-900 border border-gray-800 rounded-lg p-5 hover:border-blue-500 transition-colors"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => toggleFavorite(e, p)}
+                      className="text-lg leading-none text-yellow-400 hover:text-yellow-300 transition-colors"
+                      title="Favorit entfernen"
+                      aria-label="Favorit entfernen"
+                    >
+                      &#9733;
+                    </button>
+                    <h2 className="text-lg font-semibold">{p.name}</h2>
+                  </div>
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full ${
+                      p.active
+                        ? 'bg-green-900 text-green-300'
+                        : 'bg-gray-800 text-gray-500'
+                    }`}
+                  >
+                    {p.active ? 'aktiv' : 'inaktiv'}
+                  </span>
+                </div>
+                {p.description && (
+                  <p className="text-sm text-gray-400 mb-3 line-clamp-2">
+                    {p.description}
+                  </p>
+                )}
+                {p.techStack.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {p.techStack.map((t) => (
+                      <span
+                        key={t}
+                        className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-gray-600 mt-3">
+                  Aktualisiert: {new Date(p.updatedAt).toLocaleDateString('de-DE')}
+                </p>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Aktive Tasks */}
+      <div>
+        <h2 className="text-xl font-bold mb-4">Aktive Tasks</h2>
+        {activeTodos.length === 0 ? (
+          <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center">
+            <p className="text-gray-500">Keine Tasks in Bearbeitung oder Review.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {activeTodos.map((todo) => (
+              <Link
+                key={todo._id}
+                to={`/projects/${todo.projectId}?tab=todos`}
+                className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 hover:border-blue-500 transition-colors"
+              >
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_COLORS[todo.status]}`}
+                >
+                  {STATUS_LABELS[todo.status]}
+                </span>
+                <span
+                  className={`text-xs whitespace-nowrap ${PRIORITY_COLORS[todo.priority]}`}
+                >
+                  {PRIORITY_LABELS[todo.priority]}
+                </span>
+                <span className="text-sm text-gray-200 truncate flex-1">
+                  {todo.title}
+                </span>
+                <span className="text-xs text-gray-600 whitespace-nowrap">
+                  {projectMap[todo.projectId] || 'Unbekannt'}
+                </span>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

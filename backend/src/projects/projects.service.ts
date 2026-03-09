@@ -26,8 +26,10 @@ export class ProjectsService {
     return project;
   }
 
-  async findAll(active?: boolean): Promise<ProjectDocument[]> {
-    const filter = active !== undefined ? { active } : {};
+  async findAll(active?: boolean, favorite?: boolean): Promise<ProjectDocument[]> {
+    const filter: Record<string, unknown> = {};
+    if (active !== undefined) filter.active = active;
+    if (favorite !== undefined) filter.favorite = favorite;
     return this.projectModel.find(filter).sort({ updatedAt: -1 }).exec();
   }
 
