@@ -8,6 +8,10 @@ import {
 import Markdown from '../components/Markdown';
 import MarkdownEditor from '../components/MarkdownEditor';
 import { useToast } from '../components/Toast';
+import Button from '../components/ui/Button';
+import Badge from '../components/ui/Badge';
+import ConfirmButton from '../components/ui/ConfirmButton';
+import { LoadingText } from '../components/ui/LoadingSpinner';
 
 function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => void; onCancel: () => void }) {
   const [title, setTitle] = useState(todo.title);
@@ -62,14 +66,12 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
         </div>
       </div>
       <div className="flex gap-2 pt-2">
-        <button type="submit" disabled={saving || !title.trim()}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded transition-colors">
+        <Button type="submit" variant="primary" disabled={saving || !title.trim()}>
           {saving ? 'Speichern...' : 'Speichern'}
-        </button>
-        <button type="button" onClick={onCancel}
-          className="px-3 py-1.5 text-sm bg-gray-800 hover:bg-gray-700 text-gray-400 rounded transition-colors">
+        </Button>
+        <Button type="button" onClick={onCancel}>
           Abbrechen
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -87,8 +89,6 @@ export default function TodoDetailPage() {
   const [editing, setEditing] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [savingComment, setSavingComment] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-
   const loadTodo = () => {
     if (!todoId) return;
     api.todos.get(todoId)
@@ -127,21 +127,7 @@ export default function TodoDetailPage() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!todoId) return;
-    if (deleting) {
-      try {
-        await api.todos.delete(todoId);
-        navigate(`/projects/${id}`);
-      } catch (err: any) {
-        showError(err.message || 'Löschen fehlgeschlagen');
-      }
-    } else {
-      setDeleting(true);
-    }
-  };
-
-  if (loading) return <p className="text-gray-500">Laden...</p>;
+  if (loading) return <LoadingText />;
   if (error || !todo) {
     return (
       <div>
@@ -169,9 +155,9 @@ export default function TodoDetailPage() {
           <h1 className="text-xl font-bold mb-3">{todo.title}</h1>
 
           <div className="flex flex-wrap items-center gap-2 mb-4">
-            <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[todo.status]}`}>
+            <Badge color={STATUS_COLORS[todo.status]} rounded="full">
               {STATUS_LABELS[todo.status]}
-            </span>
+            </Badge>
             <span className={`text-xs ${PRIORITY_COLORS[todo.priority]}`}>
               {PRIORITY_LABELS[todo.priority]}
             </span>
@@ -184,7 +170,7 @@ export default function TodoDetailPage() {
           {todo.tags.length > 0 && (
             <div className="flex flex-wrap gap-1 mb-4">
               {todo.tags.map((tag) => (
-                <span key={tag} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">{tag}</span>
+                <Badge key={tag} color="bg-gray-800 text-gray-400">{tag}</Badge>
               ))}
             </div>
           )}
@@ -298,30 +284,36 @@ export default function TodoDetailPage() {
 
           <div className="flex flex-wrap items-center gap-2 mb-8">
             {STATUS_TRANSITIONS[todo.status].map((tr) => (
-              <button key={tr.next} type="button" onClick={() => handleStatusChange(tr.next)}
-                className={`text-xs px-3 py-1.5 sm:px-2.5 sm:py-1 rounded transition-colors ${TRANSITION_BUTTON_COLORS[tr.next]}`}>
+              <Button key={tr.next} type="button" variant="none" size="sm" onClick={() => handleStatusChange(tr.next)}
+                className={TRANSITION_BUTTON_COLORS[tr.next]}>
                 {tr.label}
-              </button>
+              </Button>
             ))}
-            <button type="button" onClick={() => setEditing(true)}
-              className="text-xs px-3 py-1.5 sm:px-2.5 sm:py-1 bg-blue-900/60 hover:bg-blue-900 text-blue-300 rounded transition-colors">
+            <Button type="button" variant="none" size="sm" className="bg-blue-900/60 hover:bg-blue-900 text-blue-300" onClick={() => setEditing(true)}>
               Bearbeiten
-            </button>
-            <button type="button" onClick={async () => {
+            </Button>
+            <Button type="button" variant="none" size="sm" className="bg-gray-700 hover:bg-gray-600 text-gray-300" onClick={async () => {
               try {
                 await api.todos.update(todo._id, { archived: !todo.archived } as Partial<Todo>);
                 loadTodo();
               } catch (err: any) {
                 showError(err.message || 'Archivierung fehlgeschlagen');
               }
-            }}
-              className="text-xs px-3 py-1.5 sm:px-2.5 sm:py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors">
+            }}>
               {todo.archived ? 'Wiederherstellen' : 'Archivieren'}
-            </button>
-            <button type="button" onClick={handleDelete} onBlur={() => setDeleting(false)}
-              className={`text-xs px-3 py-1.5 sm:px-2.5 sm:py-1 rounded transition-colors sm:ml-auto ${deleting ? 'bg-red-700 text-red-100 hover:bg-red-600' : 'bg-red-900/40 hover:bg-red-900/60 text-red-400'}`}>
-              {deleting ? 'Sicher?' : 'Löschen'}
-            </button>
+            </Button>
+            <ConfirmButton
+              onConfirm={async () => {
+                try {
+                  await api.todos.delete(todoId!);
+                  navigate(`/projects/${id}`);
+                } catch (err: any) {
+                  showError(err.message || 'Löschen fehlgeschlagen');
+                }
+              }}
+              size="sm"
+              className="sm:ml-auto"
+            />
           </div>
 
           <div className="border-t border-gray-800 pt-5">
@@ -344,10 +336,9 @@ export default function TodoDetailPage() {
               <input type="text" value={commentText} onChange={(e) => setCommentText(e.target.value)}
                 placeholder="Kommentar schreiben..." onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
                 className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
-              <button type="button" onClick={handleAddComment} disabled={savingComment || !commentText.trim()}
-                className="text-sm px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50 transition-colors">
+              <Button type="button" variant="primary" onClick={handleAddComment} disabled={savingComment || !commentText.trim()}>
                 {savingComment ? '...' : 'Senden'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

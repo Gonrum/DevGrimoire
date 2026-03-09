@@ -17,6 +17,7 @@ import NotificationBell from './components/NotificationBell';
 import ConnectionStatus from './components/ConnectionStatus';
 import GlobalSearch from './components/GlobalSearch';
 import { ToastProvider } from './components/Toast';
+import { LoadingText } from './components/ui/LoadingSpinner';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { configureAuth } from './api/client';
 
@@ -89,7 +90,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-500">Laden...</p>
+        <LoadingText />
       </div>
     );
   }

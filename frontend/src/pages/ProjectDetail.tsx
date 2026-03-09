@@ -11,6 +11,8 @@ import EnvironmentList, { SecretsList } from '../components/EnvironmentList';
 import ManualView from '../components/ManualView';
 import ResearchList from '../components/ResearchList';
 import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents';
+import Badge from '../components/ui/Badge';
+import { LoadingText } from '../components/ui/LoadingSpinner';
 
 type Tab = 'todos' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research';
 
@@ -105,7 +107,7 @@ export default function ProjectDetail() {
 
   useProjectEvents(id, handleSSEEvent);
 
-  if (loading) return <p className="text-gray-500">Laden...</p>;
+  if (loading) return <LoadingText />;
   if (error) {
     return (
       <div>
@@ -142,15 +144,9 @@ export default function ProjectDetail() {
       <div className="mb-8">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
           <h1 className="text-xl sm:text-2xl font-bold">{project.name}</h1>
-          <span
-            className={`text-xs px-2 py-0.5 rounded-full ${
-              project.active
-                ? 'bg-green-900 text-green-300'
-                : 'bg-gray-800 text-gray-500'
-            }`}
-          >
+          <Badge color={project.active ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500'} rounded="full">
             {project.active ? 'aktiv' : 'inaktiv'}
-          </span>
+          </Badge>
           <Link
             to={`/projects/${id}/settings`}
             className="text-xs px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded-full transition-colors"
@@ -170,25 +166,19 @@ export default function ProjectDetail() {
         {project.techStack.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
             {project.techStack.map((t) => (
-              <span
-                key={t}
-                className="text-xs bg-blue-900/40 text-blue-300 px-2 py-0.5 rounded"
-              >
+              <Badge key={t} color="bg-blue-900/40 text-blue-300">
                 {t}
-              </span>
+              </Badge>
             ))}
           </div>
         )}
         {project.components && project.components.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">
             {project.components.map((c) => (
-              <span
-                key={c.name}
-                className="text-xs bg-purple-900/40 text-purple-300 px-2 py-0.5 rounded"
-              >
+              <Badge key={c.name} color="bg-purple-900/40 text-purple-300">
                 {c.name} <span className="text-purple-400 font-mono">v{c.version}</span>
                 {c.path && <span className="text-purple-500 ml-1">({c.path})</span>}
-              </span>
+              </Badge>
             ))}
           </div>
         )}

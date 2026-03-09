@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import UserManagement from './UserManagement';
+import Button from '../components/ui/Button';
 
 const DEFAULT_INSTRUCTIONS = `# ClaudeVault Agent-Instruktionen
 
@@ -147,19 +148,12 @@ export default function Settings() {
               </div>
 
               <div className="flex items-center gap-3 mt-4">
-                <button
-                  onClick={save}
-                  disabled={saving || saved}
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
-                >
+                <Button variant="primary" size="lg" onClick={save} disabled={saving || saved}>
                   {saving ? 'Speichern...' : 'Speichern'}
-                </button>
-                <button
-                  onClick={reset}
-                  className="px-4 py-2 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition-colors text-sm"
-                >
+                </Button>
+                <Button size="lg" onClick={reset}>
                   Auf Standard zur&uuml;cksetzen
-                </button>
+                </Button>
               </div>
 
               <div className="mt-8 bg-gray-800/50 border border-gray-700 rounded-lg p-4">

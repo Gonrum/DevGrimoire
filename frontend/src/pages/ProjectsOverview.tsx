@@ -3,6 +3,10 @@ import { Link } from 'react-router-dom';
 import { api, Project } from '../api/client';
 import { useDashboardEvents } from '../hooks/useProjectEvents';
 import { useToast } from '../components/Toast';
+import Button from '../components/ui/Button';
+import Badge from '../components/ui/Badge';
+import EmptyState from '../components/ui/EmptyState';
+import { LoadingText } from '../components/ui/LoadingSpinner';
 
 function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
@@ -39,13 +43,9 @@ function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
 
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="mb-6 px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
-      >
+      <Button type="button" variant="primary" size="lg" onClick={() => setOpen(true)} className="mb-6">
         + Neues Projekt
-      </button>
+      </Button>
     );
   }
 
@@ -91,20 +91,12 @@ function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
         className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
       />
       <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={saving || !name.trim()}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded transition-colors"
-        >
+        <Button type="submit" variant="primary" disabled={saving || !name.trim()}>
           {saving ? 'Speichern...' : 'Erstellen'}
-        </button>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="px-3 py-1.5 text-sm bg-gray-800 hover:bg-gray-700 text-gray-400 rounded transition-colors"
-        >
+        </Button>
+        <Button type="button" onClick={() => setOpen(false)}>
           Abbrechen
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -157,7 +149,7 @@ export default function ProjectsOverview() {
 
   useDashboardEvents(() => loadProjects());
 
-  if (loading) return <p className="text-gray-500">Laden...</p>;
+  if (loading) return <LoadingText />;
   if (error) {
     return (
       <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
@@ -180,11 +172,9 @@ export default function ProjectsOverview() {
         />
       </div>
       {projects.length === 0 ? (
-        <p className="text-gray-500">
-          Noch keine Projekte. Lege eins über das Formular oder per MCP an.
-        </p>
+        <EmptyState message="Noch keine Projekte. Lege eins über das Formular oder per MCP an." />
       ) : filteredProjects.length === 0 ? (
-        <p className="text-gray-500">Keine Projekte gefunden für "{search}".</p>
+        <EmptyState message={`Keine Projekte gefunden für "${search}".`} />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredProjects.map((p) => (
@@ -210,15 +200,9 @@ export default function ProjectsOverview() {
                   </button>
                   <h2 className="text-lg font-semibold">{p.name}</h2>
                 </div>
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full ${
-                    p.active
-                      ? 'bg-green-900 text-green-300'
-                      : 'bg-gray-800 text-gray-500'
-                  }`}
-                >
+                <Badge color={p.active ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500'} rounded="full">
                   {p.active ? 'aktiv' : 'inaktiv'}
-                </span>
+                </Badge>
               </div>
               {p.description && (
                 <p className="text-sm text-gray-400 mb-3 line-clamp-2">
@@ -228,12 +212,9 @@ export default function ProjectsOverview() {
               {p.techStack.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {p.techStack.map((t) => (
-                    <span
-                      key={t}
-                      className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded"
-                    >
+                    <Badge key={t} color="bg-gray-800 text-gray-300">
                       {t}
-                    </span>
+                    </Badge>
                   ))}
                 </div>
               )}

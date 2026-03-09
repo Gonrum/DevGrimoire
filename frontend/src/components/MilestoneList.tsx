@@ -2,6 +2,11 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, Milestone, Todo } from '../api/client';
 import { useToast } from './Toast';
+import Button from './ui/Button';
+import Card from './ui/Card';
+import Badge from './ui/Badge';
+import ConfirmButton from './ui/ConfirmButton';
+import EmptyState from './ui/EmptyState';
 
 const STATUS_LABELS: Record<Milestone['status'], string> = {
   open: 'Offen',
@@ -23,7 +28,6 @@ interface Props {
 }
 
 function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { milestone: Milestone; todos: Todo[]; projectId: string; onUpdate: () => void; showError: (msg: string) => void }) {
-  const [deleting, setDeleting] = useState(false);
   const milestoneTodos = todos.filter((t) => t.milestoneId === milestone._id);
   const doneTodos = milestoneTodos.filter((t) => t.status === 'done');
   const progress = milestoneTodos.length > 0 ? Math.round((doneTodos.length / milestoneTodos.length) * 100) : 0;
@@ -37,26 +41,11 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
     }
   };
 
-  const handleDelete = async () => {
-    if (deleting) {
-      try {
-        await api.milestones.delete(milestone._id);
-        onUpdate();
-      } catch (err: any) {
-        showError(err.message || 'Löschen fehlgeschlagen');
-      }
-    } else {
-      setDeleting(true);
-    }
-  };
-
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+    <Card>
       <div className="flex items-start justify-between gap-3 mb-2">
         <h3 className="text-sm font-semibold">{milestone.name}</h3>
-        <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${STATUS_COLORS[milestone.status]}`}>
-          {STATUS_LABELS[milestone.status]}
-        </span>
+        <Badge color={STATUS_COLORS[milestone.status]} rounded="full" className="shrink-0">{STATUS_LABELS[milestone.status]}</Badge>
       </div>
 
       {milestone.description && (
@@ -99,46 +88,37 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
 
       <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-800">
         {milestone.status === 'open' && (
-          <button type="button" onClick={() => handleStatusChange('in_progress')}
-            className="text-xs px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded transition-colors">
-            Starten
-          </button>
+          <Button size="xs" onClick={() => handleStatusChange('in_progress')}>Starten</Button>
         )}
         {milestone.status === 'in_progress' && (
           <>
-            <button type="button" onClick={() => handleStatusChange('open')}
-              className="text-xs px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded transition-colors">
-              Zurück
-            </button>
-            <button type="button" onClick={() => handleStatusChange('done')}
-              className="text-xs px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded transition-colors">
-              Abschließen
-            </button>
+            <Button size="xs" onClick={() => handleStatusChange('open')}>Zurück</Button>
+            <Button size="xs" onClick={() => handleStatusChange('done')}>Abschließen</Button>
           </>
         )}
         {milestone.status === 'done' && (
-          <button type="button" onClick={() => handleStatusChange('in_progress')}
-            className="text-xs px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded transition-colors">
-            Wieder öffnen
-          </button>
+          <Button size="xs" onClick={() => handleStatusChange('in_progress')}>Wieder öffnen</Button>
         )}
-        <button type="button" onClick={async () => {
+        <Button size="xs" onClick={async () => {
           try {
             await api.milestones.update(milestone._id, { archived: !milestone.archived } as Partial<Milestone>);
             onUpdate();
           } catch (err: any) {
             showError(err.message || 'Archivierung fehlgeschlagen');
           }
-        }}
-          className="text-xs px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded transition-colors">
+        }}>
           {milestone.archived ? 'Wiederherstellen' : 'Archivieren'}
-        </button>
-        <button type="button" onClick={handleDelete} onBlur={() => setDeleting(false)}
-          className={`text-xs px-2 py-0.5 rounded transition-colors ml-auto ${deleting ? 'bg-red-900 text-red-300 hover:bg-red-800' : 'bg-gray-800 hover:bg-gray-700 text-gray-500 hover:text-red-400'}`}>
-          {deleting ? 'Sicher?' : 'Löschen'}
-        </button>
+        </Button>
+        <ConfirmButton onConfirm={async () => {
+          try {
+            await api.milestones.delete(milestone._id);
+            onUpdate();
+          } catch (err: any) {
+            showError(err.message || 'Löschen fehlgeschlagen');
+          }
+        }} className="ml-auto" />
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -177,15 +157,15 @@ export default function MilestoneList({ milestones, todos, projectId, onUpdate }
           </button>
         )}
         {archivedCount > 0 && (
-          <button type="button" onClick={() => setShowArchived(!showArchived)}
-            className={`text-xs px-2 py-1 rounded transition-colors ${showArchived ? 'bg-gray-700 text-gray-300' : 'text-gray-600 hover:text-gray-400'}`}>
+          <Button size="sm" onClick={() => setShowArchived(!showArchived)}
+            className={showArchived ? 'bg-gray-700 text-gray-300' : 'text-gray-600 hover:text-gray-400'}>
             {showArchived ? `Archiv ausblenden (${archivedCount})` : `Archiv (${archivedCount})`}
-          </button>
+          </Button>
         )}
       </div>
 
       {visible.length === 0 && unassignedTodos.length === 0 && (
-        <p className="text-gray-500 text-sm">Noch keine Milestones. Lege einen über das Formular oder per MCP an.</p>
+        <EmptyState message="Noch keine Milestones. Lege einen über das Formular oder per MCP an." />
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

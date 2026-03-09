@@ -1,6 +1,9 @@
 import { useState, useMemo } from 'react';
 import { Knowledge } from '../api/client';
 import Markdown from './Markdown';
+import Card from './ui/Card';
+import EmptyState from './ui/EmptyState';
+import Badge from './ui/Badge';
 
 export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -16,7 +19,7 @@ export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
     : entries;
 
   if (entries.length === 0) {
-    return <p className="text-gray-500 text-sm">Noch kein Wissen gespeichert.</p>;
+    return <EmptyState message="Noch kein Wissen gespeichert." />;
   }
 
   return (
@@ -62,17 +65,14 @@ export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
       )}
       <div className="space-y-4">
         {(selectedCategory === '__none__' ? entries.filter((e) => !e.category) : filtered).map((e) => (
-          <div
-            key={e._id}
-            className="bg-gray-900 border border-gray-800 rounded-lg p-4"
-          >
+          <Card key={e._id}>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold">{e.topic}</h3>
                 {e.category && (
-                  <span className="text-xs bg-indigo-900/40 text-indigo-300 px-2 py-0.5 rounded">
+                  <Badge color="bg-indigo-900/40 text-indigo-300">
                     {e.category}
-                  </span>
+                  </Badge>
                 )}
               </div>
               <span className="text-xs text-gray-600">
@@ -83,16 +83,13 @@ export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
             {e.tags.length > 0 && (
               <div className="flex flex-wrap gap-1 mt-3">
                 {e.tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="text-xs bg-purple-900/40 text-purple-300 px-2 py-0.5 rounded"
-                  >
+                  <Badge key={tag} color="bg-purple-900/40 text-purple-300">
                     {tag}
-                  </span>
+                  </Badge>
                 ))}
               </div>
             )}
-          </div>
+          </Card>
         ))}
       </div>
     </div>

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
+import Button from '../components/ui/Button';
+import { FormInput, FormTextarea } from '../components/ui/FormField';
 
 const ENV_PRESETS = [
   { name: 'development', label: 'Development', color: 'bg-green-900/40 text-green-300' },
@@ -63,9 +65,7 @@ export default function EnvironmentCreatePage() {
       <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-6">
         {/* Name with presets */}
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Name *</label>
-          <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="z.B. development, staging, production"
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" autoFocus />
+          <FormInput label="Name" required type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="z.B. development, staging, production" autoFocus />
           <div className="flex gap-2 mt-2">
             {ENV_PRESETS.map((preset) => (
               <button key={preset.name} type="button" onClick={() => setName(preset.name)}
@@ -76,36 +76,16 @@ export default function EnvironmentCreatePage() {
           </div>
         </div>
 
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Beschreibung</label>
-          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder="Kurze Beschreibung der Umgebung (optional)"
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none" />
-        </div>
+        <FormTextarea label="Beschreibung" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder="Kurze Beschreibung der Umgebung (optional)" />
 
         {/* Server data */}
         <div>
           <h2 className="text-sm font-medium text-gray-400 mb-3">Serverdaten</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Host</label>
-              <input type="text" value={host} onChange={(e) => setHost(e.target.value)} placeholder="z.B. 192.168.1.100 oder server.example.com"
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Port</label>
-              <input type="number" value={port} onChange={(e) => setPort(e.target.value)} placeholder="z.B. 22, 3000, 443"
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Benutzer</label>
-              <input type="text" value={user} onChange={(e) => setUser(e.target.value)} placeholder="z.B. deploy, root, www-data"
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">URL</label>
-              <input type="text" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="z.B. https://staging.example.com"
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
-            </div>
+            <FormInput label="Host" type="text" value={host} onChange={(e) => setHost(e.target.value)} placeholder="z.B. 192.168.1.100 oder server.example.com" className="font-mono" />
+            <FormInput label="Port" type="number" value={port} onChange={(e) => setPort(e.target.value)} placeholder="z.B. 22, 3000, 443" className="font-mono" />
+            <FormInput label="Benutzer" type="text" value={user} onChange={(e) => setUser(e.target.value)} placeholder="z.B. deploy, root, www-data" className="font-mono" />
+            <FormInput label="URL" type="text" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="z.B. https://staging.example.com" className="font-mono" />
           </div>
         </div>
 
@@ -113,9 +93,9 @@ export default function EnvironmentCreatePage() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-medium text-gray-400">Variablen</h2>
-            <button type="button" onClick={addVar} className="text-xs px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded transition-colors">
+            <Button type="button" size="sm" onClick={addVar}>
               + Variable
-            </button>
+            </Button>
           </div>
           {variables.length > 0 ? (
             <div className="space-y-2">
@@ -135,14 +115,12 @@ export default function EnvironmentCreatePage() {
         </div>
 
         <div className="flex gap-2 pt-2">
-          <button type="submit" disabled={saving || !name.trim()}
-            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg transition-colors">
+          <Button type="submit" variant="primary" size="lg" disabled={saving || !name.trim()}>
             {saving ? 'Erstellen...' : 'Umgebung erstellen'}
-          </button>
-          <button type="button" onClick={() => navigate(`/projects/${id}?tab=environments`)}
-            className="px-4 py-2 text-sm bg-gray-800 hover:bg-gray-700 text-gray-400 rounded-lg transition-colors">
+          </Button>
+          <Button type="button" size="lg" onClick={() => navigate(`/projects/${id}?tab=environments`)}>
             Abbrechen
-          </button>
+          </Button>
         </div>
       </form>
     </div>

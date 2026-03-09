@@ -1,17 +1,16 @@
 import { Session } from '../api/client';
+import Card from './ui/Card';
+import EmptyState from './ui/EmptyState';
 
 export default function SessionList({ sessions }: { sessions: Session[] }) {
   if (sessions.length === 0) {
-    return <p className="text-gray-500 text-sm">Noch keine Sessions aufgezeichnet.</p>;
+    return <EmptyState message="Noch keine Sessions aufgezeichnet." />;
   }
 
   return (
     <div className="space-y-4">
       {sessions.map((s) => (
-        <div
-          key={s._id}
-          className="bg-gray-900 border border-gray-800 rounded-lg p-4"
-        >
+        <Card key={s._id}>
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs text-gray-500">
               {new Date(s.createdAt).toLocaleString('de-DE')}
@@ -62,7 +61,7 @@ export default function SessionList({ sessions }: { sessions: Session[] }) {
               </ul>
             </div>
           )}
-        </div>
+        </Card>
       ))}
     </div>
   );

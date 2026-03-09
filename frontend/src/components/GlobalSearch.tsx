@@ -1,22 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { api, SearchResult } from '../api/client';
-
-const TYPE_LABELS: Record<SearchResult['type'], string> = {
-  todo: 'Todo',
-  knowledge: 'Wissen',
-  changelog: 'Changelog',
-  research: 'Recherche',
-  milestone: 'Milestone',
-};
-
-const TYPE_COLORS: Record<SearchResult['type'], string> = {
-  todo: 'bg-yellow-900 text-yellow-300',
-  knowledge: 'bg-blue-900 text-blue-300',
-  changelog: 'bg-green-900 text-green-300',
-  research: 'bg-purple-900 text-purple-300',
-  milestone: 'bg-orange-900 text-orange-300',
-};
+import { TYPE_LABELS, TYPE_COLORS } from '../constants/colors';
+import LoadingSpinner from './ui/LoadingSpinner';
 
 function getResultUrl(result: SearchResult): string {
   switch (result.type) {
@@ -175,7 +161,7 @@ export default function GlobalSearch() {
           />
           {loading && (
             <div className="absolute right-2 top-1/2 -translate-y-1/2">
-              <div className="w-3.5 h-3.5 border-2 border-gray-600 border-t-blue-400 rounded-full animate-spin" />
+              <LoadingSpinner size="sm" />
             </div>
           )}
         </div>

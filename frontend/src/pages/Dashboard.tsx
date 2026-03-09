@@ -4,6 +4,8 @@ import { api, Project, Todo } from '../api/client';
 import { useDashboardEvents } from '../hooks/useProjectEvents';
 import { useToast } from '../components/Toast';
 import { STATUS_LABELS, STATUS_COLORS, PRIORITY_COLORS, PRIORITY_LABELS } from '../components/todo-utils';
+import Badge from '../components/ui/Badge';
+import { LoadingText } from '../components/ui/LoadingSpinner';
 
 export default function Dashboard() {
   const [favorites, setFavorites] = useState<Project[]>([]);
@@ -50,7 +52,7 @@ export default function Dashboard() {
 
   useDashboardEvents(() => loadData());
 
-  if (loading) return <p className="text-gray-500">Laden...</p>;
+  if (loading) return <LoadingText />;
   if (error) {
     return (
       <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
@@ -104,15 +106,9 @@ export default function Dashboard() {
                     </button>
                     <h2 className="text-lg font-semibold">{p.name}</h2>
                   </div>
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full ${
-                      p.active
-                        ? 'bg-green-900 text-green-300'
-                        : 'bg-gray-800 text-gray-500'
-                    }`}
-                  >
+                  <Badge color={p.active ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500'} rounded="full">
                     {p.active ? 'aktiv' : 'inaktiv'}
-                  </span>
+                  </Badge>
                 </div>
                 {p.description && (
                   <p className="text-sm text-gray-400 mb-3 line-clamp-2">
@@ -122,12 +118,9 @@ export default function Dashboard() {
                 {p.techStack.length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {p.techStack.map((t) => (
-                      <span
-                        key={t}
-                        className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded"
-                      >
+                      <Badge key={t} color="bg-gray-800 text-gray-300">
                         {t}
-                      </span>
+                      </Badge>
                     ))}
                   </div>
                 )}
@@ -155,11 +148,9 @@ export default function Dashboard() {
                 to={`/projects/${todo.projectId}?tab=todos`}
                 className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 hover:border-blue-500 transition-colors"
               >
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_COLORS[todo.status]}`}
-                >
+                <Badge color={STATUS_COLORS[todo.status]} rounded="full" className="whitespace-nowrap">
                   {STATUS_LABELS[todo.status]}
-                </span>
+                </Badge>
                 <span
                   className={`text-xs whitespace-nowrap ${PRIORITY_COLORS[todo.priority]}`}
                 >

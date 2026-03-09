@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api, UserInfo } from '../api/client';
 import { useToast } from '../components/Toast';
+import Button from '../components/ui/Button';
+import Card from '../components/ui/Card';
+import Badge from '../components/ui/Badge';
+import ConfirmButton from '../components/ui/ConfirmButton';
 
 function CreateUserForm({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
@@ -38,13 +42,9 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
 
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="mb-6 px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
-      >
+      <Button type="button" variant="primary" size="lg" onClick={() => setOpen(true)} className="mb-6">
         + Neuer Benutzer
-      </button>
+      </Button>
     );
   }
 
@@ -83,20 +83,12 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
         <option value="admin">Administrator</option>
       </select>
       <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={saving || !username.trim() || !password}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded transition-colors"
-        >
+        <Button type="submit" variant="primary" disabled={saving || !username.trim() || !password}>
           {saving ? 'Speichern...' : 'Erstellen'}
-        </button>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="px-3 py-1.5 text-sm bg-gray-800 hover:bg-gray-700 text-gray-400 rounded transition-colors"
-        >
+        </Button>
+        <Button type="button" onClick={() => setOpen(false)}>
           Abbrechen
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -169,9 +161,10 @@ export default function UserManagement() {
 
       <div className="space-y-2">
         {users.map((user) => (
-          <div
+          <Card
             key={user._id}
-            className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 flex items-center gap-4"
+            padding="none"
+            className="px-4 py-3 flex items-center gap-4"
           >
             {editingId === user._id ? (
               <div className="flex-1 flex items-center gap-2 flex-wrap">
@@ -197,44 +190,24 @@ export default function UserManagement() {
                   <option value="user">Benutzer</option>
                   <option value="admin">Admin</option>
                 </select>
-                <button
-                  type="button"
-                  onClick={saveEdit}
-                  className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded"
-                >
+                <Button type="button" variant="primary" size="xs" onClick={saveEdit}>
                   Speichern
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEditingId(null)}
-                  className="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 rounded"
-                >
+                </Button>
+                <Button type="button" size="xs" onClick={() => setEditingId(null)}>
                   Abbrechen
-                </button>
+                </Button>
               </div>
             ) : (
               <>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-gray-200">{user.username}</span>
-                    <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded ${
-                        user.role === 'admin'
-                          ? 'bg-purple-900 text-purple-300'
-                          : 'bg-gray-800 text-gray-400'
-                      }`}
-                    >
+                    <Badge color={user.role === 'admin' ? 'bg-purple-900 text-purple-300' : 'bg-gray-800 text-gray-400'}>
                       {user.role === 'admin' ? 'Admin' : 'Benutzer'}
-                    </span>
-                    <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded ${
-                        user.active
-                          ? 'bg-green-900 text-green-300'
-                          : 'bg-red-900 text-red-300'
-                      }`}
-                    >
+                    </Badge>
+                    <Badge color={user.active ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}>
                       {user.active ? 'Aktiv' : 'Deaktiviert'}
-                    </span>
+                    </Badge>
                   </div>
                   {user.email && (
                     <span className="text-xs text-gray-500">{user.email}</span>
@@ -244,35 +217,24 @@ export default function UserManagement() {
                   {new Date(user.createdAt).toLocaleDateString('de-DE')}
                 </span>
                 <div className="flex gap-1">
-                  <button
-                    type="button"
-                    onClick={() => startEdit(user)}
-                    className="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 rounded"
-                  >
+                  <Button type="button" size="xs" onClick={() => startEdit(user)}>
                     Bearbeiten
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    size="xs"
                     onClick={() => handleToggleActive(user)}
-                    className={`px-2 py-1 text-xs rounded ${
-                      user.active
-                        ? 'bg-yellow-900/40 hover:bg-yellow-900 text-yellow-300'
-                        : 'bg-green-900/40 hover:bg-green-900 text-green-300'
-                    }`}
+                    className={user.active
+                      ? 'bg-yellow-900/40 hover:bg-yellow-900 text-yellow-300'
+                      : 'bg-green-900/40 hover:bg-green-900 text-green-300'}
                   >
                     {user.active ? 'Deaktivieren' : 'Aktivieren'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(user)}
-                    className="px-2 py-1 text-xs bg-red-900/40 hover:bg-red-900 text-red-300 rounded"
-                  >
-                    Löschen
-                  </button>
+                  </Button>
+                  <ConfirmButton onConfirm={() => handleDelete(user)} size="xs" />
                 </div>
               </>
             )}
-          </div>
+          </Card>
         ))}
       </div>
     </div>

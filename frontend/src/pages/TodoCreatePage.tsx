@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { api, Todo, Milestone } from '../api/client';
 import MarkdownEditor from '../components/MarkdownEditor';
+import Button from '../components/ui/Button';
+import { FormInput, FormSelect } from '../components/ui/FormField';
 
 export default function TodoCreatePage() {
   const { id } = useParams<{ id: string }>();
@@ -56,26 +58,18 @@ export default function TodoCreatePage() {
       <h1 className="text-xl font-bold mb-6">Neuer Task</h1>
 
       <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-4">
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Titel *</label>
-          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Task-Titel"
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" autoFocus />
-        </div>
+        <FormInput label="Titel" required type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Task-Titel" autoFocus />
         <div>
           <label className="block text-xs text-gray-500 mb-1">Beschreibung</label>
           <MarkdownEditor value={description} onChange={setDescription} rows={5} placeholder="Detaillierte Beschreibung (optional, Markdown)" />
         </div>
         <div className="flex flex-col sm:flex-row gap-4 items-start">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Priorität</label>
-            <select value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}
-              className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500">
-              <option value="low">Niedrig</option>
-              <option value="medium">Mittel</option>
-              <option value="high">Hoch</option>
-              <option value="critical">Kritisch</option>
-            </select>
-          </div>
+          <FormSelect label="Priorität" value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}>
+            <option value="low">Niedrig</option>
+            <option value="medium">Mittel</option>
+            <option value="high">Hoch</option>
+            <option value="critical">Kritisch</option>
+          </FormSelect>
           <div className="flex-1 w-full sm:w-auto">
             <label className="block text-xs text-gray-500 mb-1">Tags</label>
             <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="kommagetrennt, z.B. frontend, bugfix"
@@ -97,32 +91,27 @@ export default function TodoCreatePage() {
                 <input type="text" value={newMilestoneName} onChange={(e) => setNewMilestoneName(e.target.value)}
                   placeholder="Milestone-Name" autoFocus onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleCreateMilestone())}
                   className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
-                <button type="button" onClick={handleCreateMilestone} disabled={!newMilestoneName.trim()}
-                  className="text-xs px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded transition-colors">
+                <Button type="button" variant="primary" size="sm" disabled={!newMilestoneName.trim()} onClick={handleCreateMilestone}>
                   Anlegen
-                </button>
-                <button type="button" onClick={() => { setCreatingMilestone(false); setNewMilestoneName(''); }}
-                  className="text-xs px-2.5 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-400 rounded transition-colors">
+                </Button>
+                <Button type="button" size="sm" onClick={() => { setCreatingMilestone(false); setNewMilestoneName(''); }}>
                   Abbrechen
-                </button>
+                </Button>
               </div>
             ) : (
-              <button type="button" onClick={() => setCreatingMilestone(true)}
-                className="text-xs px-2.5 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded transition-colors">
+              <Button type="button" size="sm" onClick={() => setCreatingMilestone(true)}>
                 + Neuer Milestone
-              </button>
+              </Button>
             )}
           </div>
         </div>
         <div className="flex gap-2 pt-2">
-          <button type="submit" disabled={saving || !title.trim()}
-            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg transition-colors">
+          <Button type="submit" variant="primary" size="lg" disabled={saving || !title.trim()}>
             {saving ? 'Erstellen...' : 'Task erstellen'}
-          </button>
-          <button type="button" onClick={() => navigate(`/projects/${id}`)}
-            className="px-4 py-2 text-sm bg-gray-800 hover:bg-gray-700 text-gray-400 rounded-lg transition-colors">
+          </Button>
+          <Button type="button" size="lg" onClick={() => navigate(`/projects/${id}`)}>
             Abbrechen
-          </button>
+          </Button>
         </div>
       </form>
     </div>

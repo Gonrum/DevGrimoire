@@ -8,6 +8,8 @@ import {
   STATUS_COLORS, STATUS_LABELS, STATUS_TRANSITIONS,
 } from './todo-utils';
 import { useToast } from './Toast';
+import Button from './ui/Button';
+import ConfirmButton from './ui/ConfirmButton';
 
 interface Props {
   todos: Todo[];
@@ -80,12 +82,12 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
           className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
       </div>
       <div className="flex gap-2">
-        <button type="submit" disabled={saving || !title.trim()} className="text-xs px-2 py-0.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded transition-colors">
+        <Button type="submit" variant="primary" size="xs" disabled={saving || !title.trim()}>
           {saving ? '...' : 'Speichern'}
-        </button>
-        <button type="button" onClick={onCancel} className="text-xs px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-400 rounded transition-colors">
+        </Button>
+        <Button type="button" size="xs" onClick={onCancel}>
           Abbrechen
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -133,10 +135,9 @@ function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) 
               placeholder="Kommentar schreiben..." onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
               aria-label="Kommentar schreiben"
               className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
-            <button type="button" onClick={handleAdd} disabled={saving || !text.trim()}
-              className="text-xs px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded disabled:opacity-50 transition-colors">
+            <Button type="button" size="xs" onClick={handleAdd} disabled={saving || !text.trim()}>
               {saving ? '...' : 'Senden'}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -146,7 +147,6 @@ function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) 
 
 function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError }: { todo: Todo; allTodos: Todo[]; projectId: string; onUpdate: () => void; onDragStart?: (todoId: string) => void; showError: (msg: string) => void }) {
   const [editing, setEditing] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const hasBlockers = (todo.blockedBy || []).some((bid) => {
     const blocker = allTodos.find((t) => t._id === bid);
     return blocker && blocker.status !== 'done';
@@ -158,19 +158,6 @@ function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError 
       onUpdate();
     } catch (err: any) {
       showError(err.message || 'Status-Änderung fehlgeschlagen');
-    }
-  };
-
-  const handleDelete = async () => {
-    if (deleting) {
-      try {
-        await api.todos.delete(todo._id);
-        onUpdate();
-      } catch (err: any) {
-        showError(err.message || 'Löschen fehlgeschlagen');
-      }
-    } else {
-      setDeleting(true);
     }
   };
 
@@ -226,23 +213,18 @@ function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError 
       <TodoComments todo={todo} onUpdate={onUpdate} />
       <div className="flex flex-wrap items-center gap-2 mt-2 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity" onClick={(e) => e.preventDefault()}>
         {STATUS_TRANSITIONS[todo.status].map((tr) => (
-          <button key={tr.next} type="button" onClick={() => handleStatusChange(tr.next)}
-            className="text-xs px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded transition-colors">
-            {tr.label}
-          </button>
+          <Button key={tr.next} type="button" size="xs" onClick={() => handleStatusChange(tr.next)}>{tr.label}</Button>
         ))}
-        <button type="button" onClick={() => setEditing(true)}
-          className="text-xs px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded transition-colors">
-          Bearbeiten
-        </button>
-        <button type="button" onClick={handleArchiveToggle}
-          className="text-xs px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded transition-colors">
-          {todo.archived ? 'Wiederherstellen' : 'Archivieren'}
-        </button>
-        <button type="button" onClick={handleDelete} onBlur={() => setDeleting(false)}
-          className={`text-xs px-2 py-0.5 rounded transition-colors ml-auto ${deleting ? 'bg-red-900 text-red-300 hover:bg-red-800' : 'bg-gray-800 hover:bg-gray-700 text-gray-500 hover:text-red-400'}`}>
-          {deleting ? 'Sicher?' : 'Löschen'}
-        </button>
+        <Button type="button" size="xs" onClick={() => setEditing(true)}>Bearbeiten</Button>
+        <Button type="button" size="xs" onClick={handleArchiveToggle}>{todo.archived ? 'Wiederherstellen' : 'Archivieren'}</Button>
+        <ConfirmButton onConfirm={async () => {
+          try {
+            await api.todos.delete(todo._id);
+            onUpdate();
+          } catch (err: any) {
+            showError(err.message || 'Löschen fehlgeschlagen');
+          }
+        }} className="ml-auto" />
       </div>
     </Link>
   );
@@ -295,10 +277,7 @@ function TodoListRow({ todo, projectId, onUpdate, showError }: { todo: Todo; pro
       <td className="py-2.5 px-3">
         <div className="flex gap-1">
           {STATUS_TRANSITIONS[todo.status].map((tr) => (
-            <button key={tr.next} type="button" onClick={(e) => handleStatusChange(e, tr.next)}
-              className="text-xs px-1.5 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-500 hover:text-gray-200 rounded transition-colors">
-              {tr.label}
-            </button>
+            <Button key={tr.next} type="button" size="xs" onClick={(e) => handleStatusChange(e, tr.next)}>{tr.label}</Button>
           ))}
         </div>
       </td>

@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api, Project } from '../api/client';
+import Button from '../components/ui/Button';
+import ConfirmButton from '../components/ui/ConfirmButton';
+import { LoadingText } from '../components/ui/LoadingSpinner';
 
 const TEMPLATE_INSTRUCTIONS = `## Arbeitsweise
 1. Immer erst Planen und einen Überblick verschaffen
@@ -35,7 +38,6 @@ export default function ProjectSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -81,17 +83,7 @@ export default function ProjectSettings() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!id) return;
-    if (deleting) {
-      await api.projects.delete(id);
-      navigate('/');
-    } else {
-      setDeleting(true);
-    }
-  };
-
-  if (loading) return <p className="text-gray-500">Laden...</p>;
+  if (loading) return <LoadingText />;
   if (error) {
     return (
       <div>
@@ -213,25 +205,16 @@ export default function ProjectSettings() {
         />
 
         {!instructions.trim() && (
-          <button
-            type="button"
-            onClick={() => setInstructions(TEMPLATE_INSTRUCTIONS)}
-            className="mt-2 px-3 py-1.5 text-sm bg-gray-800 hover:bg-gray-700 text-gray-400 rounded-lg transition-colors"
-          >
+          <Button type="button" className="mt-2" onClick={() => setInstructions(TEMPLATE_INSTRUCTIONS)}>
             Vorlage einfügen
-          </button>
+          </Button>
         )}
       </section>
 
       <div className="flex items-center gap-3 mb-8">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || !name.trim()}
-          className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg transition-colors"
-        >
+        <Button type="button" variant="primary" size="lg" onClick={handleSave} disabled={saving || !name.trim()}>
           {saving ? 'Speichern...' : 'Alle Änderungen speichern'}
-        </button>
+        </Button>
         {saved && (
           <span className="text-sm text-green-400">Gespeichert!</span>
         )}
@@ -242,18 +225,7 @@ export default function ProjectSettings() {
         <p className="text-gray-500 text-sm mb-3">
           Das Löschen eines Projekts entfernt alle zugehörigen Daten (Todos, Sessions, Wissen).
         </p>
-        <button
-          type="button"
-          onClick={handleDelete}
-          onBlur={() => setDeleting(false)}
-          className={`px-4 py-2 text-sm rounded-lg transition-colors ${
-            deleting
-              ? 'bg-red-700 hover:bg-red-600 text-white'
-              : 'bg-gray-800 hover:bg-gray-700 text-red-400'
-          }`}
-        >
-          {deleting ? 'Wirklich löschen?' : 'Projekt löschen'}
-        </button>
+        <ConfirmButton onConfirm={async () => { if (id) { await api.projects.delete(id); navigate('/'); } }} label="Projekt löschen" confirmLabel="Wirklich löschen?" size="lg" />
       </section>
 
       <section className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">

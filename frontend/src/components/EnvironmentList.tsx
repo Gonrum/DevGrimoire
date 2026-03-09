@@ -2,38 +2,26 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api, Environment, SecretListItem } from '../api/client';
 import { useToast } from './Toast';
-
-const ENV_COLORS: Record<string, string> = {
-  dev: 'bg-green-900/40 text-green-300',
-  development: 'bg-green-900/40 text-green-300',
-  staging: 'bg-yellow-900/40 text-yellow-300',
-  prod: 'bg-red-900/40 text-red-300',
-  production: 'bg-red-900/40 text-red-300',
-};
-
-const SECRET_TYPE_LABELS: Record<string, { label: string; color: string }> = {
-  variable: { label: 'Variable', color: 'bg-gray-700 text-gray-300' },
-  password: { label: 'Passwort', color: 'bg-orange-900/40 text-orange-300' },
-  token: { label: 'Token', color: 'bg-purple-900/40 text-purple-300' },
-  ssh_key: { label: 'SSH Key', color: 'bg-cyan-900/40 text-cyan-300' },
-  certificate: { label: 'Zertifikat', color: 'bg-yellow-900/40 text-yellow-300' },
-  file: { label: 'Datei', color: 'bg-blue-900/40 text-blue-300' },
-};
+import Button from './ui/Button';
+import Card from './ui/Card';
+import Badge from './ui/Badge';
+import ConfirmButton from './ui/ConfirmButton';
+import EmptyState from './ui/EmptyState';
+import { ENV_COLORS, SECRET_TYPE_LABELS } from '../constants/colors';
 
 function EnvBadge({ name }: { name: string }) {
   const color = ENV_COLORS[name.toLowerCase()] || 'bg-gray-800 text-gray-300';
-  return <span className={`text-xs px-2 py-0.5 rounded-full ${color}`}>{name}</span>;
+  return <Badge color={color} rounded="full">{name}</Badge>;
 }
 
 function SecretTypeBadge({ type }: { type: string }) {
   const info = SECRET_TYPE_LABELS[type] || SECRET_TYPE_LABELS.variable;
-  return <span className={`text-xs px-1.5 py-0.5 rounded ${info.color}`}>{info.label}</span>;
+  return <Badge color={info.color}>{info.label}</Badge>;
 }
 
 function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () => void }) {
   const { showError } = useToast();
   const [revealed, setRevealed] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   const handleReveal = async () => {
     if (revealed) { setRevealed(null); return; }
@@ -44,13 +32,6 @@ function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () 
     } catch (err: any) {
       showError(err.message || 'Secret konnte nicht entschlüsselt werden');
     }
-  };
-
-  const handleDelete = async () => {
-    if (deleting) {
-      try { await api.secrets.delete(secret._id); onDelete(); } catch (err: any) { showError(err.message); }
-      setDeleting(false);
-    } else { setDeleting(true); }
   };
 
   const handleCopy = () => {
@@ -75,17 +56,8 @@ function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () 
         )}
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        <button type="button" onClick={handleReveal} className="text-xs px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 rounded transition-colors">
-          {revealed ? 'Verbergen' : 'Anzeigen'}
-        </button>
-        <button
-          type="button"
-          onClick={handleDelete}
-          onBlur={() => setDeleting(false)}
-          className={`text-xs px-2 py-1 rounded transition-colors ${deleting ? 'bg-red-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-500'}`}
-        >
-          {deleting ? 'Sicher?' : 'X'}
-        </button>
+        <Button type="button" size="xs" onClick={handleReveal}>{revealed ? 'Verbergen' : 'Anzeigen'}</Button>
+        <ConfirmButton onConfirm={async () => { try { await api.secrets.delete(secret._id); onDelete(); } catch (err: any) { showError(err.message); } }} label="X" confirmLabel="Sicher?" size="xs" />
       </div>
     </div>
   );
@@ -134,7 +106,6 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
   const [expanded, setExpanded] = useState(false);
   const [editingVars, setEditingVars] = useState(false);
   const [vars, setVars] = useState(env.variables);
-  const [deleting, setDeleting] = useState(false);
 
   const loadSecrets = () => { api.secrets.list(projectId, env._id).then(setSecrets).catch(() => {}); };
   useEffect(() => { if (expanded) loadSecrets(); }, [expanded]);
@@ -147,13 +118,6 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
     try { await api.environments.update(env._id, { variables: vars }); setEditingVars(false); onUpdate(); } catch (err: any) { showError(err.message); }
   };
 
-  const handleDelete = async () => {
-    if (deleting) {
-      try { await api.environments.delete(env._id); onUpdate(); } catch (err: any) { showError(err.message); }
-      setDeleting(false);
-    } else { setDeleting(true); }
-  };
-
   const addVar = () => setVars([...vars, { key: '', value: '' }]);
   const removeVar = (i: number) => setVars(vars.filter((_, idx) => idx !== i));
   const updateVar = (i: number, field: 'key' | 'value', val: string) => {
@@ -163,7 +127,7 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
   };
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+    <Card padding="none" className="overflow-hidden">
       <div className="flex items-center gap-3 p-4 cursor-pointer" onClick={() => setExpanded(!expanded)}>
         <span className="text-gray-500 text-xs">{expanded ? '\u25BC' : '\u25B6'}</span>
         <EnvBadge name={env.name} />
@@ -175,9 +139,7 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
           <button type="button" onClick={handleToggleActive} className={`text-xs px-2 py-0.5 rounded-full ${env.active ? 'bg-green-900/40 text-green-300' : 'bg-gray-800 text-gray-500'}`}>
             {env.active ? 'aktiv' : 'inaktiv'}
           </button>
-          <button type="button" onClick={handleDelete} onBlur={() => setDeleting(false)} className={`text-xs px-2 py-0.5 rounded ${deleting ? 'bg-red-700 text-white' : 'text-gray-600 hover:text-red-400'}`}>
-            {deleting ? 'Sicher?' : 'Entfernen'}
-          </button>
+          <ConfirmButton onConfirm={async () => { try { await api.environments.delete(env._id); onUpdate(); } catch (err: any) { showError(err.message); } }} label="Entfernen" size="xs" />
         </div>
       </div>
 
@@ -236,7 +198,7 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
           </div>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -254,12 +216,12 @@ export function SecretsList({ projectId }: { projectId: string }) {
         </Link>
       </div>
       {secrets.length > 0 ? (
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <Card>
           {secrets.map((s) => (
             <SecretRow key={s._id} secret={s} onDelete={load} />
           ))}
-        </div>
-      ) : <p className="text-gray-500 text-sm">Noch keine Secrets. Lege eines an oder nutze MCP (<code className="text-xs bg-gray-800 px-1 rounded">secret_set</code>).</p>}
+        </Card>
+      ) : <EmptyState message="Noch keine Secrets. Lege eines an oder nutze MCP (secret_set)." />}
     </div>
   );
 }
@@ -286,7 +248,7 @@ export default function EnvironmentList({ projectId }: { projectId: string }) {
       ))}
 
       {environments.length === 0 && (
-        <p className="text-gray-500 text-sm">Noch keine Umgebungen. Lege eine an oder nutze MCP (<code className="text-xs bg-gray-800 px-1 rounded">environment_create</code>).</p>
+        <EmptyState message="Noch keine Umgebungen. Lege eine an oder nutze MCP (environment_create)." />
       )}
     </div>
   );

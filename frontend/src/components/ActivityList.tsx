@@ -1,19 +1,6 @@
 import { Activity } from '../api/client';
-
-const ENTITY_ICONS: Record<string, string> = {
-  todo: '\u2611',
-  milestone: '\u{1F3AF}',
-  session: '\u{1F4DD}',
-  knowledge: '\u{1F4A1}',
-  changelog: '\u{1F4CB}',
-  project: '\u2699',
-};
-
-const ACTION_COLORS: Record<string, string> = {
-  created: 'text-green-400',
-  updated: 'text-blue-400',
-  deleted: 'text-red-400',
-};
+import { ENTITY_ICONS, ACTION_COLORS } from '../constants/colors';
+import EmptyState from './ui/EmptyState';
 
 function formatTime(dateStr: string): string {
   const date = new Date(dateStr);
@@ -32,7 +19,7 @@ function formatTime(dateStr: string): string {
 
 export default function ActivityList({ activities }: { activities: Activity[] }) {
   if (activities.length === 0) {
-    return <p className="text-gray-500 text-sm">Noch keine Aktivitäten.</p>;
+    return <EmptyState message="Noch keine Aktivitäten." />;
   }
 
   return (

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, UserInfo } from '../api/client';
 import { useToast } from '../components/Toast';
+import Button from '../components/ui/Button';
+import { LoadingText } from '../components/ui/LoadingSpinner';
 
 export default function Profile() {
   const [profile, setProfile] = useState<UserInfo | null>(null);
@@ -74,7 +76,7 @@ export default function Profile() {
     }
   };
 
-  if (loading) return <p className="text-gray-500">Laden...</p>;
+  if (loading) return <LoadingText />;
   if (!profile) return <p className="text-gray-500">Profil nicht gefunden.</p>;
 
   return (
@@ -107,13 +109,9 @@ export default function Profile() {
           <span>Rolle: <span className="text-gray-300">{profile.role === 'admin' ? 'Administrator' : 'Benutzer'}</span></span>
           <span>Erstellt: {new Date(profile.createdAt).toLocaleDateString('de-DE')}</span>
         </div>
-        <button
-          type="submit"
-          disabled={saving || !username.trim()}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded transition-colors"
-        >
+        <Button type="submit" variant="primary" disabled={saving || !username.trim()}>
           {saving ? 'Speichern...' : 'Speichern'}
-        </button>
+        </Button>
       </form>
 
       {/* Change Password */}
@@ -143,13 +141,9 @@ export default function Profile() {
           className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
           autoComplete="new-password"
         />
-        <button
-          type="submit"
-          disabled={changingPw || !oldPassword || !newPassword || !confirmPassword}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded transition-colors"
-        >
+        <Button type="submit" variant="primary" disabled={changingPw || !oldPassword || !newPassword || !confirmPassword}>
           {changingPw ? 'Ändern...' : 'Passwort ändern'}
-        </button>
+        </Button>
       </form>
     </div>
   );

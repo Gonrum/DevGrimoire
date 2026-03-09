@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { api, Environment, SecretType } from '../api/client';
 import { useToast } from '../components/Toast';
+import Button from '../components/ui/Button';
+import { FormInput, FormSelect } from '../components/ui/FormField';
 
 const SECRET_TYPES: { value: SecretType; label: string; description: string; icon: string }[] = [
   { value: 'variable', label: 'Variable', description: 'Umgebungsvariable (Key-Value)', icon: '{ }' },
@@ -79,12 +81,9 @@ export default function SecretCreatePage() {
         </div>
 
         {/* Key */}
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Key *</label>
-          <input type="text" value={key} onChange={(e) => setKey(e.target.value)}
-            placeholder={type === 'ssh_key' ? 'z.B. DEPLOY_SSH_KEY' : type === 'token' ? 'z.B. API_TOKEN' : type === 'password' ? 'z.B. DB_PASSWORD' : 'z.B. DATABASE_URL'}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" autoFocus />
-        </div>
+        <FormInput label="Key" required type="text" value={key} onChange={(e) => setKey(e.target.value)}
+          placeholder={type === 'ssh_key' ? 'z.B. DEPLOY_SSH_KEY' : type === 'token' ? 'z.B. API_TOKEN' : type === 'password' ? 'z.B. DB_PASSWORD' : 'z.B. DATABASE_URL'}
+          className="font-mono" autoFocus />
 
         {/* Value */}
         <div>
@@ -100,34 +99,26 @@ export default function SecretCreatePage() {
         </div>
 
         {/* Description */}
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Beschreibung</label>
-          <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Kurze Beschreibung (optional)"
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
-        </div>
+        <FormInput label="Beschreibung" type="text" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Kurze Beschreibung (optional)" />
 
         {/* Environment scope */}
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Umgebung</label>
-          <select value={environmentId} onChange={(e) => setEnvironmentId(e.target.value)}
-            className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500">
+          <FormSelect label="Umgebung" value={environmentId} onChange={(e) => setEnvironmentId(e.target.value)}>
             <option value="">Global (alle Umgebungen)</option>
             {environments.map((env) => (
               <option key={env._id} value={env._id}>{env.name}</option>
             ))}
-          </select>
+          </FormSelect>
           <p className="text-xs text-gray-600 mt-1">Globale Secrets gelten für alle Umgebungen. Umgebungsspezifische Secrets nur für die gewählte.</p>
         </div>
 
         <div className="flex gap-2 pt-2">
-          <button type="submit" disabled={saving || !key.trim() || !value}
-            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg transition-colors">
+          <Button type="submit" variant="primary" size="lg" disabled={saving || !key.trim() || !value}>
             {saving ? 'Erstellen...' : 'Secret erstellen'}
-          </button>
-          <button type="button" onClick={() => navigate(`/projects/${id}?tab=secrets`)}
-            className="px-4 py-2 text-sm bg-gray-800 hover:bg-gray-700 text-gray-400 rounded-lg transition-colors">
+          </Button>
+          <Button type="button" size="lg" onClick={() => navigate(`/projects/${id}?tab=secrets`)}>
             Abbrechen
-          </button>
+          </Button>
         </div>
       </form>
     </div>

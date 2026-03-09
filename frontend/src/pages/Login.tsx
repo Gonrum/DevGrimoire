@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import Button from '../components/ui/Button';
 
 export default function Login() {
   const { login } = useAuth();
@@ -60,13 +61,9 @@ export default function Login() {
             />
           </div>
 
-          <button
-            type="submit"
-            disabled={loading || !username.trim() || !password}
-            className="w-full px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg transition-colors"
-          >
+          <Button type="submit" variant="primary" size="lg" disabled={loading || !username.trim() || !password} className="w-full">
             {loading ? 'Anmelden...' : 'Anmelden'}
-          </button>
+          </Button>
         </form>
       </div>
     </div>
