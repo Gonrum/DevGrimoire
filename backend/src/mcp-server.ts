@@ -12,6 +12,8 @@ import { ActivitiesService } from './activities/activities.service';
 import { PushService } from './push/push.service';
 import { EnvironmentsService } from './environments/environments.service';
 import { SecretsService } from './secrets/secrets.service';
+import { ManualsService } from './manuals/manuals.service';
+import { ResearchService } from './research/research.service';
 import { registerMcpTools } from './mcp-tools';
 
 async function bootstrap() {
@@ -35,6 +37,8 @@ async function bootstrap() {
     pushService: app.get(PushService),
     environmentsService: app.get(EnvironmentsService),
     secretsService: app.get(SecretsService),
+    manualsService: app.get(ManualsService),
+    researchService: app.get(ResearchService),
   });
 
   const transport = new StdioServerTransport();

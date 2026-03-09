@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity } from '../api/client';
+import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry } from '../api/client';
 import TodoBoard from '../components/TodoBoard';
 import SessionList from '../components/SessionList';
 import KnowledgeList from '../components/KnowledgeList';
@@ -8,9 +8,11 @@ import ChangelogList from '../components/ChangelogList';
 import MilestoneList from '../components/MilestoneList';
 import ActivityList from '../components/ActivityList';
 import EnvironmentList, { SecretsList } from '../components/EnvironmentList';
+import ManualView from '../components/ManualView';
+import ResearchList from '../components/ResearchList';
 import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents';
 
-type Tab = 'todos' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets';
+type Tab = 'todos' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research';
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
@@ -22,6 +24,8 @@ export default function ProjectDetail() {
   const [changelog, setChangelog] = useState<ChangelogEntry[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [research, setResearch] = useState<ResearchEntry[]>([]);
+  const [manualKey, setManualKey] = useState(0);
   const [tab, setTab] = useState<Tab>(() => (searchParams.get('tab') as Tab) || 'todos');
   useEffect(() => {
     if (searchParams.has('tab')) {
@@ -48,8 +52,9 @@ export default function ProjectDetail() {
       api.changelog.list(id),
       api.milestones.list(id),
       api.activities.list(id, 100),
+      api.research.list(id),
     ])
-      .then(([p, t, s, k, cl, ms, act]) => {
+      .then(([p, t, s, k, cl, ms, act, res]) => {
         if (controller.signal.aborted) return;
         setProject(p);
         setTodos(t);
@@ -58,6 +63,7 @@ export default function ProjectDetail() {
         setChangelog(cl);
         setMilestones(ms);
         setActivities(act);
+        setResearch(res);
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
@@ -80,6 +86,8 @@ export default function ProjectDetail() {
         changelog: () => api.changelog.list(id).then(setChangelog),
         milestone: () => api.milestones.list(id).then(setMilestones),
         project: () => api.projects.get(id).then(setProject),
+        manual: () => setManualKey((k) => k + 1),
+        research: () => api.research.list(id).then(setResearch),
       };
       refetchers[event.entity]?.();
       api.activities.list(id, 100).then(setActivities);
@@ -110,6 +118,8 @@ export default function ProjectDetail() {
     { key: 'sessions', label: 'Sessions', count: sessions.length },
     { key: 'knowledge', label: 'Wissen', count: knowledge.length },
     { key: 'changelog', label: 'Changelog', count: changelog.length },
+    { key: 'manual', label: 'Handbuch', count: 0 },
+    { key: 'research', label: 'Recherche', count: research.length },
     { key: 'environments', label: 'Umgebungen', count: 0 },
     { key: 'secrets', label: 'Secrets', count: 0 },
     { key: 'activity', label: 'Aktivität', count: activities.length },
@@ -217,6 +227,8 @@ export default function ProjectDetail() {
       {tab === 'sessions' && <SessionList sessions={sessions} />}
       {tab === 'knowledge' && <KnowledgeList entries={knowledge} />}
       {tab === 'changelog' && <ChangelogList entries={changelog} />}
+      {tab === 'manual' && <ManualView key={manualKey} projectId={id!} />}
+      {tab === 'research' && <ResearchList entries={research} />}
       {tab === 'environments' && <EnvironmentList projectId={id!} />}
       {tab === 'secrets' && <SecretsList projectId={id!} />}
       {tab === 'activity' && <ActivityList activities={activities} />}

@@ -1,9 +1,9 @@
 import { IsString, IsOptional, IsArray } from 'class-validator';
 
-export class UpdateKnowledgeDto {
+export class UpdateResearchDto {
   @IsString()
   @IsOptional()
-  topic?: string;
+  title?: string;
 
   @IsString()
   @IsOptional()
@@ -12,9 +12,10 @@ export class UpdateKnowledgeDto {
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
-  tags?: string[];
+  sources?: string[];
 
-  @IsString()
+  @IsArray()
+  @IsString({ each: true })
   @IsOptional()
-  category?: string;
+  tags?: string[];
 }

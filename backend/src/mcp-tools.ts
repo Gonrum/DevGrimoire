@@ -13,6 +13,8 @@ import { ActivitiesService } from './activities/activities.service';
 import { PushService } from './push/push.service';
 import { EnvironmentsService } from './environments/environments.service';
 import { SecretsService } from './secrets/secrets.service';
+import { ManualsService } from './manuals/manuals.service';
+import { ResearchService } from './research/research.service';
 
 function requireString(args: Record<string, unknown>, field: string): string {
   const val = args[field];
@@ -71,6 +73,8 @@ export interface McpServices {
   pushService: PushService;
   environmentsService: EnvironmentsService;
   secretsService: SecretsService;
+  manualsService: ManualsService;
+  researchService: ResearchService;
 }
 
 const tools = [
@@ -251,6 +255,7 @@ const tools = [
         topic: { type: 'string', description: 'Topic/title of the knowledge entry' },
         content: { type: 'string', description: 'The knowledge content' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' },
+        category: { type: 'string', description: 'Category for grouping (e.g. Architecture, Patterns, Conventions)' },
       },
       required: ['projectId', 'topic', 'content'],
     },
@@ -288,6 +293,7 @@ const tools = [
         topic: { type: 'string' },
         content: { type: 'string' },
         tags: { type: 'array', items: { type: 'string' } },
+        category: { type: 'string', description: 'Category for grouping' },
       },
       required: ['id'],
     },
@@ -557,10 +563,97 @@ const tools = [
       required: ['projectId', 'environmentId'],
     },
   },
+  {
+    name: 'manual_save',
+    description: 'Save or update the user manual for a project. The manual is a single markdown document per project.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        content: { type: 'string', description: 'Manual content in Markdown format' },
+        title: { type: 'string', description: 'Manual title (default: Benutzerhandbuch)' },
+      },
+      required: ['projectId', 'content'],
+    },
+  },
+  {
+    name: 'manual_get',
+    description: 'Get the user manual for a project',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'research_save',
+    description: 'Save a research entry (findings, analysis, comparisons) for a project',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        title: { type: 'string', description: 'Research title' },
+        content: { type: 'string', description: 'Research content/findings' },
+        sources: { type: 'array', items: { type: 'string' }, description: 'Source URLs or references' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' },
+      },
+      required: ['projectId', 'title', 'content'],
+    },
+  },
+  {
+    name: 'research_list',
+    description: 'List all research entries for a project',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'research_get',
+    description: 'Get a research entry by ID',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Research entry MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'research_update',
+    description: 'Update a research entry',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Research entry MongoDB ID' },
+        title: { type: 'string' },
+        content: { type: 'string' },
+        sources: { type: 'array', items: { type: 'string' } },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'research_delete',
+    description: 'Delete a research entry',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Research entry MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -623,6 +716,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             activitiesService.removeByProject(id),
             environmentsService.removeByProject(id),
             secretsService.removeByProject(id),
+            manualsService.removeByProject(id),
+            researchService.removeByProject(id),
           ]);
           result = { deleted: true, id };
           break;
@@ -694,6 +789,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             topic: requireString(a, 'topic'),
             content: requireString(a, 'content'),
             tags: optionalStringArray(a, 'tags'),
+            category: optionalString(a, 'category'),
           });
           break;
         case 'knowledge_search':
@@ -710,6 +806,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             topic: optionalString(a, 'topic'),
             content: optionalString(a, 'content'),
             tags: optionalStringArray(a, 'tags'),
+            category: optionalString(a, 'category'),
           });
           break;
         case 'knowledge_delete':
@@ -851,6 +948,46 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = { environment: env.name, export: lines.join('\n') };
           break;
         }
+        case 'manual_save':
+          result = await manualsService.save({
+            projectId: requireString(a, 'projectId'),
+            content: requireString(a, 'content'),
+            title: optionalString(a, 'title'),
+          });
+          break;
+        case 'manual_get': {
+          const manual = await manualsService.findByProject(requireString(a, 'projectId'));
+          if (!manual) return textResult({ message: 'No manual found for this project.' });
+          result = manual;
+          break;
+        }
+        case 'research_save':
+          result = await researchService.create({
+            projectId: requireString(a, 'projectId'),
+            title: requireString(a, 'title'),
+            content: requireString(a, 'content'),
+            sources: optionalStringArray(a, 'sources'),
+            tags: optionalStringArray(a, 'tags'),
+          });
+          break;
+        case 'research_list':
+          result = await researchService.findByProject(requireString(a, 'projectId'));
+          break;
+        case 'research_get':
+          result = await researchService.findById(requireString(a, 'id'));
+          break;
+        case 'research_update':
+          result = await researchService.update(requireString(a, 'id'), {
+            title: optionalString(a, 'title'),
+            content: optionalString(a, 'content'),
+            sources: optionalStringArray(a, 'sources'),
+            tags: optionalStringArray(a, 'tags'),
+          });
+          break;
+        case 'research_delete':
+          await researchService.remove(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
+          break;
         default:
           return errorResult(`Unknown tool: ${name}`);
       }

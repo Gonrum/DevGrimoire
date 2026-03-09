@@ -1,11 +1,11 @@
 import { IsString, IsOptional, IsArray, IsMongoId } from 'class-validator';
 
-export class CreateKnowledgeDto {
+export class CreateResearchDto {
   @IsMongoId()
   projectId: string;
 
   @IsString()
-  topic: string;
+  title: string;
 
   @IsString()
   content: string;
@@ -13,9 +13,10 @@ export class CreateKnowledgeDto {
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
-  tags?: string[];
+  sources?: string[];
 
-  @IsString()
+  @IsArray()
+  @IsString({ each: true })
   @IsOptional()
-  category?: string;
+  tags?: string[];
 }

@@ -1,26 +1,26 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 
-export type KnowledgeDocument = HydratedDocument<Knowledge>;
+export type ResearchDocument = HydratedDocument<Research>;
 
 @Schema({ timestamps: true })
-export class Knowledge {
+export class Research {
   @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
   projectId: Types.ObjectId;
 
   @Prop({ required: true })
-  topic: string;
+  title: string;
 
   @Prop({ required: true })
   content: string;
 
   @Prop({ type: [String], default: [] })
-  tags: string[];
+  sources: string[];
 
-  @Prop({ type: String })
-  category?: string;
+  @Prop({ type: [String], default: [] })
+  tags: string[];
 }
 
-export const KnowledgeSchema = SchemaFactory.createForClass(Knowledge);
-KnowledgeSchema.index({ projectId: 1 });
-KnowledgeSchema.index({ topic: 'text', content: 'text', tags: 'text' });
+export const ResearchSchema = SchemaFactory.createForClass(Research);
+ResearchSchema.index({ projectId: 1 });
+ResearchSchema.index({ title: 'text', content: 'text', tags: 'text' });

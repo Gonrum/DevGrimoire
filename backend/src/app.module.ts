@@ -16,6 +16,8 @@ import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { EnvironmentsModule } from './environments/environments.module';
 import { SecretsModule } from './secrets/secrets.module';
+import { ManualsModule } from './manuals/manuals.module';
+import { ResearchModule } from './research/research.module';
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
@@ -39,6 +41,8 @@ if (!MONGODB_URI) {
     AuthModule,
     EnvironmentsModule,
     SecretsModule,
+    ManualsModule,
+    ResearchModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

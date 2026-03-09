@@ -124,6 +124,7 @@ export interface Knowledge {
   topic: string;
   content: string;
   tags: string[];
+  category?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -154,6 +155,27 @@ export interface Environment {
   url?: string;
   variables: EnvVariable[];
   active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Manual {
+  _id: string;
+  projectId: string;
+  title: string;
+  content: string;
+  lastEditedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ResearchEntry {
+  _id: string;
+  projectId: string;
+  title: string;
+  content: string;
+  sources: string[];
+  tags: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -298,5 +320,22 @@ export const api = {
       request<SecretListItem>(`/secrets/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/secrets/${id}`, { method: 'DELETE' }),
+  },
+  manuals: {
+    get: (projectId: string) =>
+      request<Manual | null>(`/manuals?projectId=${projectId}`),
+    save: (data: { projectId: string; content: string; title?: string }) =>
+      request<Manual>('/manuals', { method: 'PUT', body: JSON.stringify(data) }),
+  },
+  research: {
+    list: (projectId: string) =>
+      request<ResearchEntry[]>(`/research?projectId=${projectId}`),
+    get: (id: string) => request<ResearchEntry>(`/research/${id}`),
+    create: (data: Partial<ResearchEntry>) =>
+      request<ResearchEntry>('/research', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<ResearchEntry>) =>
+      request<ResearchEntry>(`/research/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/research/${id}`, { method: 'DELETE' }),
   },
 };
