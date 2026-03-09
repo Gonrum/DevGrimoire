@@ -50,6 +50,9 @@ export default function ActivityList({ activities }: { activities: Activity[] })
               <span className={`text-xs ${ACTION_COLORS[a.action] || 'text-gray-500'}`}>
                 {a.action}
               </span>
+              {a.username && (
+                <span className="text-xs text-gray-500">{a.username}</span>
+              )}
               <span className="text-xs text-gray-600">
                 {formatTime(a.createdAt)}
               </span>

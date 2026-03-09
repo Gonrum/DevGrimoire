@@ -136,6 +136,8 @@ export interface Activity {
   action: string;
   entityId?: string;
   summary?: string;
+  userId?: string;
+  username?: string;
   createdAt: string;
 }
 

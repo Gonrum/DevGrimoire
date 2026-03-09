@@ -60,8 +60,11 @@ export class AuthService {
     }
 
     const user = await this.userModel.findOne({ username }).exec();
-    if (!user || !user.active) {
+    if (!user) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+    if (!user.active) {
+      throw new UnauthorizedException('Konto ist deaktiviert');
     }
 
     const valid = await bcrypt.compare(password, user.passwordHash);

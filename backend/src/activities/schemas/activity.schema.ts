@@ -19,6 +19,12 @@ export class Activity {
 
   @Prop()
   summary: string;
+
+  @Prop()
+  userId: string;
+
+  @Prop()
+  username: string;
 }
 
 export const ActivitySchema = SchemaFactory.createForClass(Activity);

@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Activity, ActivityDocument } from './schemas/activity.schema';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
+import { RequestContext } from '../common/request-context';
 
 @Injectable()
 export class ActivitiesService {
@@ -13,12 +14,15 @@ export class ActivitiesService {
 
   @OnEvent(PROJECT_CHANGED)
   async handleProjectChange(event: ProjectChangeEvent) {
+    const user = RequestContext.getUser();
     await this.activityModel.create({
       projectId: event.projectId,
       entity: event.entity,
       action: event.action,
       entityId: event.entityId,
       summary: event.summary,
+      userId: user?.userId,
+      username: user?.username,
     });
   }
 
