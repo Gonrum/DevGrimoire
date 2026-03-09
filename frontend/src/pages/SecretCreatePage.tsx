@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { api, Environment, SecretType } from '../api/client';
 import { useToast } from '../components/Toast';
 
@@ -15,12 +15,13 @@ const SECRET_TYPES: { value: SecretType; label: string; description: string; ico
 export default function SecretCreatePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { showError } = useToast();
   const [key, setKey] = useState('');
   const [value, setValue] = useState('');
   const [description, setDescription] = useState('');
   const [type, setType] = useState<SecretType>('variable');
-  const [environmentId, setEnvironmentId] = useState('');
+  const [environmentId, setEnvironmentId] = useState(searchParams.get('environmentId') || '');
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -43,7 +44,7 @@ export default function SecretCreatePage() {
         type,
         environmentId: environmentId || undefined,
       });
-      navigate(`/projects/${id}?tab=secrets`);
+      navigate(`/projects/${id}?tab=${environmentId ? 'environments' : 'secrets'}`);
     } catch (err: any) {
       showError(err.message || 'Fehler beim Erstellen');
     } finally {
@@ -53,7 +54,7 @@ export default function SecretCreatePage() {
 
   return (
     <div>
-      <Link to={`/projects/${id}?tab=secrets`} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; Zurück zum Projekt</Link>
+      <Link to={`/projects/${id}?tab=${environmentId ? 'environments' : 'secrets'}`} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; Zurück zum Projekt</Link>
 
       <h1 className="text-xl font-bold mb-6">Neues Secret</h1>
 

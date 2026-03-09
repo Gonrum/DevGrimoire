@@ -91,45 +91,6 @@ function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () 
   );
 }
 
-function SecretAddForm({ projectId, environmentId, onAdded, onCancel }: { projectId: string; environmentId?: string; onAdded: () => void; onCancel?: () => void }) {
-  const { showError } = useToast();
-  const [open, setOpen] = useState(onCancel !== undefined);
-  const [key, setKey] = useState('');
-  const [value, setValue] = useState('');
-  const [description, setDescription] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  const handleClose = () => { setOpen(false); onCancel?.(); };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!key.trim() || !value) return;
-    setSaving(true);
-    try {
-      await api.secrets.create({ projectId, environmentId, key: key.trim(), value, description: description.trim() || undefined });
-      setKey(''); setValue(''); setDescription('');
-      handleClose();
-      onAdded();
-    } catch (err: any) { showError(err.message); } finally { setSaving(false); }
-  };
-
-  if (!open) return <button type="button" onClick={() => setOpen(true)} className="text-xs text-blue-400 hover:text-blue-300">+ Secret</button>;
-
-  return (
-    <form onSubmit={handleSubmit} className="mt-2 space-y-2 bg-gray-800/50 rounded p-3">
-      <div className="flex gap-2">
-        <input type="text" placeholder="KEY" value={key} onChange={(e) => setKey(e.target.value)} className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:border-blue-500" autoFocus />
-        <input type="password" placeholder="Value" value={value} onChange={(e) => setValue(e.target.value)} className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-blue-500" />
-      </div>
-      <input type="text" placeholder="Beschreibung (optional)" value={description} onChange={(e) => setDescription(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-blue-500" />
-      <div className="flex gap-2">
-        <button type="submit" disabled={saving || !key.trim() || !value} className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded">Speichern</button>
-        <button type="button" onClick={handleClose} className="text-xs px-2 py-1 bg-gray-800 text-gray-400 rounded">Abbrechen</button>
-      </div>
-    </form>
-  );
-}
-
 function ServerInfo({ env }: { env: Environment }) {
   const hasServer = env.host || env.port || env.user || env.url;
   if (!hasServer) return null;
@@ -271,7 +232,7 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
                 ))}
               </div>
             ) : <p className="text-xs text-gray-600">Keine Secrets</p>}
-            <SecretAddForm projectId={projectId} environmentId={env._id} onAdded={loadSecrets} />
+            <Link to={`/projects/${projectId}/secrets/new?environmentId=${env._id}`} className="inline-block mt-2 text-xs text-blue-400 hover:text-blue-300">+ Secret</Link>
           </div>
         </div>
       )}
