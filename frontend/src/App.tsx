@@ -12,7 +12,6 @@ import SecretCreatePage from './pages/SecretCreatePage';
 import Docs from './pages/Docs';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
-import UserManagement from './pages/UserManagement';
 import Profile from './pages/Profile';
 import NotificationBell from './components/NotificationBell';
 import ConnectionStatus from './components/ConnectionStatus';
@@ -103,9 +102,6 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 function AppShell() {
-  const { user, authEnabled } = useAuth();
-  const isAdmin = user?.role === 'admin';
-
   return (
     <div className="min-h-screen flex flex-col">
       <header className="bg-gray-900 border-b border-gray-800 px-4 sm:px-6 py-3 sm:py-4">
@@ -132,16 +128,6 @@ function AppShell() {
             >
               Projekte
             </NavLink>
-            {authEnabled && isAdmin && (
-              <NavLink
-                to="/admin/users"
-                className={({ isActive }) =>
-                  isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
-                }
-              >
-                Benutzer
-              </NavLink>
-            )}
             <NavLink
               to="/docs"
               className={({ isActive }) =>
@@ -179,7 +165,6 @@ function AppShell() {
           <Route path="/projects/:id/secrets/new" element={<SecretCreatePage />} />
           <Route path="/projects/:id/settings" element={<ProjectSettings />} />
           <Route path="/profile" element={<Profile />} />
-          <Route path="/admin/users" element={<UserManagement />} />
           <Route path="/docs" element={<Docs />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<NotFound />} />

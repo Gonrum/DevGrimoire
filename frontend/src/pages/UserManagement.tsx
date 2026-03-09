@@ -165,7 +165,6 @@ export default function UserManagement() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-6">Benutzerverwaltung</h1>
       <CreateUserForm onCreated={loadUsers} />
 
       <div className="space-y-2">
