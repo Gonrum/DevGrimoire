@@ -27,9 +27,11 @@ export class KnowledgeService {
     return entry;
   }
 
-  async findByProject(projectId: string): Promise<KnowledgeDocument[]> {
+  async findByProject(projectId: string, category?: string): Promise<KnowledgeDocument[]> {
+    const filter: Record<string, unknown> = { projectId };
+    if (category) filter.category = category;
     return this.knowledgeModel
-      .find({ projectId })
+      .find(filter)
       .sort({ updatedAt: -1 })
       .exec();
   }

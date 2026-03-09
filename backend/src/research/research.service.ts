@@ -31,6 +31,15 @@ export class ResearchService {
     return this.researchModel.find({ projectId }).sort({ updatedAt: -1 }).exec();
   }
 
+  async search(query: string, projectId?: string): Promise<ResearchDocument[]> {
+    const filter: Record<string, unknown> = { $text: { $search: query } };
+    if (projectId) filter.projectId = projectId;
+    return this.researchModel
+      .find(filter, { score: { $meta: 'textScore' } })
+      .sort({ score: { $meta: 'textScore' } })
+      .exec();
+  }
+
   async findById(id: string): Promise<ResearchDocument> {
     const entry = await this.researchModel.findById(id).exec();
     if (!entry) throw new NotFoundException(`Research ${id} not found`);

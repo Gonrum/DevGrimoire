@@ -170,12 +170,15 @@ const tools = [
   },
   {
     name: 'todo_list',
-    description: 'List todos, optionally filtered by project and/or status',
+    description: 'List todos, optionally filtered by project, status, priority, milestone, or tag',
     inputSchema: {
       type: 'object' as const,
       properties: {
         projectId: { type: 'string', description: 'Filter by project ID' },
         status: { type: 'string', enum: ['open', 'in_progress', 'review', 'done'], description: 'Filter by status' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Filter by priority' },
+        milestoneId: { type: 'string', description: 'Filter by milestone ID' },
+        tag: { type: 'string', description: 'Filter by tag (exact match)' },
       },
     },
   },
@@ -278,11 +281,12 @@ const tools = [
   },
   {
     name: 'knowledge_list',
-    description: 'List all knowledge entries for a project',
+    description: 'List knowledge entries for a project, optionally filtered by category',
     inputSchema: {
       type: 'object' as const,
       properties: {
         projectId: { type: 'string', description: 'Project MongoDB ID' },
+        category: { type: 'string', description: 'Filter by category' },
       },
       required: ['projectId'],
     },
@@ -607,6 +611,18 @@ const tools = [
     },
   },
   {
+    name: 'research_search',
+    description: 'Search research entries by text query, optionally scoped to a project',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'Search query' },
+        projectId: { type: 'string', description: 'Scope search to a specific project' },
+      },
+      required: ['query'],
+    },
+  },
+  {
     name: 'research_list',
     description: 'List all research entries for a project',
     inputSchema: {
@@ -742,6 +758,9 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = await todosService.findAll({
             projectId: optionalString(a, 'projectId'),
             status: optionalString(a, 'status') as any,
+            priority: optionalString(a, 'priority'),
+            milestoneId: optionalString(a, 'milestoneId'),
+            tag: optionalString(a, 'tag'),
           });
           break;
         case 'todo_update':
@@ -803,7 +822,10 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           );
           break;
         case 'knowledge_list':
-          result = await knowledgeService.findByProject(requireString(a, 'projectId'));
+          result = await knowledgeService.findByProject(
+            requireString(a, 'projectId'),
+            optionalString(a, 'category'),
+          );
           break;
         case 'knowledge_update':
           result = await knowledgeService.update(requireString(a, 'id'), {
@@ -973,6 +995,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             sources: optionalStringArray(a, 'sources'),
             tags: optionalStringArray(a, 'tags'),
           });
+          break;
+        case 'research_search':
+          result = await researchService.search(
+            requireString(a, 'query'),
+            optionalString(a, 'projectId'),
+          );
           break;
         case 'research_list':
           result = await researchService.findByProject(requireString(a, 'projectId'));

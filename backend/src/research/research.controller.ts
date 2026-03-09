@@ -22,6 +22,14 @@ export class ResearchController {
     return this.researchService.findByProject(projectId);
   }
 
+  @Get('search')
+  search(@Query('q') query?: string, @Query('projectId') projectId?: string) {
+    if (!query) {
+      throw new BadRequestException('q query parameter is required');
+    }
+    return this.researchService.search(query, projectId);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.researchService.findById(id);

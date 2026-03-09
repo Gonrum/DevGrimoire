@@ -26,11 +26,11 @@ export class KnowledgeController {
   }
 
   @Get()
-  findByProject(@Query('projectId') projectId?: string) {
+  findByProject(@Query('projectId') projectId?: string, @Query('category') category?: string) {
     if (!projectId) {
       throw new BadRequestException('projectId query parameter is required');
     }
-    return this.knowledgeService.findByProject(projectId);
+    return this.knowledgeService.findByProject(projectId, category);
   }
 
   @Get('search')

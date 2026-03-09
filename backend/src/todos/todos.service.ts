@@ -58,10 +58,16 @@ export class TodosService {
   async findAll(filters: {
     projectId?: string;
     status?: TodoStatus;
+    priority?: string;
+    milestoneId?: string;
+    tag?: string;
   }): Promise<TodoDocument[]> {
     const query: Record<string, unknown> = {};
     if (filters.projectId) query.projectId = filters.projectId;
     if (filters.status) query.status = filters.status;
+    if (filters.priority) query.priority = filters.priority;
+    if (filters.milestoneId) query.milestoneId = filters.milestoneId;
+    if (filters.tag) query.tags = filters.tag;
     return this.todoModel.find(query).sort({ priority: 1, createdAt: -1 }).exec();
   }
 
