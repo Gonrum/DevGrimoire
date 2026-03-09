@@ -12,6 +12,7 @@ import Docs from './pages/Docs';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
 import NotificationBell from './components/NotificationBell';
+import ConnectionStatus from './components/ConnectionStatus';
 import { ToastProvider } from './components/Toast';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { configureAuth } from './api/client';
@@ -125,6 +126,7 @@ function AppShell() {
             </NavLink>
           </nav>
           <div className="ml-auto flex items-center gap-3">
+            <ConnectionStatus />
             <NotificationBell />
             <LogoutButton />
           </div>
