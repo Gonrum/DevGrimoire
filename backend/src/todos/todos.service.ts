@@ -61,6 +61,7 @@ export class TodosService {
     priority?: string;
     milestoneId?: string;
     tag?: string;
+    includeArchived?: boolean;
   }): Promise<TodoDocument[]> {
     const query: Record<string, unknown> = {};
     if (filters.projectId) query.projectId = filters.projectId;
@@ -68,6 +69,7 @@ export class TodosService {
     if (filters.priority) query.priority = filters.priority;
     if (filters.milestoneId) query.milestoneId = filters.milestoneId;
     if (filters.tag) query.tags = filters.tag;
+    if (!filters.includeArchived) query.archived = { $ne: true };
     return this.todoModel.find(query).sort({ priority: 1, createdAt: -1 }).exec();
   }
 

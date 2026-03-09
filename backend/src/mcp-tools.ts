@@ -62,6 +62,25 @@ function textResult(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
 }
 
+function compactList<T extends Record<string, unknown>>(items: T[], stripFields: string[]): Record<string, unknown>[] {
+  return items.map((item) => {
+    const obj = typeof item.toJSON === 'function' ? (item as any).toJSON() : { ...item };
+    for (const f of stripFields) delete obj[f];
+    return obj;
+  });
+}
+
+function snippet(text: string | undefined, maxLen = 200): string | undefined {
+  if (!text) return undefined;
+  return text.length <= maxLen ? text : text.slice(0, maxLen) + '…';
+}
+
+function applyPagination<T>(items: T[], limit?: number, offset?: number): T[] {
+  const start = offset || 0;
+  const end = limit ? start + limit : undefined;
+  return items.slice(start, end);
+}
+
 function errorResult(message: string) {
   return { content: [{ type: 'text' as const, text: message }], isError: true };
 }
@@ -101,7 +120,7 @@ const tools = [
   },
   {
     name: 'project_list',
-    description: 'List all tracked projects',
+    description: 'List all tracked projects (compact: id, name, path, techStack, active). Use project_get for full details including instructions and components.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -170,7 +189,7 @@ const tools = [
   },
   {
     name: 'todo_list',
-    description: 'List todos, optionally filtered by project, status, priority, milestone, or tag',
+    description: 'List todos (compact: id, title, status, priority, tags, milestoneId). Archived todos are excluded by default. Use todo_get for full details.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -179,7 +198,21 @@ const tools = [
         priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Filter by priority' },
         milestoneId: { type: 'string', description: 'Filter by milestone ID' },
         tag: { type: 'string', description: 'Filter by tag (exact match)' },
+        includeArchived: { type: 'boolean', description: 'Include archived todos (default false)' },
+        limit: { type: 'number', description: 'Max items to return' },
+        offset: { type: 'number', description: 'Skip first N items' },
       },
+    },
+  },
+  {
+    name: 'todo_get',
+    description: 'Get a single todo with full details (description, comments, blockedBy)',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Todo MongoDB ID' },
+      },
+      required: ['id'],
     },
   },
   {
@@ -269,26 +302,40 @@ const tools = [
   },
   {
     name: 'knowledge_search',
-    description: 'Search the knowledge base by text query, optionally scoped to a project',
+    description: 'Search knowledge base (returns compact results with content snippet). Use knowledge_get for full content.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         query: { type: 'string', description: 'Search query' },
         projectId: { type: 'string', description: 'Scope search to a specific project' },
+        limit: { type: 'number', description: 'Max items to return' },
       },
       required: ['query'],
     },
   },
   {
     name: 'knowledge_list',
-    description: 'List knowledge entries for a project, optionally filtered by category',
+    description: 'List knowledge entries (compact: id, topic, tags, category). Use knowledge_get for full content.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         projectId: { type: 'string', description: 'Project MongoDB ID' },
         category: { type: 'string', description: 'Filter by category' },
+        limit: { type: 'number', description: 'Max items to return' },
+        offset: { type: 'number', description: 'Skip first N items' },
       },
       required: ['projectId'],
+    },
+  },
+  {
+    name: 'knowledge_get',
+    description: 'Get a single knowledge entry with full content',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Knowledge entry MongoDB ID' },
+      },
+      required: ['id'],
     },
   },
   {
@@ -334,14 +381,26 @@ const tools = [
   },
   {
     name: 'changelog_list',
-    description: 'List changelog entries for a project',
+    description: 'List changelog entries (compact: id, version, summary, component, date). Default limit 10. Use changelog_get for full changes list.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         projectId: { type: 'string', description: 'Project MongoDB ID' },
-        limit: { type: 'number', description: 'Number of entries to return (default 50)' },
+        limit: { type: 'number', description: 'Number of entries to return (default 10)' },
+        offset: { type: 'number', description: 'Skip first N entries' },
       },
       required: ['projectId'],
+    },
+  },
+  {
+    name: 'changelog_get',
+    description: 'Get a single changelog entry with full changes list',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Changelog entry MongoDB ID' },
+      },
+      required: ['id'],
     },
   },
   {
@@ -612,23 +671,26 @@ const tools = [
   },
   {
     name: 'research_search',
-    description: 'Search research entries by text query, optionally scoped to a project',
+    description: 'Search research entries (returns compact results with content snippet). Use research_get for full content.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         query: { type: 'string', description: 'Search query' },
         projectId: { type: 'string', description: 'Scope search to a specific project' },
+        limit: { type: 'number', description: 'Max items to return' },
       },
       required: ['query'],
     },
   },
   {
     name: 'research_list',
-    description: 'List all research entries for a project',
+    description: 'List research entries (compact: id, title, tags, sourceCount). Use research_get for full content.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         projectId: { type: 'string', description: 'Project MongoDB ID' },
+        limit: { type: 'number', description: 'Max items to return' },
+        offset: { type: 'number', description: 'Skip first N items' },
       },
       required: ['projectId'],
     },
@@ -696,9 +758,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             components: a.components as any,
           });
           break;
-        case 'project_list':
-          result = await projectsService.findAll(optionalBoolean(a, 'active'));
+        case 'project_list': {
+          const projects = await projectsService.findAll(optionalBoolean(a, 'active'));
+          result = compactList(projects as any, ['instructions', 'components', '__v']);
           break;
+        }
         case 'project_get': {
           const id = optionalString(a, 'id');
           const pName = optionalString(a, 'name');
@@ -754,14 +818,21 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             blockedBy: optionalStringArray(a, 'blockedBy'),
           });
           break;
-        case 'todo_list':
-          result = await todosService.findAll({
+        case 'todo_list': {
+          const todos = await todosService.findAll({
             projectId: optionalString(a, 'projectId'),
             status: optionalString(a, 'status') as any,
             priority: optionalString(a, 'priority'),
             milestoneId: optionalString(a, 'milestoneId'),
             tag: optionalString(a, 'tag'),
+            includeArchived: optionalBoolean(a, 'includeArchived'),
           });
+          const compactTodos = compactList(todos as any, ['description', 'comments', 'blockedBy', '__v']);
+          result = applyPagination(compactTodos, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
+          break;
+        }
+        case 'todo_get':
+          result = await todosService.findById(requireString(a, 'id'));
           break;
         case 'todo_update':
           result = await todosService.update(requireString(a, 'id'), {
@@ -815,17 +886,31 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             category: optionalString(a, 'category'),
           });
           break;
-        case 'knowledge_search':
-          result = await knowledgeService.search(
+        case 'knowledge_search': {
+          const searchResults = await knowledgeService.search(
             requireString(a, 'query'),
             optionalString(a, 'projectId'),
           );
+          const limited = optionalNumber(a, 'limit') ? searchResults.slice(0, optionalNumber(a, 'limit')) : searchResults;
+          result = limited.map((item: any) => {
+            const obj = typeof item.toJSON === 'function' ? item.toJSON() : { ...item };
+            obj.content = snippet(obj.content);
+            delete obj.__v;
+            return obj;
+          });
           break;
-        case 'knowledge_list':
-          result = await knowledgeService.findByProject(
+        }
+        case 'knowledge_list': {
+          const entries = await knowledgeService.findByProject(
             requireString(a, 'projectId'),
             optionalString(a, 'category'),
           );
+          const compactEntries = compactList(entries as any, ['content', '__v']);
+          result = applyPagination(compactEntries, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
+          break;
+        }
+        case 'knowledge_get':
+          result = await knowledgeService.findById(requireString(a, 'id'));
           break;
         case 'knowledge_update':
           result = await knowledgeService.update(requireString(a, 'id'), {
@@ -848,11 +933,18 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             component: optionalString(a, 'component'),
           });
           break;
-        case 'changelog_list':
-          result = await changelogService.findByProject(
+        case 'changelog_list': {
+          const clLimit = optionalNumber(a, 'limit') || 10;
+          const changelogs = await changelogService.findByProject(
             requireString(a, 'projectId'),
-            optionalNumber(a, 'limit'),
+            clLimit + (optionalNumber(a, 'offset') || 0),
           );
+          const compactChangelogs = compactList(changelogs as any, ['changes', '__v']);
+          result = applyPagination(compactChangelogs, clLimit, optionalNumber(a, 'offset'));
+          break;
+        }
+        case 'changelog_get':
+          result = await changelogService.findById(requireString(a, 'id'));
           break;
         case 'changelog_update':
           result = await changelogService.update(requireString(a, 'id'), {
@@ -996,15 +1088,35 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             tags: optionalStringArray(a, 'tags'),
           });
           break;
-        case 'research_search':
-          result = await researchService.search(
+        case 'research_search': {
+          const rSearchResults = await researchService.search(
             requireString(a, 'query'),
             optionalString(a, 'projectId'),
           );
+          const rLimited = optionalNumber(a, 'limit') ? rSearchResults.slice(0, optionalNumber(a, 'limit')) : rSearchResults;
+          result = rLimited.map((item: any) => {
+            const obj = typeof item.toJSON === 'function' ? item.toJSON() : { ...item };
+            obj.content = snippet(obj.content);
+            obj.sourceCount = (obj.sources || []).length;
+            delete obj.sources;
+            delete obj.__v;
+            return obj;
+          });
           break;
-        case 'research_list':
-          result = await researchService.findByProject(requireString(a, 'projectId'));
+        }
+        case 'research_list': {
+          const rEntries = await researchService.findByProject(requireString(a, 'projectId'));
+          const compactResearch = rEntries.map((item: any) => {
+            const obj = typeof item.toJSON === 'function' ? item.toJSON() : { ...item };
+            delete obj.content;
+            obj.sourceCount = (obj.sources || []).length;
+            delete obj.sources;
+            delete obj.__v;
+            return obj;
+          });
+          result = applyPagination(compactResearch, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
           break;
+        }
         case 'research_get':
           result = await researchService.findById(requireString(a, 'id'));
           break;
