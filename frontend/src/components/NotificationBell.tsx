@@ -2,6 +2,24 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, Notification } from '../api/client';
 
+function playNotificationSound() {
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(1047, ctx.currentTime + 0.1);
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.3);
+    osc.onended = () => ctx.close();
+  } catch { /* AudioContext not available */ }
+}
+
 function timeAgo(date: string): string {
   const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
   if (seconds < 60) return 'gerade eben';
@@ -54,6 +72,7 @@ export default function NotificationBell() {
       try {
         const data = JSON.parse(event.data);
         if (data.entity === 'notification' && data.action === 'created') {
+          playNotificationSound();
           fetchUnreadCount();
           if (open) fetchNotifications();
         }
