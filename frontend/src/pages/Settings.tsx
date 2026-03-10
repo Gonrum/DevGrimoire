@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '../api/client';
+import { api, ApiKeyInfo } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import UserManagement from './UserManagement';
 import Button from '../components/ui/Button';
+import ConfirmButton from '../components/ui/ConfirmButton';
 
 const DEFAULT_INSTRUCTIONS = `# ClaudeVault Agent-Instruktionen
 
@@ -37,7 +38,7 @@ Wenn du Tasks bearbeitest, halte dich an den Status-Workflow:
 - Teste Änderungen bevor du sie als fertig markierst
 `;
 
-type SettingsTab = 'instructions' | 'users';
+type SettingsTab = 'instructions' | 'apikeys' | 'users';
 
 export default function Settings() {
   const { user, authEnabled } = useAuth();
@@ -49,6 +50,16 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // API Keys state
+  const [apiKeys, setApiKeys] = useState<ApiKeyInfo[]>([]);
+  const [apiKeysLoading, setApiKeysLoading] = useState(false);
+  const [apiKeyName, setApiKeyName] = useState('');
+  const [apiKeyExpiry, setApiKeyExpiry] = useState('');
+  const [apiKeyCreating, setApiKeyCreating] = useState(false);
+  const [revealedKey, setRevealedKey] = useState<string | null>(null);
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -63,6 +74,57 @@ export default function Settings() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadApiKeys = useCallback(async () => {
+    setApiKeysLoading(true);
+    try {
+      const keys = await api.apiKeys.list();
+      setApiKeys(keys);
+    } catch (e) {
+      setApiKeyError(e instanceof Error ? e.message : 'Fehler beim Laden');
+    } finally {
+      setApiKeysLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'apikeys') loadApiKeys();
+  }, [tab, loadApiKeys]);
+
+  const createApiKey = async () => {
+    if (!apiKeyName.trim()) return;
+    setApiKeyCreating(true);
+    setApiKeyError(null);
+    try {
+      const result = await api.apiKeys.create({
+        name: apiKeyName.trim(),
+        expiresAt: apiKeyExpiry || undefined,
+      });
+      setRevealedKey(result.key);
+      setApiKeyName('');
+      setApiKeyExpiry('');
+      await loadApiKeys();
+    } catch (e) {
+      setApiKeyError(e instanceof Error ? e.message : 'Fehler beim Erstellen');
+    } finally {
+      setApiKeyCreating(false);
+    }
+  };
+
+  const deleteApiKey = async (id: string) => {
+    try {
+      await api.apiKeys.delete(id);
+      setApiKeys((prev) => prev.filter((k) => k._id !== id));
+    } catch (e) {
+      setApiKeyError(e instanceof Error ? e.message : 'Fehler beim Löschen');
+    }
+  };
+
+  const copyToClipboard = async (text: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   const save = async () => {
     setSaving(true);
@@ -84,6 +146,7 @@ export default function Settings() {
 
   const tabs: { key: SettingsTab; label: string; adminOnly?: boolean }[] = [
     { key: 'instructions', label: 'Agent-Instruktionen' },
+    { key: 'apikeys', label: 'API Keys' },
     { key: 'users', label: 'Benutzerverwaltung', adminOnly: true },
   ];
 
@@ -167,6 +230,146 @@ export default function Settings() {
               </div>
             </>
           )}
+        </>
+      )}
+
+      {tab === 'apikeys' && (
+        <>
+          <p className="text-gray-400 mb-6">
+            API Keys f&uuml;r MCP-Zugriff und REST API Authentifizierung.
+            Keys werden nur einmalig bei der Erstellung angezeigt.
+          </p>
+
+          {apiKeyError && (
+            <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-2 rounded mb-4">
+              {apiKeyError}
+            </div>
+          )}
+
+          {revealedKey && (
+            <div className="bg-green-900/30 border border-green-700 rounded-lg p-4 mb-6">
+              <p className="text-green-300 text-sm font-medium mb-2">
+                API Key erstellt — jetzt kopieren, er wird nicht mehr angezeigt!
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 bg-gray-900 text-green-400 px-3 py-2 rounded font-mono text-sm break-all">
+                  {revealedKey}
+                </code>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => copyToClipboard(revealedKey)}
+                >
+                  {copied ? 'Kopiert!' : 'Kopieren'}
+                </Button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRevealedKey(null)}
+                className="text-xs text-gray-500 hover:text-gray-300 mt-2"
+              >
+                Schlie&szlig;en
+              </button>
+            </div>
+          )}
+
+          <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 mb-6">
+            <h2 className="text-sm font-medium text-gray-300 mb-3">Neuen API Key erstellen</h2>
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <label className="block text-xs text-gray-500 mb-1">Name</label>
+                <input
+                  type="text"
+                  value={apiKeyName}
+                  onChange={(e) => setApiKeyName(e.target.value)}
+                  placeholder="z.B. MCP Server, CI/CD..."
+                  className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Ablaufdatum (optional)</label>
+                <input
+                  type="date"
+                  value={apiKeyExpiry}
+                  onChange={(e) => setApiKeyExpiry(e.target.value)}
+                  className="bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <Button
+                variant="primary"
+                onClick={createApiKey}
+                disabled={apiKeyCreating || !apiKeyName.trim()}
+              >
+                {apiKeyCreating ? 'Erstellen...' : 'Erstellen'}
+              </Button>
+            </div>
+          </div>
+
+          {apiKeysLoading ? (
+            <div className="text-gray-500 py-10 text-center">Laden...</div>
+          ) : apiKeys.length === 0 ? (
+            <div className="text-gray-500 py-10 text-center">Keine API Keys vorhanden.</div>
+          ) : (
+            <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-700 bg-gray-800/50">
+                    <th className="text-left px-4 py-2 text-gray-400 font-medium">Name</th>
+                    <th className="text-left px-4 py-2 text-gray-400 font-medium">Key</th>
+                    <th className="text-left px-4 py-2 text-gray-400 font-medium">Erstellt</th>
+                    <th className="text-left px-4 py-2 text-gray-400 font-medium">Zuletzt genutzt</th>
+                    <th className="text-left px-4 py-2 text-gray-400 font-medium">Ablauf</th>
+                    <th className="px-4 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {apiKeys.map((key) => (
+                    <tr key={key._id} className="border-b border-gray-800 last:border-0">
+                      <td className="px-4 py-3 text-gray-200">{key.name}</td>
+                      <td className="px-4 py-3">
+                        <code className="text-gray-400 font-mono text-xs">{key.prefix}...</code>
+                      </td>
+                      <td className="px-4 py-3 text-gray-400">
+                        {new Date(key.createdAt).toLocaleDateString('de-DE')}
+                      </td>
+                      <td className="px-4 py-3 text-gray-400">
+                        {key.lastUsedAt
+                          ? new Date(key.lastUsedAt).toLocaleDateString('de-DE')
+                          : 'Nie'}
+                      </td>
+                      <td className="px-4 py-3 text-gray-400">
+                        {key.expiresAt
+                          ? new Date(key.expiresAt).toLocaleDateString('de-DE')
+                          : 'Kein Ablauf'}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <ConfirmButton
+                          onConfirm={() => deleteApiKey(key._id)}
+                          label="Löschen"
+                          confirmLabel="Sicher?"
+                          variant="danger"
+                          size="xs"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="mt-8 bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+            <h2 className="text-sm font-medium text-gray-300 mb-2">Verwendung</h2>
+            <p className="text-sm text-gray-400 mb-2">
+              API Keys k&ouml;nnen f&uuml;r MCP-Server und REST API Zugriff verwendet werden:
+            </p>
+            <div className="space-y-2 text-xs font-mono text-gray-400 bg-gray-900 rounded p-3">
+              <div><span className="text-gray-500"># Header</span></div>
+              <div>Authorization: Bearer cv_...</div>
+              <div className="mt-2"><span className="text-gray-500"># Query Parameter</span></div>
+              <div>?apiKey=cv_...</div>
+            </div>
+          </div>
         </>
       )}
 

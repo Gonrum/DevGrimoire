@@ -22,6 +22,7 @@ import { ResearchModule } from './research/research.module';
 import { SettingsModule } from './settings/settings.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SearchModule } from './search/search.module';
+import { ApiKeysModule } from './api-keys/api-keys.module';
 import { RequestContextInterceptor } from './common/request-context.interceptor';
 
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -51,6 +52,7 @@ if (!MONGODB_URI) {
     SettingsModule,
     NotificationsModule,
     SearchModule,
+    ApiKeysModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

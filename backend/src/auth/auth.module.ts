@@ -10,6 +10,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { RefreshToken, RefreshTokenSchema } from './schemas/refresh-token.schema';
 import { User, UserSchema } from './schemas/user.schema';
+import { ApiKeysModule } from '../api-keys/api-keys.module';
 
 @Global()
 @Module({
@@ -23,6 +24,7 @@ import { User, UserSchema } from './schemas/user.schema';
       { name: RefreshToken.name, schema: RefreshTokenSchema },
       { name: User.name, schema: UserSchema },
     ]),
+    ApiKeysModule,
   ],
   controllers: [AuthController, UsersController],
   providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard],

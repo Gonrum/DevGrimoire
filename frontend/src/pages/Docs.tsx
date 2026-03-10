@@ -258,7 +258,8 @@ function AuthSection() {
           <InfoRow label="Access Token" value="JWT, 15 Minuten g&uuml;ltig, im Speicher gehalten" />
           <InfoRow label="Refresh Token" value="Opak, 7 Tage g&uuml;ltig, MongoDB mit TTL, Token-Rotation" />
           <InfoRow label="SSE" value="Auth via ?token=... Query-Parameter (EventSource unterst&uuml;tzt keine Header)" />
-          <InfoRow label="MCP Server" value="Nicht gesch&uuml;tzt (stdio = lokal; HTTP-Endpoints ohne Auth)" />
+          <InfoRow label="MCP Server" value="stdio = lokal ohne Auth; HTTP-Endpoints via API Key gesch&uuml;tzt" />
+          <InfoRow label="API Keys" value={<>SHA-256 gehasht, Prefix <Mono>cv_</Mono>, Bearer Header oder <Mono>?apiKey=</Mono> Query</>} />
         </div>
         <Hint>
           Ohne gesetzte Credentials (<Mono>AUTH_USERNAME</Mono> / <Mono>AUTH_PASSWORD</Mono>) ist die
@@ -302,6 +303,72 @@ function AuthSection() {
           Jeder Benutzer kann unter <Mono>Profil</Mono> (Klick auf den Benutzernamen in der Topbar) seinen
           Benutzernamen, E-Mail und Passwort &auml;ndern.
         </p>
+      </Section>
+
+      <Section title="API Keys (MCP Auth)">
+        <p className="text-gray-400 text-sm mb-4">
+          API Keys erm&ouml;glichen authentifizierten Zugriff auf die MCP-Endpoints (<Mono>/mcp</Mono>, <Mono>/sse</Mono>, <Mono>/messages</Mono>)
+          und die REST API. Keys werden SHA-256 gehasht gespeichert und k&ouml;nnen unter{' '}
+          <Mono>Einstellungen &rarr; API Keys</Mono> verwaltet werden.
+        </p>
+
+        <Step n={1} title="API Key erstellen">
+          <p className="text-gray-400 text-sm">
+            Unter <Mono>Einstellungen &rarr; API Keys &rarr; Erstellen</Mono>. Der Plaintext-Key wird
+            <strong className="text-gray-200"> nur einmalig</strong> angezeigt &mdash; sofort kopieren!
+          </p>
+        </Step>
+
+        <Step n={2} title="MCP-Client konfigurieren">
+          <p className="text-gray-400 text-sm mb-2">
+            Claude Code (<Mono>~/.claude.json</Mono>):
+          </p>
+          <Code>{`{
+  "mcpServers": {
+    "claudevault": {
+      "type": "sse",
+      "url": "http://[server]/sse?apiKey=cv_..."
+    }
+  }
+}`}</Code>
+          <p className="text-gray-400 text-sm mt-3 mb-2">
+            Alternativ per Header (Streamable HTTP):
+          </p>
+          <Code>{`{
+  "mcpServers": {
+    "claudevault": {
+      "type": "http",
+      "url": "http://[server]/mcp",
+      "headers": {
+        "Authorization": "Bearer cv_..."
+      }
+    }
+  }
+}`}</Code>
+        </Step>
+
+        <Step n={3} title="REST API mit API Key">
+          <p className="text-gray-400 text-sm mb-2">
+            API Keys funktionieren auch f&uuml;r die REST API:
+          </p>
+          <Code>{`# Header
+curl -H "Authorization: Bearer cv_..." http://[server]/api/projects
+
+# Query Parameter
+curl http://[server]/api/projects?apiKey=cv_...`}</Code>
+        </Step>
+
+        <div className="space-y-2 text-sm text-gray-400 mt-4">
+          <InfoRow label="Prefix" value={<><Mono>cv_</Mono> + 64 Hex-Zeichen (32 Bytes random)</>} />
+          <InfoRow label="Speicherung" value="Nur SHA-256 Hash in der Datenbank" />
+          <InfoRow label="Ablauf" value="Optional, bei Erstellung konfigurierbar" />
+          <InfoRow label="Scope" value="Gleiche Rechte wie User-Rolle" />
+        </div>
+
+        <Hint>
+          Wenn Auth nicht aktiviert ist (keine <Mono>AUTH_USERNAME</Mono> / <Mono>AUTH_PASSWORD</Mono>),
+          sind alle Endpoints inkl. MCP frei zug&auml;nglich &mdash; API Keys werden nicht ben&ouml;tigt.
+        </Hint>
       </Section>
 
       <Section title="Secrets & Verschl&uuml;sselung">
@@ -450,6 +517,11 @@ function ApiSection() {
                 { method: 'PATCH', path: '/api/users/:id', desc: 'Benutzer bearbeiten (Admin)' },
                 { method: 'DELETE', path: '/api/users/:id', desc: 'Benutzer l\u00f6schen (Admin)' },
               ]} />
+              <EndpointGroup label="API Keys" endpoints={[
+                { method: 'GET', path: '/api/api-keys', desc: 'Eigene API Keys auflisten' },
+                { method: 'POST', path: '/api/api-keys', desc: 'Neuen API Key erstellen (Plaintext einmalig in Response)' },
+                { method: 'DELETE', path: '/api/api-keys/:id', desc: 'API Key widerrufen' },
+              ]} />
               <EndpointGroup label="Projekte" endpoints={[
                 { method: 'GET', path: '/api/projects?active=&favorite=', desc: 'Projekte auflisten (Filter)' },
                 { method: 'POST', path: '/api/projects', desc: 'Projekt anlegen' },
@@ -548,6 +620,7 @@ function ArchitectureSection() {
           <ModuleItem name="environments" desc="Umgebungsvariablen" />
           <ModuleItem name="secrets" desc="Verschl&uuml;sselte Secrets" />
           <ModuleItem name="auth" desc="JWT Auth + RBAC + User CRUD" />
+          <ModuleItem name="api-keys" desc="API Key Auth (SHA-256)" />
           <ModuleItem name="search" desc="Globale Suche" />
           <ModuleItem name="activities" desc="Activity Feed" />
           <ModuleItem name="notifications" desc="In-App Benachrichtigungen" />

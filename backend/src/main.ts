@@ -24,6 +24,8 @@ import { ResearchService } from './research/research.service';
 import { SettingsService } from './settings/settings.service';
 import { NotificationsService } from './notifications/notifications.service';
 import { registerMcpTools, McpServices } from './mcp-tools';
+import { ApiKeysService } from './api-keys/api-keys.service';
+import { AuthService } from './auth/auth.service';
 
 function createMcpServer(services: McpServices): Server {
   const server = new Server(
@@ -65,6 +67,49 @@ async function bootstrap() {
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};
+
+  // API Key auth middleware for MCP endpoints
+  const apiKeysService = app.get(ApiKeysService);
+  const authService = app.get(AuthService);
+
+  const mcpAuthMiddleware = async (req: any, res: any, next: any) => {
+    // Skip auth if auth is not enabled
+    if (!authService.isAuthEnabled()) return next();
+
+    // Extract API key from Authorization header (Bearer cv_...) or query param
+    let apiKey: string | undefined;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer cv_')) {
+      apiKey = authHeader.slice(7);
+    } else if (req.query?.apiKey) {
+      apiKey = req.query.apiKey as string;
+    }
+
+    if (!apiKey) {
+      res.status(401).json({
+        jsonrpc: '2.0',
+        error: { code: -32001, message: 'Unauthorized: API key required. Pass via Authorization: Bearer cv_... header or ?apiKey= query param.' },
+        id: null,
+      });
+      return;
+    }
+
+    const validated = await apiKeysService.validate(apiKey);
+    if (!validated) {
+      res.status(401).json({
+        jsonrpc: '2.0',
+        error: { code: -32001, message: 'Unauthorized: Invalid or expired API key.' },
+        id: null,
+      });
+      return;
+    }
+
+    next();
+  };
+
+  expressApp.use('/mcp', mcpAuthMiddleware);
+  expressApp.use('/sse', mcpAuthMiddleware);
+  expressApp.use('/messages', mcpAuthMiddleware);
 
   // Streamable HTTP endpoint (protocol version 2025-11-25)
   expressApp.all('/mcp', async (req: any, res: any) => {

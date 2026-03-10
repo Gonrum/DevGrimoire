@@ -225,6 +225,20 @@ export interface UserInfo {
   updatedAt: string;
 }
 
+export interface ApiKeyInfo {
+  _id: string;
+  prefix: string;
+  name: string;
+  lastUsedAt?: string;
+  expiresAt?: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface ApiKeyCreateResponse extends ApiKeyInfo {
+  key: string;
+}
+
 export interface SearchResult {
   type: 'todo' | 'knowledge' | 'changelog' | 'research' | 'milestone';
   id: string;
@@ -421,6 +435,13 @@ export const api = {
       request<UserInfo>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/users/${id}`, { method: 'DELETE' }),
+  },
+  apiKeys: {
+    list: () => request<ApiKeyInfo[]>('/api-keys'),
+    create: (data: { name: string; expiresAt?: string }) =>
+      request<ApiKeyCreateResponse>('/api-keys', { method: 'POST', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/api-keys/${id}`, { method: 'DELETE' }),
   },
   profile: {
     get: () => request<UserInfo>('/auth/profile'),
