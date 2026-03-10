@@ -60,7 +60,14 @@ export class Todo {
 
   @Prop({ default: false })
   archived: boolean;
+
+  @Prop()
+  number: number;
+
+  @Prop()
+  displayNumber: string;
 }
 
 export const TodoSchema = SchemaFactory.createForClass(Todo);
 TodoSchema.index({ projectId: 1, status: 1, priority: 1, createdAt: -1 });
+TodoSchema.index({ projectId: 1, number: 1 }, { unique: true, sparse: true });

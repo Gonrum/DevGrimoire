@@ -188,6 +188,7 @@ function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError 
       <div className="flex items-start justify-between gap-2">
         <h4 className="text-sm font-medium">
           {hasBlockers && <span className="text-red-400 mr-1" title="Blockiert">&#x26D4;</span>}
+          {todo.displayNumber && <span className="text-gray-500 font-normal mr-1.5">{todo.displayNumber}</span>}
           {todo.title}
         </h4>
         <span className={`text-xs shrink-0 ${PRIORITY_COLORS[todo.priority]}`}>
@@ -257,7 +258,7 @@ function TodoListRow({ todo, projectId, onUpdate, showError }: { todo: Todo; pro
       </td>
       <td className="py-2.5 px-3">
         <Link to={`/projects/${projectId}/todos/${todo._id}`} className="hover:text-blue-400 transition-colors">
-          <div className="text-sm">{todo.title}</div>
+          <div className="text-sm">{todo.displayNumber && <span className="text-gray-500 mr-1.5">{todo.displayNumber}</span>}{todo.title}</div>
           {todo.description && <div className="text-xs text-gray-600 line-clamp-1 mt-0.5">{todo.description}</div>}
         </Link>
       </td>

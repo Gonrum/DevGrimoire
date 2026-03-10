@@ -21,4 +21,8 @@ export class UpdateMilestoneDto {
   @IsBoolean()
   @IsOptional()
   archived?: boolean;
+
+  @IsString()
+  @IsOptional()
+  changelogId?: string;
 }

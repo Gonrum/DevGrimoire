@@ -28,7 +28,17 @@ export class Milestone {
 
   @Prop({ default: false })
   archived: boolean;
+
+  @Prop({ type: Types.ObjectId, ref: 'Changelog' })
+  changelogId: Types.ObjectId;
+
+  @Prop()
+  number: number;
+
+  @Prop()
+  displayNumber: string;
 }
 
 export const MilestoneSchema = SchemaFactory.createForClass(Milestone);
 MilestoneSchema.index({ projectId: 1, status: 1, createdAt: -1 });
+MilestoneSchema.index({ projectId: 1, number: 1 }, { unique: true, sparse: true });

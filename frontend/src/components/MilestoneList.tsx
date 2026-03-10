@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { api, Milestone, Todo } from '../api/client';
 import { useToast } from './Toast';
@@ -28,9 +28,18 @@ interface Props {
 }
 
 function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { milestone: Milestone; todos: Todo[]; projectId: string; onUpdate: () => void; showError: (msg: string) => void }) {
+  const [showChangelogForm, setShowChangelogForm] = useState(false);
+  const [clVersion, setClVersion] = useState('');
+  const [clSummary, setClSummary] = useState('');
+  const [clChanges, setClChanges] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
   const milestoneTodos = todos.filter((t) => t.milestoneId === milestone._id);
   const doneTodos = milestoneTodos.filter((t) => t.status === 'done');
-  const progress = milestoneTodos.length > 0 ? Math.round((doneTodos.length / milestoneTodos.length) * 100) : 0;
+  const reviewTodos = milestoneTodos.filter((t) => t.status === 'review');
+  const total = milestoneTodos.length;
+  const donePercent = total > 0 ? Math.round((doneTodos.length / total) * 100) : 0;
+  const reviewPercent = total > 0 ? Math.round((reviewTodos.length / total) * 100) : 0;
 
   const handleStatusChange = async (status: Milestone['status']) => {
     try {
@@ -41,10 +50,34 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
     }
   };
 
+  const handleComplete = async (e: FormEvent) => {
+    e.preventDefault();
+    const changes = clChanges.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (changes.length === 0) {
+      showError('Mindestens eine Änderung eintragen.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const changelog = await api.changelog.create({
+        projectId: milestone.projectId,
+        version: clVersion || undefined,
+        summary: clSummary || undefined,
+        changes,
+      });
+      await api.milestones.update(milestone._id, { status: 'done', changelogId: changelog._id } as Partial<Milestone>);
+      setShowChangelogForm(false);
+      onUpdate();
+    } catch (err: any) {
+      showError(err.message || 'Abschließen fehlgeschlagen');
+    }
+    setSubmitting(false);
+  };
+
   return (
     <Card>
       <div className="flex items-start justify-between gap-3 mb-2">
-        <h3 className="text-sm font-semibold">{milestone.name}</h3>
+        <h3 className="text-sm font-semibold">{milestone.displayNumber && <span className="text-gray-500 font-normal mr-1.5">{milestone.displayNumber}</span>}{milestone.name}</h3>
         <Badge color={STATUS_COLORS[milestone.status]} rounded="full" className="shrink-0">{STATUS_LABELS[milestone.status]}</Badge>
       </div>
 
@@ -60,14 +93,24 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
 
       <div className="mb-2">
         <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-          <span>{doneTodos.length} / {milestoneTodos.length} Tasks</span>
-          <span>{progress}%</span>
+          <span>
+            {doneTodos.length} erledigt
+            {reviewTodos.length > 0 && <> · {reviewTodos.length} in Review</>}
+            {' '}/ {total} Tasks
+          </span>
+          <span>{donePercent}%</span>
         </div>
-        <div className="w-full bg-gray-800 rounded-full h-1.5">
+        <div className="w-full bg-gray-800 rounded-full h-1.5 flex overflow-hidden">
           <div
-            className={`h-1.5 rounded-full transition-all ${progress === 100 ? 'bg-green-500' : 'bg-blue-500'}`}
-            style={{ width: `${progress}%` }}
+            className={`h-1.5 transition-all ${donePercent + reviewPercent === 100 && reviewPercent === 0 ? 'bg-green-500' : 'bg-blue-500'}`}
+            style={{ width: `${donePercent}%` }}
           />
+          {reviewPercent > 0 && (
+            <div
+              className="h-1.5 bg-purple-500 transition-all"
+              style={{ width: `${reviewPercent}%` }}
+            />
+          )}
         </div>
       </div>
 
@@ -76,7 +119,7 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
           {milestoneTodos.slice(0, 5).map((todo) => (
             <Link key={todo._id} to={`/projects/${projectId}/todos/${todo._id}`}
               className="flex items-center gap-2 text-xs text-gray-400 hover:text-gray-200 transition-colors">
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${todo.status === 'done' ? 'bg-green-500' : todo.status === 'in_progress' ? 'bg-yellow-500' : 'bg-gray-600'}`} />
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${todo.status === 'done' ? 'bg-green-500' : todo.status === 'in_progress' ? 'bg-yellow-500' : todo.status === 'review' ? 'bg-purple-500' : 'bg-gray-600'}`} />
               <span className={todo.status === 'done' ? 'line-through text-gray-600' : ''}>{todo.title}</span>
             </Link>
           ))}
@@ -86,6 +129,40 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
         </div>
       )}
 
+      {showChangelogForm && (
+        <form onSubmit={handleComplete} className="mt-3 pt-3 border-t border-gray-800 space-y-2">
+          <p className="text-xs font-medium text-gray-400">Changelog-Eintrag erstellen</p>
+          <input
+            type="text"
+            placeholder="Version (z.B. 1.2.0)"
+            value={clVersion}
+            onChange={(e) => setClVersion(e.target.value)}
+            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:outline-none"
+          />
+          <input
+            type="text"
+            placeholder="Zusammenfassung"
+            value={clSummary}
+            onChange={(e) => setClSummary(e.target.value)}
+            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:outline-none"
+          />
+          <textarea
+            placeholder="Änderungen (eine pro Zeile)"
+            value={clChanges}
+            onChange={(e) => setClChanges(e.target.value)}
+            rows={3}
+            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:outline-none resize-none"
+            required
+          />
+          <div className="flex gap-2">
+            <Button size="xs" type="submit" disabled={submitting}>
+              {submitting ? 'Speichern...' : 'Abschließen'}
+            </Button>
+            <Button size="xs" type="button" onClick={() => setShowChangelogForm(false)}>Abbrechen</Button>
+          </div>
+        </form>
+      )}
+
       <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-800">
         {milestone.status === 'open' && (
           <Button size="xs" onClick={() => handleStatusChange('in_progress')}>Starten</Button>
@@ -93,7 +170,7 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
         {milestone.status === 'in_progress' && (
           <>
             <Button size="xs" onClick={() => handleStatusChange('open')}>Zurück</Button>
-            <Button size="xs" onClick={() => handleStatusChange('done')}>Abschließen</Button>
+            <Button size="xs" onClick={() => setShowChangelogForm(true)}>Abschließen</Button>
           </>
         )}
         {milestone.status === 'done' && (

@@ -3,9 +3,12 @@ import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
 import { Todo, TodoDocument, TodoStatus } from './schemas/todo.schema';
+import { Project, ProjectDocument } from '../projects/schemas/project.schema';
 import { CreateTodoDto } from './dto/create-todo.dto';
 import { UpdateTodoDto } from './dto/update-todo.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { CountersService } from '../counters/counters.service';
+import { formatEntityNumber } from '../common/number-format';
 
 const STATUS_ORDER: TodoStatus[] = [
   TodoStatus.OPEN,
@@ -18,6 +21,8 @@ const STATUS_ORDER: TodoStatus[] = [
 export class TodosService {
   constructor(
     @InjectModel(Todo.name) private todoModel: Model<TodoDocument>,
+    @InjectModel(Project.name) private projectModel: Model<ProjectDocument>,
+    private countersService: CountersService,
     private eventEmitter: EventEmitter2,
   ) {}
 
@@ -43,8 +48,41 @@ export class TodosService {
     }
   }
 
+  async findByNumber(projectId: string, number: number): Promise<TodoDocument> {
+    const todo = await this.todoModel.findOne({ projectId, number }).exec();
+    if (!todo) throw new NotFoundException(`Todo #${number} not found in project ${projectId}`);
+    return todo;
+  }
+
+  async findByDisplayNumber(projectId: string, displayNumber: string): Promise<TodoDocument> {
+    const todo = await this.todoModel.findOne({ projectId, displayNumber }).exec();
+    if (!todo) throw new NotFoundException(`Todo "${displayNumber}" not found in project ${projectId}`);
+    return todo;
+  }
+
+  async resolveId(args: { id?: string; projectId?: string; number?: string }): Promise<string> {
+    if (args.id) return args.id;
+    if (!args.number || !args.projectId) {
+      throw new BadRequestException('Either id or number+projectId must be provided');
+    }
+    const num = parseInt(args.number, 10);
+    const todo = isNaN(num)
+      ? await this.findByDisplayNumber(args.projectId, args.number)
+      : await this.findByNumber(args.projectId, num);
+    return todo._id.toString();
+  }
+
   async create(dto: CreateTodoDto): Promise<TodoDocument> {
-    const todo = await this.todoModel.create(dto);
+    const project = await this.projectModel.findById(dto.projectId).exec();
+    if (!project) throw new NotFoundException(`Project ${dto.projectId} not found`);
+    const seq = await this.countersService.getNextSequence(dto.projectId, 'todo');
+    const displayNumber = formatEntityNumber(
+      project.todoNumberFormat || '{type}-{n}',
+      seq,
+      project.name,
+      'T',
+    );
+    const todo = await this.todoModel.create({ ...dto, number: seq, displayNumber });
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: todo.projectId.toString(),
       entity: 'todo',

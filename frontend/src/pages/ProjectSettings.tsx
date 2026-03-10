@@ -35,6 +35,8 @@ export default function ProjectSettings() {
   const [techStack, setTechStack] = useState('');
   const [active, setActive] = useState(true);
   const [instructions, setInstructions] = useState('');
+  const [todoNumberFormat, setTodoNumberFormat] = useState('{type}-{n}');
+  const [milestoneNumberFormat, setMilestoneNumberFormat] = useState('{type}-{n}');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -54,6 +56,8 @@ export default function ProjectSettings() {
         setTechStack(p.techStack.join(', '));
         setActive(p.active);
         setInstructions(p.instructions || '');
+        setTodoNumberFormat(p.todoNumberFormat || '{type}-{n}');
+        setMilestoneNumberFormat(p.milestoneNumberFormat || '{type}-{n}');
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -72,6 +76,8 @@ export default function ProjectSettings() {
         techStack: techStack.split(',').map((t) => t.trim()).filter(Boolean),
         active,
         instructions,
+        todoNumberFormat,
+        milestoneNumberFormat,
       });
       setProject(updated);
       setSaved(true);
@@ -182,6 +188,47 @@ export default function ProjectSettings() {
           >
             {active ? 'aktiv' : 'inaktiv'}
           </button>
+        </div>
+      </section>
+
+      <section className="mb-8 space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-blue-400">Nummerierung</h2>
+          <p className="text-gray-500 text-sm mt-1">
+            Format für Task- und Milestone-Nummern. Verfügbare Variablen:{' '}
+            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{n}'}</code> Nummer,{' '}
+            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{type}'}</code> T/M,{' '}
+            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{prefix}'}</code> Projektname,{' '}
+            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{date}'}</code> Datum
+          </p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Task-Format</label>
+            <input
+              type="text"
+              value={todoNumberFormat}
+              onChange={(e) => setTodoNumberFormat(e.target.value)}
+              placeholder="{type}-{n}"
+              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 font-mono"
+            />
+            <p className="text-xs text-gray-600 mt-1">
+              Vorschau: {todoNumberFormat.replace(/\{n\}/g, '42').replace(/\{type\}/g, 'T').replace(/\{prefix\}/g, name).replace(/\{date\}/g, new Date().toISOString().slice(0, 10))}
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Milestone-Format</label>
+            <input
+              type="text"
+              value={milestoneNumberFormat}
+              onChange={(e) => setMilestoneNumberFormat(e.target.value)}
+              placeholder="{type}-{n}"
+              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 font-mono"
+            />
+            <p className="text-xs text-gray-600 mt-1">
+              Vorschau: {milestoneNumberFormat.replace(/\{n\}/g, '5').replace(/\{type\}/g, 'M').replace(/\{prefix\}/g, name).replace(/\{date\}/g, new Date().toISOString().slice(0, 10))}
+            </p>
+          </div>
         </div>
       </section>
 

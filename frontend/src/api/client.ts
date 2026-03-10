@@ -59,6 +59,8 @@ export interface Project {
   favorite: boolean;
   instructions?: string;
   components: ProjectComponent[];
+  todoNumberFormat?: string;
+  milestoneNumberFormat?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -92,6 +94,8 @@ export interface Todo {
   blockedBy: string[];
   archived: boolean;
   comments: TodoComment[];
+  number?: number;
+  displayNumber?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -104,6 +108,9 @@ export interface Milestone {
   status: 'open' | 'in_progress' | 'done';
   dueDate?: string;
   archived: boolean;
+  changelogId?: string;
+  number?: number;
+  displayNumber?: string;
   createdAt: string;
   updatedAt: string;
 }

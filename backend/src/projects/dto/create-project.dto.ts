@@ -36,4 +36,12 @@ export class CreateProjectDto {
   @IsArray()
   @IsOptional()
   components?: { name: string; version: string; path?: string }[];
+
+  @IsString()
+  @IsOptional()
+  todoNumberFormat?: string;
+
+  @IsString()
+  @IsOptional()
+  milestoneNumberFormat?: string;
 }

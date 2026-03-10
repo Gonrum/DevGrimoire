@@ -152,7 +152,7 @@ export default function TodoDetailPage() {
         </div>
       ) : (
         <div className="max-w-3xl mx-auto">
-          <h1 className="text-xl font-bold mb-3">{todo.title}</h1>
+          <h1 className="text-xl font-bold mb-3">{todo.displayNumber && <span className="text-gray-500 font-normal mr-2">{todo.displayNumber}</span>}{todo.title}</h1>
 
           <div className="flex flex-wrap items-center gap-2 mb-4">
             <Badge color={STATUS_COLORS[todo.status]} rounded="full">

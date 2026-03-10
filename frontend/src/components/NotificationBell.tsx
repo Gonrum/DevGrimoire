@@ -44,22 +44,43 @@ export default function NotificationBell() {
     return () => clearInterval(interval);
   }, [fetchUnreadCount]);
 
-  // Listen for SSE notification events
+  // Listen for SSE notification events with auto-reconnect
   useEffect(() => {
     const token = localStorage.getItem('claudevault_access_token');
     const params = new URLSearchParams();
     if (token) params.set('token', token);
-    const es = new EventSource(`/api/events?${params}`);
-    es.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.entity === 'notification' && data.action === 'created') {
-          fetchUnreadCount();
-          if (open) fetchNotifications();
-        }
-      } catch { /* ignore */ }
+    const url = `/api/events?${params}`;
+
+    let es: EventSource | null = null;
+    let retryTimer: ReturnType<typeof setTimeout>;
+    let retryDelay = 1000;
+    const MAX_RETRY_DELAY = 30000;
+
+    function connect() {
+      es = new EventSource(url);
+      es.onopen = () => { retryDelay = 1000; };
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.entity === 'notification' && data.action === 'created') {
+            fetchUnreadCount();
+            if (open) fetchNotifications();
+          }
+        } catch { /* ignore */ }
+      };
+      es.onerror = () => {
+        es?.close();
+        retryTimer = setTimeout(connect, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
+      };
+    }
+
+    connect();
+
+    return () => {
+      es?.close();
+      clearTimeout(retryTimer);
     };
-    return () => es.close();
   }, [fetchUnreadCount, fetchNotifications, open]);
 
   // Close on click outside

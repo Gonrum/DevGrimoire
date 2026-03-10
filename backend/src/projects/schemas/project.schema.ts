@@ -37,6 +37,12 @@ export class Project {
 
   @Prop({ type: [{ name: String, version: String, path: String }], default: [] })
   components: ProjectComponent[];
+
+  @Prop({ default: '{type}-{n}' })
+  todoNumberFormat: string;
+
+  @Prop({ default: '{type}-{n}' })
+  milestoneNumberFormat: string;
 }
 
 export const ProjectSchema = SchemaFactory.createForClass(Project);

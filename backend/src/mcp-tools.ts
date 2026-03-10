@@ -211,22 +211,25 @@ const tools = [
   },
   {
     name: 'todo_get',
-    description: 'Get a single todo with full details (description, comments, blockedBy)',
+    description: 'Get a single todo with full details (description, comments, blockedBy). Provide either id OR number+projectId.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         id: { type: 'string', description: 'Todo MongoDB ID' },
+        number: { type: 'string', description: 'Todo number (e.g. "3" or "T-3") — requires projectId' },
+        projectId: { type: 'string', description: 'Project ID (required when using number)' },
       },
-      required: ['id'],
     },
   },
   {
     name: 'todo_update',
-    description: 'Update a todo (e.g. change status, priority). IMPORTANT: Status transitions must follow the order open -> in_progress -> review -> done (one step at a time, forward or backward). Skipping steps will be rejected.',
+    description: 'Update a todo (e.g. change status, priority). IMPORTANT: Status transitions must follow the order open -> in_progress -> review -> done (one step at a time, forward or backward). Skipping steps will be rejected. Provide either id OR number+projectId.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         id: { type: 'string', description: 'Todo MongoDB ID' },
+        number: { type: 'string', description: 'Todo number (e.g. "3" or "T-3") — requires projectId' },
+        projectId: { type: 'string', description: 'Project ID (required when using number)' },
         title: { type: 'string' },
         description: { type: 'string' },
         status: { type: 'string', enum: ['open', 'in_progress', 'review', 'done'] },
@@ -236,31 +239,33 @@ const tools = [
         blockedBy: { type: 'array', items: { type: 'string' }, description: 'Array of Todo MongoDB IDs that block this todo' },
         archived: { type: 'boolean', description: 'Archive or unarchive a todo' },
       },
-      required: ['id'],
     },
   },
   {
     name: 'todo_delete',
-    description: 'Delete a todo',
+    description: 'Delete a todo. Provide either id OR number+projectId.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         id: { type: 'string', description: 'Todo MongoDB ID' },
+        number: { type: 'string', description: 'Todo number (e.g. "3" or "T-3") — requires projectId' },
+        projectId: { type: 'string', description: 'Project ID (required when using number)' },
       },
-      required: ['id'],
     },
   },
   {
     name: 'todo_comment',
-    description: 'Add a comment to a todo',
+    description: 'Add a comment to a todo. Provide either id OR number+projectId.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         id: { type: 'string', description: 'Todo MongoDB ID' },
+        number: { type: 'string', description: 'Todo number (e.g. "3" or "T-3") — requires projectId' },
+        projectId: { type: 'string', description: 'Project ID (required when using number)' },
         text: { type: 'string', description: 'Comment text' },
         author: { type: 'string', description: 'Comment author (default: claude)' },
       },
-      required: ['id', 'text'],
+      required: ['text'],
     },
   },
   {
@@ -463,40 +468,44 @@ const tools = [
   },
   {
     name: 'milestone_get',
-    description: 'Get a milestone by ID',
+    description: 'Get a milestone by ID or number. Provide either id OR number+projectId.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         id: { type: 'string', description: 'Milestone MongoDB ID' },
+        number: { type: 'string', description: 'Milestone number (e.g. "1" or "M-1") — requires projectId' },
+        projectId: { type: 'string', description: 'Project ID (required when using number)' },
       },
-      required: ['id'],
     },
   },
   {
     name: 'milestone_update',
-    description: 'Update a milestone',
+    description: 'Update a milestone. IMPORTANT: Setting status to "done" REQUIRES a changelogId — first create a changelog entry via changelog_add, then pass its ID here. The changelog must not already be assigned to another milestone.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         id: { type: 'string', description: 'Milestone MongoDB ID' },
+        number: { type: 'string', description: 'Milestone number (e.g. "1" or "M-1") — requires projectId' },
+        projectId: { type: 'string', description: 'Project ID (required when using number)' },
         name: { type: 'string' },
         description: { type: 'string' },
         status: { type: 'string', enum: ['open', 'in_progress', 'done'] },
         dueDate: { type: 'string', description: 'Due date (ISO 8601)' },
         archived: { type: 'boolean', description: 'Archive or unarchive a milestone' },
+        changelogId: { type: 'string', description: 'Changelog MongoDB ID (REQUIRED when setting status to done)' },
       },
-      required: ['id'],
     },
   },
   {
     name: 'milestone_delete',
-    description: 'Delete a milestone',
+    description: 'Delete a milestone. Provide either id OR number+projectId.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         id: { type: 'string', description: 'Milestone MongoDB ID' },
+        number: { type: 'string', description: 'Milestone number (e.g. "1" or "M-1") — requires projectId' },
+        projectId: { type: 'string', description: 'Project ID (required when using number)' },
       },
-      required: ['id'],
     },
   },
   {
@@ -857,11 +866,22 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = applyPagination(compactTodos, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
           break;
         }
-        case 'todo_get':
-          result = await todosService.findById(requireString(a, 'id'));
+        case 'todo_get': {
+          const todoId = await todosService.resolveId({
+            id: optionalString(a, 'id'),
+            projectId: optionalString(a, 'projectId'),
+            number: optionalString(a, 'number'),
+          });
+          result = await todosService.findById(todoId);
           break;
-        case 'todo_update':
-          result = await todosService.update(requireString(a, 'id'), {
+        }
+        case 'todo_update': {
+          const todoUpdateId = await todosService.resolveId({
+            id: optionalString(a, 'id'),
+            projectId: optionalString(a, 'projectId'),
+            number: optionalString(a, 'number'),
+          });
+          result = await todosService.update(todoUpdateId, {
             title: optionalString(a, 'title'),
             description: optionalString(a, 'description'),
             status: optionalString(a, 'status') as any,
@@ -872,17 +892,30 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             archived: optionalBoolean(a, 'archived'),
           });
           break;
-        case 'todo_delete':
-          await todosService.remove(requireString(a, 'id'));
-          result = { deleted: true, id: a.id };
+        }
+        case 'todo_delete': {
+          const todoDelId = await todosService.resolveId({
+            id: optionalString(a, 'id'),
+            projectId: optionalString(a, 'projectId'),
+            number: optionalString(a, 'number'),
+          });
+          await todosService.remove(todoDelId);
+          result = { deleted: true, id: todoDelId };
           break;
-        case 'todo_comment':
+        }
+        case 'todo_comment': {
+          const todoCommentId = await todosService.resolveId({
+            id: optionalString(a, 'id'),
+            projectId: optionalString(a, 'projectId'),
+            number: optionalString(a, 'number'),
+          });
           result = await todosService.addComment(
-            requireString(a, 'id'),
+            todoCommentId,
             requireString(a, 'text'),
             optionalString(a, 'author') || 'claude',
           );
           break;
+        }
         case 'session_save':
           result = await sessionsService.create({
             projectId: requireString(a, 'projectId'),
@@ -999,22 +1032,41 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             optionalString(a, 'status') as any,
           );
           break;
-        case 'milestone_get':
-          result = await milestonesService.findById(requireString(a, 'id'));
+        case 'milestone_get': {
+          const msGetId = await milestonesService.resolveId({
+            id: optionalString(a, 'id'),
+            projectId: optionalString(a, 'projectId'),
+            number: optionalString(a, 'number'),
+          });
+          result = await milestonesService.findById(msGetId);
           break;
-        case 'milestone_update':
-          result = await milestonesService.update(requireString(a, 'id'), {
+        }
+        case 'milestone_update': {
+          const msUpdateId = await milestonesService.resolveId({
+            id: optionalString(a, 'id'),
+            projectId: optionalString(a, 'projectId'),
+            number: optionalString(a, 'number'),
+          });
+          result = await milestonesService.update(msUpdateId, {
             name: optionalString(a, 'name'),
             description: optionalString(a, 'description'),
             status: optionalString(a, 'status') as any,
             dueDate: optionalString(a, 'dueDate'),
             archived: optionalBoolean(a, 'archived'),
+            changelogId: optionalString(a, 'changelogId'),
           });
           break;
-        case 'milestone_delete':
-          await milestonesService.remove(requireString(a, 'id'));
-          result = { deleted: true, id: a.id };
+        }
+        case 'milestone_delete': {
+          const msDelId = await milestonesService.resolveId({
+            id: optionalString(a, 'id'),
+            projectId: optionalString(a, 'projectId'),
+            number: optionalString(a, 'number'),
+          });
+          await milestonesService.remove(msDelId);
+          result = { deleted: true, id: msDelId };
           break;
+        }
         case 'notify_user': {
           const nTitle = requireString(a, 'title');
           const nBody = requireString(a, 'body');

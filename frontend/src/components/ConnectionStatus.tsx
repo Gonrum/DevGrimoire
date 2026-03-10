@@ -13,14 +13,17 @@ export default function ConnectionStatus() {
 
     let es: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout>;
+    let retryDelay = 1000;
+    const MAX_RETRY_DELAY = 30000;
 
     function connect() {
       es = new EventSource(url);
-      es.onopen = () => setConnected(true);
+      es.onopen = () => { setConnected(true); retryDelay = 1000; };
       es.onerror = () => {
         setConnected(false);
         es?.close();
-        retryTimer = setTimeout(connect, 5000);
+        retryTimer = setTimeout(connect, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
       };
     }
 
