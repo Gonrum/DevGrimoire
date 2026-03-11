@@ -479,7 +479,10 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <Button variant="primary" size="sm" onClick={() => { setEditingSchema(null); setShowForm(true); }}>
+          + Neues Schema
+        </Button>
         {dbTypes.length > 1 && (
           <div className="flex flex-wrap gap-1.5">
             <button
@@ -507,10 +510,6 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
             ))}
           </div>
         )}
-        {dbTypes.length <= 1 && <div />}
-        <Button variant="primary" size="sm" onClick={() => { setEditingSchema(null); setShowForm(true); }}>
-          + Neues Schema
-        </Button>
       </div>
 
       {entries.length === 0 ? (
