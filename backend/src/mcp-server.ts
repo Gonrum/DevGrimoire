@@ -17,6 +17,8 @@ import { ResearchService } from './research/research.service';
 import { SettingsService } from './settings/settings.service';
 import { NotificationsService } from './notifications/notifications.service';
 import { SchemasService } from './schemas/schemas.service';
+import { DependenciesService } from './dependencies/dependencies.service';
+import { FeaturesService } from './features/features.service';
 import { registerMcpTools } from './mcp-tools';
 
 async function bootstrap() {
@@ -45,6 +47,8 @@ async function bootstrap() {
     settingsService: app.get(SettingsService),
     notificationsService: app.get(NotificationsService),
     schemasService: app.get(SchemasService),
+    dependenciesService: app.get(DependenciesService),
+    featuresService: app.get(FeaturesService),
   });
 
   const transport = new StdioServerTransport();

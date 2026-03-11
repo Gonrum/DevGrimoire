@@ -24,6 +24,8 @@ import { ResearchService } from './research/research.service';
 import { SettingsService } from './settings/settings.service';
 import { NotificationsService } from './notifications/notifications.service';
 import { SchemasService } from './schemas/schemas.service';
+import { DependenciesService } from './dependencies/dependencies.service';
+import { FeaturesService } from './features/features.service';
 import { registerMcpTools, McpServices } from './mcp-tools';
 import { ApiKeysService } from './api-keys/api-keys.service';
 import { AuthService } from './auth/auth.service';
@@ -66,6 +68,8 @@ async function bootstrap() {
     settingsService: app.get(SettingsService),
     notificationsService: app.get(NotificationsService),
     schemasService: app.get(SchemasService),
+    dependenciesService: app.get(DependenciesService),
+    featuresService: app.get(FeaturesService),
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};

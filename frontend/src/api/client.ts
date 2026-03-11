@@ -294,6 +294,39 @@ export interface SchemaVersion {
   createdAt: string;
 }
 
+export type PackageManager = 'npm' | 'composer' | 'pip' | 'cargo' | 'go' | 'maven' | 'nuget' | 'gem';
+
+export interface Dependency {
+  _id: string;
+  projectId: string;
+  name: string;
+  version: string;
+  description?: string;
+  packageManager: PackageManager;
+  devDependency: boolean;
+  category?: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type FeatureStatus = 'planned' | 'in_development' | 'released' | 'deprecated';
+export type FeaturePriority = 'low' | 'medium' | 'high';
+
+export interface Feature {
+  _id: string;
+  projectId: string;
+  name: string;
+  description?: string;
+  category?: string;
+  status: FeatureStatus;
+  version?: string;
+  priority?: FeaturePriority;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const api = {
   projects: {
     list: (filters?: { active?: boolean; favorite?: boolean }) => {
@@ -502,6 +535,37 @@ export const api = {
     delete: (id: string) =>
       request<void>(`/schemas/${id}`, { method: 'DELETE' }),
     versions: (id: string) => request<SchemaVersion[]>(`/schemas/${id}/versions`),
+  },
+  features: {
+    list: (projectId: string, filters?: { status?: FeatureStatus; category?: string }) => {
+      const params = new URLSearchParams({ projectId });
+      if (filters?.status) params.set('status', filters.status);
+      if (filters?.category) params.set('category', filters.category);
+      return request<Feature[]>(`/features?${params}`);
+    },
+    get: (id: string) => request<Feature>(`/features/${id}`),
+    create: (data: Partial<Feature>) =>
+      request<Feature>('/features', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<Feature>) =>
+      request<Feature>(`/features/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/features/${id}`, { method: 'DELETE' }),
+  },
+  dependencies: {
+    list: (projectId: string, filters?: { packageManager?: PackageManager; category?: string; devDependency?: boolean }) => {
+      const params = new URLSearchParams({ projectId });
+      if (filters?.packageManager) params.set('packageManager', filters.packageManager);
+      if (filters?.category) params.set('category', filters.category);
+      if (filters?.devDependency !== undefined) params.set('devDependency', String(filters.devDependency));
+      return request<Dependency[]>(`/dependencies?${params}`);
+    },
+    get: (id: string) => request<Dependency>(`/dependencies/${id}`),
+    create: (data: Partial<Dependency>) =>
+      request<Dependency>('/dependencies', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<Dependency>) =>
+      request<Dependency>(`/dependencies/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/dependencies/${id}`, { method: 'DELETE' }),
   },
   profile: {
     get: () => request<UserInfo>('/auth/profile'),

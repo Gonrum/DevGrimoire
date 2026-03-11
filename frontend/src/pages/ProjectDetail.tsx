@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject } from '../api/client';
+import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature } from '../api/client';
 import TodoBoard from '../components/TodoBoard';
 import SessionList from '../components/SessionList';
 import KnowledgeList from '../components/KnowledgeList';
@@ -11,11 +11,13 @@ import EnvironmentList, { SecretsList } from '../components/EnvironmentList';
 import ManualView from '../components/ManualView';
 import ResearchList from '../components/ResearchList';
 import SchemaList from '../components/SchemaList';
+import DependencyList from '../components/DependencyList';
+import FeatureList from '../components/FeatureList';
 import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents';
 import Badge from '../components/ui/Badge';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
-type Tab = 'todos' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas';
+type Tab = 'todos' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features';
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
@@ -31,6 +33,8 @@ export default function ProjectDetail() {
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [secrets, setSecrets] = useState<SecretListItem[]>([]);
   const [schemas, setSchemas] = useState<SchemaObject[]>([]);
+  const [dependencies, setDependencies] = useState<Dependency[]>([]);
+  const [features, setFeatures] = useState<Feature[]>([]);
   const [manualKey, setManualKey] = useState(0);
   const [tab, setTab] = useState<Tab>(() => (searchParams.get('tab') as Tab) || 'todos');
   useEffect(() => {
@@ -62,8 +66,10 @@ export default function ProjectDetail() {
       api.environments.list(id),
       api.secrets.list(id),
       api.schemas.list(id),
+      api.dependencies.list(id),
+      api.features.list(id),
     ])
-      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch]) => {
+      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat]) => {
         if (controller.signal.aborted) return;
         setProject(p);
         setTodos(t);
@@ -76,6 +82,8 @@ export default function ProjectDetail() {
         setEnvironments(env);
         setSecrets(sec);
         setSchemas(sch);
+        setDependencies(deps);
+        setFeatures(feat);
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
@@ -103,6 +111,8 @@ export default function ProjectDetail() {
         environment: () => api.environments.list(id).then(setEnvironments),
         secret: () => api.secrets.list(id).then(setSecrets),
         schema: () => api.schemas.list(id).then(setSchemas),
+        dependency: () => api.dependencies.list(id).then(setDependencies),
+        feature: () => api.features.list(id).then(setFeatures),
       };
       refetchers[event.entity]?.();
       api.activities.list(id, 100).then(setActivities);
@@ -134,7 +144,9 @@ export default function ProjectDetail() {
     { key: 'knowledge', label: 'Wissen', count: knowledge.length },
     { key: 'changelog', label: 'Changelog', count: changelog.length },
     { key: 'manual', label: 'Handbuch', count: 0 },
+    { key: 'features', label: 'Features', count: features.length },
     { key: 'schemas', label: 'Schemas', count: schemas.length },
+    { key: 'dependencies', label: 'Dependencies', count: dependencies.length },
     { key: 'research', label: 'Recherche', count: research.length },
     { key: 'environments', label: 'Umgebungen', count: environments.length },
     { key: 'secrets', label: 'Secrets', count: secrets.length },
@@ -232,7 +244,9 @@ export default function ProjectDetail() {
       {tab === 'knowledge' && <KnowledgeList entries={knowledge} />}
       {tab === 'changelog' && <ChangelogList entries={changelog} />}
       {tab === 'manual' && <ManualView key={manualKey} projectId={id!} />}
+      {tab === 'features' && <FeatureList entries={features} projectId={id!} />}
       {tab === 'schemas' && <SchemaList entries={schemas} projectId={id!} />}
+      {tab === 'dependencies' && <DependencyList entries={dependencies} projectId={id!} />}
       {tab === 'research' && <ResearchList entries={research} />}
       {tab === 'environments' && <EnvironmentList projectId={id!} />}
       {tab === 'secrets' && <SecretsList projectId={id!} />}

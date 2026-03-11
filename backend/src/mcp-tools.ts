@@ -18,6 +18,8 @@ import { ResearchService } from './research/research.service';
 import { SettingsService } from './settings/settings.service';
 import { NotificationsService } from './notifications/notifications.service';
 import { SchemasService } from './schemas/schemas.service';
+import { DependenciesService } from './dependencies/dependencies.service';
+import { FeaturesService } from './features/features.service';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 
 function requireString(args: Record<string, unknown>, field: string): string {
@@ -105,6 +107,8 @@ export interface McpServices {
   settingsService: SettingsService;
   notificationsService: NotificationsService;
   schemasService: SchemasService;
+  dependenciesService: DependenciesService;
+  featuresService: FeaturesService;
 }
 
 const tools = [
@@ -914,10 +918,181 @@ const tools = [
       required: ['schemaId'],
     },
   },
+  {
+    name: 'dependency_add',
+    description: 'Add a project dependency (npm, composer, pip, cargo, go, maven, nuget, gem) with version and description.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        name: { type: 'string', description: 'Package name' },
+        version: { type: 'string', description: 'Package version' },
+        packageManager: { type: 'string', enum: ['npm', 'composer', 'pip', 'cargo', 'go', 'maven', 'nuget', 'gem'], description: 'Package manager type' },
+        description: { type: 'string', description: 'What this package is used for' },
+        devDependency: { type: 'boolean', description: 'Whether this is a dev dependency (default false)' },
+        category: { type: 'string', description: 'Category (e.g. Database, Auth, UI, Testing)' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' },
+      },
+      required: ['projectId', 'name', 'version', 'packageManager'],
+    },
+  },
+  {
+    name: 'dependency_list',
+    description: 'List project dependencies (compact: name, version, packageManager, devDependency, category). Use dependency_get for full details.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        packageManager: { type: 'string', enum: ['npm', 'composer', 'pip', 'cargo', 'go', 'maven', 'nuget', 'gem'], description: 'Filter by package manager' },
+        category: { type: 'string', description: 'Filter by category' },
+        devDependency: { type: 'boolean', description: 'Filter by dev/prod dependency' },
+        limit: { type: 'number', description: 'Max items to return' },
+        offset: { type: 'number', description: 'Skip first N items' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'dependency_get',
+    description: 'Get a single dependency with full details including description.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Dependency MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'dependency_update',
+    description: 'Update a dependency (version, description, category, tags).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Dependency MongoDB ID' },
+        name: { type: 'string' },
+        version: { type: 'string' },
+        description: { type: 'string' },
+        packageManager: { type: 'string', enum: ['npm', 'composer', 'pip', 'cargo', 'go', 'maven', 'nuget', 'gem'] },
+        devDependency: { type: 'boolean' },
+        category: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'dependency_delete',
+    description: 'Delete a dependency.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Dependency MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'dependency_scan',
+    description: 'Bulk-import dependencies from a package file. The agent reads the file (package.json, composer.json, etc.) and passes all dependencies here. Upsert behavior: new packages are created, existing ones get their version updated. Existing descriptions/categories/tags are preserved.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        packageManager: { type: 'string', enum: ['npm', 'composer', 'pip', 'cargo', 'go', 'maven', 'nuget', 'gem'], description: 'Package manager type' },
+        dependencies: {
+          type: 'array',
+          description: 'Array of dependencies to import',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Package name' },
+              version: { type: 'string', description: 'Package version' },
+              devDependency: { type: 'boolean', description: 'Dev dependency flag' },
+            },
+            required: ['name', 'version'],
+          },
+        },
+      },
+      required: ['projectId', 'packageManager', 'dependencies'],
+    },
+  },
+  // ── Feature tools ──
+  {
+    name: 'feature_create',
+    description: 'Create a project feature entry to document what the project offers.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        name: { type: 'string', description: 'Feature name' },
+        description: { type: 'string', description: 'Feature description (Markdown)' },
+        category: { type: 'string', description: 'Category (e.g. Auth, API, UI)' },
+        status: { type: 'string', enum: ['planned', 'in_development', 'released', 'deprecated'], description: 'Feature status (default: planned)' },
+        version: { type: 'string', description: 'Version when feature was added/released' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Feature priority' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags' },
+      },
+      required: ['projectId', 'name'],
+    },
+  },
+  {
+    name: 'feature_list',
+    description: 'List project features (compact: name, status, category, priority, version). Use feature_get for full details.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        status: { type: 'string', enum: ['planned', 'in_development', 'released', 'deprecated'], description: 'Filter by status' },
+        category: { type: 'string', description: 'Filter by category' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'feature_get',
+    description: 'Get a single feature with full details including description.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Feature MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'feature_update',
+    description: 'Update a feature (name, description, status, category, version, priority, tags).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Feature MongoDB ID' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        category: { type: 'string' },
+        status: { type: 'string', enum: ['planned', 'in_development', 'released', 'deprecated'] },
+        version: { type: 'string' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high'] },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'feature_delete',
+    description: 'Delete a feature.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Feature MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -985,6 +1160,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             manualsService.removeByProject(id),
             researchService.removeByProject(id),
             schemasService.removeByProject(id),
+            dependenciesService.removeByProject(id),
+            featuresService.removeByProject(id),
           ]);
           result = { deleted: true, id };
           break;
@@ -1437,6 +1614,90 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           } else {
             result = await schemasService.getVersions(requireString(a, 'schemaId'));
           }
+          break;
+        }
+        case 'feature_create':
+          result = await featuresService.create({
+            projectId: requireString(a, 'projectId'),
+            name: requireString(a, 'name'),
+            description: optionalString(a, 'description'),
+            category: optionalString(a, 'category'),
+            status: optionalString(a, 'status') as any,
+            version: optionalString(a, 'version'),
+            priority: optionalString(a, 'priority') as any,
+            tags: optionalStringArray(a, 'tags'),
+          });
+          break;
+        case 'feature_list': {
+          const features = await featuresService.findByProject(requireString(a, 'projectId'), {
+            status: optionalString(a, 'status') as any,
+            category: optionalString(a, 'category'),
+          });
+          result = compactList(features as any, ['description', '__v']);
+          break;
+        }
+        case 'feature_get':
+          result = await featuresService.findById(requireString(a, 'id'));
+          break;
+        case 'feature_update':
+          result = await featuresService.update(requireString(a, 'id'), {
+            name: optionalString(a, 'name'),
+            description: optionalString(a, 'description'),
+            category: optionalString(a, 'category'),
+            status: optionalString(a, 'status') as any,
+            version: optionalString(a, 'version'),
+            priority: optionalString(a, 'priority') as any,
+            tags: optionalStringArray(a, 'tags'),
+          });
+          break;
+        case 'feature_delete':
+          await featuresService.remove(requireString(a, 'id'));
+          result = { deleted: true, id: requireString(a, 'id') };
+          break;
+        case 'dependency_add':
+          result = await dependenciesService.create({
+            projectId: requireString(a, 'projectId'),
+            name: requireString(a, 'name'),
+            version: requireString(a, 'version'),
+            packageManager: requireString(a, 'packageManager') as any,
+            description: optionalString(a, 'description'),
+            devDependency: a.devDependency === true,
+            category: optionalString(a, 'category'),
+            tags: optionalStringArray(a, 'tags'),
+          });
+          break;
+        case 'dependency_list': {
+          const deps = await dependenciesService.findByProject(requireString(a, 'projectId'), {
+            packageManager: optionalString(a, 'packageManager') as any,
+            category: optionalString(a, 'category'),
+            devDependency: a.devDependency !== undefined ? a.devDependency === true : undefined,
+          });
+          result = compactList(deps as any, ['description', 'tags', '__v']);
+          break;
+        }
+        case 'dependency_get':
+          result = await dependenciesService.findById(requireString(a, 'id'));
+          break;
+        case 'dependency_update':
+          result = await dependenciesService.update(requireString(a, 'id'), {
+            version: optionalString(a, 'version'),
+            description: optionalString(a, 'description'),
+            devDependency: a.devDependency !== undefined ? a.devDependency === true : undefined,
+            category: optionalString(a, 'category'),
+            tags: optionalStringArray(a, 'tags'),
+          });
+          break;
+        case 'dependency_delete':
+          await dependenciesService.remove(requireString(a, 'id'));
+          result = { deleted: true, id: requireString(a, 'id') };
+          break;
+        case 'dependency_scan': {
+          const scanResult = await dependenciesService.bulkCreate({
+            projectId: requireString(a, 'projectId'),
+            packageManager: requireString(a, 'packageManager') as any,
+            dependencies: a.dependencies as any,
+          });
+          result = scanResult;
           break;
         }
         default:
