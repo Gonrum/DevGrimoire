@@ -129,7 +129,7 @@ export default function ProjectDetail() {
 
   const tabs: { key: Tab; label: string; count: number }[] = [
     { key: 'todos', label: 'Todos', count: todos.filter((t) => t.status !== 'done').length },
-    { key: 'milestones', label: 'Milestones', count: milestones.filter((m) => m.status !== 'done').length },
+    { key: 'milestones', label: 'Milestones', count: milestones.filter((m) => m.status !== 'done' && !m.archived).length },
     { key: 'sessions', label: 'Sessions', count: sessions.length },
     { key: 'knowledge', label: 'Wissen', count: knowledge.length },
     { key: 'changelog', label: 'Changelog', count: changelog.length },

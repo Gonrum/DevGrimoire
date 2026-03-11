@@ -458,12 +458,13 @@ const tools = [
   },
   {
     name: 'milestone_list',
-    description: 'List milestones for a project',
+    description: 'List milestones for a project. Archived milestones are excluded by default.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         projectId: { type: 'string', description: 'Project MongoDB ID' },
         status: { type: 'string', enum: ['open', 'in_progress', 'done'], description: 'Filter by status' },
+        includeArchived: { type: 'boolean', description: 'Include archived milestones (default: false)' },
       },
       required: ['projectId'],
     },
@@ -1177,6 +1178,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = await milestonesService.findByProject(
             requireString(a, 'projectId'),
             optionalString(a, 'status') as any,
+            optionalBoolean(a, 'includeArchived'),
           );
           break;
         case 'milestone_get': {

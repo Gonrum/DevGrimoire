@@ -29,8 +29,9 @@ export class MilestonesController {
   findAll(
     @Query('projectId') projectId: string,
     @Query('status') status?: MilestoneStatus,
+    @Query('includeArchived') includeArchived?: string,
   ) {
-    return this.milestonesService.findByProject(projectId, status);
+    return this.milestonesService.findByProject(projectId, status, includeArchived === 'true');
   }
 
   @Get(':id')

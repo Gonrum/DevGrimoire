@@ -480,9 +480,12 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
   return (
     <div>
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <Button variant="primary" size="sm" onClick={() => { setEditingSchema(null); setShowForm(true); }}>
+        <button
+          onClick={() => { setEditingSchema(null); setShowForm(true); }}
+          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+        >
           + Neues Schema
-        </Button>
+        </button>
         {dbTypes.length > 1 && (
           <div className="flex flex-wrap gap-1.5">
             <button

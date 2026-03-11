@@ -66,9 +66,10 @@ export class MilestonesService {
     return milestone;
   }
 
-  async findByProject(projectId: string, status?: MilestoneStatus): Promise<MilestoneDocument[]> {
+  async findByProject(projectId: string, status?: MilestoneStatus, includeArchived?: boolean): Promise<MilestoneDocument[]> {
     const query: Record<string, unknown> = { projectId };
     if (status) query.status = status;
+    if (!includeArchived) query.archived = { $ne: true };
     return this.milestoneModel.find(query).sort({ createdAt: -1 }).exec();
   }
 
