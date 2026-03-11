@@ -232,7 +232,7 @@ export default function ProjectDetail() {
       {tab === 'knowledge' && <KnowledgeList entries={knowledge} />}
       {tab === 'changelog' && <ChangelogList entries={changelog} />}
       {tab === 'manual' && <ManualView key={manualKey} projectId={id!} />}
-      {tab === 'schemas' && <SchemaList entries={schemas} />}
+      {tab === 'schemas' && <SchemaList entries={schemas} projectId={id!} />}
       {tab === 'research' && <ResearchList entries={research} />}
       {tab === 'environments' && <EnvironmentList projectId={id!} />}
       {tab === 'secrets' && <SecretsList projectId={id!} />}
