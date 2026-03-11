@@ -41,4 +41,7 @@ export class Milestone {
 
 export const MilestoneSchema = SchemaFactory.createForClass(Milestone);
 MilestoneSchema.index({ projectId: 1, status: 1, createdAt: -1 });
-MilestoneSchema.index({ projectId: 1, number: 1 }, { unique: true, sparse: true });
+MilestoneSchema.index(
+  { projectId: 1, number: 1 },
+  { unique: true, partialFilterExpression: { number: { $type: 'number' } } },
+);

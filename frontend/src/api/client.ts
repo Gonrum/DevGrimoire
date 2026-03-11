@@ -249,6 +249,51 @@ export interface SearchResult {
   priority?: string;
 }
 
+export interface SchemaField {
+  name: string;
+  type: string;
+  nullable?: boolean;
+  defaultValue?: string;
+  description?: string;
+  isPrimaryKey?: boolean;
+  isIndexed?: boolean;
+  reference?: string;
+}
+
+export interface SchemaIndex {
+  name: string;
+  fields: string[];
+  unique?: boolean;
+  type?: string;
+}
+
+export type DbType = 'mssql' | 'mysql' | 'mongodb' | 'postgresql';
+
+export interface SchemaObject {
+  _id: string;
+  projectId: string;
+  name: string;
+  dbType: DbType;
+  database?: string;
+  description?: string;
+  fields: SchemaField[];
+  indexes: SchemaIndex[];
+  version: number;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SchemaVersion {
+  _id: string;
+  schemaId: string;
+  version: number;
+  fields: SchemaField[];
+  indexes: SchemaIndex[];
+  changeNote?: string;
+  createdAt: string;
+}
+
 export const api = {
   projects: {
     list: (filters?: { active?: boolean; favorite?: boolean }) => {
@@ -442,6 +487,21 @@ export const api = {
       request<ApiKeyCreateResponse>('/api-keys', { method: 'POST', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/api-keys/${id}`, { method: 'DELETE' }),
+  },
+  schemas: {
+    list: (projectId: string, dbType?: string) => {
+      const params = new URLSearchParams({ projectId });
+      if (dbType) params.set('dbType', dbType);
+      return request<SchemaObject[]>(`/schemas?${params}`);
+    },
+    get: (id: string) => request<SchemaObject>(`/schemas/${id}`),
+    create: (data: Partial<SchemaObject>) =>
+      request<SchemaObject>('/schemas', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<SchemaObject> & { changeNote?: string }) =>
+      request<SchemaObject>(`/schemas/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/schemas/${id}`, { method: 'DELETE' }),
+    versions: (id: string) => request<SchemaVersion[]>(`/schemas/${id}/versions`),
   },
   profile: {
     get: () => request<UserInfo>('/auth/profile'),

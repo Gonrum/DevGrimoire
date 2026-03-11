@@ -17,6 +17,7 @@ import { ManualsService } from './manuals/manuals.service';
 import { ResearchService } from './research/research.service';
 import { SettingsService } from './settings/settings.service';
 import { NotificationsService } from './notifications/notifications.service';
+import { SchemasService } from './schemas/schemas.service';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 
 function requireString(args: Record<string, unknown>, field: string): string {
@@ -103,6 +104,7 @@ export interface McpServices {
   researchService: ResearchService;
   settingsService: SettingsService;
   notificationsService: NotificationsService;
+  schemasService: SchemasService;
 }
 
 const tools = [
@@ -767,10 +769,154 @@ const tools = [
       required: ['instructions'],
     },
   },
+  {
+    name: 'schema_create',
+    description: 'Create a database schema object to document a table/collection. Supports mssql, mysql, mongodb, postgresql.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        name: { type: 'string', description: 'Table/collection name' },
+        dbType: { type: 'string', enum: ['mssql', 'mysql', 'mongodb', 'postgresql'], description: 'Database type' },
+        database: { type: 'string', description: 'Database name' },
+        description: { type: 'string', description: 'Purpose/description of the table' },
+        fields: {
+          type: 'array',
+          description: 'Field definitions',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              type: { type: 'string' },
+              nullable: { type: 'boolean' },
+              defaultValue: { type: 'string' },
+              description: { type: 'string' },
+              isPrimaryKey: { type: 'boolean' },
+              isIndexed: { type: 'boolean' },
+              reference: { type: 'string', description: 'Foreign key reference (e.g. "users.id")' },
+            },
+            required: ['name', 'type'],
+          },
+        },
+        indexes: {
+          type: 'array',
+          description: 'Index definitions',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              fields: { type: 'array', items: { type: 'string' } },
+              unique: { type: 'boolean' },
+              type: { type: 'string', description: 'Index type (e.g. btree, hash, gin, fulltext)' },
+            },
+            required: ['name', 'fields'],
+          },
+        },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' },
+      },
+      required: ['projectId', 'name', 'dbType'],
+    },
+  },
+  {
+    name: 'schema_list',
+    description: 'List database schema objects for a project. Returns compact list without fields/indexes.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        dbType: { type: 'string', enum: ['mssql', 'mysql', 'mongodb', 'postgresql'], description: 'Filter by database type' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Filter by tags (all must match)' },
+        limit: { type: 'number', description: 'Max results' },
+        offset: { type: 'number', description: 'Skip results' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'schema_get',
+    description: 'Get a database schema object by ID with full details (fields, indexes).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Schema MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'schema_update',
+    description: 'Update a database schema object. Automatically creates a version snapshot before applying changes.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Schema MongoDB ID' },
+        name: { type: 'string' },
+        dbType: { type: 'string', enum: ['mssql', 'mysql', 'mongodb', 'postgresql'] },
+        database: { type: 'string' },
+        description: { type: 'string' },
+        fields: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              type: { type: 'string' },
+              nullable: { type: 'boolean' },
+              defaultValue: { type: 'string' },
+              description: { type: 'string' },
+              isPrimaryKey: { type: 'boolean' },
+              isIndexed: { type: 'boolean' },
+              reference: { type: 'string' },
+            },
+            required: ['name', 'type'],
+          },
+        },
+        indexes: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              fields: { type: 'array', items: { type: 'string' } },
+              unique: { type: 'boolean' },
+              type: { type: 'string' },
+            },
+            required: ['name', 'fields'],
+          },
+        },
+        tags: { type: 'array', items: { type: 'string' } },
+        changeNote: { type: 'string', description: 'Description of what changed (stored in version history)' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'schema_delete',
+    description: 'Delete a database schema object and all its version history.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Schema MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'schema_versions',
+    description: 'Get version history of a database schema object. Optionally get a specific version.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        schemaId: { type: 'string', description: 'Schema MongoDB ID' },
+        version: { type: 'number', description: 'Specific version number (omit for all versions)' },
+      },
+      required: ['schemaId'],
+    },
+  },
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -837,6 +983,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             secretsService.removeByProject(id),
             manualsService.removeByProject(id),
             researchService.removeByProject(id),
+            schemasService.removeByProject(id),
           ]);
           result = { deleted: true, id };
           break;
@@ -1237,6 +1384,57 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             requireString(a, 'instructions'),
           );
           result = { updated: true };
+          break;
+        }
+        case 'schema_create':
+          result = await schemasService.create({
+            projectId: requireString(a, 'projectId'),
+            name: requireString(a, 'name'),
+            dbType: requireString(a, 'dbType') as any,
+            database: optionalString(a, 'database'),
+            description: optionalString(a, 'description'),
+            fields: (a.fields as any[]) || [],
+            indexes: (a.indexes as any[]) || [],
+            tags: optionalStringArray(a, 'tags'),
+          });
+          break;
+        case 'schema_list': {
+          const schemas = await schemasService.findByProject(
+            requireString(a, 'projectId'),
+            optionalString(a, 'dbType'),
+            optionalStringArray(a, 'tags'),
+          );
+          const compactSchemas = compactList(schemas as any, ['fields', 'indexes', '__v']);
+          result = applyPagination(compactSchemas, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
+          break;
+        }
+        case 'schema_get':
+          result = await schemasService.findById(requireString(a, 'id'));
+          break;
+        case 'schema_update': {
+          const updateData: Record<string, unknown> = {};
+          if (a.name !== undefined) updateData.name = a.name;
+          if (a.dbType !== undefined) updateData.dbType = a.dbType;
+          if (a.database !== undefined) updateData.database = a.database;
+          if (a.description !== undefined) updateData.description = a.description;
+          if (a.fields !== undefined) updateData.fields = a.fields;
+          if (a.indexes !== undefined) updateData.indexes = a.indexes;
+          if (a.tags !== undefined) updateData.tags = a.tags;
+          if (a.changeNote !== undefined) updateData.changeNote = a.changeNote;
+          result = await schemasService.update(requireString(a, 'id'), updateData as any);
+          break;
+        }
+        case 'schema_delete':
+          await schemasService.remove(requireString(a, 'id'));
+          result = { deleted: true, id: requireString(a, 'id') };
+          break;
+        case 'schema_versions': {
+          const ver = optionalNumber(a, 'version');
+          if (ver !== undefined) {
+            result = await schemasService.getVersion(requireString(a, 'schemaId'), ver);
+          } else {
+            result = await schemasService.getVersions(requireString(a, 'schemaId'));
+          }
           break;
         }
         default:
