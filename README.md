@@ -268,4 +268,4 @@ DevGrimoire/
 
 ## Lizenz
 
-MIT
+[AGPL-3.0](LICENSE) -- Du kannst DevGrimoire frei nutzen, selbst hosten und modifizieren. Wenn du eine modifizierte Version als Service betreibst, musst du den Quellcode veroeffentlichen.

@@ -2,6 +2,7 @@
   "name": "devgrimoire-backend",
   "version": "1.0.0",
   "description": "DevGrimoire MCP Server & REST API",
+  "license": "AGPL-3.0-only",
   "private": true,
   "scripts": {
     "build": "nest build",
