@@ -91,6 +91,16 @@ function errorResult(message: string) {
   return { content: [{ type: 'text' as const, text: message }], isError: true };
 }
 
+function compactUpdateResult(doc: any): Record<string, unknown> {
+  const obj = typeof doc.toJSON === 'function' ? doc.toJSON() : { ...doc };
+  return { updated: true, _id: obj._id, updatedAt: obj.updatedAt };
+}
+
+function compactCreateResult(doc: any, extra?: Record<string, unknown>): Record<string, unknown> {
+  const obj = typeof doc.toJSON === 'function' ? doc.toJSON() : { ...doc };
+  return { created: true, _id: obj._id, createdAt: obj.createdAt, ...extra };
+}
+
 export interface McpServices {
   projectsService: ProjectsService;
   todosService: TodosService;
@@ -291,7 +301,7 @@ const tools = [
   },
   {
     name: 'session_get',
-    description: 'Get the latest work session(s) for a project',
+    description: 'Get the latest work session(s) for a project. limit=1 (default): full details. limit>1: compact list (date, summary snippet).',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -544,7 +554,7 @@ const tools = [
   },
   {
     name: 'environment_list',
-    description: 'List all environments for a project',
+    description: 'List all environments for a project (compact: name, active, variableCount). Use environment_get for full variables.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -908,7 +918,7 @@ const tools = [
   },
   {
     name: 'schema_versions',
-    description: 'Get version history of a database schema object. Optionally get a specific version.',
+    description: 'Get version history of a database schema object. Without version: compact list (version, changeNote, date). With version number: full details.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -1045,6 +1055,8 @@ const tools = [
         projectId: { type: 'string', description: 'Project MongoDB ID' },
         status: { type: 'string', enum: ['planned', 'in_development', 'released', 'deprecated'], description: 'Filter by status' },
         category: { type: 'string', description: 'Filter by category' },
+        limit: { type: 'number', description: 'Max items to return' },
+        offset: { type: 'number', description: 'Skip first N items' },
       },
       required: ['projectId'],
     },
@@ -1104,8 +1116,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
       let result: unknown;
 
       switch (name) {
-        case 'project_create':
-          result = await projectsService.create({
+        case 'project_create': {
+          const proj = await projectsService.create({
             name: requireString(a, 'name'),
             path: optionalString(a, 'path'),
             description: optionalString(a, 'description'),
@@ -1114,7 +1126,9 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             instructions: optionalString(a, 'instructions'),
             components: a.components as any,
           });
+          result = compactCreateResult(proj, { name: (proj as any).name });
           break;
+        }
         case 'project_list': {
           const projects = await projectsService.findAll(optionalBoolean(a, 'active'), optionalBoolean(a, 'favorite'));
           result = compactList(projects as any, ['instructions', 'components', '__v']);
@@ -1134,7 +1148,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'project_update':
-          result = await projectsService.update(requireString(a, 'id'), {
+          result = compactUpdateResult(await projectsService.update(requireString(a, 'id'), {
             name: optionalString(a, 'name'),
             path: optionalString(a, 'path'),
             description: optionalString(a, 'description'),
@@ -1143,7 +1157,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             active: optionalBoolean(a, 'active'),
             instructions: optionalString(a, 'instructions'),
             components: a.components as any,
-          });
+          }));
           break;
         case 'project_delete': {
           const id = requireString(a, 'id');
@@ -1166,8 +1180,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = { deleted: true, id };
           break;
         }
-        case 'todo_create':
-          result = await todosService.create({
+        case 'todo_create': {
+          const todo = await todosService.create({
             projectId: requireString(a, 'projectId'),
             title: requireString(a, 'title'),
             description: optionalString(a, 'description'),
@@ -1177,7 +1191,9 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             milestoneId: optionalString(a, 'milestoneId'),
             blockedBy: optionalStringArray(a, 'blockedBy'),
           });
+          result = compactCreateResult(todo, { displayNumber: (todo as any).displayNumber, title: (todo as any).title });
           break;
+        }
         case 'todo_list': {
           const todos = await todosService.findAll({
             projectId: optionalString(a, 'projectId'),
@@ -1188,7 +1204,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             includeArchived: optionalBoolean(a, 'includeArchived'),
           });
           const compactTodos = compactList(todos as any, ['description', 'comments', 'blockedBy', '__v']);
-          result = applyPagination(compactTodos, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
+          const todoLimit = optionalNumber(a, 'limit') ?? (optionalString(a, 'projectId') ? undefined : 50);
+          result = applyPagination(compactTodos, todoLimit, optionalNumber(a, 'offset'));
           break;
         }
         case 'todo_get': {
@@ -1206,7 +1223,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             projectId: optionalString(a, 'projectId'),
             number: optionalString(a, 'number'),
           });
-          result = await todosService.update(todoUpdateId, {
+          result = compactUpdateResult(await todosService.update(todoUpdateId, {
             title: optionalString(a, 'title'),
             description: optionalString(a, 'description'),
             status: optionalString(a, 'status') as any,
@@ -1215,7 +1232,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             milestoneId: optionalString(a, 'milestoneId'),
             blockedBy: optionalStringArray(a, 'blockedBy'),
             archived: optionalBoolean(a, 'archived'),
-          });
+          }));
           break;
         }
         case 'todo_delete': {
@@ -1241,44 +1258,64 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           );
           break;
         }
-        case 'session_save':
-          result = await sessionsService.create({
+        case 'session_save': {
+          const session = await sessionsService.create({
             projectId: requireString(a, 'projectId'),
             summary: requireString(a, 'summary'),
             filesChanged: optionalStringArray(a, 'filesChanged'),
             nextSteps: optionalStringArray(a, 'nextSteps'),
             openQuestions: optionalStringArray(a, 'openQuestions'),
           });
+          result = compactCreateResult(session);
           break;
+        }
         case 'session_get': {
           const projectId = requireString(a, 'projectId');
           const limit = optionalNumber(a, 'limit') || 1;
           if (limit > 1) {
-            result = await sessionsService.findByProject(projectId, limit);
+            const sessions = await sessionsService.findByProject(projectId, limit);
+            result = (sessions as any[]).map((s: any) => {
+              const obj = typeof s.toJSON === 'function' ? s.toJSON() : { ...s };
+              return {
+                _id: obj._id,
+                projectId: obj.projectId,
+                summary: snippet(obj.summary),
+                createdAt: obj.createdAt,
+              };
+            });
           } else {
             result = await sessionsService.findLatest(projectId);
             if (!result) return textResult({ message: 'No sessions found for this project.' });
           }
           break;
         }
-        case 'knowledge_save':
-          result = await knowledgeService.create({
+        case 'knowledge_save': {
+          const kEntry = await knowledgeService.create({
             projectId: requireString(a, 'projectId'),
             topic: requireString(a, 'topic'),
             content: requireString(a, 'content'),
             tags: optionalStringArray(a, 'tags'),
             category: optionalString(a, 'category'),
           });
+          result = compactCreateResult(kEntry, { topic: (kEntry as any).topic });
           break;
+        }
         case 'knowledge_search': {
+          const kProjectId = optionalString(a, 'projectId');
           const searchResults = await knowledgeService.search(
             requireString(a, 'query'),
-            optionalString(a, 'projectId'),
+            kProjectId,
           );
-          const limited = optionalNumber(a, 'limit') ? searchResults.slice(0, optionalNumber(a, 'limit')) : searchResults;
+          const limited = searchResults.slice(0, optionalNumber(a, 'limit') || 10);
           result = limited.map((item: any) => {
             const obj = typeof item.toJSON === 'function' ? item.toJSON() : { ...item };
-            obj.content = snippet(obj.content);
+            if (kProjectId) {
+              // Project-scoped: return snippet
+              obj.content = snippet(obj.content);
+            } else {
+              // Global search: only return compact metadata
+              delete obj.content;
+            }
             delete obj.__v;
             return obj;
           });
@@ -1297,26 +1334,28 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = await knowledgeService.findById(requireString(a, 'id'));
           break;
         case 'knowledge_update':
-          result = await knowledgeService.update(requireString(a, 'id'), {
+          result = compactUpdateResult(await knowledgeService.update(requireString(a, 'id'), {
             topic: optionalString(a, 'topic'),
             content: optionalString(a, 'content'),
             tags: optionalStringArray(a, 'tags'),
             category: optionalString(a, 'category'),
-          });
+          }));
           break;
         case 'knowledge_delete':
           await knowledgeService.remove(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
           break;
-        case 'changelog_add':
-          result = await changelogService.create({
+        case 'changelog_add': {
+          const clEntry = await changelogService.create({
             projectId: requireString(a, 'projectId'),
             version: optionalString(a, 'version'),
             changes: a.changes as string[],
             summary: optionalString(a, 'summary'),
             component: optionalString(a, 'component'),
           });
+          result = compactCreateResult(clEntry, { version: (clEntry as any).version });
           break;
+        }
         case 'changelog_list': {
           const clLimit = optionalNumber(a, 'limit') || 10;
           const changelogs = await changelogService.findByProject(
@@ -1331,33 +1370,37 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = await changelogService.findById(requireString(a, 'id'));
           break;
         case 'changelog_update':
-          result = await changelogService.update(requireString(a, 'id'), {
+          result = compactUpdateResult(await changelogService.update(requireString(a, 'id'), {
             version: optionalString(a, 'version'),
             changes: optionalStringArray(a, 'changes'),
             summary: optionalString(a, 'summary'),
             component: optionalString(a, 'component'),
-          });
+          }));
           break;
         case 'changelog_delete':
           await changelogService.remove(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
           break;
-        case 'milestone_create':
-          result = await milestonesService.create({
+        case 'milestone_create': {
+          const ms = await milestonesService.create({
             projectId: requireString(a, 'projectId'),
             name: requireString(a, 'name'),
             description: optionalString(a, 'description'),
             status: optionalString(a, 'status') as any,
             dueDate: optionalString(a, 'dueDate'),
           });
+          result = compactCreateResult(ms, { displayNumber: (ms as any).displayNumber, name: (ms as any).name });
           break;
-        case 'milestone_list':
-          result = await milestonesService.findByProject(
+        }
+        case 'milestone_list': {
+          const milestones = await milestonesService.findByProject(
             requireString(a, 'projectId'),
             optionalString(a, 'status') as any,
             optionalBoolean(a, 'includeArchived'),
           );
+          result = compactList(milestones as any, ['description', '__v']);
           break;
+        }
         case 'milestone_get': {
           const msGetId = await milestonesService.resolveId({
             id: optionalString(a, 'id'),
@@ -1373,14 +1416,14 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             projectId: optionalString(a, 'projectId'),
             number: optionalString(a, 'number'),
           });
-          result = await milestonesService.update(msUpdateId, {
+          result = compactUpdateResult(await milestonesService.update(msUpdateId, {
             name: optionalString(a, 'name'),
             description: optionalString(a, 'description'),
             status: optionalString(a, 'status') as any,
             dueDate: optionalString(a, 'dueDate'),
             archived: optionalBoolean(a, 'archived'),
             changelogId: optionalString(a, 'changelogId'),
-          });
+          }));
           break;
         }
         case 'milestone_delete': {
@@ -1402,40 +1445,57 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = { notificationId: notification._id.toString(), push: pushResult };
           break;
         }
-        case 'environment_create':
-          result = await environmentsService.create({
+        case 'environment_create': {
+          const env = await environmentsService.create({
             projectId: requireString(a, 'projectId'),
             name: requireString(a, 'name'),
             variables: a.variables as any,
             active: optionalBoolean(a, 'active'),
           });
+          result = compactCreateResult(env, { name: (env as any).name });
           break;
-        case 'environment_list':
-          result = await environmentsService.findByProject(requireString(a, 'projectId'));
+        }
+        case 'environment_list': {
+          const envs = await environmentsService.findByProject(requireString(a, 'projectId'));
+          result = (envs as any[]).map((e: any) => {
+            const obj = typeof e.toJSON === 'function' ? e.toJSON() : { ...e };
+            return {
+              _id: obj._id,
+              projectId: obj.projectId,
+              name: obj.name,
+              active: obj.active,
+              variableCount: (obj.variables || []).length,
+              createdAt: obj.createdAt,
+              updatedAt: obj.updatedAt,
+            };
+          });
           break;
+        }
         case 'environment_get':
           result = await environmentsService.findById(requireString(a, 'id'));
           break;
         case 'environment_update':
-          result = await environmentsService.update(requireString(a, 'id'), {
+          result = compactUpdateResult(await environmentsService.update(requireString(a, 'id'), {
             name: optionalString(a, 'name'),
             variables: a.variables as any,
             active: optionalBoolean(a, 'active'),
-          });
+          }));
           break;
         case 'environment_delete':
           await environmentsService.delete(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
           break;
-        case 'secret_set':
-          result = await secretsService.create({
+        case 'secret_set': {
+          const secret = await secretsService.create({
             projectId: requireString(a, 'projectId'),
             environmentId: optionalString(a, 'environmentId'),
             key: requireString(a, 'key'),
             value: requireString(a, 'value'),
             description: optionalString(a, 'description'),
           });
+          result = compactCreateResult(secret, { key: (secret as any).key });
           break;
+        }
         case 'secret_get':
           result = await secretsService.findById(requireString(a, 'id'));
           break;
@@ -1472,37 +1532,46 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = { environment: env.name, export: lines.join('\n') };
           break;
         }
-        case 'manual_save':
-          result = await manualsService.save({
+        case 'manual_save': {
+          const manual = await manualsService.save({
             projectId: requireString(a, 'projectId'),
             content: requireString(a, 'content'),
             title: optionalString(a, 'title'),
           });
+          result = compactCreateResult(manual, { title: (manual as any).title });
           break;
+        }
         case 'manual_get': {
           const manual = await manualsService.findByProject(requireString(a, 'projectId'));
           if (!manual) return textResult({ message: 'No manual found for this project.' });
           result = manual;
           break;
         }
-        case 'research_save':
-          result = await researchService.create({
+        case 'research_save': {
+          const rEntry = await researchService.create({
             projectId: requireString(a, 'projectId'),
             title: requireString(a, 'title'),
             content: requireString(a, 'content'),
             sources: optionalStringArray(a, 'sources'),
             tags: optionalStringArray(a, 'tags'),
           });
+          result = compactCreateResult(rEntry, { title: (rEntry as any).title });
           break;
+        }
         case 'research_search': {
+          const rProjectId = optionalString(a, 'projectId');
           const rSearchResults = await researchService.search(
             requireString(a, 'query'),
-            optionalString(a, 'projectId'),
+            rProjectId,
           );
-          const rLimited = optionalNumber(a, 'limit') ? rSearchResults.slice(0, optionalNumber(a, 'limit')) : rSearchResults;
+          const rLimited = rSearchResults.slice(0, optionalNumber(a, 'limit') || 10);
           result = rLimited.map((item: any) => {
             const obj = typeof item.toJSON === 'function' ? item.toJSON() : { ...item };
-            obj.content = snippet(obj.content);
+            if (rProjectId) {
+              obj.content = snippet(obj.content);
+            } else {
+              delete obj.content;
+            }
             obj.sourceCount = (obj.sources || []).length;
             delete obj.sources;
             delete obj.__v;
@@ -1527,12 +1596,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = await researchService.findById(requireString(a, 'id'));
           break;
         case 'research_update':
-          result = await researchService.update(requireString(a, 'id'), {
+          result = compactUpdateResult(await researchService.update(requireString(a, 'id'), {
             title: optionalString(a, 'title'),
             content: optionalString(a, 'content'),
             sources: optionalStringArray(a, 'sources'),
             tags: optionalStringArray(a, 'tags'),
-          });
+          }));
           break;
         case 'research_delete':
           await researchService.remove(requireString(a, 'id'));
@@ -1565,8 +1634,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = { updated: true };
           break;
         }
-        case 'schema_create':
-          result = await schemasService.create({
+        case 'schema_create': {
+          const schema = await schemasService.create({
             projectId: requireString(a, 'projectId'),
             name: requireString(a, 'name'),
             dbType: requireString(a, 'dbType') as any,
@@ -1576,7 +1645,9 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             indexes: (a.indexes as any[]) || [],
             tags: optionalStringArray(a, 'tags'),
           });
+          result = compactCreateResult(schema, { name: (schema as any).name });
           break;
+        }
         case 'schema_list': {
           const schemas = await schemasService.findByProject(
             requireString(a, 'projectId'),
@@ -1600,7 +1671,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           if (a.indexes !== undefined) updateData.indexes = a.indexes;
           if (a.tags !== undefined) updateData.tags = a.tags;
           if (a.changeNote !== undefined) updateData.changeNote = a.changeNote;
-          result = await schemasService.update(requireString(a, 'id'), updateData as any);
+          result = compactUpdateResult(await schemasService.update(requireString(a, 'id'), updateData as any));
           break;
         }
         case 'schema_delete':
@@ -1612,12 +1683,21 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           if (ver !== undefined) {
             result = await schemasService.getVersion(requireString(a, 'schemaId'), ver);
           } else {
-            result = await schemasService.getVersions(requireString(a, 'schemaId'));
+            const versions = await schemasService.getVersions(requireString(a, 'schemaId'));
+            result = (versions as any[]).map((v: any) => {
+              const obj = typeof v.toJSON === 'function' ? v.toJSON() : { ...v };
+              return {
+                _id: obj._id,
+                version: obj.version,
+                changeNote: obj.changeNote,
+                createdAt: obj.createdAt,
+              };
+            });
           }
           break;
         }
-        case 'feature_create':
-          result = await featuresService.create({
+        case 'feature_create': {
+          const feat = await featuresService.create({
             projectId: requireString(a, 'projectId'),
             name: requireString(a, 'name'),
             description: optionalString(a, 'description'),
@@ -1627,20 +1707,26 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             priority: optionalString(a, 'priority') as any,
             tags: optionalStringArray(a, 'tags'),
           });
+          result = compactCreateResult(feat, { name: (feat as any).name });
           break;
+        }
         case 'feature_list': {
           const features = await featuresService.findByProject(requireString(a, 'projectId'), {
             status: optionalString(a, 'status') as any,
             category: optionalString(a, 'category'),
           });
-          result = compactList(features as any, ['description', '__v']);
+          result = applyPagination(
+            compactList(features as any, ['description', '__v']),
+            optionalNumber(a, 'limit'),
+            optionalNumber(a, 'offset'),
+          );
           break;
         }
         case 'feature_get':
           result = await featuresService.findById(requireString(a, 'id'));
           break;
         case 'feature_update':
-          result = await featuresService.update(requireString(a, 'id'), {
+          result = compactUpdateResult(await featuresService.update(requireString(a, 'id'), {
             name: optionalString(a, 'name'),
             description: optionalString(a, 'description'),
             category: optionalString(a, 'category'),
@@ -1648,14 +1734,14 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             version: optionalString(a, 'version'),
             priority: optionalString(a, 'priority') as any,
             tags: optionalStringArray(a, 'tags'),
-          });
+          }));
           break;
         case 'feature_delete':
           await featuresService.remove(requireString(a, 'id'));
           result = { deleted: true, id: requireString(a, 'id') };
           break;
-        case 'dependency_add':
-          result = await dependenciesService.create({
+        case 'dependency_add': {
+          const dep = await dependenciesService.create({
             projectId: requireString(a, 'projectId'),
             name: requireString(a, 'name'),
             version: requireString(a, 'version'),
@@ -1665,27 +1751,33 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             category: optionalString(a, 'category'),
             tags: optionalStringArray(a, 'tags'),
           });
+          result = compactCreateResult(dep, { name: (dep as any).name, version: (dep as any).version });
           break;
+        }
         case 'dependency_list': {
           const deps = await dependenciesService.findByProject(requireString(a, 'projectId'), {
             packageManager: optionalString(a, 'packageManager') as any,
             category: optionalString(a, 'category'),
             devDependency: a.devDependency !== undefined ? a.devDependency === true : undefined,
           });
-          result = compactList(deps as any, ['description', 'tags', '__v']);
+          result = applyPagination(
+            compactList(deps as any, ['description', 'tags', '__v']),
+            optionalNumber(a, 'limit'),
+            optionalNumber(a, 'offset'),
+          );
           break;
         }
         case 'dependency_get':
           result = await dependenciesService.findById(requireString(a, 'id'));
           break;
         case 'dependency_update':
-          result = await dependenciesService.update(requireString(a, 'id'), {
+          result = compactUpdateResult(await dependenciesService.update(requireString(a, 'id'), {
             version: optionalString(a, 'version'),
             description: optionalString(a, 'description'),
             devDependency: a.devDependency !== undefined ? a.devDependency === true : undefined,
             category: optionalString(a, 'category'),
             tags: optionalStringArray(a, 'tags'),
-          });
+          }));
           break;
         case 'dependency_delete':
           await dependenciesService.remove(requireString(a, 'id'));

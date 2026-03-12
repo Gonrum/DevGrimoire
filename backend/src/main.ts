@@ -73,6 +73,8 @@ async function bootstrap() {
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};
+  // Track which SSE sessions are already authenticated (by initial /sse request)
+  const authenticatedSessions = new Set<string>();
 
   // API Key auth middleware for MCP endpoints
   const apiKeysService = app.get(ApiKeysService);
@@ -115,7 +117,17 @@ async function bootstrap() {
 
   expressApp.use('/mcp', mcpAuthMiddleware);
   expressApp.use('/sse', mcpAuthMiddleware);
-  expressApp.use('/messages', mcpAuthMiddleware);
+  expressApp.use('/messages', async (req: any, res: any, next: any) => {
+    // Skip auth if not enabled
+    if (!authService.isAuthEnabled()) return next();
+    // /messages requests belong to an SSE session that was already authenticated on /sse
+    const sessionId = req.query?.sessionId as string | undefined;
+    if (sessionId && authenticatedSessions.has(sessionId)) {
+      return next();
+    }
+    // Fallback: check API key directly
+    return mcpAuthMiddleware(req, res, next);
+  });
 
   // Streamable HTTP endpoint (protocol version 2025-11-25)
   expressApp.all('/mcp', async (req: any, res: any) => {
@@ -173,8 +185,10 @@ async function bootstrap() {
   expressApp.get('/sse', async (req: any, res: any) => {
     const transport = new SSEServerTransport('/messages', res);
     transports[transport.sessionId] = transport;
+    authenticatedSessions.add(transport.sessionId);
     res.on('close', () => {
       delete transports[transport.sessionId];
+      authenticatedSessions.delete(transport.sessionId);
     });
     const server = createMcpServer(services);
     await server.connect(transport);
