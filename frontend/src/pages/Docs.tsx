@@ -75,9 +75,9 @@ export default function Docs() {
 function OverviewSection() {
   return (
     <>
-      <Section title="Was ist ClaudeVault?">
+      <Section title="Was ist DevGrimoire?">
         <p className="text-gray-400 leading-relaxed">
-          ClaudeVault gibt Claude (dem AI-Assistenten) ein persistentes
+          DevGrimoire gibt Claude (dem AI-Assistenten) ein persistentes
           Ged&auml;chtnis f&uuml;r deine Projekte. Claude kann Projekte tracken,
           Todos und Milestones verwalten, Arbeitssessions dokumentieren,
           Wissen abspeichern, Changelogs pflegen und verschl&uuml;sselte
@@ -122,8 +122,8 @@ function SetupSection() {
     <>
       <Section title="Installation">
         <Step n={1} title="Repository klonen & Umgebung konfigurieren">
-          <Code>{`git clone <repo-url> ClaudeVault
-cd ClaudeVault
+          <Code>{`git clone <repo-url> DevGrimoire
+cd DevGrimoire
 cp .env.example .env
 # .env anpassen`}</Code>
           <p className="text-gray-500 text-sm mt-2">
@@ -151,7 +151,7 @@ openssl rand -hex 32`}</Code>
         <p className="text-gray-400 text-sm mb-4">
           Das Backend stellt HTTP-basierte MCP-Endpoints bereit. Claude Code kann von{' '}
           <strong className="text-gray-200">jedem Rechner im Netzwerk</strong>{' '}
-          auf ClaudeVault zugreifen &mdash; ohne lokale Installation.
+          auf DevGrimoire zugreifen &mdash; ohne lokale Installation.
         </p>
 
         <Step n={1} title="Claude Code CLI">
@@ -160,7 +160,7 @@ openssl rand -hex 32`}</Code>
           </p>
           <Code>{`{
   "mcpServers": {
-    "claudevault": {
+    "devgrimoire": {
       "type": "sse",
       "url": "http://[server]/sse"
     }
@@ -175,7 +175,7 @@ openssl rand -hex 32`}</Code>
           </p>
           <Code>{`{
   "mcpServers": {
-    "claudevault": {
+    "devgrimoire": {
       "command": "npx",
       "args": ["-y", "mcp-remote", "http://[server]/sse", "--allow-http"]
     }
@@ -229,11 +229,11 @@ NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
         <Step n={2} title="MCP-Config einrichten">
           <Code>{`{
   "mcpServers": {
-    "claudevault": {
+    "devgrimoire": {
       "command": "node",
-      "args": ["/pfad/zu/ClaudeVault/backend/dist/mcp-server.js"],
+      "args": ["/pfad/zu/DevGrimoire/backend/dist/mcp-server.js"],
       "env": {
-        "MONGODB_URI": "mongodb://user:pass@localhost:27017/claudevault?authSource=admin&directConnection=true"
+        "MONGODB_URI": "mongodb://user:pass@localhost:27017/devgrimoire?authSource=admin&directConnection=true"
       }
     }
   }
@@ -249,7 +249,7 @@ function AuthSection() {
     <>
       <Section title="Authentifizierung">
         <p className="text-gray-400 text-sm mb-4">
-          ClaudeVault unterst&uuml;tzt Multi-User-Authentifizierung mit rollenbasierter Zugriffskontrolle (RBAC).
+          DevGrimoire unterst&uuml;tzt Multi-User-Authentifizierung mit rollenbasierter Zugriffskontrolle (RBAC).
           Beim ersten Start wird aus den Env-Variablen <Mono>AUTH_USERNAME</Mono> und <Mono>AUTH_PASSWORD</Mono> ein
           Admin-Benutzer in der Datenbank angelegt. Weitere Benutzer k&ouml;nnen &uuml;ber die Admin-Oberfl&auml;che
           verwaltet werden.
@@ -325,7 +325,7 @@ function AuthSection() {
           </p>
           <Code>{`{
   "mcpServers": {
-    "claudevault": {
+    "devgrimoire": {
       "type": "sse",
       "url": "http://[server]/sse?apiKey=cv_..."
     }
@@ -336,7 +336,7 @@ function AuthSection() {
           </p>
           <Code>{`{
   "mcpServers": {
-    "claudevault": {
+    "devgrimoire": {
       "type": "http",
       "url": "http://[server]/mcp",
       "headers": {

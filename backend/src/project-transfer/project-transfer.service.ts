@@ -80,7 +80,7 @@ export class ProjectTransferService {
     return {
       _exportVersion: 1,
       _exportedAt: new Date().toISOString(),
-      _source: 'ClaudeVault',
+      _source: 'DevGrimoire',
       project: projectObj,
       todos: strip(todos),
       milestones: strip(milestones),
@@ -101,7 +101,7 @@ export class ProjectTransferService {
     data: ProjectExport,
     nameOverride?: string,
   ): Promise<{ projectId: string; projectName: string; stats: Record<string, number> }> {
-    if (data._exportVersion !== 1 || data._source !== 'ClaudeVault') {
+    if (data._exportVersion !== 1 || data._source !== 'DevGrimoire') {
       throw new BadRequestException('Invalid export format');
     }
 

@@ -18,7 +18,7 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState>(null!);
 
-const REFRESH_TOKEN_KEY = 'claudevault_refresh_token';
+const REFRESH_TOKEN_KEY = 'devgrimoire_refresh_token';
 
 function parseJwtPayload(token: string): any {
   try {

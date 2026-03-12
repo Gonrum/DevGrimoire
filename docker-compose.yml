@@ -1,7 +1,7 @@
 services:
   mongodb:
     image: mongo:7
-    container_name: claudevault-mongodb
+    container_name: devgrimoire-mongodb
     restart: unless-stopped
     ports:
       - "127.0.0.1:27017:27017"
@@ -21,7 +21,7 @@ services:
 
   mongodb-init:
     image: mongo:7
-    container_name: claudevault-mongodb-init
+    container_name: devgrimoire-mongodb-init
     restart: "no"
     depends_on:
       mongodb:
@@ -35,7 +35,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: claudevault-backend
+    container_name: devgrimoire-backend
     restart: unless-stopped
     ports:
       - "3200:3000"
@@ -64,7 +64,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: claudevault-frontend
+    container_name: devgrimoire-frontend
     restart: unless-stopped
     ports:
       - "80:8080"

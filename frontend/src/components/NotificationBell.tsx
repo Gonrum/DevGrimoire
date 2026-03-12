@@ -46,7 +46,7 @@ export default function NotificationBell() {
 
   // Listen for SSE notification events with auto-reconnect
   useEffect(() => {
-    const token = localStorage.getItem('claudevault_access_token');
+    const token = localStorage.getItem('devgrimoire_access_token');
     const params = new URLSearchParams();
     if (token) params.set('token', token);
     const url = `/api/events?${params}`;

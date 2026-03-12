@@ -32,7 +32,7 @@ import { AuthService } from './auth/auth.service';
 
 function createMcpServer(services: McpServices): Server {
   const server = new Server(
-    { name: 'ClaudeVault', version: '1.0.0' },
+    { name: 'DevGrimoire', version: '1.0.0' },
     { capabilities: { tools: {} } },
   );
   registerMcpTools(server, services);
@@ -225,7 +225,7 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  console.log(`ClaudeVault API running on port ${port}`);
+  console.log(`DevGrimoire API running on port ${port}`);
   console.log(`MCP HTTP transport available at /mcp (Streamable HTTP) and /sse (Legacy SSE)`);
 }
 bootstrap();

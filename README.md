@@ -1,8 +1,8 @@
-# ClaudeVault
+# DevGrimoire
 
 **Persistentes Projektgedaechtnis fuer Claude** -- MCP-Server, REST API und React-Dashboard in einem.
 
-ClaudeVault gibt Claude (dem AI-Assistenten) ein persistentes Gedaechtnis fuer deine Projekte. Ueber das [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) kann Claude Projekte verwalten, Aufgaben und Milestones tracken, Wissen speichern, Changelogs pflegen, Datenbank-Schemas dokumentieren, Abhaengigkeiten scannen, Feature-Kataloge fuehren, Handbuecher schreiben und vieles mehr. Das Web-Frontend zeigt alles in einem Dark-Mode Dashboard mit Echtzeit-Updates.
+DevGrimoire gibt Claude (dem AI-Assistenten) ein persistentes Gedaechtnis fuer deine Projekte. Ueber das [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) kann Claude Projekte verwalten, Aufgaben und Milestones tracken, Wissen speichern, Changelogs pflegen, Datenbank-Schemas dokumentieren, Abhaengigkeiten scannen, Feature-Kataloge fuehren, Handbuecher schreiben und vieles mehr. Das Web-Frontend zeigt alles in einem Dark-Mode Dashboard mit Echtzeit-Updates.
 
 ## Architektur
 
@@ -69,8 +69,8 @@ ClaudeVault gibt Claude (dem AI-Assistenten) ein persistentes Gedaechtnis fuer d
 
 ```bash
 # 1. Repository klonen
-git clone https://github.com/Gonrum/ClaudeVault.git
-cd ClaudeVault
+git clone https://github.com/Gonrum/DevGrimoire.git
+cd DevGrimoire
 
 # 2. Umgebungsvariablen konfigurieren
 cp .env.example .env
@@ -128,14 +128,14 @@ openssl rand -hex 32
 
 ### Remote-Anbindung (HTTP/SSE -- empfohlen)
 
-Wenn der Docker Stack laeuft, kann Claude von jedem Rechner im Netzwerk auf ClaudeVault zugreifen -- ohne lokale Installation.
+Wenn der Docker Stack laeuft, kann Claude von jedem Rechner im Netzwerk auf DevGrimoire zugreifen -- ohne lokale Installation.
 
 In `~/.claude.json` (Claude Code) oder `claude_desktop_config.json` (Claude Desktop):
 
 ```json
 {
   "mcpServers": {
-    "claudevault": {
+    "devgrimoire": {
       "type": "sse",
       "url": "http://<hostname>:3200/sse"
     }
@@ -166,11 +166,11 @@ In `~/.claude.json`:
 ```json
 {
   "mcpServers": {
-    "claudevault": {
+    "devgrimoire": {
       "command": "node",
-      "args": ["/pfad/zu/ClaudeVault/backend/dist/mcp-server.js"],
+      "args": ["/pfad/zu/DevGrimoire/backend/dist/mcp-server.js"],
       "env": {
-        "MONGODB_URI": "mongodb://user:pass@localhost:27017/claudevault?authSource=admin&directConnection=true"
+        "MONGODB_URI": "mongodb://user:pass@localhost:27017/devgrimoire?authSource=admin&directConnection=true"
       }
     }
   }
@@ -181,7 +181,7 @@ In `~/.claude.json`:
 
 ## Authentifizierung
 
-ClaudeVault unterstuetzt Multi-User-Authentifizierung mit Rollen:
+DevGrimoire unterstuetzt Multi-User-Authentifizierung mit Rollen:
 
 - **Rollen** -- `admin` (voller Zugriff + Benutzerverwaltung), `user` (Lese-/Schreibzugriff)
 - **Access Token** -- JWT, 15 Minuten gueltig, im Speicher gehalten
@@ -223,7 +223,7 @@ Komplette Projektdaten (Todos, Milestones, Wissen, Changelog, Sessions, Schemas,
 ## Projektstruktur
 
 ```
-ClaudeVault/
+DevGrimoire/
 ├── backend/
 │   └── src/
 │       ├── main.ts                # REST API Entry (NestJS HTTP, Prefix /api)

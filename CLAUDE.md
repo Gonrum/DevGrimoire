@@ -1,4 +1,4 @@
-# ClaudeVault
+# DevGrimoire
 
 MCP Server + REST API + React Frontend für Projekt-Wissensmanagement.
 
@@ -14,8 +14,8 @@ MCP Server + REST API + React Frontend für Projekt-Wissensmanagement.
 3. Wenn beides erfolgreich ist, pushen
 4. Nach Code-Änderungen immer `docker compose up -d --build backend frontend` ausführen
 
-## Task-Workflow (ClaudeVault Todos)
-Wenn du Tasks in ClaudeVault bearbeitest:
+## Task-Workflow (DevGrimoire Todos)
+Wenn du Tasks in DevGrimoire bearbeitest:
 1. Status auf `in_progress` setzen wenn du anfängst
 2. Implementierung durchführen
 3. Status auf `review` setzen
@@ -98,7 +98,7 @@ Rufe **immer** `system_instructions_get` am Anfang jeder Session auf, um die akt
 - `environment_export` kombiniert Variablen + entschlüsselte Secrets
 
 ### Benachrichtigungen (`notify_user`)
-- Push an ClaudeVault PWA: `title`, `body`, optional `url` (Deep-Link)
+- Push an DevGrimoire PWA: `title`, `body`, optional `url` (Deep-Link)
 
 ### System-Instruktionen (`system_instructions_*`)
 - `system_instructions_get` am Start jeder Session aufrufen

@@ -527,7 +527,7 @@ const tools = [
   },
   {
     name: 'notify_user',
-    description: 'Send a push notification to the user via the ClaudeVault PWA. Use this to inform the user about completed tasks, important updates, or when you need their attention.',
+    description: 'Send a push notification to the user via the DevGrimoire PWA. Use this to inform the user about completed tasks, important updates, or when you need their attention.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -805,7 +805,7 @@ const tools = [
   },
   {
     name: 'system_instructions_get',
-    description: 'IMPORTANT: Call this tool at the start of every session to learn how to work with ClaudeVault correctly. Returns global agent instructions and optionally project-specific instructions.',
+    description: 'IMPORTANT: Call this tool at the start of every session to learn how to work with DevGrimoire correctly. Returns global agent instructions and optionally project-specific instructions.',
     inputSchema: {
       type: 'object' as const,
       properties: {

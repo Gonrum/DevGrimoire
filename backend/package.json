@@ -1,7 +1,7 @@
 {
-  "name": "claudevault-backend",
+  "name": "devgrimoire-backend",
   "version": "1.0.0",
-  "description": "ClaudeVault MCP Server & REST API",
+  "description": "DevGrimoire MCP Server & REST API",
   "private": true,
   "scripts": {
     "build": "nest build",

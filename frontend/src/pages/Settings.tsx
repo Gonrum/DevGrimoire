@@ -5,7 +5,7 @@ import UserManagement from './UserManagement';
 import Button from '../components/ui/Button';
 import ConfirmButton from '../components/ui/ConfirmButton';
 
-const DEFAULT_INSTRUCTIONS = `# ClaudeVault Agent-Instruktionen
+const DEFAULT_INSTRUCTIONS = `# DevGrimoire Agent-Instruktionen
 
 ## Task-Workflow
 Wenn du Tasks bearbeitest, halte dich an den Status-Workflow:

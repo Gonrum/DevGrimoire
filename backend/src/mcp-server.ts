@@ -27,7 +27,7 @@ async function bootstrap() {
   });
 
   const server = new Server(
-    { name: 'ClaudeVault', version: '1.0.0' },
+    { name: 'DevGrimoire', version: '1.0.0' },
     { capabilities: { tools: {} } },
   );
 

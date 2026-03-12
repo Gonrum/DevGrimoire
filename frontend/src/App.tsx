@@ -65,7 +65,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, authEnabled, loading, getAccessToken } = useAuth();
 
   useEffect(() => {
-    const REFRESH_TOKEN_KEY = 'claudevault_refresh_token';
+    const REFRESH_TOKEN_KEY = 'devgrimoire_refresh_token';
     configureAuth(
       getAccessToken,
       async () => {
@@ -109,7 +109,7 @@ function AppShell() {
       <header className="bg-gray-900 border-b border-gray-800 px-4 sm:px-6 py-3 sm:py-4">
         <div className="flex items-center gap-3 sm:gap-6">
           <NavLink to="/" className="text-lg sm:text-xl font-bold text-white tracking-tight shrink-0">
-            ClaudeVault
+            DevGrimoire
           </NavLink>
           <nav className="flex gap-3 sm:gap-4 text-sm">
             <NavLink

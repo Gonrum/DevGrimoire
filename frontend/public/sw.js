@@ -1,4 +1,4 @@
-const CACHE_NAME = 'claudevault-v1';
+const CACHE_NAME = 'devgrimoire-v1';
 const APP_SHELL = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {
@@ -82,7 +82,7 @@ self.addEventListener('push', (event) => {
   };
 
   event.waitUntil(
-    self.registration.showNotification(data.title || 'ClaudeVault', options)
+    self.registration.showNotification(data.title || 'DevGrimoire', options)
   );
 });
 

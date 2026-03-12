@@ -1,6 +1,6 @@
 export const AGENT_INSTRUCTIONS_KEY = 'agent_instructions';
 
-export const DEFAULT_AGENT_INSTRUCTIONS = `# ClaudeVault Agent-Instruktionen
+export const DEFAULT_AGENT_INSTRUCTIONS = `# DevGrimoire Agent-Instruktionen
 
 ## Session-Start
 Rufe **immer** \`system_instructions_get\` am Anfang jeder Session auf, um die aktuellen Instruktionen zu laden. Übergib optional eine \`projectId\`, um projektspezifische Anweisungen zu erhalten.
@@ -251,7 +251,7 @@ Rufe **immer** \`system_instructions_get\` am Anfang jeder Session auf, um die a
 
 ## 12. Benachrichtigungen (\`notify_user\`)
 
-**Workflow**: Push-Benachrichtigung an den Benutzer über die ClaudeVault PWA senden.
+**Workflow**: Push-Benachrichtigung an den Benutzer über die DevGrimoire PWA senden.
 
 | Tool | Wann verwenden |
 |------|----------------|

@@ -1,7 +1,7 @@
 export interface ProjectExport {
   _exportVersion: 1;
   _exportedAt: string;
-  _source: 'ClaudeVault';
+  _source: 'DevGrimoire';
   project: Record<string, unknown>;
   todos: Record<string, unknown>[];
   milestones: Record<string, unknown>[];
