@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { ResearchEntry } from '../api/client';
 import Markdown from './Markdown';
 import Card from './ui/Card';
@@ -5,8 +6,10 @@ import EmptyState from './ui/EmptyState';
 import Badge from './ui/Badge';
 
 export default function ResearchList({ entries }: { entries: ResearchEntry[] }) {
+  const { t, i18n } = useTranslation();
+
   if (entries.length === 0) {
-    return <EmptyState message="Noch keine Recherche-Ergebnisse vorhanden." />;
+    return <EmptyState message={t('research.noResearch')} />;
   }
 
   return (
@@ -16,13 +19,13 @@ export default function ResearchList({ entries }: { entries: ResearchEntry[] }) 
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-sm font-semibold">{e.title}</h3>
             <span className="text-xs text-gray-600">
-              {new Date(e.updatedAt).toLocaleDateString('de-DE')}
+              {new Date(e.updatedAt).toLocaleDateString(i18n.language === 'de' ? 'de-DE' : 'en-US')}
             </span>
           </div>
           <Markdown className="text-gray-400">{e.content}</Markdown>
           {e.sources.length > 0 && (
             <div className="mt-3 pt-3 border-t border-gray-800">
-              <p className="text-xs text-gray-500 mb-1">Quellen:</p>
+              <p className="text-xs text-gray-500 mb-1">{t('research.sources')}</p>
               <ul className="space-y-0.5">
                 {e.sources.map((src, i) => (
                   <li key={i} className="text-xs text-blue-400 truncate">

@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Feature, FeatureStatus, FeaturePriority, api } from '../api/client';
 import { useToast } from './Toast';
 import Card from './ui/Card';
@@ -16,23 +17,10 @@ const statusColors: Record<FeatureStatus, string> = {
   deprecated: 'bg-red-900/40 text-red-300',
 };
 
-const statusLabels: Record<FeatureStatus, string> = {
-  planned: 'Geplant',
-  in_development: 'In Entwicklung',
-  released: 'Released',
-  deprecated: 'Deprecated',
-};
-
 const priorityColors: Record<FeaturePriority, string> = {
   low: 'bg-gray-700 text-gray-400',
   medium: 'bg-yellow-900/40 text-yellow-300',
   high: 'bg-orange-900/40 text-orange-300',
-};
-
-const priorityLabels: Record<FeaturePriority, string> = {
-  low: 'Niedrig',
-  medium: 'Mittel',
-  high: 'Hoch',
 };
 
 interface FeatureFormData {
@@ -75,9 +63,23 @@ function FeatureForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const { showSuccess, showError } = useToast();
   const [form, setForm] = useState<FeatureFormData>(initial);
   const [saving, setSaving] = useState(false);
+
+  const statusLabels: Record<FeatureStatus, string> = {
+    planned: t('featureStatus.planned'),
+    in_development: t('featureStatus.in_development'),
+    released: t('featureStatus.released'),
+    deprecated: t('featureStatus.deprecated'),
+  };
+
+  const priorityLabels: Record<FeaturePriority, string> = {
+    low: t('todoPriority.low'),
+    medium: t('todoPriority.medium'),
+    high: t('todoPriority.high'),
+  };
 
   const update = (patch: Partial<FeatureFormData>) => setForm((f) => ({ ...f, ...patch }));
 
@@ -101,14 +103,14 @@ function FeatureForm({
 
       if (editId) {
         await api.features.update(editId, data);
-        showSuccess(`Feature "${form.name}" aktualisiert`);
+        showSuccess(t('features.featureUpdated', { name: form.name }));
       } else {
         await api.features.create(data);
-        showSuccess(`Feature "${form.name}" erstellt`);
+        showSuccess(t('features.featureCreated', { name: form.name }));
       }
       onDone();
     } catch (err: any) {
-      showError(err.message || 'Fehler beim Speichern');
+      showError(err.message || t('common.errorSaving'));
     } finally {
       setSaving(false);
     }
@@ -118,18 +120,18 @@ function FeatureForm({
     <Card>
       <form onSubmit={handleSubmit} className="space-y-4">
         <h3 className="text-sm font-semibold mb-3">
-          {editId ? 'Feature bearbeiten' : 'Neues Feature'}
+          {editId ? t('features.editFeature') : t('features.newFeature')}
         </h3>
         <div className="grid grid-cols-2 gap-3">
           <FormInput
-            label="Name"
+            label={t('common.name')}
             required
             value={form.name}
             onChange={(e) => update({ name: e.target.value })}
             placeholder="z.B. JWT Auth, REST API, Dark Mode"
           />
           <FormInput
-            label="Kategorie"
+            label={t('common.category')}
             value={form.category}
             onChange={(e) => update({ category: e.target.value })}
             placeholder="z.B. Auth, API, UI, Infrastruktur"
@@ -137,7 +139,7 @@ function FeatureForm({
         </div>
         <div className="grid grid-cols-3 gap-3">
           <FormSelect
-            label="Status"
+            label={t('common.status')}
             value={form.status}
             onChange={(e) => update({ status: e.target.value as FeatureStatus })}
           >
@@ -146,41 +148,41 @@ function FeatureForm({
             ))}
           </FormSelect>
           <FormSelect
-            label="Prioritaet"
+            label={t('common.priority')}
             value={form.priority}
             onChange={(e) => update({ priority: e.target.value as FeaturePriority | '' })}
           >
-            <option value="">Keine</option>
+            <option value="">{t('common.none')}</option>
             {Object.entries(priorityLabels).map(([key, label]) => (
               <option key={key} value={key}>{label}</option>
             ))}
           </FormSelect>
           <FormInput
-            label="Version"
+            label={t('common.version')}
             value={form.version}
             onChange={(e) => update({ version: e.target.value })}
             placeholder="z.B. v1.0.0"
           />
         </div>
         <FormTextarea
-          label="Beschreibung"
+          label={t('common.description')}
           value={form.description}
           onChange={(e) => update({ description: e.target.value })}
           rows={4}
           placeholder="Was macht dieses Feature? (Markdown)"
         />
         <FormInput
-          label="Tags"
+          label={t('common.tags')}
           value={form.tags}
           onChange={(e) => update({ tags: e.target.value })}
-          placeholder="kommagetrennt"
+          placeholder={t('common.commaSeparated')}
         />
         <div className="flex gap-2 pt-2">
           <Button type="submit" variant="primary" size="md" disabled={saving}>
-            {saving ? 'Speichern...' : editId ? 'Aktualisieren' : 'Erstellen'}
+            {saving ? t('common.saving') : editId ? t('common.update') : t('common.create')}
           </Button>
           <Button type="button" variant="secondary" size="md" onClick={onCancel}>
-            Abbrechen
+            {t('common.cancel')}
           </Button>
         </div>
       </form>
@@ -189,12 +191,28 @@ function FeatureForm({
 }
 
 export default function FeatureList({ entries, projectId }: { entries: Feature[]; projectId: string }) {
+  const { t, i18n } = useTranslation();
   const { showSuccess, showError } = useToast();
   const [selectedStatus, setSelectedStatus] = useState<FeatureStatus | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingFeature, setEditingFeature] = useState<Feature | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const dateFmtLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
+
+  const statusLabels: Record<FeatureStatus, string> = {
+    planned: t('featureStatus.planned'),
+    in_development: t('featureStatus.in_development'),
+    released: t('featureStatus.released'),
+    deprecated: t('featureStatus.deprecated'),
+  };
+
+  const priorityLabels: Record<FeaturePriority, string> = {
+    low: t('todoPriority.low'),
+    medium: t('todoPriority.medium'),
+    high: t('todoPriority.high'),
+  };
 
   const statuses = useMemo(() => {
     const s = new Set<FeatureStatus>();
@@ -218,9 +236,9 @@ export default function FeatureList({ entries, projectId }: { entries: Feature[]
   const handleDelete = async (feature: Feature) => {
     try {
       await api.features.delete(feature._id);
-      showSuccess(`Feature "${feature.name}" geloescht`);
+      showSuccess(t('features.featureDeleted', { name: feature.name }));
     } catch (err: any) {
-      showError(err.message || 'Fehler beim Loeschen');
+      showError(err.message || t('common.errorDeleting'));
     }
   };
 
@@ -248,7 +266,7 @@ export default function FeatureList({ entries, projectId }: { entries: Feature[]
           onClick={() => { setEditingFeature(null); setShowForm(true); }}
           className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
         >
-          + Neues Feature
+          {t('features.newFeature')}
         </button>
         {statuses.length > 1 && (
           <div className="flex flex-wrap gap-1.5">
@@ -260,7 +278,7 @@ export default function FeatureList({ entries, projectId }: { entries: Feature[]
                   : 'bg-gray-800 text-gray-400 hover:text-gray-200'
               }`}
             >
-              Alle ({entries.length})
+              {t('common.all')} ({entries.length})
             </button>
             {statuses.map((s) => (
               <button
@@ -297,9 +315,9 @@ export default function FeatureList({ entries, projectId }: { entries: Feature[]
       </div>
 
       {entries.length === 0 ? (
-        <EmptyState message="Noch keine Features dokumentiert." />
+        <EmptyState message={t('features.noFeatures')} />
       ) : filtered.length === 0 ? (
-        <EmptyState message="Keine Features mit diesen Filtern." />
+        <EmptyState message={t('features.noFiltered')} />
       ) : (
         <div className="space-y-2">
           {filtered.map((feature) => (
@@ -343,9 +361,9 @@ export default function FeatureList({ entries, projectId }: { entries: Feature[]
                     </div>
                   )}
                   <div className="text-xs text-gray-500">
-                    Erstellt: {new Date(feature.createdAt).toLocaleDateString('de-DE')}
+                    {t('common.created')}: {new Date(feature.createdAt).toLocaleDateString(dateFmtLocale)}
                     {' | '}
-                    Aktualisiert: {new Date(feature.updatedAt).toLocaleDateString('de-DE')}
+                    {t('common.updated')}: {new Date(feature.updatedAt).toLocaleDateString(dateFmtLocale)}
                   </div>
                   <div className="flex gap-2">
                     <Button
@@ -356,12 +374,12 @@ export default function FeatureList({ entries, projectId }: { entries: Feature[]
                         setShowForm(true);
                       }}
                     >
-                      Bearbeiten
+                      {t('common.edit')}
                     </Button>
                     <ConfirmButton
                       onConfirm={() => handleDelete(feature)}
-                      label="Loeschen"
-                      confirmLabel="Wirklich loeschen?"
+                      label={t('common.delete')}
+                      confirmLabel={t('common.confirmDeleteLong')}
                       size="xs"
                     />
                   </div>

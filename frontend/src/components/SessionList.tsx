@@ -1,10 +1,13 @@
+import { useTranslation } from 'react-i18next';
 import { Session } from '../api/client';
 import Card from './ui/Card';
 import EmptyState from './ui/EmptyState';
 
 export default function SessionList({ sessions }: { sessions: Session[] }) {
+  const { t, i18n } = useTranslation();
+
   if (sessions.length === 0) {
-    return <EmptyState message="Noch keine Sessions aufgezeichnet." />;
+    return <EmptyState message={t('sessions.noSessions')} />;
   }
 
   return (
@@ -13,7 +16,7 @@ export default function SessionList({ sessions }: { sessions: Session[] }) {
         <Card key={s._id}>
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs text-gray-500">
-              {new Date(s.createdAt).toLocaleString('de-DE')}
+              {new Date(s.createdAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US')}
             </span>
           </div>
           <p className="text-sm mb-3">{s.summary}</p>
@@ -21,7 +24,7 @@ export default function SessionList({ sessions }: { sessions: Session[] }) {
           {s.filesChanged.length > 0 && (
             <div className="mb-2">
               <h4 className="text-xs font-medium text-gray-500 mb-1">
-                Geänderte Dateien
+                {t('sessions.changedFiles')}
               </h4>
               <div className="flex flex-wrap gap-1">
                 {s.filesChanged.map((f) => (
@@ -39,7 +42,7 @@ export default function SessionList({ sessions }: { sessions: Session[] }) {
           {s.nextSteps.length > 0 && (
             <div className="mb-2">
               <h4 className="text-xs font-medium text-gray-500 mb-1">
-                Nächste Schritte
+                {t('sessions.nextSteps')}
               </h4>
               <ul className="text-sm text-gray-400 list-disc list-inside">
                 {s.nextSteps.map((step, i) => (
@@ -52,7 +55,7 @@ export default function SessionList({ sessions }: { sessions: Session[] }) {
           {s.openQuestions.length > 0 && (
             <div>
               <h4 className="text-xs font-medium text-gray-500 mb-1">
-                Offene Fragen
+                {t('sessions.openQuestions')}
               </h4>
               <ul className="text-sm text-yellow-400/80 list-disc list-inside">
                 {s.openQuestions.map((q, i) => (

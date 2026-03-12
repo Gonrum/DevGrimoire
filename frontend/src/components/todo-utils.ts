@@ -1,10 +1,13 @@
 import { Todo } from '../api/client';
+import i18n from '../i18n';
 
-export const COLUMNS: { key: Todo['status']; label: string; color: string }[] = [
-  { key: 'open', label: 'Offen', color: 'border-gray-600' },
-  { key: 'in_progress', label: 'In Arbeit', color: 'border-yellow-500' },
-  { key: 'review', label: 'Review', color: 'border-purple-500' },
-  { key: 'done', label: 'Erledigt', color: 'border-green-500' },
+const t = (key: string) => i18n.t(key);
+
+export const COLUMNS: { key: Todo['status']; label: () => string; color: string }[] = [
+  { key: 'open', label: () => t('todoStatus.open'), color: 'border-gray-600' },
+  { key: 'in_progress', label: () => t('todoStatus.in_progress'), color: 'border-yellow-500' },
+  { key: 'review', label: () => t('todoStatus.review'), color: 'border-purple-500' },
+  { key: 'done', label: () => t('todoStatus.done'), color: 'border-green-500' },
 ];
 
 export const PRIORITY_COLORS: Record<Todo['priority'], string> = {
@@ -14,18 +17,18 @@ export const PRIORITY_COLORS: Record<Todo['priority'], string> = {
   low: 'text-gray-500',
 };
 
-export const PRIORITY_LABELS: Record<Todo['priority'], string> = {
-  critical: 'Kritisch',
-  high: 'Hoch',
-  medium: 'Mittel',
-  low: 'Niedrig',
+export const PRIORITY_LABELS: Record<Todo['priority'], () => string> = {
+  critical: () => t('todoPriority.critical'),
+  high: () => t('todoPriority.high'),
+  medium: () => t('todoPriority.medium'),
+  low: () => t('todoPriority.low'),
 };
 
-export const STATUS_LABELS: Record<Todo['status'], string> = {
-  open: 'Offen',
-  in_progress: 'In Arbeit',
-  review: 'Review',
-  done: 'Erledigt',
+export const STATUS_LABELS: Record<Todo['status'], () => string> = {
+  open: () => t('todoStatus.open'),
+  in_progress: () => t('todoStatus.in_progress'),
+  review: () => t('todoStatus.review'),
+  done: () => t('todoStatus.done'),
 };
 
 export const STATUS_COLORS: Record<Todo['status'], string> = {
@@ -42,15 +45,15 @@ export const TRANSITION_BUTTON_COLORS: Record<Todo['status'], string> = {
   done: 'bg-green-900/60 hover:bg-green-900 text-green-300',
 };
 
-export const STATUS_TRANSITIONS: Record<Todo['status'], { label: string; next: Todo['status'] }[]> = {
-  open: [{ label: 'Starten', next: 'in_progress' }],
+export const STATUS_TRANSITIONS: Record<Todo['status'], { label: () => string; next: Todo['status'] }[]> = {
+  open: [{ label: () => t('todoTransitions.start'), next: 'in_progress' }],
   in_progress: [
-    { label: 'Zurück', next: 'open' },
-    { label: 'Review', next: 'review' },
+    { label: () => t('todoTransitions.back'), next: 'open' },
+    { label: () => t('todoTransitions.review'), next: 'review' },
   ],
   review: [
-    { label: 'Zurück', next: 'in_progress' },
-    { label: 'Fertig', next: 'done' },
+    { label: () => t('todoTransitions.back'), next: 'in_progress' },
+    { label: () => t('todoTransitions.done'), next: 'done' },
   ],
-  done: [{ label: 'Wieder öffnen', next: 'open' }],
+  done: [{ label: () => t('todoTransitions.reopen'), next: 'open' }],
 };

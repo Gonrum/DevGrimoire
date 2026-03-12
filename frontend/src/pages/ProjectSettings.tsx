@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api, Project } from '../api/client';
 import Button from '../components/ui/Button';
 import ConfirmButton from '../components/ui/ConfirmButton';
@@ -25,6 +26,7 @@ const TEMPLATE_INSTRUCTIONS = `## Arbeitsweise
 - Einfachheit vor Abstraktion`;
 
 export default function ProjectSettings() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [project, setProject] = useState<Project | null>(null);
@@ -84,7 +86,7 @@ export default function ProjectSettings() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Fehler beim Speichern');
+      setError(err instanceof Error ? err.message : t('common.errorSaving'));
     } finally {
       setSaving(false);
     }
@@ -95,15 +97,15 @@ export default function ProjectSettings() {
     return (
       <div>
         <Link to="/" className="text-sm text-gray-500 hover:text-gray-300 mb-4 inline-block">
-          &larr; Alle Projekte
+          &larr; {t('common.allProjects')}
         </Link>
         <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
-          <p className="text-red-400">Fehler: {error}</p>
+          <p className="text-red-400">{t('common.error')}: {error}</p>
         </div>
       </div>
     );
   }
-  if (!project) return <p className="text-red-400">Projekt nicht gefunden.</p>;
+  if (!project) return <p className="text-red-400">{t('projects.notFound')}</p>;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -115,15 +117,15 @@ export default function ProjectSettings() {
       </Link>
 
       <div className="mb-8">
-        <h1 className="text-2xl font-bold mb-1">Einstellungen</h1>
+        <h1 className="text-2xl font-bold mb-1">{t('projectSettings.title')}</h1>
         <p className="text-gray-400 text-sm">{project.name}</p>
       </div>
 
       <section className="mb-8 space-y-4">
-        <h2 className="text-lg font-semibold text-blue-400">Projektdaten</h2>
+        <h2 className="text-lg font-semibold text-blue-400">{t('projectSettings.projectData')}</h2>
 
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Name *</label>
+          <label className="block text-xs text-gray-500 mb-1">{t('common.name')} *</label>
           <input
             type="text"
             value={name}
@@ -133,7 +135,7 @@ export default function ProjectSettings() {
         </div>
 
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Beschreibung</label>
+          <label className="block text-xs text-gray-500 mb-1">{t('common.description')}</label>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -144,7 +146,7 @@ export default function ProjectSettings() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Pfad</label>
+            <label className="block text-xs text-gray-500 mb-1">{t('projects.path')}</label>
             <input
               type="text"
               value={path}
@@ -154,7 +156,7 @@ export default function ProjectSettings() {
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Repository</label>
+            <label className="block text-xs text-gray-500 mb-1">{t('projectSettings.repository')}</label>
             <input
               type="text"
               value={repository}
@@ -166,7 +168,7 @@ export default function ProjectSettings() {
         </div>
 
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Tech Stack (kommagetrennt)</label>
+          <label className="block text-xs text-gray-500 mb-1">{t('projectSettings.techStack')}</label>
           <input
             type="text"
             value={techStack}
@@ -177,7 +179,7 @@ export default function ProjectSettings() {
         </div>
 
         <div className="flex items-center gap-3">
-          <label className="text-xs text-gray-500">Status:</label>
+          <label className="text-xs text-gray-500">{t('common.status')}:</label>
           <button
             type="button"
             onClick={() => setActive(!active)}
@@ -187,25 +189,25 @@ export default function ProjectSettings() {
                 : 'bg-gray-800 text-gray-500 hover:bg-gray-700'
             }`}
           >
-            {active ? 'aktiv' : 'inaktiv'}
+            {active ? t('common.active') : t('common.inactive')}
           </button>
         </div>
       </section>
 
       <section className="mb-8 space-y-4">
         <div>
-          <h2 className="text-lg font-semibold text-blue-400">Nummerierung</h2>
+          <h2 className="text-lg font-semibold text-blue-400">{t('projectSettings.numbering')}</h2>
           <p className="text-gray-500 text-sm mt-1">
-            Format für Task- und Milestone-Nummern. Verfügbare Variablen:{' '}
-            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{n}'}</code> Nummer,{' '}
-            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{type}'}</code> T/M,{' '}
-            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{prefix}'}</code> Projektname,{' '}
-            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{date}'}</code> Datum
+            {t('projectSettings.numberingHelp')}{' '}
+            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{n}'}</code> {t('projectSettings.numberVar')},{' '}
+            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{type}'}</code> {t('projectSettings.typeVar')},{' '}
+            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{prefix}'}</code> {t('projectSettings.prefixVar')},{' '}
+            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{date}'}</code> {t('projectSettings.dateVar')}
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Task-Format</label>
+            <label className="block text-xs text-gray-500 mb-1">{t('projectSettings.taskFormat')}</label>
             <input
               type="text"
               value={todoNumberFormat}
@@ -214,11 +216,11 @@ export default function ProjectSettings() {
               className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 font-mono"
             />
             <p className="text-xs text-gray-600 mt-1">
-              Vorschau: {todoNumberFormat.replace(/\{n\}/g, '42').replace(/\{type\}/g, 'T').replace(/\{prefix\}/g, name).replace(/\{date\}/g, new Date().toISOString().slice(0, 10))}
+              {t('projectSettings.preview')}: {todoNumberFormat.replace(/\{n\}/g, '42').replace(/\{type\}/g, 'T').replace(/\{prefix\}/g, name).replace(/\{date\}/g, new Date().toISOString().slice(0, 10))}
             </p>
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Milestone-Format</label>
+            <label className="block text-xs text-gray-500 mb-1">{t('projectSettings.milestoneFormat')}</label>
             <input
               type="text"
               value={milestoneNumberFormat}
@@ -227,7 +229,7 @@ export default function ProjectSettings() {
               className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 font-mono"
             />
             <p className="text-xs text-gray-600 mt-1">
-              Vorschau: {milestoneNumberFormat.replace(/\{n\}/g, '5').replace(/\{type\}/g, 'M').replace(/\{prefix\}/g, name).replace(/\{date\}/g, new Date().toISOString().slice(0, 10))}
+              {t('projectSettings.preview')}: {milestoneNumberFormat.replace(/\{n\}/g, '5').replace(/\{type\}/g, 'M').replace(/\{prefix\}/g, name).replace(/\{date\}/g, new Date().toISOString().slice(0, 10))}
             </p>
           </div>
         </div>
@@ -236,11 +238,10 @@ export default function ProjectSettings() {
       <section className="mb-8">
         <div className="mb-3">
           <h2 className="text-lg font-semibold text-blue-400">
-            Anweisungen für Claude
+            {t('projectSettings.instructions')}
           </h2>
           <p className="text-gray-500 text-sm mt-1">
-            Diese Anweisungen werden Claude über MCP zur Verfügung gestellt, wenn
-            es an diesem Projekt arbeitet.
+            {t('projectSettings.instructionsHelp')}
           </p>
         </div>
 
@@ -248,30 +249,30 @@ export default function ProjectSettings() {
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
           rows={16}
-          placeholder="z.B. 1. Immer erst Planen 2. Plan implementieren 3. Code Review..."
+          placeholder={t('projectSettings.instructionsPlaceholder')}
           className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-y font-mono leading-relaxed"
         />
 
         {!instructions.trim() && (
           <Button type="button" className="mt-2" onClick={() => setInstructions(TEMPLATE_INSTRUCTIONS)}>
-            Vorlage einfügen
+            {t('projectSettings.insertTemplate')}
           </Button>
         )}
       </section>
 
       <div className="flex items-center gap-3 mb-8">
         <Button type="button" variant="primary" size="lg" onClick={handleSave} disabled={saving || !name.trim()}>
-          {saving ? 'Speichern...' : 'Alle Änderungen speichern'}
+          {saving ? t('common.saving') : t('projectSettings.saveAll')}
         </Button>
         {saved && (
-          <span className="text-sm text-green-400">Gespeichert!</span>
+          <span className="text-sm text-green-400">{t('common.saved')}</span>
         )}
       </div>
 
       <section className="border-t border-gray-800 pt-6 mb-8">
-        <h2 className="text-lg font-semibold text-blue-400 mb-2">Daten-Export</h2>
+        <h2 className="text-lg font-semibold text-blue-400 mb-2">{t('projectSettings.dataExport')}</h2>
         <p className="text-gray-500 text-sm mb-3">
-          Exportiert alle Projektdaten (Todos, Milestones, Wissen, Changelog, Sessions, etc.) als JSON-Datei.
+          {t('projectSettings.dataExportHelp')}
         </p>
         <div className="flex items-center gap-3">
           <button
@@ -280,12 +281,12 @@ export default function ProjectSettings() {
               try {
                 await api.transfer.export(id!, includeSecrets);
               } catch (err) {
-                setError(err instanceof Error ? err.message : 'Export fehlgeschlagen');
+                setError(err instanceof Error ? err.message : t('projectSettings.exportFailed'));
               }
             }}
             className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
           >
-            Projekt exportieren
+            {t('projectSettings.exportProject')}
           </button>
           <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
             <input
@@ -294,30 +295,25 @@ export default function ProjectSettings() {
               onChange={(e) => setIncludeSecrets(e.target.checked)}
               className="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500"
             />
-            Secret-Werte einschliessen
+            {t('projectSettings.includeSecrets')}
           </label>
         </div>
       </section>
 
       <section className="border-t border-gray-800 pt-6 mb-8">
-        <h2 className="text-lg font-semibold text-red-400 mb-2">Gefahrenzone</h2>
+        <h2 className="text-lg font-semibold text-red-400 mb-2">{t('projectSettings.dangerZone')}</h2>
         <p className="text-gray-500 text-sm mb-3">
-          Das Löschen eines Projekts entfernt alle zugehörigen Daten (Todos, Sessions, Wissen).
+          {t('projectSettings.dangerZoneHelp')}
         </p>
-        <ConfirmButton onConfirm={async () => { if (id) { await api.projects.delete(id); navigate('/'); } }} label="Projekt löschen" confirmLabel="Wirklich löschen?" size="lg" />
+        <ConfirmButton onConfirm={async () => { if (id) { await api.projects.delete(id); navigate('/'); } }} label={t('projectSettings.deleteProject')} confirmLabel={t('projectSettings.confirmDeleteProject')} size="lg" />
       </section>
 
       <section className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
         <h3 className="text-sm font-medium text-gray-300 mb-2">
-          Wie nutzt Claude die Anweisungen?
+          {t('projectSettings.instructionsInfoTitle')}
         </h3>
         <p className="text-gray-500 text-sm leading-relaxed">
-          Wenn Claude über MCP auf dieses Projekt zugreift (z.B. mit{' '}
-          <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">project_get</code>),
-          erhält es die Anweisungen als Teil der Projektdaten. Du kannst Claude
-          dann bitten, sich an die Anweisungen zu halten, oder sie in die{' '}
-          <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">CLAUDE.md</code>{' '}
-          des Projekts einbauen.
+          {t('projectSettings.instructionsInfoText', { tool: 'project_get', file: 'CLAUDE.md' })}
         </p>
       </section>
     </div>

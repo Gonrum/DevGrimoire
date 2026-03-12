@@ -1,4 +1,7 @@
 import { SearchResult } from '../api/client';
+import i18n from '../i18n';
+
+const t = (key: string) => i18n.t(key);
 
 export const ENV_COLORS: Record<string, string> = {
   dev: 'bg-green-900/40 text-green-300',
@@ -8,21 +11,21 @@ export const ENV_COLORS: Record<string, string> = {
   production: 'bg-red-900/40 text-red-300',
 };
 
-export const SECRET_TYPE_LABELS: Record<string, { label: string; color: string }> = {
-  variable: { label: 'Variable', color: 'bg-gray-700 text-gray-300' },
-  password: { label: 'Passwort', color: 'bg-orange-900/40 text-orange-300' },
-  token: { label: 'Token', color: 'bg-purple-900/40 text-purple-300' },
-  ssh_key: { label: 'SSH Key', color: 'bg-cyan-900/40 text-cyan-300' },
-  certificate: { label: 'Zertifikat', color: 'bg-yellow-900/40 text-yellow-300' },
-  file: { label: 'Datei', color: 'bg-blue-900/40 text-blue-300' },
+export const SECRET_TYPE_LABELS: Record<string, { label: () => string; color: string }> = {
+  variable: { label: () => t('secretTypes.variable'), color: 'bg-gray-700 text-gray-300' },
+  password: { label: () => t('secretTypes.password'), color: 'bg-orange-900/40 text-orange-300' },
+  token: { label: () => t('secretTypes.token'), color: 'bg-purple-900/40 text-purple-300' },
+  ssh_key: { label: () => t('secretTypes.ssh_key'), color: 'bg-cyan-900/40 text-cyan-300' },
+  certificate: { label: () => t('secretTypes.certificate'), color: 'bg-yellow-900/40 text-yellow-300' },
+  file: { label: () => t('secretTypes.file'), color: 'bg-blue-900/40 text-blue-300' },
 };
 
-export const TYPE_LABELS: Record<SearchResult['type'], string> = {
-  todo: 'Todo',
-  knowledge: 'Wissen',
-  changelog: 'Changelog',
-  research: 'Recherche',
-  milestone: 'Milestone',
+export const TYPE_LABELS: Record<SearchResult['type'], () => string> = {
+  todo: () => t('searchTypes.todo'),
+  knowledge: () => t('searchTypes.knowledge'),
+  changelog: () => t('searchTypes.changelog'),
+  research: () => t('searchTypes.research'),
+  milestone: () => t('searchTypes.milestone'),
 };
 
 export const TYPE_COLORS: Record<SearchResult['type'], string> = {

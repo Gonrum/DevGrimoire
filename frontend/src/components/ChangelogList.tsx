@@ -1,11 +1,14 @@
+import { useTranslation } from 'react-i18next';
 import { ChangelogEntry } from '../api/client';
 import Card from './ui/Card';
 import EmptyState from './ui/EmptyState';
 import Badge from './ui/Badge';
 
 export default function ChangelogList({ entries }: { entries: ChangelogEntry[] }) {
+  const { t, i18n } = useTranslation();
+
   if (entries.length === 0) {
-    return <EmptyState message="Noch keine Changelog-Einträge. Claude kann welche per MCP anlegen." />;
+    return <EmptyState message={t('changelog.noChangelog')} />;
   }
 
   return (
@@ -24,7 +27,7 @@ export default function ChangelogList({ entries }: { entries: ChangelogEntry[] }
               </Badge>
             )}
             <span className="text-xs text-gray-600 ml-auto">
-              {new Date(e.createdAt).toLocaleDateString('de-DE', {
+              {new Date(e.createdAt).toLocaleDateString(i18n.language === 'de' ? 'de-DE' : 'en-US', {
                 day: '2-digit',
                 month: '2-digit',
                 year: 'numeric',

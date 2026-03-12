@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Knowledge } from '../api/client';
 import Markdown from './Markdown';
 import Card from './ui/Card';
@@ -6,6 +7,7 @@ import EmptyState from './ui/EmptyState';
 import Badge from './ui/Badge';
 
 export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
+  const { t, i18n } = useTranslation();
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   const categories = useMemo(() => {
@@ -19,7 +21,7 @@ export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
     : entries;
 
   if (entries.length === 0) {
-    return <EmptyState message="Noch kein Wissen gespeichert." />;
+    return <EmptyState message={t('knowledge.noKnowledge')} />;
   }
 
   return (
@@ -34,7 +36,7 @@ export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
                 : 'bg-gray-800 text-gray-400 hover:text-gray-200'
             }`}
           >
-            Alle ({entries.length})
+            {t('common.all')} ({entries.length})
           </button>
           {categories.map((cat) => (
             <button
@@ -58,7 +60,7 @@ export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
                   : 'bg-gray-800 text-gray-400 hover:text-gray-200'
               }`}
             >
-              Ohne Kategorie ({entries.filter((e) => !e.category).length})
+              {t('knowledge.noCategory')} ({entries.filter((e) => !e.category).length})
             </button>
           )}
         </div>
@@ -76,7 +78,7 @@ export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
                 )}
               </div>
               <span className="text-xs text-gray-600">
-                {new Date(e.updatedAt).toLocaleDateString('de-DE')}
+                {new Date(e.updatedAt).toLocaleDateString(i18n.language === 'de' ? 'de-DE' : 'en-US')}
               </span>
             </div>
             <Markdown className="text-gray-400">{e.content}</Markdown>

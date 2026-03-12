@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Todo, Milestone, api } from '../api/client';
+import i18n from '../i18n';
 import Markdown from './Markdown';
 import MarkdownEditor from './MarkdownEditor';
 import {
@@ -32,7 +34,7 @@ function sortTodos(todos: Todo[], sortKey: SortKey, sortDir: SortDir): Todo[] {
   const sorted = [...todos].sort((a, b) => {
     switch (sortKey) {
       case 'priority': return PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
-      case 'title': return a.title.localeCompare(b.title, 'de');
+      case 'title': return a.title.localeCompare(b.title, i18n.language);
       case 'created': return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       case 'updated':
       default: return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
@@ -42,6 +44,7 @@ function sortTodos(todos: Todo[], sortKey: SortKey, sortDir: SortDir): Todo[] {
 }
 
 function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => void; onCancel: () => void }) {
+  const { t } = useTranslation();
   const [title, setTitle] = useState(todo.title);
   const [description, setDescription] = useState(todo.description || '');
   const [priority, setPriority] = useState(todo.priority);
@@ -69,24 +72,24 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
     <form onSubmit={handleSubmit} className="space-y-2">
       <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
         className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-blue-500" autoFocus />
-      <MarkdownEditor value={description} onChange={setDescription} rows={2} placeholder="Beschreibung (Markdown)" />
+      <MarkdownEditor value={description} onChange={setDescription} rows={2} placeholder={t('todos.descriptionPlaceholder')} />
       <div className="flex gap-2 items-center">
         <select value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}
           className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-blue-500">
-          <option value="low">Niedrig</option>
-          <option value="medium">Mittel</option>
-          <option value="high">Hoch</option>
-          <option value="critical">Kritisch</option>
+          <option value="low">{t('todoPriority.low')}</option>
+          <option value="medium">{t('todoPriority.medium')}</option>
+          <option value="high">{t('todoPriority.high')}</option>
+          <option value="critical">{t('todoPriority.critical')}</option>
         </select>
-        <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="Tags"
+        <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('common.tags')}
           className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
       </div>
       <div className="flex gap-2">
         <Button type="submit" variant="primary" size="xs" disabled={saving || !title.trim()}>
-          {saving ? '...' : 'Speichern'}
+          {saving ? '...' : t('common.save')}
         </Button>
         <Button type="button" size="xs" onClick={onCancel}>
-          Abbrechen
+          {t('common.cancel')}
         </Button>
       </div>
     </form>
@@ -94,6 +97,7 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
 }
 
 function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
@@ -111,12 +115,13 @@ function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) 
   };
 
   const comments = todo.comments || [];
+  const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
   return (
     <div className="mt-2" onClick={(e) => e.preventDefault()}>
       <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}
         className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
-        {comments.length > 0 ? `${comments.length} Kommentar${comments.length > 1 ? 'e' : ''}` : 'Kommentieren'}
+        {comments.length > 0 ? t('todos.commentCount', { count: comments.length }) : t('todos.addComment')}
         {expanded ? ' \u25B4' : ' \u25BE'}
       </button>
       {expanded && (
@@ -125,18 +130,18 @@ function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) 
             <div key={i} className="text-xs bg-gray-800/50 rounded p-2">
               <div className="flex justify-between text-gray-500 mb-0.5">
                 <span className={c.author === 'claude' ? 'text-blue-400' : 'text-gray-400'}>{c.author}</span>
-                <span>{new Date(c.createdAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                <span>{new Date(c.createdAt).toLocaleDateString(dateLocale, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
               </div>
               <Markdown className="text-gray-300">{c.text}</Markdown>
             </div>
           ))}
           <div className="flex gap-2">
             <input type="text" value={text} onChange={(e) => setText(e.target.value)}
-              placeholder="Kommentar schreiben..." onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-              aria-label="Kommentar schreiben"
+              placeholder={t('todos.commentPlaceholder')} onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+              aria-label={t('todos.commentPlaceholder')}
               className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
             <Button type="button" size="xs" onClick={handleAdd} disabled={saving || !text.trim()}>
-              {saving ? '...' : 'Senden'}
+              {saving ? '...' : t('common.send')}
             </Button>
           </div>
         </div>
@@ -146,18 +151,21 @@ function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) 
 }
 
 function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError }: { todo: Todo; allTodos: Todo[]; projectId: string; onUpdate: () => void; onDragStart?: (todoId: string) => void; showError: (msg: string) => void }) {
+  const { t, i18n } = useTranslation();
   const [editing, setEditing] = useState(false);
   const hasBlockers = (todo.blockedBy || []).some((bid) => {
     const blocker = allTodos.find((t) => t._id === bid);
     return blocker && blocker.status !== 'done';
   });
 
+  const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
+
   const handleStatusChange = async (newStatus: Todo['status']) => {
     try {
       await api.todos.update(todo._id, { status: newStatus });
       onUpdate();
     } catch (err: any) {
-      showError(err.message || 'Status-Änderung fehlgeschlagen');
+      showError(err.message || t('todos.statusChangeFailed'));
     }
   };
 
@@ -166,7 +174,7 @@ function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError 
       await api.todos.update(todo._id, { archived: !todo.archived } as Partial<Todo>);
       onUpdate();
     } catch (err: any) {
-      showError(err.message || 'Archivierung fehlgeschlagen');
+      showError(err.message || t('todos.archiveFailed'));
     }
   };
 
@@ -181,27 +189,27 @@ function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError 
   return (
     <Link to={`/projects/${projectId}/todos/${todo._id}`}
       draggable
-      aria-roledescription="Verschiebbare Aufgabe"
+      aria-roledescription={t('todos.draggableTask')}
       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.(todo._id); }}
       onDragEnd={() => onDragStart?.('')}
       className="block bg-gray-900 border border-gray-800 rounded-lg p-3 group hover:border-gray-700 transition-colors cursor-grab active:cursor-grabbing">
       <div className="flex items-start justify-between gap-2">
         <h4 className="text-sm font-medium">
-          {hasBlockers && <span className="text-red-400 mr-1" title="Blockiert">&#x26D4;</span>}
+          {hasBlockers && <span className="text-red-400 mr-1" title={t('todos.blocked')}>&#x26D4;</span>}
           {todo.displayNumber && <span className="text-gray-500 font-normal mr-1.5">{todo.displayNumber}</span>}
           {todo.title}
         </h4>
         <span className={`text-xs shrink-0 ${PRIORITY_COLORS[todo.priority]}`}>
-          {PRIORITY_LABELS[todo.priority]}
+          {PRIORITY_LABELS[todo.priority]()}
         </span>
       </div>
       {todo.description && (
         <p className="text-xs text-gray-500 mt-1 line-clamp-3">{todo.description}</p>
       )}
       <p className="text-xs text-gray-600 mt-1">
-        {new Date(todo.createdAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+        {new Date(todo.createdAt).toLocaleDateString(dateLocale, { day: '2-digit', month: '2-digit', year: '2-digit' })}
         {todo.updatedAt !== todo.createdAt && (
-          <span> · bearbeitet {new Date(todo.updatedAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })}</span>
+          <span> · {t('todos.edited')} {new Date(todo.updatedAt).toLocaleDateString(dateLocale, { day: '2-digit', month: '2-digit', year: '2-digit' })}</span>
         )}
       </p>
       {todo.tags.length > 0 && (
@@ -214,16 +222,16 @@ function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError 
       <TodoComments todo={todo} onUpdate={onUpdate} />
       <div className="flex flex-wrap items-center gap-2 mt-2 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity" onClick={(e) => e.preventDefault()}>
         {STATUS_TRANSITIONS[todo.status].map((tr) => (
-          <Button key={tr.next} type="button" size="xs" onClick={() => handleStatusChange(tr.next)}>{tr.label}</Button>
+          <Button key={tr.next} type="button" size="xs" onClick={() => handleStatusChange(tr.next)}>{tr.label()}</Button>
         ))}
-        <Button type="button" size="xs" onClick={() => setEditing(true)}>Bearbeiten</Button>
-        <Button type="button" size="xs" onClick={handleArchiveToggle}>{todo.archived ? 'Wiederherstellen' : 'Archivieren'}</Button>
+        <Button type="button" size="xs" onClick={() => setEditing(true)}>{t('common.edit')}</Button>
+        <Button type="button" size="xs" onClick={handleArchiveToggle}>{todo.archived ? t('common.restore') : t('common.archive')}</Button>
         <ConfirmButton onConfirm={async () => {
           try {
             await api.todos.delete(todo._id);
             onUpdate();
           } catch (err: any) {
-            showError(err.message || 'Löschen fehlgeschlagen');
+            showError(err.message || t('todos.deleteFailed'));
           }
         }} className="ml-auto" />
       </div>
@@ -232,13 +240,16 @@ function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError 
 }
 
 function TodoListRow({ todo, projectId, onUpdate, showError }: { todo: Todo; projectId: string; onUpdate: () => void; showError: (msg: string) => void }) {
+  const { t, i18n } = useTranslation();
+  const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
+
   const handleStatusChange = async (e: React.MouseEvent, newStatus: Todo['status']) => {
     e.preventDefault();
     try {
       await api.todos.update(todo._id, { status: newStatus });
       onUpdate();
     } catch (err: any) {
-      showError(err.message || 'Status-Änderung fehlgeschlagen');
+      showError(err.message || t('todos.statusChangeFailed'));
     }
   };
 
@@ -248,12 +259,12 @@ function TodoListRow({ todo, projectId, onUpdate, showError }: { todo: Todo; pro
     <tr className="border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors">
       <td className="py-2.5 px-3">
         <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[todo.status]}`}>
-          {STATUS_LABELS[todo.status]}
+          {STATUS_LABELS[todo.status]()}
         </span>
       </td>
       <td className="py-2.5 px-3">
         <span className={`text-xs ${PRIORITY_COLORS[todo.priority]}`}>
-          {PRIORITY_LABELS[todo.priority]}
+          {PRIORITY_LABELS[todo.priority]()}
         </span>
       </td>
       <td className="py-2.5 px-3">
@@ -273,12 +284,12 @@ function TodoListRow({ todo, projectId, onUpdate, showError }: { todo: Todo; pro
         {comments.length > 0 && <span>{comments.length}</span>}
       </td>
       <td className="py-2.5 px-3 text-xs text-gray-600 whitespace-nowrap">
-        {new Date(todo.updatedAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+        {new Date(todo.updatedAt).toLocaleDateString(dateLocale, { day: '2-digit', month: '2-digit', year: '2-digit' })}
       </td>
       <td className="py-2.5 px-3">
         <div className="flex gap-1">
           {STATUS_TRANSITIONS[todo.status].map((tr) => (
-            <Button key={tr.next} type="button" size="xs" onClick={(e) => handleStatusChange(e, tr.next)}>{tr.label}</Button>
+            <Button key={tr.next} type="button" size="xs" onClick={(e) => handleStatusChange(e, tr.next)}>{tr.label()}</Button>
           ))}
         </div>
       </td>
@@ -289,6 +300,7 @@ function TodoListRow({ todo, projectId, onUpdate, showError }: { todo: Todo; pro
 type ViewMode = 'kanban' | 'list';
 
 export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Props) {
+  const { t } = useTranslation();
   const { showError } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
   const [filterStatus, setFilterStatus] = useState<string>('');
@@ -341,16 +353,16 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
       <div className="flex items-center gap-3 mb-4">
         <Link to={`/projects/${projectId}/todos/new`}
           className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
-          + Neuer Task
+          {t('todos.newTask')}
         </Link>
         <div className="flex bg-gray-800 rounded-lg p-0.5 ml-auto">
           <button type="button" onClick={() => setViewMode('kanban')}
             className={`text-xs px-3 py-1 rounded-md transition-colors ${viewMode === 'kanban' ? 'bg-gray-700 text-gray-200' : 'text-gray-500 hover:text-gray-300'}`}>
-            Kanban
+            {t('todos.kanban')}
           </button>
           <button type="button" onClick={() => setViewMode('list')}
             className={`text-xs px-3 py-1 rounded-md transition-colors ${viewMode === 'list' ? 'bg-gray-700 text-gray-200' : 'text-gray-500 hover:text-gray-300'}`}>
-            Liste
+            {t('todos.list')}
           </button>
         </div>
       </div>
@@ -358,50 +370,50 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} aria-label="Status filtern"
           className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500">
-          <option value="">Alle Status</option>
-          {COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+          <option value="">{t('todos.allStatus')}</option>
+          {COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label()}</option>)}
         </select>
         <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} aria-label="Priorität filtern"
           className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500">
-          <option value="">Alle Prioritäten</option>
-          <option value="critical">Kritisch</option>
-          <option value="high">Hoch</option>
-          <option value="medium">Mittel</option>
-          <option value="low">Niedrig</option>
+          <option value="">{t('todos.allPriorities')}</option>
+          <option value="critical">{t('todoPriority.critical')}</option>
+          <option value="high">{t('todoPriority.high')}</option>
+          <option value="medium">{t('todoPriority.medium')}</option>
+          <option value="low">{t('todoPriority.low')}</option>
         </select>
         {milestones.length > 0 && (
           <select value={filterMilestone} onChange={(e) => setFilterMilestone(e.target.value)} aria-label="Milestone filtern"
             className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500">
-            <option value="">Alle Milestones</option>
-            <option value="_none">Ohne Milestone</option>
+            <option value="">{t('todos.allMilestones')}</option>
+            <option value="_none">{t('todos.noMilestone')}</option>
             {milestones.map((ms) => <option key={ms._id} value={ms._id}>{ms.name}</option>)}
           </select>
         )}
         {allTags.length > 0 && (
           <select value={filterTag} onChange={(e) => setFilterTag(e.target.value)} aria-label="Tag filtern"
             className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500">
-            <option value="">Alle Tags</option>
+            <option value="">{t('todos.allTags')}</option>
             {allTags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
           </select>
         )}
         <div className="flex items-center gap-1 sm:ml-auto w-full sm:w-auto">
           <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} aria-label="Sortierung"
             className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500">
-            <option value="updated">Aktualisiert</option>
-            <option value="created">Erstellt</option>
-            <option value="priority">Priorität</option>
-            <option value="title">Titel</option>
+            <option value="updated">{t('todos.sortUpdated')}</option>
+            <option value="created">{t('todos.sortCreated')}</option>
+            <option value="priority">{t('todos.sortPriority')}</option>
+            <option value="title">{t('todos.sortTitle')}</option>
           </select>
           <button type="button" onClick={() => setSortDir((d) => d === 'asc' ? 'desc' : 'asc')}
             className="text-xs px-2 py-1 bg-gray-800 border border-gray-700 rounded text-gray-400 hover:text-gray-200 transition-colors"
-            title={sortDir === 'asc' ? 'Aufsteigend' : 'Absteigend'}>
+            title={sortDir === 'asc' ? t('todos.ascending') : t('todos.descending')}>
             {sortDir === 'asc' ? '\u2191' : '\u2193'}
           </button>
         </div>
         {hasFilters && (
           <button type="button" onClick={clearFilters}
             className="text-xs px-2 py-1 text-gray-500 hover:text-gray-300 transition-colors">
-            Filter zurücksetzen
+            {t('todos.resetFilters')}
           </button>
         )}
         {archivableDone.length > 0 && (
@@ -412,23 +424,23 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
               await Promise.all(archivableDone.map((t) => api.todos.update(t._id, { archived: true } as Partial<Todo>)));
               onUpdate();
             } catch (err: any) {
-              showError(err.message || 'Archivierung fehlgeschlagen');
+              showError(err.message || t('todos.archiveFailed'));
             }
           }}
             className={`text-xs px-2 py-1 rounded transition-colors ${confirmArchiveAll ? 'bg-yellow-900/60 text-yellow-300' : 'text-gray-600 hover:text-gray-400'}`}>
-            {confirmArchiveAll ? `Sicher? (${archivableDone.length} Tasks)` : `Erledigte archivieren (${archivableDone.length})`}
+            {confirmArchiveAll ? t('todos.archiveConfirm', { count: archivableDone.length }) : t('todos.archiveCompleted', { count: archivableDone.length })}
           </button>
         )}
         {archivedCount > 0 && (
           <button type="button" onClick={() => setShowArchived(!showArchived)}
             className={`text-xs px-2 py-1 rounded transition-colors ${showArchived ? 'bg-gray-700 text-gray-300' : 'text-gray-600 hover:text-gray-400'}`}>
-            {showArchived ? `Archiv ausblenden (${archivedCount})` : `Archiv (${archivedCount})`}
+            {showArchived ? t('todos.hideArchive', { count: archivedCount }) : t('todos.showArchive', { count: archivedCount })}
           </button>
         )}
       </div>
 
       {hasFilters && (
-        <p className="text-xs text-gray-600 mb-3">{filtered.length} von {todos.length} Tasks</p>
+        <p className="text-xs text-gray-600 mb-3">{t('todos.filtered', { shown: filtered.length, total: todos.length })}</p>
       )}
 
       {viewMode === 'kanban' ? (
@@ -456,20 +468,20 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
                     await api.todos.update(dragTodoId, { status: col.key as Todo['status'] });
                     onUpdate();
                   } catch (err: any) {
-                    showError(err.message || 'Status-Änderung fehlgeschlagen');
+                    showError(err.message || t('todos.statusChangeFailed'));
                   }
                 }}>
                 <h3 className="text-sm font-medium text-gray-400 mb-3">
-                  {col.label}{' '}
+                  {col.label()}{' '}
                   <span className="text-gray-600">({items.length})</span>
                 </h3>
-                <div className="space-y-2 min-h-[2rem]" role="list" aria-label={col.label}>
+                <div className="space-y-2 min-h-[2rem]" role="list" aria-label={col.label()}>
                   {items.map((todo) => (
                     <TodoCard key={todo._id} todo={todo} allTodos={todos} projectId={projectId} onUpdate={onUpdate}
                       onDragStart={(id) => setDragTodoId(id || null)} showError={showError} />
                   ))}
                   {items.length === 0 && !isOver && (
-                    <p className="text-xs text-gray-700 italic">Keine Einträge</p>
+                    <p className="text-xs text-gray-700 italic">{t('todos.noEntries')}</p>
                   )}
                 </div>
               </div>
@@ -481,18 +493,18 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-gray-800 text-xs text-gray-500">
-                <th className="py-2 px-3 font-medium">Status</th>
-                <th className="py-2 px-3 font-medium">Priorität</th>
-                <th className="py-2 px-3 font-medium">Titel</th>
-                <th className="py-2 px-3 font-medium">Tags</th>
-                <th className="py-2 px-3 font-medium" title="Kommentare">Komm.</th>
-                <th className="py-2 px-3 font-medium">Aktualisiert</th>
-                <th className="py-2 px-3 font-medium">Aktionen</th>
+                <th className="py-2 px-3 font-medium">{t('todos.tableStatus')}</th>
+                <th className="py-2 px-3 font-medium">{t('todos.tablePriority')}</th>
+                <th className="py-2 px-3 font-medium">{t('todos.tableTitle')}</th>
+                <th className="py-2 px-3 font-medium">{t('todos.tableTags')}</th>
+                <th className="py-2 px-3 font-medium" title={t('common.comments')}>{t('todos.tableComments')}</th>
+                <th className="py-2 px-3 font-medium">{t('todos.tableUpdated')}</th>
+                <th className="py-2 px-3 font-medium">{t('todos.tableActions')}</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={7} className="py-4 text-center text-xs text-gray-700 italic">Keine Tasks vorhanden</td></tr>
+                <tr><td colSpan={7} className="py-4 text-center text-xs text-gray-700 italic">{t('todos.noTasks')}</td></tr>
               )}
               {filtered.map((todo) => (
                 <TodoListRow key={todo._id} todo={todo} projectId={projectId} onUpdate={onUpdate} showError={showError} />

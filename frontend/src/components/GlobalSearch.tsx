@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api, SearchResult } from '../api/client';
 import { TYPE_LABELS, TYPE_COLORS } from '../constants/colors';
 import LoadingSpinner from './ui/LoadingSpinner';
@@ -20,6 +21,7 @@ function getResultUrl(result: SearchResult): string {
 }
 
 export default function GlobalSearch() {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -147,7 +149,7 @@ export default function GlobalSearch() {
           <input
             ref={inputRef}
             type="text"
-            placeholder="Suchen... (Ctrl+K)"
+            placeholder={t('common.search')}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -174,9 +176,9 @@ export default function GlobalSearch() {
                 ? 'bg-blue-900 text-blue-300 hover:bg-blue-800'
                 : 'bg-gray-800 text-gray-500 hover:bg-gray-700'
             }`}
-            title={scopeProject ? 'Nur im aktuellen Projekt' : 'Alle Projekte'}
+            title={scopeProject ? t('search.projectScope') : t('search.globalScope')}
           >
-            {scopeProject ? 'Projekt' : 'Global'}
+            {scopeProject ? t('search.project') : t('search.global')}
           </button>
         )}
       </div>
@@ -185,18 +187,18 @@ export default function GlobalSearch() {
         <div className="absolute top-full mt-1 right-0 w-[28rem] max-h-[24rem] overflow-y-auto bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50">
           {results.length === 0 && !loading && (
             <div className="px-4 py-6 text-center text-gray-500 text-sm">
-              Keine Ergebnisse für "{query}"
+              {t('common.noResults', { query })}
             </div>
           )}
           {results.length === 0 && loading && (
             <div className="px-4 py-6 text-center text-gray-500 text-sm">
-              Suche...
+              {t('common.searching')}
             </div>
           )}
           {Object.entries(grouped).map(([type, items]) => (
             <div key={type}>
               <div className="px-3 py-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-900/80 sticky top-0">
-                {TYPE_LABELS[type as SearchResult['type']]} ({items.length})
+                {TYPE_LABELS[type as SearchResult['type']]()} ({items.length})
               </div>
               {items.map((result) => {
                 flatIndex++;
@@ -216,7 +218,7 @@ export default function GlobalSearch() {
                     <span
                       className={`text-[10px] px-1.5 py-0.5 rounded mt-0.5 shrink-0 ${TYPE_COLORS[result.type]}`}
                     >
-                      {TYPE_LABELS[result.type]}
+                      {TYPE_LABELS[result.type]()}
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="text-sm text-gray-200 truncate">

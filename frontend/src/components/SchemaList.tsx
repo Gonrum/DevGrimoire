@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SchemaObject, SchemaVersion, SchemaField, SchemaIndex, DbType, api } from '../api/client';
 import { useToast } from './Toast';
 import Card from './ui/Card';
@@ -72,6 +73,7 @@ function SchemaForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const { showSuccess, showError } = useToast();
   const [form, setForm] = useState<SchemaFormData>(initial);
   const [saving, setSaving] = useState(false);
@@ -154,14 +156,14 @@ function SchemaForm({
           ...data,
           changeNote: form.changeNote.trim() || undefined,
         });
-        showSuccess(`Schema "${form.name}" aktualisiert`);
+        showSuccess(t('schemas.schemaUpdated', { name: form.name }));
       } else {
         await api.schemas.create(data);
-        showSuccess(`Schema "${form.name}" erstellt`);
+        showSuccess(t('schemas.schemaCreated', { name: form.name }));
       }
       onDone();
     } catch (err: any) {
-      showError(err.message || 'Fehler beim Speichern');
+      showError(err.message || t('common.errorSaving'));
     } finally {
       setSaving(false);
     }
@@ -171,20 +173,20 @@ function SchemaForm({
     <Card>
       <form onSubmit={handleSubmit} className="space-y-4">
         <h3 className="text-sm font-semibold mb-3">
-          {editId ? 'Schema bearbeiten' : 'Neues Schema'}
+          {editId ? t('schemas.editSchema') : t('schemas.newSchema')}
         </h3>
 
         {/* Basic info */}
         <div className="grid grid-cols-2 gap-3">
           <FormInput
-            label="Name"
+            label={t('common.name')}
             required
             value={form.name}
             onChange={(e) => update({ name: e.target.value })}
             placeholder="z.B. orders, users"
           />
           <FormSelect
-            label="Datenbanktyp"
+            label={t('schemas.dbType')}
             required
             value={form.dbType}
             onChange={(e) => update({ dbType: e.target.value as DbType })}
@@ -197,36 +199,36 @@ function SchemaForm({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <FormInput
-            label="Datenbank"
+            label={t('schemas.database')}
             value={form.database}
             onChange={(e) => update({ database: e.target.value })}
             placeholder="z.B. shop_production"
           />
           <FormInput
-            label="Tags"
+            label={t('common.tags')}
             value={form.tags}
             onChange={(e) => update({ tags: e.target.value })}
             placeholder="kommagetrennt, z.B. core, auth"
           />
         </div>
         <FormTextarea
-          label="Beschreibung"
+          label={t('common.description')}
           value={form.description}
           onChange={(e) => update({ description: e.target.value })}
           rows={2}
-          placeholder="Zweck der Tabelle/Collection"
+          placeholder={t('schemas.tablePurpose')}
         />
 
         {/* Fields */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Felder</h4>
+            <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">{t('common.fields')}</h4>
             <Button
               type="button"
               size="xs"
               onClick={() => update({ fields: [...form.fields, emptyField()] })}
             >
-              + Feld
+              {t('schemas.addField')}
             </Button>
           </div>
           <div className="space-y-2">
@@ -234,22 +236,22 @@ function SchemaForm({
               <div key={i} className="flex items-start gap-2 bg-gray-800/50 rounded p-2">
                 <div className="grid grid-cols-4 gap-2 flex-1">
                   <FormInput
-                    placeholder="Name *"
+                    placeholder={t('schemas.fieldName')}
                     value={field.name}
                     onChange={(e) => updateField(i, { name: e.target.value })}
                   />
                   <FormInput
-                    placeholder="Typ *"
+                    placeholder={t('schemas.fieldType')}
                     value={field.type}
                     onChange={(e) => updateField(i, { type: e.target.value })}
                   />
                   <FormInput
-                    placeholder="Default"
+                    placeholder={t('schemas.fieldDefault')}
                     value={field.defaultValue || ''}
                     onChange={(e) => updateField(i, { defaultValue: e.target.value || undefined })}
                   />
                   <FormInput
-                    placeholder="Referenz (FK)"
+                    placeholder={t('schemas.fieldReference')}
                     value={field.reference || ''}
                     onChange={(e) => updateField(i, { reference: e.target.value || undefined })}
                   />
@@ -286,7 +288,7 @@ function SchemaForm({
                     type="button"
                     onClick={() => removeField(i)}
                     className="text-gray-600 hover:text-red-400 text-sm"
-                    title="Feld entfernen"
+                    title={t('schemas.removeField')}
                   >
                     ✕
                   </button>
@@ -299,17 +301,17 @@ function SchemaForm({
         {/* Indexes */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Indexe</h4>
+            <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">{t('common.indexes')}</h4>
             <Button
               type="button"
               size="xs"
               onClick={() => update({ indexes: [...form.indexes, emptyIndex()] })}
             >
-              + Index
+              {t('schemas.addIndex')}
             </Button>
           </div>
           {form.indexes.length === 0 ? (
-            <p className="text-xs text-gray-600">Keine Indexe definiert.</p>
+            <p className="text-xs text-gray-600">{t('schemas.noIndexes')}</p>
           ) : (
             <div className="space-y-2">
               {form.indexes.map((idx, i) => (
@@ -317,23 +319,23 @@ function SchemaForm({
                   <div className="flex-1 space-y-2">
                     <div className="flex gap-2">
                       <FormInput
-                        placeholder="Index-Name *"
+                        placeholder={t('schemas.indexName')}
                         value={idx.name}
                         onChange={(e) => updateIndex(i, { name: e.target.value })}
                       />
                       <FormInput
-                        placeholder="Typ (btree, hash, gin...)"
+                        placeholder={t('schemas.indexType')}
                         value={idx.type || ''}
                         onChange={(e) => updateIndex(i, { type: e.target.value || undefined })}
                       />
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-gray-500">Felder:</span>
+                      <span className="text-xs text-gray-500">{t('schemas.indexFields')}</span>
                       {idx.fields.map((f, fi) => (
                         <div key={fi} className="flex items-center gap-1">
                           <input
                             className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 w-28 focus:outline-none focus:border-blue-500"
-                            placeholder="Feldname"
+                            placeholder={t('schemas.fieldNamePlaceholder')}
                             value={f}
                             onChange={(e) => updateIndexField(i, fi, e.target.value)}
                           />
@@ -371,7 +373,7 @@ function SchemaForm({
                       type="button"
                       onClick={() => removeIndex(i)}
                       className="text-gray-600 hover:text-red-400 text-sm"
-                      title="Index entfernen"
+                      title={t('schemas.removeIndex')}
                     >
                       ✕
                     </button>
@@ -385,20 +387,20 @@ function SchemaForm({
         {/* Change note (only for edit) */}
         {editId && (
           <FormInput
-            label="Änderungsnotiz"
+            label={t('schemas.changeNote')}
             value={form.changeNote}
             onChange={(e) => update({ changeNote: e.target.value })}
-            placeholder="Was wurde geändert? (optional, wird in Versionshistorie gespeichert)"
+            placeholder={t('schemas.changeNotePlaceholder')}
           />
         )}
 
         {/* Actions */}
         <div className="flex gap-2 pt-2">
           <Button type="submit" variant="primary" size="md" disabled={saving}>
-            {saving ? 'Speichern...' : editId ? 'Aktualisieren' : 'Erstellen'}
+            {saving ? t('common.saving') : editId ? t('common.update') : t('common.create')}
           </Button>
           <Button type="button" variant="secondary" size="md" onClick={onCancel}>
-            Abbrechen
+            {t('common.cancel')}
           </Button>
         </div>
       </form>
@@ -407,6 +409,7 @@ function SchemaForm({
 }
 
 export default function SchemaList({ entries, projectId }: { entries: SchemaObject[]; projectId: string }) {
+  const { t, i18n } = useTranslation();
   const { showSuccess, showError } = useToast();
   const [selectedDbType, setSelectedDbType] = useState<DbType | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -414,6 +417,8 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
   const [loadingVersions, setLoadingVersions] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingSchema, setEditingSchema] = useState<SchemaObject | null>(null);
+
+  const dateFmtLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
   const dbTypes = useMemo(() => {
     const types = new Set<DbType>();
@@ -453,9 +458,9 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
   const handleDelete = async (schema: SchemaObject) => {
     try {
       await api.schemas.delete(schema._id);
-      showSuccess(`Schema "${schema.name}" gelöscht`);
+      showSuccess(t('schemas.schemaDeleted', { name: schema.name }));
     } catch (err: any) {
-      showError(err.message || 'Fehler beim Löschen');
+      showError(err.message || t('common.errorDeleting'));
     }
   };
 
@@ -484,7 +489,7 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
           onClick={() => { setEditingSchema(null); setShowForm(true); }}
           className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
         >
-          + Neues Schema
+          {t('schemas.newSchema')}
         </button>
         {dbTypes.length > 1 && (
           <div className="flex flex-wrap gap-1.5">
@@ -496,7 +501,7 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
                   : 'bg-gray-800 text-gray-400 hover:text-gray-200'
               }`}
             >
-              Alle ({entries.length})
+              {t('common.all')} ({entries.length})
             </button>
             {dbTypes.map((dt) => (
               <button
@@ -516,7 +521,7 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
       </div>
 
       {entries.length === 0 ? (
-        <EmptyState message="Noch keine Schema-Objekte dokumentiert." />
+        <EmptyState message={t('schemas.noSchemas')} />
       ) : (
         <div className="space-y-3">
           {filtered.map((schema) => (
@@ -534,11 +539,11 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
                     <span className="text-xs text-gray-500">v{schema.version}</span>
                   </div>
                   <div className="flex items-center gap-3 text-xs text-gray-500">
-                    <span>{schema.fields.length} Felder</span>
+                    <span>{t('schemas.fieldsCount', { count: schema.fields.length })}</span>
                     {schema.indexes.length > 0 && (
-                      <span>{schema.indexes.length} Indexe</span>
+                      <span>{t('schemas.indexesCount', { count: schema.indexes.length })}</span>
                     )}
-                    <span>{new Date(schema.updatedAt).toLocaleDateString('de-DE')}</span>
+                    <span>{new Date(schema.updatedAt).toLocaleDateString(dateFmtLocale)}</span>
                     <span className="text-gray-600">{expandedId === schema._id ? '▲' : '▼'}</span>
                   </div>
                 </div>
@@ -564,12 +569,12 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
                   {/* Action buttons */}
                   <div className="flex gap-2">
                     <Button size="xs" onClick={(e) => handleEdit(schema, e)}>
-                      Bearbeiten
+                      {t('common.edit')}
                     </Button>
                     <ConfirmButton
                       onConfirm={() => handleDelete(schema)}
-                      label="Löschen"
-                      confirmLabel="Wirklich löschen?"
+                      label={t('common.delete')}
+                      confirmLabel={t('common.confirmDeleteLong')}
                       size="xs"
                     />
                   </div>
@@ -577,19 +582,19 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
                   {/* Fields Table */}
                   {schema.fields.length > 0 && (
                     <div>
-                      <h4 className="text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">Felder</h4>
+                      <h4 className="text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">{t('common.fields')}</h4>
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="text-gray-500 border-b border-gray-800">
-                              <th className="text-left py-1.5 pr-3 font-medium">Name</th>
+                              <th className="text-left py-1.5 pr-3 font-medium">{t('common.name')}</th>
                               <th className="text-left py-1.5 pr-3 font-medium">Typ</th>
                               <th className="text-center py-1.5 pr-3 font-medium">NULL</th>
                               <th className="text-center py-1.5 pr-3 font-medium">PK</th>
                               <th className="text-center py-1.5 pr-3 font-medium">IDX</th>
                               <th className="text-left py-1.5 pr-3 font-medium">Default</th>
-                              <th className="text-left py-1.5 pr-3 font-medium">Referenz</th>
-                              <th className="text-left py-1.5 font-medium">Beschreibung</th>
+                              <th className="text-left py-1.5 pr-3 font-medium">{t('schemas.fieldRef')}</th>
+                              <th className="text-left py-1.5 font-medium">{t('schemas.fieldDescription')}</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -614,13 +619,13 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
                   {/* Indexes Table */}
                   {schema.indexes.length > 0 && (
                     <div>
-                      <h4 className="text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">Indexe</h4>
+                      <h4 className="text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">{t('common.indexes')}</h4>
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="text-gray-500 border-b border-gray-800">
-                              <th className="text-left py-1.5 pr-3 font-medium">Name</th>
-                              <th className="text-left py-1.5 pr-3 font-medium">Felder</th>
+                              <th className="text-left py-1.5 pr-3 font-medium">{t('common.name')}</th>
+                              <th className="text-left py-1.5 pr-3 font-medium">{t('common.fields')}</th>
                               <th className="text-center py-1.5 pr-3 font-medium">Unique</th>
                               <th className="text-left py-1.5 font-medium">Typ</th>
                             </tr>
@@ -643,12 +648,12 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
                   {/* Version History */}
                   <div>
                     <h4 className="text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
-                      Versionshistorie
+                      {t('schemas.versionHistory')}
                     </h4>
                     {loadingVersions === schema._id ? (
-                      <p className="text-xs text-gray-500">Laden...</p>
+                      <p className="text-xs text-gray-500">{t('common.loading')}</p>
                     ) : (versions[schema._id] || []).length === 0 ? (
-                      <p className="text-xs text-gray-600">Noch keine früheren Versionen.</p>
+                      <p className="text-xs text-gray-600">{t('schemas.noPreviousVersions')}</p>
                     ) : (
                       <div className="space-y-1">
                         {(versions[schema._id] || []).map((v) => (
@@ -658,10 +663,10 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
                           >
                             <span className="font-mono text-gray-300">v{v.version}</span>
                             <span className="text-gray-500">
-                              {new Date(v.createdAt).toLocaleString('de-DE')}
+                              {new Date(v.createdAt).toLocaleString(dateFmtLocale)}
                             </span>
                             <span className="text-gray-500">
-                              {v.fields.length} Felder, {v.indexes.length} Indexe
+                              {t('schemas.fieldsCount', { count: v.fields.length })}, {t('schemas.indexesCount', { count: v.indexes.length })}
                             </span>
                             {v.changeNote && (
                               <span className="text-gray-400 italic">{v.changeNote}</span>

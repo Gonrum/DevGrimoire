@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Dependency, PackageManager, api } from '../api/client';
 import { useToast } from './Toast';
 import Card from './ui/Card';
@@ -70,6 +71,7 @@ function DependencyForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const { showSuccess, showError } = useToast();
   const [form, setForm] = useState<DependencyFormData>(initial);
   const [saving, setSaving] = useState(false);
@@ -96,14 +98,14 @@ function DependencyForm({
 
       if (editId) {
         await api.dependencies.update(editId, data);
-        showSuccess(`Dependency "${form.name}" aktualisiert`);
+        showSuccess(t('dependencies.depUpdated', { name: form.name }));
       } else {
         await api.dependencies.create(data);
-        showSuccess(`Dependency "${form.name}" hinzugefuegt`);
+        showSuccess(t('dependencies.depCreated', { name: form.name }));
       }
       onDone();
     } catch (err: any) {
-      showError(err.message || 'Fehler beim Speichern');
+      showError(err.message || t('common.errorSaving'));
     } finally {
       setSaving(false);
     }
@@ -113,25 +115,25 @@ function DependencyForm({
     <Card>
       <form onSubmit={handleSubmit} className="space-y-4">
         <h3 className="text-sm font-semibold mb-3">
-          {editId ? 'Dependency bearbeiten' : 'Neue Dependency'}
+          {editId ? t('dependencies.editDependency') : t('dependencies.newDependency')}
         </h3>
         <div className="grid grid-cols-3 gap-3">
           <FormInput
-            label="Name"
+            label={t('common.name')}
             required
             value={form.name}
             onChange={(e) => update({ name: e.target.value })}
             placeholder="z.B. react, lodash"
           />
           <FormInput
-            label="Version"
+            label={t('common.version')}
             required
             value={form.version}
             onChange={(e) => update({ version: e.target.value })}
             placeholder="z.B. ^18.2.0"
           />
           <FormSelect
-            label="Package Manager"
+            label={t('dependencies.packageManager')}
             required
             value={form.packageManager}
             onChange={(e) => update({ packageManager: e.target.value as PackageManager })}
@@ -143,24 +145,24 @@ function DependencyForm({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <FormInput
-            label="Kategorie"
+            label={t('common.category')}
             value={form.category}
             onChange={(e) => update({ category: e.target.value })}
             placeholder="z.B. framework, testing, utility"
           />
           <FormInput
-            label="Tags"
+            label={t('common.tags')}
             value={form.tags}
             onChange={(e) => update({ tags: e.target.value })}
-            placeholder="kommagetrennt"
+            placeholder={t('common.commaSeparated')}
           />
         </div>
         <FormTextarea
-          label="Beschreibung"
+          label={t('common.description')}
           value={form.description}
           onChange={(e) => update({ description: e.target.value })}
           rows={2}
-          placeholder="Wofuer wird dieses Paket verwendet?"
+          placeholder={t('dependencies.purposePlaceholder')}
         />
         <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
           <input
@@ -169,14 +171,14 @@ function DependencyForm({
             onChange={(e) => update({ devDependency: e.target.checked })}
             className="rounded bg-gray-700 border-gray-600"
           />
-          Dev-Dependency
+          {t('dependencies.devDependency')}
         </label>
         <div className="flex gap-2 pt-2">
           <Button type="submit" variant="primary" size="md" disabled={saving}>
-            {saving ? 'Speichern...' : editId ? 'Aktualisieren' : 'Erstellen'}
+            {saving ? t('common.saving') : editId ? t('common.update') : t('common.create')}
           </Button>
           <Button type="button" variant="secondary" size="md" onClick={onCancel}>
-            Abbrechen
+            {t('common.cancel')}
           </Button>
         </div>
       </form>
@@ -185,12 +187,15 @@ function DependencyForm({
 }
 
 export default function DependencyList({ entries, projectId }: { entries: Dependency[]; projectId: string }) {
+  const { t, i18n } = useTranslation();
   const { showSuccess, showError } = useToast();
   const [selectedPm, setSelectedPm] = useState<PackageManager | null>(null);
   const [showDevOnly, setShowDevOnly] = useState<boolean | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingDep, setEditingDep] = useState<Dependency | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const dateFmtLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
   const packageManagers = useMemo(() => {
     const pms = new Set<PackageManager>();
@@ -209,9 +214,9 @@ export default function DependencyList({ entries, projectId }: { entries: Depend
   const handleDelete = async (dep: Dependency) => {
     try {
       await api.dependencies.delete(dep._id);
-      showSuccess(`Dependency "${dep.name}" geloescht`);
+      showSuccess(t('dependencies.depDeleted', { name: dep.name }));
     } catch (err: any) {
-      showError(err.message || 'Fehler beim Loeschen');
+      showError(err.message || t('common.errorDeleting'));
     }
   };
 
@@ -239,7 +244,7 @@ export default function DependencyList({ entries, projectId }: { entries: Depend
           onClick={() => { setEditingDep(null); setShowForm(true); }}
           className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
         >
-          + Neue Dependency
+          {t('dependencies.newDependency')}
         </button>
         {packageManagers.length > 1 && (
           <div className="flex flex-wrap gap-1.5">
@@ -251,7 +256,7 @@ export default function DependencyList({ entries, projectId }: { entries: Depend
                   : 'bg-gray-800 text-gray-400 hover:text-gray-200'
               }`}
             >
-              Alle ({entries.length})
+              {t('common.all')} ({entries.length})
             </button>
             {packageManagers.map((pm) => (
               <button
@@ -293,9 +298,9 @@ export default function DependencyList({ entries, projectId }: { entries: Depend
       </div>
 
       {entries.length === 0 ? (
-        <EmptyState message="Noch keine Dependencies dokumentiert." />
+        <EmptyState message={t('dependencies.noDependencies')} />
       ) : filtered.length === 0 ? (
-        <EmptyState message="Keine Dependencies mit diesen Filtern." />
+        <EmptyState message={t('dependencies.noFiltered')} />
       ) : (
         <div className="space-y-2">
           {filtered.map((dep) => (
@@ -335,9 +340,9 @@ export default function DependencyList({ entries, projectId }: { entries: Depend
                     </div>
                   )}
                   <div className="text-xs text-gray-500">
-                    Hinzugefuegt: {new Date(dep.createdAt).toLocaleDateString('de-DE')}
+                    {t('common.addedOn')}: {new Date(dep.createdAt).toLocaleDateString(dateFmtLocale)}
                     {' | '}
-                    Aktualisiert: {new Date(dep.updatedAt).toLocaleDateString('de-DE')}
+                    {t('common.updated')}: {new Date(dep.updatedAt).toLocaleDateString(dateFmtLocale)}
                   </div>
                   <div className="flex gap-2">
                     <Button
@@ -348,12 +353,12 @@ export default function DependencyList({ entries, projectId }: { entries: Depend
                         setShowForm(true);
                       }}
                     >
-                      Bearbeiten
+                      {t('common.edit')}
                     </Button>
                     <ConfirmButton
                       onConfirm={() => handleDelete(dep)}
-                      label="Loeschen"
-                      confirmLabel="Wirklich loeschen?"
+                      label={t('common.delete')}
+                      confirmLabel={t('common.confirmDeleteLong')}
                       size="xs"
                     />
                   </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, UserInfo } from '../api/client';
 import { useToast } from '../components/Toast';
 import Button from '../components/ui/Button';
@@ -7,6 +8,7 @@ import Badge from '../components/ui/Badge';
 import ConfirmButton from '../components/ui/ConfirmButton';
 
 function CreateUserForm({ onCreated }: { onCreated: () => void }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -26,7 +28,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
         password,
         role,
       });
-      showSuccess('Benutzer erstellt');
+      showSuccess(t('users.userCreated'));
       setUsername('');
       setEmail('');
       setPassword('');
@@ -34,7 +36,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
       setOpen(false);
       onCreated();
     } catch (err: any) {
-      showError(err.message || 'Fehler beim Erstellen');
+      showError(err.message || t('common.errorSaving'));
     } finally {
       setSaving(false);
     }
@@ -43,17 +45,17 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
   if (!open) {
     return (
       <Button type="button" variant="primary" size="lg" onClick={() => setOpen(true)} className="mb-6">
-        + Neuer Benutzer
+        {t('users.newUser')}
       </Button>
     );
   }
 
   return (
     <form onSubmit={handleSubmit} className="mb-6 bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 max-w-md">
-      <h3 className="text-sm font-semibold text-gray-300">Neuen Benutzer anlegen</h3>
+      <h3 className="text-sm font-semibold text-gray-300">{t('users.createUser')}</h3>
       <input
         type="text"
-        placeholder="Benutzername *"
+        placeholder={t('users.usernamePlaceholder')}
         value={username}
         onChange={(e) => setUsername(e.target.value)}
         className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
@@ -61,14 +63,14 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
       />
       <input
         type="email"
-        placeholder="E-Mail (optional)"
+        placeholder={t('users.emailPlaceholder')}
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
       />
       <input
         type="password"
-        placeholder="Passwort *"
+        placeholder={t('users.passwordPlaceholder')}
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
@@ -79,15 +81,15 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
         onChange={(e) => setRole(e.target.value as 'user' | 'admin')}
         className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
       >
-        <option value="user">Benutzer</option>
-        <option value="admin">Administrator</option>
+        <option value="user">{t('users.roleUser')}</option>
+        <option value="admin">{t('users.roleAdmin')}</option>
       </select>
       <div className="flex gap-2">
         <Button type="submit" variant="primary" disabled={saving || !username.trim() || !password}>
-          {saving ? 'Speichern...' : 'Erstellen'}
+          {saving ? t('common.saving') : t('common.create')}
         </Button>
         <Button type="button" onClick={() => setOpen(false)}>
-          Abbrechen
+          {t('common.cancel')}
         </Button>
       </div>
     </form>
@@ -95,18 +97,21 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
 }
 
 export default function UserManagement() {
+  const { t, i18n } = useTranslation();
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<Partial<UserInfo>>({});
   const { showError, showSuccess } = useToast();
 
+  const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
+
   const loadUsers = async () => {
     try {
       const data = await api.users.list();
       setUsers(data);
     } catch (err: any) {
-      showError(err.message || 'Fehler beim Laden');
+      showError(err.message || t('common.errorLoading', { error: '' }));
     } finally {
       setLoading(false);
     }
@@ -119,7 +124,7 @@ export default function UserManagement() {
   const handleToggleActive = async (user: UserInfo) => {
     try {
       await api.users.update(user._id, { active: !user.active });
-      showSuccess(user.active ? 'Benutzer deaktiviert' : 'Benutzer aktiviert');
+      showSuccess(user.active ? t('users.userDeactivated') : t('users.userActivated'));
       loadUsers();
     } catch (err: any) {
       showError(err.message);
@@ -129,7 +134,7 @@ export default function UserManagement() {
   const handleDelete = async (user: UserInfo) => {
     try {
       await api.users.delete(user._id);
-      showSuccess('Benutzer gelöscht');
+      showSuccess(t('users.userDeleted'));
       loadUsers();
     } catch (err: any) {
       showError(err.message);
@@ -145,7 +150,7 @@ export default function UserManagement() {
     if (!editingId) return;
     try {
       await api.users.update(editingId, editData);
-      showSuccess('Benutzer aktualisiert');
+      showSuccess(t('users.userUpdated'));
       setEditingId(null);
       loadUsers();
     } catch (err: any) {
@@ -153,7 +158,7 @@ export default function UserManagement() {
     }
   };
 
-  if (loading) return <p className="text-gray-500">Laden...</p>;
+  if (loading) return <p className="text-gray-500">{t('common.loading')}</p>;
 
   return (
     <div>
@@ -187,14 +192,14 @@ export default function UserManagement() {
                   onChange={(e) => setEditData({ ...editData, role: e.target.value as 'admin' | 'user' })}
                   className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
                 >
-                  <option value="user">Benutzer</option>
+                  <option value="user">{t('users.roleUser')}</option>
                   <option value="admin">Admin</option>
                 </select>
                 <Button type="button" variant="primary" size="xs" onClick={saveEdit}>
-                  Speichern
+                  {t('common.save')}
                 </Button>
                 <Button type="button" size="xs" onClick={() => setEditingId(null)}>
-                  Abbrechen
+                  {t('common.cancel')}
                 </Button>
               </div>
             ) : (
@@ -203,10 +208,10 @@ export default function UserManagement() {
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-gray-200">{user.username}</span>
                     <Badge color={user.role === 'admin' ? 'bg-purple-900 text-purple-300' : 'bg-gray-800 text-gray-400'}>
-                      {user.role === 'admin' ? 'Admin' : 'Benutzer'}
+                      {user.role === 'admin' ? 'Admin' : t('users.roleUser')}
                     </Badge>
                     <Badge color={user.active ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}>
-                      {user.active ? 'Aktiv' : 'Deaktiviert'}
+                      {user.active ? t('users.statusActive') : t('users.statusInactive')}
                     </Badge>
                   </div>
                   {user.email && (
@@ -214,11 +219,11 @@ export default function UserManagement() {
                   )}
                 </div>
                 <span className="text-xs text-gray-600">
-                  {new Date(user.createdAt).toLocaleDateString('de-DE')}
+                  {new Date(user.createdAt).toLocaleDateString(dateLocale)}
                 </span>
                 <div className="flex gap-1">
                   <Button type="button" size="xs" onClick={() => startEdit(user)}>
-                    Bearbeiten
+                    {t('common.edit')}
                   </Button>
                   <Button
                     type="button"
@@ -228,7 +233,7 @@ export default function UserManagement() {
                       ? 'bg-yellow-900/40 hover:bg-yellow-900 text-yellow-300'
                       : 'bg-green-900/40 hover:bg-green-900 text-green-300'}
                   >
-                    {user.active ? 'Deaktivieren' : 'Aktivieren'}
+                    {user.active ? t('users.deactivate') : t('users.activate')}
                   </Button>
                   <ConfirmButton onConfirm={() => handleDelete(user)} size="xs" />
                 </div>

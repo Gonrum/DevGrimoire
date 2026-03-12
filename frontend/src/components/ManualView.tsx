@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, Manual } from '../api/client';
 import Markdown from './Markdown';
 import MarkdownEditor from './MarkdownEditor';
@@ -14,6 +15,7 @@ function ManualForm({ projectId, manual, categories, onSaved, onCancel }: {
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const [title, setTitle] = useState(manual?.title || '');
   const [content, setContent] = useState(manual?.content || '');
   const [category, setCategory] = useState(manual?.category || '');
@@ -50,14 +52,14 @@ function ManualForm({ projectId, manual, categories, onSaved, onCancel }: {
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       <div>
-        <label className="block text-xs text-gray-500 mb-1">Titel</label>
+        <label className="block text-xs text-gray-500 mb-1">{t('manuals.titleLabel')}</label>
         <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
           className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500" autoFocus />
       </div>
       <div className="flex gap-3">
         <div className="flex-1">
-          <label className="block text-xs text-gray-500 mb-1">Kategorie</label>
-          <input type="text" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="z.B. Setup, API, Deployment"
+          <label className="block text-xs text-gray-500 mb-1">{t('manuals.categoryLabel')}</label>
+          <input type="text" value={category} onChange={(e) => setCategory(e.target.value)} placeholder={t('manuals.categoryPlaceholder')}
             list="manual-categories"
             className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
           <datalist id="manual-categories">
@@ -65,20 +67,20 @@ function ManualForm({ projectId, manual, categories, onSaved, onCancel }: {
           </datalist>
         </div>
         <div className="w-24">
-          <label className="block text-xs text-gray-500 mb-1">Sortierung</label>
+          <label className="block text-xs text-gray-500 mb-1">{t('manuals.sortOrder')}</label>
           <input type="number" value={sortOrder} onChange={(e) => setSortOrder(Number(e.target.value))}
             className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500" />
         </div>
       </div>
       <div>
-        <label className="block text-xs text-gray-500 mb-1">Inhalt</label>
-        <MarkdownEditor value={content} onChange={setContent} rows={12} placeholder="Markdown-Inhalt..." />
+        <label className="block text-xs text-gray-500 mb-1">{t('manuals.content')}</label>
+        <MarkdownEditor value={content} onChange={setContent} rows={12} placeholder={t('manuals.contentPlaceholder')} />
       </div>
       <div className="flex gap-2 pt-2">
         <Button type="submit" variant="primary" disabled={saving || !title.trim()}>
-          {saving ? 'Speichern...' : 'Speichern'}
+          {saving ? t('common.saving') : t('common.save')}
         </Button>
-        <Button type="button" onClick={onCancel}>Abbrechen</Button>
+        <Button type="button" onClick={onCancel}>{t('common.cancel')}</Button>
       </div>
     </form>
   );
@@ -89,7 +91,10 @@ function ManualArticle({ manual, onUpdate, onEdit }: {
   onUpdate: () => void;
   onEdit: () => void;
 }) {
+  const { t, i18n } = useTranslation();
   const { showError } = useToast();
+
+  const dateFmtLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
   const handleDownload = () => {
     const blob = new Blob([manual.content], { type: 'text/markdown' });
@@ -107,14 +112,14 @@ function ManualArticle({ manual, onUpdate, onEdit }: {
         {manual.content ? (
           <Markdown>{manual.content}</Markdown>
         ) : (
-          <p className="text-sm text-gray-600 italic">Kein Inhalt</p>
+          <p className="text-sm text-gray-600 italic">{t('manuals.noContent')}</p>
         )}
       </div>
       <div className="flex items-center gap-2 mt-6 pt-4 border-t border-gray-800">
-        <Button size="xs" onClick={onEdit}>Bearbeiten</Button>
-        <Button size="xs" onClick={handleDownload}>Markdown herunterladen</Button>
+        <Button size="xs" onClick={onEdit}>{t('common.edit')}</Button>
+        <Button size="xs" onClick={handleDownload}>{t('manuals.downloadMarkdown')}</Button>
         <span className="text-xs text-gray-600 ml-auto">
-          {new Date(manual.updatedAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+          {new Date(manual.updatedAt).toLocaleDateString(dateFmtLocale, { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
           {manual.lastEditedBy && ` · ${manual.lastEditedBy}`}
         </span>
         <ConfirmButton onConfirm={async () => {
@@ -122,7 +127,7 @@ function ManualArticle({ manual, onUpdate, onEdit }: {
             await api.manuals.delete(manual._id);
             onUpdate();
           } catch (err: any) {
-            showError(err.message || 'Löschen fehlgeschlagen');
+            showError(err.message || t('manuals.deleteFailed'));
           }
         }} />
       </div>
@@ -131,6 +136,7 @@ function ManualArticle({ manual, onUpdate, onEdit }: {
 }
 
 export default function ManualView({ projectId, entries, onUpdate }: { projectId: string; entries: Manual[]; onUpdate: () => void }) {
+  const { t } = useTranslation();
   const [showForm, setShowForm] = useState(false);
   const [editingManual, setEditingManual] = useState<Manual | undefined>(undefined);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -156,7 +162,7 @@ export default function ManualView({ projectId, entries, onUpdate }: { projectId
   if (showForm || editingManual) {
     return (
       <div>
-        <h2 className="text-lg font-semibold mb-4">{editingManual ? 'Eintrag bearbeiten' : 'Neuer Handbuch-Eintrag'}</h2>
+        <h2 className="text-lg font-semibold mb-4">{editingManual ? t('manuals.editEntry') : t('manuals.newManualEntry')}</h2>
         <ManualForm
           projectId={projectId}
           manual={editingManual}
@@ -174,10 +180,10 @@ export default function ManualView({ projectId, entries, onUpdate }: { projectId
         <div className="mb-4">
           <button type="button" onClick={() => setShowForm(true)}
             className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
-            + Neuer Eintrag
+            {t('manuals.newEntry')}
           </button>
         </div>
-        <EmptyState message="Noch keine Handbuch-Einträge. Lege einen über das Formular oder per MCP an." />
+        <EmptyState message={t('manuals.noManuals')} />
       </div>
     );
   }
@@ -189,7 +195,7 @@ export default function ManualView({ projectId, entries, onUpdate }: { projectId
         <div className="sticky top-4 space-y-1">
           <button type="button" onClick={() => setShowForm(true)}
             className="w-full px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors mb-3">
-            + Neuer Eintrag
+            {t('manuals.newEntry')}
           </button>
           {sortedCategories.map(([cat, items]) => (
             <div key={cat || '__none'}>

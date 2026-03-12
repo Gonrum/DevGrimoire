@@ -1,6 +1,8 @@
+import { useTranslation } from 'react-i18next';
 import { Activity } from '../api/client';
 import { ENTITY_ICONS, ACTION_COLORS } from '../constants/colors';
 import EmptyState from './ui/EmptyState';
+import i18n from '../i18n';
 
 function formatTime(dateStr: string): string {
   const date = new Date(dateStr);
@@ -8,18 +10,21 @@ function formatTime(dateStr: string): string {
   const diffMs = now.getTime() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
 
-  if (diffMin < 1) return 'gerade eben';
-  if (diffMin < 60) return `vor ${diffMin} Min.`;
+  if (diffMin < 1) return i18n.t('activity.justNow');
+  if (diffMin < 60) return i18n.t('activity.minutesAgo', { count: diffMin });
   const diffHours = Math.floor(diffMin / 60);
-  if (diffHours < 24) return `vor ${diffHours} Std.`;
+  if (diffHours < 24) return i18n.t('activity.hoursAgo', { count: diffHours });
   const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 7) return `vor ${diffDays} Tag${diffDays > 1 ? 'en' : ''}`;
-  return date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  if (diffDays < 7) return i18n.t('activity.daysAgo', { count: diffDays });
+  const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
+  return date.toLocaleDateString(dateLocale, { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
 export default function ActivityList({ activities }: { activities: Activity[] }) {
+  const { t } = useTranslation();
+
   if (activities.length === 0) {
-    return <EmptyState message="Noch keine Aktivitäten." />;
+    return <EmptyState message={t('activity.noActivities')} />;
   }
 
   return (

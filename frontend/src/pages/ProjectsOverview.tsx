@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api, Project } from '../api/client';
 import { useDashboardEvents } from '../hooks/useProjectEvents';
 import { useToast } from '../components/Toast';
@@ -9,6 +10,7 @@ import EmptyState from '../components/ui/EmptyState';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
 function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -27,7 +29,7 @@ function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
         description: description.trim() || undefined,
         path: path.trim() || undefined,
         repository: repository.trim() || undefined,
-        techStack: techStack.split(',').map((t) => t.trim()).filter(Boolean),
+        techStack: techStack.split(',').map((s) => s.trim()).filter(Boolean),
       });
       setName('');
       setDescription('');
@@ -44,24 +46,24 @@ function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
   if (!open) {
     return (
       <Button type="button" variant="primary" size="lg" onClick={() => setOpen(true)} className="mb-6">
-        + Neues Projekt
+        {t('projects.newProject')}
       </Button>
     );
   }
 
   return (
     <form onSubmit={handleSubmit} className="mb-6 bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 max-w-xl">
-      <h3 className="text-sm font-semibold text-gray-300">Neues Projekt anlegen</h3>
+      <h3 className="text-sm font-semibold text-gray-300">{t('projects.createProject')}</h3>
       <input
         type="text"
-        placeholder="Projektname *"
+        placeholder={t('projects.projectName')}
         value={name}
         onChange={(e) => setName(e.target.value)}
         className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
         autoFocus
       />
       <textarea
-        placeholder="Beschreibung (optional)"
+        placeholder={t('projects.descriptionOptional')}
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         rows={2}
@@ -70,14 +72,14 @@ function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <input
           type="text"
-          placeholder="Pfad (optional)"
+          placeholder={t('projects.pathOptional')}
           value={path}
           onChange={(e) => setPath(e.target.value)}
           className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
         />
         <input
           type="text"
-          placeholder="Repository URL (optional)"
+          placeholder={t('projects.repositoryOptional')}
           value={repository}
           onChange={(e) => setRepository(e.target.value)}
           className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
@@ -85,17 +87,17 @@ function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
       </div>
       <input
         type="text"
-        placeholder="Tech Stack (kommagetrennt, z.B. React, Node.js)"
+        placeholder={t('projects.techStackHint')}
         value={techStack}
         onChange={(e) => setTechStack(e.target.value)}
         className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
       />
       <div className="flex gap-2">
         <Button type="submit" variant="primary" disabled={saving || !name.trim()}>
-          {saving ? 'Speichern...' : 'Erstellen'}
+          {saving ? t('common.saving') : t('common.create')}
         </Button>
         <Button type="button" onClick={() => setOpen(false)}>
-          Abbrechen
+          {t('common.cancel')}
         </Button>
       </div>
     </form>
@@ -103,6 +105,7 @@ function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
 }
 
 export default function ProjectsOverview() {
+  const { t, i18n } = useTranslation();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +130,7 @@ export default function ProjectsOverview() {
       await api.projects.update(project._id, { favorite: !project.favorite });
       loadProjects();
     } catch (err: any) {
-      showError(err.message || 'Favorit konnte nicht geändert werden');
+      showError(err.message || t('dashboard.favoriteError'));
     }
   };
 
@@ -138,7 +141,7 @@ export default function ProjectsOverview() {
       return (
         p.name.toLowerCase().includes(q) ||
         p.description?.toLowerCase().includes(q) ||
-        p.techStack.some((t) => t.toLowerCase().includes(q))
+        p.techStack.some((s) => s.toLowerCase().includes(q))
       );
     })
     .sort((a, b) => {
@@ -152,18 +155,20 @@ export default function ProjectsOverview() {
 
   useDashboardEvents(() => loadProjects());
 
+  const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
+
   if (loading) return <LoadingText />;
   if (error) {
     return (
       <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
-        <p className="text-red-400">Fehler beim Laden: {error}</p>
+        <p className="text-red-400">{t('common.errorLoading', { error })}</p>
       </div>
     );
   }
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-6">Projektübersicht</h1>
+      <h1 className="text-2xl font-bold mb-6">{t('projects.overview')}</h1>
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
         <ProjectCreateForm onCreated={loadProjects} />
         <button
@@ -172,7 +177,7 @@ export default function ProjectsOverview() {
           disabled={importing}
           className="px-3 py-1.5 text-sm bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
         >
-          {importing ? 'Importieren...' : 'JSON importieren'}
+          {importing ? t('projects.importing') : t('projects.importJson')}
         </button>
         <input
           ref={fileInputRef}
@@ -188,7 +193,7 @@ export default function ProjectsOverview() {
               loadProjects();
               navigate(`/projects/${result.projectId}`);
             } catch (err: any) {
-              showError(err.message || 'Import fehlgeschlagen');
+              showError(err.message || t('projects.importFailed'));
             } finally {
               setImporting(false);
               e.target.value = '';
@@ -197,16 +202,16 @@ export default function ProjectsOverview() {
         />
         <input
           type="text"
-          placeholder="Projekte suchen..."
+          placeholder={t('projects.searchProjects')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 w-full sm:w-64"
         />
       </div>
       {projects.length === 0 ? (
-        <EmptyState message="Noch keine Projekte. Lege eins über das Formular oder per MCP an." />
+        <EmptyState message={t('projects.noProjects')} />
       ) : filteredProjects.length === 0 ? (
-        <EmptyState message={`Keine Projekte gefunden für "${search}".`} />
+        <EmptyState message={t('projects.noProjectsFound', { search })} />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredProjects.map((p) => (
@@ -225,15 +230,15 @@ export default function ProjectsOverview() {
                         ? 'text-yellow-400 hover:text-yellow-300'
                         : 'text-gray-700 hover:text-yellow-400'
                     }`}
-                    title={p.favorite ? 'Favorit entfernen' : 'Als Favorit markieren'}
-                    aria-label={p.favorite ? 'Favorit entfernen' : 'Als Favorit markieren'}
+                    title={p.favorite ? t('projects.removeFavorite') : t('projects.addFavorite')}
+                    aria-label={p.favorite ? t('projects.removeFavorite') : t('projects.addFavorite')}
                   >
                     {p.favorite ? '\u2605' : '\u2606'}
                   </button>
                   <h2 className="text-lg font-semibold">{p.name}</h2>
                 </div>
                 <Badge color={p.active ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500'} rounded="full">
-                  {p.active ? 'aktiv' : 'inaktiv'}
+                  {p.active ? t('common.active') : t('common.inactive')}
                 </Badge>
               </div>
               {p.description && (
@@ -243,17 +248,17 @@ export default function ProjectsOverview() {
               )}
               {p.techStack.length > 0 && (
                 <div className="flex flex-wrap gap-1">
-                  {p.techStack.map((t) => (
-                    <Badge key={t} color="bg-gray-800 text-gray-300">
-                      {t}
+                  {p.techStack.map((tech) => (
+                    <Badge key={tech} color="bg-gray-800 text-gray-300">
+                      {tech}
                     </Badge>
                   ))}
                 </div>
               )}
               <p className="text-xs text-gray-600 mt-3">
-                Erstellt: {new Date(p.createdAt).toLocaleDateString('de-DE')}
+                {t('common.created')}: {new Date(p.createdAt).toLocaleDateString(dateLocale)}
                 {' · '}
-                Aktualisiert: {new Date(p.updatedAt).toLocaleDateString('de-DE')}
+                {t('common.updated')}: {new Date(p.updatedAt).toLocaleDateString(dateLocale)}
               </p>
             </Link>
           ))}

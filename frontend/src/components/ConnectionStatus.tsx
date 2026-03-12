@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
 
 export default function ConnectionStatus() {
+  const { t } = useTranslation();
   const [connected, setConnected] = useState(false);
   const { getAccessToken } = useAuth();
 
@@ -38,7 +40,7 @@ export default function ConnectionStatus() {
   return (
     <span
       className={`w-2 h-2 rounded-full shrink-0 ${connected ? 'bg-green-500' : 'bg-red-500'}`}
-      title={connected ? 'Live-Verbindung aktiv' : 'Keine Verbindung'}
+      title={connected ? t('connection.connected') : t('connection.disconnected')}
     />
   );
 }

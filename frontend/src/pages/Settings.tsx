@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, ApiKeyInfo } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import UserManagement from './UserManagement';
@@ -41,6 +42,7 @@ Wenn du Tasks bearbeitest, halte dich an den Status-Workflow:
 type SettingsTab = 'instructions' | 'apikeys' | 'users';
 
 export default function Settings() {
+  const { t, i18n } = useTranslation();
   const { user, authEnabled } = useAuth();
   const isAdmin = authEnabled && user?.role === 'admin';
   const [tab, setTab] = useState<SettingsTab>('instructions');
@@ -61,17 +63,19 @@ export default function Settings() {
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
+
   const load = useCallback(async () => {
     try {
       const res = await api.settings.get('agent_instructions');
       setInstructions(res.value ?? DEFAULT_INSTRUCTIONS);
       setSaved(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Fehler beim Laden');
+      setError(e instanceof Error ? e.message : t('common.errorLoading', { error: '' }));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -81,11 +85,11 @@ export default function Settings() {
       const keys = await api.apiKeys.list();
       setApiKeys(keys);
     } catch (e) {
-      setApiKeyError(e instanceof Error ? e.message : 'Fehler beim Laden');
+      setApiKeyError(e instanceof Error ? e.message : t('common.errorLoading', { error: '' }));
     } finally {
       setApiKeysLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (tab === 'apikeys') loadApiKeys();
@@ -105,7 +109,7 @@ export default function Settings() {
       setApiKeyExpiry('');
       await loadApiKeys();
     } catch (e) {
-      setApiKeyError(e instanceof Error ? e.message : 'Fehler beim Erstellen');
+      setApiKeyError(e instanceof Error ? e.message : t('common.errorCreating'));
     } finally {
       setApiKeyCreating(false);
     }
@@ -116,7 +120,7 @@ export default function Settings() {
       await api.apiKeys.delete(id);
       setApiKeys((prev) => prev.filter((k) => k._id !== id));
     } catch (e) {
-      setApiKeyError(e instanceof Error ? e.message : 'Fehler beim Löschen');
+      setApiKeyError(e instanceof Error ? e.message : t('common.errorDeleting'));
     }
   };
 
@@ -133,7 +137,7 @@ export default function Settings() {
       await api.settings.set('agent_instructions', instructions);
       setSaved(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Fehler beim Speichern');
+      setError(e instanceof Error ? e.message : t('common.errorSaving'));
     } finally {
       setSaving(false);
     }
@@ -145,31 +149,31 @@ export default function Settings() {
   };
 
   const tabs: { key: SettingsTab; label: string; adminOnly?: boolean }[] = [
-    { key: 'instructions', label: 'Agent-Instruktionen' },
-    { key: 'apikeys', label: 'API Keys' },
-    { key: 'users', label: 'Benutzerverwaltung', adminOnly: true },
+    { key: 'instructions', label: t('settings.tabInstructions') },
+    { key: 'apikeys', label: t('settings.tabApiKeys') },
+    { key: 'users', label: t('settings.tabUsers'), adminOnly: true },
   ];
 
-  const visibleTabs = tabs.filter((t) => !t.adminOnly || isAdmin);
+  const visibleTabs = tabs.filter((tb) => !tb.adminOnly || isAdmin);
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold text-white mb-4">Einstellungen</h1>
+      <h1 className="text-2xl font-bold text-white mb-4">{t('settings.title')}</h1>
 
       {visibleTabs.length > 1 && (
         <div className="flex gap-1 mb-6 border-b border-gray-800">
-          {visibleTabs.map((t) => (
+          {visibleTabs.map((tb) => (
             <button
-              key={t.key}
+              key={tb.key}
               type="button"
-              onClick={() => setTab(t.key)}
+              onClick={() => setTab(tb.key)}
               className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
-                tab === t.key
+                tab === tb.key
                   ? 'text-blue-400 border-blue-400'
                   : 'text-gray-400 border-transparent hover:text-gray-200'
               }`}
             >
-              {t.label}
+              {tb.label}
             </button>
           ))}
         </div>
@@ -178,9 +182,7 @@ export default function Settings() {
       {tab === 'instructions' && (
         <>
           <p className="text-gray-400 mb-6">
-            Globale Instruktionen die jeder Agent beim Start einer Session erh&auml;lt.
-            Agents rufen <code className="text-blue-400 bg-gray-800 px-1 rounded">system_instructions_get</code> auf
-            und verhalten sich entsprechend.
+            {t('settings.instructionsDescription', { tool: 'system_instructions_get' })}
           </p>
 
           {error && (
@@ -190,15 +192,15 @@ export default function Settings() {
           )}
 
           {loading ? (
-            <div className="text-gray-500 py-10 text-center">Laden...</div>
+            <div className="text-gray-500 py-10 text-center">{t('common.loading')}</div>
           ) : (
             <>
               <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700 bg-gray-800/50">
-                  <span className="text-sm text-gray-400 font-medium">Agent-Instruktionen (Markdown)</span>
+                  <span className="text-sm text-gray-400 font-medium">{t('settings.instructionsLabel')}</span>
                   <div className="flex items-center gap-2">
                     {!saved && (
-                      <span className="text-xs text-yellow-500">Ungespeicherte &Auml;nderungen</span>
+                      <span className="text-xs text-yellow-500">{t('settings.unsavedChanges')}</span>
                     )}
                   </div>
                 </div>
@@ -212,20 +214,17 @@ export default function Settings() {
 
               <div className="flex items-center gap-3 mt-4">
                 <Button variant="primary" size="lg" onClick={save} disabled={saving || saved}>
-                  {saving ? 'Speichern...' : 'Speichern'}
+                  {saving ? t('common.saving') : t('common.save')}
                 </Button>
                 <Button size="lg" onClick={reset}>
-                  Auf Standard zur&uuml;cksetzen
+                  {t('settings.resetDefault')}
                 </Button>
               </div>
 
               <div className="mt-8 bg-gray-800/50 border border-gray-700 rounded-lg p-4">
-                <h2 className="text-sm font-medium text-gray-300 mb-2">Hinweis</h2>
+                <h2 className="text-sm font-medium text-gray-300 mb-2">{t('settings.instructionsNote')}</h2>
                 <p className="text-sm text-gray-400">
-                  Projekt-spezifische Instruktionen k&ouml;nnen zus&auml;tzlich in den Projekt-Einstellungen hinterlegt werden.
-                  Wenn ein Agent <code className="text-blue-400 bg-gray-800 px-1 rounded">system_instructions_get</code> mit
-                  einer <code className="text-blue-400 bg-gray-800 px-1 rounded">projectId</code> aufruft,
-                  erh&auml;lt er sowohl die globalen als auch die projekt-spezifischen Instruktionen.
+                  {t('settings.instructionsNoteText', { tool: 'system_instructions_get', param: 'projectId' })}
                 </p>
               </div>
             </>
@@ -236,8 +235,7 @@ export default function Settings() {
       {tab === 'apikeys' && (
         <>
           <p className="text-gray-400 mb-6">
-            API Keys f&uuml;r MCP-Zugriff und REST API Authentifizierung.
-            Keys werden nur einmalig bei der Erstellung angezeigt.
+            {t('settings.apiKeysDescription')}
           </p>
 
           {apiKeyError && (
@@ -249,7 +247,7 @@ export default function Settings() {
           {revealedKey && (
             <div className="bg-green-900/30 border border-green-700 rounded-lg p-4 mb-6">
               <p className="text-green-300 text-sm font-medium mb-2">
-                API Key erstellt — jetzt kopieren, er wird nicht mehr angezeigt!
+                {t('settings.apiKeyCreated')}
               </p>
               <div className="flex items-center gap-2">
                 <code className="flex-1 bg-gray-900 text-green-400 px-3 py-2 rounded font-mono text-sm break-all">
@@ -260,7 +258,7 @@ export default function Settings() {
                   size="sm"
                   onClick={() => copyToClipboard(revealedKey)}
                 >
-                  {copied ? 'Kopiert!' : 'Kopieren'}
+                  {copied ? t('common.copied') : t('common.copy')}
                 </Button>
               </div>
               <button
@@ -268,26 +266,26 @@ export default function Settings() {
                 onClick={() => setRevealedKey(null)}
                 className="text-xs text-gray-500 hover:text-gray-300 mt-2"
               >
-                Schlie&szlig;en
+                {t('common.close')}
               </button>
             </div>
           )}
 
           <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 mb-6">
-            <h2 className="text-sm font-medium text-gray-300 mb-3">Neuen API Key erstellen</h2>
+            <h2 className="text-sm font-medium text-gray-300 mb-3">{t('settings.createApiKey')}</h2>
             <div className="flex items-end gap-3">
               <div className="flex-1">
-                <label className="block text-xs text-gray-500 mb-1">Name</label>
+                <label className="block text-xs text-gray-500 mb-1">{t('settings.apiKeyName')}</label>
                 <input
                   type="text"
                   value={apiKeyName}
                   onChange={(e) => setApiKeyName(e.target.value)}
-                  placeholder="z.B. MCP Server, CI/CD..."
+                  placeholder={t('settings.apiKeyNamePlaceholder')}
                   className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Ablaufdatum (optional)</label>
+                <label className="block text-xs text-gray-500 mb-1">{t('settings.apiKeyExpiry')}</label>
                 <input
                   type="date"
                   value={apiKeyExpiry}
@@ -300,25 +298,25 @@ export default function Settings() {
                 onClick={createApiKey}
                 disabled={apiKeyCreating || !apiKeyName.trim()}
               >
-                {apiKeyCreating ? 'Erstellen...' : 'Erstellen'}
+                {apiKeyCreating ? t('common.creating') : t('common.create')}
               </Button>
             </div>
           </div>
 
           {apiKeysLoading ? (
-            <div className="text-gray-500 py-10 text-center">Laden...</div>
+            <div className="text-gray-500 py-10 text-center">{t('common.loading')}</div>
           ) : apiKeys.length === 0 ? (
-            <div className="text-gray-500 py-10 text-center">Keine API Keys vorhanden.</div>
+            <div className="text-gray-500 py-10 text-center">{t('settings.noApiKeys')}</div>
           ) : (
             <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-700 bg-gray-800/50">
-                    <th className="text-left px-4 py-2 text-gray-400 font-medium">Name</th>
+                    <th className="text-left px-4 py-2 text-gray-400 font-medium">{t('settings.apiKeyTableName')}</th>
                     <th className="text-left px-4 py-2 text-gray-400 font-medium">Key</th>
-                    <th className="text-left px-4 py-2 text-gray-400 font-medium">Erstellt</th>
-                    <th className="text-left px-4 py-2 text-gray-400 font-medium">Zuletzt genutzt</th>
-                    <th className="text-left px-4 py-2 text-gray-400 font-medium">Ablauf</th>
+                    <th className="text-left px-4 py-2 text-gray-400 font-medium">{t('settings.apiKeyTableCreated')}</th>
+                    <th className="text-left px-4 py-2 text-gray-400 font-medium">{t('settings.apiKeyTableLastUsed')}</th>
+                    <th className="text-left px-4 py-2 text-gray-400 font-medium">{t('settings.apiKeyTableExpiry')}</th>
                     <th className="px-4 py-2"></th>
                   </tr>
                 </thead>
@@ -330,23 +328,23 @@ export default function Settings() {
                         <code className="text-gray-400 font-mono text-xs">{key.prefix}...</code>
                       </td>
                       <td className="px-4 py-3 text-gray-400">
-                        {new Date(key.createdAt).toLocaleDateString('de-DE')}
+                        {new Date(key.createdAt).toLocaleDateString(dateLocale)}
                       </td>
                       <td className="px-4 py-3 text-gray-400">
                         {key.lastUsedAt
-                          ? new Date(key.lastUsedAt).toLocaleDateString('de-DE')
-                          : 'Nie'}
+                          ? new Date(key.lastUsedAt).toLocaleDateString(dateLocale)
+                          : t('common.neverUsed')}
                       </td>
                       <td className="px-4 py-3 text-gray-400">
                         {key.expiresAt
-                          ? new Date(key.expiresAt).toLocaleDateString('de-DE')
-                          : 'Kein Ablauf'}
+                          ? new Date(key.expiresAt).toLocaleDateString(dateLocale)
+                          : t('common.noExpiry')}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <ConfirmButton
                           onConfirm={() => deleteApiKey(key._id)}
-                          label="Löschen"
-                          confirmLabel="Sicher?"
+                          label={t('common.delete')}
+                          confirmLabel={t('common.confirmDelete')}
                           variant="danger"
                           size="xs"
                         />
@@ -359,9 +357,9 @@ export default function Settings() {
           )}
 
           <div className="mt-8 bg-gray-800/50 border border-gray-700 rounded-lg p-4">
-            <h2 className="text-sm font-medium text-gray-300 mb-2">Verwendung</h2>
+            <h2 className="text-sm font-medium text-gray-300 mb-2">{t('settings.apiKeyUsageTitle')}</h2>
             <p className="text-sm text-gray-400 mb-2">
-              API Keys k&ouml;nnen f&uuml;r MCP-Server und REST API Zugriff verwendet werden:
+              {t('settings.apiKeyUsageText')}
             </p>
             <div className="space-y-2 text-xs font-mono text-gray-400 bg-gray-900 rounded p-3">
               <div><span className="text-gray-500"># Header</span></div>

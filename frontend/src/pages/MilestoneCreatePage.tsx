@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import Button from '../components/ui/Button';
 import { FormInput, FormTextarea } from '../components/ui/FormField';
@@ -7,6 +8,7 @@ import { FormInput, FormTextarea } from '../components/ui/FormField';
 export default function MilestoneCreatePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -31,20 +33,20 @@ export default function MilestoneCreatePage() {
 
   return (
     <div>
-      <Link to={`/projects/${id}`} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; Zurück zum Projekt</Link>
+      <Link to={`/projects/${id}`} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; {t('milestoneCreate.backToProject')}</Link>
 
-      <h1 className="text-xl font-bold mb-6">Neuer Milestone</h1>
+      <h1 className="text-xl font-bold mb-6">{t('milestoneCreate.title')}</h1>
 
       <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-4">
-        <FormInput label="Name" required type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Milestone-Name" autoFocus />
-        <FormTextarea label="Beschreibung" value={description} onChange={(e) => setDescription(e.target.value)} rows={4} placeholder="Beschreibung (optional)" />
-        <FormInput label="Fälligkeitsdatum (optional)" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        <FormInput label={t('common.name')} required type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('common.name')} autoFocus />
+        <FormTextarea label={t('common.description')} value={description} onChange={(e) => setDescription(e.target.value)} rows={4} placeholder={t('common.description')} />
+        <FormInput label={t('milestoneCreate.dueDate')} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
         <div className="flex gap-2 pt-2">
           <Button type="submit" variant="primary" size="lg" disabled={saving || !name.trim()}>
-            {saving ? 'Erstellen...' : 'Milestone erstellen'}
+            {saving ? t('common.creating') : t('common.create')}
           </Button>
           <Button type="button" size="lg" onClick={() => navigate(`/projects/${id}`)}>
-            Abbrechen
+            {t('common.cancel')}
           </Button>
         </div>
       </form>

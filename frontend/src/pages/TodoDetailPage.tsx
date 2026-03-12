@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api, Todo, Milestone } from '../api/client';
 import {
   PRIORITY_COLORS, PRIORITY_LABELS,
@@ -14,6 +15,7 @@ import ConfirmButton from '../components/ui/ConfirmButton';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
 function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => void; onCancel: () => void }) {
+  const { t } = useTranslation();
   const [title, setTitle] = useState(todo.title);
   const [description, setDescription] = useState(todo.description || '');
   const [priority, setPriority] = useState(todo.priority);
@@ -40,37 +42,37 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       <div>
-        <label className="block text-xs text-gray-500 mb-1">Titel</label>
+        <label className="block text-xs text-gray-500 mb-1">{t('common.title')}</label>
         <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
           className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500" autoFocus />
       </div>
       <div>
-        <label className="block text-xs text-gray-500 mb-1">Beschreibung</label>
-        <MarkdownEditor value={description} onChange={setDescription} rows={4} placeholder="Beschreibung (Markdown)" />
+        <label className="block text-xs text-gray-500 mb-1">{t('common.description')}</label>
+        <MarkdownEditor value={description} onChange={setDescription} rows={4} placeholder={t('todos.descriptionPlaceholder')} />
       </div>
       <div className="flex gap-3 items-center">
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Priorität</label>
+          <label className="block text-xs text-gray-500 mb-1">{t('common.priority')}</label>
           <select value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}
             className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500">
-            <option value="low">Niedrig</option>
-            <option value="medium">Mittel</option>
-            <option value="high">Hoch</option>
-            <option value="critical">Kritisch</option>
+            <option value="low">{t('todoPriority.low')}</option>
+            <option value="medium">{t('todoPriority.medium')}</option>
+            <option value="high">{t('todoPriority.high')}</option>
+            <option value="critical">{t('todoPriority.critical')}</option>
           </select>
         </div>
         <div className="flex-1">
-          <label className="block text-xs text-gray-500 mb-1">Tags</label>
-          <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="kommagetrennt"
+          <label className="block text-xs text-gray-500 mb-1">{t('common.tags')}</label>
+          <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('common.commaSeparated')}
             className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
         </div>
       </div>
       <div className="flex gap-2 pt-2">
         <Button type="submit" variant="primary" disabled={saving || !title.trim()}>
-          {saving ? 'Speichern...' : 'Speichern'}
+          {saving ? t('common.saving') : t('common.save')}
         </Button>
         <Button type="button" onClick={onCancel}>
-          Abbrechen
+          {t('common.cancel')}
         </Button>
       </div>
     </form>
@@ -80,6 +82,7 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
 export default function TodoDetailPage() {
   const { id, todoId } = useParams<{ id: string; todoId: string }>();
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation();
   const { showError } = useToast();
   const [todo, setTodo] = useState<Todo | null>(null);
   const [allTodos, setAllTodos] = useState<Todo[]>([]);
@@ -111,7 +114,7 @@ export default function TodoDetailPage() {
       await api.todos.update(todoId, { status: newStatus });
       loadTodo();
     } catch (err: any) {
-      showError(err.message || 'Status-Änderung fehlgeschlagen');
+      showError(err.message || t('todos.statusChangeFailed'));
     }
   };
 
@@ -131,9 +134,9 @@ export default function TodoDetailPage() {
   if (error || !todo) {
     return (
       <div>
-        <Link to={`/projects/${id}`} className="text-sm text-gray-500 hover:text-gray-300 mb-4 inline-block">&larr; Zurück zum Projekt</Link>
+        <Link to={`/projects/${id}`} className="text-sm text-gray-500 hover:text-gray-300 mb-4 inline-block">&larr; {t('todoDetail.backToProject')}</Link>
         <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
-          <p className="text-red-400">{error || 'Task nicht gefunden.'}</p>
+          <p className="text-red-400">{error || t('todoDetail.notFound')}</p>
         </div>
       </div>
     );
@@ -143,11 +146,11 @@ export default function TodoDetailPage() {
 
   return (
     <div>
-      <Link to={`/projects/${id}`} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; Zurück zum Projekt</Link>
+      <Link to={`/projects/${id}`} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; {t('todoDetail.backToProject')}</Link>
 
       {editing ? (
         <div className="max-w-3xl mx-auto">
-          <h2 className="text-lg font-semibold mb-4">Task bearbeiten</h2>
+          <h2 className="text-lg font-semibold mb-4">{t('todoDetail.editTask')}</h2>
           <TodoEditForm todo={todo} onSaved={() => { setEditing(false); loadTodo(); }} onCancel={() => setEditing(false)} />
         </div>
       ) : (
@@ -156,10 +159,10 @@ export default function TodoDetailPage() {
 
           <div className="flex flex-wrap items-center gap-2 mb-4">
             <Badge color={STATUS_COLORS[todo.status]} rounded="full">
-              {STATUS_LABELS[todo.status]}
+              {STATUS_LABELS[todo.status]()}
             </Badge>
             <span className={`text-xs ${PRIORITY_COLORS[todo.priority]}`}>
-              {PRIORITY_LABELS[todo.priority]}
+              {PRIORITY_LABELS[todo.priority]()}
             </span>
           </div>
 
@@ -177,7 +180,7 @@ export default function TodoDetailPage() {
 
           {milestones.length > 0 && (
             <div className="mb-4">
-              <label className="block text-xs text-gray-600 mb-1">Milestone</label>
+              <label className="block text-xs text-gray-600 mb-1">{t('todoCreate.milestone')}</label>
               <select
                 value={todo.milestoneId || ''}
                 onChange={async (e) => {
@@ -185,12 +188,12 @@ export default function TodoDetailPage() {
                     await api.todos.update(todo._id, { milestoneId: e.target.value || undefined } as Partial<Todo>);
                     loadTodo();
                   } catch (err: any) {
-                    showError(err.message || 'Milestone-Änderung fehlgeschlagen');
+                    showError(err.message || t('todoDetail.milestoneChangeFailed'));
                   }
                 }}
                 className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500"
               >
-                <option value="">Kein Milestone</option>
+                <option value="">{t('todoCreate.noMilestone')}</option>
                 {milestones.map((ms) => (
                   <option key={ms._id} value={ms._id}>{ms.name}</option>
                 ))}
@@ -210,12 +213,12 @@ export default function TodoDetailPage() {
               <div className="mb-4 space-y-2">
                 {hasBlockers && (
                   <div className="flex items-center gap-1.5 text-xs text-red-400 bg-red-900/20 border border-red-900/50 rounded px-2 py-1.5">
-                    <span>Blockiert</span>
+                    <span>{t('todoDetail.blocked')}</span>
                   </div>
                 )}
                 {blockedBy.length > 0 && (
                   <div>
-                    <label className="block text-xs text-gray-600 mb-1">Blockiert von</label>
+                    <label className="block text-xs text-gray-600 mb-1">{t('todoDetail.blockedBy')}</label>
                     <div className="space-y-1">
                       {blockedBy.map((dep) => (
                         <div key={dep._id} className="flex items-center gap-2 text-xs">
@@ -228,7 +231,7 @@ export default function TodoDetailPage() {
                               await api.todos.update(todo._id, { blockedBy: (todo.blockedBy || []).filter((b) => b !== dep._id) } as Partial<Todo>);
                               loadTodo();
                             } catch (err: any) {
-                              showError(err.message || 'Abhängigkeit entfernen fehlgeschlagen');
+                              showError(err.message || t('todoDetail.removeDependencyFailed'));
                             }
                           }} className="text-gray-600 hover:text-red-400 transition-colors ml-auto">&times;</button>
                         </div>
@@ -238,7 +241,7 @@ export default function TodoDetailPage() {
                 )}
                 {blocks.length > 0 && (
                   <div>
-                    <label className="block text-xs text-gray-600 mb-1">Blockiert</label>
+                    <label className="block text-xs text-gray-600 mb-1">{t('todoDetail.blocking')}</label>
                     <div className="space-y-1">
                       {blocks.map((dep) => (
                         <div key={dep._id} className="flex items-center gap-2 text-xs">
@@ -260,12 +263,12 @@ export default function TodoDetailPage() {
                         await api.todos.update(todo._id, { blockedBy: [...(todo.blockedBy || []), e.target.value] } as Partial<Todo>);
                         loadTodo();
                       } catch (err: any) {
-                        showError(err.message || 'Abhängigkeit hinzufügen fehlgeschlagen');
+                        showError(err.message || t('todoDetail.addDependencyFailed'));
                       }
                     }}
                     className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500"
                   >
-                    <option value="">+ Abhängigkeit hinzufügen...</option>
+                    <option value="">{t('todoDetail.addDependency')}</option>
                     {availableDeps.map((t) => (
                       <option key={t._id} value={t._id}>{t.title}</option>
                     ))}
@@ -276,9 +279,9 @@ export default function TodoDetailPage() {
           })()}
 
           <div className="text-xs text-gray-600 mb-5 space-y-0.5">
-            <p>Erstellt: {new Date(todo.createdAt).toLocaleString('de-DE')}</p>
+            <p>{t('common.created')}: {new Date(todo.createdAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US')}</p>
             {todo.updatedAt !== todo.createdAt && (
-              <p>Aktualisiert: {new Date(todo.updatedAt).toLocaleString('de-DE')}</p>
+              <p>{t('common.updated')}: {new Date(todo.updatedAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US')}</p>
             )}
           </div>
 
@@ -286,21 +289,21 @@ export default function TodoDetailPage() {
             {STATUS_TRANSITIONS[todo.status].map((tr) => (
               <Button key={tr.next} type="button" variant="none" size="sm" onClick={() => handleStatusChange(tr.next)}
                 className={TRANSITION_BUTTON_COLORS[tr.next]}>
-                {tr.label}
+                {tr.label()}
               </Button>
             ))}
             <Button type="button" variant="none" size="sm" className="bg-blue-900/60 hover:bg-blue-900 text-blue-300" onClick={() => setEditing(true)}>
-              Bearbeiten
+              {t('common.edit')}
             </Button>
             <Button type="button" variant="none" size="sm" className="bg-gray-700 hover:bg-gray-600 text-gray-300" onClick={async () => {
               try {
                 await api.todos.update(todo._id, { archived: !todo.archived } as Partial<Todo>);
                 loadTodo();
               } catch (err: any) {
-                showError(err.message || 'Archivierung fehlgeschlagen');
+                showError(err.message || t('todos.archiveFailed'));
               }
             }}>
-              {todo.archived ? 'Wiederherstellen' : 'Archivieren'}
+              {todo.archived ? t('common.restore') : t('common.archive')}
             </Button>
             <ConfirmButton
               onConfirm={async () => {
@@ -308,7 +311,7 @@ export default function TodoDetailPage() {
                   await api.todos.delete(todoId!);
                   navigate(`/projects/${id}`);
                 } catch (err: any) {
-                  showError(err.message || 'Löschen fehlgeschlagen');
+                  showError(err.message || t('todos.deleteFailed'));
                 }
               }}
               size="sm"
@@ -318,15 +321,15 @@ export default function TodoDetailPage() {
 
           <div className="border-t border-gray-800 pt-5">
             <h3 className="text-sm font-medium text-gray-400 mb-3">
-              Kommentare {comments.length > 0 && <span className="text-gray-600">({comments.length})</span>}
+              {t('todoDetail.comments')} {comments.length > 0 && <span className="text-gray-600">({comments.length})</span>}
             </h3>
             <div className="space-y-2 mb-3">
-              {comments.length === 0 && <p className="text-xs text-gray-700 italic">Noch keine Kommentare</p>}
+              {comments.length === 0 && <p className="text-xs text-gray-700 italic">{t('todoDetail.noComments')}</p>}
               {comments.map((c, i) => (
                 <div key={i} className="text-xs bg-gray-900 border border-gray-800 rounded p-2.5">
                   <div className="flex justify-between text-gray-500 mb-1">
                     <span className={c.author === 'claude' ? 'text-blue-400' : 'text-gray-400'}>{c.author}</span>
-                    <span>{new Date(c.createdAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                    <span>{new Date(c.createdAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
                   <Markdown className="text-gray-300">{c.text}</Markdown>
                 </div>
@@ -334,10 +337,10 @@ export default function TodoDetailPage() {
             </div>
             <div className="flex gap-2">
               <input type="text" value={commentText} onChange={(e) => setCommentText(e.target.value)}
-                placeholder="Kommentar schreiben..." onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
+                placeholder={t('todoDetail.commentPlaceholder')} onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
                 className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
               <Button type="button" variant="primary" onClick={handleAddComment} disabled={savingComment || !commentText.trim()}>
-                {savingComment ? '...' : 'Senden'}
+                {savingComment ? '...' : t('common.send')}
               </Button>
             </div>
           </div>

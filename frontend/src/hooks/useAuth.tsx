@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from 'react';
+import i18n from '../i18n';
 
 interface UserInfo {
   userId: string;
@@ -120,8 +121,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: 'Login fehlgeschlagen' }));
-      throw new Error(err.message || 'Login fehlgeschlagen');
+      const err = await res.json().catch(() => ({ message: i18n.t('auth.loginFailed') }));
+      throw new Error(err.message || i18n.t('auth.loginFailed'));
     }
 
     const data = await res.json();

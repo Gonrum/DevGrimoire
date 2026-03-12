@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
 import Button from '../components/ui/Button';
@@ -15,6 +16,7 @@ export default function EnvironmentCreatePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { showError } = useToast();
+  const { t } = useTranslation();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [host, setHost] = useState('');
@@ -50,7 +52,7 @@ export default function EnvironmentCreatePage() {
       });
       navigate(`/projects/${id}?tab=environments`);
     } catch (err: any) {
-      showError(err.message || 'Fehler beim Erstellen');
+      showError(err.message || t('envCreate.errorCreating'));
     } finally {
       setSaving(false);
     }
@@ -58,14 +60,14 @@ export default function EnvironmentCreatePage() {
 
   return (
     <div>
-      <Link to={`/projects/${id}?tab=environments`} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; Zurück zum Projekt</Link>
+      <Link to={`/projects/${id}?tab=environments`} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; {t('envCreate.backToProject')}</Link>
 
-      <h1 className="text-xl font-bold mb-6">Neue Umgebung</h1>
+      <h1 className="text-xl font-bold mb-6">{t('envCreate.title')}</h1>
 
       <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-6">
         {/* Name with presets */}
         <div>
-          <FormInput label="Name" required type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="z.B. development, staging, production" autoFocus />
+          <FormInput label={t('common.name')} required type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('envCreate.namePlaceholder')} autoFocus />
           <div className="flex gap-2 mt-2">
             {ENV_PRESETS.map((preset) => (
               <button key={preset.name} type="button" onClick={() => setName(preset.name)}
@@ -76,25 +78,25 @@ export default function EnvironmentCreatePage() {
           </div>
         </div>
 
-        <FormTextarea label="Beschreibung" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder="Kurze Beschreibung der Umgebung (optional)" />
+        <FormTextarea label={t('common.description')} value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder={t('envCreate.descriptionPlaceholder')} />
 
         {/* Server data */}
         <div>
-          <h2 className="text-sm font-medium text-gray-400 mb-3">Serverdaten</h2>
+          <h2 className="text-sm font-medium text-gray-400 mb-3">{t('envCreate.serverData')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <FormInput label="Host" type="text" value={host} onChange={(e) => setHost(e.target.value)} placeholder="z.B. 192.168.1.100 oder server.example.com" className="font-mono" />
-            <FormInput label="Port" type="number" value={port} onChange={(e) => setPort(e.target.value)} placeholder="z.B. 22, 3000, 443" className="font-mono" />
-            <FormInput label="Benutzer" type="text" value={user} onChange={(e) => setUser(e.target.value)} placeholder="z.B. deploy, root, www-data" className="font-mono" />
-            <FormInput label="URL" type="text" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="z.B. https://staging.example.com" className="font-mono" />
+            <FormInput label={t('envCreate.host')} type="text" value={host} onChange={(e) => setHost(e.target.value)} placeholder={t('envCreate.hostPlaceholder')} className="font-mono" />
+            <FormInput label={t('envCreate.port')} type="number" value={port} onChange={(e) => setPort(e.target.value)} placeholder={t('envCreate.portPlaceholder')} className="font-mono" />
+            <FormInput label={t('envCreate.user')} type="text" value={user} onChange={(e) => setUser(e.target.value)} placeholder={t('envCreate.userPlaceholder')} className="font-mono" />
+            <FormInput label={t('envCreate.url')} type="text" value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t('envCreate.urlPlaceholder')} className="font-mono" />
           </div>
         </div>
 
         {/* Variables */}
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-medium text-gray-400">Variablen</h2>
+            <h2 className="text-sm font-medium text-gray-400">{t('envCreate.variables')}</h2>
             <Button type="button" size="sm" onClick={addVar}>
-              + Variable
+              {t('envCreate.addVariable')}
             </Button>
           </div>
           {variables.length > 0 ? (
@@ -110,16 +112,16 @@ export default function EnvironmentCreatePage() {
               ))}
             </div>
           ) : (
-            <p className="text-xs text-gray-600">Keine Variablen. Variablen können auch später hinzugefügt werden.</p>
+            <p className="text-xs text-gray-600">{t('envCreate.noVariables')}</p>
           )}
         </div>
 
         <div className="flex gap-2 pt-2">
           <Button type="submit" variant="primary" size="lg" disabled={saving || !name.trim()}>
-            {saving ? 'Erstellen...' : 'Umgebung erstellen'}
+            {saving ? t('common.creating') : t('envCreate.createEnvironment')}
           </Button>
           <Button type="button" size="lg" onClick={() => navigate(`/projects/${id}?tab=environments`)}>
-            Abbrechen
+            {t('common.cancel')}
           </Button>
         </div>
       </form>

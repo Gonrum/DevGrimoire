@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import i18n from '../../i18n';
 import Button from './Button';
 
 interface ConfirmButtonProps {
@@ -15,8 +16,8 @@ interface ConfirmButtonProps {
 
 export default function ConfirmButton({
   onConfirm,
-  label = 'Löschen',
-  confirmLabel = 'Sicher?',
+  label = i18n.t('common.delete'),
+  confirmLabel = i18n.t('common.confirmDelete'),
   variant = 'secondary',
   confirmVariant = 'danger-solid',
   size = 'xs',

@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
 import Button from '../components/ui/Button';
 
 export default function Login() {
+  const { t } = useTranslation();
   const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -17,19 +19,24 @@ export default function Login() {
     try {
       await login(username.trim(), password);
     } catch (err: any) {
-      setError(err.message || 'Login fehlgeschlagen');
+      setError(err.message || t('auth.loginFailed'));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
+    <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden">
+      <img
+        src="/logo.png"
+        alt=""
+        className="pointer-events-none select-none fixed bottom-[-5%] right-[-5%] w-[50vw] max-w-[600px]"
+      />
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-6">
           <img src="/logo.png" alt="DevGrimoire" className="h-20 mb-3" />
           <h1 className="text-2xl font-bold text-center">DevGrimoire</h1>
-          <p className="text-gray-500 text-sm text-center mt-1">Anmelden um fortzufahren</p>
+          <p className="text-gray-500 text-sm text-center mt-1">{t('auth.loginSubtitle')}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-lg p-6 space-y-4">
@@ -40,7 +47,7 @@ export default function Login() {
           )}
 
           <div>
-            <label htmlFor="username" className="block text-xs text-gray-500 mb-1">Benutzername</label>
+            <label htmlFor="username" className="block text-xs text-gray-500 mb-1">{t('auth.username')}</label>
             <input
               id="username"
               type="text"
@@ -53,7 +60,7 @@ export default function Login() {
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-xs text-gray-500 mb-1">Passwort</label>
+            <label htmlFor="password" className="block text-xs text-gray-500 mb-1">{t('auth.password')}</label>
             <input
               id="password"
               type="password"
@@ -65,7 +72,7 @@ export default function Login() {
           </div>
 
           <Button type="submit" variant="primary" size="lg" disabled={loading || !username.trim() || !password} className="w-full">
-            {loading ? 'Anmelden...' : 'Anmelden'}
+            {loading ? t('auth.loggingIn') : t('auth.login')}
           </Button>
         </form>
       </div>

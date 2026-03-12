@@ -1,19 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { api, Notification } from '../api/client';
 
 function timeAgo(date: string): string {
   const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
-  if (seconds < 60) return 'gerade eben';
+  if (seconds < 60) return i18n.t('notifications.justNow');
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `vor ${minutes}m`;
+  if (minutes < 60) return i18n.t('activity.minutesAgo', { count: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `vor ${hours}h`;
+  if (hours < 24) return i18n.t('activity.hoursAgo', { count: hours });
   const days = Math.floor(hours / 24);
-  return `vor ${days}d`;
+  return i18n.t('activity.daysAgo', { count: days });
 }
 
 export default function NotificationBell() {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -125,7 +128,7 @@ export default function NotificationBell() {
         type="button"
         onClick={toggle}
         className="relative text-gray-400 hover:text-gray-200 transition-colors p-1"
-        title="Benachrichtigungen"
+        title={t('notifications.title')}
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -141,23 +144,23 @@ export default function NotificationBell() {
       {open && (
         <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 max-h-[70vh] flex flex-col">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-            <span className="text-sm font-medium text-white">Benachrichtigungen</span>
+            <span className="text-sm font-medium text-white">{t('notifications.title')}</span>
             {unreadCount > 0 && (
               <button
                 onClick={markAllRead}
                 className="text-xs text-blue-400 hover:text-blue-300"
               >
-                Alle gelesen
+                {t('notifications.markAllRead')}
               </button>
             )}
           </div>
 
           <div className="overflow-y-auto flex-1">
             {loading && notifications.length === 0 ? (
-              <div className="px-4 py-8 text-center text-gray-500 text-sm">Laden...</div>
+              <div className="px-4 py-8 text-center text-gray-500 text-sm">{t('common.loading')}</div>
             ) : notifications.length === 0 ? (
               <div className="px-4 py-8 text-center text-gray-500 text-sm">
-                Keine Benachrichtigungen
+                {t('notifications.noNotifications')}
               </div>
             ) : (
               notifications.map((n) => (

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api, Project, Todo } from '../api/client';
 import { useDashboardEvents } from '../hooks/useProjectEvents';
 import { useToast } from '../components/Toast';
@@ -8,6 +9,7 @@ import Badge from '../components/ui/Badge';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
 export default function Dashboard() {
+  const { t, i18n } = useTranslation();
   const [favorites, setFavorites] = useState<Project[]>([]);
   const [activeTodos, setActiveTodos] = useState<Todo[]>([]);
   const [projectMap, setProjectMap] = useState<Record<string, string>>({});
@@ -42,7 +44,7 @@ export default function Dashboard() {
       await api.projects.update(project._id, { favorite: !project.favorite });
       loadData();
     } catch (err: any) {
-      showError(err.message || 'Favorit konnte nicht geändert werden');
+      showError(err.message || t('dashboard.favoriteError'));
     }
   };
 
@@ -52,11 +54,13 @@ export default function Dashboard() {
 
   useDashboardEvents(() => loadData());
 
+  const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
+
   if (loading) return <LoadingText />;
   if (error) {
     return (
       <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
-        <p className="text-red-400">Fehler beim Laden: {error}</p>
+        <p className="text-red-400">{t('common.errorLoading', { error })}</p>
       </div>
     );
   }
@@ -66,23 +70,23 @@ export default function Dashboard() {
       {/* Favoriten-Projekte */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <h1 className="text-2xl font-bold">{t('dashboard.title')}</h1>
           <Link
             to="/projects"
             className="text-sm text-gray-400 hover:text-blue-400 transition-colors"
           >
-            Alle Projekte &rarr;
+            {t('dashboard.allProjects')}
           </Link>
         </div>
 
         {favorites.length === 0 ? (
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center">
-            <p className="text-gray-500 mb-2">Keine Favoriten-Projekte vorhanden.</p>
+            <p className="text-gray-500 mb-2">{t('dashboard.noFavorites')}</p>
             <Link
               to="/projects"
               className="text-sm text-blue-400 hover:text-blue-300"
             >
-              Projekte als Favorit markieren
+              {t('dashboard.markFavorites')}
             </Link>
           </div>
         ) : (
@@ -99,15 +103,15 @@ export default function Dashboard() {
                       type="button"
                       onClick={(e) => toggleFavorite(e, p)}
                       className="text-lg leading-none text-yellow-400 hover:text-yellow-300 transition-colors"
-                      title="Favorit entfernen"
-                      aria-label="Favorit entfernen"
+                      title={t('dashboard.removeFavorite')}
+                      aria-label={t('dashboard.removeFavorite')}
                     >
                       &#9733;
                     </button>
                     <h2 className="text-lg font-semibold">{p.name}</h2>
                   </div>
                   <Badge color={p.active ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500'} rounded="full">
-                    {p.active ? 'aktiv' : 'inaktiv'}
+                    {p.active ? t('common.active') : t('common.inactive')}
                   </Badge>
                 </div>
                 {p.description && (
@@ -117,15 +121,15 @@ export default function Dashboard() {
                 )}
                 {p.techStack.length > 0 && (
                   <div className="flex flex-wrap gap-1">
-                    {p.techStack.map((t) => (
-                      <Badge key={t} color="bg-gray-800 text-gray-300">
-                        {t}
+                    {p.techStack.map((tech) => (
+                      <Badge key={tech} color="bg-gray-800 text-gray-300">
+                        {tech}
                       </Badge>
                     ))}
                   </div>
                 )}
                 <p className="text-xs text-gray-600 mt-3">
-                  Aktualisiert: {new Date(p.updatedAt).toLocaleDateString('de-DE')}
+                  {t('common.updated')}: {new Date(p.updatedAt).toLocaleDateString(dateLocale)}
                 </p>
               </Link>
             ))}
@@ -135,10 +139,10 @@ export default function Dashboard() {
 
       {/* Aktive Tasks */}
       <div>
-        <h2 className="text-xl font-bold mb-4">Aktive Tasks</h2>
+        <h2 className="text-xl font-bold mb-4">{t('dashboard.activeTasks')}</h2>
         {activeTodos.length === 0 ? (
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center">
-            <p className="text-gray-500">Keine Tasks in Bearbeitung oder Review.</p>
+            <p className="text-gray-500">{t('dashboard.noActiveTasks')}</p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -149,18 +153,18 @@ export default function Dashboard() {
                 className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 hover:border-blue-500 transition-colors"
               >
                 <Badge color={STATUS_COLORS[todo.status]} rounded="full" className="whitespace-nowrap">
-                  {STATUS_LABELS[todo.status]}
+                  {STATUS_LABELS[todo.status]()}
                 </Badge>
                 <span
                   className={`text-xs whitespace-nowrap ${PRIORITY_COLORS[todo.priority]}`}
                 >
-                  {PRIORITY_LABELS[todo.priority]}
+                  {PRIORITY_LABELS[todo.priority]()}
                 </span>
                 <span className="text-sm text-gray-200 truncate flex-1">
                   {todo.title}
                 </span>
                 <span className="text-xs text-gray-600 whitespace-nowrap">
-                  {projectMap[todo.projectId] || 'Unbekannt'}
+                  {projectMap[todo.projectId] || t('common.unknown')}
                 </span>
               </Link>
             ))}

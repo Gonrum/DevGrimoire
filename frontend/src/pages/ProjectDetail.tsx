@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature, Manual } from '../api/client';
 import TodoBoard from '../components/TodoBoard';
 import SessionList from '../components/SessionList';
@@ -20,6 +21,7 @@ import { LoadingText } from '../components/ui/LoadingSpinner';
 type Tab = 'todos' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features';
 
 export default function ProjectDetail() {
+  const { t, i18n } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
@@ -132,64 +134,66 @@ export default function ProjectDetail() {
 
   useProjectEvents(id, handleSSEEvent);
 
+  const dateFmtLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
+
   if (loading) return <LoadingText />;
   if (error) {
     return (
       <div>
         <Link to="/" className="text-sm text-gray-500 hover:text-gray-300 mb-4 inline-block">
-          &larr; Alle Projekte
+          &larr; {t('common.allProjects')}
         </Link>
         <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
-          <p className="text-red-400">Fehler: {error}</p>
+          <p className="text-red-400">{t('common.error')}: {error}</p>
         </div>
       </div>
     );
   }
-  if (!project) return <p className="text-red-400">Projekt nicht gefunden.</p>;
+  if (!project) return <p className="text-red-400">{t('projects.notFound')}</p>;
 
   const tabs: { key: Tab; label: string; count: number }[] = [
     { key: 'todos', label: 'Todos', count: todos.filter((t) => t.status !== 'done').length },
     { key: 'milestones', label: 'Milestones', count: milestones.filter((m) => m.status !== 'done' && !m.archived).length },
     { key: 'sessions', label: 'Sessions', count: sessions.length },
-    { key: 'knowledge', label: 'Wissen', count: knowledge.length },
+    { key: 'knowledge', label: t('searchTypes.knowledge'), count: knowledge.length },
     { key: 'changelog', label: 'Changelog', count: changelog.length },
-    { key: 'manual', label: 'Handbuch', count: manuals.length },
+    { key: 'manual', label: i18n.language === 'de' ? 'Handbuch' : 'Manual', count: manuals.length },
     { key: 'features', label: 'Features', count: features.length },
     { key: 'schemas', label: 'Schemas', count: schemas.length },
     { key: 'dependencies', label: 'Dependencies', count: dependencies.length },
-    { key: 'research', label: 'Recherche', count: research.length },
-    { key: 'environments', label: 'Umgebungen', count: environments.length },
+    { key: 'research', label: t('searchTypes.research'), count: research.length },
+    { key: 'environments', label: i18n.language === 'de' ? 'Umgebungen' : 'Environments', count: environments.length },
     { key: 'secrets', label: 'Secrets', count: secrets.length },
-    { key: 'activity', label: 'Aktivität', count: activities.length },
+    { key: 'activity', label: i18n.language === 'de' ? 'Aktivität' : 'Activity', count: activities.length },
   ];
 
   return (
     <div>
       <Link to="/" className="text-sm text-gray-500 hover:text-gray-300 mb-4 inline-block">
-        &larr; Alle Projekte
+        &larr; {t('common.allProjects')}
       </Link>
 
       <div className="mb-8">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
           <h1 className="text-xl sm:text-2xl font-bold">{project.name}</h1>
           <Badge color={project.active ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500'} rounded="full">
-            {project.active ? 'aktiv' : 'inaktiv'}
+            {project.active ? t('common.active') : t('common.inactive')}
           </Badge>
           <Link
             to={`/projects/${id}/settings`}
             className="text-xs px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded-full transition-colors"
           >
-            Einstellungen
+            {t('nav.settings')}
           </Link>
         </div>
         {project.description && (
           <p className="text-gray-400 mb-2">{project.description}</p>
         )}
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs sm:text-sm text-gray-500">
-          {project.path && <span>Pfad: {project.path}</span>}
-          {project.repository && <span>Repo: {project.repository}</span>}
-          <span>Erstellt: {new Date(project.createdAt).toLocaleDateString('de-DE')}</span>
-          <span>Aktualisiert: {new Date(project.updatedAt).toLocaleDateString('de-DE')}</span>
+          {project.path && <span>{t('projects.path')}: {project.path}</span>}
+          {project.repository && <span>{t('projects.repo')}: {project.repository}</span>}
+          <span>{t('common.created')}: {new Date(project.createdAt).toLocaleDateString(dateFmtLocale)}</span>
+          <span>{t('common.updated')}: {new Date(project.updatedAt).toLocaleDateString(dateFmtLocale)}</span>
         </div>
         {project.techStack.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">

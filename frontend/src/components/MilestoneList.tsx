@@ -1,5 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api, Milestone, Todo } from '../api/client';
 import { useToast } from './Toast';
 import Button from './ui/Button';
@@ -7,11 +8,12 @@ import Card from './ui/Card';
 import Badge from './ui/Badge';
 import ConfirmButton from './ui/ConfirmButton';
 import EmptyState from './ui/EmptyState';
+import i18n from '../i18n';
 
-const STATUS_LABELS: Record<Milestone['status'], string> = {
-  open: 'Offen',
-  in_progress: 'In Arbeit',
-  done: 'Erledigt',
+const STATUS_LABELS: Record<Milestone['status'], () => string> = {
+  open: () => i18n.t('todoStatus.open'),
+  in_progress: () => i18n.t('todoStatus.in_progress'),
+  done: () => i18n.t('todoStatus.done'),
 };
 
 const STATUS_COLORS: Record<Milestone['status'], string> = {
@@ -28,11 +30,14 @@ interface Props {
 }
 
 function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { milestone: Milestone; todos: Todo[]; projectId: string; onUpdate: () => void; showError: (msg: string) => void }) {
+  const { t, i18n } = useTranslation();
   const [showChangelogForm, setShowChangelogForm] = useState(false);
   const [clVersion, setClVersion] = useState('');
   const [clSummary, setClSummary] = useState('');
   const [clChanges, setClChanges] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
   const milestoneTodos = todos.filter((t) => t.milestoneId === milestone._id);
   const doneTodos = milestoneTodos.filter((t) => t.status === 'done');
@@ -46,7 +51,7 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
       await api.milestones.update(milestone._id, { status });
       onUpdate();
     } catch (err: any) {
-      showError(err.message || 'Status-Änderung fehlgeschlagen');
+      showError(err.message || t('todos.statusChangeFailed'));
     }
   };
 
@@ -54,7 +59,7 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
     e.preventDefault();
     const changes = clChanges.split('\n').map((l) => l.trim()).filter(Boolean);
     if (changes.length === 0) {
-      showError('Mindestens eine Änderung eintragen.');
+      showError(t('milestones.minOneChange'));
       return;
     }
     setSubmitting(true);
@@ -69,7 +74,7 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
       setShowChangelogForm(false);
       onUpdate();
     } catch (err: any) {
-      showError(err.message || 'Abschließen fehlgeschlagen');
+      showError(err.message || t('milestones.completeFailed'));
     }
     setSubmitting(false);
   };
@@ -80,7 +85,7 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
         <Link to={`/projects/${projectId}/milestones/${milestone._id}`} className="text-sm font-semibold hover:text-blue-400 transition-colors">
           {milestone.displayNumber && <span className="text-gray-500 font-normal mr-1.5">{milestone.displayNumber}</span>}{milestone.name}
         </Link>
-        <Badge color={STATUS_COLORS[milestone.status]} rounded="full" className="shrink-0">{STATUS_LABELS[milestone.status]}</Badge>
+        <Badge color={STATUS_COLORS[milestone.status]} rounded="full" className="shrink-0">{STATUS_LABELS[milestone.status]()}</Badge>
       </div>
 
       {milestone.description && (
@@ -89,16 +94,16 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
 
       {milestone.dueDate && (
         <p className="text-xs text-gray-600 mb-2">
-          Fällig: {new Date(milestone.dueDate).toLocaleDateString('de-DE')}
+          {t('milestones.due')}: {new Date(milestone.dueDate).toLocaleDateString(dateLocale)}
         </p>
       )}
 
       <div className="mb-2">
         <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
           <span>
-            {doneTodos.length} erledigt
-            {reviewTodos.length > 0 && <> · {reviewTodos.length} in Review</>}
-            {' '}/ {total} Tasks
+            {t('milestones.doneCount', { count: doneTodos.length })}
+            {reviewTodos.length > 0 && <> · {t('milestones.inReview', { count: reviewTodos.length })}</>}
+            {' '}/ {total} {t('milestones.tasks')}
           </span>
           <span>{donePercent}%</span>
         </div>
@@ -126,30 +131,30 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
             </Link>
           ))}
           {milestoneTodos.length > 5 && (
-            <p className="text-xs text-gray-600">+ {milestoneTodos.length - 5} weitere</p>
+            <p className="text-xs text-gray-600">{t('common.more', { count: milestoneTodos.length - 5 })}</p>
           )}
         </div>
       )}
 
       {showChangelogForm && (
         <form onSubmit={handleComplete} className="mt-3 pt-3 border-t border-gray-800 space-y-2">
-          <p className="text-xs font-medium text-gray-400">Changelog-Eintrag erstellen</p>
+          <p className="text-xs font-medium text-gray-400">{t('milestones.createChangelog')}</p>
           <input
             type="text"
-            placeholder="Version (z.B. 1.2.0)"
+            placeholder={t('milestones.versionPlaceholder')}
             value={clVersion}
             onChange={(e) => setClVersion(e.target.value)}
             className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:outline-none"
           />
           <input
             type="text"
-            placeholder="Zusammenfassung"
+            placeholder={t('milestones.summaryPlaceholder')}
             value={clSummary}
             onChange={(e) => setClSummary(e.target.value)}
             className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:outline-none"
           />
           <textarea
-            placeholder="Änderungen (eine pro Zeile)"
+            placeholder={t('milestones.changesPlaceholder')}
             value={clChanges}
             onChange={(e) => setClChanges(e.target.value)}
             rows={3}
@@ -158,42 +163,42 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
           />
           <div className="flex gap-2">
             <Button size="xs" type="submit" disabled={submitting}>
-              {submitting ? 'Speichern...' : 'Abschließen'}
+              {submitting ? t('milestones.completing') : t('milestones.complete')}
             </Button>
-            <Button size="xs" type="button" onClick={() => setShowChangelogForm(false)}>Abbrechen</Button>
+            <Button size="xs" type="button" onClick={() => setShowChangelogForm(false)}>{t('common.cancel')}</Button>
           </div>
         </form>
       )}
 
       <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-800">
         {milestone.status === 'open' && (
-          <Button size="xs" onClick={() => handleStatusChange('in_progress')}>Starten</Button>
+          <Button size="xs" onClick={() => handleStatusChange('in_progress')}>{t('todoTransitions.start')}</Button>
         )}
         {milestone.status === 'in_progress' && (
           <>
-            <Button size="xs" onClick={() => handleStatusChange('open')}>Zurück</Button>
-            <Button size="xs" onClick={() => setShowChangelogForm(true)}>Abschließen</Button>
+            <Button size="xs" onClick={() => handleStatusChange('open')}>{t('todoTransitions.back')}</Button>
+            <Button size="xs" onClick={() => setShowChangelogForm(true)}>{t('milestones.complete')}</Button>
           </>
         )}
         {milestone.status === 'done' && (
-          <Button size="xs" onClick={() => handleStatusChange('in_progress')}>Wieder öffnen</Button>
+          <Button size="xs" onClick={() => handleStatusChange('in_progress')}>{t('todoTransitions.reopen')}</Button>
         )}
         <Button size="xs" onClick={async () => {
           try {
             await api.milestones.update(milestone._id, { archived: !milestone.archived } as Partial<Milestone>);
             onUpdate();
           } catch (err: any) {
-            showError(err.message || 'Archivierung fehlgeschlagen');
+            showError(err.message || t('todos.archiveFailed'));
           }
         }}>
-          {milestone.archived ? 'Wiederherstellen' : 'Archivieren'}
+          {milestone.archived ? t('common.restore') : t('common.archive')}
         </Button>
         <ConfirmButton onConfirm={async () => {
           try {
             await api.milestones.delete(milestone._id);
             onUpdate();
           } catch (err: any) {
-            showError(err.message || 'Löschen fehlgeschlagen');
+            showError(err.message || t('todos.deleteFailed'));
           }
         }} className="ml-auto" />
       </div>
@@ -202,6 +207,7 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
 }
 
 export default function MilestoneList({ milestones, todos, projectId, onUpdate }: Props) {
+  const { t } = useTranslation();
   const { showError } = useToast();
   const [showArchived, setShowArchived] = useState(false);
   const [confirmArchiveAll, setConfirmArchiveAll] = useState(false);
@@ -218,7 +224,7 @@ export default function MilestoneList({ milestones, todos, projectId, onUpdate }
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <Link to={`/projects/${projectId}/milestones/new`}
           className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
-          + Neuer Milestone
+          {t('milestones.newMilestone')}
         </Link>
         {archivableDone.length > 0 && (
           <button type="button" onBlur={() => setConfirmArchiveAll(false)} onClick={async () => {
@@ -228,23 +234,23 @@ export default function MilestoneList({ milestones, todos, projectId, onUpdate }
               await Promise.all(archivableDone.map((ms) => api.milestones.update(ms._id, { archived: true } as Partial<Milestone>)));
               onUpdate();
             } catch (err: any) {
-              showError(err.message || 'Archivierung fehlgeschlagen');
+              showError(err.message || t('todos.archiveFailed'));
             }
           }}
             className={`text-xs px-2 py-1 rounded transition-colors ${confirmArchiveAll ? 'bg-yellow-900/60 text-yellow-300' : 'text-gray-600 hover:text-gray-400'}`}>
-            {confirmArchiveAll ? `Sicher? (${archivableDone.length})` : `Erledigte archivieren (${archivableDone.length})`}
+            {confirmArchiveAll ? t('milestones.archiveConfirm', { count: archivableDone.length }) : t('milestones.archiveCompleted', { count: archivableDone.length })}
           </button>
         )}
         {archivedCount > 0 && (
           <Button size="sm" onClick={() => setShowArchived(!showArchived)}
             className={showArchived ? 'bg-gray-700 text-gray-300' : 'text-gray-600 hover:text-gray-400'}>
-            {showArchived ? `Archiv ausblenden (${archivedCount})` : `Archiv (${archivedCount})`}
+            {showArchived ? t('milestones.hideArchive', { count: archivedCount }) : t('milestones.showArchive', { count: archivedCount })}
           </Button>
         )}
       </div>
 
       {visible.length === 0 && unassignedTodos.length === 0 && (
-        <EmptyState message="Noch keine Milestones. Lege einen über das Formular oder per MCP an." />
+        <EmptyState message={t('milestones.noMilestones')} />
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -256,7 +262,7 @@ export default function MilestoneList({ milestones, todos, projectId, onUpdate }
       {unassignedTodos.length > 0 && (
         <div className="mt-6">
           <h3 className="text-sm font-medium text-gray-500 mb-2">
-            Nicht zugeordnete Tasks <span className="text-gray-600">({unassignedTodos.length})</span>
+            {t('milestones.unassignedTasks')} <span className="text-gray-600">({unassignedTodos.length})</span>
           </h3>
           <div className="space-y-1">
             {unassignedTodos.map((todo) => (

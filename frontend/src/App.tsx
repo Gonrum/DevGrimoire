@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Routes, Route, NavLink, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import Dashboard from './pages/Dashboard';
 import ProjectsOverview from './pages/ProjectsOverview';
 import ProjectDetail from './pages/ProjectDetail';
@@ -23,18 +24,20 @@ import { AuthProvider, useAuth } from './hooks/useAuth';
 import { configureAuth } from './api/client';
 
 function NotFound() {
+  const { t } = useTranslation();
   return (
     <div className="text-center py-20">
       <h1 className="text-4xl font-bold text-gray-500 mb-4">404</h1>
       <p className="text-gray-400 mb-6">Seite nicht gefunden.</p>
       <Link to="/" className="text-blue-400 hover:text-blue-300">
-        Zum Dashboard
+        {t('nav.dashboard')}
       </Link>
     </div>
   );
 }
 
 function UserMenu() {
+  const { t } = useTranslation();
   const { authEnabled, user, logout } = useAuth();
   if (!authEnabled) return null;
 
@@ -45,17 +48,17 @@ function UserMenu() {
         className={({ isActive }) =>
           `text-sm transition-colors ${isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'}`
         }
-        title="Profil"
+        title={t('nav.profile')}
       >
-        {user?.username || 'Profil'}
+        {user?.username || t('nav.profile')}
       </NavLink>
       <button
         type="button"
         onClick={logout}
         className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
-        title="Abmelden"
+        title={t('nav.logout')}
       >
-        Abmelden
+        {t('nav.logout')}
       </button>
     </div>
   );
@@ -104,6 +107,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 function AppShell() {
+  const { t } = useTranslation();
   return (
     <div className="min-h-screen flex flex-col">
       <header className="bg-gray-900 border-b border-gray-800 px-4 sm:px-6 py-3 sm:py-4">
@@ -120,7 +124,7 @@ function AppShell() {
                 isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
               }
             >
-              Dashboard
+              {t('nav.dashboard')}
             </NavLink>
             <NavLink
               to="/projects"
@@ -129,7 +133,7 @@ function AppShell() {
                 isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
               }
             >
-              Projekte
+              {t('nav.projects')}
             </NavLink>
             <NavLink
               to="/docs"
@@ -137,7 +141,7 @@ function AppShell() {
                 isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
               }
             >
-              Docs
+              {t('nav.docs')}
             </NavLink>
             <NavLink
               to="/settings"
@@ -145,7 +149,7 @@ function AppShell() {
                 isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
               }
             >
-              Einstellungen
+              {t('nav.settings')}
             </NavLink>
           </nav>
           <div className="ml-auto flex items-center gap-3">

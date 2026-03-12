@@ -1,10 +1,10 @@
 # DevGrimoire
 
-**Persistentes Projektgedaechtnis fuer Claude** -- MCP-Server, REST API und React-Dashboard in einem.
+**Persistent project memory for Claude** -- MCP server, REST API, and React dashboard in one.
 
-DevGrimoire gibt Claude (dem AI-Assistenten) ein persistentes Gedaechtnis fuer deine Projekte. Ueber das [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) kann Claude Projekte verwalten, Aufgaben und Milestones tracken, Wissen speichern, Changelogs pflegen, Datenbank-Schemas dokumentieren, Abhaengigkeiten scannen, Feature-Kataloge fuehren, Handbuecher schreiben und vieles mehr. Das Web-Frontend zeigt alles in einem Dark-Mode Dashboard mit Echtzeit-Updates.
+DevGrimoire gives Claude (the AI assistant) a persistent memory for your projects. Through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), Claude can manage projects, track tasks and milestones, store knowledge, maintain changelogs, document database schemas, scan dependencies, manage feature catalogs, write manuals, and much more. The web frontend displays everything in a dark-mode dashboard with real-time updates.
 
-## Architektur
+## Architecture
 
 ```
 ┌──────────────┐     stdio      ┌─────────────────────────────────┐
@@ -25,112 +25,112 @@ DevGrimoire gibt Claude (dem AI-Assistenten) ein persistentes Gedaechtnis fuer d
 
 ## Features
 
-- **70 MCP-Tools** -- Claude kann Projekte, Todos, Milestones, Sessions, Wissen, Changelogs, Handbuecher, Recherchen, Schemas, Abhaengigkeiten, Features, Umgebungen und Secrets verwalten
-- **REST API** -- 98 Endpoints fuer alle Ressourcen
-- **React-Dashboard** -- Dark-Mode UI mit Kanban-Board, Milestone-Tracking, Activity Feed, Markdown-Editor und mehr
-- **Echtzeit-Updates** -- SSE via MongoDB Change Streams + EventEmitter
-- **Authentifizierung** -- Multi-User JWT-Auth mit Rollen (Admin/User), API-Keys fuer programmatischen Zugriff
-- **Verschluesselte Secrets** -- AES-256-GCM pro Umgebung (dev/staging/prod)
-- **Push-Benachrichtigungen** -- Claude kann den User via Web Push benachrichtigen
-- **Globale Suche** -- Volltextsuche ueber alle Entitaeten eines Projekts
-- **Projekt-Import/Export** -- Kompletten Projektstand als JSON exportieren und importieren
-- **In-App Benachrichtigungen** -- Notification-Inbox mit Deep-Links
-- **ARM/Standalone-Modus** -- Laeuft auch auf Raspberry Pi und anderen ARM-Geraeten
-- **Zwei MCP-Transports** -- Lokaler stdio-Modus oder Remote via HTTP/SSE
-- **Docker Compose** -- Ein Befehl fuer den kompletten Stack
+- **70 MCP Tools** -- Claude can manage projects, todos, milestones, sessions, knowledge, changelogs, manuals, research, schemas, dependencies, features, environments, and secrets
+- **REST API** -- 98 endpoints for all resources
+- **React Dashboard** -- Dark-mode UI with Kanban board, milestone tracking, activity feed, Markdown editor, and more
+- **Real-Time Updates** -- SSE via MongoDB Change Streams + EventEmitter
+- **Authentication** -- Multi-user JWT auth with roles (Admin/User), API keys for programmatic access
+- **Encrypted Secrets** -- AES-256-GCM per environment (dev/staging/prod)
+- **Push Notifications** -- Claude can notify the user via Web Push
+- **Global Search** -- Full-text search across all entities of a project
+- **Project Import/Export** -- Export and import complete project state as JSON
+- **In-App Notifications** -- Notification inbox with deep links
+- **ARM/Standalone Mode** -- Runs on Raspberry Pi and other ARM devices
+- **Two MCP Transports** -- Local stdio mode or remote via HTTP/SSE
+- **Docker Compose** -- One command for the entire stack
 
-## MCP-Tools (70)
+## MCP Tools (70)
 
-| Bereich | Tools | Beschreibung |
-|---------|-------|--------------|
-| **Projekte** | `project_create`, `_list`, `_get`, `_update`, `_delete` | Container fuer alle Daten, Tech Stack, Instruktionen |
-| **Todos** | `todo_create`, `_list`, `_get`, `_update`, `_delete`, `_comment` | Status-State-Machine, Prioritaet, Tags, Dependencies, Archivierung |
-| **Milestones** | `milestone_create`, `_list`, `_get`, `_update`, `_delete` | Gruppierung von Todos, Abschluss erfordert Changelog |
-| **Sessions** | `session_save`, `_get` | Arbeitssessions mit Zusammenfassung, Dateien, naechsten Schritten |
-| **Wissen** | `knowledge_save`, `_search`, `_list`, `_get`, `_update`, `_delete` | Langfristige Wissensbasis mit Volltextsuche |
-| **Changelog** | `changelog_add`, `_list`, `_get`, `_update`, `_delete` | Versions-Changelog mit Component-Support |
-| **Handbuecher** | `manual_create`, `_list`, `_get`, `_update`, `_delete` | Kategorisierte Dokumentation in Markdown |
-| **Recherche** | `research_save`, `_search`, `_list`, `_get`, `_update`, `_delete` | Zeitpunktbezogene Recherchen mit Quellen |
-| **Schemas** | `schema_create`, `_list`, `_get`, `_update`, `_delete`, `_versions` | DB-Schema-Dokumentation mit Versionierung |
-| **Features** | `feature_create`, `_list`, `_get`, `_update`, `_delete` | Feature-Katalog mit Status-Tracking |
-| **Dependencies** | `dependency_add`, `_list`, `_get`, `_update`, `_delete`, `_scan` | Paketabhaengigkeiten mit Bulk-Scan aus package.json etc. |
-| **Umgebungen** | `environment_create`, `_list`, `_get`, `_update`, `_delete`, `_export` | Key-Value Variablen pro Environment, .env-Export |
-| **Secrets** | `secret_set`, `_get`, `_list`, `_delete` | AES-256-GCM verschluesselte Werte |
-| **System** | `system_instructions_get`, `_set`, `notify_user` | Agent-Instruktionen, Push-Benachrichtigungen |
+| Area | Tools | Description |
+|------|-------|-------------|
+| **Projects** | `project_create`, `_list`, `_get`, `_update`, `_delete` | Container for all data, tech stack, instructions |
+| **Todos** | `todo_create`, `_list`, `_get`, `_update`, `_delete`, `_comment` | Status state machine, priority, tags, dependencies, archiving |
+| **Milestones** | `milestone_create`, `_list`, `_get`, `_update`, `_delete` | Grouping of todos, completion requires changelog |
+| **Sessions** | `session_save`, `_get` | Work sessions with summary, files, next steps |
+| **Knowledge** | `knowledge_save`, `_search`, `_list`, `_get`, `_update`, `_delete` | Long-term knowledge base with full-text search |
+| **Changelog** | `changelog_add`, `_list`, `_get`, `_update`, `_delete` | Version changelog with component support |
+| **Manuals** | `manual_create`, `_list`, `_get`, `_update`, `_delete` | Categorized documentation in Markdown |
+| **Research** | `research_save`, `_search`, `_list`, `_get`, `_update`, `_delete` | Point-in-time research with sources |
+| **Schemas** | `schema_create`, `_list`, `_get`, `_update`, `_delete`, `_versions` | DB schema documentation with versioning |
+| **Features** | `feature_create`, `_list`, `_get`, `_update`, `_delete` | Feature catalog with status tracking |
+| **Dependencies** | `dependency_add`, `_list`, `_get`, `_update`, `_delete`, `_scan` | Package dependencies with bulk scan from package.json etc. |
+| **Environments** | `environment_create`, `_list`, `_get`, `_update`, `_delete`, `_export` | Key-value variables per environment, .env export |
+| **Secrets** | `secret_set`, `_get`, `_list`, `_delete` | AES-256-GCM encrypted values |
+| **System** | `system_instructions_get`, `_set`, `notify_user` | Agent instructions, push notifications |
 
-## Schnellstart
+## Quick Start
 
-### Voraussetzungen
+### Prerequisites
 
 - **Docker & Docker Compose**
-- **Claude Code CLI** oder **Claude Desktop** (als MCP-Client)
+- **Claude Code CLI** or **Claude Desktop** (as MCP client)
 
 ### Installation
 
 ```bash
-# 1. Repository klonen
+# 1. Clone the repository
 git clone https://github.com/Gonrum/DevGrimoire.git
 cd DevGrimoire
 
-# 2. Umgebungsvariablen konfigurieren
+# 2. Configure environment variables
 cp .env.example .env
-# .env anpassen (MongoDB Credentials, Auth, Encryption Key)
+# Edit .env (MongoDB credentials, auth, encryption key)
 
-# 3. Stack starten
+# 3. Start the stack
 docker compose up -d
 ```
 
-Danach ist verfuegbar:
+Once running, the following services are available:
 
-| Dienst | URL |
-|--------|-----|
+| Service | URL |
+|---------|-----|
 | Frontend (Dashboard) | http://localhost |
 | Backend (REST API) | http://localhost:3200/api |
-| MCP SSE-Endpoint | http://localhost:3200/sse |
+| MCP SSE Endpoint | http://localhost:3200/sse |
 | MCP Streamable HTTP | http://localhost:3200/mcp |
 
-### ARM/Standalone-Modus
+### ARM/Standalone Mode
 
-Fuer ARM-Geraete (Raspberry Pi, Jetson Nano) oder Systeme mit wenig RAM:
+For ARM devices (Raspberry Pi, Jetson Nano) or systems with limited RAM:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.standalone.yml up -d
 ```
 
-Dies startet MongoDB ohne Replica Set (weniger RAM, kein Change Stream, SSE trotzdem funktional via EventEmitter).
+This starts MongoDB without a replica set (less RAM, no Change Streams, but SSE still works via EventEmitter).
 
-## Konfiguration
+## Configuration
 
-Umgebungsvariablen in `.env`:
+Environment variables in `.env`:
 
-| Variable | Beschreibung | Erforderlich |
-|----------|--------------|:------------:|
-| `MONGO_USER` | MongoDB-Benutzername | Ja |
-| `MONGO_PASSWORD` | MongoDB-Passwort | Ja |
-| `MONGODB_URI` | Volle MongoDB Connection URI | Ja |
-| `AUTH_USERNAME` | Login-Benutzername (erster Admin) | Nein* |
-| `AUTH_PASSWORD` | Login-Passwort | Nein* |
-| `JWT_SECRET` | Geheimnis fuer JWT-Signierung | Bei Auth |
-| `SECRETS_ENCRYPTION_KEY` | AES-256-Key (64 Hex-Zeichen) | Fuer Secrets |
-| `VAPID_PUBLIC_KEY` | Web Push Public Key | Fuer Push |
-| `VAPID_PRIVATE_KEY` | Web Push Private Key | Fuer Push |
-| `MONGODB_STANDALONE` | `true` fuer Standalone-Modus | Nein |
-| `NODE_HEAP_SIZE` | Node.js Heap in MB (Default: 512) | Nein |
+| Variable | Description | Required |
+|----------|-------------|:--------:|
+| `MONGO_USER` | MongoDB username | Yes |
+| `MONGO_PASSWORD` | MongoDB password | Yes |
+| `MONGODB_URI` | Full MongoDB connection URI | Yes |
+| `AUTH_USERNAME` | Login username (first admin) | No* |
+| `AUTH_PASSWORD` | Login password | No* |
+| `JWT_SECRET` | Secret for JWT signing | With Auth |
+| `SECRETS_ENCRYPTION_KEY` | AES-256 key (64 hex characters) | For Secrets |
+| `VAPID_PUBLIC_KEY` | Web Push public key | For Push |
+| `VAPID_PRIVATE_KEY` | Web Push private key | For Push |
+| `MONGODB_STANDALONE` | `true` for standalone mode | No |
+| `NODE_HEAP_SIZE` | Node.js heap in MB (default: 512) | No |
 
-\* Ohne `AUTH_USERNAME`/`AUTH_PASSWORD` ist die Authentifizierung deaktiviert.
+\* Without `AUTH_USERNAME`/`AUTH_PASSWORD`, authentication is disabled.
 
 ```bash
-# Encryption Key generieren:
+# Generate encryption key:
 openssl rand -hex 32
 ```
 
-## MCP-Konfiguration
+## MCP Configuration
 
-### Remote-Anbindung (HTTP/SSE -- empfohlen)
+### Remote Connection (HTTP/SSE -- recommended)
 
-Wenn der Docker Stack laeuft, kann Claude von jedem Rechner im Netzwerk auf DevGrimoire zugreifen -- ohne lokale Installation.
+When the Docker stack is running, Claude can access DevGrimoire from any machine on the network -- no local installation required.
 
-In `~/.claude.json` (Claude Code) oder `claude_desktop_config.json` (Claude Desktop):
+In `~/.claude.json` (Claude Code) or `claude_desktop_config.json` (Claude Desktop):
 
 ```json
 {
@@ -143,17 +143,17 @@ In `~/.claude.json` (Claude Code) oder `claude_desktop_config.json` (Claude Desk
 }
 ```
 
-### Verfuegbare MCP-Transports
+### Available MCP Transports
 
-| Endpoint | Beschreibung |
-|----------|--------------|
+| Endpoint | Description |
+|----------|-------------|
 | `GET /sse` | Legacy SSE (Claude Code, Claude Desktop) |
-| `POST /messages` | Legacy SSE Message-Endpoint |
-| `POST\|GET\|DELETE /mcp` | Streamable HTTP (neuere Clients) |
+| `POST /messages` | Legacy SSE message endpoint |
+| `POST\|GET\|DELETE /mcp` | Streamable HTTP (newer clients) |
 
-### Lokale Anbindung (stdio)
+### Local Connection (stdio)
 
-Alternativ kann der MCP-Server lokal per stdio gestartet werden. Dafuer muss das Backend lokal gebaut sein und MongoDB erreichbar sein.
+Alternatively, the MCP server can be started locally via stdio. This requires the backend to be built locally and MongoDB to be reachable.
 
 ```bash
 cd backend
@@ -168,7 +168,7 @@ In `~/.claude.json`:
   "mcpServers": {
     "devgrimoire": {
       "command": "node",
-      "args": ["/pfad/zu/DevGrimoire/backend/dist/mcp-server.js"],
+      "args": ["/path/to/DevGrimoire/backend/dist/mcp-server.js"],
       "env": {
         "MONGODB_URI": "mongodb://user:pass@localhost:27017/devgrimoire?authSource=admin&directConnection=true"
       }
@@ -177,95 +177,95 @@ In `~/.claude.json`:
 }
 ```
 
-> **Hinweis:** Die MCP-Endpoints haben aktuell keine Authentifizierung. In einer Produktionsumgebung sollte der Zugriff per Firewall oder VPN eingeschraenkt werden.
+> **Note:** The MCP endpoints currently have no authentication. In a production environment, access should be restricted via firewall or VPN.
 
-## Authentifizierung
+## Authentication
 
-DevGrimoire unterstuetzt Multi-User-Authentifizierung mit Rollen:
+DevGrimoire supports multi-user authentication with roles:
 
-- **Rollen** -- `admin` (voller Zugriff + Benutzerverwaltung), `user` (Lese-/Schreibzugriff)
-- **Access Token** -- JWT, 15 Minuten gueltig, im Speicher gehalten
-- **Refresh Token** -- Opak, 7 Tage gueltig, in MongoDB mit TTL-Index, Rotation bei Nutzung
-- **API-Keys** -- Fuer programmatischen Zugriff (z.B. CI/CD), beschraenkbar auf Rollen
-- **SSE** -- Auth via `?token=...` Query-Parameter (EventSource unterstuetzt keine Header)
-- **MCP Server** -- Nicht geschuetzt (stdio = nur lokal, HTTP/SSE = ggf. Firewall/VPN)
+- **Roles** -- `admin` (full access + user management), `user` (read/write access)
+- **Access Token** -- JWT, valid for 15 minutes, held in memory
+- **Refresh Token** -- Opaque, valid for 7 days, stored in MongoDB with TTL index, rotated on use
+- **API Keys** -- For programmatic access (e.g., CI/CD), restrictable to roles
+- **SSE** -- Auth via `?token=...` query parameter (EventSource does not support headers)
+- **MCP Server** -- Not protected (stdio = local only, HTTP/SSE = use firewall/VPN as needed)
 
-Beim ersten Start wird aus `AUTH_USERNAME`/`AUTH_PASSWORD` ein Admin-Account erstellt. Weitere User koennen im Dashboard unter Benutzerverwaltung angelegt werden.
+On first startup, an admin account is created from `AUTH_USERNAME`/`AUTH_PASSWORD`. Additional users can be created in the dashboard under user management.
 
-## Secrets & Verschluesselung
+## Secrets & Encryption
 
-Secrets werden mit AES-256-GCM verschluesselt in MongoDB gespeichert:
+Secrets are stored AES-256-GCM encrypted in MongoDB:
 
-- Jedes Secret hat einen eigenen zufaelligen IV
-- Speicherformat: `iv:authTag:ciphertext` (alles Hex)
-- List-Endpoint gibt nur Keys + Beschreibung zurueck, niemals Werte
-- Entschluesselung nur via `GET /api/secrets/:id` oder `secret_get` MCP-Tool
-- Ohne `SECRETS_ENCRYPTION_KEY` ist das Secrets-Feature deaktiviert
+- Each secret has its own random IV
+- Storage format: `iv:authTag:ciphertext` (all hex)
+- List endpoint returns only keys + description, never values
+- Decryption only via `GET /api/secrets/:id` or `secret_get` MCP tool
+- Without `SECRETS_ENCRYPTION_KEY`, the secrets feature is disabled
 
-## Projekt-Import/Export
+## Project Import/Export
 
-Komplette Projektdaten (Todos, Milestones, Wissen, Changelog, Sessions, Schemas, Dependencies, Features, Handbuecher, Recherchen, Umgebungen, Secrets) koennen als JSON exportiert und in eine neue Instanz importiert werden. Dabei werden alle internen Referenzen (Milestone-Links, Dependencies, Changelog-Verknuepfungen) korrekt remapped.
+Complete project data (todos, milestones, knowledge, changelog, sessions, schemas, dependencies, features, manuals, research, environments, secrets) can be exported as JSON and imported into a new instance. All internal references (milestone links, dependencies, changelog associations) are correctly remapped.
 
-- **Export**: Projekteinstellungen > Daten-Export (optional mit entschluesselten Secret-Werten)
-- **Import**: Projektuebersicht > JSON importieren
+- **Export**: Project settings > Data export (optionally with decrypted secret values)
+- **Import**: Project overview > Import JSON
 
 ## Tech Stack
 
-| Komponente | Technologie |
-|------------|-------------|
+| Component | Technology |
+|-----------|------------|
 | Backend | NestJS 11, Mongoose 8, TypeScript 5, Passport JWT |
 | Frontend | React 19, Vite 6, TailwindCSS 3, React Router 7 |
-| Datenbank | MongoDB 7 (Replica Set oder Standalone) |
+| Database | MongoDB 7 (Replica Set or Standalone) |
 | MCP | @modelcontextprotocol/sdk 1.12 |
-| Sicherheit | bcryptjs, AES-256-GCM, JWT (Access + Refresh), API-Keys |
-| Infrastruktur | Docker Compose, nginx, Multi-Arch (x86_64 + ARM64) |
+| Security | bcryptjs, AES-256-GCM, JWT (Access + Refresh), API Keys |
+| Infrastructure | Docker Compose, nginx, Multi-Arch (x86_64 + ARM64) |
 
-## Projektstruktur
+## Project Structure
 
 ```
 DevGrimoire/
 ├── backend/
 │   └── src/
-│       ├── main.ts                # REST API Entry (NestJS HTTP, Prefix /api)
-│       ├── mcp-server.ts          # MCP Entry (stdio Transport)
-│       ├── mcp-tools.ts           # MCP Tool-Definitionen (70 Tools)
-│       ├── auth/                  # JWT Auth, Rollen, API-Keys, User-Verwaltung
-│       ├── projects/              # Projekte (Schema, Service, Controller, DTOs)
-│       ├── todos/                 # Aufgaben (State Machine, Dependencies, Comments)
-│       ├── milestones/            # Milestones (Changelog-Verknuepfung)
-│       ├── sessions/              # Arbeitssessions
-│       ├── knowledge/             # Wissensbasis (Volltextsuche)
-│       ├── changelog/             # Versions-Changelog
-│       ├── manuals/               # Kategorisierte Handbuecher
-│       ├── research/              # Recherchen mit Quellen
-│       ├── schemas/               # DB-Schema-Dokumentation (Versionierung)
-│       ├── features/              # Feature-Katalog
-│       ├── dependencies/          # Paketabhaengigkeiten (Scan)
-│       ├── environments/          # Umgebungsvariablen (dev/staging/prod)
-│       ├── secrets/               # Verschluesselte Secrets (AES-256-GCM)
-│       ├── activities/            # Activity Feed (automatisch geloggt)
-│       ├── notifications/         # In-App Benachrichtigungen
-│       ├── events/                # SSE Events (Change Streams + EventEmitter)
+│       ├── main.ts                # REST API entry (NestJS HTTP, prefix /api)
+│       ├── mcp-server.ts          # MCP entry (stdio transport)
+│       ├── mcp-tools.ts           # MCP tool definitions (70 tools)
+│       ├── auth/                  # JWT auth, roles, API keys, user management
+│       ├── projects/              # Projects (schema, service, controller, DTOs)
+│       ├── todos/                 # Tasks (state machine, dependencies, comments)
+│       ├── milestones/            # Milestones (changelog association)
+│       ├── sessions/              # Work sessions
+│       ├── knowledge/             # Knowledge base (full-text search)
+│       ├── changelog/             # Version changelog
+│       ├── manuals/               # Categorized manuals
+│       ├── research/              # Research with sources
+│       ├── schemas/               # DB schema documentation (versioning)
+│       ├── features/              # Feature catalog
+│       ├── dependencies/          # Package dependencies (scan)
+│       ├── environments/          # Environment variables (dev/staging/prod)
+│       ├── secrets/               # Encrypted secrets (AES-256-GCM)
+│       ├── activities/            # Activity feed (auto-logged)
+│       ├── notifications/         # In-app notifications
+│       ├── events/                # SSE events (Change Streams + EventEmitter)
 │       ├── push/                  # Web Push (VAPID)
-│       ├── search/                # Globale Suche
-│       ├── settings/              # System-Einstellungen
-│       ├── api-keys/              # API-Key Verwaltung
-│       ├── counters/              # Auto-Increment Nummern (T-1, M-1)
-│       ├── project-transfer/      # JSON Import/Export
-│       └── common/                # Shared (Encryption, Pipes, Interceptors)
+│       ├── search/                # Global search
+│       ├── settings/              # System settings
+│       ├── api-keys/              # API key management
+│       ├── counters/              # Auto-increment numbers (T-1, M-1)
+│       ├── project-transfer/      # JSON import/export
+│       └── common/                # Shared (encryption, pipes, interceptors)
 ├── frontend/
 │   └── src/
-│       ├── pages/                 # Dashboard, Projektdetail, Todo-Detail, Login, ...
+│       ├── pages/                 # Dashboard, project detail, todo detail, login, ...
 │       ├── components/            # TodoBoard, MilestoneList, SchemaList, ManualView, ...
 │       ├── components/ui/         # Button, Badge, ConfirmButton, EmptyState, ...
 │       └── hooks/                 # useAuth, useProjectEvents
-├── docker-compose.yml             # Standard (Replica Set)
-├── docker-compose.standalone.yml  # ARM/Standalone (ohne Replica Set)
+├── docker-compose.yml             # Standard (replica set)
+├── docker-compose.standalone.yml  # ARM/Standalone (without replica set)
 ├── .env.example
-├── CLAUDE.md                      # Instruktionen fuer Claude Code
+├── CLAUDE.md                      # Instructions for Claude Code
 └── README.md
 ```
 
-## Lizenz
+## License
 
-[AGPL-3.0](LICENSE) -- Du kannst DevGrimoire frei nutzen, selbst hosten und modifizieren. Wenn du eine modifizierte Version als Service betreibst, musst du den Quellcode veroeffentlichen.
+[AGPL-3.0](LICENSE) -- You are free to use, self-host, and modify DevGrimoire. If you operate a modified version as a service, you must publish the source code.

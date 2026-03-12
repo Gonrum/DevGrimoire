@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api, Environment, SecretListItem } from '../api/client';
 import { useToast } from './Toast';
 import Button from './ui/Button';
@@ -16,10 +17,11 @@ function EnvBadge({ name }: { name: string }) {
 
 function SecretTypeBadge({ type }: { type: string }) {
   const info = SECRET_TYPE_LABELS[type] || SECRET_TYPE_LABELS.variable;
-  return <Badge color={info.color}>{info.label}</Badge>;
+  return <Badge color={info.color}>{info.label()}</Badge>;
 }
 
 function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () => void }) {
+  const { t } = useTranslation();
   const { showError } = useToast();
   const [revealed, setRevealed] = useState<string | null>(null);
 
@@ -30,7 +32,7 @@ function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () 
       setRevealed(s.value);
       setTimeout(() => setRevealed(null), 10000);
     } catch (err: any) {
-      showError(err.message || 'Secret konnte nicht entschlüsselt werden');
+      showError(err.message || t('environments.decryptError'));
     }
   };
 
@@ -49,27 +51,28 @@ function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () 
         {revealed && (
           <div className="mt-1 flex items-center gap-2">
             <code className="text-xs bg-gray-800 text-green-400 px-2 py-0.5 rounded font-mono break-all">{revealed}</code>
-            <button type="button" onClick={handleCopy} className="text-xs text-gray-500 hover:text-gray-300" title="Kopieren">
-              Kopieren
+            <button type="button" onClick={handleCopy} className="text-xs text-gray-500 hover:text-gray-300" title={t('common.copy')}>
+              {t('common.copy')}
             </button>
           </div>
         )}
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        <Button type="button" size="xs" onClick={handleReveal}>{revealed ? 'Verbergen' : 'Anzeigen'}</Button>
-        <ConfirmButton onConfirm={async () => { try { await api.secrets.delete(secret._id); onDelete(); } catch (err: any) { showError(err.message); } }} label="X" confirmLabel="Sicher?" size="xs" />
+        <Button type="button" size="xs" onClick={handleReveal}>{revealed ? t('environments.hide') : t('environments.reveal')}</Button>
+        <ConfirmButton onConfirm={async () => { try { await api.secrets.delete(secret._id); onDelete(); } catch (err: any) { showError(err.message); } }} label="X" confirmLabel={t('common.confirmDelete')} size="xs" />
       </div>
     </div>
   );
 }
 
 function ServerInfo({ env }: { env: Environment }) {
+  const { t } = useTranslation();
   const hasServer = env.host || env.port || env.user || env.url;
   if (!hasServer) return null;
 
   return (
     <div className="mb-3">
-      <h4 className="text-xs font-medium text-gray-500 uppercase mb-2">Server</h4>
+      <h4 className="text-xs font-medium text-gray-500 uppercase mb-2">{t('environments.server')}</h4>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
         {env.host && (
           <div className="flex gap-2">
@@ -101,6 +104,7 @@ function ServerInfo({ env }: { env: Environment }) {
 }
 
 function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; projectId: string; onUpdate: () => void }) {
+  const { t } = useTranslation();
   const { showError } = useToast();
   const [secrets, setSecrets] = useState<SecretListItem[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -133,13 +137,13 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
         <EnvBadge name={env.name} />
         {env.description && <span className="text-xs text-gray-500 truncate hidden sm:inline">{env.description}</span>}
         <span className="text-sm text-gray-400">
-          {env.variables.length} Variablen
+          {t('environments.variableCount', { count: env.variables.length })}
         </span>
         <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           <button type="button" onClick={handleToggleActive} className={`text-xs px-2 py-0.5 rounded-full ${env.active ? 'bg-green-900/40 text-green-300' : 'bg-gray-800 text-gray-500'}`}>
-            {env.active ? 'aktiv' : 'inaktiv'}
+            {env.active ? t('common.active') : t('common.inactive')}
           </button>
-          <ConfirmButton onConfirm={async () => { try { await api.environments.delete(env._id); onUpdate(); } catch (err: any) { showError(err.message); } }} label="Entfernen" size="xs" />
+          <ConfirmButton onConfirm={async () => { try { await api.environments.delete(env._id); onUpdate(); } catch (err: any) { showError(err.message); } }} label={t('common.remove')} size="xs" />
         </div>
       </div>
 
@@ -149,13 +153,13 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <h4 className="text-xs font-medium text-gray-500 uppercase">Variablen</h4>
+              <h4 className="text-xs font-medium text-gray-500 uppercase">{t('environments.variables')}</h4>
               {!editingVars ? (
-                <button type="button" onClick={() => { setVars(env.variables); setEditingVars(true); }} className="text-xs text-blue-400 hover:text-blue-300">Bearbeiten</button>
+                <button type="button" onClick={() => { setVars(env.variables); setEditingVars(true); }} className="text-xs text-blue-400 hover:text-blue-300">{t('common.edit')}</button>
               ) : (
                 <div className="flex gap-2">
-                  <button type="button" onClick={handleSaveVars} className="text-xs text-blue-400 hover:text-blue-300">Speichern</button>
-                  <button type="button" onClick={() => { setVars(env.variables); setEditingVars(false); }} className="text-xs text-gray-500">Abbrechen</button>
+                  <button type="button" onClick={handleSaveVars} className="text-xs text-blue-400 hover:text-blue-300">{t('common.save')}</button>
+                  <button type="button" onClick={() => { setVars(env.variables); setEditingVars(false); }} className="text-xs text-gray-500">{t('common.cancel')}</button>
                 </div>
               )}
             </div>
@@ -168,7 +172,7 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
                     <button type="button" onClick={() => removeVar(i)} className="text-gray-600 hover:text-red-400 text-xs">X</button>
                   </div>
                 ))}
-                <button type="button" onClick={addVar} className="text-xs text-blue-400 hover:text-blue-300">+ Variable</button>
+                <button type="button" onClick={addVar} className="text-xs text-blue-400 hover:text-blue-300">{t('environments.addVariable')}</button>
               </div>
             ) : (
               env.variables.length > 0 ? (
@@ -181,20 +185,20 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
                     </div>
                   ))}
                 </div>
-              ) : <p className="text-xs text-gray-600">Keine Variablen</p>
+              ) : <p className="text-xs text-gray-600">{t('environments.noVariables')}</p>
             )}
           </div>
 
           <div>
-            <h4 className="text-xs font-medium text-gray-500 uppercase mb-2">Secrets (verschlüsselt)</h4>
+            <h4 className="text-xs font-medium text-gray-500 uppercase mb-2">{t('environments.secrets')}</h4>
             {secrets.length > 0 ? (
               <div>
                 {secrets.map((s) => (
                   <SecretRow key={s._id} secret={s} onDelete={loadSecrets} />
                 ))}
               </div>
-            ) : <p className="text-xs text-gray-600">Keine Secrets</p>}
-            <Link to={`/projects/${projectId}/secrets/new?environmentId=${env._id}`} className="inline-block mt-2 text-xs text-blue-400 hover:text-blue-300">+ Secret</Link>
+            ) : <p className="text-xs text-gray-600">{t('environments.noSecrets')}</p>}
+            <Link to={`/projects/${projectId}/secrets/new?environmentId=${env._id}`} className="inline-block mt-2 text-xs text-blue-400 hover:text-blue-300">{t('environments.addSecret')}</Link>
           </div>
         </div>
       )}
@@ -203,6 +207,7 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
 }
 
 export function SecretsList({ projectId }: { projectId: string }) {
+  const { t } = useTranslation();
   const [secrets, setSecrets] = useState<SecretListItem[]>([]);
 
   const load = () => { api.secrets.list(projectId, '').then(setSecrets).catch(() => {}); };
@@ -212,7 +217,7 @@ export function SecretsList({ projectId }: { projectId: string }) {
     <div className="space-y-4">
       <div className="flex items-center gap-3 mb-4">
         <Link to={`/projects/${projectId}/secrets/new`} className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
-          + Neues Secret
+          {t('secretsPage.newSecret')}
         </Link>
       </div>
       {secrets.length > 0 ? (
@@ -221,12 +226,13 @@ export function SecretsList({ projectId }: { projectId: string }) {
             <SecretRow key={s._id} secret={s} onDelete={load} />
           ))}
         </Card>
-      ) : <EmptyState message="Noch keine Secrets. Lege eines an oder nutze MCP (secret_set)." />}
+      ) : <EmptyState message={t('secretsPage.noSecrets')} />}
     </div>
   );
 }
 
 export default function EnvironmentList({ projectId }: { projectId: string }) {
+  const { t } = useTranslation();
   const [environments, setEnvironments] = useState<Environment[]>([]);
 
   const load = () => {
@@ -239,7 +245,7 @@ export default function EnvironmentList({ projectId }: { projectId: string }) {
     <div className="space-y-4">
       <div className="flex items-center gap-3 mb-4">
         <Link to={`/projects/${projectId}/environments/new`} className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
-          + Neue Umgebung
+          {t('environments.newEnvironment')}
         </Link>
       </div>
 
@@ -248,7 +254,7 @@ export default function EnvironmentList({ projectId }: { projectId: string }) {
       ))}
 
       {environments.length === 0 && (
-        <EmptyState message="Noch keine Umgebungen. Lege eine an oder nutze MCP (environment_create)." />
+        <EmptyState message={t('environments.noEnvironments')} />
       )}
     </div>
   );
