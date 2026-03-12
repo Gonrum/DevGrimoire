@@ -5,4 +5,5 @@ dist/
 .DS_Store
 *.tsbuildinfo
 .claude/
+CLAUDE.md
 mongo-keyfile
