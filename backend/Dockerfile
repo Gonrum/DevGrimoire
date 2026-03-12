@@ -14,4 +14,4 @@ COPY --from=build /app/package.json ./
 RUN chown -R node:node /app
 USER node
 EXPOSE 3000
-CMD ["node", "dist/main"]
+CMD ["sh", "-c", "exec node --max-old-space-size=${NODE_HEAP_SIZE:-512} dist/main"]

@@ -1,0 +1,31 @@
+# Standalone MongoDB (without Replica Set) — for ARM/embedded devices
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.standalone.yml up -d
+#
+# Differences to default (replica set) mode:
+# - MongoDB runs without --replSet (no Change Streams, no transactions)
+# - mongodb-init service is disabled (not needed)
+# - Backend uses MONGODB_STANDALONE=true to skip Change Stream watchers
+# - SSE live updates still work via EventEmitter (same-process events)
+
+services:
+  mongodb:
+    entrypoint: ["mongod", "--bind_ip_all", "--auth", "--wiredTigerCacheSizeGB", "0.25"]
+    healthcheck:
+      test: ["CMD", "mongosh", "-u", "${MONGO_USER}", "-p", "${MONGO_PASSWORD}", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  mongodb-init:
+    profiles: ["disabled"]
+
+  backend:
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGODB_STANDALONE: "true"
+      NODE_HEAP_SIZE: "${NODE_HEAP_SIZE:-256}"

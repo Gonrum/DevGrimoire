@@ -41,9 +41,17 @@ export class EventsController implements OnModuleInit, OnModuleDestroy {
   private changeStream: any = null;
   private readonly recentEvents = new Map<string, number>();
 
-  constructor(@InjectConnection() private readonly connection: Connection) {}
+  private readonly standalone: boolean;
+
+  constructor(@InjectConnection() private readonly connection: Connection) {
+    this.standalone = process.env.MONGODB_STANDALONE === 'true';
+  }
 
   onModuleInit() {
+    if (this.standalone) {
+      this.logger.log('Standalone mode: Change Streams disabled, using EventEmitter only');
+      return;
+    }
     this.watchChangeStreams();
   }
 
