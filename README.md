@@ -2,6 +2,8 @@
 
 **Persistent project memory for Claude** -- MCP server, REST API, and React dashboard in one.
 
+> **Note:** This project was built entirely via vibe coding with Claude. While it works well in practice, the code has not been manually audited for security. **Do not expose it to the public internet without proper review.** Use it in trusted networks or behind a VPN.
+
 DevGrimoire gives Claude (the AI assistant) a persistent memory for your projects. Through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), Claude can manage projects, track tasks and milestones, store knowledge, maintain changelogs, document database schemas, scan dependencies, manage feature catalogs, write manuals, and much more. The web frontend displays everything in a dark-mode dashboard with real-time updates.
 
 ## Architecture
