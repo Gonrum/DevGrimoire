@@ -41,6 +41,7 @@ export default function ProjectSettings() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [includeSecrets, setIncludeSecrets] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -266,6 +267,37 @@ export default function ProjectSettings() {
           <span className="text-sm text-green-400">Gespeichert!</span>
         )}
       </div>
+
+      <section className="border-t border-gray-800 pt-6 mb-8">
+        <h2 className="text-lg font-semibold text-blue-400 mb-2">Daten-Export</h2>
+        <p className="text-gray-500 text-sm mb-3">
+          Exportiert alle Projektdaten (Todos, Milestones, Wissen, Changelog, Sessions, etc.) als JSON-Datei.
+        </p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await api.transfer.export(id!, includeSecrets);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Export fehlgeschlagen');
+              }
+            }}
+            className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+          >
+            Projekt exportieren
+          </button>
+          <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={includeSecrets}
+              onChange={(e) => setIncludeSecrets(e.target.checked)}
+              className="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500"
+            />
+            Secret-Werte einschliessen
+          </label>
+        </div>
+      </section>
 
       <section className="border-t border-gray-800 pt-6 mb-8">
         <h2 className="text-lg font-semibold text-red-400 mb-2">Gefahrenzone</h2>

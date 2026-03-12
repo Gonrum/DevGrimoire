@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, Project } from '../api/client';
 import { useDashboardEvents } from '../hooks/useProjectEvents';
 import { useToast } from '../components/Toast';
@@ -107,7 +107,10 @@ export default function ProjectsOverview() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [importing, setImporting] = useState(false);
   const { showError } = useToast();
+  const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadProjects = () => {
     api.projects
@@ -163,6 +166,35 @@ export default function ProjectsOverview() {
       <h1 className="text-2xl font-bold mb-6">Projektübersicht</h1>
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
         <ProjectCreateForm onCreated={loadProjects} />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={importing}
+          className="px-3 py-1.5 text-sm bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+        >
+          {importing ? 'Importieren...' : 'JSON importieren'}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          className="hidden"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            setImporting(true);
+            try {
+              const result = await api.transfer.import(file);
+              loadProjects();
+              navigate(`/projects/${result.projectId}`);
+            } catch (err: any) {
+              showError(err.message || 'Import fehlgeschlagen');
+            } finally {
+              setImporting(false);
+              e.target.value = '';
+            }
+          }}
+        />
         <input
           type="text"
           placeholder="Projekte suchen..."
