@@ -77,7 +77,9 @@ Rufe **immer** `system_instructions_get` am Anfang jeder Session auf, um die akt
 - Unterschied zu Knowledge: Research = Recherche mit Quellen, Knowledge = langfristige Fakten
 
 ### Handbuch (`manual_*`)
-- Ein einzelnes Markdown-Dokument pro Projekt (upsert-Verhalten)
+- Mehrere kategorisierte Einträge pro Projekt (CRUD: `manual_create/list/get/update/delete`)
+- Kategorien für Gruppierung (z.B. "Setup", "API", "Deployment"), `sortOrder` für Reihenfolge
+- `manual_list` kompakt (ohne Content), `manual_get` für vollständigen Eintrag
 
 ### Schema-Objekte (`schema_*`)
 - DB-Tabellen/Collections dokumentieren mit automatischer Versionierung

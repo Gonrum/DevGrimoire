@@ -173,6 +173,8 @@ export interface Manual {
   projectId: string;
   title: string;
   content: string;
+  category?: string;
+  sortOrder: number;
   lastEditedBy: string;
   createdAt: string;
   updatedAt: string;
@@ -458,10 +460,18 @@ export const api = {
       request<void>(`/secrets/${id}`, { method: 'DELETE' }),
   },
   manuals: {
-    get: (projectId: string) =>
-      request<Manual | null>(`/manuals?projectId=${projectId}`),
-    save: (data: { projectId: string; content: string; title?: string }) =>
-      request<Manual>('/manuals', { method: 'PUT', body: JSON.stringify(data) }),
+    list: (projectId: string, category?: string) => {
+      const params = new URLSearchParams({ projectId });
+      if (category) params.set('category', category);
+      return request<Manual[]>(`/manuals?${params}`);
+    },
+    get: (id: string) => request<Manual>(`/manuals/${id}`),
+    create: (data: Partial<Manual>) =>
+      request<Manual>('/manuals', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<Manual>) =>
+      request<Manual>(`/manuals/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/manuals/${id}`, { method: 'DELETE' }),
   },
   notifications: {
     list: (limit?: number, unreadOnly?: boolean) => {

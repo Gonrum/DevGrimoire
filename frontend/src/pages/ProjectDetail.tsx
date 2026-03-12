@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature } from '../api/client';
+import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature, Manual } from '../api/client';
 import TodoBoard from '../components/TodoBoard';
 import SessionList from '../components/SessionList';
 import KnowledgeList from '../components/KnowledgeList';
@@ -35,7 +35,7 @@ export default function ProjectDetail() {
   const [schemas, setSchemas] = useState<SchemaObject[]>([]);
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
   const [features, setFeatures] = useState<Feature[]>([]);
-  const [manualKey, setManualKey] = useState(0);
+  const [manuals, setManuals] = useState<Manual[]>([]);
   const [envKey, setEnvKey] = useState(0);
   const [secretsKey, setSecretsKey] = useState(0);
   const [tab, setTab] = useState<Tab>(() => (searchParams.get('tab') as Tab) || 'todos');
@@ -70,8 +70,9 @@ export default function ProjectDetail() {
       api.schemas.list(id),
       api.dependencies.list(id),
       api.features.list(id),
+      api.manuals.list(id),
     ])
-      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat]) => {
+      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man]) => {
         if (controller.signal.aborted) return;
         setProject(p);
         setTodos(t);
@@ -86,6 +87,7 @@ export default function ProjectDetail() {
         setSchemas(sch);
         setDependencies(deps);
         setFeatures(feat);
+        setManuals(man);
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
@@ -108,7 +110,7 @@ export default function ProjectDetail() {
         changelog: () => api.changelog.list(id).then(setChangelog),
         milestone: () => api.milestones.list(id).then(setMilestones),
         project: () => api.projects.get(id).then(setProject),
-        manual: () => setManualKey((k) => k + 1),
+        manual: () => api.manuals.list(id).then(setManuals),
         research: () => api.research.list(id).then(setResearch),
         environment: () => { api.environments.list(id).then(setEnvironments); setEnvKey((k) => k + 1); },
         secret: () => { api.secrets.list(id).then(setSecrets); setSecretsKey((k) => k + 1); },
@@ -151,7 +153,7 @@ export default function ProjectDetail() {
     { key: 'sessions', label: 'Sessions', count: sessions.length },
     { key: 'knowledge', label: 'Wissen', count: knowledge.length },
     { key: 'changelog', label: 'Changelog', count: changelog.length },
-    { key: 'manual', label: 'Handbuch', count: 0 },
+    { key: 'manual', label: 'Handbuch', count: manuals.length },
     { key: 'features', label: 'Features', count: features.length },
     { key: 'schemas', label: 'Schemas', count: schemas.length },
     { key: 'dependencies', label: 'Dependencies', count: dependencies.length },
@@ -251,7 +253,7 @@ export default function ProjectDetail() {
       {tab === 'sessions' && <SessionList sessions={sessions} />}
       {tab === 'knowledge' && <KnowledgeList entries={knowledge} />}
       {tab === 'changelog' && <ChangelogList entries={changelog} />}
-      {tab === 'manual' && <ManualView key={manualKey} projectId={id!} />}
+      {tab === 'manual' && <ManualView projectId={id!} entries={manuals} onUpdate={() => api.manuals.list(id!).then(setManuals)} />}
       {tab === 'features' && <FeatureList entries={features} projectId={id!} />}
       {tab === 'schemas' && <SchemaList entries={schemas} projectId={id!} />}
       {tab === 'dependencies' && <DependencyList entries={dependencies} projectId={id!} />}

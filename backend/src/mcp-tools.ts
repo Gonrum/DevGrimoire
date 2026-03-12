@@ -662,27 +662,67 @@ const tools = [
     },
   },
   {
-    name: 'manual_save',
-    description: 'Save or update the user manual for a project. The manual is a single markdown document per project.',
+    name: 'manual_create',
+    description: 'Create a new manual entry for a project. Manuals are categorized documentation pages.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         projectId: { type: 'string', description: 'Project MongoDB ID' },
-        content: { type: 'string', description: 'Manual content in Markdown format' },
-        title: { type: 'string', description: 'Manual title (default: Benutzerhandbuch)' },
+        title: { type: 'string', description: 'Entry title' },
+        content: { type: 'string', description: 'Content in Markdown format' },
+        category: { type: 'string', description: 'Category for grouping (e.g. Setup, API, Deployment)' },
+        sortOrder: { type: 'number', description: 'Sort order within category (default 0)' },
       },
-      required: ['projectId', 'content'],
+      required: ['projectId', 'title'],
+    },
+  },
+  {
+    name: 'manual_list',
+    description: 'List manual entries for a project (compact: id, title, category, sortOrder, updatedAt). Use manual_get for full content.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        category: { type: 'string', description: 'Filter by category' },
+      },
+      required: ['projectId'],
     },
   },
   {
     name: 'manual_get',
-    description: 'Get the user manual for a project',
+    description: 'Get a single manual entry with full content.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        id: { type: 'string', description: 'Manual entry MongoDB ID' },
       },
-      required: ['projectId'],
+      required: ['id'],
+    },
+  },
+  {
+    name: 'manual_update',
+    description: 'Update a manual entry (title, content, category, sortOrder).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Manual entry MongoDB ID' },
+        title: { type: 'string' },
+        content: { type: 'string' },
+        category: { type: 'string' },
+        sortOrder: { type: 'number' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'manual_delete',
+    description: 'Delete a manual entry.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Manual entry MongoDB ID' },
+      },
+      required: ['id'],
     },
   },
   {
@@ -1532,19 +1572,42 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = { environment: env.name, export: lines.join('\n') };
           break;
         }
-        case 'manual_save': {
-          const manual = await manualsService.save({
+        case 'manual_create': {
+          const manual = await manualsService.create({
             projectId: requireString(a, 'projectId'),
-            content: requireString(a, 'content'),
-            title: optionalString(a, 'title'),
+            title: requireString(a, 'title'),
+            content: optionalString(a, 'content'),
+            category: optionalString(a, 'category'),
+            sortOrder: optionalNumber(a, 'sortOrder'),
           });
           result = compactCreateResult(manual, { title: (manual as any).title });
           break;
         }
+        case 'manual_list': {
+          const manuals = await manualsService.findByProject(
+            requireString(a, 'projectId'),
+            optionalString(a, 'category'),
+          );
+          result = compactList(manuals as any, ['content', '__v']);
+          break;
+        }
         case 'manual_get': {
-          const manual = await manualsService.findByProject(requireString(a, 'projectId'));
-          if (!manual) return textResult({ message: 'No manual found for this project.' });
-          result = manual;
+          result = await manualsService.findById(requireString(a, 'id'));
+          break;
+        }
+        case 'manual_update': {
+          const updated = await manualsService.update(requireString(a, 'id'), {
+            title: optionalString(a, 'title'),
+            content: optionalString(a, 'content'),
+            category: optionalString(a, 'category'),
+            sortOrder: optionalNumber(a, 'sortOrder'),
+          });
+          result = compactUpdateResult(updated);
+          break;
+        }
+        case 'manual_delete': {
+          await manualsService.delete(requireString(a, 'id'));
+          result = { deleted: true };
           break;
         }
         case 'research_save': {

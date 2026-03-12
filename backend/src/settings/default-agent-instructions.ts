@@ -169,17 +169,21 @@ Rufe **immer** \`system_instructions_get\` am Anfang jeder Session auf, um die a
 
 ## 8. Handbuch (\`manual_*\`)
 
-**Workflow**: Ein einzelnes Markdown-Dokument pro Projekt als Benutzerhandbuch.
+**Workflow**: Mehrere kategorisierte Handbuch-Einträge pro Projekt. Jeder Eintrag hat einen Titel, Markdown-Inhalt, optionale Kategorie und Sortierung.
 
 | Tool | Wann verwenden |
 |------|----------------|
-| \`manual_save\` | Handbuch erstellen oder aktualisieren. Pflicht: \`projectId\`, \`content\` (Markdown). Optional: \`title\` |
-| \`manual_get\` | Aktuelles Handbuch laden |
+| \`manual_create\` | Neuen Eintrag anlegen. Pflicht: \`projectId\`, \`title\`. Optional: \`content\` (Markdown), \`category\`, \`sortOrder\` |
+| \`manual_list\` | Kompakte Liste (id, title, category, sortOrder, updatedAt). Filter: \`projectId\` (Pflicht), \`category\` |
+| \`manual_get\` | Vollständigen Eintrag mit Content laden |
+| \`manual_update\` | Eintrag aktualisieren (title, content, category, sortOrder) |
+| \`manual_delete\` | Eintrag löschen |
 
 **Tipps**:
-- Es gibt **ein** Handbuch pro Projekt (upsert-Verhalten)
-- Content als vollständiges Markdown-Dokument übergeben (nicht inkrementell)
-- Für Benutzer-Dokumentation, Setup-Anleitungen, FAQ etc.
+- Mehrere Einträge pro Projekt möglich — nach Kategorie und Sortierung geordnet
+- Kategorien für Gruppierung verwenden (z.B. "Setup", "API", "Deployment", "FAQ")
+- \`sortOrder\` für Reihenfolge innerhalb einer Kategorie (default: 0)
+- Content unterstützt Markdown inkl. GFM-Tabellen
 
 ---
 
@@ -312,7 +316,7 @@ Rufe **immer** \`system_instructions_get\` am Anfang jeder Session auf, um die a
 
 ## Effizient mit Context umgehen
 - **List-Tools** liefern kompakte Übersichten (nur Metadaten, kein Content)
-- Nutze **_get Tools** (todo_get, knowledge_get, changelog_get, research_get, schema_get, dependency_get, feature_get) nur wenn du Details brauchst
+- Nutze **_get Tools** (todo_get, knowledge_get, changelog_get, research_get, schema_get, dependency_get, feature_get, manual_get) nur wenn du Details brauchst
 - Arbeite immer mit **projectId** — nie global suchen wenn du das Projekt kennst
 - Nutze **limit/offset** bei großen Listen
 - **Search-Tools** (knowledge_search, research_search) liefern Content-Snippets (200 Zeichen), nicht den vollen Text
