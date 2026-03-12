@@ -157,13 +157,13 @@ export default function ProjectDetail() {
   if (!project) return <p className="text-red-400">{t('projects.notFound')}</p>;
 
   const tabs: { key: Tab; label: string; count: number }[] = [
-    { key: 'todos', label: 'Todos', count: todos.filter((t) => t.status !== 'done').length },
+    { key: 'todos', label: 'Quests', count: todos.filter((t) => t.status !== 'done').length },
     { key: 'soul', label: t('soul.title'), count: (['vision', 'principles', 'conventions', 'communication', 'boundaries', 'workflow', 'quality'] as const).filter((k) => soul?.[k]?.trim()).length },
-    { key: 'milestones', label: 'Milestones', count: milestones.filter((m) => m.status !== 'done' && !m.archived).length },
-    { key: 'sessions', label: 'Sessions', count: sessions.length },
+    { key: 'milestones', label: i18n.language === 'de' ? 'Artefakte' : 'Artifacts', count: milestones.filter((m) => m.status !== 'done' && !m.archived).length },
+    { key: 'sessions', label: i18n.language === 'de' ? 'Rituale' : 'Rituals', count: sessions.length },
     { key: 'knowledge', label: t('searchTypes.knowledge'), count: knowledge.length },
-    { key: 'changelog', label: 'Changelog', count: changelog.length },
-    { key: 'manual', label: i18n.language === 'de' ? 'Handbuch' : 'Manual', count: manuals.length },
+    { key: 'changelog', label: i18n.language === 'de' ? 'Chroniken' : 'Chronicles', count: changelog.length },
+    { key: 'manual', label: i18n.language === 'de' ? 'Foliant' : 'Tome', count: manuals.length },
     { key: 'features', label: 'Features', count: features.length },
     { key: 'schemas', label: 'Schemas', count: schemas.length },
     { key: 'dependencies', label: 'Dependencies', count: dependencies.length },
@@ -181,7 +181,7 @@ export default function ProjectDetail() {
 
       <div className="mb-8">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
-          <h1 className="text-xl sm:text-2xl font-bold">{project.name}</h1>
+          <h1 className="text-xl sm:text-2xl font-bold font-grimoire">{project.name}</h1>
           <Badge color={project.active ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500'} rounded="full">
             {project.active ? t('common.active') : t('common.inactive')}
           </Badge>
@@ -204,7 +204,7 @@ export default function ProjectDetail() {
         {project.techStack.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
             {project.techStack.map((t) => (
-              <Badge key={t} color="bg-blue-900/40 text-blue-300">
+              <Badge key={t} color="bg-violet-900/40 text-cyan-300">
                 {t}
               </Badge>
             ))}
@@ -231,7 +231,7 @@ export default function ProjectDetail() {
               onClick={() => setTab(t.key)}
               className={`pb-3 text-xs sm:text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
                 tab === t.key
-                  ? 'border-blue-500 text-blue-400'
+                  ? 'border-violet-500 text-cyan-400'
                   : 'border-transparent text-gray-500 hover:text-gray-300'
               }`}
             >

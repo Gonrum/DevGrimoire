@@ -169,7 +169,7 @@ export default function Settings() {
               onClick={() => setTab(tb.key)}
               className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
                 tab === tb.key
-                  ? 'text-blue-400 border-blue-400'
+                  ? 'text-cyan-400 border-cyan-400'
                   : 'text-gray-400 border-transparent hover:text-gray-200'
               }`}
             >
@@ -207,7 +207,7 @@ export default function Settings() {
                 <textarea
                   value={instructions}
                   onChange={(e) => { setInstructions(e.target.value); setSaved(false); }}
-                  className="w-full h-[500px] bg-gray-900 text-gray-200 px-4 py-3 font-mono text-sm resize-y focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full h-[500px] bg-gray-900 text-gray-200 px-4 py-3 font-mono text-sm resize-y focus:outline-none focus:ring-1 focus:ring-violet-500"
                   spellCheck={false}
                 />
               </div>
@@ -281,7 +281,7 @@ export default function Settings() {
                   value={apiKeyName}
                   onChange={(e) => setApiKeyName(e.target.value)}
                   placeholder={t('settings.apiKeyNamePlaceholder')}
-                  className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
                 />
               </div>
               <div>
@@ -290,7 +290,7 @@ export default function Settings() {
                   type="date"
                   value={apiKeyExpiry}
                   onChange={(e) => setApiKeyExpiry(e.target.value)}
-                  className="bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
                 />
               </div>
               <Button

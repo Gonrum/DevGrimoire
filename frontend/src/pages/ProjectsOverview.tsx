@@ -59,7 +59,7 @@ function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
         placeholder={t('projects.projectName')}
         value={name}
         onChange={(e) => setName(e.target.value)}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
         autoFocus
       />
       <textarea
@@ -67,7 +67,7 @@ function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         rows={2}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
+        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 resize-none"
       />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <input
@@ -75,14 +75,14 @@ function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
           placeholder={t('projects.pathOptional')}
           value={path}
           onChange={(e) => setPath(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+          className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
         />
         <input
           type="text"
           placeholder={t('projects.repositoryOptional')}
           value={repository}
           onChange={(e) => setRepository(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+          className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
         />
       </div>
       <input
@@ -90,7 +90,7 @@ function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
         placeholder={t('projects.techStackHint')}
         value={techStack}
         onChange={(e) => setTechStack(e.target.value)}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
       />
       <div className="flex gap-2">
         <Button type="submit" variant="primary" disabled={saving || !name.trim()}>
@@ -168,7 +168,7 @@ export default function ProjectsOverview() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-6">{t('projects.overview')}</h1>
+      <h1 className="text-2xl font-bold mb-6 font-grimoire">{t('projects.overview')}</h1>
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
         <ProjectCreateForm onCreated={loadProjects} />
         <button
@@ -205,7 +205,7 @@ export default function ProjectsOverview() {
           placeholder={t('projects.searchProjects')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 w-full sm:w-64"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 w-full sm:w-64"
         />
       </div>
       {projects.length === 0 ? (
@@ -218,7 +218,7 @@ export default function ProjectsOverview() {
             <Link
               key={p._id}
               to={`/projects/${p._id}`}
-              className="block bg-gray-900 border border-gray-800 rounded-lg p-5 hover:border-blue-500 transition-colors"
+              className="block bg-gray-900 border border-gray-800 rounded-lg p-5 hover:border-violet-500 transition-colors"
             >
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">

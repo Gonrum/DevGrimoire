@@ -242,7 +242,7 @@ export default function DependencyList({ entries, projectId }: { entries: Depend
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <button
           onClick={() => { setEditingDep(null); setShowForm(true); }}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+          className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors"
         >
           {t('dependencies.newDependency')}
         </button>
@@ -252,7 +252,7 @@ export default function DependencyList({ entries, projectId }: { entries: Depend
               onClick={() => setSelectedPm(null)}
               className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
                 selectedPm === null
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-violet-600 text-white'
                   : 'bg-gray-800 text-gray-400 hover:text-gray-200'
               }`}
             >
@@ -264,7 +264,7 @@ export default function DependencyList({ entries, projectId }: { entries: Depend
                 onClick={() => setSelectedPm(selectedPm === pm ? null : pm)}
                 className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
                   selectedPm === pm
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-violet-600 text-white'
                     : 'bg-gray-800 text-gray-400 hover:text-gray-200'
                 }`}
               >

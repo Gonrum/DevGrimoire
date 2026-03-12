@@ -41,7 +41,7 @@ export default function MarkdownEditor({ value, onChange, rows = 5, placeholder,
           onChange={(e) => onChange(e.target.value)}
           rows={rows}
           placeholder={placeholder}
-          className={`w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none font-mono ${className}`}
+          className={`w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 resize-none font-mono ${className}`}
         />
       )}
     </div>

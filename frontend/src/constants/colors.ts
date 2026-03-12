@@ -17,7 +17,7 @@ export const SECRET_TYPE_LABELS: Record<string, { label: () => string; color: st
   token: { label: () => t('secretTypes.token'), color: 'bg-purple-900/40 text-purple-300' },
   ssh_key: { label: () => t('secretTypes.ssh_key'), color: 'bg-cyan-900/40 text-cyan-300' },
   certificate: { label: () => t('secretTypes.certificate'), color: 'bg-yellow-900/40 text-yellow-300' },
-  file: { label: () => t('secretTypes.file'), color: 'bg-blue-900/40 text-blue-300' },
+  file: { label: () => t('secretTypes.file'), color: 'bg-violet-900/40 text-violet-300' },
 };
 
 export const TYPE_LABELS: Record<SearchResult['type'], () => string> = {
@@ -30,7 +30,7 @@ export const TYPE_LABELS: Record<SearchResult['type'], () => string> = {
 
 export const TYPE_COLORS: Record<SearchResult['type'], string> = {
   todo: 'bg-yellow-900 text-yellow-300',
-  knowledge: 'bg-blue-900 text-blue-300',
+  knowledge: 'bg-violet-900 text-violet-300',
   changelog: 'bg-green-900 text-green-300',
   research: 'bg-purple-900 text-purple-300',
   milestone: 'bg-orange-900 text-orange-300',
@@ -47,6 +47,6 @@ export const ENTITY_ICONS: Record<string, string> = {
 
 export const ACTION_COLORS: Record<string, string> = {
   created: 'text-green-400',
-  updated: 'text-blue-400',
+  updated: 'text-cyan-400',
   deleted: 'text-red-400',
 };

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Todo, Milestone, api } from '../api/client';
@@ -71,18 +71,18 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
   return (
     <form onSubmit={handleSubmit} className="space-y-2">
       <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-blue-500" autoFocus />
+        className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-violet-500" autoFocus />
       <MarkdownEditor value={description} onChange={setDescription} rows={2} placeholder={t('todos.descriptionPlaceholder')} />
       <div className="flex gap-2 items-center">
         <select value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-blue-500">
+          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-violet-500">
           <option value="low">{t('todoPriority.low')}</option>
           <option value="medium">{t('todoPriority.medium')}</option>
           <option value="high">{t('todoPriority.high')}</option>
           <option value="critical">{t('todoPriority.critical')}</option>
         </select>
         <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('common.tags')}
-          className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
+          className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
       </div>
       <div className="flex gap-2">
         <Button type="submit" variant="primary" size="xs" disabled={saving || !title.trim()}>
@@ -129,7 +129,7 @@ function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) 
           {comments.map((c, i) => (
             <div key={i} className="text-xs bg-gray-800/50 rounded p-2">
               <div className="flex justify-between text-gray-500 mb-0.5">
-                <span className={c.author === 'claude' ? 'text-blue-400' : 'text-gray-400'}>{c.author}</span>
+                <span className={c.author === 'claude' ? 'text-cyan-400' : 'text-gray-400'}>{c.author}</span>
                 <span>{new Date(c.createdAt).toLocaleDateString(dateLocale, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
               </div>
               <Markdown className="text-gray-300">{c.text}</Markdown>
@@ -139,7 +139,7 @@ function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) 
             <input type="text" value={text} onChange={(e) => setText(e.target.value)}
               placeholder={t('todos.commentPlaceholder')} onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
               aria-label={t('todos.commentPlaceholder')}
-              className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
+              className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
             <Button type="button" size="xs" onClick={handleAdd} disabled={saving || !text.trim()}>
               {saving ? '...' : t('common.send')}
             </Button>
@@ -153,6 +153,19 @@ function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) 
 function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError }: { todo: Todo; allTodos: Todo[]; projectId: string; onUpdate: () => void; onDragStart?: (todoId: string) => void; showError: (msg: string) => void }) {
   const { t, i18n } = useTranslation();
   const [editing, setEditing] = useState(false);
+  const [animClass, setAnimClass] = useState('');
+  const prevStatusRef = useRef(todo.status);
+
+  useEffect(() => {
+    if (prevStatusRef.current !== todo.status) {
+      const cls = todo.status === 'done' ? 'quest-status-done' : 'quest-status-changed';
+      setAnimClass(cls);
+      prevStatusRef.current = todo.status;
+      const timer = setTimeout(() => setAnimClass(''), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [todo.status]);
+
   const hasBlockers = (todo.blockedBy || []).some((bid) => {
     const blocker = allTodos.find((t) => t._id === bid);
     return blocker && blocker.status !== 'done';
@@ -180,7 +193,7 @@ function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError 
 
   if (editing) {
     return (
-      <div className="bg-gray-900 border border-blue-800 rounded-lg p-3">
+      <div className="bg-gray-900 border border-violet-800 rounded-lg p-3">
         <TodoEditForm todo={todo} onSaved={() => { setEditing(false); onUpdate(); }} onCancel={() => setEditing(false)} />
       </div>
     );
@@ -192,7 +205,7 @@ function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError 
       aria-roledescription={t('todos.draggableTask')}
       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.(todo._id); }}
       onDragEnd={() => onDragStart?.('')}
-      className="block bg-gray-900 border border-gray-800 rounded-lg p-3 group hover:border-gray-700 transition-colors cursor-grab active:cursor-grabbing">
+      className={`block bg-gray-900 border border-gray-800 rounded-lg p-3 group hover:border-gray-700 transition-colors cursor-grab active:cursor-grabbing ${animClass}`}>
       <div className="flex items-start justify-between gap-2">
         <h4 className="text-sm font-medium">
           {hasBlockers && <span className="text-red-400 mr-1" title={t('todos.blocked')}>&#x26D4;</span>}
@@ -241,6 +254,19 @@ function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError 
 
 function TodoListRow({ todo, projectId, onUpdate, showError }: { todo: Todo; projectId: string; onUpdate: () => void; showError: (msg: string) => void }) {
   const { t, i18n } = useTranslation();
+  const [animClass, setAnimClass] = useState('');
+  const prevStatusRef = useRef(todo.status);
+
+  useEffect(() => {
+    if (prevStatusRef.current !== todo.status) {
+      const cls = todo.status === 'done' ? 'quest-status-done' : 'quest-status-changed';
+      setAnimClass(cls);
+      prevStatusRef.current = todo.status;
+      const timer = setTimeout(() => setAnimClass(''), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [todo.status]);
+
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
   const handleStatusChange = async (e: React.MouseEvent, newStatus: Todo['status']) => {
@@ -256,7 +282,7 @@ function TodoListRow({ todo, projectId, onUpdate, showError }: { todo: Todo; pro
   const comments = todo.comments || [];
 
   return (
-    <tr className="border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors">
+    <tr className={`border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors ${animClass}`}>
       <td className="py-2.5 px-3">
         <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[todo.status]}`}>
           {STATUS_LABELS[todo.status]()}
@@ -268,7 +294,7 @@ function TodoListRow({ todo, projectId, onUpdate, showError }: { todo: Todo; pro
         </span>
       </td>
       <td className="py-2.5 px-3">
-        <Link to={`/projects/${projectId}/todos/${todo._id}`} className="hover:text-blue-400 transition-colors">
+        <Link to={`/projects/${projectId}/todos/${todo._id}`} className="hover:text-cyan-400 transition-colors">
           <div className="text-sm">{todo.displayNumber && <span className="text-gray-500 mr-1.5">{todo.displayNumber}</span>}{todo.title}</div>
           {todo.description && <div className="text-xs text-gray-600 line-clamp-1 mt-0.5">{todo.description}</div>}
         </Link>
@@ -352,7 +378,7 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
     <div>
       <div className="flex items-center gap-3 mb-4">
         <Link to={`/projects/${projectId}/todos/new`}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
+          className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors">
           {t('todos.newTask')}
         </Link>
         <div className="flex bg-gray-800 rounded-lg p-0.5 ml-auto">
@@ -369,12 +395,12 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} aria-label="Status filtern"
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500">
+          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500">
           <option value="">{t('todos.allStatus')}</option>
           {COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label()}</option>)}
         </select>
         <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} aria-label="Priorität filtern"
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500">
+          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500">
           <option value="">{t('todos.allPriorities')}</option>
           <option value="critical">{t('todoPriority.critical')}</option>
           <option value="high">{t('todoPriority.high')}</option>
@@ -383,7 +409,7 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
         </select>
         {milestones.length > 0 && (
           <select value={filterMilestone} onChange={(e) => setFilterMilestone(e.target.value)} aria-label="Milestone filtern"
-            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500">
+            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500">
             <option value="">{t('todos.allMilestones')}</option>
             <option value="_none">{t('todos.noMilestone')}</option>
             {milestones.map((ms) => <option key={ms._id} value={ms._id}>{ms.name}</option>)}
@@ -391,14 +417,14 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
         )}
         {allTags.length > 0 && (
           <select value={filterTag} onChange={(e) => setFilterTag(e.target.value)} aria-label="Tag filtern"
-            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500">
+            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500">
             <option value="">{t('todos.allTags')}</option>
             {allTags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
           </select>
         )}
         <div className="flex items-center gap-1 sm:ml-auto w-full sm:w-auto">
           <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} aria-label="Sortierung"
-            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500">
+            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500">
             <option value="updated">{t('todos.sortUpdated')}</option>
             <option value="created">{t('todos.sortCreated')}</option>
             <option value="priority">{t('todos.sortPriority')}</option>
@@ -452,7 +478,7 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
             const isValidDrop = dragSource && STATUS_TRANSITIONS[dragSource.status].some((tr) => tr.next === col.key);
             return (
               <div key={col.key}
-                className={`border-t-2 ${isOver ? (isValidDrop ? 'border-blue-500 bg-blue-900/10' : 'border-red-500/50 bg-red-900/5') : col.color} pt-3 rounded-b-lg transition-colors`}
+                className={`border-t-2 ${isOver ? (isValidDrop ? 'border-violet-500 bg-violet-900/10' : 'border-red-500/50 bg-red-900/5') : col.color} pt-3 rounded-b-lg transition-colors`}
                 onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverCol(col.key); }}
                 onDragLeave={() => setDragOverCol(null)}
                 onDrop={async (e) => {

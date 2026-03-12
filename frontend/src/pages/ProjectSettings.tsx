@@ -122,7 +122,7 @@ export default function ProjectSettings() {
       </div>
 
       <section className="mb-8 space-y-4">
-        <h2 className="text-lg font-semibold text-blue-400">{t('projectSettings.projectData')}</h2>
+        <h2 className="text-lg font-semibold text-cyan-400">{t('projectSettings.projectData')}</h2>
 
         <div>
           <label className="block text-xs text-gray-500 mb-1">{t('common.name')} *</label>
@@ -130,7 +130,7 @@ export default function ProjectSettings() {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+            className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
           />
         </div>
 
@@ -140,7 +140,7 @@ export default function ProjectSettings() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={2}
-            className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
+            className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 resize-none"
           />
         </div>
 
@@ -152,7 +152,7 @@ export default function ProjectSettings() {
               value={path}
               onChange={(e) => setPath(e.target.value)}
               placeholder="/home/user/project"
-              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
             />
           </div>
           <div>
@@ -162,7 +162,7 @@ export default function ProjectSettings() {
               value={repository}
               onChange={(e) => setRepository(e.target.value)}
               placeholder="https://github.com/..."
-              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
             />
           </div>
         </div>
@@ -174,7 +174,7 @@ export default function ProjectSettings() {
             value={techStack}
             onChange={(e) => setTechStack(e.target.value)}
             placeholder="React, Node.js, MongoDB"
-            className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+            className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
           />
         </div>
 
@@ -196,7 +196,7 @@ export default function ProjectSettings() {
 
       <section className="mb-8 space-y-4">
         <div>
-          <h2 className="text-lg font-semibold text-blue-400">{t('projectSettings.numbering')}</h2>
+          <h2 className="text-lg font-semibold text-cyan-400">{t('projectSettings.numbering')}</h2>
           <p className="text-gray-500 text-sm mt-1">
             {t('projectSettings.numberingHelp')}{' '}
             <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{n}'}</code> {t('projectSettings.numberVar')},{' '}
@@ -213,7 +213,7 @@ export default function ProjectSettings() {
               value={todoNumberFormat}
               onChange={(e) => setTodoNumberFormat(e.target.value)}
               placeholder="{type}-{n}"
-              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 font-mono"
+              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 font-mono"
             />
             <p className="text-xs text-gray-600 mt-1">
               {t('projectSettings.preview')}: {todoNumberFormat.replace(/\{n\}/g, '42').replace(/\{type\}/g, 'T').replace(/\{prefix\}/g, name).replace(/\{date\}/g, new Date().toISOString().slice(0, 10))}
@@ -226,7 +226,7 @@ export default function ProjectSettings() {
               value={milestoneNumberFormat}
               onChange={(e) => setMilestoneNumberFormat(e.target.value)}
               placeholder="{type}-{n}"
-              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 font-mono"
+              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 font-mono"
             />
             <p className="text-xs text-gray-600 mt-1">
               {t('projectSettings.preview')}: {milestoneNumberFormat.replace(/\{n\}/g, '5').replace(/\{type\}/g, 'M').replace(/\{prefix\}/g, name).replace(/\{date\}/g, new Date().toISOString().slice(0, 10))}
@@ -237,7 +237,7 @@ export default function ProjectSettings() {
 
       <section className="mb-8">
         <div className="mb-3">
-          <h2 className="text-lg font-semibold text-blue-400">
+          <h2 className="text-lg font-semibold text-cyan-400">
             {t('projectSettings.instructions')}
           </h2>
           <p className="text-gray-500 text-sm mt-1">
@@ -250,7 +250,7 @@ export default function ProjectSettings() {
           onChange={(e) => setInstructions(e.target.value)}
           rows={16}
           placeholder={t('projectSettings.instructionsPlaceholder')}
-          className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-y font-mono leading-relaxed"
+          className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 resize-y font-mono leading-relaxed"
         />
 
         {!instructions.trim() && (
@@ -270,7 +270,7 @@ export default function ProjectSettings() {
       </div>
 
       <section className="border-t border-gray-800 pt-6 mb-8">
-        <h2 className="text-lg font-semibold text-blue-400 mb-2">{t('projectSettings.dataExport')}</h2>
+        <h2 className="text-lg font-semibold text-cyan-400 mb-2">{t('projectSettings.dataExport')}</h2>
         <p className="text-gray-500 text-sm mb-3">
           {t('projectSettings.dataExportHelp')}
         </p>
@@ -284,7 +284,7 @@ export default function ProjectSettings() {
                 setError(err instanceof Error ? err.message : t('projectSettings.exportFailed'));
               }
             }}
-            className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+            className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors"
           >
             {t('projectSettings.exportProject')}
           </button>
@@ -293,7 +293,7 @@ export default function ProjectSettings() {
               type="checkbox"
               checked={includeSecrets}
               onChange={(e) => setIncludeSecrets(e.target.checked)}
-              className="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500"
+              className="rounded border-gray-600 bg-gray-800 text-violet-500 focus:ring-violet-500"
             />
             {t('projectSettings.includeSecrets')}
           </label>

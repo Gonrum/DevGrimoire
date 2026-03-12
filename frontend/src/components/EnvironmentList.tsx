@@ -95,7 +95,7 @@ function ServerInfo({ env }: { env: Environment }) {
         {env.url && (
           <div className="flex gap-2 col-span-2">
             <span className="text-gray-500">URL:</span>
-            <a href={env.url} target="_blank" rel="noopener noreferrer" className="font-mono text-blue-400 hover:text-blue-300 truncate">{env.url}</a>
+            <a href={env.url} target="_blank" rel="noopener noreferrer" className="font-mono text-cyan-400 hover:text-cyan-300 truncate">{env.url}</a>
           </div>
         )}
       </div>
@@ -155,10 +155,10 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
             <div className="flex items-center justify-between mb-2">
               <h4 className="text-xs font-medium text-gray-500 uppercase">{t('environments.variables')}</h4>
               {!editingVars ? (
-                <button type="button" onClick={() => { setVars(env.variables); setEditingVars(true); }} className="text-xs text-blue-400 hover:text-blue-300">{t('common.edit')}</button>
+                <button type="button" onClick={() => { setVars(env.variables); setEditingVars(true); }} className="text-xs text-cyan-400 hover:text-cyan-300">{t('common.edit')}</button>
               ) : (
                 <div className="flex gap-2">
-                  <button type="button" onClick={handleSaveVars} className="text-xs text-blue-400 hover:text-blue-300">{t('common.save')}</button>
+                  <button type="button" onClick={handleSaveVars} className="text-xs text-cyan-400 hover:text-cyan-300">{t('common.save')}</button>
                   <button type="button" onClick={() => { setVars(env.variables); setEditingVars(false); }} className="text-xs text-gray-500">{t('common.cancel')}</button>
                 </div>
               )}
@@ -167,12 +167,12 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
               <div className="space-y-1">
                 {vars.map((v, i) => (
                   <div key={i} className="flex gap-2 items-center">
-                    <input type="text" value={v.key} onChange={(e) => updateVar(i, 'key', e.target.value)} placeholder="KEY" className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:border-blue-500" />
-                    <input type="text" value={v.value} onChange={(e) => updateVar(i, 'value', e.target.value)} placeholder="Value" className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-blue-500" />
+                    <input type="text" value={v.key} onChange={(e) => updateVar(i, 'key', e.target.value)} placeholder="KEY" className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:border-violet-500" />
+                    <input type="text" value={v.value} onChange={(e) => updateVar(i, 'value', e.target.value)} placeholder="Value" className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-violet-500" />
                     <button type="button" onClick={() => removeVar(i)} className="text-gray-600 hover:text-red-400 text-xs">X</button>
                   </div>
                 ))}
-                <button type="button" onClick={addVar} className="text-xs text-blue-400 hover:text-blue-300">{t('environments.addVariable')}</button>
+                <button type="button" onClick={addVar} className="text-xs text-cyan-400 hover:text-cyan-300">{t('environments.addVariable')}</button>
               </div>
             ) : (
               env.variables.length > 0 ? (
@@ -198,7 +198,7 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
                 ))}
               </div>
             ) : <p className="text-xs text-gray-600">{t('environments.noSecrets')}</p>}
-            <Link to={`/projects/${projectId}/secrets/new?environmentId=${env._id}`} className="inline-block mt-2 text-xs text-blue-400 hover:text-blue-300">{t('environments.addSecret')}</Link>
+            <Link to={`/projects/${projectId}/secrets/new?environmentId=${env._id}`} className="inline-block mt-2 text-xs text-cyan-400 hover:text-cyan-300">{t('environments.addSecret')}</Link>
           </div>
         </div>
       )}
@@ -216,7 +216,7 @@ export function SecretsList({ projectId }: { projectId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3 mb-4">
-        <Link to={`/projects/${projectId}/secrets/new`} className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
+        <Link to={`/projects/${projectId}/secrets/new`} className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors">
           {t('secretsPage.newSecret')}
         </Link>
       </div>
@@ -244,7 +244,7 @@ export default function EnvironmentList({ projectId }: { projectId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3 mb-4">
-        <Link to={`/projects/${projectId}/environments/new`} className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
+        <Link to={`/projects/${projectId}/environments/new`} className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors">
           {t('environments.newEnvironment')}
         </Link>
       </div>

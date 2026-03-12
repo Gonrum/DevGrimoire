@@ -70,11 +70,11 @@ export default function SecretCreatePage() {
             {SECRET_TYPES.map((st) => (
               <button key={st.value} type="button" onClick={() => setType(st.value)}
                 className={`text-left p-3 rounded-lg border transition-colors ${type === st.value
-                  ? 'border-blue-500 bg-blue-900/20'
+                  ? 'border-violet-500 bg-violet-900/20'
                   : 'border-gray-700 bg-gray-800/50 hover:border-gray-600'}`}>
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-xs font-mono text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded">{st.icon}</span>
-                  <span className={`text-sm font-medium ${type === st.value ? 'text-blue-400' : 'text-gray-300'}`}>{st.label}</span>
+                  <span className={`text-sm font-medium ${type === st.value ? 'text-cyan-400' : 'text-gray-300'}`}>{st.label}</span>
                 </div>
                 <p className="text-xs text-gray-500">{st.description}</p>
               </button>
@@ -93,10 +93,10 @@ export default function SecretCreatePage() {
           {isMultiline ? (
             <textarea value={value} onChange={(e) => setValue(e.target.value)} rows={8}
               placeholder={type === 'ssh_key' ? t('secretCreate.valuePlaceholder_ssh_key') : type === 'certificate' ? t('secretCreate.valuePlaceholder_certificate') : t('secretCreate.valuePlaceholder_file')}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-y" />
+              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 resize-y" />
           ) : (
             <input type="password" value={value} onChange={(e) => setValue(e.target.value)} placeholder={t('secretCreate.valuePlaceholder')}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
+              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
           )}
         </div>
 

@@ -148,7 +148,7 @@ export default function NotificationBell() {
             {unreadCount > 0 && (
               <button
                 onClick={markAllRead}
-                className="text-xs text-blue-400 hover:text-blue-300"
+                className="text-xs text-cyan-400 hover:text-cyan-300"
               >
                 {t('notifications.markAllRead')}
               </button>
@@ -172,7 +172,7 @@ export default function NotificationBell() {
                   }`}
                 >
                   {!n.read && (
-                    <span className="mt-1.5 w-2 h-2 bg-blue-500 rounded-full shrink-0" />
+                    <span className="mt-1.5 w-2 h-2 bg-violet-500 rounded-full shrink-0" />
                   )}
                   <div className={!n.read ? '' : 'pl-5'}>
                     <div className="text-sm font-medium text-gray-200">{n.title}</div>

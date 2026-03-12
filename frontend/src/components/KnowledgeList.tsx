@@ -32,7 +32,7 @@ export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
             onClick={() => setSelectedCategory(null)}
             className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
               selectedCategory === null
-                ? 'bg-blue-600 text-white'
+                ? 'bg-violet-600 text-white'
                 : 'bg-gray-800 text-gray-400 hover:text-gray-200'
             }`}
           >
@@ -44,7 +44,7 @@ export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
               onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
               className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
                 selectedCategory === cat
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-violet-600 text-white'
                   : 'bg-gray-800 text-gray-400 hover:text-gray-200'
               }`}
             >
@@ -56,7 +56,7 @@ export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
               onClick={() => setSelectedCategory('__none__')}
               className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
                 selectedCategory === '__none__'
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-violet-600 text-white'
                   : 'bg-gray-800 text-gray-400 hover:text-gray-200'
               }`}
             >

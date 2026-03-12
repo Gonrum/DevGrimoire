@@ -29,7 +29,7 @@ export default function Docs() {
                 onClick={() => setActive(s.key)}
                 className={`w-full text-left px-3 py-1.5 text-sm rounded transition-colors ${
                   active === s.key
-                    ? 'bg-gray-800 text-blue-400 font-medium'
+                    ? 'bg-gray-800 text-cyan-400 font-medium'
                     : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
                 }`}
               >
@@ -49,7 +49,7 @@ export default function Docs() {
             onClick={() => setActive(s.key)}
             className={`px-3 py-1.5 text-xs rounded whitespace-nowrap transition-colors ${
               active === s.key
-                ? 'bg-gray-800 text-blue-400 font-medium'
+                ? 'bg-gray-800 text-cyan-400 font-medium'
                 : 'text-gray-500'
             }`}
           >
@@ -297,7 +297,7 @@ openssl rand -hex 32`}</Code>
               <span>{isDE ? 'Legacy SSE Message-Endpoint' : 'Legacy SSE message endpoint'}</span>
             </div>
             <div className="flex gap-3">
-              <code className="text-blue-400 shrink-0 w-44">POST|GET|DELETE /mcp</code>
+              <code className="text-cyan-400 shrink-0 w-44">POST|GET|DELETE /mcp</code>
               <span>{isDE ? 'Streamable HTTP (neuere Clients)' : 'Streamable HTTP (newer clients)'}</span>
             </div>
           </div>
@@ -851,7 +851,7 @@ function ArchitectureSection() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mb-10">
-      <h2 className="text-lg font-semibold text-blue-400 mb-3">{title}</h2>
+      <h2 className="text-lg font-semibold text-cyan-400 mb-3">{title}</h2>
       {children}
     </section>
   );
@@ -861,7 +861,7 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
   return (
     <div className="mb-4">
       <h3 className="text-sm font-medium text-gray-300 mb-2">
-        <span className="text-blue-400 mr-2">{n}.</span>
+        <span className="text-cyan-400 mr-2">{n}.</span>
         {title}
       </h3>
       {children}

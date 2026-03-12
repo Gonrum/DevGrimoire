@@ -104,9 +104,9 @@ export default function EnvironmentCreatePage() {
               {variables.map((v, i) => (
                 <div key={i} className="flex gap-2 items-center">
                   <input type="text" value={v.key} onChange={(e) => updateVar(i, 'key', e.target.value)} placeholder="KEY"
-                    className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
+                    className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
                   <input type="text" value={v.value} onChange={(e) => updateVar(i, 'value', e.target.value)} placeholder="Value"
-                    className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
+                    className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
                   <button type="button" onClick={() => removeVar(i)} className="text-gray-600 hover:text-red-400 text-sm px-2 py-2 transition-colors">X</button>
                 </div>
               ))}

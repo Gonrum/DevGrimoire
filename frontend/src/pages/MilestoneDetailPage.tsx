@@ -44,7 +44,7 @@ function MilestoneEditForm({ milestone, onSaved, onCancel }: { milestone: Milest
       <div>
         <label className="block text-xs text-gray-500 mb-1">{t('common.name')}</label>
         <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500" autoFocus />
+          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500" autoFocus />
       </div>
       <div>
         <label className="block text-xs text-gray-500 mb-1">{t('common.description')}</label>
@@ -53,7 +53,7 @@ function MilestoneEditForm({ milestone, onSaved, onCancel }: { milestone: Milest
       <div>
         <label className="block text-xs text-gray-500 mb-1">{t('milestoneCreate.dueDate')}</label>
         <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500" />
+          className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500" />
       </div>
       <div className="flex gap-2 pt-2">
         <Button type="submit" variant="primary" disabled={saving || !name.trim()}>
@@ -106,21 +106,21 @@ function ChangelogForm({ milestone, onCompleted, onCancel, showError }: { milest
         placeholder={t('milestones.versionPlaceholder')}
         value={clVersion}
         onChange={(e) => setClVersion(e.target.value)}
-        className="w-full px-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:outline-none"
+        className="w-full px-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-none"
       />
       <input
         type="text"
         placeholder={t('milestones.summaryPlaceholder')}
         value={clSummary}
         onChange={(e) => setClSummary(e.target.value)}
-        className="w-full px-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:outline-none"
+        className="w-full px-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-none"
       />
       <textarea
         placeholder={t('milestones.changesPlaceholder')}
         value={clChanges}
         onChange={(e) => setClChanges(e.target.value)}
         rows={4}
-        className="w-full px-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:outline-none resize-none"
+        className="w-full px-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-none resize-none"
         required
       />
       <div className="flex gap-2">
@@ -248,7 +248,7 @@ export default function MilestoneDetailPage() {
             </div>
             <div className="w-full bg-gray-800 rounded-full h-2 flex overflow-hidden">
               <div
-                className={`h-2 transition-all ${donePercent + reviewPercent === 100 && reviewPercent === 0 ? 'bg-green-500' : 'bg-blue-500'}`}
+                className={`h-2 transition-all ${donePercent + reviewPercent === 100 && reviewPercent === 0 ? 'bg-green-500' : 'bg-violet-500'}`}
                 style={{ width: `${donePercent}%` }}
               />
               {reviewPercent > 0 && (
@@ -346,7 +346,7 @@ export default function MilestoneDetailPage() {
                 {t('milestoneDetail.reopenMilestone')}
               </Button>
             )}
-            <Button type="button" variant="none" size="sm" className="bg-blue-900/60 hover:bg-blue-900 text-blue-300"
+            <Button type="button" variant="none" size="sm" className="bg-violet-900/60 hover:bg-violet-900 text-cyan-300"
               onClick={() => setEditing(true)}>
               {t('common.edit')}
             </Button>

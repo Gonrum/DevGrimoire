@@ -12,7 +12,7 @@ import Markdown from './Markdown';
 
 const statusColors: Record<FeatureStatus, string> = {
   planned: 'bg-gray-700 text-gray-300',
-  in_development: 'bg-blue-900/40 text-blue-300',
+  in_development: 'bg-violet-900/40 text-violet-300',
   released: 'bg-green-900/40 text-green-300',
   deprecated: 'bg-red-900/40 text-red-300',
 };
@@ -264,7 +264,7 @@ export default function FeatureList({ entries, projectId }: { entries: Feature[]
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <button
           onClick={() => { setEditingFeature(null); setShowForm(true); }}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+          className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors"
         >
           {t('features.newFeature')}
         </button>
@@ -274,7 +274,7 @@ export default function FeatureList({ entries, projectId }: { entries: Feature[]
               onClick={() => setSelectedStatus(null)}
               className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
                 selectedStatus === null
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-violet-600 text-white'
                   : 'bg-gray-800 text-gray-400 hover:text-gray-200'
               }`}
             >
@@ -286,7 +286,7 @@ export default function FeatureList({ entries, projectId }: { entries: Feature[]
                 onClick={() => setSelectedStatus(selectedStatus === s ? null : s)}
                 className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
                   selectedStatus === s
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-violet-600 text-white'
                     : 'bg-gray-800 text-gray-400 hover:text-gray-200'
                 }`}
               >

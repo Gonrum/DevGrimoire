@@ -82,7 +82,7 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
   return (
     <Card>
       <div className="flex items-start justify-between gap-3 mb-2">
-        <Link to={`/projects/${projectId}/milestones/${milestone._id}`} className="text-sm font-semibold hover:text-blue-400 transition-colors">
+        <Link to={`/projects/${projectId}/milestones/${milestone._id}`} className="text-sm font-semibold hover:text-cyan-400 transition-colors">
           {milestone.displayNumber && <span className="text-gray-500 font-normal mr-1.5">{milestone.displayNumber}</span>}{milestone.name}
         </Link>
         <Badge color={STATUS_COLORS[milestone.status]} rounded="full" className="shrink-0">{STATUS_LABELS[milestone.status]()}</Badge>
@@ -109,7 +109,7 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
         </div>
         <div className="w-full bg-gray-800 rounded-full h-1.5 flex overflow-hidden">
           <div
-            className={`h-1.5 transition-all ${donePercent + reviewPercent === 100 && reviewPercent === 0 ? 'bg-green-500' : 'bg-blue-500'}`}
+            className={`h-1.5 transition-all ${donePercent + reviewPercent === 100 && reviewPercent === 0 ? 'bg-green-500' : 'bg-violet-500'}`}
             style={{ width: `${donePercent}%` }}
           />
           {reviewPercent > 0 && (
@@ -144,21 +144,21 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
             placeholder={t('milestones.versionPlaceholder')}
             value={clVersion}
             onChange={(e) => setClVersion(e.target.value)}
-            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:outline-none"
+            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-none"
           />
           <input
             type="text"
             placeholder={t('milestones.summaryPlaceholder')}
             value={clSummary}
             onChange={(e) => setClSummary(e.target.value)}
-            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:outline-none"
+            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-none"
           />
           <textarea
             placeholder={t('milestones.changesPlaceholder')}
             value={clChanges}
             onChange={(e) => setClChanges(e.target.value)}
             rows={3}
-            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:outline-none resize-none"
+            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-none resize-none"
             required
           />
           <div className="flex gap-2">
@@ -223,7 +223,7 @@ export default function MilestoneList({ milestones, todos, projectId, onUpdate }
     <div>
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <Link to={`/projects/${projectId}/milestones/new`}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
+          className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors">
           {t('milestones.newMilestone')}
         </Link>
         {archivableDone.length > 0 && (

@@ -17,7 +17,7 @@ export default function ChangelogList({ entries }: { entries: ChangelogEntry[] }
         <Card key={e._id}>
           <div className="flex items-center gap-3 mb-2">
             {e.version && (
-              <Badge color="bg-blue-900/40 text-blue-300" className="text-sm font-mono font-semibold">
+              <Badge color="bg-violet-900/40 text-cyan-300" className="text-sm font-mono font-semibold">
                 v{e.version}
               </Badge>
             )}

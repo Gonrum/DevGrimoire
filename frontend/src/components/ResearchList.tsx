@@ -28,7 +28,7 @@ export default function ResearchList({ entries }: { entries: ResearchEntry[] }) 
               <p className="text-xs text-gray-500 mb-1">{t('research.sources')}</p>
               <ul className="space-y-0.5">
                 {e.sources.map((src, i) => (
-                  <li key={i} className="text-xs text-blue-400 truncate">
+                  <li key={i} className="text-xs text-cyan-400 truncate">
                     {src.startsWith('http') ? (
                       <a href={src} target="_blank" rel="noopener noreferrer" className="hover:underline">{src}</a>
                     ) : (

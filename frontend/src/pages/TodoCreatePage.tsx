@@ -75,14 +75,14 @@ export default function TodoCreatePage() {
           <div className="flex-1 w-full sm:w-auto">
             <label className="block text-xs text-gray-500 mb-1">{t('common.tags')}</label>
             <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('todoCreate.tagsPlaceholder')}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
+              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
           </div>
         </div>
         <div>
           <label className="block text-xs text-gray-500 mb-1">{t('todoCreate.milestone')}</label>
           <div className="flex flex-wrap items-center gap-2">
             <select value={milestoneId} onChange={(e) => setMilestoneId(e.target.value)}
-              className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500">
+              className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500">
               <option value="">{t('todoCreate.noMilestone')}</option>
               {milestones.map((ms) => (
                 <option key={ms._id} value={ms._id}>{ms.name}</option>
@@ -92,7 +92,7 @@ export default function TodoCreatePage() {
               <div className="flex items-center gap-2">
                 <input type="text" value={newMilestoneName} onChange={(e) => setNewMilestoneName(e.target.value)}
                   placeholder={t('common.name')} autoFocus onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleCreateMilestone())}
-                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
+                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
                 <Button type="button" variant="primary" size="sm" disabled={!newMilestoneName.trim()} onClick={handleCreateMilestone}>
                   {t('common.create')}
                 </Button>

@@ -334,7 +334,7 @@ function SchemaForm({
                       {idx.fields.map((f, fi) => (
                         <div key={fi} className="flex items-center gap-1">
                           <input
-                            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 w-28 focus:outline-none focus:border-blue-500"
+                            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 w-28 focus:outline-none focus:border-violet-500"
                             placeholder={t('schemas.fieldNamePlaceholder')}
                             value={f}
                             onChange={(e) => updateIndexField(i, fi, e.target.value)}
@@ -353,7 +353,7 @@ function SchemaForm({
                       <button
                         type="button"
                         onClick={() => addIndexField(i)}
-                        className="text-xs text-blue-400 hover:text-blue-300"
+                        className="text-xs text-cyan-400 hover:text-cyan-300"
                       >
                         +
                       </button>
@@ -487,7 +487,7 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <button
           onClick={() => { setEditingSchema(null); setShowForm(true); }}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+          className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors"
         >
           {t('schemas.newSchema')}
         </button>
@@ -497,7 +497,7 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
               onClick={() => setSelectedDbType(null)}
               className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
                 selectedDbType === null
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-violet-600 text-white'
                   : 'bg-gray-800 text-gray-400 hover:text-gray-200'
               }`}
             >
@@ -509,7 +509,7 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
                 onClick={() => setSelectedDbType(selectedDbType === dt ? null : dt)}
                 className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
                   selectedDbType === dt
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-violet-600 text-white'
                     : 'bg-gray-800 text-gray-400 hover:text-gray-200'
                 }`}
               >

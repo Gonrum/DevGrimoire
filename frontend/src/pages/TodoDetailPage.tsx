@@ -44,7 +44,7 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
       <div>
         <label className="block text-xs text-gray-500 mb-1">{t('common.title')}</label>
         <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
-          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500" autoFocus />
+          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500" autoFocus />
       </div>
       <div>
         <label className="block text-xs text-gray-500 mb-1">{t('common.description')}</label>
@@ -54,7 +54,7 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
         <div>
           <label className="block text-xs text-gray-500 mb-1">{t('common.priority')}</label>
           <select value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}
-            className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500">
+            className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500">
             <option value="low">{t('todoPriority.low')}</option>
             <option value="medium">{t('todoPriority.medium')}</option>
             <option value="high">{t('todoPriority.high')}</option>
@@ -64,7 +64,7 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
         <div className="flex-1">
           <label className="block text-xs text-gray-500 mb-1">{t('common.tags')}</label>
           <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('common.commaSeparated')}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
+            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
         </div>
       </div>
       <div className="flex gap-2 pt-2">
@@ -191,7 +191,7 @@ export default function TodoDetailPage() {
                     showError(err.message || t('todoDetail.milestoneChangeFailed'));
                   }
                 }}
-                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500"
+                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500"
               >
                 <option value="">{t('todoCreate.noMilestone')}</option>
                 {milestones.map((ms) => (
@@ -223,7 +223,7 @@ export default function TodoDetailPage() {
                       {blockedBy.map((dep) => (
                         <div key={dep._id} className="flex items-center gap-2 text-xs">
                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dep.status === 'done' ? 'bg-green-500' : dep.status === 'in_progress' ? 'bg-yellow-500' : 'bg-gray-600'}`} />
-                          <Link to={`/projects/${id}/todos/${dep._id}`} className="text-gray-400 hover:text-blue-400 transition-colors">
+                          <Link to={`/projects/${id}/todos/${dep._id}`} className="text-gray-400 hover:text-cyan-400 transition-colors">
                             <span className={dep.status === 'done' ? 'line-through text-gray-600' : ''}>{dep.title}</span>
                           </Link>
                           <button type="button" onClick={async () => {
@@ -246,7 +246,7 @@ export default function TodoDetailPage() {
                       {blocks.map((dep) => (
                         <div key={dep._id} className="flex items-center gap-2 text-xs">
                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dep.status === 'done' ? 'bg-green-500' : dep.status === 'in_progress' ? 'bg-yellow-500' : 'bg-gray-600'}`} />
-                          <Link to={`/projects/${id}/todos/${dep._id}`} className="text-gray-400 hover:text-blue-400 transition-colors">
+                          <Link to={`/projects/${id}/todos/${dep._id}`} className="text-gray-400 hover:text-cyan-400 transition-colors">
                             {dep.title}
                           </Link>
                         </div>
@@ -266,7 +266,7 @@ export default function TodoDetailPage() {
                         showError(err.message || t('todoDetail.addDependencyFailed'));
                       }
                     }}
-                    className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500"
+                    className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500"
                   >
                     <option value="">{t('todoDetail.addDependency')}</option>
                     {availableDeps.map((t) => (
@@ -292,7 +292,7 @@ export default function TodoDetailPage() {
                 {tr.label()}
               </Button>
             ))}
-            <Button type="button" variant="none" size="sm" className="bg-blue-900/60 hover:bg-blue-900 text-blue-300" onClick={() => setEditing(true)}>
+            <Button type="button" variant="none" size="sm" className="bg-violet-900/60 hover:bg-violet-900 text-cyan-300" onClick={() => setEditing(true)}>
               {t('common.edit')}
             </Button>
             <Button type="button" variant="none" size="sm" className="bg-gray-700 hover:bg-gray-600 text-gray-300" onClick={async () => {
@@ -328,7 +328,7 @@ export default function TodoDetailPage() {
               {comments.map((c, i) => (
                 <div key={i} className="text-xs bg-gray-900 border border-gray-800 rounded p-2.5">
                   <div className="flex justify-between text-gray-500 mb-1">
-                    <span className={c.author === 'claude' ? 'text-blue-400' : 'text-gray-400'}>{c.author}</span>
+                    <span className={c.author === 'claude' ? 'text-cyan-400' : 'text-gray-400'}>{c.author}</span>
                     <span>{new Date(c.createdAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
                   <Markdown className="text-gray-300">{c.text}</Markdown>
@@ -338,7 +338,7 @@ export default function TodoDetailPage() {
             <div className="flex gap-2">
               <input type="text" value={commentText} onChange={(e) => setCommentText(e.target.value)}
                 placeholder={t('todoDetail.commentPlaceholder')} onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
-                className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
+                className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
               <Button type="button" variant="primary" onClick={handleAddComment} disabled={savingComment || !commentText.trim()}>
                 {savingComment ? '...' : t('common.send')}
               </Button>

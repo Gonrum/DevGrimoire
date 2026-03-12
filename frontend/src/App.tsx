@@ -22,6 +22,7 @@ import { ToastProvider } from './components/Toast';
 import { LoadingText } from './components/ui/LoadingSpinner';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { configureAuth } from './api/client';
+import ParticleBackground from './components/ParticleBackground';
 
 function NotFound() {
   const { t } = useTranslation();
@@ -29,7 +30,7 @@ function NotFound() {
     <div className="text-center py-20">
       <h1 className="text-4xl font-bold text-gray-500 mb-4">404</h1>
       <p className="text-gray-400 mb-6">Seite nicht gefunden.</p>
-      <Link to="/" className="text-blue-400 hover:text-blue-300">
+      <Link to="/" className="text-cyan-400 hover:text-blue-300">
         {t('nav.dashboard')}
       </Link>
     </div>
@@ -46,7 +47,7 @@ function UserMenu() {
       <NavLink
         to="/profile"
         className={({ isActive }) =>
-          `text-sm transition-colors ${isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'}`
+          `text-sm transition-colors ${isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'}`
         }
         title={t('nav.profile')}
       >
@@ -109,19 +110,20 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 function AppShell() {
   const { t } = useTranslation();
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="bg-gray-900 border-b border-gray-800 px-4 sm:px-6 py-3 sm:py-4">
+    <div className="min-h-screen flex flex-col relative">
+      <ParticleBackground />
+      <header className="bg-gray-900/95 border-b border-gray-800 px-4 sm:px-6 py-3 sm:py-4 grimoire-header relative z-10">
         <div className="flex items-center gap-3 sm:gap-6">
           <NavLink to="/" className="flex items-center gap-2 shrink-0">
             <img src="/logo.png" alt="DevGrimoire" className="h-7 sm:h-8" />
-            <span className="text-lg sm:text-xl font-bold text-white tracking-tight">DevGrimoire</span>
+            <span className="text-lg sm:text-xl font-bold text-white tracking-tight font-grimoire">DevGrimoire</span>
           </NavLink>
           <nav className="flex gap-3 sm:gap-4 text-sm">
             <NavLink
               to="/"
               end
               className={({ isActive }) =>
-                isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
+                isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'
               }
             >
               {t('nav.dashboard')}
@@ -130,7 +132,7 @@ function AppShell() {
               to="/projects"
               end
               className={({ isActive }) =>
-                isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
+                isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'
               }
             >
               {t('nav.projects')}
@@ -138,7 +140,7 @@ function AppShell() {
             <NavLink
               to="/docs"
               className={({ isActive }) =>
-                isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
+                isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'
               }
             >
               {t('nav.docs')}
@@ -146,7 +148,7 @@ function AppShell() {
             <NavLink
               to="/settings"
               className={({ isActive }) =>
-                isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
+                isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'
               }
             >
               {t('nav.settings')}
@@ -160,7 +162,7 @@ function AppShell() {
           </div>
         </div>
       </header>
-      <main className="flex-1 w-full px-4 sm:px-6 py-4 sm:py-8">
+      <main className="flex-1 w-full px-4 sm:px-6 py-4 sm:py-8 relative z-10">
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/projects" element={<ProjectsOverview />} />

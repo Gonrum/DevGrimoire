@@ -70,10 +70,10 @@ export default function Dashboard() {
       {/* Favoriten-Projekte */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-bold">{t('dashboard.title')}</h1>
+          <h1 className="text-2xl font-bold font-grimoire">{t('dashboard.title')}</h1>
           <Link
             to="/projects"
-            className="text-sm text-gray-400 hover:text-blue-400 transition-colors"
+            className="text-sm text-gray-400 hover:text-cyan-400 transition-colors"
           >
             {t('dashboard.allProjects')}
           </Link>
@@ -84,7 +84,7 @@ export default function Dashboard() {
             <p className="text-gray-500 mb-2">{t('dashboard.noFavorites')}</p>
             <Link
               to="/projects"
-              className="text-sm text-blue-400 hover:text-blue-300"
+              className="text-sm text-cyan-400 hover:text-cyan-300"
             >
               {t('dashboard.markFavorites')}
             </Link>
@@ -95,7 +95,7 @@ export default function Dashboard() {
               <Link
                 key={p._id}
                 to={`/projects/${p._id}`}
-                className="block bg-gray-900 border border-gray-800 rounded-lg p-5 hover:border-blue-500 transition-colors"
+                className="block bg-gray-900 border border-gray-800 rounded-lg p-5 hover:border-violet-500 transition-colors"
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
@@ -150,7 +150,7 @@ export default function Dashboard() {
               <Link
                 key={todo._id}
                 to={`/projects/${todo.projectId}?tab=todos`}
-                className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 hover:border-blue-500 transition-colors"
+                className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 hover:border-violet-500 transition-colors"
               >
                 <Badge color={STATUS_COLORS[todo.status]} rounded="full" className="whitespace-nowrap">
                   {STATUS_LABELS[todo.status]()}

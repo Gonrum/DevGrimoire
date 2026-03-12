@@ -96,7 +96,7 @@ export default function Profile() {
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
           />
         </div>
         <div>
@@ -106,7 +106,7 @@ export default function Profile() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder={t('common.optional')}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
           />
         </div>
         <div className="flex items-center gap-3 text-xs text-gray-500">
@@ -134,7 +134,7 @@ export default function Profile() {
               i18n.changeLanguage(browserLang);
             }
           }}
-          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
         >
           <option value="">{t('profile.languageAuto')}</option>
           <option value="de">{t('profile.languageDe')}</option>
@@ -150,7 +150,7 @@ export default function Profile() {
           placeholder={t('profile.currentPassword')}
           value={oldPassword}
           onChange={(e) => setOldPassword(e.target.value)}
-          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
           autoComplete="current-password"
         />
         <input
@@ -158,7 +158,7 @@ export default function Profile() {
           placeholder={t('profile.newPassword')}
           value={newPassword}
           onChange={(e) => setNewPassword(e.target.value)}
-          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
           autoComplete="new-password"
         />
         <input
@@ -166,7 +166,7 @@ export default function Profile() {
           placeholder={t('profile.confirmPassword')}
           value={confirmPassword}
           onChange={(e) => setConfirmPassword(e.target.value)}
-          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
           autoComplete="new-password"
         />
         <Button type="submit" variant="primary" disabled={changingPw || !oldPassword || !newPassword || !confirmPassword}>

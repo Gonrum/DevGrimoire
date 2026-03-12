@@ -1,6 +1,6 @@
 import { InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 
-const inputBase = 'w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500';
+const inputBase = 'w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500';
 
 function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
   return (

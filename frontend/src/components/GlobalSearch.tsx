@@ -159,7 +159,7 @@ export default function GlobalSearch() {
               if (query.trim()) setOpen(true);
             }}
             onKeyDown={handleKeyDown}
-            className="w-48 sm:w-64 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors"
+            className="w-48 sm:w-64 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 transition-colors"
           />
           {loading && (
             <div className="absolute right-2 top-1/2 -translate-y-1/2">
@@ -173,7 +173,7 @@ export default function GlobalSearch() {
             onClick={() => setScopeProject((prev) => !prev)}
             className={`text-xs px-2 py-1 rounded transition-colors whitespace-nowrap ${
               scopeProject
-                ? 'bg-blue-900 text-blue-300 hover:bg-blue-800'
+                ? 'bg-violet-900 text-cyan-300 hover:bg-violet-800'
                 : 'bg-gray-800 text-gray-500 hover:bg-gray-700'
             }`}
             title={scopeProject ? t('search.projectScope') : t('search.globalScope')}
