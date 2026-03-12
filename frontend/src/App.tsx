@@ -108,8 +108,9 @@ function AppShell() {
     <div className="min-h-screen flex flex-col">
       <header className="bg-gray-900 border-b border-gray-800 px-4 sm:px-6 py-3 sm:py-4">
         <div className="flex items-center gap-3 sm:gap-6">
-          <NavLink to="/" className="text-lg sm:text-xl font-bold text-white tracking-tight shrink-0">
-            DevGrimoire
+          <NavLink to="/" className="flex items-center gap-2 shrink-0">
+            <img src="/logo.png" alt="DevGrimoire" className="h-7 sm:h-8" />
+            <span className="text-lg sm:text-xl font-bold text-white tracking-tight">DevGrimoire</span>
           </NavLink>
           <nav className="flex gap-3 sm:gap-4 text-sm">
             <NavLink

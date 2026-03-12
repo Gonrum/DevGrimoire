@@ -26,8 +26,11 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-bold text-center mb-2">DevGrimoire</h1>
-        <p className="text-gray-500 text-sm text-center mb-8">Anmelden um fortzufahren</p>
+        <div className="flex flex-col items-center mb-6">
+          <img src="/logo.png" alt="DevGrimoire" className="h-20 mb-3" />
+          <h1 className="text-2xl font-bold text-center">DevGrimoire</h1>
+          <p className="text-gray-500 text-sm text-center mt-1">Anmelden um fortzufahren</p>
+        </div>
 
         <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-lg p-6 space-y-4">
           {error && (
