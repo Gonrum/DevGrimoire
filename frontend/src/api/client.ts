@@ -398,6 +398,7 @@ export const api = {
       if (limit) params.set('limit', String(limit));
       return request<ChangelogEntry[]>(`/changelog?${params}`);
     },
+    get: (id: string) => request<ChangelogEntry>(`/changelog/${id}`),
     create: (data: Partial<ChangelogEntry>) =>
       request<ChangelogEntry>('/changelog', { method: 'POST', body: JSON.stringify(data) }),
     delete: (id: string) =>

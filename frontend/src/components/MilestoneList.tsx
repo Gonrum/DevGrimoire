@@ -77,7 +77,9 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
   return (
     <Card>
       <div className="flex items-start justify-between gap-3 mb-2">
-        <h3 className="text-sm font-semibold">{milestone.displayNumber && <span className="text-gray-500 font-normal mr-1.5">{milestone.displayNumber}</span>}{milestone.name}</h3>
+        <Link to={`/projects/${projectId}/milestones/${milestone._id}`} className="text-sm font-semibold hover:text-blue-400 transition-colors">
+          {milestone.displayNumber && <span className="text-gray-500 font-normal mr-1.5">{milestone.displayNumber}</span>}{milestone.name}
+        </Link>
         <Badge color={STATUS_COLORS[milestone.status]} rounded="full" className="shrink-0">{STATUS_LABELS[milestone.status]}</Badge>
       </div>
 

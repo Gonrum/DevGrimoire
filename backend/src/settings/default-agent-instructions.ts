@@ -17,7 +17,7 @@ Rufe **immer** \`system_instructions_get\` am Anfang jeder Session auf, um die a
 | \`project_list\` | Übersicht aller Projekte (kompakt). Für Details → \`project_get\` |
 | \`project_get\` | Vollständige Projektdaten inkl. Instruktionen und Komponenten laden. Lookup über \`id\` oder \`name\` |
 | \`project_update\` | Projekt aktualisieren (Name, Pfad, Beschreibung, techStack, aktiv-Status, Instruktionen, Komponenten) |
-| \`project_delete\` | Projekt und **alle** zugehörigen Daten löschen (Todos, Sessions, Knowledge, Changelog, Milestones, Environments, Secrets, Research, Schemas, Manual) |
+| \`project_delete\` | Projekt und **alle** zugehörigen Daten löschen (Todos, Sessions, Knowledge, Changelog, Milestones, Environments, Secrets, Research, Schemas, Dependencies, Features, Manual) |
 
 **Tipps**:
 - Nutze \`instructions\` um projektspezifische Agent-Anweisungen zu hinterlegen
@@ -270,9 +270,49 @@ Rufe **immer** \`system_instructions_get\` am Anfang jeder Session auf, um die a
 
 ---
 
+## 14. Abhängigkeiten (\`dependency_*\`)
+
+**Workflow**: Paketabhängigkeiten pro Projekt verwalten. Unterstützt 8 Paketmanager: npm, composer, pip, cargo, go, maven, nuget, gem.
+
+| Tool | Wann verwenden |
+|------|----------------|
+| \`dependency_add\` | Einzelne Abhängigkeit anlegen. Pflicht: \`projectId\`, \`name\`, \`version\`, \`packageManager\`. Optional: \`description\`, \`devDependency\`, \`category\`, \`tags\` |
+| \`dependency_list\` | Kompakte Liste (name, version, packageManager, devDependency, category). Filter: packageManager, category, devDependency. Pagination: limit/offset |
+| \`dependency_get\` | Vollständige Details einer Abhängigkeit inkl. Beschreibung laden |
+| \`dependency_update\` | Abhängigkeit aktualisieren (Version, Beschreibung, Kategorie, Tags) |
+| \`dependency_delete\` | Abhängigkeit endgültig löschen |
+| \`dependency_scan\` | **Bulk-Import** aus Paketdateien (package.json, composer.json etc.). Upsert: neue anlegen, bestehende Version aktualisieren. Bestehende description/category/tags bleiben erhalten |
+
+**Tipps**:
+- Unique Constraint: projectId + name + packageManager
+- \`dependency_scan\` für initiale Erfassung, \`dependency_add\` für einzelne Pakete
+- Vergib \`category\` (z.B. Database, Auth, UI, Testing) für bessere Übersicht
+
+---
+
+## 15. Feature-Katalog (\`feature_*\`)
+
+**Workflow**: Features/Funktionen pro Projekt dokumentieren und deren Status verfolgen.
+
+| Tool | Wann verwenden |
+|------|----------------|
+| \`feature_create\` | Feature anlegen. Pflicht: \`projectId\`, \`name\`. Optional: \`description\`, \`category\`, \`status\` (planned/in_development/released/deprecated), \`version\`, \`priority\` (low/medium/high), \`tags\` |
+| \`feature_list\` | Kompakte Liste. Filter: status, category. Pagination: limit/offset |
+| \`feature_get\` | Vollständige Feature-Details laden |
+| \`feature_update\` | Feature aktualisieren (Name, Status, Beschreibung, Kategorie, Version, Priorität, Tags) |
+| \`feature_delete\` | Feature endgültig löschen |
+
+**Tipps**:
+- Status-Verlauf: \`planned\` → \`in_development\` → \`released\` (kein strikter Workflow)
+- \`deprecated\` für veraltete Features
+- \`version\` für die Release-Version verwenden (z.B. "1.2.0")
+- \`category\` für Feature-Gruppierung (z.B. "Auth", "Dashboard", "API")
+
+---
+
 ## Effizient mit Context umgehen
 - **List-Tools** liefern kompakte Übersichten (nur Metadaten, kein Content)
-- Nutze **_get Tools** (todo_get, knowledge_get, changelog_get, research_get, schema_get) nur wenn du Details brauchst
+- Nutze **_get Tools** (todo_get, knowledge_get, changelog_get, research_get, schema_get, dependency_get, feature_get) nur wenn du Details brauchst
 - Arbeite immer mit **projectId** — nie global suchen wenn du das Projekt kennst
 - Nutze **limit/offset** bei großen Listen
 - **Search-Tools** (knowledge_search, research_search) liefern Content-Snippets (200 Zeichen), nicht den vollen Text

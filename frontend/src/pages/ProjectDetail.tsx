@@ -36,6 +36,8 @@ export default function ProjectDetail() {
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
   const [features, setFeatures] = useState<Feature[]>([]);
   const [manualKey, setManualKey] = useState(0);
+  const [envKey, setEnvKey] = useState(0);
+  const [secretsKey, setSecretsKey] = useState(0);
   const [tab, setTab] = useState<Tab>(() => (searchParams.get('tab') as Tab) || 'todos');
   useEffect(() => {
     if (searchParams.has('tab')) {
@@ -108,13 +110,19 @@ export default function ProjectDetail() {
         project: () => api.projects.get(id).then(setProject),
         manual: () => setManualKey((k) => k + 1),
         research: () => api.research.list(id).then(setResearch),
-        environment: () => api.environments.list(id).then(setEnvironments),
-        secret: () => api.secrets.list(id).then(setSecrets),
+        environment: () => { api.environments.list(id).then(setEnvironments); setEnvKey((k) => k + 1); },
+        secret: () => { api.secrets.list(id).then(setSecrets); setSecretsKey((k) => k + 1); },
         schema: () => api.schemas.list(id).then(setSchemas),
         dependency: () => api.dependencies.list(id).then(setDependencies),
         feature: () => api.features.list(id).then(setFeatures),
       };
       refetchers[event.entity]?.();
+      // Cross-dependencies: todo changes affect milestone progress and vice versa
+      if (event.entity === 'todo') {
+        api.milestones.list(id).then(setMilestones);
+      } else if (event.entity === 'milestone') {
+        api.todos.list({ projectId: id }).then(setTodos);
+      }
       api.activities.list(id, 100).then(setActivities);
     },
     [id],
@@ -248,8 +256,8 @@ export default function ProjectDetail() {
       {tab === 'schemas' && <SchemaList entries={schemas} projectId={id!} />}
       {tab === 'dependencies' && <DependencyList entries={dependencies} projectId={id!} />}
       {tab === 'research' && <ResearchList entries={research} />}
-      {tab === 'environments' && <EnvironmentList projectId={id!} />}
-      {tab === 'secrets' && <SecretsList projectId={id!} />}
+      {tab === 'environments' && <EnvironmentList key={envKey} projectId={id!} />}
+      {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id!} />}
       {tab === 'activity' && <ActivityList activities={activities} />}
     </div>
   );

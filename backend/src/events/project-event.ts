@@ -2,7 +2,7 @@ export const PROJECT_CHANGED = 'project.changed';
 
 export interface ProjectChangeEvent {
   projectId: string;
-  entity: 'project' | 'todo' | 'session' | 'knowledge' | 'changelog' | 'milestone' | 'manual' | 'research' | 'notification' | 'environment' | 'secret';
+  entity: 'project' | 'todo' | 'session' | 'knowledge' | 'changelog' | 'milestone' | 'manual' | 'research' | 'notification' | 'environment' | 'secret' | 'schema' | 'dependency' | 'feature';
   action: 'created' | 'updated' | 'deleted';
   entityId?: string;
   summary?: string;
