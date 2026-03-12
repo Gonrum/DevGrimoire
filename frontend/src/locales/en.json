@@ -527,6 +527,27 @@
     "navApi": "REST API",
     "navArchitecture": "Architecture"
   },
+  "soul": {
+    "title": "Soul",
+    "empty": "No project soul defined yet.",
+    "emptyHint": "Define your project's identity \u2014 vision, principles, conventions and more. This information automatically guides how Claude works with your project.",
+    "vision": "Vision",
+    "visionPlaceholder": "What is this project? Who is it for? What's the goal?",
+    "principles": "Principles",
+    "principlesPlaceholder": "Technical principles, architecture decisions...",
+    "conventions": "Conventions",
+    "conventionsPlaceholder": "Coding style, naming, formatting, tests...",
+    "communication": "Communication",
+    "communicationPlaceholder": "How should the agent communicate? Verbose/concise, language...",
+    "boundaries": "Boundaries",
+    "boundariesPlaceholder": "What should the agent never do?",
+    "workflow": "Workflow",
+    "workflowPlaceholder": "How should work be done? Plan first, review process...",
+    "quality": "Quality",
+    "qualityPlaceholder": "Quality standards, security requirements...",
+    "sectionEmpty": "Not defined yet",
+    "sectionsComplete": "{{count}} / 7"
+  },
   "secretCreate": {
     "title": "New Secret",
     "backToProject": "Back to project",

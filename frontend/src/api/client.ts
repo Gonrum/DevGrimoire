@@ -312,6 +312,20 @@ export interface Dependency {
   updatedAt: string;
 }
 
+export interface Soul {
+  _id: string;
+  projectId: string;
+  vision: string;
+  principles: string;
+  conventions: string;
+  communication: string;
+  boundaries: string;
+  workflow: string;
+  quality: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type FeatureStatus = 'planned' | 'in_development' | 'released' | 'deprecated';
 export type FeaturePriority = 'low' | 'medium' | 'high';
 
@@ -577,6 +591,11 @@ export const api = {
       request<Dependency>(`/dependencies/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/dependencies/${id}`, { method: 'DELETE' }),
+  },
+  souls: {
+    get: (projectId: string) => request<Soul | null>(`/souls?projectId=${projectId}`),
+    upsert: (data: Partial<Soul> & { projectId: string }) =>
+      request<Soul>('/souls', { method: 'PUT', body: JSON.stringify(data) }),
   },
   transfer: {
     export: async (id: string, includeSecrets = false) => {

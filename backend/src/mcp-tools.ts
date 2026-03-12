@@ -20,6 +20,7 @@ import { NotificationsService } from './notifications/notifications.service';
 import { SchemasService } from './schemas/schemas.service';
 import { DependenciesService } from './dependencies/dependencies.service';
 import { FeaturesService } from './features/features.service';
+import { SoulsService } from './souls/souls.service';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 
 function requireString(args: Record<string, unknown>, field: string): string {
@@ -119,6 +120,7 @@ export interface McpServices {
   schemasService: SchemasService;
   dependenciesService: DependenciesService;
   featuresService: FeaturesService;
+  soulsService: SoulsService;
 }
 
 const tools = [
@@ -1141,10 +1143,39 @@ const tools = [
       required: ['id'],
     },
   },
+  {
+    name: 'soul_get',
+    description: 'Get the project soul (identity, principles, conventions, boundaries). The soul defines how the agent should work with this project. Returns null if no soul is defined yet.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'soul_update',
+    description: 'Update (or create) the project soul. Supports partial updates — only provided sections are changed. Use this to define how the agent should work with this project. Sections: vision, principles, conventions, communication, boundaries, workflow, quality.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        vision: { type: 'string', description: 'Project vision, purpose, target audience' },
+        principles: { type: 'string', description: 'Technical principles, architecture decisions' },
+        conventions: { type: 'string', description: 'Coding style, naming, formatting, test requirements' },
+        communication: { type: 'string', description: 'How the agent should communicate (verbose/concise, language, tone)' },
+        boundaries: { type: 'string', description: 'What the agent should never do (no-gos)' },
+        workflow: { type: 'string', description: 'How work should be done (plan first, review process, etc.)' },
+        quality: { type: 'string', description: 'Quality standards, security requirements' },
+      },
+      required: ['projectId'],
+    },
+  },
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -1216,6 +1247,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             schemasService.removeByProject(id),
             dependenciesService.removeByProject(id),
             featuresService.removeByProject(id),
+            soulsService.removeByProject(id),
           ]);
           result = { deleted: true, id };
           break;
@@ -1676,17 +1708,33 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             DEFAULT_AGENT_INSTRUCTIONS,
           );
           const projectId = optionalString(a, 'projectId');
+          const res: Record<string, unknown> = { globalInstructions: instructions };
           if (projectId) {
             const project = await projectsService.findById(projectId);
             if (project?.instructions) {
-              result = {
-                globalInstructions: instructions,
-                projectInstructions: project.instructions,
-              };
-              break;
+              res.projectInstructions = project.instructions;
+            }
+            const soul = await soulsService.findByProject(projectId);
+            if (soul) {
+              const soulObj = soul.toObject() as unknown as Record<string, unknown>;
+              const sections = [
+                { key: 'vision', label: 'Vision' },
+                { key: 'principles', label: 'Principles' },
+                { key: 'conventions', label: 'Conventions' },
+                { key: 'communication', label: 'Communication' },
+                { key: 'boundaries', label: 'Boundaries' },
+                { key: 'workflow', label: 'Workflow' },
+                { key: 'quality', label: 'Quality' },
+              ];
+              const soulParts = sections
+                .filter((s) => soulObj[s.key])
+                .map((s) => `### ${s.label}\n${soulObj[s.key]}`);
+              if (soulParts.length > 0) {
+                res.projectSoul = `## Project Soul\n\n${soulParts.join('\n\n')}`;
+              }
             }
           }
-          result = { globalInstructions: instructions };
+          result = res;
           break;
         }
         case 'system_instructions_set': {
@@ -1853,6 +1901,24 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             dependencies: a.dependencies as any,
           });
           result = scanResult;
+          break;
+        }
+        case 'soul_get': {
+          const soul = await soulsService.findByProject(requireString(a, 'projectId'));
+          result = soul || { message: 'No project soul defined yet. Use soul_update to create one.' };
+          break;
+        }
+        case 'soul_update': {
+          const soulFields: Record<string, string> = {};
+          for (const key of ['vision', 'principles', 'conventions', 'communication', 'boundaries', 'workflow', 'quality']) {
+            const val = optionalString(a, key);
+            if (val !== undefined) soulFields[key] = val;
+          }
+          const soul = await soulsService.upsert(requireString(a, 'projectId'), soulFields);
+          const soulObj = soul.toObject() as unknown as Record<string, unknown>;
+          const defined = ['vision', 'principles', 'conventions', 'communication', 'boundaries', 'workflow', 'quality']
+            .filter((k) => soulObj[k]).length;
+          result = { updated: true, sectionsDefined: `${defined}/7` };
           break;
         }
         default:

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature, Manual } from '../api/client';
+import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature, Manual, Soul } from '../api/client';
 import TodoBoard from '../components/TodoBoard';
 import SessionList from '../components/SessionList';
 import KnowledgeList from '../components/KnowledgeList';
@@ -14,11 +14,12 @@ import ResearchList from '../components/ResearchList';
 import SchemaList from '../components/SchemaList';
 import DependencyList from '../components/DependencyList';
 import FeatureList from '../components/FeatureList';
+import SoulView from '../components/SoulView';
 import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents';
 import Badge from '../components/ui/Badge';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
-type Tab = 'todos' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features';
+type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features';
 
 export default function ProjectDetail() {
   const { t, i18n } = useTranslation();
@@ -38,6 +39,7 @@ export default function ProjectDetail() {
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
   const [features, setFeatures] = useState<Feature[]>([]);
   const [manuals, setManuals] = useState<Manual[]>([]);
+  const [soul, setSoul] = useState<Soul | null>(null);
   const [envKey, setEnvKey] = useState(0);
   const [secretsKey, setSecretsKey] = useState(0);
   const [tab, setTab] = useState<Tab>(() => (searchParams.get('tab') as Tab) || 'todos');
@@ -73,8 +75,9 @@ export default function ProjectDetail() {
       api.dependencies.list(id),
       api.features.list(id),
       api.manuals.list(id),
+      api.souls.get(id),
     ])
-      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man]) => {
+      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man, sl]) => {
         if (controller.signal.aborted) return;
         setProject(p);
         setTodos(t);
@@ -90,6 +93,7 @@ export default function ProjectDetail() {
         setDependencies(deps);
         setFeatures(feat);
         setManuals(man);
+        setSoul(sl);
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
@@ -119,6 +123,7 @@ export default function ProjectDetail() {
         schema: () => api.schemas.list(id).then(setSchemas),
         dependency: () => api.dependencies.list(id).then(setDependencies),
         feature: () => api.features.list(id).then(setFeatures),
+        soul: () => api.souls.get(id!).then(setSoul),
       };
       refetchers[event.entity]?.();
       // Cross-dependencies: todo changes affect milestone progress and vice versa
@@ -153,6 +158,7 @@ export default function ProjectDetail() {
 
   const tabs: { key: Tab; label: string; count: number }[] = [
     { key: 'todos', label: 'Todos', count: todos.filter((t) => t.status !== 'done').length },
+    { key: 'soul', label: t('soul.title'), count: (['vision', 'principles', 'conventions', 'communication', 'boundaries', 'workflow', 'quality'] as const).filter((k) => soul?.[k]?.trim()).length },
     { key: 'milestones', label: 'Milestones', count: milestones.filter((m) => m.status !== 'done' && !m.archived).length },
     { key: 'sessions', label: 'Sessions', count: sessions.length },
     { key: 'knowledge', label: t('searchTypes.knowledge'), count: knowledge.length },
@@ -246,6 +252,7 @@ export default function ProjectDetail() {
           onUpdate={() => api.todos.list({ projectId: id }).then(setTodos)}
         />
       )}
+      {tab === 'soul' && <SoulView projectId={id!} soul={soul} onUpdate={() => api.souls.get(id!).then(setSoul)} />}
       {tab === 'milestones' && (
         <MilestoneList
           milestones={milestones}

@@ -24,6 +24,7 @@ const COLLECTION_ENTITY_MAP: Record<string, ProjectChangeEvent['entity']> = {
   schemas: 'schema',
   dependencies: 'dependency',
   features: 'feature',
+  souls: 'soul',
 };
 
 const OPERATION_ACTION_MAP: Record<string, ProjectChangeEvent['action']> = {
