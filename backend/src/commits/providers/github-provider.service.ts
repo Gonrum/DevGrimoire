@@ -3,6 +3,9 @@ import { GitProviderInterface, NormalizedCommit, FetchCommitsResult } from './gi
 import { GitRepository } from '../schemas/git-repository.schema';
 import { validateGitBaseUrl } from './url-validator';
 
+const MAX_PAGES = 10;
+const FETCH_TIMEOUT = 30000;
+
 @Injectable()
 export class GitHubProviderService implements GitProviderInterface {
   private readonly logger = new Logger(GitHubProviderService.name);
@@ -37,7 +40,7 @@ export class GitHubProviderService implements GitProviderInterface {
     const perPage = 100;
     let newEtag: string | undefined;
 
-    while (true) {
+    while (page <= MAX_PAGES) {
       const params = new URLSearchParams({
         per_page: String(perPage),
         page: String(page),
@@ -52,7 +55,7 @@ export class GitHubProviderService implements GitProviderInterface {
       const url = `${baseUrl}/repos/${config.owner}/${config.repo}/commits?${params}`;
       const headers = this.getHeaders(token, page === 1 ? etag : undefined);
 
-      const response = await fetch(url, { headers });
+      const response = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT) });
 
       if (response.status === 304) {
         return { commits: [], notModified: true, etag };
@@ -93,7 +96,6 @@ export class GitHubProviderService implements GitProviderInterface {
 
       if (data.length < perPage) break;
 
-      // Check Link header for next page
       const linkHeader = response.headers.get('link');
       if (!linkHeader || !linkHeader.includes('rel="next"')) break;
 
@@ -108,7 +110,7 @@ export class GitHubProviderService implements GitProviderInterface {
       validateGitBaseUrl(config.baseUrl);
       const baseUrl = this.getBaseUrl(config);
       const url = `${baseUrl}/repos/${config.owner}/${config.repo}`;
-      const response = await fetch(url, { headers: this.getHeaders(token) });
+      const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
       return response.ok;
     } catch {
       return false;

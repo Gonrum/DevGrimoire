@@ -1,4 +1,7 @@
-import { IsString, IsOptional, IsArray, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsArray, IsBoolean, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ProjectComponentDto } from './project-component.dto';
+import { GitRepositoryDto } from './git-repository.dto';
 
 export class UpdateProjectDto {
   @IsString()
@@ -35,8 +38,10 @@ export class UpdateProjectDto {
   instructions?: string;
 
   @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProjectComponentDto)
   @IsOptional()
-  components?: { name: string; version: string; path?: string }[];
+  components?: ProjectComponentDto[];
 
   @IsString()
   @IsOptional()
@@ -47,15 +52,8 @@ export class UpdateProjectDto {
   milestoneNumberFormat?: string;
 
   @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GitRepositoryDto)
   @IsOptional()
-  gitRepositories?: {
-    provider: 'github' | 'gitlab';
-    baseUrl?: string;
-    owner?: string;
-    repo?: string;
-    gitlabProjectId?: string;
-    defaultBranch?: string;
-    tokenSecretId?: string;
-    syncEnabled?: boolean;
-  }[];
+  gitRepositories?: GitRepositoryDto[];
 }

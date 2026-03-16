@@ -9,6 +9,8 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { CommitsService } from './commits.service';
+import { SyncDto } from './dto/sync.dto';
+import { ValidateTokenDto } from './dto/validate-token.dto';
 
 @Controller('commits')
 export class CommitsController {
@@ -51,7 +53,7 @@ export class CommitsController {
     if (!projectId) {
       throw new BadRequestException('projectId query parameter is required');
     }
-    return this.commitsService.search(projectId, query, limit ? parseInt(limit, 10) : undefined);
+    return this.commitsService.search(projectId, query, limit ? Math.min(parseInt(limit, 10), 100) : undefined);
   }
 
   @Get('count')
@@ -69,31 +71,26 @@ export class CommitsController {
 
   @Post('sync')
   @HttpCode(200)
-  async sync(@Body() body: { projectId: string; repoIndex?: number }) {
-    if (!body.projectId) {
-      throw new BadRequestException('projectId is required');
+  async sync(@Body() dto: SyncDto) {
+    if (dto.repoIndex !== undefined) {
+      return this.commitsService.syncRepository(dto.projectId, dto.repoIndex);
     }
-    if (body.repoIndex !== undefined) {
-      return this.commitsService.syncRepository(body.projectId, body.repoIndex);
-    }
-    return this.commitsService.syncAllForProject(body.projectId);
+    return this.commitsService.syncAllForProject(dto.projectId);
   }
 
   @Post('validate-token')
   @HttpCode(200)
-  async validateToken(
-    @Body() body: { provider: string; baseUrl?: string; owner?: string; repo?: string; gitlabProjectId?: string; token: string },
-  ) {
+  async validateToken(@Body() dto: ValidateTokenDto) {
     const config = {
-      provider: body.provider as 'github' | 'gitlab',
-      baseUrl: body.baseUrl || '',
-      owner: body.owner || '',
-      repo: body.repo || '',
-      gitlabProjectId: body.gitlabProjectId || '',
+      provider: dto.provider as 'github' | 'gitlab',
+      baseUrl: dto.baseUrl || '',
+      owner: dto.owner || '',
+      repo: dto.repo || '',
+      gitlabProjectId: dto.gitlabProjectId || '',
       defaultBranch: 'main',
       syncEnabled: true,
     };
-    const valid = await this.commitsService.validateRepoToken(config, body.token);
+    const valid = await this.commitsService.validateRepoToken(config, dto.token);
     return { valid };
   }
 }

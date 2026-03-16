@@ -1,4 +1,6 @@
-import { IsString, IsOptional, IsArray, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsArray, IsBoolean, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ProjectComponentDto } from './project-component.dto';
 
 export class CreateProjectDto {
   @IsString()
@@ -34,8 +36,10 @@ export class CreateProjectDto {
   instructions?: string;
 
   @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProjectComponentDto)
   @IsOptional()
-  components?: { name: string; version: string; path?: string }[];
+  components?: ProjectComponentDto[];
 
   @IsString()
   @IsOptional()

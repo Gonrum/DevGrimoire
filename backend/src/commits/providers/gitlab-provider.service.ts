@@ -3,6 +3,9 @@ import { GitProviderInterface, NormalizedCommit, FetchCommitsResult } from './gi
 import { GitRepository } from '../schemas/git-repository.schema';
 import { validateGitBaseUrl } from './url-validator';
 
+const MAX_PAGES = 10;
+const FETCH_TIMEOUT = 30000;
+
 @Injectable()
 export class GitLabProviderService implements GitProviderInterface {
   private readonly logger = new Logger(GitLabProviderService.name);
@@ -15,7 +18,6 @@ export class GitLabProviderService implements GitProviderInterface {
     if (config.gitlabProjectId) {
       return encodeURIComponent(config.gitlabProjectId);
     }
-    // Fallback: use owner/repo as path
     return encodeURIComponent(`${config.owner}/${config.repo}`);
   }
 
@@ -38,7 +40,7 @@ export class GitLabProviderService implements GitProviderInterface {
     let page = 1;
     const perPage = 100;
 
-    while (true) {
+    while (page <= MAX_PAGES) {
       const params = new URLSearchParams({
         per_page: String(perPage),
         page: String(page),
@@ -51,7 +53,7 @@ export class GitLabProviderService implements GitProviderInterface {
       }
 
       const url = `${baseUrl}/api/v4/projects/${projectPath}/repository/commits?${params}`;
-      const response = await fetch(url, { headers: this.getHeaders(token) });
+      const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
 
       if (response.status === 401 || response.status === 403) {
         throw new Error(`GitLab auth error: ${response.status}`);
@@ -84,7 +86,6 @@ export class GitLabProviderService implements GitProviderInterface {
 
       if (data.length < perPage) break;
 
-      // GitLab commits endpoint doesn't return X-Total, check Link header
       const linkHeader = response.headers.get('link');
       if (!linkHeader || !linkHeader.includes('rel="next"')) break;
 
@@ -100,7 +101,7 @@ export class GitLabProviderService implements GitProviderInterface {
       const baseUrl = this.getBaseUrl(config);
       const projectPath = this.getProjectPath(config);
       const url = `${baseUrl}/api/v4/projects/${projectPath}`;
-      const response = await fetch(url, { headers: this.getHeaders(token) });
+      const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
       return response.ok;
     } catch {
       return false;

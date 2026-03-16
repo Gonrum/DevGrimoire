@@ -13,6 +13,12 @@ export class RefreshToken {
 
   @Prop({ required: true })
   expiresAt: Date;
+
+  @Prop()
+  ip: string;
+
+  @Prop()
+  userAgent: string;
 }
 
 export const RefreshTokenSchema = SchemaFactory.createForClass(RefreshToken);

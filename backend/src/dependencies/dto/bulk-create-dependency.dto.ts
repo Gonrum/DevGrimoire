@@ -1,4 +1,4 @@
-import { IsString, IsArray, IsEnum, ValidateNested, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsArray, IsEnum, ValidateNested, IsOptional, IsBoolean, ArrayMaxSize } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PackageManager } from '../schemas/dependency.schema';
 
@@ -22,6 +22,7 @@ export class BulkCreateDependencyDto {
   packageManager: PackageManager;
 
   @IsArray()
+  @ArrayMaxSize(500)
   @ValidateNested({ each: true })
   @Type(() => BulkDependencyItemDto)
   dependencies: BulkDependencyItemDto[];

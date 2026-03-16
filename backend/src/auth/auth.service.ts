@@ -54,7 +54,7 @@ export class AuthService {
     return AUTH_ENABLED;
   }
 
-  async login(username: string, password: string): Promise<{ accessToken: string; refreshToken: string }> {
+  async login(username: string, password: string, clientInfo?: { ip?: string; userAgent?: string }): Promise<{ accessToken: string; refreshToken: string }> {
     if (!AUTH_ENABLED) {
       throw new UnauthorizedException('Authentication is not configured');
     }
@@ -73,16 +73,21 @@ export class AuthService {
     }
 
     const accessToken = this.generateAccessToken(user);
-    const refreshToken = await this.generateRefreshToken(user._id.toString());
+    const refreshToken = await this.generateRefreshToken(user._id.toString(), clientInfo);
 
     return { accessToken, refreshToken };
   }
 
-  async refresh(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+  async refresh(refreshToken: string, clientInfo?: { ip?: string; userAgent?: string }): Promise<{ accessToken: string; refreshToken: string }> {
     const stored = await this.refreshTokenModel.findOne({ token: refreshToken }).exec();
     if (!stored || stored.expiresAt < new Date()) {
       if (stored) await stored.deleteOne();
       throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    // Warn if client context changed (IP or User-Agent mismatch)
+    if (stored.ip && clientInfo?.ip && stored.ip !== clientInfo.ip) {
+      this.logger.warn(`Refresh token used from different IP: stored=${stored.ip}, current=${clientInfo.ip}, userId=${stored.userId}`);
     }
 
     // Rotate: delete old, create new
@@ -94,7 +99,7 @@ export class AuthService {
     }
 
     const accessToken = this.generateAccessToken(user);
-    const newRefreshToken = await this.generateRefreshToken(user._id.toString());
+    const newRefreshToken = await this.generateRefreshToken(user._id.toString(), clientInfo);
 
     return { accessToken, refreshToken: newRefreshToken };
   }
@@ -181,12 +186,18 @@ export class AuthService {
     );
   }
 
-  private async generateRefreshToken(userId: string): Promise<string> {
+  private async generateRefreshToken(userId: string, clientInfo?: { ip?: string; userAgent?: string }): Promise<string> {
     const token = randomBytes(48).toString('hex');
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRY_DAYS);
 
-    await this.refreshTokenModel.create({ token, userId, expiresAt });
+    await this.refreshTokenModel.create({
+      token,
+      userId,
+      expiresAt,
+      ip: clientInfo?.ip,
+      userAgent: clientInfo?.userAgent,
+    });
 
     return token;
   }
