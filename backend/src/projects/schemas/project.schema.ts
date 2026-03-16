@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
+import { GitRepositorySchema, GitRepository } from '../../commits/schemas/git-repository.schema';
 
 export class ProjectComponent {
   name: string;
@@ -43,6 +44,9 @@ export class Project {
 
   @Prop({ default: '{type}-{n}' })
   milestoneNumberFormat: string;
+
+  @Prop({ type: [GitRepositorySchema], default: [] })
+  gitRepositories: GitRepository[];
 }
 
 export const ProjectSchema = SchemaFactory.createForClass(Project);

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api, Project } from '../api/client';
+import { api, Project, GitRepository } from '../api/client';
 import Button from '../components/ui/Button';
 import ConfirmButton from '../components/ui/ConfirmButton';
 import { LoadingText } from '../components/ui/LoadingSpinner';
+import Badge from '../components/ui/Badge';
 
 const TEMPLATE_INSTRUCTIONS = `## Arbeitsweise
 1. Immer erst Planen und einen Überblick verschaffen
@@ -44,6 +45,15 @@ export default function ProjectSettings() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [includeSecrets, setIncludeSecrets] = useState(false);
+  const [gitRepos, setGitRepos] = useState<GitRepository[]>([]);
+  const [showAddRepo, setShowAddRepo] = useState(false);
+  const [newRepoProvider, setNewRepoProvider] = useState<'github' | 'gitlab'>('github');
+  const [newRepoUrl, setNewRepoUrl] = useState('');
+  const [newRepoToken, setNewRepoToken] = useState('');
+  const [newRepoBranch, setNewRepoBranch] = useState('main');
+  const [newRepoBaseUrl, setNewRepoBaseUrl] = useState('');
+  const [validating, setValidating] = useState(false);
+  const [repoError, setRepoError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -61,10 +71,98 @@ export default function ProjectSettings() {
         setInstructions(p.instructions || '');
         setTodoNumberFormat(p.todoNumberFormat || '{type}-{n}');
         setMilestoneNumberFormat(p.milestoneNumberFormat || '{type}-{n}');
+        setGitRepos(p.gitRepositories || []);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [id]);
+
+  const parseRepoUrl = (url: string, provider: 'github' | 'gitlab'): { owner: string; repo: string; gitlabProjectId: string } => {
+    const cleaned = url.replace(/\.git$/, '').replace(/\/$/, '');
+    const match = cleaned.match(/(?:https?:\/\/[^/]+)\/(.+)/);
+    const pathPart = match ? match[1] : url;
+    if (provider === 'github') {
+      const parts = pathPart.split('/');
+      return { owner: parts[0] || '', repo: parts[1] || '', gitlabProjectId: '' };
+    }
+    return { owner: '', repo: '', gitlabProjectId: pathPart };
+  };
+
+  const handleAddRepo = async () => {
+    if (!newRepoUrl.trim() || !newRepoToken.trim()) return;
+    setRepoError(null);
+    setValidating(true);
+
+    try {
+      const parsed = parseRepoUrl(newRepoUrl, newRepoProvider);
+
+      // Validate token
+      const { valid } = await api.commits.validateToken({
+        provider: newRepoProvider,
+        baseUrl: newRepoBaseUrl || undefined,
+        owner: parsed.owner,
+        repo: parsed.repo,
+        gitlabProjectId: parsed.gitlabProjectId,
+        token: newRepoToken,
+      });
+
+      if (!valid) {
+        setRepoError('Token-Validierung fehlgeschlagen. Bitte Token und URL prüfen.');
+        return;
+      }
+
+      // Store token as secret
+      const secret = await api.secrets.create({
+        projectId: id!,
+        key: `git-token-${newRepoProvider}-${Date.now()}`,
+        value: newRepoToken,
+        description: `Git ${newRepoProvider} token for ${newRepoUrl}`,
+        type: 'token',
+      });
+
+      const newRepo: GitRepository = {
+        provider: newRepoProvider,
+        baseUrl: newRepoBaseUrl || undefined,
+        owner: parsed.owner,
+        repo: parsed.repo,
+        gitlabProjectId: parsed.gitlabProjectId,
+        defaultBranch: newRepoBranch || 'main',
+        tokenSecretId: secret._id,
+        syncEnabled: true,
+      };
+
+      const updated = [...gitRepos, newRepo];
+      setGitRepos(updated);
+
+      // Save to project immediately
+      await api.projects.update(id!, { gitRepositories: updated } as any);
+
+      // Reset form
+      setNewRepoUrl('');
+      setNewRepoToken('');
+      setNewRepoBranch('main');
+      setNewRepoBaseUrl('');
+      setShowAddRepo(false);
+    } catch (err) {
+      setRepoError(err instanceof Error ? err.message : 'Fehler beim Hinzufügen');
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  const handleRemoveRepo = async (index: number) => {
+    const updated = gitRepos.filter((_, i) => i !== index);
+    setGitRepos(updated);
+    await api.projects.update(id!, { gitRepositories: updated } as any);
+  };
+
+  const handleToggleSync = async (index: number) => {
+    const updated = gitRepos.map((r, i) =>
+      i === index ? { ...r, syncEnabled: !r.syncEnabled } : r,
+    );
+    setGitRepos(updated);
+    await api.projects.update(id!, { gitRepositories: updated } as any);
+  };
 
   const handleSave = async () => {
     if (!id || !name.trim()) return;
@@ -256,6 +354,170 @@ export default function ProjectSettings() {
         {!instructions.trim() && (
           <Button type="button" className="mt-2" onClick={() => setInstructions(TEMPLATE_INSTRUCTIONS)}>
             {t('projectSettings.insertTemplate')}
+          </Button>
+        )}
+      </section>
+
+      <section className="mb-8 space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-cyan-400">Git Repositories</h2>
+          <p className="text-gray-500 text-sm mt-1">
+            GitHub- oder GitLab-Repositories verbinden um Commits zu synchronisieren.
+          </p>
+        </div>
+
+        {gitRepos.length > 0 && (
+          <div className="space-y-2">
+            {gitRepos.map((repo, i) => (
+              <div key={i} className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+                <Badge color={repo.provider === 'github' ? 'bg-gray-700 text-white' : 'bg-orange-900/60 text-orange-300'} rounded="full">
+                  {repo.provider === 'github' ? 'GH' : 'GL'}
+                </Badge>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-gray-200 truncate">
+                    {repo.provider === 'github'
+                      ? `${repo.owner}/${repo.repo}`
+                      : repo.gitlabProjectId || `${repo.owner}/${repo.repo}`
+                    }
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {repo.defaultBranch || 'main'}
+                    {repo.lastSyncAt && ` · Letzter Sync: ${new Date(repo.lastSyncAt).toLocaleString('de-DE')}`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggleSync(i)}
+                  className={`text-xs px-2 py-1 rounded-full transition-colors ${
+                    repo.syncEnabled !== false
+                      ? 'bg-green-900/50 text-green-300 hover:bg-green-800/50'
+                      : 'bg-gray-800 text-gray-500 hover:bg-gray-700'
+                  }`}
+                >
+                  {repo.syncEnabled !== false ? 'Aktiv' : 'Pausiert'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveRepo(i)}
+                  className="text-xs text-red-400 hover:text-red-300 px-2 py-1"
+                >
+                  Entfernen
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {showAddRepo ? (
+          <div className="border border-gray-800 rounded-lg p-4 space-y-3">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setNewRepoProvider('github')}
+                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                  newRepoProvider === 'github'
+                    ? 'bg-violet-600 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                GitHub
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewRepoProvider('gitlab')}
+                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                  newRepoProvider === 'gitlab'
+                    ? 'bg-violet-600 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                GitLab
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Repository URL *
+              </label>
+              <input
+                type="text"
+                value={newRepoUrl}
+                onChange={(e) => setNewRepoUrl(e.target.value)}
+                placeholder={newRepoProvider === 'github'
+                  ? 'https://github.com/owner/repo'
+                  : 'https://gitlab.com/group/project'
+                }
+                className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+              />
+            </div>
+
+            {newRepoProvider === 'gitlab' && (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  Base URL (nur für Self-Hosted)
+                </label>
+                <input
+                  type="text"
+                  value={newRepoBaseUrl}
+                  onChange={(e) => setNewRepoBaseUrl(e.target.value)}
+                  placeholder="https://gitlab.example.com"
+                  className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+                />
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  {newRepoProvider === 'github' ? 'Personal Access Token *' : 'Access Token (read_api) *'}
+                </label>
+                <input
+                  type="password"
+                  value={newRepoToken}
+                  onChange={(e) => setNewRepoToken(e.target.value)}
+                  placeholder={newRepoProvider === 'github' ? 'ghp_...' : 'glpat-...'}
+                  className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Default Branch</label>
+                <input
+                  type="text"
+                  value={newRepoBranch}
+                  onChange={(e) => setNewRepoBranch(e.target.value)}
+                  placeholder="main"
+                  className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+                />
+              </div>
+            </div>
+
+            {repoError && (
+              <p className="text-sm text-red-400">{repoError}</p>
+            )}
+
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={handleAddRepo}
+                disabled={validating || !newRepoUrl.trim() || !newRepoToken.trim()}
+              >
+                {validating ? 'Prüfe...' : 'Verbinden'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => { setShowAddRepo(false); setRepoError(null); }}
+              >
+                Abbrechen
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button type="button" variant="secondary" size="sm" onClick={() => setShowAddRepo(true)}>
+            + Repository hinzufügen
           </Button>
         )}
       </section>

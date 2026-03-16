@@ -21,6 +21,7 @@ import { SchemasService } from './schemas/schemas.service';
 import { DependenciesService } from './dependencies/dependencies.service';
 import { FeaturesService } from './features/features.service';
 import { SoulsService } from './souls/souls.service';
+import { CommitsService } from './commits/commits.service';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 
 function requireString(args: Record<string, unknown>, field: string): string {
@@ -121,6 +122,7 @@ export interface McpServices {
   dependenciesService: DependenciesService;
   featuresService: FeaturesService;
   soulsService: SoulsService;
+  commitsService: CommitsService;
 }
 
 const tools = [
@@ -1172,10 +1174,54 @@ const tools = [
       required: ['projectId'],
     },
   },
+  // ─── Commits ───
+  {
+    name: 'commit_list',
+    description: 'List commits for a project (compact: sha-short, first line of message, author, date). Synced from GitHub/GitLab.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        branch: { type: 'string', description: 'Filter by branch name' },
+        author: { type: 'string', description: 'Filter by author name or email (partial match)' },
+        since: { type: 'string', description: 'Only commits after this ISO date' },
+        until: { type: 'string', description: 'Only commits before this ISO date' },
+        provider: { type: 'string', enum: ['github', 'gitlab'], description: 'Filter by provider' },
+        limit: { type: 'number', description: 'Max items (default 20)' },
+        offset: { type: 'number', description: 'Skip first N items' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'commit_search',
+    description: 'Full-text search in commit messages for a project',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        query: { type: 'string', description: 'Search query for commit messages' },
+        limit: { type: 'number', description: 'Max results (default 20)' },
+      },
+      required: ['projectId', 'query'],
+    },
+  },
+  {
+    name: 'commit_sync',
+    description: 'Trigger manual sync of commits from configured Git repositories. Fetches new commits from GitHub/GitLab.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        repoIndex: { type: 'number', description: 'Optional: sync only a specific repository by index (0-based)' },
+      },
+      required: ['projectId'],
+    },
+  },
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -1919,6 +1965,50 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const defined = ['vision', 'principles', 'conventions', 'communication', 'boundaries', 'workflow', 'quality']
             .filter((k) => soulObj[k]).length;
           result = { updated: true, sectionsDefined: `${defined}/7` };
+          break;
+        }
+        case 'commit_list': {
+          const commits = await commitsService.findByProject(requireString(a, 'projectId'), {
+            branch: optionalString(a, 'branch'),
+            author: optionalString(a, 'author'),
+            since: optionalString(a, 'since'),
+            until: optionalString(a, 'until'),
+            provider: optionalString(a, 'provider'),
+            limit: optionalNumber(a, 'limit') || 20,
+            offset: optionalNumber(a, 'offset'),
+          });
+          result = commits.map((c: any) => ({
+            sha: c.sha?.substring(0, 8),
+            message: c.message?.split('\n')[0]?.substring(0, 120),
+            author: c.authorName,
+            date: c.committedAt,
+            provider: c.provider,
+            branch: c.branch,
+          }));
+          break;
+        }
+        case 'commit_search': {
+          const found = await commitsService.search(
+            requireString(a, 'projectId'),
+            requireString(a, 'query'),
+            optionalNumber(a, 'limit'),
+          );
+          result = found.map((c: any) => ({
+            sha: c.sha?.substring(0, 8),
+            message: snippet(c.message),
+            author: c.authorName,
+            date: c.committedAt,
+            url: c.url,
+          }));
+          break;
+        }
+        case 'commit_sync': {
+          const ri = optionalNumber(a, 'repoIndex');
+          if (ri !== undefined) {
+            result = await commitsService.syncRepository(requireString(a, 'projectId'), ri);
+          } else {
+            result = await commitsService.syncAllForProject(requireString(a, 'projectId'));
+          }
           break;
         }
         default:

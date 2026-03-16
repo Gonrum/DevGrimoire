@@ -45,4 +45,17 @@ export class UpdateProjectDto {
   @IsString()
   @IsOptional()
   milestoneNumberFormat?: string;
+
+  @IsArray()
+  @IsOptional()
+  gitRepositories?: {
+    provider: 'github' | 'gitlab';
+    baseUrl?: string;
+    owner?: string;
+    repo?: string;
+    gitlabProjectId?: string;
+    defaultBranch?: string;
+    tokenSecretId?: string;
+    syncEnabled?: boolean;
+  }[];
 }

@@ -1,0 +1,106 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { GitProviderInterface, NormalizedCommit, FetchCommitsResult } from './git-provider.interface';
+import { GitRepository } from '../schemas/git-repository.schema';
+
+@Injectable()
+export class GitLabProviderService implements GitProviderInterface {
+  private readonly logger = new Logger(GitLabProviderService.name);
+
+  private getBaseUrl(config: GitRepository): string {
+    return config.baseUrl || 'https://gitlab.com';
+  }
+
+  private getProjectPath(config: GitRepository): string {
+    if (config.gitlabProjectId) {
+      return encodeURIComponent(config.gitlabProjectId);
+    }
+    // Fallback: use owner/repo as path
+    return encodeURIComponent(`${config.owner}/${config.repo}`);
+  }
+
+  private getHeaders(token: string): Record<string, string> {
+    return {
+      'PRIVATE-TOKEN': token,
+      'Content-Type': 'application/json',
+    };
+  }
+
+  async fetchCommits(
+    config: GitRepository,
+    token: string,
+    since?: Date,
+  ): Promise<FetchCommitsResult> {
+    const baseUrl = this.getBaseUrl(config);
+    const projectPath = this.getProjectPath(config);
+    const allCommits: NormalizedCommit[] = [];
+    let page = 1;
+    const perPage = 100;
+
+    while (true) {
+      const params = new URLSearchParams({
+        per_page: String(perPage),
+        page: String(page),
+      });
+      if (since) {
+        params.set('since', since.toISOString());
+      }
+      if (config.defaultBranch) {
+        params.set('ref_name', config.defaultBranch);
+      }
+
+      const url = `${baseUrl}/api/v4/projects/${projectPath}/repository/commits?${params}`;
+      const response = await fetch(url, { headers: this.getHeaders(token) });
+
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(`GitLab auth error: ${response.status}`);
+      }
+
+      if (response.status === 429) {
+        this.logger.warn('GitLab rate limit exceeded');
+        break;
+      }
+
+      if (!response.ok) {
+        throw new Error(`GitLab API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (!Array.isArray(data) || data.length === 0) break;
+
+      for (const item of data) {
+        allCommits.push({
+          sha: item.id,
+          message: item.message || '',
+          authorName: item.author_name || 'Unknown',
+          authorEmail: item.author_email,
+          committedAt: new Date(item.authored_date || item.committed_date || item.created_at),
+          url: item.web_url || '',
+          additions: item.stats?.additions,
+          deletions: item.stats?.deletions,
+        });
+      }
+
+      if (data.length < perPage) break;
+
+      // GitLab commits endpoint doesn't return X-Total, check Link header
+      const linkHeader = response.headers.get('link');
+      if (!linkHeader || !linkHeader.includes('rel="next"')) break;
+
+      page++;
+    }
+
+    return { commits: allCommits };
+  }
+
+  async validateToken(config: GitRepository, token: string): Promise<boolean> {
+    try {
+      const baseUrl = this.getBaseUrl(config);
+      const projectPath = this.getProjectPath(config);
+      const url = `${baseUrl}/api/v4/projects/${projectPath}`;
+      const response = await fetch(url, { headers: this.getHeaders(token) });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+}

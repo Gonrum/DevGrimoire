@@ -27,6 +27,7 @@ import { SchemasService } from './schemas/schemas.service';
 import { DependenciesService } from './dependencies/dependencies.service';
 import { FeaturesService } from './features/features.service';
 import { SoulsService } from './souls/souls.service';
+import { CommitsService } from './commits/commits.service';
 import { registerMcpTools, McpServices } from './mcp-tools';
 import { ApiKeysService } from './api-keys/api-keys.service';
 import { AuthService } from './auth/auth.service';
@@ -72,6 +73,7 @@ async function bootstrap() {
     dependenciesService: app.get(DependenciesService),
     featuresService: app.get(FeaturesService),
     soulsService: app.get(SoulsService),
+    commitsService: app.get(CommitsService),
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};

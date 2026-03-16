@@ -61,6 +61,7 @@ export interface Project {
   components: ProjectComponent[];
   todoNumberFormat?: string;
   milestoneNumberFormat?: string;
+  gitRepositories?: GitRepository[];
   createdAt: string;
   updatedAt: string;
 }
@@ -343,6 +344,36 @@ export interface Feature {
   updatedAt: string;
 }
 
+export interface GitRepository {
+  _id?: string;
+  provider: 'github' | 'gitlab';
+  baseUrl?: string;
+  owner?: string;
+  repo?: string;
+  gitlabProjectId?: string;
+  defaultBranch?: string;
+  tokenSecretId?: string;
+  syncEnabled?: boolean;
+  lastSyncAt?: string;
+  lastSyncSha?: string;
+}
+
+export interface CommitEntry {
+  _id: string;
+  projectId: string;
+  provider: 'github' | 'gitlab';
+  sha: string;
+  message: string;
+  authorName: string;
+  authorEmail?: string;
+  committedAt: string;
+  url?: string;
+  branch?: string;
+  additions?: number;
+  deletions?: number;
+  createdAt: string;
+}
+
 export const api = {
   projects: {
     list: (filters?: { active?: boolean; favorite?: boolean }) => {
@@ -591,6 +622,36 @@ export const api = {
       request<Dependency>(`/dependencies/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/dependencies/${id}`, { method: 'DELETE' }),
+  },
+  commits: {
+    list: (projectId: string, filters?: { branch?: string; author?: string; since?: string; until?: string; provider?: string; limit?: number; offset?: number }) => {
+      const params = new URLSearchParams({ projectId });
+      if (filters?.branch) params.set('branch', filters.branch);
+      if (filters?.author) params.set('author', filters.author);
+      if (filters?.since) params.set('since', filters.since);
+      if (filters?.until) params.set('until', filters.until);
+      if (filters?.provider) params.set('provider', filters.provider);
+      if (filters?.limit) params.set('limit', String(filters.limit));
+      if (filters?.offset) params.set('offset', String(filters.offset));
+      return request<CommitEntry[]>(`/commits?${params}`);
+    },
+    search: (projectId: string, query: string, limit?: number) => {
+      const params = new URLSearchParams({ projectId, q: query });
+      if (limit) params.set('limit', String(limit));
+      return request<CommitEntry[]>(`/commits/search?${params}`);
+    },
+    count: (projectId: string) =>
+      request<{ count: number }>(`/commits/count?projectId=${projectId}`),
+    sync: (projectId: string, repoIndex?: number) =>
+      request<{ newCommits?: number; totalNewCommits?: number }>('/commits/sync', {
+        method: 'POST',
+        body: JSON.stringify({ projectId, repoIndex }),
+      }),
+    validateToken: (data: { provider: string; baseUrl?: string; owner?: string; repo?: string; gitlabProjectId?: string; token: string }) =>
+      request<{ valid: boolean }>('/commits/validate-token', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
   souls: {
     get: (projectId: string) => request<Soul | null>(`/souls?projectId=${projectId}`),

@@ -15,11 +15,12 @@ import SchemaList from '../components/SchemaList';
 import DependencyList from '../components/DependencyList';
 import FeatureList from '../components/FeatureList';
 import SoulView from '../components/SoulView';
+import CommitList from '../components/CommitList';
 import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents';
 import Badge from '../components/ui/Badge';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
-type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features';
+type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits';
 
 export default function ProjectDetail() {
   const { t, i18n } = useTranslation();
@@ -40,7 +41,9 @@ export default function ProjectDetail() {
   const [features, setFeatures] = useState<Feature[]>([]);
   const [manuals, setManuals] = useState<Manual[]>([]);
   const [soul, setSoul] = useState<Soul | null>(null);
+  const [commitCount, setCommitCount] = useState(0);
   const [envKey, setEnvKey] = useState(0);
+  const [commitsKey, setCommitsKey] = useState(0);
   const [secretsKey, setSecretsKey] = useState(0);
   const [tab, setTab] = useState<Tab>(() => (searchParams.get('tab') as Tab) || 'todos');
   useEffect(() => {
@@ -76,8 +79,9 @@ export default function ProjectDetail() {
       api.features.list(id),
       api.manuals.list(id),
       api.souls.get(id),
+      api.commits.count(id),
     ])
-      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man, sl]) => {
+      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man, sl, cc]) => {
         if (controller.signal.aborted) return;
         setProject(p);
         setTodos(t);
@@ -94,6 +98,7 @@ export default function ProjectDetail() {
         setFeatures(feat);
         setManuals(man);
         setSoul(sl);
+        setCommitCount(cc?.count || 0);
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
@@ -124,6 +129,7 @@ export default function ProjectDetail() {
         dependency: () => api.dependencies.list(id).then(setDependencies),
         feature: () => api.features.list(id).then(setFeatures),
         soul: () => api.souls.get(id!).then(setSoul),
+        commit: () => { api.commits.count(id).then((c) => setCommitCount(c.count)); setCommitsKey((k) => k + 1); },
       };
       refetchers[event.entity]?.();
       // Cross-dependencies: todo changes affect milestone progress and vice versa
@@ -170,6 +176,7 @@ export default function ProjectDetail() {
     { key: 'research', label: t('searchTypes.research'), count: research.length },
     { key: 'environments', label: i18n.language === 'de' ? 'Umgebungen' : 'Environments', count: environments.length },
     { key: 'secrets', label: 'Secrets', count: secrets.length },
+    { key: 'commits', label: 'Commits', count: commitCount },
     { key: 'activity', label: i18n.language === 'de' ? 'Aktivität' : 'Activity', count: activities.length },
   ];
 
@@ -271,6 +278,7 @@ export default function ProjectDetail() {
       {tab === 'research' && <ResearchList entries={research} />}
       {tab === 'environments' && <EnvironmentList key={envKey} projectId={id!} />}
       {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id!} />}
+      {tab === 'commits' && <CommitList key={commitsKey} projectId={id!} gitRepositories={project.gitRepositories} />}
       {tab === 'activity' && <ActivityList activities={activities} />}
     </div>
   );

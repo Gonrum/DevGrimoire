@@ -58,6 +58,14 @@ export class ProjectsService {
     return project;
   }
 
+  async updateRaw(id: string, update: Record<string, unknown>): Promise<ProjectDocument> {
+    const project = await this.projectModel
+      .findByIdAndUpdate(id, update, { new: true })
+      .exec();
+    if (!project) throw new NotFoundException(`Project ${id} not found`);
+    return project;
+  }
+
   async remove(id: string): Promise<void> {
     const result = await this.projectModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException(`Project ${id} not found`);

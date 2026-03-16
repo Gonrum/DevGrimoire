@@ -20,6 +20,7 @@ import { SchemasService } from './schemas/schemas.service';
 import { DependenciesService } from './dependencies/dependencies.service';
 import { FeaturesService } from './features/features.service';
 import { SoulsService } from './souls/souls.service';
+import { CommitsService } from './commits/commits.service';
 import { registerMcpTools } from './mcp-tools';
 
 async function bootstrap() {
@@ -51,6 +52,7 @@ async function bootstrap() {
     dependenciesService: app.get(DependenciesService),
     featuresService: app.get(FeaturesService),
     soulsService: app.get(SoulsService),
+    commitsService: app.get(CommitsService),
   });
 
   const transport = new StdioServerTransport();
