@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 
-type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'api' | 'architecture';
+type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'api' | 'git' | 'architecture';
 
 export default function Docs() {
   const [active, setActive] = useState<DocsSection>('overview');
@@ -14,6 +14,7 @@ export default function Docs() {
     { key: 'auth', label: t('docs.navAuth') },
     { key: 'mcp', label: t('docs.navMcp') },
     { key: 'api', label: t('docs.navApi') },
+    { key: 'git', label: 'Git Integration' },
     { key: 'architecture', label: t('docs.navArchitecture') },
   ];
 
@@ -67,6 +68,7 @@ export default function Docs() {
         {active === 'auth' && <AuthSection />}
         {active === 'mcp' && <McpSection />}
         {active === 'api' && <ApiSection />}
+        {active === 'git' && <GitIntegrationSection />}
         {active === 'architecture' && <ArchitectureSection />}
       </div>
     </div>
@@ -788,6 +790,135 @@ function ApiSection() {
   );
 }
 
+function GitIntegrationSection() {
+  const isDE = i18n.language === 'de';
+  return (
+    <>
+      <Section title={isDE ? 'Überblick' : 'Overview'}>
+        <p className="text-sm text-gray-400 leading-relaxed">
+          {isDE
+            ? 'DevGrimoire kann Commits aus GitHub- und GitLab-Repositories automatisch synchronisieren. Pro Projekt können mehrere Repositories angebunden werden. Tokens werden verschlüsselt gespeichert (AES-256-GCM).'
+            : 'DevGrimoire can automatically sync commits from GitHub and GitLab repositories. Multiple repositories can be connected per project. Tokens are stored encrypted (AES-256-GCM).'}
+        </p>
+      </Section>
+
+      <Section title={isDE ? 'Repository verbinden' : 'Connect Repository'}>
+        <Step n={1} title={isDE ? 'Projekt-Einstellungen öffnen' : 'Open project settings'}>
+          <p className="text-sm text-gray-400">{isDE ? 'Klicke auf "Settings" im Projekt-Header.' : 'Click "Settings" in the project header.'}</p>
+        </Step>
+        <Step n={2} title={isDE ? 'Zum Abschnitt "Git Repositories" scrollen' : 'Scroll to "Git Repositories" section'}>
+          <p className="text-sm text-gray-400">{isDE ? 'Klicke auf "+ Repository hinzufügen".' : 'Click "+ Repository hinzufügen" (Add repository).'}</p>
+        </Step>
+        <Step n={3} title={isDE ? 'Provider & URL eingeben' : 'Enter provider & URL'}>
+          <p className="text-sm text-gray-400">
+            {isDE ? 'Wähle GitHub oder GitLab und gib die Repository-URL ein:' : 'Choose GitHub or GitLab and enter the repository URL:'}
+          </p>
+          <Code>{`# GitHub
+https://github.com/owner/repo
+
+# GitLab (gitlab.com)
+https://gitlab.com/group/project
+
+# GitLab (Self-Hosted)
+https://gitlab.example.com/group/project
+→ Base URL: https://gitlab.example.com`}</Code>
+        </Step>
+        <Step n={4} title={isDE ? 'Access Token eingeben' : 'Enter access token'}>
+          <div className="space-y-2 text-sm text-gray-400">
+            <p><strong className="text-gray-300">GitHub:</strong> {isDE ? 'Fine-Grained PAT mit "Contents: Read" Berechtigung' : 'Fine-Grained PAT with "Contents: Read" permission'}</p>
+            <p><strong className="text-gray-300">GitLab:</strong> {isDE ? 'Personal Access Token mit Scope' : 'Personal Access Token with scope'} <Mono>read_api</Mono></p>
+          </div>
+        </Step>
+        <Step n={5} title={isDE ? 'Verbinden & Sync' : 'Connect & Sync'}>
+          <p className="text-sm text-gray-400">{isDE ? 'Der Token wird validiert, verschlüsselt gespeichert und der erste Sync kann über den Commits-Tab gestartet werden.' : 'The token is validated, stored encrypted, and the first sync can be started from the Commits tab.'}</p>
+        </Step>
+      </Section>
+
+      <Section title={isDE ? 'Sync-Verhalten' : 'Sync Behavior'}>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Erster Sync' : 'Initial sync'} value={isDE ? 'Lädt alle Commits des Default-Branches (paginiert, 100/Seite)' : 'Fetches all commits from default branch (paginated, 100/page)'} />
+          <InfoRow label={isDE ? 'Folge-Syncs' : 'Incremental sync'} value={isDE ? 'Nur neue Commits seit dem letzten Sync (since-Parameter)' : 'Only new commits since last sync (since parameter)'} />
+          <InfoRow label="GitHub ETag" value={isDE ? 'Conditional Requests — bei 304 kein Rate-Limit-Verbrauch' : 'Conditional requests — 304 costs zero rate limit'} />
+          <InfoRow label={isDE ? 'Duplikat-Schutz' : 'Deduplication'} value={isDE ? 'Unique Index auf projectId + SHA' : 'Unique index on projectId + SHA'} />
+        </div>
+      </Section>
+
+      <Section title="Rate Limits">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-gray-500 border-b border-gray-800">
+              <th className="py-2 pr-4">Provider</th>
+              <th className="py-2 pr-4">{isDE ? 'Authentifiziert' : 'Authenticated'}</th>
+              <th className="py-2">{isDE ? 'Unauthentifiziert' : 'Unauthenticated'}</th>
+            </tr>
+          </thead>
+          <tbody className="text-gray-400">
+            <tr className="border-b border-gray-800/50">
+              <td className="py-2 pr-4 text-gray-300">GitHub</td>
+              <td className="py-2 pr-4">5.000/h</td>
+              <td className="py-2">60/h</td>
+            </tr>
+            <tr className="border-b border-gray-800/50">
+              <td className="py-2 pr-4 text-gray-300">GitLab (gitlab.com)</td>
+              <td className="py-2 pr-4">7.200/h</td>
+              <td className="py-2">3.600/h</td>
+            </tr>
+            <tr>
+              <td className="py-2 pr-4 text-gray-300">GitLab (Self-Hosted)</td>
+              <td className="py-2 pr-4" colSpan={2}>{isDE ? 'Admin-konfigurierbar' : 'Admin-configurable'}</td>
+            </tr>
+          </tbody>
+        </table>
+      </Section>
+
+      <Section title={isDE ? 'MCP-Tools' : 'MCP Tools'}>
+        <ToolGroup title="Commits" tools={[
+          { name: 'commit_list', desc: isDE ? 'Commits auflisten (Filter: branch, author, since, until, provider)' : 'List commits (filter: branch, author, since, until, provider)' },
+          { name: 'commit_search', desc: isDE ? 'Volltextsuche in Commit-Messages' : 'Full-text search in commit messages' },
+          { name: 'commit_sync', desc: isDE ? 'Manuellen Sync triggern' : 'Trigger manual sync' },
+        ]} />
+      </Section>
+
+      <Section title={isDE ? 'REST API Endpoints' : 'REST API Endpoints'}>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-gray-500 border-b border-gray-800">
+              <th className="py-2 pr-4">Method</th>
+              <th className="py-2 pr-4">Path</th>
+              <th className="py-2">{isDE ? 'Beschreibung' : 'Description'}</th>
+            </tr>
+          </thead>
+          <tbody className="text-gray-400">
+            <Endpoint method="GET" path="/api/commits" desc={isDE ? 'Commits auflisten (projectId, branch, author, since, until)' : 'List commits (projectId, branch, author, since, until)'} />
+            <Endpoint method="GET" path="/api/commits/search" desc={isDE ? 'Volltextsuche (q, projectId)' : 'Full-text search (q, projectId)'} />
+            <Endpoint method="GET" path="/api/commits/count" desc={isDE ? 'Anzahl Commits (projectId)' : 'Commit count (projectId)'} />
+            <Endpoint method="GET" path="/api/commits/:id" desc={isDE ? 'Einzelnen Commit laden' : 'Get single commit'} />
+            <Endpoint method="POST" path="/api/commits/sync" desc={isDE ? 'Sync triggern (projectId, repoIndex?)' : 'Trigger sync (projectId, repoIndex?)'} />
+            <Endpoint method="POST" path="/api/commits/validate-token" desc={isDE ? 'Token validieren' : 'Validate token'} />
+          </tbody>
+        </table>
+      </Section>
+
+      <Section title={isDE ? 'Fehlerbehebung' : 'Troubleshooting'}>
+        <div className="space-y-3 text-sm">
+          <div>
+            <p className="text-gray-300 font-medium">{isDE ? 'Token-Validierung fehlgeschlagen' : 'Token validation failed'}</p>
+            <p className="text-gray-500">{isDE ? 'Token-Berechtigungen prüfen: GitHub → Contents:Read, GitLab → read_api' : 'Check token permissions: GitHub → Contents:Read, GitLab → read_api'}</p>
+          </div>
+          <div>
+            <p className="text-gray-300 font-medium">{isDE ? 'Keine Commits nach Sync' : 'No commits after sync'}</p>
+            <p className="text-gray-500">{isDE ? 'Default Branch in den Repository-Settings prüfen (main vs master)' : 'Check default branch in repository settings (main vs master)'}</p>
+          </div>
+          <div>
+            <p className="text-gray-300 font-medium">{isDE ? 'GitLab Self-Hosted: 404' : 'GitLab self-hosted: 404'}</p>
+            <p className="text-gray-500">{isDE ? 'Base URL muss das Protokoll enthalten (https://gitlab.example.com)' : 'Base URL must include the protocol (https://gitlab.example.com)'}</p>
+          </div>
+        </div>
+      </Section>
+    </>
+  );
+}
+
 function ArchitectureSection() {
   const isDE = i18n.language === 'de';
   return (
@@ -825,6 +956,7 @@ function ArchitectureSection() {
           <ModuleItem name="activities" desc="Activity Feed" />
           <ModuleItem name="notifications" desc={isDE ? 'In-App Benachrichtigungen' : 'In-app notifications'} />
           <ModuleItem name="push" desc="Web Push (VAPID)" />
+          <ModuleItem name="commits" desc={isDE ? 'Git-Commit-Sync (GitHub/GitLab)' : 'Git commit sync (GitHub/GitLab)'} />
           <ModuleItem name="events" desc={isDE ? 'SSE Live-Updates' : 'SSE live updates'} />
           <ModuleItem name="settings" desc={isDE ? 'Key-Value Einstellungen' : 'Key-value settings'} />
           <ModuleItem name="common" desc="Shared Pipes, EncryptionService" />
