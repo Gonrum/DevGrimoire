@@ -2,6 +2,8 @@ import { Controller, Post, Body, HttpCode, HttpStatus, Get, Patch, Req } from '@
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { Public } from './decorators/public.decorator';
 
 @Controller('auth')
@@ -40,14 +42,14 @@ export class AuthController {
   }
 
   @Patch('profile')
-  async updateProfile(@Req() req: any, @Body() body: { username?: string; email?: string }) {
-    return this.authService.updateProfile(req.user.userId, body);
+  async updateProfile(@Req() req: any, @Body() dto: UpdateProfileDto) {
+    return this.authService.updateProfile(req.user.userId, dto);
   }
 
   @Post('change-password')
   @HttpCode(HttpStatus.OK)
-  async changePassword(@Req() req: any, @Body() body: { oldPassword: string; newPassword: string }) {
-    await this.authService.changePassword(req.user.userId, body.oldPassword, body.newPassword);
+  async changePassword(@Req() req: any, @Body() dto: ChangePasswordDto) {
+    await this.authService.changePassword(req.user.userId, dto.oldPassword, dto.newPassword);
     return { message: 'Passwort geändert' };
   }
 }

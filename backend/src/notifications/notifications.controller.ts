@@ -11,7 +11,7 @@ export class NotificationsController {
     @Query('unreadOnly') unreadOnly?: string,
   ) {
     return this.notificationsService.findAll(
-      limit ? parseInt(limit, 10) : undefined,
+      Math.min(limit ? parseInt(limit, 10) : 50, 200),
       unreadOnly === 'true',
     );
   }

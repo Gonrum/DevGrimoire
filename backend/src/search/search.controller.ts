@@ -12,7 +12,7 @@ export class SearchController {
     @Query('limit') limit?: string,
   ) {
     if (!query || !query.trim()) return [];
-    const parsedLimit = limit ? parseInt(limit, 10) : 20;
+    const parsedLimit = Math.min(limit ? parseInt(limit, 10) : 20, 100);
     return this.searchService.search(query.trim(), projectId, parsedLimit);
   }
 }

@@ -155,9 +155,10 @@ export class CommitsService {
     const filter: Record<string, unknown> = { projectId };
     if (options?.branch) filter.branch = options.branch;
     if (options?.author) {
+      const escaped = options.author.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter.$or = [
-        { authorName: { $regex: options.author, $options: 'i' } },
-        { authorEmail: { $regex: options.author, $options: 'i' } },
+        { authorName: { $regex: escaped, $options: 'i' } },
+        { authorEmail: { $regex: escaped, $options: 'i' } },
       ];
     }
     if (options?.provider) filter.provider = options.provider;

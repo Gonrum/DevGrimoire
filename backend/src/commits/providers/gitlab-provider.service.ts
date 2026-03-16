@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { GitProviderInterface, NormalizedCommit, FetchCommitsResult } from './git-provider.interface';
 import { GitRepository } from '../schemas/git-repository.schema';
+import { validateGitBaseUrl } from './url-validator';
 
 @Injectable()
 export class GitLabProviderService implements GitProviderInterface {
@@ -30,6 +31,7 @@ export class GitLabProviderService implements GitProviderInterface {
     token: string,
     since?: Date,
   ): Promise<FetchCommitsResult> {
+    validateGitBaseUrl(config.baseUrl);
     const baseUrl = this.getBaseUrl(config);
     const projectPath = this.getProjectPath(config);
     const allCommits: NormalizedCommit[] = [];
@@ -94,6 +96,7 @@ export class GitLabProviderService implements GitProviderInterface {
 
   async validateToken(config: GitRepository, token: string): Promise<boolean> {
     try {
+      validateGitBaseUrl(config.baseUrl);
       const baseUrl = this.getBaseUrl(config);
       const projectPath = this.getProjectPath(config);
       const url = `${baseUrl}/api/v4/projects/${projectPath}`;

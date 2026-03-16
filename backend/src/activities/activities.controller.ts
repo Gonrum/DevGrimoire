@@ -12,7 +12,7 @@ export class ActivitiesController {
   ) {
     return this.activitiesService.findByProject(
       projectId,
-      limit ? parseInt(limit, 10) : undefined,
+      Math.min(limit ? parseInt(limit, 10) : 100, 200),
     );
   }
 }

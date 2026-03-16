@@ -34,7 +34,7 @@ export class CommitsController {
       since,
       until,
       provider,
-      limit: limit ? parseInt(limit, 10) : undefined,
+      limit: limit ? Math.min(parseInt(limit, 10), 200) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
     });
   }

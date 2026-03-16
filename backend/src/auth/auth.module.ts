@@ -17,7 +17,14 @@ import { ApiKeysModule } from '../api-keys/api-keys.module';
   imports: [
     PassportModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'dev-secret-do-not-use-in-production',
+      secret: (() => {
+        const secret = process.env.JWT_SECRET;
+        const authEnabled = !!(process.env.AUTH_USERNAME && process.env.AUTH_PASSWORD);
+        if (authEnabled && !secret) {
+          throw new Error('SECURITY: JWT_SECRET must be set when authentication is enabled (AUTH_USERNAME/AUTH_PASSWORD are set)');
+        }
+        return secret || 'dev-only-auth-disabled';
+      })(),
       signOptions: { expiresIn: '15m' },
     }),
     MongooseModule.forFeature([

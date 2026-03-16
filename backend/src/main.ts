@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { randomUUID } from 'node:crypto';
+import helmet from 'helmet';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { json } = require('express');
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -216,6 +217,10 @@ async function bootstrap() {
   // NestJS REST API
   // =========================================================================
   app.setGlobalPrefix('api');
+  app.use(helmet({
+    contentSecurityPolicy: false, // Handled by nginx/frontend
+    crossOriginEmbedderPolicy: false, // Allow SSE
+  }));
   app.enableCors({
     origin: process.env.CORS_ORIGIN || 'http://localhost:8080',
   });

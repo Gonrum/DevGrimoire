@@ -15,6 +15,8 @@ import { AuthService } from './auth.service';
 import { Roles } from './decorators/roles.decorator';
 import { RolesGuard } from './guards/roles.guard';
 import { UserRole } from './schemas/user.schema';
+import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @Controller('users')
 @UseGuards(RolesGuard)
@@ -36,16 +38,16 @@ export class UsersController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  create(@Body() body: { username: string; email?: string; password: string; role?: UserRole }) {
-    return this.authService.createUser(body);
+  create(@Body() dto: CreateUserDto) {
+    return this.authService.createUser(dto);
   }
 
   @Patch(':id')
   async update(
     @Param('id') id: string,
-    @Body() body: { username?: string; email?: string; role?: UserRole; active?: boolean },
+    @Body() dto: UpdateUserDto,
   ) {
-    const user = await this.authService.updateUser(id, body);
+    const user = await this.authService.updateUser(id, dto);
     if (!user) throw new NotFoundException('User not found');
     return user;
   }
