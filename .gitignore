@@ -7,3 +7,4 @@ dist/
 .claude/
 CLAUDE.md
 mongo-keyfile
+data/

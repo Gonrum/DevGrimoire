@@ -22,6 +22,7 @@ import { DependenciesService } from './dependencies/dependencies.service';
 import { FeaturesService } from './features/features.service';
 import { SoulsService } from './souls/souls.service';
 import { CommitsService } from './commits/commits.service';
+import { RagService } from './rag/rag.service';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 
 function requireString(args: Record<string, unknown>, field: string): string {
@@ -123,6 +124,7 @@ export interface McpServices {
   featuresService: FeaturesService;
   soulsService: SoulsService;
   commitsService: CommitsService;
+  ragService: RagService;
 }
 
 const tools = [
@@ -1223,10 +1225,42 @@ const tools = [
       required: ['projectId'],
     },
   },
+  {
+    name: 'rag_search',
+    description: 'Semantic search across all project knowledge (knowledge, research, manuals, changelogs, todos, sessions). Uses vector embeddings for meaning-based search instead of keyword matching. Requires Ollama running locally.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'Natural language search query' },
+        projectId: { type: 'string', description: 'Filter by project ID' },
+        entity: { type: 'string', description: 'Filter by entity type: knowledge, research, manual, changelog, todo, session' },
+        limit: { type: 'number', description: 'Max results (default 10)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'rag_reindex',
+    description: 'Rebuild the RAG vector index. Run this after initial setup or to fix sync issues. Can reindex all projects or a specific one.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Reindex only this project (omit for full reindex)' },
+      },
+    },
+  },
+  {
+    name: 'rag_status',
+    description: 'Get RAG vector index statistics: readiness, embedding model, document count per entity type.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -2019,6 +2053,28 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           } else {
             result = await commitsService.syncAllForProject(requireString(a, 'projectId'));
           }
+          break;
+        }
+        case 'rag_search': {
+          const ragResults = await ragService.search(
+            requireString(a, 'query'),
+            optionalString(a, 'projectId'),
+            optionalString(a, 'entity'),
+            optionalNumber(a, 'limit') || 10,
+          );
+          result = ragResults.map((r) => ({
+            ...r,
+            content: snippet(r.content),
+            score: Math.round(r.score * 1000) / 1000,
+          }));
+          break;
+        }
+        case 'rag_reindex': {
+          result = await ragService.reindex(optionalString(a, 'projectId'));
+          break;
+        }
+        case 'rag_status': {
+          result = await ragService.status();
           break;
         }
         default:

@@ -40,6 +40,8 @@ services:
     restart: unless-stopped
     ports:
       - "3200:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       MONGODB_URI: ${MONGODB_URI}
       PORT: 3000
@@ -51,15 +53,24 @@ services:
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+      RAG_EMBEDDING_PROVIDER: ${RAG_EMBEDDING_PROVIDER:-ollama}
+      RAG_EMBEDDING_URL: ${RAG_EMBEDDING_URL:-}
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-nomic-embed-text}
+      RAG_FALLBACK_PROVIDER: ${RAG_FALLBACK_PROVIDER:-}
+      RAG_FALLBACK_URL: ${RAG_FALLBACK_URL:-}
+      RAG_FALLBACK_MODEL: ${RAG_FALLBACK_MODEL:-}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+    volumes:
+      - lancedb_data:/app/data/lancedb
     depends_on:
       mongodb-init:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/auth/status || exit 1"]
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/auth/status').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 30s
 
   frontend:
     build:
@@ -76,3 +87,4 @@ services:
 volumes:
   mongodb_data:
   mongodb_keyfile:
+  lancedb_data:

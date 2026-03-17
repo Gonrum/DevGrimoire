@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 
-type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'api' | 'git' | 'architecture';
+type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'rag' | 'api' | 'git' | 'architecture';
 
 export default function Docs() {
   const [active, setActive] = useState<DocsSection>('overview');
@@ -13,6 +13,7 @@ export default function Docs() {
     { key: 'setup', label: t('docs.navSetup') },
     { key: 'auth', label: t('docs.navAuth') },
     { key: 'mcp', label: t('docs.navMcp') },
+    { key: 'rag', label: 'RAG' },
     { key: 'api', label: t('docs.navApi') },
     { key: 'git', label: 'Git Integration' },
     { key: 'architecture', label: t('docs.navArchitecture') },
@@ -67,6 +68,7 @@ export default function Docs() {
         {active === 'setup' && <SetupSection />}
         {active === 'auth' && <AuthSection />}
         {active === 'mcp' && <McpSection />}
+        {active === 'rag' && <RagSection />}
         {active === 'api' && <ApiSection />}
         {active === 'git' && <GitIntegrationSection />}
         {active === 'architecture' && <ArchitectureSection />}
@@ -919,6 +921,125 @@ https://gitlab.example.com/group/project
   );
 }
 
+function RagSection() {
+  const isDE = i18n.language === 'de';
+  return (
+    <>
+      <Section title={isDE ? 'Überblick' : 'Overview'}>
+        <p className="text-sm text-gray-400 leading-relaxed">
+          {isDE
+            ? 'DevGrimoire enthält ein integriertes RAG-System (Retrieval-Augmented Generation) für semantische Suche über alle Projektdaten. Anders als Keyword-Suche versteht RAG Bedeutung — eine Suche nach "wie deploye ich das" findet auch Einträge über "Docker Compose Setup" oder "CI/CD Pipeline".'
+            : 'DevGrimoire includes a built-in RAG system (Retrieval-Augmented Generation) for semantic search across all project data. Unlike keyword search, RAG understands meaning — searching for "how do I deploy" also finds entries about "Docker Compose setup" or "CI/CD pipeline".'}
+        </p>
+      </Section>
+
+      <Section title={isDE ? 'Wie es funktioniert' : 'How It Works'}>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label="Vector DB" value={isDE ? 'LanceDB (embedded, kein extra Service nötig)' : 'LanceDB (embedded, no extra service needed)'} />
+          <InfoRow label="Embeddings" value={isDE ? 'Ollama (CPU) oder OpenAI-kompatible API wie LM Studio (GPU)' : 'Ollama (CPU) or OpenAI-compatible API like LM Studio (GPU)'} />
+          <InfoRow label={isDE ? 'Indizierte Entitäten' : 'Indexed Entities'} value="Knowledge, Research, Manuals, Changelogs, Todos, Sessions" />
+          <InfoRow label="Auto-Sync" value={isDE ? 'Neue/geänderte/gelöschte Dokumente werden automatisch via Change Streams indexiert' : 'New/updated/deleted documents are automatically indexed via Change Streams'} />
+          <InfoRow label="Fallback" value={isDE ? 'Automatischer Fallback von Primary (GPU) auf Secondary (CPU) wenn nicht erreichbar' : 'Automatic fallback from primary (GPU) to secondary (CPU) when unavailable'} />
+        </div>
+      </Section>
+
+      <Section title="Setup">
+        <Step n={1} title={isDE ? 'Embedding-Modell installieren' : 'Install embedding model'}>
+          <Code>{`# Option A: Ollama (CPU)
+ollama pull nomic-embed-text-v2-moe
+
+# Option B: LM Studio (GPU)
+# Load nomic-embed-text-v2-moe via LM Studio UI`}</Code>
+        </Step>
+        <Step n={2} title={isDE ? 'In .env konfigurieren' : 'Configure in .env'}>
+          <Code>{`# Ollama (default)
+RAG_EMBEDDING_PROVIDER=ollama
+RAG_EMBEDDING_MODEL=nomic-embed-text
+
+# Or: LM Studio / OpenAI-compatible (GPU)
+RAG_EMBEDDING_PROVIDER=openai-compatible
+RAG_EMBEDDING_URL=http://<gpu-host>:1234
+RAG_EMBEDDING_MODEL=text-embedding-nomic-embed-text-v2-moe
+
+# Optional: automatic fallback
+RAG_FALLBACK_PROVIDER=ollama
+RAG_FALLBACK_URL=http://localhost:11434
+RAG_FALLBACK_MODEL=nomic-embed-text-v2-moe`}</Code>
+        </Step>
+        <Step n={3} title={isDE ? 'Initialen Index aufbauen' : 'Build initial index'}>
+          <p className="text-sm text-gray-400">
+            {isDE
+              ? 'Nach dem Start einmal den Index über das MCP-Tool befüllen:'
+              : 'After startup, build the index once via the MCP tool:'}
+          </p>
+          <Code>rag_reindex</Code>
+        </Step>
+      </Section>
+
+      <Section title="MCP Tools">
+        <ToolGroup title="RAG" tools={[
+          { name: 'rag_search', desc: isDE ? 'Semantische Suche (query, projectId?, entity?, limit?)' : 'Semantic search (query, projectId?, entity?, limit?)' },
+          { name: 'rag_reindex', desc: isDE ? 'Vollen Index neu aufbauen (projectId? für einzelnes Projekt)' : 'Rebuild full index (projectId? for single project)' },
+          { name: 'rag_status', desc: isDE ? 'Index-Statistiken, aktiver Endpoint, Fallback-Konfiguration' : 'Index statistics, active endpoint, fallback config' },
+        ]} />
+      </Section>
+
+      <Section title={isDE ? 'RAG vs. Keyword-Suche' : 'RAG vs. Keyword Search'}>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-gray-500 border-b border-gray-800">
+              <th className="py-2 pr-4"></th>
+              <th className="py-2 pr-4"><Mono>rag_search</Mono></th>
+              <th className="py-2"><Mono>knowledge_search</Mono></th>
+            </tr>
+          </thead>
+          <tbody className="text-gray-400">
+            <tr className="border-b border-gray-800/50">
+              <td className="py-2 pr-4 text-gray-300">{isDE ? 'Methode' : 'Method'}</td>
+              <td className="py-2 pr-4">{isDE ? 'Vektor-Ähnlichkeit' : 'Vector similarity'}</td>
+              <td className="py-2">{isDE ? 'Keyword-Match' : 'Keyword match'}</td>
+            </tr>
+            <tr className="border-b border-gray-800/50">
+              <td className="py-2 pr-4 text-gray-300">{isDE ? 'Entitäten' : 'Entities'}</td>
+              <td className="py-2 pr-4">{isDE ? 'Alle (Knowledge, Research, Manual, Changelog, Todo, Session)' : 'All (Knowledge, Research, Manual, Changelog, Todo, Session)'}</td>
+              <td className="py-2">{isDE ? 'Nur Knowledge' : 'Knowledge only'}</td>
+            </tr>
+            <tr className="border-b border-gray-800/50">
+              <td className="py-2 pr-4 text-gray-300">{isDE ? 'Ideal für' : 'Best for'}</td>
+              <td className="py-2 pr-4">{isDE ? 'Explorative Fragen' : 'Exploratory questions'}</td>
+              <td className="py-2">{isDE ? 'Gezielte Keywords' : 'Targeted keywords'}</td>
+            </tr>
+            <tr>
+              <td className="py-2 pr-4 text-gray-300">{isDE ? 'Voraussetzung' : 'Requires'}</td>
+              <td className="py-2 pr-4">Ollama / LM Studio</td>
+              <td className="py-2">MongoDB</td>
+            </tr>
+          </tbody>
+        </table>
+      </Section>
+
+      <Section title={isDE ? 'Konfiguration (.env)' : 'Configuration (.env)'}>
+        <div className="space-y-1">
+          <EnvVar name="RAG_EMBEDDING_PROVIDER" desc={isDE ? '"ollama" oder "openai-compatible" (Default: ollama)' : '"ollama" or "openai-compatible" (default: ollama)'} />
+          <EnvVar name="RAG_EMBEDDING_URL" desc={isDE ? 'URL des Embedding-Servers' : 'Embedding server URL'} />
+          <EnvVar name="RAG_EMBEDDING_MODEL" desc={isDE ? 'Modellname (Default: nomic-embed-text)' : 'Model name (default: nomic-embed-text)'} />
+          <EnvVar name="RAG_FALLBACK_PROVIDER" desc={isDE ? 'Fallback-Provider (optional)' : 'Fallback provider (optional)'} />
+          <EnvVar name="RAG_FALLBACK_URL" desc={isDE ? 'Fallback-Server-URL (optional)' : 'Fallback server URL (optional)'} />
+          <EnvVar name="RAG_FALLBACK_MODEL" desc={isDE ? 'Fallback-Modellname (optional)' : 'Fallback model name (optional)'} />
+          <EnvVar name="RAG_MAX_INPUT_CHARS" desc={isDE ? 'Max. Zeichen pro Embedding (Default: 1800)' : 'Max chars per embedding (default: 1800)'} />
+          <EnvVar name="OLLAMA_URL" desc={isDE ? 'Ollama-URL (Default: http://localhost:11434)' : 'Ollama URL (default: http://localhost:11434)'} />
+        </div>
+      </Section>
+
+      <Hint>
+        {isDE
+          ? 'RAG ist optional. Wenn kein Embedding-Server verfügbar ist, startet die App normal — die RAG-Features sind dann einfach deaktiviert.'
+          : 'RAG is optional. If no embedding server is available, the app starts normally — RAG features are simply disabled.'}
+      </Hint>
+    </>
+  );
+}
+
 function ArchitectureSection() {
   const isDE = i18n.language === 'de';
   return (
@@ -956,6 +1077,7 @@ function ArchitectureSection() {
           <ModuleItem name="activities" desc="Activity Feed" />
           <ModuleItem name="notifications" desc={isDE ? 'In-App Benachrichtigungen' : 'In-app notifications'} />
           <ModuleItem name="push" desc="Web Push (VAPID)" />
+          <ModuleItem name="rag" desc={isDE ? 'Semantische Suche (LanceDB + Embeddings)' : 'Semantic search (LanceDB + embeddings)'} />
           <ModuleItem name="commits" desc={isDE ? 'Git-Commit-Sync (GitHub/GitLab)' : 'Git commit sync (GitHub/GitLab)'} />
           <ModuleItem name="events" desc={isDE ? 'SSE Live-Updates' : 'SSE live updates'} />
           <ModuleItem name="settings" desc={isDE ? 'Key-Value Einstellungen' : 'Key-value settings'} />
@@ -965,7 +1087,7 @@ function ArchitectureSection() {
 
       <Section title={isDE ? 'Technologie-Stack' : 'Technology Stack'}>
         <div className="space-y-2 text-sm text-gray-400">
-          <InfoRow label="Backend" value="NestJS, Mongoose, MongoDB (Replica Set)" />
+          <InfoRow label="Backend" value="NestJS, Mongoose, MongoDB (Replica Set), LanceDB" />
           <InfoRow label="Frontend" value="React, Vite, TailwindCSS" />
           <InfoRow label="MCP" value="@modelcontextprotocol/sdk (stdio + HTTP/SSE)" />
           <InfoRow label="Auth" value={isDE ? 'Passport JWT, bcrypt, Token-Rotation' : 'Passport JWT, bcrypt, token rotation'} />

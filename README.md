@@ -27,7 +27,8 @@ DevGrimoire gives Claude (the AI assistant) a persistent memory for your project
 
 ## Features
 
-- **70 MCP Tools** -- Claude can manage projects, todos, milestones, sessions, knowledge, changelogs, manuals, research, schemas, dependencies, features, environments, and secrets
+- **73 MCP Tools** -- Claude can manage projects, todos, milestones, sessions, knowledge, changelogs, manuals, research, schemas, dependencies, features, environments, and secrets
+- **RAG Semantic Search** -- LanceDB vector database with Ollama/LM Studio embeddings for meaning-based search across all entity types
 - **REST API** -- 98 endpoints for all resources
 - **React Dashboard** -- Dark-mode UI with Kanban board, milestone tracking, activity feed, Markdown editor, and more
 - **Real-Time Updates** -- SSE via MongoDB Change Streams + EventEmitter
@@ -41,7 +42,7 @@ DevGrimoire gives Claude (the AI assistant) a persistent memory for your project
 - **Two MCP Transports** -- Local stdio mode or remote via HTTP/SSE
 - **Docker Compose** -- One command for the entire stack
 
-## MCP Tools (70)
+## MCP Tools (73)
 
 | Area | Tools | Description |
 |------|-------|-------------|
@@ -58,6 +59,7 @@ DevGrimoire gives Claude (the AI assistant) a persistent memory for your project
 | **Dependencies** | `dependency_add`, `_list`, `_get`, `_update`, `_delete`, `_scan` | Package dependencies with bulk scan from package.json etc. |
 | **Environments** | `environment_create`, `_list`, `_get`, `_update`, `_delete`, `_export` | Key-value variables per environment, .env export |
 | **Secrets** | `secret_set`, `_get`, `_list`, `_delete` | AES-256-GCM encrypted values |
+| **RAG** | `rag_search`, `rag_reindex`, `rag_status` | Semantic vector search across all entities |
 | **System** | `system_instructions_get`, `_set`, `notify_user` | Agent instructions, push notifications |
 
 ## Quick Start
@@ -118,6 +120,13 @@ Environment variables in `.env`:
 | `VAPID_PRIVATE_KEY` | Web Push private key | For Push |
 | `MONGODB_STANDALONE` | `true` for standalone mode | No |
 | `NODE_HEAP_SIZE` | Node.js heap in MB (default: 512) | No |
+| `RAG_EMBEDDING_PROVIDER` | `ollama` or `openai-compatible` (default: `ollama`) | No |
+| `RAG_EMBEDDING_URL` | Embedding server URL | For RAG |
+| `RAG_EMBEDDING_MODEL` | Model name (default: `nomic-embed-text`) | For RAG |
+| `RAG_FALLBACK_PROVIDER` | Fallback provider type | No |
+| `RAG_FALLBACK_URL` | Fallback server URL | No |
+| `RAG_FALLBACK_MODEL` | Fallback model name | No |
+| `OLLAMA_URL` | Ollama URL (default: `http://localhost:11434`) | No |
 
 \* Without `AUTH_USERNAME`/`AUTH_PASSWORD`, authentication is disabled.
 
@@ -204,6 +213,59 @@ Secrets are stored AES-256-GCM encrypted in MongoDB:
 - Decryption only via `GET /api/secrets/:id` or `secret_get` MCP tool
 - Without `SECRETS_ENCRYPTION_KEY`, the secrets feature is disabled
 
+## RAG (Semantic Search)
+
+DevGrimoire includes a built-in RAG (Retrieval-Augmented Generation) system for semantic search across all project data. Unlike keyword search, RAG understands meaning -- searching for "how do I deploy" also finds entries about "Docker Compose setup" or "CI/CD pipeline".
+
+### How it works
+
+- **LanceDB** (embedded, no extra service) stores vector embeddings on disk
+- **Ollama** or any **OpenAI-compatible API** (LM Studio, vLLM, etc.) generates embeddings
+- **Indexed entities**: Knowledge, Research, Manuals, Changelogs, Todos, Sessions
+- **Auto-sync**: New/updated/deleted documents are automatically indexed via Change Streams
+
+### Setup
+
+1. Install an embedding model:
+   ```bash
+   # Option A: Ollama (CPU)
+   ollama pull nomic-embed-text
+
+   # Option B: LM Studio (GPU) -- load nomic-embed-text-v2-moe via UI
+   ```
+
+2. Configure in `.env`:
+   ```env
+   # Ollama (default)
+   RAG_EMBEDDING_PROVIDER=ollama
+   RAG_EMBEDDING_MODEL=nomic-embed-text
+
+   # Or: LM Studio / OpenAI-compatible (GPU, much faster)
+   RAG_EMBEDDING_PROVIDER=openai-compatible
+   RAG_EMBEDDING_URL=http://<gpu-host>:1234
+   RAG_EMBEDDING_MODEL=text-embedding-nomic-embed-text-v2-moe
+
+   # Optional: automatic fallback when primary is unavailable
+   RAG_FALLBACK_PROVIDER=ollama
+   RAG_FALLBACK_URL=http://localhost:11434
+   RAG_FALLBACK_MODEL=nomic-embed-text-v2-moe
+   ```
+
+3. Build the initial index:
+   ```
+   rag_reindex  (via MCP tool)
+   ```
+
+### MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `rag_search` | Semantic search with optional filters (projectId, entity type, limit) |
+| `rag_reindex` | Rebuild the full vector index (all projects or a specific one) |
+| `rag_status` | Index statistics, active endpoint, fallback configuration |
+
+> **Note:** RAG is optional. If no embedding server is available, the app starts normally with RAG features disabled.
+
 ## Project Import/Export
 
 Complete project data (todos, milestones, knowledge, changelog, sessions, schemas, dependencies, features, manuals, research, environments, secrets) can be exported as JSON and imported into a new instance. All internal references (milestone links, dependencies, changelog associations) are correctly remapped.
@@ -215,7 +277,7 @@ Complete project data (todos, milestones, knowledge, changelog, sessions, schema
 
 | Component | Technology |
 |-----------|------------|
-| Backend | NestJS 11, Mongoose 8, TypeScript 5, Passport JWT |
+| Backend | NestJS 11, Mongoose 8, TypeScript 5, Passport JWT, LanceDB |
 | Frontend | React 19, Vite 6, TailwindCSS 3, React Router 7 |
 | Database | MongoDB 7 (Replica Set or Standalone) |
 | MCP | @modelcontextprotocol/sdk 1.12 |
@@ -249,6 +311,7 @@ DevGrimoire/
 │       ├── notifications/         # In-app notifications
 │       ├── events/                # SSE events (Change Streams + EventEmitter)
 │       ├── push/                  # Web Push (VAPID)
+│       ├── rag/                   # RAG semantic search (LanceDB + embeddings)
 │       ├── search/                # Global search
 │       ├── settings/              # System settings
 │       ├── api-keys/              # API key management

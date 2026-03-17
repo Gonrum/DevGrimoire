@@ -314,12 +314,34 @@ Rufe **immer** \`system_instructions_get\` am Anfang jeder Session auf, um die a
 
 ---
 
+## 16. RAG — Semantische Suche (\`rag_*\`)
+
+**Workflow**: Bedeutungsbasierte Suche über **alle** Entity-Typen (Knowledge, Research, Manual, Changelog, Todo, Session) via Vektor-Embeddings.
+
+| Tool | Wann verwenden |
+|------|----------------|
+| \`rag_search\` | Semantische Suche. Pflicht: \`query\`. Optional: \`projectId\`, \`entity\` (knowledge/research/manual/changelog/todo/session), \`limit\` |
+| \`rag_reindex\` | Vektoren-Index komplett neu aufbauen. Optional: \`projectId\` für einzelnes Projekt |
+| \`rag_status\` | Index-Statistiken, aktiver Embedding-Endpoint, Fallback-Konfiguration |
+
+**Wann \`rag_search\` statt \`knowledge_search\`?**
+- \`knowledge_search\` — Keyword-basiert, nur Knowledge-Einträge
+- \`rag_search\` — Bedeutungsbasiert, durchsucht **alle** Entity-Typen gleichzeitig. Findet auch Treffer bei sinngemäß ähnlichen Begriffen
+
+**Tipps**:
+- \`rag_search\` für explorative Fragen ("Wie funktioniert X?", "Was wissen wir über Y?")
+- \`knowledge_search\` für gezielte Keyword-Suche in Knowledge-Einträgen
+- Nach Modellwechsel \`rag_reindex\` erforderlich
+
+---
+
 ## Effizient mit Context umgehen
 - **List-Tools** liefern kompakte Übersichten (nur Metadaten, kein Content)
 - Nutze **_get Tools** (todo_get, knowledge_get, changelog_get, research_get, schema_get, dependency_get, feature_get, manual_get) nur wenn du Details brauchst
 - Arbeite immer mit **projectId** — nie global suchen wenn du das Projekt kennst
 - Nutze **limit/offset** bei großen Listen
 - **Search-Tools** (knowledge_search, research_search) liefern Content-Snippets (200 Zeichen), nicht den vollen Text
+- **\`rag_search\`** für projektübergreifende semantische Suche nutzen
 
 ## Code-Qualität
 - Führe vor jedem Commit eine Lint-Prüfung durch

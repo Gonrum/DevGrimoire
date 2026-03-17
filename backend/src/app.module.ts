@@ -29,6 +29,7 @@ import { FeaturesModule } from './features/features.module';
 import { SoulsModule } from './souls/souls.module';
 import { CommitsModule } from './commits/commits.module';
 import { ProjectTransferModule } from './project-transfer/project-transfer.module';
+import { RagModule } from './rag/rag.module';
 import { RequestContextInterceptor } from './common/request-context.interceptor';
 
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -65,6 +66,7 @@ if (!MONGODB_URI) {
     SoulsModule,
     CommitsModule,
     ProjectTransferModule,
+    RagModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
