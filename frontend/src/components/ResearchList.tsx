@@ -16,9 +16,9 @@ export default function ResearchList({ entries }: { entries: ResearchEntry[] }) 
     <div className="space-y-4">
       {entries.map((e) => (
         <Card key={e._id}>
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-semibold">{e.title}</h3>
-            <span className="text-xs text-gray-600">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <h3 className="text-sm font-semibold truncate min-w-0">{e.title}</h3>
+            <span className="text-xs text-gray-600 shrink-0">
               {new Date(e.updatedAt).toLocaleDateString(i18n.language === 'de' ? 'de-DE' : 'en-US')}
             </span>
           </div>

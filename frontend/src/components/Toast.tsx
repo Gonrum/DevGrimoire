@@ -38,11 +38,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={{ showError, showSuccess }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2" aria-live="polite">
+      <div className="fixed bottom-4 left-4 right-4 sm:left-auto z-50 flex flex-col gap-2" aria-live="polite">
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`px-4 py-2.5 rounded-lg text-sm shadow-lg max-w-sm animate-[fadeIn_0.2s_ease-out] ${
+            className={`px-4 py-2.5 rounded-lg text-sm shadow-lg sm:max-w-sm animate-[fadeIn_0.2s_ease-out] ${
               toast.type === 'error'
                 ? 'bg-red-900/90 border border-red-700 text-red-200'
                 : 'bg-green-900/90 border border-green-700 text-green-200'

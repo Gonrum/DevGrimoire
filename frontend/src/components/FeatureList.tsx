@@ -122,7 +122,7 @@ function FeatureForm({
         <h3 className="text-sm font-semibold mb-3">
           {editId ? t('features.editFeature') : t('features.newFeature')}
         </h3>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormInput
             label={t('common.name')}
             required
@@ -137,7 +137,7 @@ function FeatureForm({
             placeholder="z.B. Auth, API, UI, Infrastruktur"
           />
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <FormSelect
             label={t('common.status')}
             value={form.status}

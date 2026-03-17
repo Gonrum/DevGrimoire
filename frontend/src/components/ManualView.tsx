@@ -115,7 +115,7 @@ function ManualArticle({ manual, onUpdate, onEdit }: {
           <p className="text-sm text-gray-600 italic">{t('manuals.noContent')}</p>
         )}
       </div>
-      <div className="flex items-center gap-2 mt-6 pt-4 border-t border-gray-800">
+      <div className="flex flex-wrap items-center gap-2 mt-6 pt-4 border-t border-gray-800">
         <Button size="xs" onClick={onEdit}>{t('common.edit')}</Button>
         <Button size="xs" onClick={handleDownload}>{t('manuals.downloadMarkdown')}</Button>
         <span className="text-xs text-gray-600 ml-auto">
@@ -189,9 +189,9 @@ export default function ManualView({ projectId, entries, onUpdate }: { projectId
   }
 
   return (
-    <div className="flex gap-6 min-h-[400px]">
+    <div className="flex flex-col md:flex-row gap-6 min-h-[400px]">
       {/* Sidebar */}
-      <nav className="w-52 shrink-0">
+      <nav className="w-full md:w-52 md:shrink-0">
         <div className="sticky top-4 space-y-1">
           <button type="button" onClick={() => setShowForm(true)}
             className="w-full px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors mb-3">

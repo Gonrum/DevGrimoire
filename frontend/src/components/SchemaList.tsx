@@ -177,7 +177,7 @@ function SchemaForm({
         </h3>
 
         {/* Basic info */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormInput
             label={t('common.name')}
             required
@@ -197,7 +197,7 @@ function SchemaForm({
             <option value="mssql">MSSQL</option>
           </FormSelect>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormInput
             label={t('schemas.database')}
             value={form.database}
@@ -233,8 +233,8 @@ function SchemaForm({
           </div>
           <div className="space-y-2">
             {form.fields.map((field, i) => (
-              <div key={i} className="flex items-start gap-2 bg-gray-800/50 rounded p-2">
-                <div className="grid grid-cols-4 gap-2 flex-1">
+              <div key={i} className="flex flex-col sm:flex-row items-start gap-2 bg-gray-800/50 rounded p-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 w-full">
                   <FormInput
                     placeholder={t('schemas.fieldName')}
                     value={field.name}
@@ -530,7 +530,7 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
                 className="cursor-pointer"
                 onClick={() => toggleExpand(schema._id)}
               >
-                <div className="flex items-center justify-between mb-1">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-1">
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-semibold font-mono">{schema.name}</h3>
                     <Badge color={dbTypeColors[schema.dbType]}>

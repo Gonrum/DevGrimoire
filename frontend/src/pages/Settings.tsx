@@ -158,7 +158,7 @@ export default function Settings() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold text-white mb-4">{t('settings.title')}</h1>
+      <h1 className="text-xl sm:text-2xl font-bold text-white mb-4">{t('settings.title')}</h1>
 
       {visibleTabs.length > 1 && (
         <div className="flex gap-1 mb-6 border-b border-gray-800">
@@ -207,7 +207,7 @@ export default function Settings() {
                 <textarea
                   value={instructions}
                   onChange={(e) => { setInstructions(e.target.value); setSaved(false); }}
-                  className="w-full h-[500px] bg-gray-900 text-gray-200 px-4 py-3 font-mono text-sm resize-y focus:outline-none focus:ring-1 focus:ring-violet-500"
+                  className="w-full h-[300px] sm:h-[500px] bg-gray-900 text-gray-200 px-4 py-3 font-mono text-sm resize-y focus:outline-none focus:ring-1 focus:ring-violet-500"
                   spellCheck={false}
                 />
               </div>
@@ -273,7 +273,7 @@ export default function Settings() {
 
           <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 mb-6">
             <h2 className="text-sm font-medium text-gray-300 mb-3">{t('settings.createApiKey')}</h2>
-            <div className="flex items-end gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-end gap-3">
               <div className="flex-1">
                 <label className="block text-xs text-gray-500 mb-1">{t('settings.apiKeyName')}</label>
                 <input
@@ -308,8 +308,8 @@ export default function Settings() {
           ) : apiKeys.length === 0 ? (
             <div className="text-gray-500 py-10 text-center">{t('settings.noApiKeys')}</div>
           ) : (
-            <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
+            <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-x-auto">
+              <table className="w-full text-sm min-w-[600px]">
                 <thead>
                   <tr className="border-b border-gray-700 bg-gray-800/50">
                     <th className="text-left px-4 py-2 text-gray-400 font-medium">{t('settings.apiKeyTableName')}</th>

@@ -68,16 +68,16 @@ export default function KnowledgeList({ entries }: { entries: Knowledge[] }) {
       <div className="space-y-4">
         {(selectedCategory === '__none__' ? entries.filter((e) => !e.category) : filtered).map((e) => (
           <Card key={e._id}>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold">{e.topic}</h3>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <h3 className="text-sm font-semibold truncate">{e.topic}</h3>
                 {e.category && (
                   <Badge color="bg-indigo-900/40 text-indigo-300">
                     {e.category}
                   </Badge>
                 )}
               </div>
-              <span className="text-xs text-gray-600">
+              <span className="text-xs text-gray-600 shrink-0">
                 {new Date(e.updatedAt).toLocaleDateString(i18n.language === 'de' ? 'de-DE' : 'en-US')}
               </span>
             </div>
