@@ -120,7 +120,7 @@ function AppShell() {
   return (
     <div className="min-h-screen flex flex-col relative">
       <ParticleBackground />
-      <header className="bg-gray-900/95 border-b border-gray-800 px-4 sm:px-6 py-3 sm:py-4 grimoire-header relative z-10" style={{ paddingTop: 'max(0.75rem, var(--sat))', paddingLeft: 'max(1rem, var(--sal))', paddingRight: 'max(1rem, var(--sar))' }}>
+      <header className="bg-gray-900/95 border-b border-gray-800 px-4 sm:px-6 py-3 sm:py-4 grimoire-header relative z-30" style={{ paddingTop: 'max(0.75rem, var(--sat))', paddingLeft: 'max(1rem, var(--sal))', paddingRight: 'max(1rem, var(--sar))' }}>
         <div className="flex items-center gap-3 sm:gap-6">
           {/* Hamburger button - mobile only */}
           <button

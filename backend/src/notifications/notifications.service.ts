@@ -48,4 +48,14 @@ export class NotificationsService {
   async markAllAsRead(): Promise<void> {
     await this.notificationModel.updateMany({ read: false }, { read: true }).exec();
   }
+
+  async delete(id: string): Promise<void> {
+    const result = await this.notificationModel.findByIdAndDelete(id).exec();
+    if (!result) throw new NotFoundException(`Notification ${id} not found`);
+  }
+
+  async deleteAll(): Promise<{ deleted: number }> {
+    const result = await this.notificationModel.deleteMany({}).exec();
+    return { deleted: result.deletedCount };
+  }
 }

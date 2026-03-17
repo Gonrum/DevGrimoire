@@ -9,9 +9,10 @@ services:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
       MONGO_INITDB_DATABASE: ${MONGO_DB}
-    entrypoint: ["/bin/bash", "-c", "openssl rand -base64 756 > /tmp/mongo-keyfile && chmod 400 /tmp/mongo-keyfile && chown 999:999 /tmp/mongo-keyfile && exec docker-entrypoint.sh mongod --replSet rs0 --keyFile /tmp/mongo-keyfile"]
+    entrypoint: ["/bin/bash", "-c", "if [ ! -f /keyfile/mongo-keyfile ]; then openssl rand -base64 756 > /keyfile/mongo-keyfile; fi && chmod 400 /keyfile/mongo-keyfile && chown 999:999 /keyfile/mongo-keyfile && exec docker-entrypoint.sh mongod --replSet rs0 --keyFile /keyfile/mongo-keyfile"]
     volumes:
       - mongodb_data:/data/db
+      - mongodb_keyfile:/keyfile
     healthcheck:
       test: ["CMD", "mongosh", "-u", "${MONGO_USER}", "-p", "${MONGO_PASSWORD}", "--authenticationDatabase", "admin", "--eval", "rs.status().ok"]
       interval: 10s
@@ -74,3 +75,4 @@ services:
 
 volumes:
   mongodb_data:
+  mongodb_keyfile:

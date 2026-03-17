@@ -423,6 +423,8 @@
   "notifications": {
     "title": "Notifications",
     "markAllRead": "Mark all read",
+    "deleteAll": "Delete all",
+    "delete": "Delete",
     "noNotifications": "No notifications",
     "justNow": "just now"
   },

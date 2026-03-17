@@ -423,6 +423,8 @@
   "notifications": {
     "title": "Benachrichtigungen",
     "markAllRead": "Alle gelesen",
+    "deleteAll": "Alle löschen",
+    "delete": "Löschen",
     "noNotifications": "Keine Benachrichtigungen",
     "justNow": "gerade eben"
   },
