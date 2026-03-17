@@ -70,7 +70,7 @@ export default function Dashboard() {
       {/* Favoriten-Projekte */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-bold font-grimoire">{t('dashboard.title')}</h1>
+          <h1 className="text-xl sm:text-2xl font-bold font-grimoire">{t('dashboard.title')}</h1>
           <Link
             to="/projects"
             className="text-sm text-gray-400 hover:text-cyan-400 transition-colors"
@@ -139,7 +139,7 @@ export default function Dashboard() {
 
       {/* Aktive Tasks */}
       <div>
-        <h2 className="text-xl font-bold mb-4">{t('dashboard.activeTasks')}</h2>
+        <h2 className="text-lg sm:text-xl font-bold mb-4">{t('dashboard.activeTasks')}</h2>
         {activeTodos.length === 0 ? (
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center">
             <p className="text-gray-500">{t('dashboard.noActiveTasks')}</p>
@@ -150,7 +150,7 @@ export default function Dashboard() {
               <Link
                 key={todo._id}
                 to={`/projects/${todo.projectId}?tab=todos`}
-                className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 hover:border-violet-500 transition-colors"
+                className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 bg-gray-900 border border-gray-800 rounded-lg px-3 sm:px-4 py-3 hover:border-violet-500 transition-colors"
               >
                 <Badge color={STATUS_COLORS[todo.status]} rounded="full" className="whitespace-nowrap">
                   {STATUS_LABELS[todo.status]()}

@@ -168,7 +168,7 @@ export default function ProjectsOverview() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-6 font-grimoire">{t('projects.overview')}</h1>
+      <h1 className="text-xl sm:text-2xl font-bold mb-6 font-grimoire">{t('projects.overview')}</h1>
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
         <ProjectCreateForm onCreated={loadProjects} />
         <button

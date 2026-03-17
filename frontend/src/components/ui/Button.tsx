@@ -11,10 +11,10 @@ const variants = {
 } as const;
 
 const sizes = {
-  xs: 'text-xs px-2 py-0.5',
-  sm: 'text-xs px-2.5 py-1',
-  md: 'px-3 py-1.5 text-sm',
-  lg: 'px-4 py-2 text-sm',
+  xs: 'text-xs px-2.5 py-1 sm:px-2 sm:py-0.5',
+  sm: 'text-xs px-3 py-1.5 sm:px-2.5 sm:py-1',
+  md: 'px-3.5 py-2 sm:px-3 sm:py-1.5 text-sm',
+  lg: 'px-4 py-2.5 sm:px-4 sm:py-2 text-sm',
 } as const;
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

@@ -117,7 +117,7 @@ function DependencyForm({
         <h3 className="text-sm font-semibold mb-3">
           {editId ? t('dependencies.editDependency') : t('dependencies.newDependency')}
         </h3>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <FormInput
             label={t('common.name')}
             required
@@ -143,7 +143,7 @@ function DependencyForm({
             ))}
           </FormSelect>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormInput
             label={t('common.category')}
             value={form.category}

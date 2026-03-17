@@ -229,7 +229,23 @@ export default function ProjectDetail() {
         )}
       </div>
 
-      <div className="border-b border-gray-800 mb-6 -mx-4 sm:mx-0 px-4 sm:px-0 overflow-x-auto">
+      {/* Mobile: Tab dropdown */}
+      <div className="sm:hidden mb-6">
+        <select
+          value={tab}
+          onChange={(e) => setTab(e.target.value as Tab)}
+          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+        >
+          {tabs.map((t) => (
+            <option key={t.key} value={t.key}>
+              {t.label} ({t.count})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Desktop: Tab bar */}
+      <div className="hidden sm:block border-b border-gray-800 mb-6 overflow-x-auto">
         <nav className="flex gap-4 sm:gap-6 min-w-max">
           {tabs.map((t) => (
             <button

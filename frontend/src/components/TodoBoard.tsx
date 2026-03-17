@@ -299,14 +299,14 @@ function TodoListRow({ todo, projectId, onUpdate, showError }: { todo: Todo; pro
           {todo.description && <div className="text-xs text-gray-600 line-clamp-1 mt-0.5">{todo.description}</div>}
         </Link>
       </td>
-      <td className="py-2.5 px-3">
+      <td className="py-2.5 px-3 hidden sm:table-cell">
         <div className="flex flex-wrap gap-1">
           {todo.tags.map((tag) => (
             <span key={tag} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">{tag}</span>
           ))}
         </div>
       </td>
-      <td className="py-2.5 px-3 text-xs text-gray-600">
+      <td className="py-2.5 px-3 text-xs text-gray-600 hidden sm:table-cell">
         {comments.length > 0 && <span>{comments.length}</span>}
       </td>
       <td className="py-2.5 px-3 text-xs text-gray-600 whitespace-nowrap">
@@ -515,15 +515,15 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
           })}
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
+        <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+          <table className="w-full text-left min-w-[640px]">
             <thead>
               <tr className="border-b border-gray-800 text-xs text-gray-500">
                 <th className="py-2 px-3 font-medium">{t('todos.tableStatus')}</th>
                 <th className="py-2 px-3 font-medium">{t('todos.tablePriority')}</th>
                 <th className="py-2 px-3 font-medium">{t('todos.tableTitle')}</th>
-                <th className="py-2 px-3 font-medium">{t('todos.tableTags')}</th>
-                <th className="py-2 px-3 font-medium" title={t('common.comments')}>{t('todos.tableComments')}</th>
+                <th className="py-2 px-3 font-medium hidden sm:table-cell">{t('todos.tableTags')}</th>
+                <th className="py-2 px-3 font-medium hidden sm:table-cell" title={t('common.comments')}>{t('todos.tableComments')}</th>
                 <th className="py-2 px-3 font-medium">{t('todos.tableUpdated')}</th>
                 <th className="py-2 px-3 font-medium">{t('todos.tableActions')}</th>
               </tr>

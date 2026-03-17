@@ -73,7 +73,7 @@ function ServerInfo({ env }: { env: Environment }) {
   return (
     <div className="mb-3">
       <h4 className="text-xs font-medium text-gray-500 uppercase mb-2">{t('environments.server')}</h4>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
         {env.host && (
           <div className="flex gap-2">
             <span className="text-gray-500">Host:</span>

@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { Routes, Route, NavLink, Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Dashboard from './pages/Dashboard';
 import ProjectsOverview from './pages/ProjectsOverview';
@@ -109,16 +109,42 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
 function AppShell() {
   const { t } = useTranslation();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const location = useLocation();
+
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
+
   return (
     <div className="min-h-screen flex flex-col relative">
       <ParticleBackground />
       <header className="bg-gray-900/95 border-b border-gray-800 px-4 sm:px-6 py-3 sm:py-4 grimoire-header relative z-10">
         <div className="flex items-center gap-3 sm:gap-6">
-          <NavLink to="/" className="flex items-center gap-2 shrink-0">
+          {/* Hamburger button - mobile only */}
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="md:hidden text-gray-400 hover:text-gray-200 p-1.5 -ml-1"
+            aria-label="Menu"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+              {mobileMenuOpen ? (
+                <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>
+              ) : (
+                <><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" /></>
+              )}
+            </svg>
+          </button>
+
+          <NavLink to="/" className="flex items-center gap-2 shrink-0" onClick={() => setMobileMenuOpen(false)}>
             <img src="/logo.png" alt="DevGrimoire" className="h-7 sm:h-8" />
             <span className="text-lg sm:text-xl font-bold text-white tracking-tight font-grimoire">DevGrimoire</span>
           </NavLink>
-          <nav className="flex gap-3 sm:gap-4 text-sm">
+
+          {/* Desktop nav */}
+          <nav className="hidden md:flex gap-4 text-sm">
             <NavLink
               to="/"
               end
@@ -154,6 +180,7 @@ function AppShell() {
               {t('nav.settings')}
             </NavLink>
           </nav>
+
           <div className="ml-auto flex items-center gap-3">
             <GlobalSearch />
             <ConnectionStatus />
@@ -161,6 +188,50 @@ function AppShell() {
             <UserMenu />
           </div>
         </div>
+
+        {/* Mobile nav drawer */}
+        {mobileMenuOpen && (
+          <nav className="md:hidden border-t border-gray-800 mt-3 pt-3 pb-1 flex flex-col gap-1">
+            <NavLink
+              to="/"
+              end
+              onClick={() => setMobileMenuOpen(false)}
+              className={({ isActive }) =>
+                `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
+              }
+            >
+              {t('nav.dashboard')}
+            </NavLink>
+            <NavLink
+              to="/projects"
+              end
+              onClick={() => setMobileMenuOpen(false)}
+              className={({ isActive }) =>
+                `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
+              }
+            >
+              {t('nav.projects')}
+            </NavLink>
+            <NavLink
+              to="/docs"
+              onClick={() => setMobileMenuOpen(false)}
+              className={({ isActive }) =>
+                `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
+              }
+            >
+              {t('nav.docs')}
+            </NavLink>
+            <NavLink
+              to="/settings"
+              onClick={() => setMobileMenuOpen(false)}
+              className={({ isActive }) =>
+                `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
+              }
+            >
+              {t('nav.settings')}
+            </NavLink>
+          </nav>
+        )}
       </header>
       <main className="flex-1 w-full px-4 sm:px-6 py-4 sm:py-8 relative z-10">
         <Routes>

@@ -99,3 +99,25 @@
 .quest-status-done {
   animation: quest-pulse-done 1.5s ease-out;
 }
+
+/* Reduce motion for accessibility and mobile performance */
+@media (prefers-reduced-motion: reduce) {
+  .particle-float {
+    animation: none !important;
+    display: none;
+  }
+  .animate-sparkle {
+    animation: none !important;
+  }
+  .quest-status-changed,
+  .quest-status-done {
+    animation: none !important;
+  }
+}
+
+/* Reduce particles on small screens for performance */
+@media (max-width: 768px) {
+  .particle-float:nth-child(n+16) {
+    display: none;
+  }
+}
