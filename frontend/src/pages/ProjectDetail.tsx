@@ -16,6 +16,7 @@ import DependencyList from '../components/DependencyList';
 import FeatureList from '../components/FeatureList';
 import SoulView from '../components/SoulView';
 import CommitList from '../components/CommitList';
+import GitRepoWidget from '../components/GitRepoWidget';
 import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents';
 import Badge from '../components/ui/Badge';
 import { LoadingText } from '../components/ui/LoadingSpinner';
@@ -226,6 +227,13 @@ export default function ProjectDetail() {
               </Badge>
             ))}
           </div>
+        )}
+        {project.gitRepositories && project.gitRepositories.length > 0 && (
+          <GitRepoWidget
+            projectId={id!}
+            gitRepositories={project.gitRepositories}
+            onNavigateToCommits={() => setTab('commits')}
+          />
         )}
       </div>
 

@@ -650,8 +650,11 @@ export const api = {
       if (limit) params.set('limit', String(limit));
       return request<CommitEntry[]>(`/commits/search?${params}`);
     },
-    count: (projectId: string) =>
-      request<{ count: number }>(`/commits/count?projectId=${projectId}`),
+    count: (projectId: string, repoLabel?: string) => {
+      const params = new URLSearchParams({ projectId });
+      if (repoLabel) params.set('repoLabel', repoLabel);
+      return request<{ count: number }>(`/commits/count?${params}`);
+    },
     sync: (projectId: string, repoIndex?: number) =>
       request<{ newCommits?: number; totalNewCommits?: number }>('/commits/sync', {
         method: 'POST',

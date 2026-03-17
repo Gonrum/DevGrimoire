@@ -203,8 +203,10 @@ export class CommitsService {
     return commit;
   }
 
-  async countByProject(projectId: string): Promise<number> {
-    return this.commitModel.countDocuments({ projectId }).exec();
+  async countByProject(projectId: string, repoLabel?: string): Promise<number> {
+    const filter: Record<string, unknown> = { projectId };
+    if (repoLabel) filter.repoLabel = repoLabel;
+    return this.commitModel.countDocuments(filter).exec();
   }
 
   async removeByProject(projectId: string): Promise<void> {

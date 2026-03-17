@@ -59,11 +59,14 @@ export class CommitsController {
   }
 
   @Get('count')
-  count(@Query('projectId') projectId?: string) {
+  count(
+    @Query('projectId') projectId?: string,
+    @Query('repoLabel') repoLabel?: string,
+  ) {
     if (!projectId) {
       throw new BadRequestException('projectId query parameter is required');
     }
-    return this.commitsService.countByProject(projectId).then((count) => ({ count }));
+    return this.commitsService.countByProject(projectId, repoLabel).then((count) => ({ count }));
   }
 
   @Get(':id')
