@@ -39,7 +39,12 @@ Wenn du Tasks bearbeitest, halte dich an den Status-Workflow:
 - Teste Änderungen bevor du sie als fertig markierst
 `;
 
-type SettingsTab = 'instructions' | 'apikeys' | 'users';
+type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'users';
+
+const PUSH_CATEGORIES = [
+  { key: 'notify_user', default: true },
+  { key: 'mcp_tool_call', default: false },
+] as const;
 
 export default function Settings() {
   const { t, i18n } = useTranslation();
@@ -62,6 +67,11 @@ export default function Settings() {
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Notification push categories
+  const [pushCategories, setPushCategories] = useState<Record<string, boolean>>({});
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushSaving, setPushSaving] = useState(false);
 
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
@@ -91,9 +101,35 @@ export default function Settings() {
     }
   }, [t]);
 
+  const loadPushCategories = useCallback(async () => {
+    setPushLoading(true);
+    try {
+      const res = await api.settings.get('notification_push_categories');
+      const enabled = (res.value ?? PUSH_CATEGORIES.filter((c) => c.default).map((c) => c.key).join(',')).split(',').map((c) => c.trim()).filter(Boolean);
+      const state: Record<string, boolean> = {};
+      for (const cat of PUSH_CATEGORIES) {
+        state[cat.key] = enabled.includes(cat.key);
+      }
+      setPushCategories(state);
+    } catch { /* ignore */ }
+    setPushLoading(false);
+  }, []);
+
+  const togglePushCategory = async (key: string) => {
+    const updated = { ...pushCategories, [key]: !pushCategories[key] };
+    setPushCategories(updated);
+    setPushSaving(true);
+    try {
+      const value = Object.entries(updated).filter(([, v]) => v).map(([k]) => k).join(',');
+      await api.settings.set('notification_push_categories', value);
+    } catch { /* ignore */ }
+    setPushSaving(false);
+  };
+
   useEffect(() => {
     if (tab === 'apikeys') loadApiKeys();
-  }, [tab, loadApiKeys]);
+    if (tab === 'notifications') loadPushCategories();
+  }, [tab, loadApiKeys, loadPushCategories]);
 
   const createApiKey = async () => {
     if (!apiKeyName.trim()) return;
@@ -151,6 +187,7 @@ export default function Settings() {
   const tabs: { key: SettingsTab; label: string; adminOnly?: boolean }[] = [
     { key: 'instructions', label: t('settings.tabInstructions') },
     { key: 'apikeys', label: t('settings.tabApiKeys') },
+    { key: 'notifications', label: t('settings.tabNotifications') },
     { key: 'users', label: t('settings.tabUsers'), adminOnly: true },
   ];
 
@@ -368,6 +405,52 @@ export default function Settings() {
               <div>?apiKey=cv_...</div>
             </div>
           </div>
+        </>
+      )}
+
+      {tab === 'notifications' && (
+        <>
+          <p className="text-gray-400 mb-6">
+            {t('settings.notificationsDescription')}
+          </p>
+
+          {pushLoading ? (
+            <div className="text-gray-500 py-10 text-center">{t('common.loading')}</div>
+          ) : (
+            <div className="space-y-3">
+              {PUSH_CATEGORIES.map((cat) => (
+                <div
+                  key={cat.key}
+                  className="bg-gray-900 border border-gray-700 rounded-lg p-4 flex items-center justify-between gap-4"
+                >
+                  <div>
+                    <div className="text-sm font-medium text-gray-200">
+                      {t(`settings.pushCategory_${cat.key}`)}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {t(`settings.pushCategory_${cat.key}_desc`)}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={pushCategories[cat.key] ?? false}
+                    onClick={() => togglePushCategory(cat.key)}
+                    disabled={pushSaving}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+                      pushCategories[cat.key] ? 'bg-violet-600' : 'bg-gray-600'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
+                        pushCategories[cat.key] ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
 

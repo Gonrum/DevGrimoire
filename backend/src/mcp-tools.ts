@@ -1567,9 +1567,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const nTitle = requireString(a, 'title');
           const nBody = requireString(a, 'body');
           const nUrl = optionalString(a, 'url');
-          const notification = await notificationsService.create(nTitle, nBody, nUrl);
-          const pushResult = await pushService.sendNotification(nTitle, nBody, nUrl);
-          result = { notificationId: notification._id.toString(), push: pushResult };
+          const notification = await notificationsService.create(nTitle, nBody, nUrl, 'notify_user');
+          result = { notificationId: notification._id.toString() };
           break;
         }
         case 'environment_create': {
@@ -2030,6 +2029,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
       notificationsService.create(
         `MCP: ${name}`,
         formatToolSummary(name, a),
+        undefined,
+        'mcp_tool_call',
       ).catch(() => {});
 
       return textResult(result);

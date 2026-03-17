@@ -16,6 +16,9 @@ export class AppNotification {
 
   @Prop({ default: false })
   read: boolean;
+
+  @Prop()
+  category: string;
 }
 
 export const NotificationSchema = SchemaFactory.createForClass(AppNotification);
