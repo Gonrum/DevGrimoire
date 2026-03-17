@@ -8,10 +8,8 @@ import { SettingsService } from '../settings/settings.service';
 
 export const NOTIFICATION_CREATED = 'notification.created';
 export const NOTIFICATION_PUSH_CATEGORIES_KEY = 'notification_push_categories';
-// Default: only notify_user sends push; mcp_tool_calls disabled
+// Default: only notify_user sends push; all mcp_* disabled
 export const DEFAULT_PUSH_CATEGORIES = 'notify_user';
-
-export type NotificationCategory = 'mcp_tool_call' | 'notify_user';
 
 @Injectable()
 export class NotificationsService {
@@ -23,7 +21,7 @@ export class NotificationsService {
     private settingsService: SettingsService,
   ) {}
 
-  async create(title: string, body: string, url?: string, category?: NotificationCategory): Promise<NotificationDocument> {
+  async create(title: string, body: string, url?: string, category?: string): Promise<NotificationDocument> {
     const notification = await this.notificationModel.create({ title, body, url, category });
     this.eventEmitter.emit(NOTIFICATION_CREATED, {
       id: notification._id.toString(),
@@ -41,7 +39,6 @@ export class NotificationsService {
         this.pushService.sendNotification(title, body, url).catch(() => {});
       }
     } else {
-      // No category = always push (e.g. explicit notify_user calls)
       this.pushService.sendNotification(title, body, url).catch(() => {});
     }
     return notification;

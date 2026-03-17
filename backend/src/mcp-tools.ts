@@ -2026,12 +2026,16 @@ export function registerMcpTools(server: Server, services: McpServices): void {
       }
 
       // Send in-app notification for tool usage (fire-and-forget)
-      notificationsService.create(
-        `MCP: ${name}`,
-        formatToolSummary(name, a),
-        undefined,
-        'mcp_tool_call',
-      ).catch(() => {});
+      // notify_user already creates its own notification in the switch case
+      if (name !== 'notify_user') {
+        const toolPrefix = name.split('_')[0];
+        notificationsService.create(
+          `MCP: ${name}`,
+          formatToolSummary(name, a),
+          undefined,
+          `mcp_${toolPrefix}`,
+        ).catch(() => {});
+      }
 
       return textResult(result);
     } catch (error) {

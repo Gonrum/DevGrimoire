@@ -41,10 +41,31 @@ Wenn du Tasks bearbeitest, halte dich an den Status-Workflow:
 
 type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'users';
 
-const PUSH_CATEGORIES = [
+interface PushCategory {
+  key: string;
+  default: boolean;
+  group?: string;
+}
+
+const PUSH_CATEGORIES: PushCategory[] = [
   { key: 'notify_user', default: true },
-  { key: 'mcp_tool_call', default: false },
-] as const;
+  { key: 'mcp_project', default: false, group: 'mcp' },
+  { key: 'mcp_todo', default: false, group: 'mcp' },
+  { key: 'mcp_milestone', default: false, group: 'mcp' },
+  { key: 'mcp_knowledge', default: false, group: 'mcp' },
+  { key: 'mcp_changelog', default: false, group: 'mcp' },
+  { key: 'mcp_session', default: false, group: 'mcp' },
+  { key: 'mcp_research', default: false, group: 'mcp' },
+  { key: 'mcp_manual', default: false, group: 'mcp' },
+  { key: 'mcp_schema', default: false, group: 'mcp' },
+  { key: 'mcp_dependency', default: false, group: 'mcp' },
+  { key: 'mcp_environment', default: false, group: 'mcp' },
+  { key: 'mcp_secret', default: false, group: 'mcp' },
+  { key: 'mcp_feature', default: false, group: 'mcp' },
+  { key: 'mcp_soul', default: false, group: 'mcp' },
+  { key: 'mcp_commit', default: false, group: 'mcp' },
+  { key: 'mcp_system', default: false, group: 'mcp' },
+];
 
 export default function Settings() {
   const { t, i18n } = useTranslation();
@@ -115,8 +136,7 @@ export default function Settings() {
     setPushLoading(false);
   }, []);
 
-  const togglePushCategory = async (key: string) => {
-    const updated = { ...pushCategories, [key]: !pushCategories[key] };
+  const savePushCategories = async (updated: Record<string, boolean>) => {
     setPushCategories(updated);
     setPushSaving(true);
     try {
@@ -124,6 +144,18 @@ export default function Settings() {
       await api.settings.set('notification_push_categories', value);
     } catch { /* ignore */ }
     setPushSaving(false);
+  };
+
+  const togglePushCategory = (key: string) => {
+    savePushCategories({ ...pushCategories, [key]: !pushCategories[key] });
+  };
+
+  const toggleAllMcp = () => {
+    const mcpKeys = PUSH_CATEGORIES.filter((c) => c.group === 'mcp').map((c) => c.key);
+    const allOn = mcpKeys.every((k) => pushCategories[k]);
+    const updated = { ...pushCategories };
+    for (const k of mcpKeys) updated[k] = !allOn;
+    savePushCategories(updated);
   };
 
   useEffect(() => {
@@ -408,51 +440,96 @@ export default function Settings() {
         </>
       )}
 
-      {tab === 'notifications' && (
-        <>
-          <p className="text-gray-400 mb-6">
-            {t('settings.notificationsDescription')}
-          </p>
+      {tab === 'notifications' && (() => {
+        const mcpCats = PUSH_CATEGORIES.filter((c) => c.group === 'mcp');
+        const allMcpOn = mcpCats.every((c) => pushCategories[c.key]);
+        const someMcpOn = mcpCats.some((c) => pushCategories[c.key]);
 
-          {pushLoading ? (
-            <div className="text-gray-500 py-10 text-center">{t('common.loading')}</div>
-          ) : (
-            <div className="space-y-3">
-              {PUSH_CATEGORIES.map((cat) => (
-                <div
-                  key={cat.key}
-                  className="bg-gray-900 border border-gray-700 rounded-lg p-4 flex items-center justify-between gap-4"
-                >
-                  <div>
-                    <div className="text-sm font-medium text-gray-200">
-                      {t(`settings.pushCategory_${cat.key}`)}
+        const Toggle = ({ checked, onClick }: { checked: boolean; onClick: () => void }) => (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={checked}
+            onClick={onClick}
+            disabled={pushSaving}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+              checked ? 'bg-violet-600' : 'bg-gray-600'
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
+                checked ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        );
+
+        return (
+          <>
+            <p className="text-gray-400 mb-6">
+              {t('settings.notificationsDescription')}
+            </p>
+
+            {pushLoading ? (
+              <div className="text-gray-500 py-10 text-center">{t('common.loading')}</div>
+            ) : (
+              <div className="space-y-6">
+                {/* notify_user — standalone */}
+                {PUSH_CATEGORIES.filter((c) => !c.group).map((cat) => (
+                  <div
+                    key={cat.key}
+                    className="bg-gray-900 border border-gray-700 rounded-lg p-4 flex items-center justify-between gap-4"
+                  >
+                    <div>
+                      <div className="text-sm font-medium text-gray-200">
+                        {t(`settings.pushCategory_${cat.key}`)}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {t(`settings.pushCategory_${cat.key}_desc`)}
+                      </div>
                     </div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      {t(`settings.pushCategory_${cat.key}_desc`)}
+                    <Toggle checked={pushCategories[cat.key] ?? false} onClick={() => togglePushCategory(cat.key)} />
+                  </div>
+                ))}
+
+                {/* MCP Tool-Aufrufe — grouped */}
+                <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-800/50">
+                    <div>
+                      <div className="text-sm font-medium text-gray-200">{t('settings.pushGroup_mcp')}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">{t('settings.pushGroup_mcp_desc')}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">
+                        {someMcpOn ? `${mcpCats.filter((c) => pushCategories[c.key]).length}/${mcpCats.length}` : t('common.none')}
+                      </span>
+                      <Toggle checked={allMcpOn} onClick={toggleAllMcp} />
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={pushCategories[cat.key] ?? false}
-                    onClick={() => togglePushCategory(cat.key)}
-                    disabled={pushSaving}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
-                      pushCategories[cat.key] ? 'bg-violet-600' : 'bg-gray-600'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
-                        pushCategories[cat.key] ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
+                  <div className="divide-y divide-gray-800">
+                    {mcpCats.map((cat) => (
+                      <div
+                        key={cat.key}
+                        className="flex items-center justify-between px-4 py-3 gap-4"
+                      >
+                        <div>
+                          <div className="text-sm text-gray-300">
+                            {t(`settings.pushCategory_${cat.key}`)}
+                          </div>
+                          <div className="text-xs text-gray-600 mt-0.5">
+                            {t(`settings.pushCategory_${cat.key}_desc`)}
+                          </div>
+                        </div>
+                        <Toggle checked={pushCategories[cat.key] ?? false} onClick={() => togglePushCategory(cat.key)} />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {tab === 'users' && isAdmin && <UserManagement />}
     </div>
