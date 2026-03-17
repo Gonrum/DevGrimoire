@@ -38,6 +38,12 @@ export class Commit {
   branch: string;
 
   @Prop({ type: Number })
+  repoIndex: number;
+
+  @Prop()
+  repoLabel: string;
+
+  @Prop({ type: Number })
   additions: number;
 
   @Prop({ type: Number })
@@ -48,4 +54,5 @@ export const CommitSchema = SchemaFactory.createForClass(Commit);
 CommitSchema.index({ projectId: 1, sha: 1 }, { unique: true });
 CommitSchema.index({ projectId: 1, committedAt: -1 });
 CommitSchema.index({ projectId: 1, provider: 1 });
+CommitSchema.index({ projectId: 1, repoLabel: 1 });
 CommitSchema.index({ message: 'text' });

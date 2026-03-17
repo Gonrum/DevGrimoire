@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, CommitEntry, GitRepository } from '../api/client';
 import Badge from './ui/Badge';
@@ -41,20 +41,29 @@ export default function CommitList({ projectId, gitRepositories }: CommitListPro
   const [search, setSearch] = useState('');
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [activeRepoLabel, setActiveRepoLabel] = useState<string | null>(null);
   const limit = 50;
 
   const locale = i18n.language === 'de' ? 'de' : 'en';
+
+  const repoLabels = useMemo(() => {
+    if (!gitRepositories) return [];
+    return gitRepositories
+      .map((r) => r.label)
+      .filter((l): l is string => !!l);
+  }, [gitRepositories]);
 
   const loadCommits = useCallback(async () => {
     setLoading(true);
     try {
       if (search.trim()) {
         const results = await api.commits.search(projectId, search, limit);
-        setCommits(results);
-        setTotal(results.length);
+        const filtered = activeRepoLabel ? results.filter((c) => c.repoLabel === activeRepoLabel) : results;
+        setCommits(filtered);
+        setTotal(filtered.length);
       } else {
         const [results, countRes] = await Promise.all([
-          api.commits.list(projectId, { limit, offset }),
+          api.commits.list(projectId, { limit, offset, repoLabel: activeRepoLabel || undefined }),
           api.commits.count(projectId),
         ]);
         setCommits(results);
@@ -65,7 +74,7 @@ export default function CommitList({ projectId, gitRepositories }: CommitListPro
     } finally {
       setLoading(false);
     }
-  }, [projectId, search, offset]);
+  }, [projectId, search, offset, activeRepoLabel]);
 
   useEffect(() => {
     loadCommits();
@@ -118,6 +127,36 @@ export default function CommitList({ projectId, gitRepositories }: CommitListPro
         </Button>
       </div>
 
+      {repoLabels.length > 1 && (
+        <div className="flex gap-1.5 mb-4 flex-wrap">
+          <button
+            type="button"
+            onClick={() => { setActiveRepoLabel(null); setOffset(0); }}
+            className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+              activeRepoLabel === null
+                ? 'bg-violet-600 text-white'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            {locale === 'de' ? 'Alle' : 'All'}
+          </button>
+          {repoLabels.map((label) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => { setActiveRepoLabel(label); setOffset(0); }}
+              className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                activeRepoLabel === label
+                  ? 'bg-violet-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {loading ? (
         <p className="text-gray-500 text-sm py-4">Loading...</p>
       ) : commits.length === 0 ? (
@@ -161,6 +200,11 @@ export default function CommitList({ projectId, gitRepositories }: CommitListPro
                     <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
                       <span>{commit.authorName}</span>
                       <span>{timeAgo(commit.committedAt, locale)}</span>
+                      {commit.repoLabel && repoLabels.length > 1 && !activeRepoLabel && (
+                        <span className="text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                          {commit.repoLabel}
+                        </span>
+                      )}
                       {commit.branch && (
                         <Badge color="bg-gray-800 text-gray-400" rounded="full">
                           {commit.branch}

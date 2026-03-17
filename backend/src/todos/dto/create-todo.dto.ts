@@ -39,4 +39,8 @@ export class CreateTodoDto {
   @IsMongoId({ each: true })
   @IsOptional()
   blockedBy?: string[];
+
+  @IsString()
+  @IsOptional()
+  repoLabel?: string;
 }

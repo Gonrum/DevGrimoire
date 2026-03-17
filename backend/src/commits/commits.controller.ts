@@ -24,6 +24,7 @@ export class CommitsController {
     @Query('since') since?: string,
     @Query('until') until?: string,
     @Query('provider') provider?: string,
+    @Query('repoLabel') repoLabel?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
@@ -36,6 +37,7 @@ export class CommitsController {
       since,
       until,
       provider,
+      repoLabel,
       limit: limit ? Math.min(parseInt(limit, 10), 200) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
     });
@@ -83,6 +85,7 @@ export class CommitsController {
   async validateToken(@Body() dto: ValidateTokenDto) {
     const config = {
       provider: dto.provider as 'github' | 'gitlab',
+      label: '',
       baseUrl: dto.baseUrl || '',
       owner: dto.owner || '',
       repo: dto.repo || '',

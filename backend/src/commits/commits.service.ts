@@ -77,6 +77,8 @@ export class CommitsService {
             $setOnInsert: {
               projectId,
               provider: repoConfig.provider,
+              repoIndex,
+              repoLabel: repoConfig.label || undefined,
               sha: commit.sha,
               message: commit.message,
               authorName: commit.authorName,
@@ -148,12 +150,14 @@ export class CommitsService {
       since?: string;
       until?: string;
       provider?: string;
+      repoLabel?: string;
       limit?: number;
       offset?: number;
     },
   ): Promise<CommitDocument[]> {
     const filter: Record<string, unknown> = { projectId };
     if (options?.branch) filter.branch = options.branch;
+    if (options?.repoLabel) filter.repoLabel = options.repoLabel;
     if (options?.author) {
       const escaped = options.author.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter.$or = [

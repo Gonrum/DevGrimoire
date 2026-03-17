@@ -35,4 +35,8 @@ export class UpdateTodoDto {
   @IsBoolean()
   @IsOptional()
   archived?: boolean;
+
+  @IsString()
+  @IsOptional()
+  repoLabel?: string;
 }

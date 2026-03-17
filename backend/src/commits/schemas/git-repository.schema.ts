@@ -3,6 +3,7 @@ import { Schema as MongooseSchema } from 'mongoose';
 export const GitRepositorySchema = new MongooseSchema(
   {
     provider: { type: String, enum: ['github', 'gitlab'], required: true },
+    label: { type: String, default: '' },
     baseUrl: { type: String, default: '' },
     owner: { type: String, default: '' },
     repo: { type: String, default: '' },
@@ -20,6 +21,7 @@ export const GitRepositorySchema = new MongooseSchema(
 export interface GitRepository {
   _id?: string;
   provider: 'github' | 'gitlab';
+  label: string;
   baseUrl: string;
   owner: string;
   repo: string;

@@ -208,6 +208,7 @@ const tools = [
         tags: { type: 'array', items: { type: 'string' } },
         milestoneId: { type: 'string', description: 'Milestone MongoDB ID to associate with' },
         blockedBy: { type: 'array', items: { type: 'string' }, description: 'Array of Todo MongoDB IDs that block this todo' },
+        repoLabel: { type: 'string', description: 'Optional: associate todo with a specific repository label (e.g. "API", "Frontend")' },
       },
       required: ['projectId', 'title'],
     },
@@ -258,6 +259,7 @@ const tools = [
         milestoneId: { type: 'string', description: 'Milestone MongoDB ID to associate with' },
         blockedBy: { type: 'array', items: { type: 'string' }, description: 'Array of Todo MongoDB IDs that block this todo' },
         archived: { type: 'boolean', description: 'Archive or unarchive a todo' },
+        repoLabel: { type: 'string', description: 'Optional: associate todo with a specific repository label (e.g. "API", "Frontend")' },
       },
     },
   },
@@ -405,6 +407,7 @@ const tools = [
         changes: { type: 'array', items: { type: 'string' }, description: 'List of changes made' },
         summary: { type: 'string', description: 'Brief summary of the release/changes' },
         component: { type: 'string', description: 'Component name for monorepos (e.g. API, Frontend)' },
+        repoLabel: { type: 'string', description: 'Optional: associate changelog with a specific repository label (e.g. "API", "Frontend")' },
       },
       required: ['projectId', 'changes'],
     },
@@ -435,7 +438,7 @@ const tools = [
   },
   {
     name: 'changelog_update',
-    description: 'Update a changelog entry (version, changes, summary, component)',
+    description: 'Update a changelog entry (version, changes, summary, component, repoLabel)',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -444,6 +447,7 @@ const tools = [
         changes: { type: 'array', items: { type: 'string' }, description: 'List of changes' },
         summary: { type: 'string', description: 'Brief summary' },
         component: { type: 'string', description: 'Component name for monorepos' },
+        repoLabel: { type: 'string', description: 'Optional: associate changelog with a specific repository label' },
       },
       required: ['id'],
     },
@@ -1177,7 +1181,7 @@ const tools = [
   // ─── Commits ───
   {
     name: 'commit_list',
-    description: 'List commits for a project (compact: sha-short, first line of message, author, date). Synced from GitHub/GitLab.',
+    description: 'List commits for a project (compact: sha-short, first line of message, author, date, repoLabel). Synced from GitHub/GitLab.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -1187,6 +1191,7 @@ const tools = [
         since: { type: 'string', description: 'Only commits after this ISO date' },
         until: { type: 'string', description: 'Only commits before this ISO date' },
         provider: { type: 'string', enum: ['github', 'gitlab'], description: 'Filter by provider' },
+        repoLabel: { type: 'string', description: 'Filter by repository label (e.g. "API", "Frontend")' },
         limit: { type: 'number', description: 'Max items (default 20)' },
         offset: { type: 'number', description: 'Skip first N items' },
       },
@@ -1308,6 +1313,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             tags: optionalStringArray(a, 'tags'),
             milestoneId: optionalString(a, 'milestoneId'),
             blockedBy: optionalStringArray(a, 'blockedBy'),
+            repoLabel: optionalString(a, 'repoLabel'),
           });
           result = compactCreateResult(todo, { displayNumber: (todo as any).displayNumber, title: (todo as any).title });
           break;
@@ -1350,6 +1356,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             milestoneId: optionalString(a, 'milestoneId'),
             blockedBy: optionalStringArray(a, 'blockedBy'),
             archived: optionalBoolean(a, 'archived'),
+            repoLabel: optionalString(a, 'repoLabel'),
           }));
           break;
         }
@@ -1470,6 +1477,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             changes: a.changes as string[],
             summary: optionalString(a, 'summary'),
             component: optionalString(a, 'component'),
+            repoLabel: optionalString(a, 'repoLabel'),
           });
           result = compactCreateResult(clEntry, { version: (clEntry as any).version });
           break;
@@ -1493,6 +1501,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             changes: optionalStringArray(a, 'changes'),
             summary: optionalString(a, 'summary'),
             component: optionalString(a, 'component'),
+            repoLabel: optionalString(a, 'repoLabel'),
           }));
           break;
         case 'changelog_delete':
@@ -1974,6 +1983,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             since: optionalString(a, 'since'),
             until: optionalString(a, 'until'),
             provider: optionalString(a, 'provider'),
+            repoLabel: optionalString(a, 'repoLabel'),
             limit: optionalNumber(a, 'limit') || 20,
             offset: optionalNumber(a, 'offset'),
           });
@@ -1984,6 +1994,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             date: c.committedAt,
             provider: c.provider,
             branch: c.branch,
+            repoLabel: c.repoLabel,
           }));
           break;
         }
@@ -2015,10 +2026,26 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           return errorResult(`Unknown tool: ${name}`);
       }
 
+      // Send in-app notification for tool usage (fire-and-forget)
+      notificationsService.create(
+        `MCP: ${name}`,
+        formatToolSummary(name, a),
+      ).catch(() => {});
+
       return textResult(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return errorResult(`Error: ${message}`);
     }
   });
+}
+
+function formatToolSummary(toolName: string, args: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(args)) {
+    if (value === undefined || value === null) continue;
+    const str = typeof value === 'string' ? value : JSON.stringify(value);
+    parts.push(`${key}: ${str.length > 80 ? str.slice(0, 80) + '…' : str}`);
+  }
+  return parts.length > 0 ? parts.join(', ') : '(keine Parameter)';
 }

@@ -52,6 +52,7 @@ export default function ProjectSettings() {
   const [newRepoToken, setNewRepoToken] = useState('');
   const [newRepoBranch, setNewRepoBranch] = useState('main');
   const [newRepoBaseUrl, setNewRepoBaseUrl] = useState('');
+  const [newRepoLabel, setNewRepoLabel] = useState('');
   const [validating, setValidating] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
 
@@ -122,6 +123,7 @@ export default function ProjectSettings() {
 
       const newRepo: GitRepository = {
         provider: newRepoProvider,
+        label: newRepoLabel.trim() || undefined,
         baseUrl: newRepoBaseUrl || undefined,
         owner: parsed.owner,
         repo: parsed.repo,
@@ -142,6 +144,7 @@ export default function ProjectSettings() {
       setNewRepoToken('');
       setNewRepoBranch('main');
       setNewRepoBaseUrl('');
+      setNewRepoLabel('');
       setShowAddRepo(false);
     } catch (err) {
       setRepoError(err instanceof Error ? err.message : 'Fehler beim Hinzufügen');
@@ -374,12 +377,19 @@ export default function ProjectSettings() {
                   {repo.provider === 'github' ? 'GH' : 'GL'}
                 </Badge>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-200 truncate">
-                    {repo.provider === 'github'
-                      ? `${repo.owner}/${repo.repo}`
-                      : repo.gitlabProjectId || `${repo.owner}/${repo.repo}`
-                    }
-                  </p>
+                  <div className="flex items-center gap-2">
+                    {repo.label && (
+                      <span className="text-xs font-medium text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded">
+                        {repo.label}
+                      </span>
+                    )}
+                    <p className="text-sm text-gray-200 truncate">
+                      {repo.provider === 'github'
+                        ? `${repo.owner}/${repo.repo}`
+                        : repo.gitlabProjectId || `${repo.owner}/${repo.repo}`
+                      }
+                    </p>
+                  </div>
                   <p className="text-xs text-gray-500">
                     {repo.defaultBranch || 'main'}
                     {repo.lastSyncAt && ` · Letzter Sync: ${new Date(repo.lastSyncAt).toLocaleString('de-DE')}`}
@@ -465,6 +475,19 @@ export default function ProjectSettings() {
                 />
               </div>
             )}
+
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Label (z.B. "API", "Frontend", "App")
+              </label>
+              <input
+                type="text"
+                value={newRepoLabel}
+                onChange={(e) => setNewRepoLabel(e.target.value)}
+                placeholder="Optional: Name zur Identifikation"
+                className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+              />
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>

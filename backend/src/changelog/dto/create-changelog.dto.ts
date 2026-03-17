@@ -19,4 +19,8 @@ export class CreateChangelogDto {
   @IsString()
   @IsOptional()
   component?: string;
+
+  @IsString()
+  @IsOptional()
+  repoLabel?: string;
 }

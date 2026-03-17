@@ -58,6 +58,9 @@ export class Todo {
   @Prop({ type: [TodoComment], default: [] })
   comments: TodoComment[];
 
+  @Prop()
+  repoLabel: string;
+
   @Prop({ default: false })
   archived: boolean;
 

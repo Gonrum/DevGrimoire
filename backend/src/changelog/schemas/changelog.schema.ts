@@ -19,6 +19,9 @@ export class Changelog {
 
   @Prop()
   component: string;
+
+  @Prop()
+  repoLabel: string;
 }
 
 export const ChangelogSchema = SchemaFactory.createForClass(Changelog);

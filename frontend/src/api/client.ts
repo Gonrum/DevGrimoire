@@ -73,6 +73,7 @@ export interface ChangelogEntry {
   changes: string[];
   summary?: string;
   component?: string;
+  repoLabel?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,6 +94,7 @@ export interface Todo {
   tags: string[];
   milestoneId?: string;
   blockedBy: string[];
+  repoLabel?: string;
   archived: boolean;
   comments: TodoComment[];
   number?: number;
@@ -347,6 +349,7 @@ export interface Feature {
 export interface GitRepository {
   _id?: string;
   provider: 'github' | 'gitlab';
+  label?: string;
   baseUrl?: string;
   owner?: string;
   repo?: string;
@@ -369,6 +372,8 @@ export interface CommitEntry {
   committedAt: string;
   url?: string;
   branch?: string;
+  repoIndex?: number;
+  repoLabel?: string;
   additions?: number;
   deletions?: number;
   createdAt: string;
@@ -531,6 +536,10 @@ export const api = {
       request<Notification>(`/notifications/${id}/read`, { method: 'PUT' }),
     markAllAsRead: () =>
       request<void>('/notifications/read-all', { method: 'PUT' }),
+    delete: (id: string) =>
+      request<void>(`/notifications/${id}`, { method: 'DELETE' }),
+    deleteAll: () =>
+      request<{ deleted: number }>('/notifications/all', { method: 'DELETE' }),
   },
   settings: {
     get: (key: string) =>
@@ -624,13 +633,14 @@ export const api = {
       request<void>(`/dependencies/${id}`, { method: 'DELETE' }),
   },
   commits: {
-    list: (projectId: string, filters?: { branch?: string; author?: string; since?: string; until?: string; provider?: string; limit?: number; offset?: number }) => {
+    list: (projectId: string, filters?: { branch?: string; author?: string; since?: string; until?: string; provider?: string; repoLabel?: string; limit?: number; offset?: number }) => {
       const params = new URLSearchParams({ projectId });
       if (filters?.branch) params.set('branch', filters.branch);
       if (filters?.author) params.set('author', filters.author);
       if (filters?.since) params.set('since', filters.since);
       if (filters?.until) params.set('until', filters.until);
       if (filters?.provider) params.set('provider', filters.provider);
+      if (filters?.repoLabel) params.set('repoLabel', filters.repoLabel);
       if (filters?.limit) params.set('limit', String(filters.limit));
       if (filters?.offset) params.set('offset', String(filters.offset));
       return request<CommitEntry[]>(`/commits?${params}`);
