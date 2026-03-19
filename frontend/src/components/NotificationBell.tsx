@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { api, Notification } from '../api/client';
+import { useAuth } from '../hooks/useAuth';
 
 function timeAgo(date: string): string {
   const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
@@ -48,8 +49,13 @@ export default function NotificationBell() {
   }, [fetchUnreadCount]);
 
   // Listen for SSE notification events with auto-reconnect
+  const { getAccessToken, authEnabled } = useAuth();
   useEffect(() => {
-    const token = localStorage.getItem('devgrimoire_access_token');
+    // Wait for auth to resolve; if auth is enabled, require token
+    if (authEnabled === null) return;
+    const token = getAccessToken();
+    if (authEnabled && !token) return;
+
     const params = new URLSearchParams();
     if (token) params.set('token', token);
     const url = `/api/events?${params}`;
@@ -84,7 +90,7 @@ export default function NotificationBell() {
       es?.close();
       clearTimeout(retryTimer);
     };
-  }, [fetchUnreadCount, fetchNotifications, open]);
+  }, [fetchUnreadCount, fetchNotifications, open, getAccessToken, authEnabled]);
 
   // Close on click outside
   useEffect(() => {

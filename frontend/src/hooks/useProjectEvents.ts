@@ -3,14 +3,14 @@ import { useAuth } from './useAuth';
 
 export interface ProjectChangeEvent {
   projectId: string;
-  entity: 'project' | 'todo' | 'session' | 'knowledge' | 'changelog' | 'milestone' | 'manual' | 'research' | 'environment' | 'secret' | 'schema' | 'dependency' | 'feature' | 'soul';
+  entity: 'project' | 'todo' | 'session' | 'knowledge' | 'changelog' | 'milestone' | 'manual' | 'research' | 'notification' | 'environment' | 'secret' | 'schema' | 'dependency' | 'feature' | 'soul' | 'commit' | 'recurring-task' | 'snippet';
   action: 'created' | 'updated' | 'deleted';
   entityId?: string;
 }
 
 type EventHandler = (event: ProjectChangeEvent) => void;
 
-function useSSE(url: string | null, onEvent: EventHandler, token: string | null) {
+function useSSE(url: string | null, onEvent: EventHandler, token: string | null, authEnabled: boolean | null) {
   const handlerRef = useRef(onEvent);
   handlerRef.current = onEvent;
 
@@ -19,6 +19,9 @@ function useSSE(url: string | null, onEvent: EventHandler, token: string | null)
 
   useEffect(() => {
     if (!url) return;
+    // Don't connect until auth is resolved; if auth is enabled, wait for token
+    if (authEnabled === null) return;
+    if (authEnabled && !token) return;
 
     const sep = url.includes('?') ? '&' : '?';
     const fullUrl = token ? `${url}${sep}token=${token}` : url;
@@ -62,22 +65,23 @@ function useSSE(url: string | null, onEvent: EventHandler, token: string | null)
       if (timerRef.current) clearTimeout(timerRef.current);
       pendingRef.current.clear();
     };
-  }, [url, token]);
+  }, [url, token, authEnabled]);
 }
 
 export function useProjectEvents(
   projectId: string | undefined,
   onEvent: EventHandler,
 ) {
-  const { getAccessToken } = useAuth();
+  const { getAccessToken, authEnabled } = useAuth();
   useSSE(
     projectId ? `/api/events?projectId=${projectId}` : null,
     onEvent,
     getAccessToken(),
+    authEnabled,
   );
 }
 
 export function useDashboardEvents(onEvent: EventHandler) {
-  const { getAccessToken } = useAuth();
-  useSSE('/api/events', onEvent, getAccessToken());
+  const { getAccessToken, authEnabled } = useAuth();
+  useSSE('/api/events', onEvent, getAccessToken(), authEnabled);
 }

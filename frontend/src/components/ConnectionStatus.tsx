@@ -5,10 +5,14 @@ import { useAuth } from '../hooks/useAuth';
 export default function ConnectionStatus() {
   const { t } = useTranslation();
   const [connected, setConnected] = useState(false);
-  const { getAccessToken } = useAuth();
+  const { getAccessToken, authEnabled } = useAuth();
 
   useEffect(() => {
+    // Wait for auth to resolve; if auth is enabled, require token
+    if (authEnabled === null) return;
     const token = getAccessToken();
+    if (authEnabled && !token) return;
+
     const params = new URLSearchParams();
     if (token) params.set('token', token);
     const url = `/api/events?${params}`;
@@ -35,7 +39,7 @@ export default function ConnectionStatus() {
       es?.close();
       clearTimeout(retryTimer);
     };
-  }, [getAccessToken]);
+  }, [getAccessToken, authEnabled]);
 
   return (
     <span
