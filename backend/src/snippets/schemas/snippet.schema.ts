@@ -32,4 +32,7 @@ export class Snippet {
 
 export const SnippetSchema = SchemaFactory.createForClass(Snippet);
 SnippetSchema.index({ projectId: 1 });
-SnippetSchema.index({ title: 'text', code: 'text', description: 'text', tags: 'text' });
+SnippetSchema.index(
+  { title: 'text', code: 'text', description: 'text', tags: 'text' },
+  { language_override: 'textSearchLanguage' },
+);
