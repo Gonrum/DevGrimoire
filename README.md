@@ -27,7 +27,7 @@ DevGrimoire gives Claude (the AI assistant) a persistent memory for your project
 
 ## Features
 
-- **73 MCP Tools** -- Claude can manage projects, todos, milestones, sessions, knowledge, changelogs, manuals, research, schemas, dependencies, features, environments, and secrets
+- **89 MCP Tools** -- Claude can manage projects, todos, milestones, sessions, knowledge, changelogs, manuals, research, schemas, dependencies, features, snippets, environments, and secrets
 - **RAG Semantic Search** -- LanceDB vector database with Ollama/LM Studio embeddings for meaning-based search across all entity types
 - **REST API** -- 98 endpoints for all resources
 - **React Dashboard** -- Dark-mode UI with Kanban board, milestone tracking, activity feed, Markdown editor, and more
@@ -42,7 +42,7 @@ DevGrimoire gives Claude (the AI assistant) a persistent memory for your project
 - **Two MCP Transports** -- Local stdio mode or remote via HTTP/SSE
 - **Docker Compose** -- One command for the entire stack
 
-## MCP Tools (73)
+## MCP Tools (89)
 
 | Area | Tools | Description |
 |------|-------|-------------|
@@ -56,9 +56,13 @@ DevGrimoire gives Claude (the AI assistant) a persistent memory for your project
 | **Research** | `research_save`, `_search`, `_list`, `_get`, `_update`, `_delete` | Point-in-time research with sources |
 | **Schemas** | `schema_create`, `_list`, `_get`, `_update`, `_delete`, `_versions` | DB schema documentation with versioning |
 | **Features** | `feature_create`, `_list`, `_get`, `_update`, `_delete` | Feature catalog with status tracking |
+| **Snippets** | `snippet_save`, `_list`, `_get`, `_update`, `_delete`, `_search` | Code snippets per project with language, category, full-text search |
 | **Dependencies** | `dependency_add`, `_list`, `_get`, `_update`, `_delete`, `_scan` | Package dependencies with bulk scan from package.json etc. |
 | **Environments** | `environment_create`, `_list`, `_get`, `_update`, `_delete`, `_export` | Key-value variables per environment, .env export |
 | **Secrets** | `secret_set`, `_get`, `_list`, `_delete` | AES-256-GCM encrypted values |
+| **Souls** | `soul_get`, `_update` | Project personality / guiding principles |
+| **Commits** | `commit_list`, `_search`, `_sync` | Git commit history from GitHub/GitLab |
+| **Recurring Tasks** | `recurring_task_create`, `_list`, `_get`, `_update`, `_delete` | Scheduled recurring todo creation |
 | **RAG** | `rag_search`, `rag_reindex`, `rag_status` | Semantic vector search across all entities |
 | **System** | `system_instructions_get`, `_set`, `notify_user` | Agent instructions, push notifications |
 
@@ -221,7 +225,7 @@ DevGrimoire includes a built-in RAG (Retrieval-Augmented Generation) system for 
 
 - **LanceDB** (embedded, no extra service) stores vector embeddings on disk
 - **Ollama** or any **OpenAI-compatible API** (LM Studio, vLLM, etc.) generates embeddings
-- **Indexed entities**: Knowledge, Research, Manuals, Changelogs, Todos, Sessions
+- **Indexed entities**: Knowledge, Research, Manuals, Changelogs, Todos, Sessions, Snippets
 - **Auto-sync**: New/updated/deleted documents are automatically indexed via Change Streams
 
 ### Setup
@@ -268,7 +272,7 @@ DevGrimoire includes a built-in RAG (Retrieval-Augmented Generation) system for 
 
 ## Project Import/Export
 
-Complete project data (todos, milestones, knowledge, changelog, sessions, schemas, dependencies, features, manuals, research, environments, secrets) can be exported as JSON and imported into a new instance. All internal references (milestone links, dependencies, changelog associations) are correctly remapped.
+Complete project data (todos, milestones, knowledge, changelog, sessions, schemas, dependencies, features, snippets, manuals, research, environments, secrets) can be exported as JSON and imported into a new instance. All internal references (milestone links, dependencies, changelog associations) are correctly remapped.
 
 - **Export**: Project settings > Data export (optionally with decrypted secret values)
 - **Import**: Project overview > Import JSON
@@ -292,7 +296,7 @@ DevGrimoire/
 │   └── src/
 │       ├── main.ts                # REST API entry (NestJS HTTP, prefix /api)
 │       ├── mcp-server.ts          # MCP entry (stdio transport)
-│       ├── mcp-tools.ts           # MCP tool definitions (70 tools)
+│       ├── mcp-tools.ts           # MCP tool definitions (89 tools)
 │       ├── auth/                  # JWT auth, roles, API keys, user management
 │       ├── projects/              # Projects (schema, service, controller, DTOs)
 │       ├── todos/                 # Tasks (state machine, dependencies, comments)
@@ -304,6 +308,7 @@ DevGrimoire/
 │       ├── research/              # Research with sources
 │       ├── schemas/               # DB schema documentation (versioning)
 │       ├── features/              # Feature catalog
+│       ├── snippets/              # Code snippets (language, category, full-text search)
 │       ├── dependencies/          # Package dependencies (scan)
 │       ├── environments/          # Environment variables (dev/staging/prod)
 │       ├── secrets/               # Encrypted secrets (AES-256-GCM)
