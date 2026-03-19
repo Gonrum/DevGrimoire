@@ -341,6 +341,12 @@
     "depCreated": "Dependency \"{{name}}\" added",
     "depDeleted": "Dependency \"{{name}}\" deleted"
   },
+  "sidebar": {
+    "core": "Core",
+    "knowledge": "Knowledge",
+    "catalog": "Catalog",
+    "system": "System"
+  },
   "snippets": {
     "newSnippet": "+ New Snippet",
     "editSnippet": "Edit Snippet",

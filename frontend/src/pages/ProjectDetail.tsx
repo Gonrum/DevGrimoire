@@ -51,6 +51,7 @@ export default function ProjectDetail() {
   const [commitsKey, setCommitsKey] = useState(0);
   const [secretsKey, setSecretsKey] = useState(0);
   const [tab, setTab] = useState<Tab>(() => (searchParams.get('tab') as Tab) || 'todos');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   useEffect(() => {
     if (searchParams.has('tab')) {
       setTab(searchParams.get('tab') as Tab);
@@ -173,25 +174,81 @@ export default function ProjectDetail() {
   }
   if (!project) return <p className="text-red-400">{t('projects.notFound')}</p>;
 
-  const tabs: { key: Tab; label: string; count: number }[] = [
-    { key: 'todos', label: 'Quests', count: todos.filter((t) => t.status !== 'done').length },
-    { key: 'soul', label: t('soul.title'), count: (['vision', 'principles', 'conventions', 'communication', 'boundaries', 'workflow', 'quality'] as const).filter((k) => soul?.[k]?.trim()).length },
-    { key: 'milestones', label: i18n.language === 'de' ? 'Artefakte' : 'Artifacts', count: milestones.filter((m) => m.status !== 'done' && !m.archived).length },
-    { key: 'sessions', label: i18n.language === 'de' ? 'Rituale' : 'Rituals', count: sessions.length },
-    { key: 'knowledge', label: t('searchTypes.knowledge'), count: knowledge.length },
-    { key: 'changelog', label: i18n.language === 'de' ? 'Chroniken' : 'Chronicles', count: changelog.length },
-    { key: 'manual', label: i18n.language === 'de' ? 'Foliant' : 'Tome', count: manuals.length },
-    { key: 'features', label: 'Features', count: features.length },
-    { key: 'schemas', label: 'Schemas', count: schemas.length },
-    { key: 'dependencies', label: 'Dependencies', count: dependencies.length },
-    { key: 'snippets', label: 'Snippets', count: snippets.length },
-    { key: 'research', label: t('searchTypes.research'), count: research.length },
-    { key: 'environments', label: i18n.language === 'de' ? 'Umgebungen' : 'Environments', count: environments.length },
-    { key: 'secrets', label: 'Secrets', count: secrets.length },
-    { key: 'recurring-tasks', label: t('recurringTasks.tabLabel'), count: recurringTasks.filter((rt) => rt.active).length },
-    { key: 'commits', label: 'Commits', count: commitCount },
-    { key: 'activity', label: i18n.language === 'de' ? 'Aktivität' : 'Activity', count: activities.length },
+  const navGroups: { label: string; items: { key: Tab; label: string; count: number }[] }[] = [
+    {
+      label: t('sidebar.core'),
+      items: [
+        { key: 'todos', label: 'Quests', count: todos.filter((t) => t.status !== 'done').length },
+        { key: 'milestones', label: i18n.language === 'de' ? 'Artefakte' : 'Artifacts', count: milestones.filter((m) => m.status !== 'done' && !m.archived).length },
+        { key: 'sessions', label: i18n.language === 'de' ? 'Rituale' : 'Rituals', count: sessions.length },
+        { key: 'activity', label: i18n.language === 'de' ? 'Aktivit\u00e4t' : 'Activity', count: activities.length },
+      ],
+    },
+    {
+      label: t('sidebar.knowledge'),
+      items: [
+        { key: 'knowledge', label: t('searchTypes.knowledge'), count: knowledge.length },
+        { key: 'changelog', label: i18n.language === 'de' ? 'Chroniken' : 'Chronicles', count: changelog.length },
+        { key: 'manual', label: i18n.language === 'de' ? 'Foliant' : 'Tome', count: manuals.length },
+        { key: 'research', label: t('searchTypes.research'), count: research.length },
+        { key: 'snippets', label: 'Snippets', count: snippets.length },
+      ],
+    },
+    {
+      label: t('sidebar.catalog'),
+      items: [
+        { key: 'features', label: 'Features', count: features.length },
+        { key: 'schemas', label: 'Schemas', count: schemas.length },
+        { key: 'dependencies', label: 'Dependencies', count: dependencies.length },
+      ],
+    },
+    {
+      label: t('sidebar.system'),
+      items: [
+        { key: 'soul', label: t('soul.title'), count: (['vision', 'principles', 'conventions', 'communication', 'boundaries', 'workflow', 'quality'] as const).filter((k) => soul?.[k]?.trim()).length },
+        { key: 'environments', label: i18n.language === 'de' ? 'Umgebungen' : 'Environments', count: environments.length },
+        { key: 'secrets', label: 'Secrets', count: secrets.length },
+        { key: 'recurring-tasks', label: t('recurringTasks.tabLabel'), count: recurringTasks.filter((rt) => rt.active).length },
+        { key: 'commits', label: 'Commits', count: commitCount },
+      ],
+    },
   ];
+
+  const currentTabLabel = navGroups.flatMap((g) => g.items).find((i) => i.key === tab)?.label || tab;
+
+  const sidebarNav = (onSelect?: () => void) => (
+    <nav className="space-y-5">
+      {navGroups.map((group) => (
+        <div key={group.label}>
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-gray-600 px-3 mb-1.5">
+            {group.label}
+          </h3>
+          <ul className="space-y-0.5">
+            {group.items.map((item) => (
+              <li key={item.key}>
+                <button
+                  type="button"
+                  onClick={() => { setTab(item.key); onSelect?.(); }}
+                  className={`w-full text-left px-3 py-1.5 text-sm rounded-lg flex justify-between items-center transition-colors ${
+                    tab === item.key
+                      ? 'bg-gray-800 text-cyan-400 font-medium'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
+                  }`}
+                >
+                  <span className="truncate">{item.label}</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ml-2 ${
+                    tab === item.key ? 'bg-gray-700 text-cyan-400' : 'bg-gray-800/80 text-gray-500'
+                  }`}>
+                    {item.count}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </nav>
+  );
 
   return (
     <div>
@@ -199,7 +256,7 @@ export default function ProjectDetail() {
         &larr; {t('common.allProjects')}
       </Link>
 
-      <div className="mb-8">
+      <div className="mb-6">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
           <h1 className="text-xl sm:text-2xl font-bold font-grimoire">{project.name}</h1>
           <Badge color={project.active ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500'} rounded="full">
@@ -249,75 +306,81 @@ export default function ProjectDetail() {
         )}
       </div>
 
-      {/* Mobile: Tab dropdown */}
-      <div className="sm:hidden mb-6">
-        <select
-          value={tab}
-          onChange={(e) => setTab(e.target.value as Tab)}
-          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
-        >
-          {tabs.map((t) => (
-            <option key={t.key} value={t.key}>
-              {t.label} ({t.count})
-            </option>
-          ))}
-        </select>
-      </div>
+      {/* Mobile: Sidebar toggle */}
+      <button
+        type="button"
+        onClick={() => setSidebarOpen(true)}
+        className="lg:hidden mb-4 flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200 bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded-lg transition-colors"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+          <line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
+        <span>{currentTabLabel}</span>
+      </button>
 
-      {/* Desktop: Tab bar */}
-      <div className="hidden sm:block border-b border-gray-800 mb-6 overflow-x-auto">
-        <nav className="flex gap-4 sm:gap-6 min-w-max">
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={`pb-3 text-xs sm:text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
-                tab === t.key
-                  ? 'border-violet-500 text-cyan-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-300'
-              }`}
-            >
-              {t.label}
-              <span className="ml-1 sm:ml-1.5 text-xs bg-gray-800 px-1 sm:px-1.5 py-0.5 rounded-full">
-                {t.count}
-              </span>
-            </button>
-          ))}
-        </nav>
-      </div>
+      {/* Mobile: Sidebar drawer overlay */}
+      {sidebarOpen && (
+        <>
+          <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
+          <div className="fixed inset-y-0 left-0 w-64 bg-gray-900 border-r border-gray-800 z-50 lg:hidden overflow-y-auto" style={{ paddingTop: 'max(1rem, var(--sat))', paddingBottom: 'max(1rem, var(--sab))', paddingLeft: 'max(0.75rem, var(--sal))' }}>
+            <div className="flex items-center justify-between px-3 mb-4 pr-4">
+              <span className="text-sm font-semibold text-gray-300">{project.name}</span>
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(false)}
+                className="text-gray-500 hover:text-gray-300 p-1"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            {sidebarNav(() => setSidebarOpen(false))}
+          </div>
+        </>
+      )}
 
-      {tab === 'todos' && (
-        <TodoBoard
-          todos={todos}
-          milestones={milestones}
-          projectId={id!}
-          onUpdate={() => api.todos.list({ projectId: id }).then(setTodos)}
-        />
-      )}
-      {tab === 'soul' && <SoulView projectId={id!} soul={soul} onUpdate={() => api.souls.get(id!).then(setSoul)} />}
-      {tab === 'milestones' && (
-        <MilestoneList
-          milestones={milestones}
-          todos={todos}
-          projectId={id!}
-          onUpdate={() => api.milestones.list(id!).then(setMilestones)}
-        />
-      )}
-      {tab === 'sessions' && <SessionList sessions={sessions} />}
-      {tab === 'knowledge' && <KnowledgeList entries={knowledge} />}
-      {tab === 'changelog' && <ChangelogList entries={changelog} />}
-      {tab === 'manual' && <ManualView projectId={id!} entries={manuals} onUpdate={() => api.manuals.list(id!).then(setManuals)} />}
-      {tab === 'features' && <FeatureList entries={features} projectId={id!} />}
-      {tab === 'schemas' && <SchemaList entries={schemas} projectId={id!} />}
-      {tab === 'dependencies' && <DependencyList entries={dependencies} projectId={id!} />}
-      {tab === 'snippets' && <SnippetList entries={snippets} projectId={id!} />}
-      {tab === 'research' && <ResearchList entries={research} />}
-      {tab === 'environments' && <EnvironmentList key={envKey} projectId={id!} />}
-      {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id!} />}
-      {tab === 'recurring-tasks' && <RecurringTaskList entries={recurringTasks} projectId={id!} />}
-      {tab === 'commits' && <CommitList key={commitsKey} projectId={id!} gitRepositories={project.gitRepositories} />}
-      {tab === 'activity' && <ActivityList activities={activities} />}
+      <div className="flex gap-6">
+        {/* Desktop: Fixed sidebar */}
+        <div className="hidden lg:block shrink-0 w-52 sticky top-4 self-start max-h-[calc(100vh-2rem)] overflow-y-auto">
+          {sidebarNav()}
+        </div>
+
+        {/* Content area */}
+        <div className="flex-1 min-w-0">
+          {tab === 'todos' && (
+            <TodoBoard
+              todos={todos}
+              milestones={milestones}
+              projectId={id!}
+              onUpdate={() => api.todos.list({ projectId: id }).then(setTodos)}
+            />
+          )}
+          {tab === 'soul' && <SoulView projectId={id!} soul={soul} onUpdate={() => api.souls.get(id!).then(setSoul)} />}
+          {tab === 'milestones' && (
+            <MilestoneList
+              milestones={milestones}
+              todos={todos}
+              projectId={id!}
+              onUpdate={() => api.milestones.list(id!).then(setMilestones)}
+            />
+          )}
+          {tab === 'sessions' && <SessionList sessions={sessions} />}
+          {tab === 'knowledge' && <KnowledgeList entries={knowledge} />}
+          {tab === 'changelog' && <ChangelogList entries={changelog} />}
+          {tab === 'manual' && <ManualView projectId={id!} entries={manuals} onUpdate={() => api.manuals.list(id!).then(setManuals)} />}
+          {tab === 'features' && <FeatureList entries={features} projectId={id!} />}
+          {tab === 'schemas' && <SchemaList entries={schemas} projectId={id!} />}
+          {tab === 'dependencies' && <DependencyList entries={dependencies} projectId={id!} />}
+          {tab === 'snippets' && <SnippetList entries={snippets} projectId={id!} />}
+          {tab === 'research' && <ResearchList entries={research} />}
+          {tab === 'environments' && <EnvironmentList key={envKey} projectId={id!} />}
+          {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id!} />}
+          {tab === 'recurring-tasks' && <RecurringTaskList entries={recurringTasks} projectId={id!} />}
+          {tab === 'commits' && <CommitList key={commitsKey} projectId={id!} gitRepositories={project.gitRepositories} />}
+          {tab === 'activity' && <ActivityList activities={activities} />}
+        </div>
+      </div>
     </div>
   );
 }
