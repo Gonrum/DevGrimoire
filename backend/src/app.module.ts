@@ -3,6 +3,7 @@ import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ProjectsModule } from './projects/projects.module';
 import { TodosModule } from './todos/todos.module';
 import { SessionsModule } from './sessions/sessions.module';
@@ -30,6 +31,8 @@ import { SoulsModule } from './souls/souls.module';
 import { CommitsModule } from './commits/commits.module';
 import { ProjectTransferModule } from './project-transfer/project-transfer.module';
 import { RagModule } from './rag/rag.module';
+import { RecurringTasksModule } from './recurring-tasks/recurring-tasks.module';
+import { SnippetsModule } from './snippets/snippets.module';
 import { RequestContextInterceptor } from './common/request-context.interceptor';
 
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -41,6 +44,7 @@ if (!MONGODB_URI) {
   imports: [
     MongooseModule.forRoot(MONGODB_URI),
     EventEmitterModule.forRoot(),
+    ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     ProjectsModule,
     TodosModule,
@@ -67,6 +71,8 @@ if (!MONGODB_URI) {
     CommitsModule,
     ProjectTransferModule,
     RagModule,
+    RecurringTasksModule,
+    SnippetsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

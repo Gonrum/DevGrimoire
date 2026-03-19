@@ -23,6 +23,8 @@ import { FeaturesService } from './features/features.service';
 import { SoulsService } from './souls/souls.service';
 import { CommitsService } from './commits/commits.service';
 import { RagService } from './rag/rag.service';
+import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
+import { SnippetsService } from './snippets/snippets.service';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 
 function requireString(args: Record<string, unknown>, field: string): string {
@@ -125,6 +127,8 @@ export interface McpServices {
   soulsService: SoulsService;
   commitsService: CommitsService;
   ragService: RagService;
+  recurringTasksService: RecurringTasksService;
+  snippetsService: SnippetsService;
 }
 
 const tools = [
@@ -1257,10 +1261,177 @@ const tools = [
       properties: {},
     },
   },
+  {
+    name: 'recurring_task_create',
+    description: 'Create a recurring task. With projectId: creates todos in that project. Without projectId: system-wide task that creates notifications.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID (optional — omit for system-wide task)' },
+        title: { type: 'string', description: 'Todo/notification title' },
+        description: { type: 'string', description: 'Description' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+        tags: { type: 'array', items: { type: 'string' } },
+        milestoneId: { type: 'string', description: 'Milestone MongoDB ID' },
+        repoLabel: { type: 'string', description: 'Repository label' },
+        frequency: { type: 'string', enum: ['daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'], description: 'How often to run' },
+        dayOfWeek: { type: 'number', description: '0=Sun, 1=Mon, ..., 6=Sat (for weekly/biweekly)' },
+        dayOfMonth: { type: 'number', description: '1-31 (for monthly/quarterly/yearly)' },
+        month: { type: 'number', description: '1-12 (for quarterly/yearly)' },
+        hour: { type: 'number', description: '0-23, default 9' },
+        maxCatchUp: { type: 'number', description: 'Max catch-up runs after downtime (default 3)' },
+      },
+      required: ['title', 'frequency'],
+    },
+  },
+  {
+    name: 'recurring_task_list',
+    description: 'List recurring tasks. Filter by projectId, or use systemOnly=true for system-wide tasks, or omit both for all.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID (optional)' },
+        systemOnly: { type: 'boolean', description: 'Only system-wide tasks (no projectId)' },
+        active: { type: 'boolean', description: 'Filter by active/inactive' },
+      },
+    },
+  },
+  {
+    name: 'recurring_task_get',
+    description: 'Get a recurring task by ID with full details',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'RecurringTask MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'recurring_task_update',
+    description: 'Update a recurring task',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'RecurringTask MongoDB ID' },
+        title: { type: 'string' },
+        description: { type: 'string' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+        tags: { type: 'array', items: { type: 'string' } },
+        milestoneId: { type: 'string' },
+        repoLabel: { type: 'string' },
+        frequency: { type: 'string', enum: ['daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'] },
+        dayOfWeek: { type: 'number' },
+        dayOfMonth: { type: 'number' },
+        month: { type: 'number' },
+        hour: { type: 'number' },
+        active: { type: 'boolean' },
+        maxCatchUp: { type: 'number' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'recurring_task_delete',
+    description: 'Delete a recurring task',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'RecurringTask MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'snippet_save',
+    description: 'Save a code snippet for a project',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        title: { type: 'string', description: 'Snippet title' },
+        language: { type: 'string', description: 'Programming language (e.g. typescript, python, bash, sql)' },
+        code: { type: 'string', description: 'The code snippet content' },
+        description: { type: 'string', description: 'Optional description/explanation' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' },
+        category: { type: 'string', description: 'Category (e.g. Utils, Config, Patterns, Queries)' },
+        fileName: { type: 'string', description: 'Optional source file name' },
+      },
+      required: ['projectId', 'title', 'language', 'code'],
+    },
+  },
+  {
+    name: 'snippet_list',
+    description: 'List code snippets (compact: id, title, language, category, tags). Use snippet_get for full code.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        language: { type: 'string', description: 'Filter by programming language' },
+        category: { type: 'string', description: 'Filter by category' },
+        tag: { type: 'string', description: 'Filter by tag (exact match)' },
+        limit: { type: 'number', description: 'Max items to return' },
+        offset: { type: 'number', description: 'Skip first N items' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'snippet_get',
+    description: 'Get a code snippet with full code content',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Snippet MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'snippet_update',
+    description: 'Update a code snippet',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Snippet MongoDB ID' },
+        title: { type: 'string', description: 'Snippet title' },
+        language: { type: 'string', description: 'Programming language' },
+        code: { type: 'string', description: 'The code snippet content' },
+        description: { type: 'string', description: 'Description/explanation' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags' },
+        category: { type: 'string', description: 'Category' },
+        fileName: { type: 'string', description: 'Source file name' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'snippet_delete',
+    description: 'Delete a code snippet',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Snippet MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'snippet_search',
+    description: 'Full-text search over code snippets. Returns snippets (200 chars of code) — use snippet_get for full content.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        q: { type: 'string', description: 'Search query' },
+        projectId: { type: 'string', description: 'Optional: limit to project' },
+      },
+      required: ['q'],
+    },
+  },
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -1333,6 +1504,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             dependenciesService.removeByProject(id),
             featuresService.removeByProject(id),
             soulsService.removeByProject(id),
+            recurringTasksService.removeByProject(id),
+            snippetsService.removeByProject(id),
           ]);
           result = { deleted: true, id };
           break;
@@ -2075,6 +2248,122 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'rag_status': {
           result = await ragService.status();
+          break;
+        }
+        case 'recurring_task_create': {
+          const rt = await recurringTasksService.create({
+            projectId: optionalString(a, 'projectId'),
+            title: requireString(a, 'title'),
+            description: optionalString(a, 'description'),
+            priority: optionalString(a, 'priority'),
+            tags: optionalStringArray(a, 'tags'),
+            milestoneId: optionalString(a, 'milestoneId'),
+            repoLabel: optionalString(a, 'repoLabel'),
+            frequency: requireString(a, 'frequency') as any,
+            dayOfWeek: optionalNumber(a, 'dayOfWeek'),
+            dayOfMonth: optionalNumber(a, 'dayOfMonth'),
+            month: optionalNumber(a, 'month'),
+            hour: optionalNumber(a, 'hour'),
+            maxCatchUp: optionalNumber(a, 'maxCatchUp'),
+          });
+          result = compactCreateResult(rt, { nextRun: (rt as any).nextRun });
+          break;
+        }
+        case 'recurring_task_list': {
+          const rts = await recurringTasksService.findAll({
+            projectId: optionalString(a, 'projectId'),
+            systemOnly: optionalBoolean(a, 'systemOnly'),
+            active: optionalBoolean(a, 'active'),
+          });
+          result = compactList(rts as any[], ['description', 'createdTodoIds']);
+          break;
+        }
+        case 'recurring_task_get': {
+          result = await recurringTasksService.findById(requireString(a, 'id'));
+          break;
+        }
+        case 'recurring_task_update': {
+          const updated = await recurringTasksService.update(requireString(a, 'id'), {
+            title: optionalString(a, 'title'),
+            description: optionalString(a, 'description'),
+            priority: optionalString(a, 'priority'),
+            tags: optionalStringArray(a, 'tags'),
+            milestoneId: optionalString(a, 'milestoneId'),
+            repoLabel: optionalString(a, 'repoLabel'),
+            frequency: optionalString(a, 'frequency') as any,
+            dayOfWeek: optionalNumber(a, 'dayOfWeek'),
+            dayOfMonth: optionalNumber(a, 'dayOfMonth'),
+            month: optionalNumber(a, 'month'),
+            hour: optionalNumber(a, 'hour'),
+            active: optionalBoolean(a, 'active'),
+            maxCatchUp: optionalNumber(a, 'maxCatchUp'),
+          });
+          result = compactUpdateResult(updated);
+          break;
+        }
+        case 'recurring_task_delete': {
+          await recurringTasksService.remove(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
+          break;
+        }
+        case 'snippet_save': {
+          const snip = await snippetsService.create({
+            projectId: requireString(a, 'projectId'),
+            title: requireString(a, 'title'),
+            language: requireString(a, 'language'),
+            code: requireString(a, 'code'),
+            description: optionalString(a, 'description'),
+            tags: optionalStringArray(a, 'tags'),
+            category: optionalString(a, 'category'),
+            fileName: optionalString(a, 'fileName'),
+          });
+          result = compactCreateResult(snip, { title: (snip as any).title });
+          break;
+        }
+        case 'snippet_list': {
+          const snippets = await snippetsService.findByProject(
+            requireString(a, 'projectId'),
+            optionalString(a, 'language'),
+            optionalString(a, 'category'),
+            optionalString(a, 'tag'),
+          );
+          result = applyPagination(
+            compactList(snippets as any, ['code', 'description', '__v']),
+            optionalNumber(a, 'limit'),
+            optionalNumber(a, 'offset'),
+          );
+          break;
+        }
+        case 'snippet_get':
+          result = await snippetsService.findById(requireString(a, 'id'));
+          break;
+        case 'snippet_update':
+          result = compactUpdateResult(await snippetsService.update(requireString(a, 'id'), {
+            title: optionalString(a, 'title'),
+            language: optionalString(a, 'language'),
+            code: optionalString(a, 'code'),
+            description: optionalString(a, 'description'),
+            tags: optionalStringArray(a, 'tags'),
+            category: optionalString(a, 'category'),
+            fileName: optionalString(a, 'fileName'),
+          }));
+          break;
+        case 'snippet_delete':
+          await snippetsService.remove(requireString(a, 'id'));
+          result = { deleted: true, id: requireString(a, 'id') };
+          break;
+        case 'snippet_search': {
+          const searchResults = await snippetsService.search(
+            requireString(a, 'q'),
+            optionalString(a, 'projectId'),
+          );
+          result = searchResults.map((s: any) => {
+            const obj = typeof s.toJSON === 'function' ? s.toJSON() : { ...s };
+            obj.code = snippet(obj.code);
+            obj.description = snippet(obj.description);
+            delete obj.__v;
+            return obj;
+          });
           break;
         }
         default:

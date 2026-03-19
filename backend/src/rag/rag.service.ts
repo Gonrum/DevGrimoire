@@ -14,6 +14,7 @@ const INDEXABLE_ENTITIES = [
   'changelog',
   'todo',
   'session',
+  'snippet',
 ] as const;
 
 type IndexableEntity = (typeof INDEXABLE_ENTITIES)[number];
@@ -26,11 +27,14 @@ const ENTITY_COLLECTION_MAP: Record<IndexableEntity, string> = {
   changelog: 'changelogs',
   todo: 'todos',
   session: 'sessions',
+  snippet: 'snippets',
 };
 
 interface RagDocument {
   [key: string]: unknown;
   id: string;
+  sourceId: string;
+  chunkIndex: number;
   projectId: string;
   entity: string;
   title: string;
@@ -156,6 +160,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       this.table = await this.db.createTable('documents', [
         {
           id: '__init__',
+          sourceId: '__init__',
+          chunkIndex: 0,
           projectId: '__init__',
           entity: '__init__',
           title: '__init__',
@@ -214,16 +220,59 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Get embedding with truncation, logging, and automatic fallback */
+  /** Split text into overlapping chunks, preferring natural boundaries */
+  private chunkText(text: string, maxChars?: number, overlap?: number): string[] {
+    const chunkSize = maxChars ?? parseInt(
+      process.env.RAG_CHUNK_SIZE || process.env.RAG_MAX_INPUT_CHARS || '1800', 10,
+    );
+    const chunkOverlap = overlap ?? parseInt(process.env.RAG_CHUNK_OVERLAP || '200', 10);
+
+    if (text.length <= chunkSize) return [text];
+
+    const chunks: string[] = [];
+    let start = 0;
+
+    while (start < text.length) {
+      let end = Math.min(start + chunkSize, text.length);
+
+      // If not at the end of text, find a natural break point
+      if (end < text.length) {
+        const window = text.slice(start, end);
+        // Try paragraph break, then sentence, then word
+        const paraBreak = window.lastIndexOf('\n\n');
+        const sentenceBreak = window.lastIndexOf('. ');
+        const wordBreak = window.lastIndexOf(' ');
+
+        if (paraBreak > chunkSize * 0.5) {
+          end = start + paraBreak + 2; // Include the \n\n
+        } else if (sentenceBreak > chunkSize * 0.5) {
+          end = start + sentenceBreak + 2; // Include the ". "
+        } else if (wordBreak > chunkSize * 0.5) {
+          end = start + wordBreak + 1; // Include the space
+        }
+      }
+
+      chunks.push(text.slice(start, end));
+
+      // Next chunk starts with overlap from the end of current chunk
+      if (end >= text.length) break;
+      const nextStart = end - Math.min(chunkOverlap, end - start - 1);
+      // Prevent infinite loop: ensure we always advance at least 1 char
+      if (nextStart <= start) break;
+      start = nextStart;
+    }
+
+    return chunks;
+  }
+
+  /** Get embedding with logging and automatic fallback */
   private async getEmbedding(text: string): Promise<number[]> {
-    const maxChars = parseInt(process.env.RAG_MAX_INPUT_CHARS || '1800', 10);
-    const truncated = text.length > maxChars ? text.slice(0, maxChars) : text;
-    const preview = truncated.slice(0, 80).replace(/\n/g, ' ');
-    this.logger.log(`Embedding: "${preview}${truncated.length > 80 ? '…' : ''}" (${truncated.length} chars)`);
+    const preview = text.slice(0, 80).replace(/\n/g, ' ');
+    this.logger.log(`Embedding: "${preview}${text.length > 80 ? '…' : ''}" (${text.length} chars)`);
     const start = Date.now();
 
     try {
-      const vector = await this.callEmbeddingApi(truncated);
+      const vector = await this.callEmbeddingApi(text);
       this.logger.log(`Embedded in ${Date.now() - start}ms (${vector.length} dims, ${this.embeddingProvider})`);
       return vector;
     } catch (err) {
@@ -236,13 +285,10 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         const fallback = this.endpoints[i];
         try {
           this.logger.warn(`Primary embedding failed, trying fallback: ${fallback.provider} @ ${fallback.url}`);
-          const prevProvider = this.embeddingProvider;
-          const prevUrl = this.embeddingUrl;
-          const prevModel = this.embeddingModel;
           this.embeddingProvider = fallback.provider;
           this.embeddingUrl = fallback.url;
           this.embeddingModel = fallback.model;
-          const vector = await this.callEmbeddingApi(truncated);
+          const vector = await this.callEmbeddingApi(text);
           this.logger.log(`Fallback succeeded: ${fallback.provider} in ${Date.now() - start}ms`);
           return vector;
         } catch {
@@ -269,46 +315,59 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         return { title: String(doc.title || ''), content: String(doc.description || '') };
       case 'session':
         return { title: 'Session', content: String(doc.summary || '') };
+      case 'snippet':
+        return { title: String(doc.title || ''), content: `[${String(doc.language || '')}] ${String(doc.code || '')}` };
       default:
         return null;
     }
   }
 
-  /** Upsert a single document into the vector store */
+  /** Upsert a single document into the vector store (with chunking) */
   private async upsertDocument(entity: IndexableEntity, doc: Record<string, unknown>): Promise<void> {
     if (!this.table) return;
 
     const extracted = this.extractText(entity, doc);
     if (!extracted || (!extracted.title && !extracted.content)) return;
 
-    const id = String(doc._id);
+    const docId = String(doc._id);
     const projectId = String(doc.projectId || '');
     const combinedText = `${extracted.title}\n${extracted.content}`.trim();
 
-    const vector = await this.getEmbedding(combinedText);
-
-    // Delete existing record if present, then add new one
+    // Delete all existing chunks for this document
     try {
-      await this.table.delete(`id = "${id}"`);
+      await this.table.delete(`id = "${docId}" OR id LIKE "${docId}__chunk_%"`);
     } catch {
-      // Record might not exist yet
+      // Records might not exist yet
     }
 
-    await this.table.add([{
-      id,
-      projectId,
-      entity,
-      title: extracted.title,
-      content: extracted.content.slice(0, 2000), // Store truncated for display
-      vector,
-    }]);
+    const chunks = this.chunkText(combinedText);
+    const records: RagDocument[] = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      const vector = await this.getEmbedding(chunks[i]);
+      const id = chunks.length === 1 ? docId : `${docId}__chunk_${i}`;
+      records.push({
+        id,
+        sourceId: docId,
+        chunkIndex: i,
+        projectId,
+        entity,
+        title: extracted.title,
+        content: chunks[i].slice(0, 2000),
+        vector,
+      });
+    }
+
+    if (records.length > 0) {
+      await this.table.add(records);
+    }
   }
 
-  /** Remove a document from the vector store */
+  /** Remove a document (and all its chunks) from the vector store */
   private async removeDocument(entityId: string): Promise<void> {
     if (!this.table) return;
     try {
-      await this.table.delete(`id = "${entityId}"`);
+      await this.table.delete(`id = "${entityId}" OR id LIKE "${entityId}__chunk_%"`);
     } catch {
       // Ignore if not found
     }
@@ -348,7 +407,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Semantic search across all indexed documents */
+  /** Semantic search across all indexed documents (deduplicated by source document) */
   async search(
     query: string,
     projectId?: string,
@@ -361,25 +420,36 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
     const vector = await this.getEmbedding(query);
 
-    const queryBuilder = this.table!.search(vector).limit(limit * 3); // Overfetch for filtering
+    const queryBuilder = this.table!.search(vector).limit(limit * 5); // Overfetch for filtering + dedup
 
     const results = await queryBuilder.toArray();
 
-    // Apply filters and map
-    return results
-      .filter((row) => {
-        if (projectId && row.projectId !== projectId) return false;
-        if (entity && row.entity !== entity) return false;
-        return row.id !== '__init__';
-      })
+    // Filter, deduplicate by sourceId (keep best chunk per document), then limit
+    const seen = new Map<string, { row: Record<string, unknown>; score: number }>();
+    for (const row of results) {
+      if (row.id === '__init__') continue;
+      if (projectId && row.projectId !== projectId) continue;
+      if (entity && row.entity !== entity) continue;
+
+      const sourceId = (row.sourceId as string) || (row.id as string);
+      const score = row._distance != null ? 1 - (row._distance as number) : 0;
+
+      const existing = seen.get(sourceId);
+      if (!existing || score > existing.score) {
+        seen.set(sourceId, { row, score });
+      }
+    }
+
+    return Array.from(seen.values())
+      .sort((a, b) => b.score - a.score)
       .slice(0, limit)
-      .map((row) => ({
-        id: row.id as string,
+      .map(({ row, score }) => ({
+        id: ((row.sourceId as string) || (row.id as string)),
         projectId: row.projectId as string,
         entity: row.entity as string,
         title: row.title as string,
         content: row.content as string,
-        score: row._distance != null ? 1 - (row._distance as number) : 0,
+        score,
       }));
   }
 
@@ -400,7 +470,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       await this.db!.dropTable('documents');
       const zeroVector = new Array(this.dimensions).fill(0);
       this.table = await this.db!.createTable('documents', [
-        { id: '__init__', projectId: '__init__', entity: '__init__', title: '__init__', content: '__init__', vector: zeroVector },
+        { id: '__init__', sourceId: '__init__', chunkIndex: 0, projectId: '__init__', entity: '__init__', title: '__init__', content: '__init__', vector: zeroVector },
       ]);
       await this.table.delete('id = "__init__"');
     }
@@ -420,26 +490,34 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       const cursor = db.collection(collection).find(filter);
       let count = 0;
 
-      // Process in batches
+      // Process in batches (with chunking)
       const batch: RagDocument[] = [];
       for await (const doc of cursor) {
         const extracted = this.extractText(entity, doc as Record<string, unknown>);
         if (!extracted || (!extracted.title && !extracted.content)) continue;
 
+        const docId = String(doc._id);
+        const projectId = String(doc.projectId || '');
         const combinedText = `${extracted.title}\n${extracted.content}`.trim();
-        const vector = await this.getEmbedding(combinedText);
+        const chunks = this.chunkText(combinedText);
 
-        batch.push({
-          id: String(doc._id),
-          projectId: String(doc.projectId || ''),
-          entity,
-          title: extracted.title,
-          content: extracted.content.slice(0, 2000),
-          vector,
-        });
+        for (let i = 0; i < chunks.length; i++) {
+          const vector = await this.getEmbedding(chunks[i]);
+          const id = chunks.length === 1 ? docId : `${docId}__chunk_${i}`;
+          batch.push({
+            id,
+            sourceId: docId,
+            chunkIndex: i,
+            projectId,
+            entity,
+            title: extracted.title,
+            content: chunks[i].slice(0, 2000),
+            vector,
+          });
+        }
         count++;
 
-        // Flush batch every 50 documents
+        // Flush batch every 50 records
         if (batch.length >= 50) {
           await this.table!.add(batch);
           batch.length = 0;
@@ -467,6 +545,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     endpoints: EmbeddingEndpoint[];
     dimensions: number;
     documentCount: number;
+    chunkCount: number;
     entities: Record<string, number>;
   }> {
     const isReady = await this.ensureReady();
@@ -478,6 +557,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         endpoints: this.endpoints,
         dimensions: 0,
         documentCount: 0,
+        chunkCount: 0,
         entities: {},
       };
     }
@@ -485,10 +565,16 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     const allRows = await this.table.search(new Array(this.dimensions).fill(0)).limit(100000).toArray();
     const validRows = allRows.filter((r) => r.id !== '__init__');
 
+    // Count unique source documents and entities (by sourceId)
+    const uniqueSources = new Set<string>();
     const entities: Record<string, number> = {};
     for (const row of validRows) {
-      const e = row.entity as string;
-      entities[e] = (entities[e] || 0) + 1;
+      const sourceId = (row.sourceId as string) || (row.id as string);
+      if (!uniqueSources.has(sourceId)) {
+        uniqueSources.add(sourceId);
+        const e = row.entity as string;
+        entities[e] = (entities[e] || 0) + 1;
+      }
     }
 
     return {
@@ -496,7 +582,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       activeEndpoint: { provider: this.embeddingProvider, model: this.embeddingModel, url: this.embeddingUrl },
       endpoints: this.endpoints,
       dimensions: this.dimensions,
-      documentCount: validRows.length,
+      documentCount: uniqueSources.size,
+      chunkCount: validRows.length,
       entities,
     };
   }

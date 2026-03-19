@@ -346,6 +346,45 @@ export interface Feature {
   updatedAt: string;
 }
 
+export interface Snippet {
+  _id: string;
+  projectId: string;
+  title: string;
+  language: string;
+  code: string;
+  description?: string;
+  tags: string[];
+  category?: string;
+  fileName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RecurringFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly';
+
+export interface RecurringTask {
+  _id: string;
+  projectId: string;
+  title: string;
+  description?: string;
+  priority?: 'low' | 'medium' | 'high' | 'critical';
+  tags: string[];
+  milestoneId?: string;
+  repoLabel?: string;
+  frequency: RecurringFrequency;
+  dayOfWeek?: number;
+  dayOfMonth?: number;
+  month?: number;
+  hour: number;
+  active: boolean;
+  lastRun?: string;
+  nextRun: string;
+  createdTodoIds: string[];
+  maxCatchUp: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface GitRepository {
   _id?: string;
   provider: 'github' | 'gitlab';
@@ -665,11 +704,53 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+    branches: (projectId: string, repoIndex: number) =>
+      request<{ name: string; isDefault: boolean }[]>(`/commits/branches?projectId=${projectId}&repoIndex=${repoIndex}`),
+  },
+  snippets: {
+    list: (projectId: string, filters?: { language?: string; category?: string; tag?: string }) => {
+      const params = new URLSearchParams({ projectId });
+      if (filters?.language) params.set('language', filters.language);
+      if (filters?.category) params.set('category', filters.category);
+      if (filters?.tag) params.set('tag', filters.tag);
+      return request<Snippet[]>(`/snippets?${params}`);
+    },
+    search: (query: string, projectId?: string) => {
+      const params = new URLSearchParams({ q: query });
+      if (projectId) params.set('projectId', projectId);
+      return request<Snippet[]>(`/snippets/search?${params}`);
+    },
+    get: (id: string) => request<Snippet>(`/snippets/${id}`),
+    create: (data: Partial<Snippet>) =>
+      request<Snippet>('/snippets', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<Snippet>) =>
+      request<Snippet>(`/snippets/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/snippets/${id}`, { method: 'DELETE' }),
   },
   souls: {
     get: (projectId: string) => request<Soul | null>(`/souls?projectId=${projectId}`),
     upsert: (data: Partial<Soul> & { projectId: string }) =>
       request<Soul>('/souls', { method: 'PUT', body: JSON.stringify(data) }),
+  },
+  recurringTasks: {
+    list: (filters?: { projectId?: string; systemOnly?: boolean; active?: boolean }) => {
+      const params = new URLSearchParams();
+      if (filters?.projectId) params.set('projectId', filters.projectId);
+      if (filters?.systemOnly) params.set('systemOnly', 'true');
+      if (filters?.active !== undefined) params.set('active', String(filters.active));
+      const qs = params.toString();
+      return request<RecurringTask[]>(`/recurring-tasks${qs ? `?${qs}` : ''}`);
+    },
+    get: (id: string) => request<RecurringTask>(`/recurring-tasks/${id}`),
+    create: (data: Partial<RecurringTask>) =>
+      request<RecurringTask>('/recurring-tasks', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<RecurringTask>) =>
+      request<RecurringTask>(`/recurring-tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/recurring-tasks/${id}`, { method: 'DELETE' }),
+    trigger: (id: string) =>
+      request<RecurringTask>(`/recurring-tasks/${id}/trigger`, { method: 'POST' }),
   },
   transfer: {
     export: async (id: string, includeSecrets = false) => {

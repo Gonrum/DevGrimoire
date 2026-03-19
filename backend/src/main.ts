@@ -30,6 +30,8 @@ import { FeaturesService } from './features/features.service';
 import { SoulsService } from './souls/souls.service';
 import { CommitsService } from './commits/commits.service';
 import { RagService } from './rag/rag.service';
+import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
+import { SnippetsService } from './snippets/snippets.service';
 import { registerMcpTools, McpServices } from './mcp-tools';
 import { ApiKeysService } from './api-keys/api-keys.service';
 import { AuthService } from './auth/auth.service';
@@ -77,6 +79,8 @@ async function bootstrap() {
     soulsService: app.get(SoulsService),
     commitsService: app.get(CommitsService),
     ragService: app.get(RagService),
+    recurringTasksService: app.get(RecurringTasksService),
+    snippetsService: app.get(SnippetsService),
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};
