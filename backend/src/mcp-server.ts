@@ -26,6 +26,8 @@ import { CommitsService } from './commits/commits.service';
 import { RagService } from './rag/rag.service';
 import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
 import { SnippetsService } from './snippets/snippets.service';
+import { AttachmentsService } from './attachments/attachments.service';
+import { QuestionsService } from './questions/questions.service';
 import { registerMcpTools } from './mcp-tools';
 
 // Load .env from project root (parent of backend/)
@@ -84,6 +86,8 @@ async function bootstrap() {
     ragService: app.get(RagService),
     recurringTasksService: app.get(RecurringTasksService),
     snippetsService: app.get(SnippetsService),
+    attachmentsService: app.get(AttachmentsService),
+    questionsService: app.get(QuestionsService),
   });
 
   const transport = new StdioServerTransport();

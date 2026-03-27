@@ -15,6 +15,7 @@ const INDEXABLE_ENTITIES = [
   'todo',
   'session',
   'snippet',
+  'attachment',
 ] as const;
 
 type IndexableEntity = (typeof INDEXABLE_ENTITIES)[number];
@@ -28,6 +29,7 @@ const ENTITY_COLLECTION_MAP: Record<IndexableEntity, string> = {
   todo: 'todos',
   session: 'sessions',
   snippet: 'snippets',
+  attachment: 'attachments',
 };
 
 interface RagDocument {
@@ -317,6 +319,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         return { title: 'Session', content: String(doc.summary || '') };
       case 'snippet':
         return { title: String(doc.title || ''), content: `[${String(doc.language || '')}] ${String(doc.code || '')}` };
+      case 'attachment':
+        return { title: String(doc.originalName || ''), content: String(doc.textContent || '') };
       default:
         return null;
     }
@@ -428,7 +432,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     const seen = new Map<string, { row: Record<string, unknown>; score: number }>();
     for (const row of results) {
       if (row.id === '__init__') continue;
-      if (projectId && row.projectId !== projectId) continue;
+      // Show project-specific + global entries (global = empty projectId)
+      if (projectId && row.projectId !== projectId && row.projectId !== '') continue;
       if (entity && row.entity !== entity) continue;
 
       const sourceId = (row.sourceId as string) || (row.id as string);
@@ -484,7 +489,12 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       const filter: Record<string, unknown> = {};
       if (projectId) {
         const { ObjectId } = await import('mongodb');
-        filter.projectId = new ObjectId(projectId);
+        // Include project-specific + global entries (no projectId)
+        filter.$or = [
+          { projectId: new ObjectId(projectId) },
+          { projectId: { $exists: false } },
+          { projectId: null },
+        ];
       }
 
       const cursor = db.collection(collection).find(filter);

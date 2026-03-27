@@ -25,6 +25,9 @@ import { CommitsService } from './commits/commits.service';
 import { RagService } from './rag/rag.service';
 import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
 import { SnippetsService } from './snippets/snippets.service';
+import { AttachmentsService } from './attachments/attachments.service';
+import { QuestionsService } from './questions/questions.service';
+import { RequestContext } from './common/request-context';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 
 function requireString(args: Record<string, unknown>, field: string): string {
@@ -129,6 +132,8 @@ export interface McpServices {
   ragService: RagService;
   recurringTasksService: RecurringTasksService;
   snippetsService: SnippetsService;
+  attachmentsService: AttachmentsService;
+  questionsService: QuestionsService;
 }
 
 const tools = [
@@ -325,27 +330,29 @@ const tools = [
   },
   {
     name: 'knowledge_save',
-    description: 'Save a knowledge entry (architecture decisions, patterns, conventions, notes) for a project',
+    description: 'Save a knowledge entry (architecture decisions, patterns, conventions, notes). Use scope="global" for cross-project knowledge (projectId optional), scope="project" for project-specific (projectId required).',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (required for scope="project", optional for scope="global")' },
+        scope: { type: 'string', enum: ['global', 'project'], description: 'Scope: "global" for cross-project, "project" for project-specific (default: "project")' },
         topic: { type: 'string', description: 'Topic/title of the knowledge entry' },
         content: { type: 'string', description: 'The knowledge content' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' },
         category: { type: 'string', description: 'Category for grouping (e.g. Architecture, Patterns, Conventions)' },
       },
-      required: ['projectId', 'topic', 'content'],
+      required: ['topic', 'content'],
     },
   },
   {
     name: 'knowledge_search',
-    description: 'Search knowledge base (returns compact results with content snippet). Use knowledge_get for full content.',
+    description: 'Search knowledge base (returns compact results with content snippet). Use knowledge_get for full content. Without scope filter: returns both project-specific and global results.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         query: { type: 'string', description: 'Search query' },
-        projectId: { type: 'string', description: 'Scope search to a specific project' },
+        projectId: { type: 'string', description: 'Scope search to a specific project (also includes global entries)' },
+        scope: { type: 'string', enum: ['global', 'project'], description: 'Filter by scope: "global" only global, "project" only project-specific' },
         limit: { type: 'number', description: 'Max items to return' },
       },
       required: ['query'],
@@ -353,16 +360,16 @@ const tools = [
   },
   {
     name: 'knowledge_list',
-    description: 'List knowledge entries (compact: id, topic, tags, category). Use knowledge_get for full content.',
+    description: 'List knowledge entries (compact: id, topic, tags, category, scope). With projectId: shows project-specific + global entries. With scope="global": shows only global entries (no projectId needed).',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (shows project + global entries)' },
+        scope: { type: 'string', enum: ['global', 'project'], description: 'Filter by scope' },
         category: { type: 'string', description: 'Filter by category' },
         limit: { type: 'number', description: 'Max items to return' },
         offset: { type: 'number', description: 'Skip first N items' },
       },
-      required: ['projectId'],
     },
   },
   {
@@ -550,6 +557,22 @@ const tools = [
         url: { type: 'string', description: 'URL to open when notification is clicked (e.g. /projects/abc123)' },
       },
       required: ['title', 'body'],
+    },
+  },
+  {
+    name: 'ask_user',
+    description: 'Ask the user a question and wait for their answer. The question is shown in the DevGrimoire UI (via SSE + push notification). Use this when you need clarification, a decision, or missing information. If todoId is provided, the question and answer are documented as a comment on the todo.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        question: { type: 'string', description: 'The question to ask the user' },
+        options: { type: 'array', items: { type: 'string' }, description: 'Answer options (if omitted, user can type free text)' },
+        context: { type: 'string', description: 'Additional context to help the user understand the question' },
+        todoId: { type: 'string', description: 'Todo MongoDB ID to link the question to a task (question + answer will be documented as comment)' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (auto-derived from todoId if set)' },
+        timeoutSeconds: { type: 'number', description: 'How long to wait for an answer (default: 300, max: 600)' },
+      },
+      required: ['question'],
     },
   },
   {
@@ -1428,10 +1451,77 @@ const tools = [
       required: ['q'],
     },
   },
+  // ── Attachments ──────────────────────────────────────────────
+  {
+    name: 'attachment_upload',
+    description: 'Upload a file attachment. Content must be base64-encoded. Can attach to a specific entity (e.g. todo) or as standalone project file.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        fileName: { type: 'string', description: 'Original filename (e.g. "diagram.png")' },
+        content: { type: 'string', description: 'Base64-encoded file content' },
+        mimeType: { type: 'string', description: 'MIME type (auto-detected from extension if omitted)' },
+        entityType: { type: 'string', description: 'Entity type to attach to (e.g. "todo", "knowledge")' },
+        entityId: { type: 'string', description: 'Entity MongoDB ID to attach to' },
+        description: { type: 'string', description: 'Optional description' },
+        tags: { type: 'string', description: 'Comma-separated tags' },
+      },
+      required: ['projectId', 'fileName', 'content'],
+    },
+  },
+  {
+    name: 'attachment_list',
+    description: 'List file attachments for a project. Optionally filter by entity type/id.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        entityType: { type: 'string', description: 'Filter by entity type (e.g. "todo")' },
+        entityId: { type: 'string', description: 'Filter by entity MongoDB ID' },
+        limit: { type: 'number', description: 'Max results (default 50)' },
+        offset: { type: 'number', description: 'Skip results' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'attachment_get',
+    description: 'Get metadata of a single attachment (no file content).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Attachment MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'attachment_download',
+    description: 'Download file content. Returns text directly for text files, base64 for binary files. Max 5MB.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Attachment MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'attachment_delete',
+    description: 'Delete a file attachment (removes from storage and database).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Attachment MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -1506,6 +1596,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             soulsService.removeByProject(id),
             recurringTasksService.removeByProject(id),
             snippetsService.removeByProject(id),
+            attachmentsService.removeByProject(id),
           ]);
           result = { deleted: true, id };
           break;
@@ -1622,21 +1713,27 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'knowledge_save': {
-          const kEntry = await knowledgeService.create({
-            projectId: requireString(a, 'projectId'),
+          const kScope = optionalString(a, 'scope') as 'global' | 'project' | undefined;
+          const kDto: any = {
             topic: requireString(a, 'topic'),
             content: requireString(a, 'content'),
             tags: optionalStringArray(a, 'tags'),
             category: optionalString(a, 'category'),
-          });
-          result = compactCreateResult(kEntry, { topic: (kEntry as any).topic });
+            scope: kScope,
+          };
+          const kPid = optionalString(a, 'projectId');
+          if (kPid) kDto.projectId = kPid;
+          const kEntry = await knowledgeService.create(kDto);
+          result = compactCreateResult(kEntry, { topic: (kEntry as any).topic, scope: (kEntry as any).scope });
           break;
         }
         case 'knowledge_search': {
           const kProjectId = optionalString(a, 'projectId');
+          const kSearchScope = optionalString(a, 'scope');
           const searchResults = await knowledgeService.search(
             requireString(a, 'query'),
             kProjectId,
+            kSearchScope,
           );
           const limited = searchResults.slice(0, optionalNumber(a, 'limit') || 10);
           result = limited.map((item: any) => {
@@ -1655,11 +1752,16 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'knowledge_list': {
           const entries = await knowledgeService.findByProject(
-            requireString(a, 'projectId'),
-            optionalString(a, 'category'),
+            optionalString(a, 'projectId'),
+            {
+              category: optionalString(a, 'category'),
+              scope: optionalString(a, 'scope'),
+              limit: optionalNumber(a, 'limit'),
+              offset: optionalNumber(a, 'offset'),
+            },
           );
           const compactEntries = compactList(entries as any, ['content', '__v']);
-          result = applyPagination(compactEntries, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
+          result = compactEntries;
           break;
         }
         case 'knowledge_get':
@@ -1776,6 +1878,20 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const nUrl = optionalString(a, 'url');
           const notification = await notificationsService.create(nTitle, nBody, nUrl, 'notify_user');
           result = { notificationId: notification._id.toString() };
+          break;
+        }
+        case 'ask_user': {
+          const userId = RequestContext.getUser()?.userId;
+          const questionEntry = await questionsService.create({
+            question: requireString(a, 'question'),
+            options: optionalStringArray(a, 'options'),
+            context: optionalString(a, 'context'),
+            todoId: optionalString(a, 'todoId'),
+            projectId: optionalString(a, 'projectId'),
+            timeoutSeconds: optionalNumber(a, 'timeoutSeconds'),
+          }, userId);
+          const timeoutMs = questionEntry.timeoutMs;
+          result = await questionsService.waitForAnswer(questionEntry._id.toString(), timeoutMs);
           break;
         }
         case 'environment_create': {
@@ -2366,13 +2482,84 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           });
           break;
         }
+        // ── Attachments ────────────────────────────────────────
+        case 'attachment_upload': {
+          const attachment = await attachmentsService.createFromBase64(
+            {
+              projectId: requireString(a, 'projectId'),
+              fileName: requireString(a, 'fileName'),
+              mimeType: optionalString(a, 'mimeType'),
+              entityType: optionalString(a, 'entityType'),
+              entityId: optionalString(a, 'entityId'),
+              description: optionalString(a, 'description'),
+              tags: optionalStringArray(a, 'tags'),
+            },
+            requireString(a, 'content'),
+          );
+          result = compactCreateResult(attachment, {
+            originalName: (attachment as any).originalName,
+            size: (attachment as any).size,
+            mimeType: (attachment as any).mimeType,
+          });
+          break;
+        }
+        case 'attachment_list': {
+          const items = await attachmentsService.findByProject(
+            requireString(a, 'projectId'),
+            optionalString(a, 'entityType'),
+            optionalString(a, 'entityId'),
+          );
+          result = applyPagination(
+            compactList(items as any, ['textContent', '__v']),
+            optionalNumber(a, 'limit') ?? 50,
+            optionalNumber(a, 'offset') ?? 0,
+          );
+          break;
+        }
+        case 'attachment_get': {
+          const att = await attachmentsService.findById(requireString(a, 'id'));
+          result = att;
+          break;
+        }
+        case 'attachment_download': {
+          const { buffer, attachment: att } = await attachmentsService.getContent(requireString(a, 'id'));
+          const MAX_DOWNLOAD = 5 * 1024 * 1024;
+          if (buffer.length > MAX_DOWNLOAD) {
+            result = {
+              originalName: att.originalName,
+              mimeType: att.mimeType,
+              size: att.size,
+              error: `File too large for MCP download (${(att.size / 1024 / 1024).toFixed(1)}MB). Use the REST API: GET /api/attachments/${att._id}/download`,
+            };
+          } else if (att.mimeType.startsWith('text/') || ['application/json', 'application/javascript', 'application/typescript', 'application/xml', 'application/x-yaml', 'application/x-sh'].includes(att.mimeType)) {
+            result = {
+              originalName: att.originalName,
+              mimeType: att.mimeType,
+              size: att.size,
+              content: buffer.toString('utf-8'),
+            };
+          } else {
+            result = {
+              originalName: att.originalName,
+              mimeType: att.mimeType,
+              size: att.size,
+              contentBase64: buffer.toString('base64'),
+            };
+          }
+          break;
+        }
+        case 'attachment_delete': {
+          await attachmentsService.remove(requireString(a, 'id'));
+          result = { deleted: true };
+          break;
+        }
         default:
           return errorResult(`Unknown tool: ${name}`);
       }
 
       // Send in-app notification for tool usage (fire-and-forget)
       // notify_user already creates its own notification in the switch case
-      if (name !== 'notify_user') {
+      if (name !== 'notify_user' && name !== 'ask_user') {
         const toolPrefix = name.split('_')[0];
         notificationsService.create(
           `MCP: ${name}`,

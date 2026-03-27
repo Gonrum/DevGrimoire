@@ -1,8 +1,20 @@
-import { IsString, IsOptional, IsArray, IsMongoId } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsArray,
+  IsMongoId,
+  IsIn,
+  ValidateIf,
+} from 'class-validator';
 
 export class CreateKnowledgeDto {
   @IsMongoId()
-  projectId: string;
+  @ValidateIf((o) => o.scope !== 'global')
+  projectId?: string;
+
+  @IsIn(['global', 'project'])
+  @IsOptional()
+  scope?: 'global' | 'project';
 
   @IsString()
   topic: string;

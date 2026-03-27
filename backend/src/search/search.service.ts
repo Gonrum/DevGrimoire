@@ -99,7 +99,7 @@ export class SearchService {
       results.push({
         type: 'knowledge',
         id: k._id.toString(),
-        projectId: k.projectId.toString(),
+        projectId: k.projectId?.toString() || '',
         title: k.topic,
         snippet: makeSnippet(k.content),
       });

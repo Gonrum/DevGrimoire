@@ -2,12 +2,27 @@ import { Controller, Logger, OnModuleDestroy, OnModuleInit, Query, Sse } from '@
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
-import { Observable, Subject, filter, map } from 'rxjs';
+import { Observable, Subject, filter, map, merge } from 'rxjs';
 import { PROJECT_CHANGED, ProjectChangeEvent } from './project-event';
 import { NOTIFICATION_CREATED } from '../notifications/notifications.service';
+import { QUESTION_CREATED, QUESTION_ANSWERED } from '../questions/questions.service';
 
 interface MessageEvent {
   data: string;
+}
+
+interface QuestionEvent {
+  type: 'question_created' | 'question_answered';
+  questionId: string;
+  question?: string;
+  options?: string[];
+  context?: string;
+  todoId?: string | null;
+  projectId?: string | null;
+  targetUserId?: string | null;
+  expiresAt?: string;
+  answer?: string;
+  answeredByUserId?: string | null;
 }
 
 const COLLECTION_ENTITY_MAP: Record<string, ProjectChangeEvent['entity']> = {
@@ -28,6 +43,9 @@ const COLLECTION_ENTITY_MAP: Record<string, ProjectChangeEvent['entity']> = {
   commits: 'commit',
 };
 
+/** Collections watched separately (not ProjectChangeEvent) */
+const QUESTION_COLLECTION = 'questions';
+
 const OPERATION_ACTION_MAP: Record<string, ProjectChangeEvent['action']> = {
   insert: 'created',
   update: 'updated',
@@ -39,6 +57,7 @@ const OPERATION_ACTION_MAP: Record<string, ProjectChangeEvent['action']> = {
 export class EventsController implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EventsController.name);
   private readonly events$ = new Subject<ProjectChangeEvent>();
+  private readonly questionEvents$ = new Subject<QuestionEvent>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private changeStream: any = null;
   private readonly recentEvents = new Map<string, number>();
@@ -62,7 +81,7 @@ export class EventsController implements OnModuleInit, OnModuleDestroy {
   }
 
   private watchChangeStreams() {
-    const watchedCollections = Object.keys(COLLECTION_ENTITY_MAP);
+    const watchedCollections = [...Object.keys(COLLECTION_ENTITY_MAP), QUESTION_COLLECTION];
     const pipeline = [
       { $match: { 'ns.coll': { $in: watchedCollections } } },
     ];
@@ -76,12 +95,46 @@ export class EventsController implements OnModuleInit, OnModuleDestroy {
       this.changeStream = db.watch(pipeline, { fullDocument: 'updateLookup' });
 
       this.changeStream.on('change', (change: any) => {
-        const entity = COLLECTION_ENTITY_MAP[change.ns?.coll];
+        const coll = change.ns?.coll;
+        const doc = change.fullDocument || change.documentKey;
         const action = OPERATION_ACTION_MAP[change.operationType];
-        if (!entity || !action) return;
+        if (!action) return;
+
+        // Handle question events separately (cross-process via Change Stream)
+        if (coll === QUESTION_COLLECTION && doc && change.operationType === 'insert') {
+          const questionId = doc._id?.toString();
+          if (questionId && doc.status === 'pending') {
+            this.questionEvents$.next({
+              type: 'question_created',
+              questionId,
+              question: doc.question,
+              options: doc.options || [],
+              context: doc.context,
+              todoId: doc.todoId?.toString() || null,
+              projectId: doc.projectId?.toString() || null,
+              targetUserId: doc.targetUserId?.toString() || null,
+              expiresAt: doc.expiresAt?.toISOString?.() || doc.expiresAt,
+            });
+          }
+          return;
+        }
+        if (coll === QUESTION_COLLECTION && doc && (change.operationType === 'update' || change.operationType === 'replace')) {
+          const questionId = (doc._id || change.documentKey?._id)?.toString();
+          if (questionId && doc.status === 'answered') {
+            this.questionEvents$.next({
+              type: 'question_answered',
+              questionId,
+              answer: doc.answer,
+              answeredByUserId: doc.answeredByUserId?.toString() || null,
+            });
+          }
+          return;
+        }
+
+        const entity = COLLECTION_ENTITY_MAP[coll];
+        if (!entity) return;
 
         let projectId: string | undefined;
-        const doc = change.fullDocument || change.documentKey;
 
         if (entity === 'project') {
           projectId = (doc?._id || change.documentKey?._id)?.toString();
@@ -148,16 +201,60 @@ export class EventsController implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  @OnEvent(QUESTION_CREATED)
+  handleQuestionCreated(event: any) {
+    this.questionEvents$.next({
+      type: 'question_created',
+      questionId: event.questionId,
+      question: event.question,
+      options: event.options,
+      context: event.context,
+      todoId: event.todoId,
+      projectId: event.projectId,
+      targetUserId: event.targetUserId,
+      expiresAt: event.expiresAt,
+    });
+  }
+
+  @OnEvent(QUESTION_ANSWERED)
+  handleQuestionAnswered(event: any) {
+    this.questionEvents$.next({
+      type: 'question_answered',
+      questionId: event.questionId,
+      answer: event.answer,
+      answeredByUserId: event.answeredByUserId,
+    });
+  }
+
   @Sse()
-  sse(@Query('projectId') projectId?: string): Observable<MessageEvent> {
-    return this.events$.pipe(
+  sse(
+    @Query('projectId') projectId?: string,
+    @Query('userId') userId?: string,
+  ): Observable<MessageEvent> {
+    const projectEvents$ = this.events$.pipe(
       filter((event) => {
         // Notification events go to ALL clients
         if (event.entity === 'notification') return true;
+        // Global events (projectId=null) go to ALL clients
+        if (event.projectId === null) return true;
         if (projectId) return event.projectId === projectId;
         return event.entity === 'project';
       }),
       map((event) => ({ data: JSON.stringify(event) })),
     );
+
+    const questionStream$ = this.questionEvents$.pipe(
+      filter((event) => {
+        // Broadcast questions (no targetUserId) go to all clients
+        if (!event.targetUserId) return true;
+        // Targeted questions: only to the target user
+        if (userId) return event.targetUserId === userId;
+        // No userId on SSE connection: show all (client filters)
+        return true;
+      }),
+      map((event) => ({ data: JSON.stringify(event) })),
+    );
+
+    return merge(projectEvents$, questionStream$);
   }
 }

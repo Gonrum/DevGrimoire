@@ -5,8 +5,11 @@ export type KnowledgeDocument = HydratedDocument<Knowledge>;
 
 @Schema({ timestamps: true })
 export class Knowledge {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
-  projectId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  projectId?: Types.ObjectId;
+
+  @Prop({ type: String, enum: ['global', 'project'], default: 'project' })
+  scope: string;
 
   @Prop({ required: true })
   topic: string;
@@ -23,4 +26,5 @@ export class Knowledge {
 
 export const KnowledgeSchema = SchemaFactory.createForClass(Knowledge);
 KnowledgeSchema.index({ projectId: 1 });
+KnowledgeSchema.index({ scope: 1 });
 KnowledgeSchema.index({ topic: 'text', content: 'text', tags: 'text' });

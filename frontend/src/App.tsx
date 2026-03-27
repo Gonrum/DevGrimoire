@@ -11,6 +11,9 @@ import MilestoneCreatePage from './pages/MilestoneCreatePage';
 import MilestoneDetailPage from './pages/MilestoneDetailPage';
 import EnvironmentCreatePage from './pages/EnvironmentCreatePage';
 import SecretCreatePage from './pages/SecretCreatePage';
+import RecurringTaskCreatePage from './pages/RecurringTaskCreatePage';
+import RecurringTaskDetailPage from './pages/RecurringTaskDetailPage';
+import RecurringTasksPage from './pages/RecurringTasksPage';
 import Docs from './pages/Docs';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
@@ -21,8 +24,9 @@ import GlobalSearch from './components/GlobalSearch';
 import { ToastProvider } from './components/Toast';
 import { LoadingText } from './components/ui/LoadingSpinner';
 import { AuthProvider, useAuth } from './hooks/useAuth';
-import { configureAuth } from './api/client';
+import { configureAuth, api } from './api/client';
 import ParticleBackground from './components/ParticleBackground';
+import QuestionDialog from './components/QuestionDialog';
 
 function NotFound() {
   const { t } = useTranslation();
@@ -110,6 +114,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 function AppShell() {
   const { t } = useTranslation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isSlaveMode, setIsSlaveMode] = useState(false);
   const location = useLocation();
 
   // Close mobile menu on route change
@@ -117,9 +122,22 @@ function AppShell() {
     setMobileMenuOpen(false);
   }, [location.pathname]);
 
+  // Check replication role
+  useEffect(() => {
+    api.replication.getStatus()
+      .then((s) => setIsSlaveMode(s.role === 'slave'))
+      .catch(() => {});
+  }, []);
+
   return (
     <div className="min-h-screen flex flex-col relative">
       <ParticleBackground />
+      <QuestionDialog />
+      {isSlaveMode && (
+        <div className="bg-amber-900/60 border-b border-amber-700 px-4 py-1.5 text-center text-xs text-amber-200 relative z-40">
+          {t('replication.slaveBanner')}
+        </div>
+      )}
       <header className="bg-gray-900/95 border-b border-gray-800 px-4 sm:px-6 py-3 sm:py-4 grimoire-header relative z-30" style={{ paddingTop: 'max(0.75rem, var(--sat))', paddingLeft: 'max(1rem, var(--sal))', paddingRight: 'max(1rem, var(--sar))' }}>
         <div className="flex items-center gap-3 sm:gap-6">
           {/* Hamburger button - mobile only */}
@@ -162,6 +180,14 @@ function AppShell() {
               }
             >
               {t('nav.projects')}
+            </NavLink>
+            <NavLink
+              to="/recurring-tasks"
+              className={({ isActive }) =>
+                isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'
+              }
+            >
+              {t('nav.recurringTasks')}
             </NavLink>
             <NavLink
               to="/docs"
@@ -213,6 +239,15 @@ function AppShell() {
               {t('nav.projects')}
             </NavLink>
             <NavLink
+              to="/recurring-tasks"
+              onClick={() => setMobileMenuOpen(false)}
+              className={({ isActive }) =>
+                `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
+              }
+            >
+              {t('nav.recurringTasks')}
+            </NavLink>
+            <NavLink
               to="/docs"
               onClick={() => setMobileMenuOpen(false)}
               className={({ isActive }) =>
@@ -244,6 +279,11 @@ function AppShell() {
           <Route path="/projects/:id/milestones/:milestoneId" element={<MilestoneDetailPage />} />
           <Route path="/projects/:id/environments/new" element={<EnvironmentCreatePage />} />
           <Route path="/projects/:id/secrets/new" element={<SecretCreatePage />} />
+          <Route path="/projects/:id/recurring-tasks/new" element={<RecurringTaskCreatePage />} />
+          <Route path="/projects/:id/recurring-tasks/:recurringTaskId" element={<RecurringTaskDetailPage />} />
+          <Route path="/recurring-tasks" element={<RecurringTasksPage />} />
+          <Route path="/recurring-tasks/new" element={<RecurringTaskCreatePage />} />
+          <Route path="/recurring-tasks/:recurringTaskId" element={<RecurringTaskDetailPage />} />
           <Route path="/projects/:id/settings" element={<ProjectSettings />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/docs" element={<Docs />} />

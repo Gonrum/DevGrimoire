@@ -272,7 +272,8 @@
     "archiveFailed": "Archive failed",
     "deleteFailed": "Delete failed",
     "completeFailed": "Completion failed",
-    "archived": "Archived"
+    "archived": "Archived",
+    "newQuest": "+ New Quest"
   },
   "milestoneStatus": {
     "open": "Open",
@@ -342,10 +343,10 @@
     "depDeleted": "Dependency \"{{name}}\" deleted"
   },
   "sidebar": {
-    "core": "Core",
-    "knowledge": "Knowledge",
-    "catalog": "Catalog",
-    "system": "System"
+    "core": "Adventure",
+    "knowledge": "Library",
+    "catalog": "Inventory",
+    "system": "Chamber"
   },
   "snippets": {
     "newSnippet": "+ New Snippet",
@@ -430,7 +431,7 @@
     "todo": "Quest",
     "knowledge": "Lore",
     "changelog": "Chronicles",
-    "research": "Scrolls",
+    "research": "Studies",
     "milestone": "Artifact"
   },
   "search": {
@@ -488,6 +489,7 @@
     "tabInstructions": "Agent Instructions",
     "tabApiKeys": "API Keys",
     "tabUsers": "User Management",
+    "tabReplication": "Mirroring",
     "tabNotifications": "Notifications",
     "notificationsDescription": "Control which notification categories are sent as push notifications to your device. In-app notifications are always active.",
     "pushCategory_notify_user": "Explicit Notifications",
@@ -704,5 +706,54 @@
     "typeCertificateDesc": "TLS/SSL certificate or private key",
     "typeFile": "File",
     "typeFileDesc": "Any file content (e.g. .env, config)"
+  },
+  "question": {
+    "title": "Agent Question",
+    "more": "more",
+    "placeholder": "Type your answer...",
+    "send": "Send"
+  },
+  "replication": {
+    "description": "Magical mirroring between Grimoire instances. The master grimoire mirrors all changes to the reflection.",
+    "role": "Role",
+    "masterConfig": "Master Configuration",
+    "slaveUrl": "Slave URL",
+    "slaveApiKey": "API Key for Slave",
+    "fullSyncCron": "Full Sync Schedule (Cron)",
+    "testConnection": "Test Connection",
+    "triggerSync": "Sync Now",
+    "connectionOk": "Connection successful",
+    "connectionFailed": "Connection failed",
+    "syncStarted": "Full sync started",
+    "readonlyWarning": "This instance is in read-only slave mode. Write operations are disabled.",
+    "promote": "Promote to Master",
+    "promoteConfirm": "Really promote?",
+    "promoted": "Instance promoted to master",
+    "instanceId": "Instance ID",
+    "connection": "Connection",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "queue": "Queue",
+    "failed": "Failed",
+    "clearFailed": "Clear",
+    "cleared": "items cleared",
+    "lastSync": "Last Sync",
+    "lastFullSync": "Last Full Sync",
+    "slaveBanner": "Read-Only Mode — This grimoire is a mirror"
+  },
+  "attachments": {
+    "title": "Scrolls",
+    "dropzone": "Drop scrolls here or click to upload",
+    "empty": "No scrolls yet",
+    "download": "Download",
+    "indexed": "Indexed in RAG search",
+    "uploading": "Uploading...",
+    "attachments": "Scrolls",
+    "projectFile": "Project",
+    "entity_todo": "Quest",
+    "entity_knowledge": "Lore",
+    "entity_milestone": "Artifact",
+    "entity_research": "Study",
+    "entity_snippet": "Rune"
   }
 }

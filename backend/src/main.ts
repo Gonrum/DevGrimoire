@@ -32,6 +32,8 @@ import { CommitsService } from './commits/commits.service';
 import { RagService } from './rag/rag.service';
 import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
 import { SnippetsService } from './snippets/snippets.service';
+import { AttachmentsService } from './attachments/attachments.service';
+import { QuestionsService } from './questions/questions.service';
 import { registerMcpTools, McpServices } from './mcp-tools';
 import { ApiKeysService } from './api-keys/api-keys.service';
 import { AuthService } from './auth/auth.service';
@@ -52,8 +54,8 @@ async function bootstrap() {
 
   const expressApp = app.getHttpAdapter().getInstance();
 
-  // JSON body parser for all routes
-  expressApp.use(json());
+  // JSON body parser for all routes (100MB limit for MCP + replication payloads with attachments)
+  expressApp.use(json({ limit: '100mb' }));
 
   // =========================================================================
   // MCP HTTP Transport — registered BEFORE NestJS routes
@@ -81,6 +83,8 @@ async function bootstrap() {
     ragService: app.get(RagService),
     recurringTasksService: app.get(RecurringTasksService),
     snippetsService: app.get(SnippetsService),
+    attachmentsService: app.get(AttachmentsService),
+    questionsService: app.get(QuestionsService),
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};

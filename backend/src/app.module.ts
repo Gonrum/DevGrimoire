@@ -33,7 +33,12 @@ import { ProjectTransferModule } from './project-transfer/project-transfer.modul
 import { RagModule } from './rag/rag.module';
 import { RecurringTasksModule } from './recurring-tasks/recurring-tasks.module';
 import { SnippetsModule } from './snippets/snippets.module';
+import { MinioModule } from './minio/minio.module';
+import { AttachmentsModule } from './attachments/attachments.module';
+import { ReplicationModule } from './replication/replication.module';
+import { ReplicationReadonlyGuard } from './replication/replication-readonly.guard';
 import { RequestContextInterceptor } from './common/request-context.interceptor';
+import { QuestionsModule } from './questions/questions.module';
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
@@ -73,11 +78,16 @@ if (!MONGODB_URI) {
     RagModule,
     RecurringTasksModule,
     SnippetsModule,
+    MinioModule,
+    AttachmentsModule,
+    ReplicationModule,
+    QuestionsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: ReplicationReadonlyGuard },
     { provide: APP_INTERCEPTOR, useClass: RequestContextInterceptor },
   ],
 })

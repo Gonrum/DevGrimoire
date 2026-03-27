@@ -272,7 +272,8 @@
     "archiveFailed": "Archivierung fehlgeschlagen",
     "deleteFailed": "Löschen fehlgeschlagen",
     "completeFailed": "Abschließen fehlgeschlagen",
-    "archived": "Archiviert"
+    "archived": "Archiviert",
+    "newQuest": "+ Neuer Quest"
   },
   "milestoneStatus": {
     "open": "Offen",
@@ -342,10 +343,10 @@
     "depDeleted": "Dependency \"{{name}}\" geloescht"
   },
   "sidebar": {
-    "core": "Kern",
-    "knowledge": "Wissen",
-    "catalog": "Katalog",
-    "system": "System"
+    "core": "Abenteuer",
+    "knowledge": "Bibliothek",
+    "catalog": "Inventar",
+    "system": "Kammer"
   },
   "snippets": {
     "newSnippet": "+ Neues Snippet",
@@ -430,7 +431,7 @@
     "todo": "Quest",
     "knowledge": "Lore",
     "changelog": "Chroniken",
-    "research": "Schriftrollen",
+    "research": "Studien",
     "milestone": "Artefakt"
   },
   "search": {
@@ -488,6 +489,7 @@
     "tabInstructions": "Agent-Instruktionen",
     "tabApiKeys": "API Keys",
     "tabUsers": "Benutzerverwaltung",
+    "tabReplication": "Spiegelung",
     "tabNotifications": "Benachrichtigungen",
     "notificationsDescription": "Steuere welche Benachrichtigungs-Kategorien als Push-Notification an dein Gerät gesendet werden. In-App-Benachrichtigungen sind immer aktiv.",
     "pushCategory_notify_user": "Explizite Benachrichtigungen",
@@ -704,5 +706,54 @@
     "typeCertificateDesc": "TLS/SSL-Zertifikat oder private Key",
     "typeFile": "Datei",
     "typeFileDesc": "Beliebiger Dateiinhalt (z.B. .env, Config)"
+  },
+  "question": {
+    "title": "Agent-Rückfrage",
+    "more": "weitere",
+    "placeholder": "Antwort eingeben...",
+    "send": "Senden"
+  },
+  "replication": {
+    "description": "Magische Spiegelung zwischen Grimoire-Instanzen. Das Meister-Grimoire spiegelt alle Änderungen an den Spiegel.",
+    "role": "Rolle",
+    "masterConfig": "Master-Konfiguration",
+    "slaveUrl": "Slave-URL",
+    "slaveApiKey": "API-Key für Slave",
+    "fullSyncCron": "Full-Sync Zeitplan (Cron)",
+    "testConnection": "Verbindung testen",
+    "triggerSync": "Jetzt synchronisieren",
+    "connectionOk": "Verbindung erfolgreich",
+    "connectionFailed": "Verbindung fehlgeschlagen",
+    "syncStarted": "Full-Sync gestartet",
+    "readonlyWarning": "Diese Instanz ist im Read-Only Slave-Modus. Schreiboperationen sind deaktiviert.",
+    "promote": "Zum Master befördern",
+    "promoteConfirm": "Wirklich befördern?",
+    "promoted": "Instanz zum Master befördert",
+    "instanceId": "Instanz-ID",
+    "connection": "Verbindung",
+    "connected": "Verbunden",
+    "disconnected": "Getrennt",
+    "queue": "Warteschlange",
+    "failed": "Fehlgeschlagen",
+    "clearFailed": "Bereinigen",
+    "cleared": "Einträge bereinigt",
+    "lastSync": "Letzte Sync",
+    "lastFullSync": "Letzter Full-Sync",
+    "slaveBanner": "Nur-Lese-Modus — Dieses Grimoire ist ein Spiegel"
+  },
+  "attachments": {
+    "title": "Pergamente",
+    "dropzone": "Pergamente hierher ziehen oder klicken zum Hochladen",
+    "empty": "Keine Pergamente vorhanden",
+    "download": "Download",
+    "indexed": "In RAG-Suche indiziert",
+    "uploading": "Hochladen...",
+    "attachments": "Pergamente",
+    "projectFile": "Projekt",
+    "entity_todo": "Quest",
+    "entity_knowledge": "Lore",
+    "entity_milestone": "Artefakt",
+    "entity_research": "Studie",
+    "entity_snippet": "Rune"
   }
 }
