@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { GitProviderInterface, NormalizedCommit, FetchCommitsResult } from './git-provider.interface';
+import { GitProviderInterface, NormalizedCommit, FetchCommitsResult, GitBranch, CommitStats } from './git-provider.interface';
 import { GitRepository } from '../schemas/git-repository.schema';
 import { validateGitBaseUrl } from './url-validator';
 
@@ -44,6 +44,7 @@ export class GitLabProviderService implements GitProviderInterface {
       const params = new URLSearchParams({
         per_page: String(perPage),
         page: String(page),
+        with_stats: 'true',
       });
       if (since) {
         params.set('since', since.toISOString());
@@ -93,6 +94,43 @@ export class GitLabProviderService implements GitProviderInterface {
     }
 
     return { commits: allCommits };
+  }
+
+  async fetchCommitStats(config: GitRepository, token: string, sha: string): Promise<CommitStats> {
+    validateGitBaseUrl(config.baseUrl);
+    const baseUrl = this.getBaseUrl(config);
+    const projectPath = this.getProjectPath(config);
+    // Fetch diff to get file count
+    const diffUrl = `${baseUrl}/api/v4/projects/${projectPath}/repository/commits/${sha}/diff`;
+    const diffResp = await fetch(diffUrl, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    let changedFiles: number | undefined;
+    if (diffResp.ok) {
+      const diffs = await diffResp.json();
+      changedFiles = Array.isArray(diffs) ? diffs.length : undefined;
+    }
+    // Fetch single commit for stats (additions/deletions)
+    const commitUrl = `${baseUrl}/api/v4/projects/${projectPath}/repository/commits/${sha}?stats=true`;
+    const commitResp = await fetch(commitUrl, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    if (!commitResp.ok) return { changedFiles };
+    const data = await commitResp.json();
+    return {
+      additions: data.stats?.additions,
+      deletions: data.stats?.deletions,
+      changedFiles,
+    };
+  }
+
+  async fetchBranches(config: GitRepository, token: string): Promise<GitBranch[]> {
+    validateGitBaseUrl(config.baseUrl);
+    const baseUrl = this.getBaseUrl(config);
+    const projectPath = this.getProjectPath(config);
+    const url = `${baseUrl}/api/v4/projects/${projectPath}/repository/branches?per_page=100`;
+    const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    if (!response.ok) {
+      throw new Error(`GitLab API error: ${response.status} ${response.statusText}`);
+    }
+    const data = await response.json();
+    return (data as any[]).map((b) => ({ name: b.name, isDefault: b.default === true }));
   }
 
   async validateToken(config: GitRepository, token: string): Promise<boolean> {

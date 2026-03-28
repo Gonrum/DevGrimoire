@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
-import { Commit, CommitDocument, GitProvider } from './schemas/commit.schema';
+import { Commit, CommitDocument } from './schemas/commit.schema';
 import { GitHubProviderService } from './providers/github-provider.service';
 import { GitLabProviderService } from './providers/gitlab-provider.service';
 import { GitProviderInterface } from './providers/git-provider.interface';
@@ -69,6 +69,7 @@ export class CommitsService {
     }
 
     let newCommits = 0;
+    const newShas: string[] = [];
     for (const commit of result.commits) {
       try {
         const existing = await this.commitModel.findOneAndUpdate(
@@ -88,17 +89,28 @@ export class CommitsService {
               branch: commit.branch || repoConfig.defaultBranch,
               additions: commit.additions,
               deletions: commit.deletions,
+              changedFiles: commit.changedFiles,
             },
           },
           { upsert: true, new: false },
         ).exec();
         // null = new insert (document didn't exist before)
-        if (!existing) newCommits++;
+        if (!existing) {
+          newCommits++;
+          newShas.push(commit.sha);
+        }
       } catch (err: any) {
         // Duplicate key = already exists, skip
         if (err.code === 11000) continue;
         throw err;
       }
+    }
+
+    // Fetch detailed stats (changedFiles, additions, deletions) for new commits
+    if (newShas.length > 0) {
+      this.fetchAndUpdateStats(provider, repoConfig, token, projectId, newShas).catch((err) =>
+        this.logger.error(`Stats enrichment failed for project ${projectId}: ${err}`),
+      );
     }
 
     // Update sync metadata on the project
@@ -121,6 +133,37 @@ export class CommitsService {
     }
 
     return { newCommits };
+  }
+
+  private async fetchAndUpdateStats(
+    provider: GitProviderInterface,
+    config: GitRepository,
+    token: string,
+    projectId: string,
+    shas: string[],
+  ): Promise<void> {
+    const BATCH_DELAY = 100; // ms between requests to avoid rate limits
+    for (const sha of shas) {
+      try {
+        const stats = await provider.fetchCommitStats(config, token, sha);
+        const update: Record<string, unknown> = {};
+        if (stats.changedFiles != null) update.changedFiles = stats.changedFiles;
+        if (stats.additions != null) update.additions = stats.additions;
+        if (stats.deletions != null) update.deletions = stats.deletions;
+        if (Object.keys(update).length > 0) {
+          await this.commitModel.updateOne(
+            { projectId, sha },
+            { $set: update },
+          ).exec();
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to fetch stats for commit ${sha}: ${err}`);
+      }
+      if (shas.length > 1) {
+        await new Promise((r) => setTimeout(r, BATCH_DELAY));
+      }
+    }
+    this.logger.log(`Stats enriched for ${shas.length} commits in project ${projectId}`);
   }
 
   async syncAllForProject(projectId: string): Promise<{ totalNewCommits: number }> {
@@ -216,5 +259,24 @@ export class CommitsService {
   async validateRepoToken(config: GitRepository, token: string): Promise<boolean> {
     const provider = this.getProvider(config.provider);
     return provider.validateToken(config, token);
+  }
+
+  async fetchBranches(projectId: string, repoIndex: number) {
+    const project = await this.projectsService.findById(projectId);
+    const projectObj = project.toObject() as any;
+    const repos: GitRepository[] = projectObj.gitRepositories || [];
+
+    if (repoIndex < 0 || repoIndex >= repos.length) {
+      throw new BadRequestException(`Repository index ${repoIndex} out of range`);
+    }
+
+    const repoConfig = repos[repoIndex];
+    if (!repoConfig.tokenSecretId) {
+      throw new BadRequestException('No token configured for this repository');
+    }
+
+    const token = await this.getToken(repoConfig.tokenSecretId);
+    const provider = this.getProvider(repoConfig.provider);
+    return provider.fetchBranches(repoConfig, token);
   }
 }

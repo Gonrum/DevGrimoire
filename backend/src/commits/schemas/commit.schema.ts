@@ -48,6 +48,9 @@ export class Commit {
 
   @Prop({ type: Number })
   deletions: number;
+
+  @Prop({ type: Number })
+  changedFiles: number;
 }
 
 export const CommitSchema = SchemaFactory.createForClass(Commit);

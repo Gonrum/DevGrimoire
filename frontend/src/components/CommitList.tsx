@@ -197,9 +197,22 @@ export default function CommitList({ projectId, gitRepositories }: CommitListPro
                       )}
                       <span className="text-sm text-gray-200 truncate">{firstLine}</span>
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
+                    <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5 flex-wrap">
                       <span>{commit.authorName}</span>
                       <span>{timeAgo(commit.committedAt, locale)}</span>
+                      {(commit.additions != null || commit.deletions != null || commit.changedFiles != null) && (
+                        <span className="text-gray-600">
+                          {commit.changedFiles != null && (
+                            <span className="text-gray-500">{commit.changedFiles} {commit.changedFiles === 1 ? 'file' : 'files'}</span>
+                          )}
+                          {commit.changedFiles != null && (commit.additions != null || commit.deletions != null) && (
+                            <span className="mx-0.5">·</span>
+                          )}
+                          {commit.additions != null && <span className="text-green-500">+{commit.additions}</span>}
+                          {commit.additions != null && commit.deletions != null && <span className="mx-0.5">/</span>}
+                          {commit.deletions != null && <span className="text-red-400">-{commit.deletions}</span>}
+                        </span>
+                      )}
                       {commit.repoLabel && repoLabels.length > 1 && !activeRepoLabel && (
                         <span className="text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded text-[10px] font-medium">
                           {commit.repoLabel}

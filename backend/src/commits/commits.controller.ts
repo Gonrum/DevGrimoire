@@ -69,6 +69,16 @@ export class CommitsController {
     return this.commitsService.countByProject(projectId, repoLabel).then((count) => ({ count }));
   }
 
+  @Get('branches')
+  async branches(
+    @Query('projectId') projectId?: string,
+    @Query('repoIndex') repoIndex?: string,
+  ) {
+    if (!projectId) throw new BadRequestException('projectId is required');
+    if (repoIndex === undefined) throw new BadRequestException('repoIndex is required');
+    return this.commitsService.fetchBranches(projectId, parseInt(repoIndex, 10));
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.commitsService.findById(id);

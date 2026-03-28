@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { GitProviderInterface, NormalizedCommit, FetchCommitsResult } from './git-provider.interface';
+import { GitProviderInterface, NormalizedCommit, FetchCommitsResult, GitBranch, CommitStats } from './git-provider.interface';
 import { GitRepository } from '../schemas/git-repository.schema';
 import { validateGitBaseUrl } from './url-validator';
 
@@ -103,6 +103,32 @@ export class GitHubProviderService implements GitProviderInterface {
     }
 
     return { commits: allCommits, etag: newEtag };
+  }
+
+  async fetchCommitStats(config: GitRepository, token: string, sha: string): Promise<CommitStats> {
+    validateGitBaseUrl(config.baseUrl);
+    const baseUrl = this.getBaseUrl(config);
+    const url = `${baseUrl}/repos/${config.owner}/${config.repo}/commits/${sha}`;
+    const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    if (!response.ok) return {};
+    const data = await response.json();
+    return {
+      additions: data.stats?.additions,
+      deletions: data.stats?.deletions,
+      changedFiles: Array.isArray(data.files) ? data.files.length : undefined,
+    };
+  }
+
+  async fetchBranches(config: GitRepository, token: string): Promise<GitBranch[]> {
+    validateGitBaseUrl(config.baseUrl);
+    const baseUrl = this.getBaseUrl(config);
+    const url = `${baseUrl}/repos/${config.owner}/${config.repo}/branches?per_page=100`;
+    const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    if (!response.ok) {
+      throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
+    }
+    const data = await response.json();
+    return (data as any[]).map((b) => ({ name: b.name, isDefault: b.protected === true }));
   }
 
   async validateToken(config: GitRepository, token: string): Promise<boolean> {
