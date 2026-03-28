@@ -1,0 +1,168 @@
+import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { api, RecurringFrequency, Project } from '../api/client';
+import MarkdownEditor from '../components/MarkdownEditor';
+import Button from '../components/ui/Button';
+import { FormInput, FormSelect } from '../components/ui/FormField';
+
+const FREQUENCIES: RecurringFrequency[] = ['daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'];
+
+export default function RecurringTaskCreatePage() {
+  const { id } = useParams<{ id: string }>();
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const isGlobal = !id;
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [priority, setPriority] = useState('medium');
+  const [tags, setTags] = useState('');
+  const [frequency, setFrequency] = useState<RecurringFrequency>('weekly');
+  const [dayOfWeek, setDayOfWeek] = useState(1);
+  const [dayOfMonth, setDayOfMonth] = useState(1);
+  const [month, setMonth] = useState(1);
+  const [hour, setHour] = useState(9);
+  const [saving, setSaving] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState(id || '');
+  const [projects, setProjects] = useState<Project[]>([]);
+
+  useEffect(() => {
+    if (isGlobal) {
+      api.projects.list().then(setProjects);
+    }
+  }, [isGlobal]);
+
+  const showDayOfWeek = frequency === 'weekly' || frequency === 'biweekly';
+  const showDayOfMonth = frequency === 'monthly' || frequency === 'quarterly' || frequency === 'yearly';
+  const showMonth = frequency === 'yearly';
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+    setSaving(true);
+    try {
+      const projectId = isGlobal ? (selectedProjectId || undefined) : id;
+      await api.recurringTasks.create({
+        projectId,
+        title: title.trim(),
+        description: description.trim() || undefined,
+        priority: priority as any,
+        tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
+        frequency,
+        dayOfWeek: showDayOfWeek ? dayOfWeek : undefined,
+        dayOfMonth: showDayOfMonth ? dayOfMonth : undefined,
+        month: showMonth ? month : undefined,
+        hour,
+      });
+      if (isGlobal) {
+        navigate('/recurring-tasks');
+      } else {
+        navigate(`/projects/${id}?tab=recurring-tasks`);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const backLink = isGlobal ? '/recurring-tasks' : `/projects/${id}?tab=recurring-tasks`;
+  const backLabel = isGlobal ? t('recurringTasks.globalTitle') : t('recurringTasks.backToProject');
+
+  return (
+    <div>
+      <Link to={backLink} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">
+        &larr; {backLabel}
+      </Link>
+
+      <h1 className="text-xl font-bold mb-6">{t('recurringTasks.createTitle')}</h1>
+
+      <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-4">
+        <FormInput label={t('common.title')} required type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('common.title')} autoFocus />
+
+        {isGlobal && (
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">{t('recurringTasks.targetProject')}</label>
+            <select
+              value={selectedProjectId}
+              onChange={(e) => setSelectedProjectId(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+            >
+              <option value="">{t('recurringTasks.systemWideOption')}</option>
+              {projects.map((p) => (
+                <option key={p._id} value={p._id}>{p.name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-600 mt-1">{t('recurringTasks.systemWideHint')}</p>
+          </div>
+        )}
+
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">{t('common.description')}</label>
+          <MarkdownEditor value={description} onChange={setDescription} rows={4} placeholder={t('recurringTasks.descriptionPlaceholder')} />
+        </div>
+        <div className="flex flex-col sm:flex-row gap-4 items-start">
+          <FormSelect label={t('common.priority')} value={priority} onChange={(e) => setPriority(e.target.value)}>
+            <option value="low">{t('todoPriority.low')}</option>
+            <option value="medium">{t('todoPriority.medium')}</option>
+            <option value="high">{t('todoPriority.high')}</option>
+            <option value="critical">{t('todoPriority.critical')}</option>
+          </FormSelect>
+          <div className="flex-1 w-full sm:w-auto">
+            <label className="block text-xs text-gray-500 mb-1">{t('common.tags')}</label>
+            <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('todoCreate.tagsPlaceholder')}
+              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+          </div>
+        </div>
+
+        <div className="border-t border-gray-800 pt-4">
+          <h2 className="text-sm font-semibold text-gray-300 mb-3">{t('recurringTasks.schedule')}</h2>
+          <div className="flex flex-col sm:flex-row gap-4 items-start">
+            <FormSelect label={t('recurringTasks.frequency')} value={frequency} onChange={(e) => setFrequency(e.target.value as RecurringFrequency)}>
+              {FREQUENCIES.map((f) => (
+                <option key={f} value={f}>{t(`recurringTasks.freq_${f}`)}</option>
+              ))}
+            </FormSelect>
+
+            {showDayOfWeek && (
+              <FormSelect label={t('recurringTasks.dayOfWeek')} value={String(dayOfWeek)} onChange={(e) => setDayOfWeek(Number(e.target.value))}>
+                {[1, 2, 3, 4, 5, 6, 0].map((d) => (
+                  <option key={d} value={d}>{t(`recurringTasks.day_${d}`)}</option>
+                ))}
+              </FormSelect>
+            )}
+
+            {showDayOfMonth && (
+              <FormSelect label={t('recurringTasks.dayOfMonth')} value={String(dayOfMonth)} onChange={(e) => setDayOfMonth(Number(e.target.value))}>
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                  <option key={d} value={d}>{d}.</option>
+                ))}
+              </FormSelect>
+            )}
+
+            {showMonth && (
+              <FormSelect label={t('recurringTasks.month')} value={String(month)} onChange={(e) => setMonth(Number(e.target.value))}>
+                {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                  <option key={m} value={m}>{t(`recurringTasks.month_${m}`)}</option>
+                ))}
+              </FormSelect>
+            )}
+
+            <FormSelect label={t('recurringTasks.hour')} value={String(hour)} onChange={(e) => setHour(Number(e.target.value))}>
+              {Array.from({ length: 24 }, (_, i) => i).map((h) => (
+                <option key={h} value={h}>{`${String(h).padStart(2, '0')}:00`}</option>
+              ))}
+            </FormSelect>
+          </div>
+        </div>
+
+        <div className="flex gap-2 pt-2">
+          <Button type="submit" variant="primary" size="lg" disabled={saving || !title.trim()}>
+            {saving ? t('common.creating') : t('common.create')}
+          </Button>
+          <Button type="button" size="lg" onClick={() => navigate(backLink)}>
+            {t('common.cancel')}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
