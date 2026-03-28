@@ -1,0 +1,48 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument, Types } from 'mongoose';
+
+export type AttachmentDocument = HydratedDocument<Attachment>;
+
+@Schema({ timestamps: true })
+export class Attachment {
+  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
+  projectId: Types.ObjectId;
+
+  @Prop({ type: String })
+  entityType?: string;
+
+  @Prop({ type: Types.ObjectId })
+  entityId?: Types.ObjectId;
+
+  @Prop({ required: true })
+  originalName: string;
+
+  @Prop({ required: true })
+  mimeType: string;
+
+  @Prop({ required: true })
+  size: number;
+
+  @Prop({ required: true })
+  storageKey: string;
+
+  @Prop({ type: String })
+  description?: string;
+
+  @Prop({ type: [String], default: [] })
+  tags: string[];
+
+  @Prop({ type: String })
+  textContent?: string;
+
+  @Prop({ type: Boolean, default: false })
+  ragIndexed: boolean;
+}
+
+export const AttachmentSchema = SchemaFactory.createForClass(Attachment);
+AttachmentSchema.index({ projectId: 1 });
+AttachmentSchema.index({ projectId: 1, entityType: 1, entityId: 1 });
+AttachmentSchema.index(
+  { originalName: 'text', description: 'text' },
+  { name: 'attachment_text', language_override: 'lang' },
+);
