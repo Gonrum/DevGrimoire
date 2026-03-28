@@ -415,7 +415,43 @@ export interface CommitEntry {
   repoLabel?: string;
   additions?: number;
   deletions?: number;
+  changedFiles?: number;
   createdAt: string;
+}
+
+export interface Attachment {
+  _id: string;
+  projectId: string;
+  entityType?: string;
+  entityId?: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  storageKey: string;
+  description?: string;
+  tags: string[];
+  ragIndexed: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReplicationConfig {
+  role: 'standalone' | 'master' | 'slave';
+  slaveUrl?: string;
+  slaveApiKey?: string;
+  masterUrl?: string;
+  fullSyncCron: string;
+  instanceId: string;
+}
+
+export interface ReplicationStatus {
+  role: string;
+  instanceId: string;
+  connected: boolean;
+  lastSync: string | null;
+  lastFullSync: string | null;
+  queueSize: number;
+  failedCount: number;
 }
 
 export const api = {
@@ -792,6 +828,71 @@ export const api = {
       }
       return res.json() as Promise<{ projectId: string; projectName: string; stats: Record<string, number> }>;
     },
+  },
+  attachments: {
+    storageStatus: () =>
+      request<{ enabled: boolean; bucket?: string }>('/attachments/storage-status'),
+    list: (projectId: string, entityType?: string, entityId?: string) => {
+      const params = new URLSearchParams({ projectId });
+      if (entityType) params.set('entityType', entityType);
+      if (entityId) params.set('entityId', entityId);
+      return request<Attachment[]>(`/attachments?${params}`);
+    },
+    get: (id: string) => request<Attachment>(`/attachments/${id}`),
+    upload: async (
+      projectId: string,
+      file: File,
+      opts?: { entityType?: string; entityId?: string; description?: string; tags?: string },
+    ) => {
+      const headers: Record<string, string> = {};
+      const token = getAccessToken?.();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('projectId', projectId);
+      if (opts?.entityType) formData.append('entityType', opts.entityType);
+      if (opts?.entityId) formData.append('entityId', opts.entityId);
+      if (opts?.description) formData.append('description', opts.description);
+      if (opts?.tags) formData.append('tags', opts.tags);
+      const res = await fetch(`${BASE_URL}/attachments`, {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: res.statusText }));
+        throw new Error(err.message || res.statusText);
+      }
+      return res.json() as Promise<Attachment>;
+    },
+    update: (id: string, data: { description?: string; tags?: string[]; entityType?: string; entityId?: string }) =>
+      request<Attachment>(`/attachments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/attachments/${id}`, { method: 'DELETE' }),
+    downloadUrl: (id: string) => {
+      const token = getAccessToken?.();
+      const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+      return `${BASE_URL}/attachments/${id}/download${qs}`;
+    },
+    previewUrl: (id: string) => {
+      const token = getAccessToken?.();
+      const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+      return `${BASE_URL}/attachments/${id}/preview${qs}`;
+    },
+  },
+  replication: {
+    getConfig: () => request<ReplicationConfig>('/replication/config'),
+    updateConfig: (data: Partial<ReplicationConfig>) =>
+      request<ReplicationConfig>('/replication/config', { method: 'PUT', body: JSON.stringify(data) }),
+    getStatus: () => request<ReplicationStatus>('/replication/status'),
+    testConnection: () =>
+      request<{ success: boolean; latency: number; error?: string }>('/replication/test-connection', { method: 'POST' }),
+    triggerFullSync: () =>
+      request<{ started: boolean; reason?: string }>('/replication/trigger-full-sync', { method: 'POST' }),
+    promote: () =>
+      request<{ role: string; message: string }>('/replication/promote', { method: 'POST' }),
+    clearFailed: () =>
+      request<{ cleared: number }>('/replication/queue/clear-failed', { method: 'POST' }),
   },
   profile: {
     get: () => request<UserInfo>('/auth/profile'),

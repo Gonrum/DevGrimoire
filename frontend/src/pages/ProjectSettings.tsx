@@ -55,6 +55,18 @@ export default function ProjectSettings() {
   const [newRepoLabel, setNewRepoLabel] = useState('');
   const [validating, setValidating] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
+  const [editingBranch, setEditingBranch] = useState<number | null>(null);
+  const [branchOptions, setBranchOptions] = useState<{ name: string; isDefault: boolean }[]>([]);
+  const [loadingBranches, setLoadingBranches] = useState(false);
+  const [editingRepoIndex, setEditingRepoIndex] = useState<number | null>(null);
+  const [editRepoUrl, setEditRepoUrl] = useState('');
+  const [editRepoToken, setEditRepoToken] = useState('');
+  const [editRepoBranch, setEditRepoBranch] = useState('main');
+  const [editRepoBaseUrl, setEditRepoBaseUrl] = useState('');
+  const [editRepoLabel, setEditRepoLabel] = useState('');
+  const [editRepoProvider, setEditRepoProvider] = useState<'github' | 'gitlab'>('github');
+  const [editValidating, setEditValidating] = useState(false);
+  const [editRepoError, setEditRepoError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -157,6 +169,113 @@ export default function ProjectSettings() {
     const updated = gitRepos.filter((_, i) => i !== index);
     setGitRepos(updated);
     await api.projects.update(id!, { gitRepositories: updated } as any);
+  };
+
+  const handleStartEditBranch = async (index: number) => {
+    setEditingBranch(index);
+    setBranchOptions([]);
+    setLoadingBranches(true);
+    try {
+      const branches = await api.commits.branches(id!, index);
+      setBranchOptions(branches.sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0) || a.name.localeCompare(b.name)));
+    } catch {
+      setBranchOptions([]);
+    } finally {
+      setLoadingBranches(false);
+    }
+  };
+
+  const handleUpdateBranch = async (index: number, branch: string) => {
+    const trimmed = branch.trim();
+    if (!trimmed) return;
+    const updated = gitRepos.map((r, i) =>
+      i === index ? { ...r, defaultBranch: trimmed } : r,
+    );
+    setGitRepos(updated);
+    setEditingBranch(null);
+    setBranchOptions([]);
+    await api.projects.update(id!, { gitRepositories: updated } as any);
+  };
+
+  const handleStartEditRepo = (index: number) => {
+    const repo = gitRepos[index];
+    setEditingRepoIndex(index);
+    setEditRepoProvider(repo.provider as 'github' | 'gitlab');
+    setEditRepoUrl(
+      repo.provider === 'github'
+        ? `${repo.owner}/${repo.repo}`
+        : repo.gitlabProjectId || `${repo.owner}/${repo.repo}`,
+    );
+    setEditRepoToken('');
+    setEditRepoBranch(repo.defaultBranch || 'main');
+    setEditRepoBaseUrl(repo.baseUrl || '');
+    setEditRepoLabel(repo.label || '');
+    setEditRepoError(null);
+  };
+
+  const handleCancelEditRepo = () => {
+    setEditingRepoIndex(null);
+    setEditRepoError(null);
+  };
+
+  const handleSaveEditRepo = async () => {
+    if (editingRepoIndex === null || !editRepoUrl.trim()) return;
+    setEditRepoError(null);
+    setEditValidating(true);
+
+    try {
+      const parsed = parseRepoUrl(editRepoUrl, editRepoProvider);
+      const oldRepo = gitRepos[editingRepoIndex];
+      const hasNewToken = editRepoToken.trim().length > 0;
+
+      if (hasNewToken) {
+        const { valid } = await api.commits.validateToken({
+          provider: editRepoProvider,
+          baseUrl: editRepoBaseUrl || undefined,
+          owner: parsed.owner,
+          repo: parsed.repo,
+          gitlabProjectId: parsed.gitlabProjectId,
+          token: editRepoToken,
+        });
+        if (!valid) {
+          setEditRepoError('Token-Validierung fehlgeschlagen. Bitte Token und URL prüfen.');
+          return;
+        }
+      }
+
+      let tokenSecretId = oldRepo.tokenSecretId;
+      if (hasNewToken) {
+        const secret = await api.secrets.create({
+          projectId: id!,
+          key: `git-token-${editRepoProvider}-${Date.now()}`,
+          value: editRepoToken,
+          description: `Git ${editRepoProvider} token for ${editRepoUrl}`,
+          type: 'token',
+        });
+        tokenSecretId = secret._id;
+      }
+
+      const updatedRepo: GitRepository = {
+        ...oldRepo,
+        provider: editRepoProvider,
+        label: editRepoLabel.trim() || undefined,
+        baseUrl: editRepoBaseUrl || undefined,
+        owner: parsed.owner,
+        repo: parsed.repo,
+        gitlabProjectId: parsed.gitlabProjectId,
+        defaultBranch: editRepoBranch || 'main',
+        tokenSecretId,
+      };
+
+      const updated = gitRepos.map((r, i) => (i === editingRepoIndex ? updatedRepo : r));
+      setGitRepos(updated);
+      await api.projects.update(id!, { gitRepositories: updated } as any);
+      setEditingRepoIndex(null);
+    } catch (err) {
+      setEditRepoError(err instanceof Error ? err.message : 'Fehler beim Speichern');
+    } finally {
+      setEditValidating(false);
+    }
   };
 
   const handleToggleSync = async (index: number) => {
@@ -372,48 +491,144 @@ export default function ProjectSettings() {
         {gitRepos.length > 0 && (
           <div className="space-y-2">
             {gitRepos.map((repo, i) => (
-              <div key={i} className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
-                <Badge color={repo.provider === 'github' ? 'bg-gray-700 text-white' : 'bg-orange-900/60 text-orange-300'} rounded="full">
-                  {repo.provider === 'github' ? 'GH' : 'GL'}
-                </Badge>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    {repo.label && (
-                      <span className="text-xs font-medium text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded">
-                        {repo.label}
-                      </span>
-                    )}
-                    <p className="text-sm text-gray-200 truncate">
-                      {repo.provider === 'github'
-                        ? `${repo.owner}/${repo.repo}`
-                        : repo.gitlabProjectId || `${repo.owner}/${repo.repo}`
-                      }
-                    </p>
+              editingRepoIndex === i ? (
+                <div key={i} className="border border-violet-500/50 rounded-lg p-4 space-y-3 bg-gray-900/80">
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setEditRepoProvider('github')}
+                      className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${editRepoProvider === 'github' ? 'bg-violet-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+                      GitHub
+                    </button>
+                    <button type="button" onClick={() => setEditRepoProvider('gitlab')}
+                      className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${editRepoProvider === 'gitlab' ? 'bg-violet-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+                      GitLab
+                    </button>
                   </div>
-                  <p className="text-xs text-gray-500">
-                    {repo.defaultBranch || 'main'}
-                    {repo.lastSyncAt && ` · Letzter Sync: ${new Date(repo.lastSyncAt).toLocaleString('de-DE')}`}
-                  </p>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Repository URL *</label>
+                    <input type="text" value={editRepoUrl} onChange={(e) => setEditRepoUrl(e.target.value)}
+                      placeholder={editRepoProvider === 'github' ? 'https://github.com/owner/repo' : 'https://gitlab.com/group/project'}
+                      className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+                  </div>
+                  {editRepoProvider === 'gitlab' && (
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Base URL (nur für Self-Hosted)</label>
+                      <input type="text" value={editRepoBaseUrl} onChange={(e) => setEditRepoBaseUrl(e.target.value)}
+                        placeholder="https://gitlab.example.com"
+                        className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Label (z.B. "API", "Frontend", "App")</label>
+                    <input type="text" value={editRepoLabel} onChange={(e) => setEditRepoLabel(e.target.value)}
+                      placeholder="Optional: Name zur Identifikation"
+                      className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">
+                        {editRepoProvider === 'github' ? 'Personal Access Token' : 'Access Token (read_api)'}
+                        <span className="text-gray-600 ml-1">(leer = beibehalten)</span>
+                      </label>
+                      <input type="password" value={editRepoToken} onChange={(e) => setEditRepoToken(e.target.value)}
+                        placeholder="Neuer Token oder leer lassen"
+                        className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Default Branch</label>
+                      <input type="text" value={editRepoBranch} onChange={(e) => setEditRepoBranch(e.target.value)}
+                        placeholder="main"
+                        className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+                    </div>
+                  </div>
+                  {editRepoError && <p className="text-sm text-red-400">{editRepoError}</p>}
+                  <div className="flex gap-2">
+                    <Button type="button" variant="primary" size="sm" onClick={handleSaveEditRepo}
+                      disabled={editValidating || !editRepoUrl.trim()}>
+                      {editValidating ? 'Prüfe...' : t('common.save')}
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={handleCancelEditRepo}>
+                      {t('common.cancel')}
+                    </Button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleToggleSync(i)}
-                  className={`text-xs px-2 py-1 rounded-full transition-colors ${
-                    repo.syncEnabled !== false
-                      ? 'bg-green-900/50 text-green-300 hover:bg-green-800/50'
-                      : 'bg-gray-800 text-gray-500 hover:bg-gray-700'
-                  }`}
-                >
-                  {repo.syncEnabled !== false ? 'Aktiv' : 'Pausiert'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleRemoveRepo(i)}
-                  className="text-xs text-red-400 hover:text-red-300 px-2 py-1"
-                >
-                  Entfernen
-                </button>
-              </div>
+              ) : (
+                <div key={i} className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+                  <Badge color={repo.provider === 'github' ? 'bg-gray-700 text-white' : 'bg-orange-900/60 text-orange-300'} rounded="full">
+                    {repo.provider === 'github' ? 'GH' : 'GL'}
+                  </Badge>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      {repo.label && (
+                        <span className="text-xs font-medium text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded">
+                          {repo.label}
+                        </span>
+                      )}
+                      <p className="text-sm text-gray-200 truncate">
+                        {repo.provider === 'github'
+                          ? `${repo.owner}/${repo.repo}`
+                          : repo.gitlabProjectId || `${repo.owner}/${repo.repo}`
+                        }
+                      </p>
+                    </div>
+                    <div className="text-xs text-gray-500 flex items-center gap-1">
+                      {editingBranch === i ? (
+                        loadingBranches ? (
+                          <span className="text-xs text-gray-500 animate-pulse">Branches laden…</span>
+                        ) : (
+                          <select
+                            value={repo.defaultBranch || 'main'}
+                            onChange={(e) => handleUpdateBranch(i, e.target.value)}
+                            onBlur={() => { setEditingBranch(null); setBranchOptions([]); }}
+                            autoFocus
+                            className="bg-gray-800 border border-violet-500 rounded px-1.5 py-0.5 text-xs text-gray-200 focus:outline-none"
+                          >
+                            {!branchOptions.some((b) => b.name === (repo.defaultBranch || 'main')) && (
+                              <option value={repo.defaultBranch || 'main'}>{repo.defaultBranch || 'main'}</option>
+                            )}
+                            {branchOptions.map((b) => (
+                              <option key={b.name} value={b.name}>
+                                {b.name}{b.isDefault ? ' (default)' : ''}
+                              </option>
+                            ))}
+                          </select>
+                        )
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditBranch(i)}
+                          className="hover:text-violet-400 transition-colors cursor-pointer"
+                          title="Branch ändern"
+                        >
+                          {repo.defaultBranch || 'main'}
+                        </button>
+                      )}
+                      {repo.lastSyncAt && <span>· Letzter Sync: {new Date(repo.lastSyncAt).toLocaleString('de-DE')}</span>}
+                    </div>
+                  </div>
+                  <button type="button" onClick={() => handleStartEditRepo(i)}
+                    className="text-xs text-violet-400 hover:text-violet-300 px-2 py-1">
+                    {t('common.edit')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSync(i)}
+                    className={`text-xs px-2 py-1 rounded-full transition-colors ${
+                      repo.syncEnabled !== false
+                        ? 'bg-green-900/50 text-green-300 hover:bg-green-800/50'
+                        : 'bg-gray-800 text-gray-500 hover:bg-gray-700'
+                    }`}
+                  >
+                    {repo.syncEnabled !== false ? 'Aktiv' : 'Pausiert'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveRepo(i)}
+                    className="text-xs text-red-400 hover:text-red-300 px-2 py-1"
+                  >
+                    Entfernen
+                  </button>
+                </div>
+              )
             ))}
           </div>
         )}

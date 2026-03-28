@@ -13,6 +13,7 @@ import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import ConfirmButton from '../components/ui/ConfirmButton';
 import { LoadingText } from '../components/ui/LoadingSpinner';
+import AttachmentList from '../components/AttachmentList';
 
 function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => void; onCancel: () => void }) {
   const { t } = useTranslation();
@@ -92,6 +93,7 @@ export default function TodoDetailPage() {
   const [editing, setEditing] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [savingComment, setSavingComment] = useState(false);
+  const [storageEnabled, setStorageEnabled] = useState(false);
   const loadTodo = () => {
     if (!todoId) return;
     api.todos.get(todoId)
@@ -106,6 +108,7 @@ export default function TodoDetailPage() {
       api.milestones.list(id).then(setMilestones);
       api.todos.list({ projectId: id }).then(setAllTodos);
     }
+    api.attachments.storageStatus().then((s) => setStorageEnabled(s.enabled)).catch(() => {});
   }, [id]);
 
   const handleStatusChange = async (newStatus: Todo['status']) => {
@@ -344,6 +347,20 @@ export default function TodoDetailPage() {
               </Button>
             </div>
           </div>
+
+          {storageEnabled && (
+            <div className="border-t border-gray-800 pt-5">
+              <h3 className="text-sm font-medium text-gray-400 mb-3">
+                {t('attachments.attachments')}
+              </h3>
+              <AttachmentList
+                projectId={id!}
+                entityType="todo"
+                entityId={todoId!}
+                showUpload
+              />
+            </div>
+          )}
         </div>
       )}
     </div>

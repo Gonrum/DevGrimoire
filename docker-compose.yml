@@ -60,6 +60,13 @@ services:
       RAG_FALLBACK_URL: ${RAG_FALLBACK_URL:-}
       RAG_FALLBACK_MODEL: ${RAG_FALLBACK_MODEL:-}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      # MinIO (optional — file storage)
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-}
+      MINIO_PORT: ${MINIO_PORT:-9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
+      MINIO_BUCKET: ${MINIO_BUCKET:-devgrimoire}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
     volumes:
       - lancedb_data:/app/data/lancedb
     depends_on:
@@ -71,6 +78,27 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
+  # MinIO — optional S3-compatible object storage for file attachments
+  # Uncomment to enable file storage features
+  # minio:
+  #   image: minio/minio:latest
+  #   container_name: devgrimoire-minio
+  #   restart: unless-stopped
+  #   command: server /data --console-address ":9001"
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+  #   environment:
+  #     MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+  #     MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+  #   volumes:
+  #     - minio_data:/data
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
 
   frontend:
     build:
@@ -88,3 +116,4 @@ volumes:
   mongodb_data:
   mongodb_keyfile:
   lancedb_data:
+  # minio_data:

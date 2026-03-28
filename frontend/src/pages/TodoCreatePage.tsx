@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { api, Todo, Milestone } from '../api/client';
@@ -20,9 +20,13 @@ export default function TodoCreatePage() {
   const [saving, setSaving] = useState(false);
   const [newMilestoneName, setNewMilestoneName] = useState('');
   const [creatingMilestone, setCreatingMilestone] = useState(false);
+  const [storageEnabled, setStorageEnabled] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadMilestones = () => { if (id) api.milestones.list(id).then(setMilestones); };
   useEffect(() => { loadMilestones(); }, [id]);
+  useEffect(() => { api.attachments.storageStatus().then((s) => setStorageEnabled(s.enabled)).catch(() => {}); }, []);
 
   const handleCreateMilestone = async () => {
     if (!id || !newMilestoneName.trim()) return;
@@ -38,7 +42,7 @@ export default function TodoCreatePage() {
     if (!id || !title.trim()) return;
     setSaving(true);
     try {
-      await api.todos.create({
+      const todo = await api.todos.create({
         projectId: id,
         title: title.trim(),
         description: description.trim() || undefined,
@@ -47,6 +51,14 @@ export default function TodoCreatePage() {
         tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
         milestoneId: milestoneId || undefined,
       } as Partial<Todo> & { milestoneId?: string });
+
+      // Upload pending files after todo creation
+      if (pendingFiles.length > 0 && todo._id) {
+        for (const file of pendingFiles) {
+          await api.attachments.upload(id, file, { entityType: 'todo', entityId: todo._id }).catch(() => {});
+        }
+      }
+
       navigate(`/projects/${id}`);
     } finally {
       setSaving(false);
@@ -107,6 +119,48 @@ export default function TodoCreatePage() {
             )}
           </div>
         </div>
+        {storageEnabled && (
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">{t('attachments.attachments')}</label>
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded-lg border-2 border-dashed border-gray-700 hover:border-gray-600 bg-gray-900/50 px-4 py-4 text-center cursor-pointer transition-colors"
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                onChange={(e) => {
+                  if (e.target.files) {
+                    setPendingFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
+                    e.target.value = '';
+                  }
+                }}
+                className="hidden"
+              />
+              {pendingFiles.length === 0 ? (
+                <p className="text-sm text-gray-500">{t('attachments.dropzone')}</p>
+              ) : (
+                <div className="space-y-1">
+                  {pendingFiles.map((f, i) => (
+                    <div key={i} className="flex items-center justify-between text-sm text-gray-300">
+                      <span className="truncate">{f.name}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setPendingFiles((prev) => prev.filter((_, j) => j !== i)); }}
+                        className="text-red-400 hover:text-red-300 ml-2 text-xs"
+                      >
+                        &times;
+                      </button>
+                    </div>
+                  ))}
+                  <p className="text-xs text-gray-600 mt-1">{t('attachments.dropzone')}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="flex gap-2 pt-2">
           <Button type="submit" variant="primary" size="lg" disabled={saving || !title.trim()}>
             {saving ? t('common.creating') : t('common.create')}

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { api, ApiKeyInfo } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import UserManagement from './UserManagement';
+import ReplicationSettings from '../components/ReplicationSettings';
 import Button from '../components/ui/Button';
 import ConfirmButton from '../components/ui/ConfirmButton';
 
@@ -39,7 +40,7 @@ Wenn du Tasks bearbeitest, halte dich an den Status-Workflow:
 - Teste Änderungen bevor du sie als fertig markierst
 `;
 
-type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'users';
+type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'users' | 'replication';
 
 interface PushCategory {
   key: string;
@@ -221,6 +222,7 @@ export default function Settings() {
     { key: 'apikeys', label: t('settings.tabApiKeys') },
     { key: 'notifications', label: t('settings.tabNotifications') },
     { key: 'users', label: t('settings.tabUsers'), adminOnly: true },
+    { key: 'replication', label: t('settings.tabReplication'), adminOnly: true },
   ];
 
   const visibleTabs = tabs.filter((tb) => !tb.adminOnly || isAdmin);
@@ -532,6 +534,7 @@ export default function Settings() {
       })()}
 
       {tab === 'users' && isAdmin && <UserManagement />}
+      {tab === 'replication' && isAdmin && <ReplicationSettings />}
     </div>
   );
 }

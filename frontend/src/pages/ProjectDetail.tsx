@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature, Manual, Soul, RecurringTask, Snippet } from '../api/client';
+import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature, Manual, Soul, RecurringTask, Snippet, Attachment } from '../api/client';
 import TodoBoard from '../components/TodoBoard';
 import SessionList from '../components/SessionList';
 import KnowledgeList from '../components/KnowledgeList';
@@ -18,12 +18,13 @@ import SoulView from '../components/SoulView';
 import CommitList from '../components/CommitList';
 import RecurringTaskList from '../components/RecurringTaskList';
 import SnippetList from '../components/SnippetList';
+import AttachmentList from '../components/AttachmentList';
 import GitRepoWidget from '../components/GitRepoWidget';
 import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents';
 import Badge from '../components/ui/Badge';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
-type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets';
+type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files';
 
 export default function ProjectDetail() {
   const { t, i18n } = useTranslation();
@@ -47,6 +48,8 @@ export default function ProjectDetail() {
   const [recurringTasks, setRecurringTasks] = useState<RecurringTask[]>([]);
   const [snippets, setSnippets] = useState<Snippet[]>([]);
   const [commitCount, setCommitCount] = useState(0);
+  const [storageEnabled, setStorageEnabled] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [envKey, setEnvKey] = useState(0);
   const [commitsKey, setCommitsKey] = useState(0);
   const [secretsKey, setSecretsKey] = useState(0);
@@ -88,8 +91,9 @@ export default function ProjectDetail() {
       api.commits.count(id),
       api.recurringTasks.list({ projectId: id }),
       api.snippets.list(id),
+      api.attachments.storageStatus(),
     ])
-      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man, sl, cc, rts, snip]) => {
+      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man, sl, cc, rts, snip, storage]) => {
         if (controller.signal.aborted) return;
         setProject(p);
         setTodos(t);
@@ -109,6 +113,10 @@ export default function ProjectDetail() {
         setCommitCount(cc?.count || 0);
         setRecurringTasks(rts);
         setSnippets(snip);
+        setStorageEnabled(storage.enabled);
+        if (storage.enabled) {
+          api.attachments.list(id).then(setAttachments).catch(() => {});
+        }
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
@@ -141,6 +149,7 @@ export default function ProjectDetail() {
         soul: () => api.souls.get(id!).then(setSoul),
         'recurring-task': () => api.recurringTasks.list({ projectId: id }).then(setRecurringTasks),
         snippet: () => api.snippets.list(id).then(setSnippets),
+        attachment: () => api.attachments.list(id).then(setAttachments),
         commit: () => { api.commits.count(id).then((c) => setCommitCount(c.count)); setCommitsKey((k) => k + 1); },
       };
       refetchers[event.entity]?.();
@@ -181,7 +190,7 @@ export default function ProjectDetail() {
         { key: 'todos', label: 'Quests', count: todos.filter((t) => t.status !== 'done').length },
         { key: 'milestones', label: i18n.language === 'de' ? 'Artefakte' : 'Artifacts', count: milestones.filter((m) => m.status !== 'done' && !m.archived).length },
         { key: 'sessions', label: i18n.language === 'de' ? 'Rituale' : 'Rituals', count: sessions.length },
-        { key: 'activity', label: i18n.language === 'de' ? 'Aktivit\u00e4t' : 'Activity', count: activities.length },
+        { key: 'activity', label: i18n.language === 'de' ? 'Spuren' : 'Traces', count: activities.length },
       ],
     },
     {
@@ -190,26 +199,27 @@ export default function ProjectDetail() {
         { key: 'knowledge', label: t('searchTypes.knowledge'), count: knowledge.length },
         { key: 'changelog', label: i18n.language === 'de' ? 'Chroniken' : 'Chronicles', count: changelog.length },
         { key: 'manual', label: i18n.language === 'de' ? 'Foliant' : 'Tome', count: manuals.length },
-        { key: 'research', label: t('searchTypes.research'), count: research.length },
-        { key: 'snippets', label: 'Snippets', count: snippets.length },
+        { key: 'research', label: i18n.language === 'de' ? 'Studien' : 'Studies', count: research.length },
+        { key: 'snippets', label: i18n.language === 'de' ? 'Runen' : 'Runes', count: snippets.length },
+        ...(storageEnabled ? [{ key: 'files' as Tab, label: i18n.language === 'de' ? 'Pergamente' : 'Scrolls', count: attachments.length }] : []),
       ],
     },
     {
       label: t('sidebar.catalog'),
       items: [
-        { key: 'features', label: 'Features', count: features.length },
-        { key: 'schemas', label: 'Schemas', count: schemas.length },
-        { key: 'dependencies', label: 'Dependencies', count: dependencies.length },
+        { key: 'features', label: i18n.language === 'de' ? 'Fähigkeiten' : 'Abilities', count: features.length },
+        { key: 'schemas', label: i18n.language === 'de' ? 'Blaupausen' : 'Blueprints', count: schemas.length },
+        { key: 'dependencies', label: i18n.language === 'de' ? 'Zutaten' : 'Reagents', count: dependencies.length },
       ],
     },
     {
       label: t('sidebar.system'),
       items: [
         { key: 'soul', label: t('soul.title'), count: (['vision', 'principles', 'conventions', 'communication', 'boundaries', 'workflow', 'quality'] as const).filter((k) => soul?.[k]?.trim()).length },
-        { key: 'environments', label: i18n.language === 'de' ? 'Umgebungen' : 'Environments', count: environments.length },
-        { key: 'secrets', label: 'Secrets', count: secrets.length },
-        { key: 'recurring-tasks', label: t('recurringTasks.tabLabel'), count: recurringTasks.filter((rt) => rt.active).length },
-        { key: 'commits', label: 'Commits', count: commitCount },
+        { key: 'environments', label: i18n.language === 'de' ? 'Reiche' : 'Realms', count: environments.length },
+        { key: 'secrets', label: i18n.language === 'de' ? 'Siegel' : 'Seals', count: secrets.length },
+        { key: 'recurring-tasks', label: i18n.language === 'de' ? 'Riten' : 'Rites', count: recurringTasks.filter((rt) => rt.active).length },
+        { key: 'commits', label: i18n.language === 'de' ? 'Vermerke' : 'Inscriptions', count: commitCount },
       ],
     },
   ];
@@ -378,6 +388,7 @@ export default function ProjectDetail() {
           {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id!} />}
           {tab === 'recurring-tasks' && <RecurringTaskList entries={recurringTasks} projectId={id!} />}
           {tab === 'commits' && <CommitList key={commitsKey} projectId={id!} gitRepositories={project.gitRepositories} />}
+          {tab === 'files' && <AttachmentList projectId={id!} showUpload />}
           {tab === 'activity' && <ActivityList activities={activities} />}
         </div>
       </div>
