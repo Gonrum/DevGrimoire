@@ -30,6 +30,26 @@ import { QuestionsService } from './questions/questions.service';
 import { RequestContext } from './common/request-context';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 
+const RAG_BACKEND_URL = process.env.RAG_BACKEND_URL || 'http://localhost:3200';
+
+function ragHeaders(): Record<string, string> {
+  const apiKey = process.env.DEVGRIMOIRE_API_KEY;
+  if (apiKey) return { Authorization: `Bearer ${apiKey}` };
+  return {};
+}
+
+async function ragHttpGet(path: string): Promise<any> {
+  const res = await fetch(`${RAG_BACKEND_URL}${path}`, { headers: ragHeaders() });
+  if (!res.ok) throw new Error(`RAG backend error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+async function ragHttpPost(path: string): Promise<any> {
+  const res = await fetch(`${RAG_BACKEND_URL}${path}`, { method: 'POST', headers: ragHeaders() });
+  if (!res.ok) throw new Error(`RAG backend error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
 function requireString(args: Record<string, unknown>, field: string): string {
   const val = args[field];
   if (typeof val !== 'string' || val.length === 0) {
@@ -2345,25 +2365,51 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'rag_search': {
-          const ragResults = await ragService.search(
-            requireString(a, 'query'),
-            optionalString(a, 'projectId'),
-            optionalString(a, 'entity'),
-            optionalNumber(a, 'limit') || 10,
-          );
-          result = ragResults.map((r) => ({
-            ...r,
-            content: snippet(r.content),
-            score: Math.round(r.score * 1000) / 1000,
-          }));
+          if (process.env.MCP_STDIO === 'true') {
+            const params = new URLSearchParams({ query: requireString(a, 'query') });
+            const pid = optionalString(a, 'projectId');
+            const ent = optionalString(a, 'entity');
+            const lim = optionalNumber(a, 'limit');
+            if (pid) params.set('projectId', pid);
+            if (ent) params.set('entity', ent);
+            if (lim) params.set('limit', String(lim));
+            const ragResults = await ragHttpGet(`/api/rag/search?${params}`);
+            result = ragResults.map((r: any) => ({
+              ...r,
+              content: snippet(r.content),
+              score: Math.round(r.score * 1000) / 1000,
+            }));
+          } else {
+            const ragResults = await ragService.search(
+              requireString(a, 'query'),
+              optionalString(a, 'projectId'),
+              optionalString(a, 'entity'),
+              optionalNumber(a, 'limit') || 10,
+            );
+            result = ragResults.map((r) => ({
+              ...r,
+              content: snippet(r.content),
+              score: Math.round(r.score * 1000) / 1000,
+            }));
+          }
           break;
         }
         case 'rag_reindex': {
-          result = await ragService.reindex(optionalString(a, 'projectId'));
+          if (process.env.MCP_STDIO === 'true') {
+            const pid = optionalString(a, 'projectId');
+            const params = pid ? `?projectId=${pid}` : '';
+            result = await ragHttpPost(`/api/rag/reindex${params}`);
+          } else {
+            result = await ragService.reindex(optionalString(a, 'projectId'));
+          }
           break;
         }
         case 'rag_status': {
-          result = await ragService.status();
+          if (process.env.MCP_STDIO === 'true') {
+            result = await ragHttpGet('/api/rag/status');
+          } else {
+            result = await ragService.status();
+          }
           break;
         }
         case 'recurring_task_create': {
