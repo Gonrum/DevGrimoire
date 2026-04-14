@@ -5,6 +5,7 @@ import { ReplicationQueue, ReplicationQueueSchema } from './schemas/replication-
 import { ReplicationPushService } from './replication-push.service';
 import { ReplicationReceiveService } from './replication-receive.service';
 import { ReplicationFullSyncService } from './replication-full-sync.service';
+import { ReplicationPullService } from './replication-pull.service';
 import { ReplicationController } from './replication.controller';
 import { ReplicationScheduler } from './replication.scheduler';
 import { ReplicationReadonlyGuard } from './replication-readonly.guard';
@@ -28,6 +29,7 @@ import { ProjectsModule } from '../projects/projects.module';
     ReplicationPushService,
     ReplicationReceiveService,
     ReplicationFullSyncService,
+    ReplicationPullService,
     ReplicationScheduler,
     ReplicationReadonlyGuard,
   ],

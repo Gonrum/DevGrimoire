@@ -479,6 +479,8 @@ export interface ReplicationConfig {
   peerUrl?: string;
   peerApiKey?: string;
   fullSyncCron: string;
+  /** Cron schedule for inbound pull when behind NAT (peer mode). */
+  pullCron?: string;
   instanceId: string;
 }
 
@@ -496,6 +498,8 @@ export interface ReplicationStatus {
   connected: boolean;
   lastSync: string | null;
   lastFullSync: string | null;
+  /** Last successful pull from peer (only relevant in peer role). */
+  lastPull: string | null;
   queueSize: number;
   failedCount: number;
 }
@@ -1002,6 +1006,11 @@ export const api = {
       request<{ success: boolean; latency: number; error?: string }>('/replication/test-connection', { method: 'POST' }),
     triggerFullSync: () =>
       request<{ started: boolean; reason?: string }>('/replication/trigger-full-sync', { method: 'POST' }),
+    triggerPull: () =>
+      request<{ pulled: number; applied: number; skipped: number; rounds: number; error?: string }>(
+        '/replication/trigger-pull',
+        { method: 'POST' },
+      ),
     promote: () =>
       request<{ role: string; message: string }>('/replication/promote', { method: 'POST' }),
     clearFailed: () =>

@@ -146,6 +146,26 @@ export default function ReplicationSettings() {
     }
   };
 
+  const triggerPull = async () => {
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await api.replication.triggerPull();
+      if (result.error) {
+        setError(`${t('replication.pullFailed')}: ${result.error}`);
+      } else {
+        setSuccess(t('replication.pullDone', {
+          applied: result.applied,
+          skipped: result.skipped,
+        }));
+        setTimeout(() => setSuccess(null), 5000);
+        api.replication.getStatus().then(setStatus).catch(() => {});
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
   const promote = async () => {
     try {
       await api.replication.promote();
@@ -284,10 +304,12 @@ export default function ReplicationSettings() {
               </Button>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Button variant="primary" onClick={testConnection}>{t('replication.testConnection')}</Button>
             <Button variant="secondary" onClick={triggerSync}>{t('replication.triggerSync')}</Button>
+            <Button variant="secondary" onClick={triggerPull}>{t('replication.triggerPull')}</Button>
           </div>
+          <p className="text-xs text-gray-500 mt-1">{t('replication.pullHint')}</p>
         </div>
       )}
 
@@ -365,6 +387,14 @@ export default function ReplicationSettings() {
                 {status.lastFullSync ? new Date(status.lastFullSync).toLocaleString(dateLocale) : '-'}
               </span>
             </div>
+            {role === 'peer' && (
+              <div>
+                <span className="text-gray-500">{t('replication.lastPull')}:</span>
+                <span className="ml-2 text-gray-300">
+                  {status.lastPull ? new Date(status.lastPull).toLocaleString(dateLocale) : '-'}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}

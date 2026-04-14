@@ -857,7 +857,12 @@
     "projectSelectionHint": "Only enabled projects are pushed/received. Personal projects stay local.",
     "projectSelectionEmpty": "No active projects.",
     "projectSyncOn": "Sync",
-    "synced": "synced"
+    "synced": "synced",
+    "triggerPull": "Pull now",
+    "pullHint": "Pull fetches changes from the peer server (for home instances behind NAT). Hourly cron runs automatically.",
+    "pullDone": "Pull complete: {{applied}} applied, {{skipped}} skipped",
+    "pullFailed": "Pull failed",
+    "lastPull": "Last pull"
   },
   "attachments": {
     "title": "Scrolls",

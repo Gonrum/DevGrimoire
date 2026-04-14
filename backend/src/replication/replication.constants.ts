@@ -7,7 +7,9 @@ export const REPL_PEER_URL = 'replication.peer.url';
 export const REPL_PEER_API_KEY = 'replication.peer.apiKey';
 export const REPL_LAST_SYNC = 'replication.lastSync';
 export const REPL_LAST_FULL_SYNC = 'replication.lastFullSync';
+export const REPL_LAST_PULL = 'replication.lastPull';
 export const REPL_FULL_SYNC_CRON = 'replication.fullSyncCron';
+export const REPL_PULL_CRON = 'replication.pullCron';
 export const REPL_INSTANCE_ID = 'replication.instanceId';
 
 export type ReplicationRole = 'standalone' | 'master' | 'slave' | 'peer';
@@ -45,6 +47,8 @@ export interface ReplicationConfig {
   peerUrl?: string;
   peerApiKey?: string;
   fullSyncCron: string;
+  /** Cron schedule for inbound pull (peer mode behind NAT/firewall). */
+  pullCron: string;
   instanceId: string;
 }
 
@@ -54,6 +58,15 @@ export interface ReplicationStatus {
   connected: boolean;
   lastSync: string | null;
   lastFullSync: string | null;
+  lastPull: string | null;
   queueSize: number;
   failedCount: number;
+}
+
+/** Server-side pull response. `until` is the receiver's clock at moment of
+ *  response and becomes the next request's `since`. */
+export interface ReplicationPullResponse {
+  changes: ReplicationPayload[];
+  until: string;
+  count: number;
 }

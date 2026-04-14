@@ -95,11 +95,17 @@ export class ReplicationFullSyncService {
           project: project,
         };
 
-        // Fetch all entities for this project
+        // Fetch all entities for this project. projectId is stored as ObjectId
+        // by some services and as string by others (notably MCP-tool-created
+        // documents). Mongo's raw .find() does not auto-cast, so we $in both
+        // representations to catch every document. Without this the full-sync
+        // would only ship the project document itself.
+        const projectIdOid = new ObjectId(String(projectId));
+        const projectIdStr = String(projectId);
         for (const [key, collName] of Object.entries(SYNC_COLLECTIONS)) {
           try {
             const docs = await db.collection(collName)
-              .find({ projectId: new ObjectId(String(projectId)) })
+              .find({ projectId: { $in: [projectIdOid, projectIdStr] } })
               .toArray();
 
             // For attachments, include binary data if MinIO is available

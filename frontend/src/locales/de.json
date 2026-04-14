@@ -857,7 +857,12 @@
     "projectSelectionHint": "Nur freigeschaltete Projekte werden gepusht/empfangen. Persönliche Projekte bleiben lokal.",
     "projectSelectionEmpty": "Keine aktiven Projekte vorhanden.",
     "projectSyncOn": "Sync",
-    "synced": "synchron"
+    "synced": "synchron",
+    "triggerPull": "Jetzt abholen",
+    "pullHint": "Pull holt Änderungen vom Peer-Server (für Heim-Instanzen hinter NAT). Stündlicher Cron läuft automatisch.",
+    "pullDone": "Pull fertig: {{applied}} angewendet, {{skipped}} übersprungen",
+    "pullFailed": "Pull fehlgeschlagen",
+    "lastPull": "Letzter Pull"
   },
   "attachments": {
     "title": "Pergamente",
