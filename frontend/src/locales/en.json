@@ -856,7 +856,8 @@
     "projectSelectionTitle": "Projects to replicate",
     "projectSelectionHint": "Only enabled projects are pushed/received. Personal projects stay local.",
     "projectSelectionEmpty": "No active projects.",
-    "projectSyncOn": "Sync"
+    "projectSyncOn": "Sync",
+    "synced": "synced"
   },
   "attachments": {
     "title": "Scrolls",

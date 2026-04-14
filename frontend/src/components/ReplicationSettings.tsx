@@ -72,6 +72,17 @@ export default function ReplicationSettings() {
     }
   }, [role, loadProjects]);
 
+  // Poll status every 5s when actively replicating, so the queue counter and
+  // lastSync timestamp tick down/up live without forcing a manual refresh.
+  useEffect(() => {
+    if (role === 'standalone') return;
+    const tick = () => {
+      api.replication.getStatus().then(setStatus).catch(() => {});
+    };
+    const id = window.setInterval(tick, 5000);
+    return () => window.clearInterval(id);
+  }, [role]);
+
   const save = async () => {
     setSaving(true);
     setError(null);
@@ -312,7 +323,7 @@ export default function ReplicationSettings() {
               <span className="text-gray-500">{t('replication.instanceId')}:</span>
               <span className="ml-2 text-gray-300 font-mono text-xs">{status.instanceId.slice(0, 8)}...</span>
             </div>
-            {role === 'master' && (
+            {(role === 'master' || role === 'peer') && (
               <>
                 <div>
                   <span className="text-gray-500">{t('replication.connection')}:</span>
@@ -322,7 +333,12 @@ export default function ReplicationSettings() {
                 </div>
                 <div>
                   <span className="text-gray-500">{t('replication.queue')}:</span>
-                  <span className="ml-2 text-gray-300">{status.queueSize}</span>
+                  <span className={`ml-2 ${status.queueSize === 0 ? 'text-emerald-400' : 'text-amber-300'}`}>
+                    {status.queueSize}
+                    {status.queueSize === 0 && (
+                      <span className="ml-1 text-[10px] uppercase tracking-wide">{t('replication.synced')}</span>
+                    )}
+                  </span>
                 </div>
                 <div>
                   <span className="text-gray-500">{t('replication.failed')}:</span>

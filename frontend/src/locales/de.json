@@ -856,7 +856,8 @@
     "projectSelectionTitle": "Projekte zum Replizieren freigeben",
     "projectSelectionHint": "Nur freigeschaltete Projekte werden gepusht/empfangen. Persönliche Projekte bleiben lokal.",
     "projectSelectionEmpty": "Keine aktiven Projekte vorhanden.",
-    "projectSyncOn": "Sync"
+    "projectSyncOn": "Sync",
+    "synced": "fertig"
   },
   "attachments": {
     "title": "Pergamente",
