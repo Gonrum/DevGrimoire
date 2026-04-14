@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 
-type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'rag' | 'api' | 'logs' | 'git' | 'architecture';
+type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'rag' | 'chat' | 'replication' | 'api' | 'logs' | 'git' | 'architecture';
 
 export default function Docs() {
   const [active, setActive] = useState<DocsSection>('overview');
@@ -14,6 +14,8 @@ export default function Docs() {
     { key: 'auth', label: t('docs.navAuth') },
     { key: 'mcp', label: t('docs.navMcp') },
     { key: 'rag', label: 'RAG' },
+    { key: 'chat', label: 'Chat' },
+    { key: 'replication', label: t('docs.navReplication') },
     { key: 'api', label: t('docs.navApi') },
     { key: 'logs', label: 'Logs' },
     { key: 'git', label: 'Git Integration' },
@@ -70,6 +72,8 @@ export default function Docs() {
         {active === 'auth' && <AuthSection />}
         {active === 'mcp' && <McpSection />}
         {active === 'rag' && <RagSection />}
+        {active === 'chat' && <ChatSection />}
+        {active === 'replication' && <ReplicationDocsSection />}
         {active === 'api' && <ApiSection />}
         {active === 'logs' && <LogsSection />}
         {active === 'git' && <GitIntegrationSection />}
@@ -154,6 +158,26 @@ function OverviewSection() {
           <FeatureCard
             title="MCP Remote"
             desc={isDE ? 'HTTP/SSE-Zugriff von jedem Rechner im Netzwerk' : 'HTTP/SSE access from any machine on the network'}
+          />
+          <FeatureCard
+            title={isDE ? 'Projekt-Chat' : 'Project Chat'}
+            desc={isDE ? 'In-App-Chat mit konfigurierbarem LLM (LM Studio, OpenAI, Anthropic). Tool-Calling, Datei- und Bildanhänge.' : 'In-app chat with configurable LLM (LM Studio, OpenAI, Anthropic). Tool calling, file and image attachments.'}
+          />
+          <FeatureCard
+            title={isDE ? 'Verteilte Synchronisation' : 'Distributed Sync'}
+            desc={isDE ? 'Master/Slave oder bidirektionaler Peer-Mode mit Last-Write-Wins. Per-Projekt opt-in.' : 'Master/Slave or bidirectional peer mode with last-write-wins. Per-project opt-in.'}
+          />
+          <FeatureCard
+            title={isDE ? 'RAG (Semantische Suche)' : 'RAG (Semantic Search)'}
+            desc={isDE ? 'LanceDB Vektor-DB + Ollama/LM Studio Embeddings. Findet Treffer nach Bedeutung, nicht nur Stichwort.' : 'LanceDB vector DB + Ollama/LM Studio embeddings. Finds results by meaning, not just keyword.'}
+          />
+          <FeatureCard
+            title={isDE ? 'Dateianhänge' : 'File Attachments'}
+            desc={isDE ? 'MinIO/S3-Speicher, automatische Textextraktion (inkl. PDF) für RAG-Indexing.' : 'MinIO/S3 storage, automatic text extraction (incl. PDF) for RAG indexing.'}
+          />
+          <FeatureCard
+            title="Releases"
+            desc={isDE ? 'Versions-Tracking pro Projekt mit Assets, GitLab-Sync, Status-Workflow.' : 'Per-project version tracking with assets, GitLab sync, status workflow.'}
           />
         </div>
       </Section>
@@ -588,11 +612,11 @@ function McpSection() {
   const isDE = i18n.language === 'de';
   return (
     <>
-      <Section title={isDE ? 'MCP-Tools (49)' : 'MCP Tools (49)'}>
+      <Section title={isDE ? 'MCP-Tools (109)' : 'MCP Tools (109)'}>
         <p className="text-gray-400 text-sm mb-4">
           {isDE
-            ? 'Nach dem Anbinden stehen Claude 49 Tools zur Verf\u00fcgung. List-Tools liefern kompakte \u00dcbersichten, Details nur via _get Tools.'
-            : 'After connecting, Claude has access to 49 tools. List tools return compact overviews, details only via _get tools.'}
+            ? 'Nach dem Anbinden stehen Claude 109 Tools zur Verf\u00fcgung, gruppiert nach Entit\u00e4t. List-Tools liefern kompakte \u00dcbersichten (nur Metadaten), Details holst du \u00fcber _get-Tools \u2014 das schont den Context.'
+            : 'After connecting, Claude has access to 109 tools, grouped by entity. List tools return compact overviews (metadata only), details fetched via _get tools \u2014 this keeps the context lean.'}
         </p>
 
         <ToolGroup title={isDE ? 'Projekte' : 'Projects'} tools={[
@@ -643,8 +667,11 @@ function McpSection() {
         ]} />
 
         <ToolGroup title={isDE ? 'Handbuch' : 'Manual'} tools={[
-          { name: 'manual_save', desc: isDE ? 'Projekthandbuch speichern/aktualisieren (Markdown)' : 'Save/update project manual (Markdown)' },
-          { name: 'manual_get', desc: isDE ? 'Projekthandbuch abrufen' : 'Get project manual' },
+          { name: 'manual_create', desc: isDE ? 'Handbuch-Eintrag anlegen (Titel, Markdown, Kategorie)' : 'Create manual entry (title, Markdown, category)' },
+          { name: 'manual_list', desc: isDE ? 'Eintr\u00e4ge eines Projekts auflisten (mit Filter nach Kategorie)' : 'List entries for a project (filterable by category)' },
+          { name: 'manual_get', desc: isDE ? 'Einzelnen Eintrag mit vollem Inhalt' : 'Get single entry with full content' },
+          { name: 'manual_update', desc: isDE ? 'Eintrag aktualisieren' : 'Update entry' },
+          { name: 'manual_delete', desc: isDE ? 'Eintrag l\u00f6schen' : 'Delete entry' },
         ]} />
 
         <ToolGroup title={isDE ? 'Recherche' : 'Research'} tools={[
@@ -669,9 +696,96 @@ function McpSection() {
           { name: 'secret_delete', desc: isDE ? 'Secret l\u00f6schen' : 'Delete secret' },
         ]} />
 
+        <ToolGroup title={isDE ? 'Schemas (DB-Dokumentation)' : 'Schemas (DB Documentation)'} tools={[
+          { name: 'schema_create', desc: isDE ? 'DB-Schema anlegen (Tabelle/Collection mit Feldern, Indizes)' : 'Create DB schema (table/collection with fields, indexes)' },
+          { name: 'schema_list', desc: isDE ? 'Schemas eines Projekts auflisten (Filter: dbType, tags)' : 'List schemas for a project (filter: dbType, tags)' },
+          { name: 'schema_get', desc: isDE ? 'Vollst\u00e4ndiges Schema mit Feldern und Indizes' : 'Full schema with fields and indexes' },
+          { name: 'schema_update', desc: isDE ? 'Aktualisieren \u2014 erstellt automatisch Versions-Snapshot' : 'Update \u2014 auto-creates version snapshot' },
+          { name: 'schema_delete', desc: isDE ? 'Schema und alle Versionen l\u00f6schen' : 'Delete schema and all versions' },
+          { name: 'schema_versions', desc: isDE ? 'Versionshistorie eines Schemas' : 'Version history of a schema' },
+        ]} />
+
+        <ToolGroup title={isDE ? 'Features' : 'Features'} tools={[
+          { name: 'feature_create', desc: isDE ? 'Feature/Funktion anlegen (Status, Priorit\u00e4t, Version)' : 'Create feature (status, priority, version)' },
+          { name: 'feature_list', desc: isDE ? 'Features filtern nach Status/Kategorie' : 'Filter features by status/category' },
+          { name: 'feature_get', desc: isDE ? 'Einzelnes Feature mit Details' : 'Single feature with details' },
+          { name: 'feature_update', desc: isDE ? 'Feature aktualisieren (Status, Version)' : 'Update feature (status, version)' },
+          { name: 'feature_delete', desc: isDE ? 'Feature l\u00f6schen' : 'Delete feature' },
+        ]} />
+
+        <ToolGroup title="Snippets" tools={[
+          { name: 'snippet_save', desc: isDE ? 'Code-Snippet speichern (Sprache, Kategorie, Tags)' : 'Save code snippet (language, category, tags)' },
+          { name: 'snippet_list', desc: isDE ? 'Snippets filtern' : 'Filter snippets' },
+          { name: 'snippet_get', desc: isDE ? 'Snippet mit vollem Code' : 'Snippet with full code' },
+          { name: 'snippet_update', desc: isDE ? 'Snippet aktualisieren' : 'Update snippet' },
+          { name: 'snippet_delete', desc: isDE ? 'Snippet l\u00f6schen' : 'Delete snippet' },
+          { name: 'snippet_search', desc: isDE ? 'Volltextsuche \u00fcber Snippets' : 'Full-text search across snippets' },
+        ]} />
+
+        <ToolGroup title={isDE ? 'Abh\u00e4ngigkeiten' : 'Dependencies'} tools={[
+          { name: 'dependency_add', desc: isDE ? 'Einzelne Abh\u00e4ngigkeit anlegen (npm/composer/pip/cargo/go/maven/nuget/gem)' : 'Add single dependency (npm/composer/pip/cargo/go/maven/nuget/gem)' },
+          { name: 'dependency_list', desc: isDE ? 'Abh\u00e4ngigkeiten auflisten' : 'List dependencies' },
+          { name: 'dependency_get', desc: isDE ? 'Einzelne Abh\u00e4ngigkeit' : 'Single dependency' },
+          { name: 'dependency_update', desc: isDE ? 'Abh\u00e4ngigkeit aktualisieren' : 'Update dependency' },
+          { name: 'dependency_delete', desc: isDE ? 'Abh\u00e4ngigkeit l\u00f6schen' : 'Delete dependency' },
+          { name: 'dependency_scan', desc: isDE ? 'Bulk-Import aus package.json/composer.json/etc.' : 'Bulk import from package.json/composer.json/etc.' },
+        ]} />
+
+        <ToolGroup title={isDE ? 'Releases' : 'Releases'} tools={[
+          { name: 'release_create', desc: isDE ? 'Release anlegen (Version, Beschreibung, Plattform, Status)' : 'Create release (version, description, platform, status)' },
+          { name: 'release_list', desc: isDE ? 'Releases filtern' : 'Filter releases' },
+          { name: 'release_get', desc: isDE ? 'Release mit Assets' : 'Release with assets' },
+          { name: 'release_update', desc: isDE ? 'Release aktualisieren' : 'Update release' },
+          { name: 'release_delete', desc: isDE ? 'Release l\u00f6schen' : 'Delete release' },
+          { name: 'release_sync_gitlab', desc: isDE ? 'Releases aus GitLab-Repo synchronisieren (inkl. Assets)' : 'Sync releases from GitLab repo (incl. assets)' },
+        ]} />
+
+        <ToolGroup title={isDE ? 'Anh\u00e4nge' : 'Attachments'} tools={[
+          { name: 'attachment_upload', desc: isDE ? 'Datei hochladen (base64), optional an Todo/Entity geh\u00e4ngt' : 'Upload file (base64), optionally attached to todo/entity' },
+          { name: 'attachment_list', desc: isDE ? 'Anh\u00e4nge auflisten (Filter: entityType, entityId)' : 'List attachments (filter: entityType, entityId)' },
+          { name: 'attachment_get', desc: isDE ? 'Metadaten einer Datei' : 'File metadata' },
+          { name: 'attachment_download', desc: isDE ? 'Dateiinhalt laden (Text plain, bin\u00e4r base64)' : 'Load file content (text plain, binary base64)' },
+          { name: 'attachment_delete', desc: isDE ? 'Datei l\u00f6schen (Storage + DB)' : 'Delete file (storage + DB)' },
+        ]} />
+
+        <ToolGroup title={isDE ? 'Wiederkehrende Tasks' : 'Recurring Tasks'} tools={[
+          { name: 'recurring_task_create', desc: isDE ? 'Wiederkehrenden Task planen (Cron oder Intervall)' : 'Schedule recurring task (cron or interval)' },
+          { name: 'recurring_task_list', desc: isDE ? 'Geplante Tasks auflisten' : 'List scheduled tasks' },
+          { name: 'recurring_task_get', desc: isDE ? 'Einzelnen Plan abrufen' : 'Get single schedule' },
+          { name: 'recurring_task_update', desc: isDE ? 'Plan aktualisieren' : 'Update schedule' },
+          { name: 'recurring_task_delete', desc: isDE ? 'Plan l\u00f6schen' : 'Delete schedule' },
+        ]} />
+
+        <ToolGroup title="Commits" tools={[
+          { name: 'commit_list', desc: isDE ? 'Git-Commits eines Projekts (Filter: branch, author, date)' : 'Git commits for a project (filter: branch, author, date)' },
+          { name: 'commit_search', desc: isDE ? 'Suche in Commit-Messages' : 'Search in commit messages' },
+          { name: 'commit_sync', desc: isDE ? 'Manueller Sync mit GitHub/GitLab' : 'Manual sync with GitHub/GitLab' },
+        ]} />
+
+        <ToolGroup title={isDE ? 'Logs' : 'Logs'} tools={[
+          { name: 'log_list', desc: isDE ? 'Per-Projekt Log-Eintr\u00e4ge (Filter: level, service, search)' : 'Per-project log entries (filter: level, service, search)' },
+          { name: 'log_search', desc: isDE ? 'Volltextsuche in Logs' : 'Full-text search in logs' },
+          { name: 'log_stats', desc: isDE ? 'Aggregierte Statistik (count by level, service, time)' : 'Aggregated stats (count by level, service, time)' },
+        ]} />
+
+        <ToolGroup title={isDE ? 'Souls (Projekt-Pers\u00f6nlichkeit)' : 'Souls (Project Personality)'} tools={[
+          { name: 'soul_get', desc: isDE ? 'Projekt-Soul abrufen (Pers\u00f6nlichkeit, Stimme, Prinzipien)' : 'Get project soul (personality, voice, principles)' },
+          { name: 'soul_update', desc: isDE ? 'Projekt-Soul aktualisieren' : 'Update project soul' },
+        ]} />
+
+        <ToolGroup title="RAG" tools={[
+          { name: 'rag_search', desc: isDE ? 'Semantische Suche \u00fcber alle indizierten Eintr\u00e4ge' : 'Semantic search across all indexed entries' },
+          { name: 'rag_reindex', desc: isDE ? 'Vektor-Index neu aufbauen (alle/ein Projekt)' : 'Rebuild vector index (all/single project)' },
+          { name: 'rag_status', desc: isDE ? 'Index-Statistik, aktiver Embedding-Endpoint' : 'Index stats, active embedding endpoint' },
+        ]} />
+
+        <ToolGroup title={isDE ? 'Dialog' : 'Dialog'} tools={[
+          { name: 'notify_user', desc: isDE ? 'Push-Notification an den User senden' : 'Send push notification to user' },
+          { name: 'ask_user', desc: isDE ? 'Interaktive Frage stellen (yes/no/text), wartet auf Antwort' : 'Ask interactive question (yes/no/text), waits for reply' },
+        ]} />
+
         <ToolGroup title={isDE ? 'Sonstiges' : 'Other'} tools={[
-          { name: 'notify_user', desc: isDE ? 'Benachrichtigung an den User senden' : 'Send notification to user' },
-          { name: 'system_instructions_get', desc: isDE ? 'Globale Agent-Instruktionen abrufen' : 'Get global agent instructions' },
+          { name: 'system_instructions_get', desc: isDE ? 'Globale + projekt-spezifische Agent-Instruktionen abrufen' : 'Get global + project-specific agent instructions' },
           { name: 'system_instructions_set', desc: isDE ? 'Globale Agent-Instruktionen setzen' : 'Set global agent instructions' },
         ]} />
       </Section>
@@ -1191,6 +1305,14 @@ function ArchitectureSection() {
           <ModuleItem name="events" desc={isDE ? 'SSE Live-Updates' : 'SSE live updates'} />
           <ModuleItem name="settings" desc={isDE ? 'Key-Value Einstellungen' : 'Key-value settings'} />
           <ModuleItem name="common" desc="Shared Pipes, EncryptionService" />
+          <ModuleItem name="chat" desc={isDE ? 'Projekt-Chat mit LLM (Multi-Provider, Tool-Calling)' : 'Project chat with LLM (multi-provider, tool calling)'} />
+          <ModuleItem name="releases" desc={isDE ? 'Release-Tracking + GitLab-Sync' : 'Release tracking + GitLab sync'} />
+          <ModuleItem name="attachments" desc={isDE ? 'MinIO/S3 Dateispeicher mit Textextraktion' : 'MinIO/S3 file storage with text extraction'} />
+          <ModuleItem name="replication" desc={isDE ? 'Master/Slave + Peer-Mode bidirektionaler Sync' : 'Master/slave + peer-mode bidirectional sync'} />
+          <ModuleItem name="recurring-tasks" desc={isDE ? 'Geplante Task-Erstellung' : 'Scheduled task creation'} />
+          <ModuleItem name="souls" desc={isDE ? 'Projekt-Pers\u00f6nlichkeit' : 'Project personality'} />
+          <ModuleItem name="questions" desc={isDE ? 'ask_user interaktiver Dialog' : 'ask_user interactive dialog'} />
+          <ModuleItem name="minio" desc={isDE ? 'MinIO/S3 Client-Wrapper' : 'MinIO/S3 client wrapper'} />
         </div>
       </Section>
 
@@ -1204,6 +1326,190 @@ function ArchitectureSection() {
           <InfoRow label={isDE ? 'Infrastruktur' : 'Infrastructure'} value="Docker Compose (MongoDB, Backend, nginx)" />
           <InfoRow label={isDE ? 'Live-Updates' : 'Live Updates'} value="MongoDB Change Streams + SSE" />
         </div>
+      </Section>
+    </>
+  );
+}
+
+function ChatSection() {
+  const isDE = i18n.language === 'de';
+  return (
+    <>
+      <Section title={isDE ? 'Überblick' : 'Overview'}>
+        <p className="text-gray-400 leading-relaxed">
+          {isDE
+            ? 'Im Dashboard rechts unten findest du das Chat-Dock — eine in-app Konversation mit einem konfigurierbaren LLM, scope auf das aktuelle Projekt. Der System-Prompt wird automatisch aus Projekt-Kontext (RAG-Treffer, History, Anhänge) gebaut. Optional kann der LLM via Tool-Calling Live-Daten lesen oder schreiben.'
+            : 'The chat dock at the bottom-right of the dashboard is an in-app conversation with a configurable LLM, scoped to the current project. The system prompt is auto-built from project context (RAG hits, history, attachments). Optionally the LLM can read or write live data via tool calling.'}
+        </p>
+      </Section>
+
+      <Section title={isDE ? 'Provider' : 'Providers'}>
+        <p className="text-gray-400 text-sm mb-3">
+          {isDE
+            ? 'Pro Endpoint frei wählbar in Settings → Chat. Mehrere Endpoints werden in Reihenfolge probiert (Fallback bei Fehler).'
+            : 'Per-endpoint selectable in Settings → Chat. Multiple endpoints are tried in order (fallback on error).'}
+        </p>
+        <div className="text-sm">
+          <table className="w-full text-left border border-gray-800 rounded">
+            <thead className="bg-gray-900 text-gray-300 text-xs">
+              <tr>
+                <th className="px-3 py-2">Provider</th>
+                <th className="px-3 py-2">{isDE ? 'Default-URL' : 'Default URL'}</th>
+                <th className="px-3 py-2">{isDE ? 'API-Key' : 'API key'}</th>
+                <th className="px-3 py-2">Tool-Calling</th>
+                <th className="px-3 py-2">Vision</th>
+              </tr>
+            </thead>
+            <tbody className="text-gray-400 text-xs">
+              <tr className="border-t border-gray-800">
+                <td className="px-3 py-2 font-mono">lmstudio</td>
+                <td className="px-3 py-2 font-mono">http://localhost:1234</td>
+                <td className="px-3 py-2">{isDE ? 'optional' : 'optional'}</td>
+                <td className="px-3 py-2 text-emerald-400">✓</td>
+                <td className="px-3 py-2 text-gray-500">{isDE ? 'modellabhängig' : 'model-dependent'}</td>
+              </tr>
+              <tr className="border-t border-gray-800">
+                <td className="px-3 py-2 font-mono">openai-compatible</td>
+                <td className="px-3 py-2 font-mono">—</td>
+                <td className="px-3 py-2">{isDE ? 'optional' : 'optional'}</td>
+                <td className="px-3 py-2 text-emerald-400">✓</td>
+                <td className="px-3 py-2 text-gray-500">{isDE ? 'modellabhängig' : 'model-dependent'}</td>
+              </tr>
+              <tr className="border-t border-gray-800">
+                <td className="px-3 py-2 font-mono">anthropic</td>
+                <td className="px-3 py-2 font-mono">https://api.anthropic.com</td>
+                <td className="px-3 py-2 text-amber-300">{isDE ? 'Pflicht' : 'required'} (sk-ant-...)</td>
+                <td className="px-3 py-2 text-gray-500">{isDE ? 'Roadmap' : 'Roadmap'}</td>
+                <td className="px-3 py-2 text-emerald-400">✓</td>
+              </tr>
+              <tr className="border-t border-gray-800">
+                <td className="px-3 py-2 font-mono">openai</td>
+                <td className="px-3 py-2 font-mono">https://api.openai.com</td>
+                <td className="px-3 py-2 text-amber-300">{isDE ? 'Pflicht' : 'required'} (sk-...)</td>
+                <td className="px-3 py-2 text-emerald-400">✓</td>
+                <td className="px-3 py-2 text-emerald-400">✓</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="text-gray-500 text-xs mt-3">
+          {isDE
+            ? 'Ollama: nutze "openai-compatible" mit URL http://localhost:11434. Der native ollama-Provider wurde entfernt (M-12), bestehende Configs migrieren automatisch. Ollama\'s /v1-Shim unterstützt seit v0.3 Function-Calling und Vision.'
+            : 'Ollama: use "openai-compatible" with URL http://localhost:11434. The native ollama provider was retired (M-12); existing configs auto-migrate. Ollama\'s /v1 shim supports function calling and vision since v0.3.'}
+        </p>
+      </Section>
+
+      <Section title={isDE ? 'Tool-Calling' : 'Tool Calling'}>
+        <p className="text-gray-400 text-sm mb-3">
+          {isDE
+            ? 'Tools sind in Lese- und Schreib-Gruppen aufgeteilt, opt-in pro Tool. Default-Allowlist enthält nur einige Read-Tools (rag_search, knowledge_search, todo_list, milestone_list). Schreibende Tools müssen explizit aktiviert werden und sind in der UI rot hinterlegt mit Confirm-Dialog beim "Alle aktivieren".'
+            : 'Tools are split into read and write groups, opt-in per tool. The default allowlist enables only a few read tools (rag_search, knowledge_search, todo_list, milestone_list). Write tools must be enabled explicitly, are highlighted red in the UI and require confirmation when enabling all at once.'}
+        </p>
+        <p className="text-gray-400 text-sm mb-3">
+          {isDE
+            ? 'Jeder erfolgreiche Schreib-Tool-Aufruf wird im Logs-Modul mit User, Session, Tool-Name und Args (gekürzt) festgehalten — vollständiger Audit-Trail.'
+            : 'Every successful write-tool call is logged in the logs module with user, session, tool name and (truncated) args — a full audit trail.'}
+        </p>
+        <p className="text-gray-400 text-sm">
+          {isDE
+            ? 'Hartcodiert geblockt: project_delete und alle _delete-Bulk-Operationen — auch wenn sie in der Allowlist stünden.'
+            : 'Hard-coded as blocked: project_delete and all _delete bulk operations — even if added to the allowlist.'}
+        </p>
+      </Section>
+
+      <Section title={isDE ? 'Anhänge (Text & Bild)' : 'Attachments (Text & Image)'}>
+        <p className="text-gray-400 text-sm mb-3">
+          {isDE
+            ? 'Im Chat-Dock kannst du via Paperclip-Button, Drag-and-Drop oder Clipboard-Paste Dateien anhängen. Textdateien (.md, .json, Code, .pdf, .csv) werden serverseitig extrahiert und in den System-Prompt eingefügt — pro Datei max 20.000 Zeichen, gesamt-Budget 80.000.'
+            : 'In the chat dock you can attach files via paperclip button, drag-and-drop, or clipboard paste. Text files (.md, .json, code, .pdf, .csv) are extracted server-side and injected into the system prompt — max 20,000 chars per file, 80,000 total budget.'}
+        </p>
+        <p className="text-gray-400 text-sm">
+          {isDE
+            ? 'Bilder (JPEG/PNG/WEBP/GIF) werden provider-spezifisch encoded: Anthropic content_block, OpenAI image_url data-URL, Ollama messages[].images base64. Voraussetzung: der gewählte Endpoint hat das "Vision-Modell"-Flag aktiv und das geladene Modell ist tatsächlich vision-fähig.'
+            : 'Images (JPEG/PNG/WEBP/GIF) are encoded per-provider: Anthropic content_block, OpenAI image_url data URL, Ollama messages[].images base64. Requirement: the selected endpoint has the "vision model" flag enabled and the loaded model is actually vision-capable.'}
+        </p>
+      </Section>
+
+      <Section title={isDE ? 'API-Key-Sicherheit' : 'API Key Security'}>
+        <ul className="text-gray-400 text-sm space-y-1 list-disc list-inside">
+          <li>{isDE ? 'API-Keys werden AES-256-GCM verschlüsselt in der Settings-DB gespeichert (gleiche Mechanik wie Secrets/Replication, nutzt SECRETS_ENCRYPTION_KEY)' : 'API keys are AES-256-GCM encrypted in the settings DB (same mechanism as secrets/replication, uses SECRETS_ENCRYPTION_KEY)'}</li>
+          <li>{isDE ? 'GET /api/chat/config liefert nie den Klartext-Key — stattdessen nur hasApiKey: true/false pro Endpoint' : 'GET /api/chat/config never returns the plain-text key — only hasApiKey: true/false per endpoint'}</li>
+          <li>{isDE ? 'Beim PUT: leeres Feld = unverändert, expliziter "" = löschen, Wert = überschreiben' : 'On PUT: empty field = unchanged, explicit "" = delete, value = overwrite'}</li>
+          <li>{isDE ? 'Ohne SECRETS_ENCRYPTION_KEY schlägt das Anlegen eines Cloud-Endpoints fehl — setze den Key vor der Konfiguration' : 'Without SECRETS_ENCRYPTION_KEY, creating a cloud endpoint fails — set the key before configuring'}</li>
+        </ul>
+      </Section>
+    </>
+  );
+}
+
+function ReplicationDocsSection() {
+  const isDE = i18n.language === 'de';
+  return (
+    <>
+      <Section title={isDE ? 'Überblick' : 'Overview'}>
+        <p className="text-gray-400 leading-relaxed">
+          {isDE
+            ? 'DevGrimoire kann Daten zwischen zwei Instanzen synchronisieren — entweder einseitig (Master/Slave für Backups) oder bidirektional (Peer-Mode für verteiltes Arbeiten zwischen z.B. Heim- und Firmen-Instanz).'
+            : 'DevGrimoire can synchronize data between two instances — either unidirectionally (master/slave for backups) or bidirectionally (peer mode for distributed work between e.g. home and office instances).'}
+        </p>
+      </Section>
+
+      <Section title={isDE ? 'Rollen' : 'Roles'}>
+        <ul className="text-gray-400 text-sm space-y-2 list-disc list-inside">
+          <li><span className="font-mono text-gray-300">standalone</span> {isDE ? '— Default, keine Replikation' : '— default, no replication'}</li>
+          <li><span className="font-mono text-gray-300">master</span> → <span className="font-mono text-gray-300">slave</span> {isDE ? '— Einweg-Replikation für Backup. Slave ist Read-Only, kann zum Master promoted werden (Failover).' : '— one-way replication for backup. Slave is read-only, can be promoted to master (failover).'}</li>
+          <li><span className="font-mono text-gray-300">peer</span> ↔ <span className="font-mono text-gray-300">peer</span> {isDE ? '— bidirektional symmetrisch. Beide Instanzen pushen lokale Änderungen, beide bleiben voll schreibbar. Konflikte werden via Last-Write-Wins (auf updatedAt) gelöst.' : '— symmetric bidirectional. Both instances push local changes, both stay fully writable. Conflicts resolved via last-write-wins (on updatedAt).'}</li>
+        </ul>
+      </Section>
+
+      <Section title={isDE ? 'Per-Projekt-Opt-In' : 'Per-Project Opt-In'}>
+        <p className="text-gray-400 text-sm mb-3">
+          {isDE
+            ? 'Replikation läuft nur für Projekte die du explizit freigegeben hast (Settings → Replikation → Checkbox-Liste). Persönliche Projekte ohne Opt-in bleiben lokal — selbst wenn die Replikations-Verbindung steht. Default für alle bestehenden Projekte: nicht-repliziert.'
+            : 'Replication only runs for projects you explicitly enable (Settings → Replication → checkbox list). Personal projects without opt-in stay local — even when the replication link is up. Default for all existing projects: not replicated.'}
+        </p>
+        <p className="text-gray-400 text-sm">
+          {isDE
+            ? 'Use-Case: Heim-Instanz hat alle Projekte, du gibst nur die Arbeits-Projekte zur Firmen-Instanz frei. Persönliche Projekte werden nie zur Firma gesynct.'
+            : 'Use case: home instance has all projects; you only enable work projects to flow to the office instance. Personal projects never sync to the office.'}
+        </p>
+      </Section>
+
+      <Section title={isDE ? 'Last-Write-Wins (Peer-Mode)' : 'Last-Write-Wins (Peer Mode)'}>
+        <p className="text-gray-400 text-sm mb-3">
+          {isDE
+            ? 'Bei eingehender Änderung vergleicht der Empfänger die updatedAt-Timestamps. Älteres Incoming wird verworfen mit Log-Eintrag "LWW skipped". Bei simultanen Edits beider Seiten geht der frühere Edit verloren — bewusste Wahl gegen Komplexität von Vector Clocks oder CRDTs.'
+            : 'On incoming change, the receiver compares updatedAt timestamps. Older incoming is discarded with log entry "LWW skipped". On simultaneous edits from both sides, the earlier edit is lost — deliberate choice against the complexity of vector clocks or CRDTs.'}
+        </p>
+        <div className="bg-amber-900/20 border border-amber-800/40 rounded px-3 py-2 text-amber-200 text-xs">
+          {isDE
+            ? '⚠ Beide Peer-Instanzen müssen NTP-synchron laufen, sonst wird LWW willkürlich (1 Sekunde Drift = Race Condition). Delete-Events bleiben unbedingt — kein LWW-Check.'
+            : '⚠ Both peer instances must be NTP-synchronized, otherwise LWW becomes arbitrary (1 second drift = race condition). Delete events always apply — no LWW check.'}
+        </div>
+      </Section>
+
+      <Section title="Setup">
+        <ol className="text-gray-400 text-sm space-y-2 list-decimal list-inside">
+          <li>{isDE ? 'Auf beiden Instanzen Settings → Replikation → Rolle: Peer (bidirektional)' : 'On both instances Settings → Replication → Role: Peer (bidirectional)'}</li>
+          <li>{isDE ? 'PeerUrl + PeerApiKey je Seite mit der Adresse der Gegenseite eintragen' : 'Enter peer URL + peer API key on each side pointing at the other instance'}</li>
+          <li>{isDE ? 'Beide Instanzen müssen denselben SECRETS_ENCRYPTION_KEY haben (sonst können verschlüsselte Secrets nicht entschlüsselt werden)' : 'Both instances must share the same SECRETS_ENCRYPTION_KEY (else encrypted secrets cannot be decrypted)'}</li>
+          <li>{isDE ? 'NTP-Sync auf beiden Hosts sicherstellen (timedatectl status / chronyc tracking)' : 'Ensure NTP sync on both hosts (timedatectl status / chronyc tracking)'}</li>
+          <li>{isDE ? 'In der Project-Liste (gleicher Tab) die Projekte ankreuzen die replizieren sollen' : 'In the project list (same tab) tick the projects to replicate'}</li>
+          <li>{isDE ? '"Verbindung testen" → grün, dann "Jetzt synchronisieren" für initialen Full-Sync' : '"Test connection" → green, then "Sync now" for initial full sync'}</li>
+        </ol>
+      </Section>
+
+      <Section title={isDE ? 'Offline-Verhalten' : 'Offline Behaviour'}>
+        <p className="text-gray-400 text-sm mb-3">
+          {isDE
+            ? 'Wenn der Peer offline ist, queuen sich die Änderungen in MongoDB. Beim Reconnect läuft die Queue ab, ein nächtlicher Full-Sync (Default 3:00 Uhr) backfillt was die Queue verpasst hat (z.B. wegen Queue-Overflow oder Down-Time länger als 24h).'
+            : 'When the peer is offline, changes queue in MongoDB. On reconnect the queue drains; a nightly full sync (default 3:00 AM) backfills what the queue missed (e.g. due to queue overflow or downtime > 24h).'}
+        </p>
+        <p className="text-gray-400 text-sm">
+          {isDE
+            ? 'Anwendungsfall: arbeite zu Hause weiter, wenn Firmen-Server-Verbindung tot ist — Edits werden lokal angewendet und gequeued, bei nächster Verbindung gepusht. Wenn die Firma in der Zwischenzeit auch was am gleichen Doc geändert hat, gewinnt der jüngere updatedAt.'
+            : 'Use case: keep working at home when the office server connection is down — edits apply locally and queue, get pushed on next connection. If the office also changed the same doc meanwhile, the newer updatedAt wins.'}
+        </p>
       </Section>
     </>
   );

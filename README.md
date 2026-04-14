@@ -27,13 +27,18 @@ DevGrimoire gives Claude (the AI assistant) a persistent memory for your project
 
 ## Features
 
-- **89 MCP Tools** -- Claude can manage projects, todos, milestones, sessions, knowledge, changelogs, manuals, research, schemas, dependencies, features, snippets, environments, and secrets
+- **109 MCP Tools** -- Claude can manage projects, todos, milestones, sessions, knowledge, changelogs, manuals, research, schemas, dependencies, features, snippets, environments, secrets, releases, logs, attachments, commits, recurring tasks, and more
+- **Project Chat** -- In-dashboard chat with multi-provider LLM support (LM Studio, OpenAI-compatible, Anthropic, OpenAI), per-tool allowlist with read/write split, text + image attachments, vision models, audit logging
 - **RAG Semantic Search** -- LanceDB vector database with Ollama/LM Studio embeddings for meaning-based search across all entity types
-- **REST API** -- 98 endpoints for all resources
+- **Distributed Sync** -- Master/Slave for backup setups, **Peer mode for bidirectional sync** with last-write-wins; per-project opt-in keeps personal projects local while sharing only what you choose
+- **File Attachments** -- MinIO/S3-compatible storage for arbitrary files per project or per todo, automatic text extraction (incl. PDF) for RAG indexing
+- **Releases** -- Per-project release tracking with assets, GitLab sync, draft/published/archived workflow
+- **Structured Logs** -- Per-project log entries with TTL-based retention, search and stats; powers chat-tool audit trail
+- **REST API** -- 100+ endpoints for all resources
 - **React Dashboard** -- Dark-mode UI with Kanban board, milestone tracking, activity feed, Markdown editor, and more
 - **Real-Time Updates** -- SSE via MongoDB Change Streams + EventEmitter
 - **Authentication** -- Multi-user JWT auth with roles (Admin/User), API keys for programmatic access
-- **Encrypted Secrets** -- AES-256-GCM per environment (dev/staging/prod)
+- **Encrypted Secrets** -- AES-256-GCM per environment (dev/staging/prod); same encryption protects per-endpoint chat API keys and replication credentials
 - **Push Notifications** -- Claude can notify the user via Web Push
 - **Global Search** -- Full-text search across all entities of a project
 - **Project Import/Export** -- Export and import complete project state as JSON
@@ -42,7 +47,7 @@ DevGrimoire gives Claude (the AI assistant) a persistent memory for your project
 - **Two MCP Transports** -- Local stdio mode or remote via HTTP/SSE
 - **Docker Compose** -- One command for the entire stack
 
-## MCP Tools (89)
+## MCP Tools (109)
 
 | Area | Tools | Description |
 |------|-------|-------------|
@@ -50,7 +55,7 @@ DevGrimoire gives Claude (the AI assistant) a persistent memory for your project
 | **Todos** | `todo_create`, `_list`, `_get`, `_update`, `_delete`, `_comment` | Status state machine, priority, tags, dependencies, archiving |
 | **Milestones** | `milestone_create`, `_list`, `_get`, `_update`, `_delete` | Grouping of todos, completion requires changelog |
 | **Sessions** | `session_save`, `_get` | Work sessions with summary, files, next steps |
-| **Knowledge** | `knowledge_save`, `_search`, `_list`, `_get`, `_update`, `_delete` | Long-term knowledge base with full-text search |
+| **Knowledge** | `knowledge_save`, `_search`, `_list`, `_get`, `_update`, `_delete` | Long-term knowledge base with full-text search; supports project-scoped + global entries |
 | **Changelog** | `changelog_add`, `_list`, `_get`, `_update`, `_delete` | Version changelog with component support |
 | **Manuals** | `manual_create`, `_list`, `_get`, `_update`, `_delete` | Categorized documentation in Markdown |
 | **Research** | `research_save`, `_search`, `_list`, `_get`, `_update`, `_delete` | Point-in-time research with sources |
@@ -63,8 +68,12 @@ DevGrimoire gives Claude (the AI assistant) a persistent memory for your project
 | **Souls** | `soul_get`, `_update` | Project personality / guiding principles |
 | **Commits** | `commit_list`, `_search`, `_sync` | Git commit history from GitHub/GitLab |
 | **Recurring Tasks** | `recurring_task_create`, `_list`, `_get`, `_update`, `_delete` | Scheduled recurring todo creation |
+| **Releases** | `release_create`, `_list`, `_get`, `_update`, `_delete`, `_sync_gitlab` | Per-project releases with assets, GitLab sync, draft/published/archived |
+| **Attachments** | `attachment_upload`, `_list`, `_get`, `_download`, `_delete` | Files in MinIO/S3, optional text extraction (incl. PDF) for RAG |
+| **Logs** | `log_list`, `_search`, `_stats` | Per-project structured log entries with TTL retention |
 | **RAG** | `rag_search`, `rag_reindex`, `rag_status` | Semantic vector search across all entities |
-| **System** | `system_instructions_get`, `_set`, `notify_user` | Agent instructions, push notifications |
+| **Dialog** | `notify_user`, `ask_user` | Push notifications + interactive yes/no/text questions to the user |
+| **System** | `system_instructions_get`, `_set` | Global + per-project agent instructions |
 
 ## Quick Start
 
@@ -131,6 +140,14 @@ Environment variables in `.env`:
 | `RAG_FALLBACK_URL` | Fallback server URL | No |
 | `RAG_FALLBACK_MODEL` | Fallback model name | No |
 | `OLLAMA_URL` | Ollama URL (default: `http://localhost:11434`) | No |
+| `CHAT_LLM_PROVIDER` | `lmstudio`, `openai-compatible`, `anthropic`, `openai` | For Chat |
+| `CHAT_LLM_URL` | Chat LLM endpoint URL | For Chat |
+| `CHAT_LLM_MODEL` | Chat model name | For Chat |
+| `CHAT_LLM_API_KEY` | Required for `anthropic`/`openai`, optional for local providers | For Chat |
+| `MINIO_ENDPOINT` | MinIO/S3 host (without protocol) | For Files |
+| `MINIO_ACCESS_KEY` | MinIO access key | For Files |
+| `MINIO_SECRET_KEY` | MinIO secret key | For Files |
+| `MINIO_BUCKET` | Bucket name (default: `devgrimoire`) | No |
 
 \* Without `AUTH_USERNAME`/`AUTH_PASSWORD`, authentication is disabled.
 
@@ -270,6 +287,56 @@ DevGrimoire includes a built-in RAG (Retrieval-Augmented Generation) system for 
 
 > **Note:** RAG is optional. If no embedding server is available, the app starts normally with RAG features disabled.
 
+## Project Chat
+
+In-dashboard chat with a configurable LLM. Each chat session is scoped to a project, the system prompt is auto-built from the project context (RAG hits, attachments, history), and tool-calling lets the LLM read or even write project data through a per-tool allowlist.
+
+### Providers
+
+| Provider | Auth | Streaming Tool-Calls | Vision |
+|----------|------|----------------------|--------|
+| `lmstudio` | Bearer optional | ✓ | If model supports it |
+| `openai-compatible` | Bearer optional | ✓ | If model supports it (also covers Ollama via its `/v1` shim) |
+| `anthropic` | `x-api-key` required | Roadmap (T-71) | ✓ (Claude 3+) |
+| `openai` | Bearer required | ✓ | ✓ (GPT-4o etc.) |
+
+For Ollama specifically: configure as `openai-compatible` with URL `http://localhost:11434` -- the Ollama OpenAI compatibility shim covers tools and vision since v0.3. Native Ollama provider was retired in M-12; existing configs auto-migrate.
+
+### Tool-Calling
+
+Tools are split into **read** and **write** groups, opt-in per tool. By default only a small read-only allowlist (RAG search, knowledge search, todo list, milestone list) is enabled. Write tools (todo creation, milestone updates, knowledge save, etc.) must be enabled explicitly per tool and are surfaced in the UI with a warning. Every write call is recorded in the per-project log feed.
+
+Destructive bulk operations (`project_delete`, all `_delete` tools) are hard-coded as never-callable, regardless of allowlist contents.
+
+### Attachments
+
+Users can attach text files (Markdown, PDF, source code, JSON, etc.) and images to chat messages. Text is extracted and injected into the system prompt with a per-file cap (20k chars) and a global budget (80k chars). Images are forwarded to the LLM in the provider-specific format -- requires a vision-capable endpoint, which the user marks per endpoint.
+
+API keys are AES-256-GCM encrypted in the settings DB and never returned in plain text by the config endpoint.
+
+## Distributed Sync (Replication)
+
+DevGrimoire can replicate data between two instances. Three roles are available:
+
+- **`master` -> `slave`** -- One-way replication for backup setups; the slave is read-only and can be promoted on failover
+- **`peer` <-> `peer`** -- Symmetric bidirectional sync; both sides remain writable, conflicts resolved via **last-write-wins** on `updatedAt`
+- **`standalone`** -- Default; no replication
+
+### Per-Project Opt-in
+
+Replication is opt-in **per project** via a checkbox in Settings -> Replication. Personal projects you don't enable stay local; only enabled projects flow to the peer/slave. This is the typical home/office setup: keep private projects at home, share work projects with the office instance.
+
+### Offline Behaviour
+
+Events are queued in MongoDB when the peer is unreachable and replayed on reconnect. A nightly full-sync (configurable cron) backfills anything the queue may have missed. For peer mode both instances should be NTP-synchronized -- last-write-wins becomes arbitrary if clocks drift.
+
+### Setup
+
+1. Set both instances to role `peer` in Settings -> Replication
+2. Configure the counterparty URL + a shared API key on each side
+3. Generate the same `SECRETS_ENCRYPTION_KEY` on both (so encrypted secrets stay decryptable)
+4. Tick the projects you want to replicate -- they appear on the other side after the next event or full-sync
+
 ## Project Import/Export
 
 Complete project data (todos, milestones, knowledge, changelog, sessions, schemas, dependencies, features, snippets, manuals, research, environments, secrets) can be exported as JSON and imported into a new instance. All internal references (milestone links, dependencies, changelog associations) are correctly remapped.
@@ -296,13 +363,13 @@ DevGrimoire/
 │   └── src/
 │       ├── main.ts                # REST API entry (NestJS HTTP, prefix /api)
 │       ├── mcp-server.ts          # MCP entry (stdio transport)
-│       ├── mcp-tools.ts           # MCP tool definitions (89 tools)
+│       ├── mcp-tools.ts           # MCP tool definitions (109 tools)
 │       ├── auth/                  # JWT auth, roles, API keys, user management
 │       ├── projects/              # Projects (schema, service, controller, DTOs)
 │       ├── todos/                 # Tasks (state machine, dependencies, comments)
 │       ├── milestones/            # Milestones (changelog association)
 │       ├── sessions/              # Work sessions
-│       ├── knowledge/             # Knowledge base (full-text search)
+│       ├── knowledge/             # Knowledge base (full-text search, project + global scope)
 │       ├── changelog/             # Version changelog
 │       ├── manuals/               # Categorized manuals
 │       ├── research/              # Research with sources
@@ -312,6 +379,16 @@ DevGrimoire/
 │       ├── dependencies/          # Package dependencies (scan)
 │       ├── environments/          # Environment variables (dev/staging/prod)
 │       ├── secrets/               # Encrypted secrets (AES-256-GCM)
+│       ├── releases/              # Per-project release tracking + GitLab sync
+│       ├── attachments/           # MinIO/S3 file storage with text extraction
+│       ├── chat/                  # Project chat: multi-provider LLM, tool-calling, attachments
+│       ├── logs/                  # Per-project structured logs with TTL retention
+│       ├── replication/           # Master/Slave + Peer-mode bidirectional sync
+│       ├── commits/               # Git commit history (GitHub/GitLab sync)
+│       ├── recurring-tasks/       # Scheduled recurring todo creation
+│       ├── souls/                 # Per-project guiding principles
+│       ├── questions/             # ask_user interactive dialog
+│       ├── minio/                 # MinIO/S3 client wrapper
 │       ├── activities/            # Activity feed (auto-logged)
 │       ├── notifications/         # In-app notifications
 │       ├── events/                # SSE events (Change Streams + EventEmitter)
@@ -325,9 +402,10 @@ DevGrimoire/
 │       └── common/                # Shared (encryption, pipes, interceptors)
 ├── frontend/
 │   └── src/
-│       ├── pages/                 # Dashboard, project detail, todo detail, login, ...
-│       ├── components/            # TodoBoard, MilestoneList, SchemaList, ManualView, ...
+│       ├── pages/                 # Dashboard, project detail, todo detail, login, settings, docs, ...
+│       ├── components/            # TodoBoard, MilestoneList, SchemaList, ChatDock, LogList, ReleaseList, ReplicationSettings, ...
 │       ├── components/ui/         # Button, Badge, ConfirmButton, EmptyState, ...
+│       ├── api/                   # REST client + browserLlmClient (browser-mode chat streaming)
 │       └── hooks/                 # useAuth, useProjectEvents
 ├── docker-compose.yml             # Standard (replica set)
 ├── docker-compose.standalone.yml  # ARM/Standalone (without replica set)

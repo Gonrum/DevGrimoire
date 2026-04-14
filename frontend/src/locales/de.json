@@ -703,7 +703,8 @@
     "navAuth": "Auth & Benutzer",
     "navMcp": "MCP-Tools",
     "navApi": "REST API",
-    "navArchitecture": "Architektur"
+    "navArchitecture": "Architektur",
+    "navReplication": "Replikation"
   },
   "soul": {
     "title": "Soul",
