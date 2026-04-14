@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 
-type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'rag' | 'api' | 'git' | 'architecture';
+type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'rag' | 'api' | 'logs' | 'git' | 'architecture';
 
 export default function Docs() {
   const [active, setActive] = useState<DocsSection>('overview');
@@ -15,6 +15,7 @@ export default function Docs() {
     { key: 'mcp', label: t('docs.navMcp') },
     { key: 'rag', label: 'RAG' },
     { key: 'api', label: t('docs.navApi') },
+    { key: 'logs', label: 'Logs' },
     { key: 'git', label: 'Git Integration' },
     { key: 'architecture', label: t('docs.navArchitecture') },
   ];
@@ -70,6 +71,7 @@ export default function Docs() {
         {active === 'mcp' && <McpSection />}
         {active === 'rag' && <RagSection />}
         {active === 'api' && <ApiSection />}
+        {active === 'logs' && <LogsSection />}
         {active === 'git' && <GitIntegrationSection />}
         {active === 'architecture' && <ArchitectureSection />}
       </div>
@@ -776,6 +778,12 @@ function ApiSection() {
                 { method: 'PUT', path: '/api/secrets/:id', desc: isDE ? 'Secret aktualisieren' : 'Update secret' },
                 { method: 'DELETE', path: '/api/secrets/:id', desc: isDE ? 'Secret l\u00f6schen' : 'Delete secret' },
               ]} />
+              <EndpointGroup label="Logs" endpoints={[
+                { method: 'POST', path: '/api/logs', desc: isDE ? 'Log-Eintrag erstellen (via API Key)' : 'Create log entry (via API key)' },
+                { method: 'POST', path: '/api/logs/batch', desc: isDE ? 'Mehrere Logs auf einmal senden' : 'Send multiple logs at once' },
+                { method: 'GET', path: '/api/logs?projectId=&level=&service=&search=', desc: isDE ? 'Logs abrufen (mit Filtern)' : 'Fetch logs (with filters)' },
+                { method: 'GET', path: '/api/logs/stats?projectId=', desc: isDE ? 'Log-Statistiken' : 'Log statistics' },
+              ]} />
               <EndpointGroup label={isDE ? 'Sonstiges' : 'Other'} endpoints={[
                 { method: 'GET', path: '/api/search?q=&projectId=&limit=', desc: isDE ? 'Globale Suche' : 'Global search' },
                 { method: 'GET', path: '/api/activities?projectId=', desc: isDE ? 'Aktivit\u00e4ten' : 'Activities' },
@@ -787,6 +795,106 @@ function ApiSection() {
             </tbody>
           </table>
         </div>
+      </Section>
+    </>
+  );
+}
+
+function LogsSection() {
+  const isDE = i18n.language === 'de';
+  return (
+    <>
+      <Section title={isDE ? 'Überblick' : 'Overview'}>
+        <p className="text-sm text-gray-400 leading-relaxed">
+          {isDE
+            ? 'Externe Anwendungen können Logs per REST API an DevGrimoire senden. Logs werden pro Projekt gespeichert und nach 5 Tagen automatisch gelöscht (MongoDB TTL Index). Claude kann über MCP Tools auf die Logs zugreifen.'
+            : 'External applications can send logs to DevGrimoire via the REST API. Logs are stored per project and automatically deleted after 5 days (MongoDB TTL index). Claude can access logs via MCP tools.'}
+        </p>
+        <div className="mt-3 space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Aufbewahrung' : 'Retention'} value={isDE ? '5 Tage (konfigurierbar via LOG_TTL_DAYS)' : '5 days (configurable via LOG_TTL_DAYS)'} />
+          <InfoRow label={isDE ? 'Authentifizierung' : 'Authentication'} value={isDE ? 'API Key (Authorization: Bearer cv_...)' : 'API key (Authorization: Bearer cv_...)'} />
+          <InfoRow label="MCP Tools" value="log_list, log_search, log_stats" />
+          <InfoRow label={isDE ? 'Frontend' : 'Frontend'} value={isDE ? 'Projekt → System → Orakel' : 'Project → System → Oracles'} />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Einrichtung' : 'Setup'}>
+        <Step n={1} title={isDE ? 'API Key erstellen' : 'Create API Key'}>
+          <p className="text-sm text-gray-400">
+            {isDE
+              ? 'Unter Einstellungen → API Keys einen neuen Key erstellen. Den Plaintext-Key kopieren — er wird nur einmal angezeigt.'
+              : 'Go to Settings → API Keys and create a new key. Copy the plaintext key — it is only shown once.'}
+          </p>
+        </Step>
+        <Step n={2} title={isDE ? 'Logs senden' : 'Send Logs'}>
+          <p className="text-sm text-gray-400 mb-2">
+            {isDE ? 'Einzelner Log-Eintrag:' : 'Single log entry:'}
+          </p>
+          <Code>{`curl -X POST ${window.location.origin}/api/logs \\
+  -H "Authorization: Bearer cv_YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "projectId": "PROJECT_ID",
+    "level": "error",
+    "message": "Database connection timeout",
+    "service": "api-server",
+    "area": "database",
+    "environment": "production",
+    "tags": ["db", "timeout"]
+  }'`}</Code>
+          <p className="text-sm text-gray-400 mt-3 mb-2">
+            {isDE ? 'Mehrere Logs auf einmal (Batch):' : 'Multiple logs at once (batch):'}
+          </p>
+          <Code>{`curl -X POST ${window.location.origin}/api/logs/batch \\
+  -H "Authorization: Bearer cv_YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "logs": [
+      { "projectId": "PROJECT_ID", "level": "info", "message": "Server started", "service": "api" },
+      { "projectId": "PROJECT_ID", "level": "warn", "message": "Slow query", "service": "db" }
+    ]
+  }'`}</Code>
+        </Step>
+        <Step n={3} title={isDE ? 'Logs ansehen' : 'View Logs'}>
+          <p className="text-sm text-gray-400">
+            {isDE
+              ? 'Im Projekt unter System → Orakel. Filter nach Level, Service oder Volltextsuche. Claude kann Logs auch über die MCP Tools log_list, log_search und log_stats abfragen.'
+              : 'In the project under System → Oracles. Filter by level, service, or full-text search. Claude can also query logs via the MCP tools log_list, log_search, and log_stats.'}
+          </p>
+        </Step>
+      </Section>
+
+      <Section title={isDE ? 'Felder' : 'Fields'}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-500 border-b border-gray-800">
+                <th className="py-2 pr-4">{isDE ? 'Feld' : 'Field'}</th>
+                <th className="py-2 pr-4">{isDE ? 'Pflicht' : 'Required'}</th>
+                <th className="py-2">{isDE ? 'Beschreibung' : 'Description'}</th>
+              </tr>
+            </thead>
+            <tbody className="text-gray-400">
+              <tr className="border-b border-gray-800/50"><td className="py-1.5 pr-4"><Mono>projectId</Mono></td><td className="pr-4">{isDE ? 'Ja' : 'Yes'}</td><td>{isDE ? 'Projekt MongoDB ID' : 'Project MongoDB ID'}</td></tr>
+              <tr className="border-b border-gray-800/50"><td className="py-1.5 pr-4"><Mono>message</Mono></td><td className="pr-4">{isDE ? 'Ja' : 'Yes'}</td><td>{isDE ? 'Log-Nachricht' : 'Log message'}</td></tr>
+              <tr className="border-b border-gray-800/50"><td className="py-1.5 pr-4"><Mono>level</Mono></td><td className="pr-4">{isDE ? 'Nein' : 'No'}</td><td>debug, info, warn, error (default: info)</td></tr>
+              <tr className="border-b border-gray-800/50"><td className="py-1.5 pr-4"><Mono>service</Mono></td><td className="pr-4">{isDE ? 'Nein' : 'No'}</td><td>{isDE ? 'Service-Name (z.B. api-server, worker)' : 'Service name (e.g. api-server, worker)'}</td></tr>
+              <tr className="border-b border-gray-800/50"><td className="py-1.5 pr-4"><Mono>area</Mono></td><td className="pr-4">{isDE ? 'Nein' : 'No'}</td><td>{isDE ? 'Bereich im Service (z.B. database, auth)' : 'Area within service (e.g. database, auth)'}</td></tr>
+              <tr className="border-b border-gray-800/50"><td className="py-1.5 pr-4"><Mono>environment</Mono></td><td className="pr-4">{isDE ? 'Nein' : 'No'}</td><td>production, staging, development, test</td></tr>
+              <tr className="border-b border-gray-800/50"><td className="py-1.5 pr-4"><Mono>metadata</Mono></td><td className="pr-4">{isDE ? 'Nein' : 'No'}</td><td>{isDE ? 'Freies JSON-Objekt für zusätzliche Daten' : 'Free-form JSON object for additional data'}</td></tr>
+              <tr className="border-b border-gray-800/50"><td className="py-1.5 pr-4"><Mono>tags</Mono></td><td className="pr-4">{isDE ? 'Nein' : 'No'}</td><td>{isDE ? 'String-Array für Kategorisierung' : 'String array for categorization'}</td></tr>
+              <tr><td className="py-1.5 pr-4"><Mono>source</Mono></td><td className="pr-4">{isDE ? 'Nein' : 'No'}</td><td>{isDE ? 'Quell-Identifikator (z.B. Hostname)' : 'Source identifier (e.g. hostname)'}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Konfiguration' : 'Configuration'}>
+        <p className="text-sm text-gray-400 mb-2">
+          {isDE ? 'Optionale Umgebungsvariable in der .env:' : 'Optional environment variable in .env:'}
+        </p>
+        <Code>{`# Log-Aufbewahrungszeit in Tagen (default: 5)
+LOG_TTL_DAYS=5`}</Code>
       </Section>
     </>
   );
@@ -1079,6 +1187,7 @@ function ArchitectureSection() {
           <ModuleItem name="push" desc="Web Push (VAPID)" />
           <ModuleItem name="rag" desc={isDE ? 'Semantische Suche (LanceDB + Embeddings)' : 'Semantic search (LanceDB + embeddings)'} />
           <ModuleItem name="commits" desc={isDE ? 'Git-Commit-Sync (GitHub/GitLab)' : 'Git commit sync (GitHub/GitLab)'} />
+          <ModuleItem name="logs" desc={isDE ? 'Application Logs (TTL 5 Tage)' : 'Application logs (TTL 5 days)'} />
           <ModuleItem name="events" desc={isDE ? 'SSE Live-Updates' : 'SSE live updates'} />
           <ModuleItem name="settings" desc={isDE ? 'Key-Value Einstellungen' : 'Key-value settings'} />
           <ModuleItem name="common" desc="Shared Pipes, EncryptionService" />

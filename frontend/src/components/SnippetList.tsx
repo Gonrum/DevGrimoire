@@ -7,6 +7,7 @@ import EmptyState from './ui/EmptyState';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
+import Markdown from './Markdown';
 import { FormInput, FormTextarea } from './ui/FormField';
 
 interface SnippetFormData {
@@ -312,7 +313,9 @@ export default function SnippetList({ entries, projectId }: { entries: Snippet[]
               {expandedId === snippet._id && (
                 <div className="mt-3 pt-3 border-t border-gray-800 space-y-3">
                   {snippet.description && (
-                    <p className="text-sm text-gray-400">{snippet.description}</p>
+                    <div className="text-gray-400">
+                      <Markdown>{snippet.description}</Markdown>
+                    </div>
                   )}
                   <div className="relative">
                     <pre className="bg-gray-950 border border-gray-800 rounded-lg p-4 overflow-x-auto text-sm font-mono text-gray-300 max-h-96 overflow-y-auto">

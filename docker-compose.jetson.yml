@@ -1,0 +1,180 @@
+# DevGrimoire — Jetson Nano Deployment
+# Usage: docker compose -f docker-compose.jetson.yml up -d
+#
+# Modes:
+#   standalone — eigenständige Instanz (default)
+#   slave      — Read-Only Replik, empfängt Daten vom Master
+#
+# Modus umschalten: über das Frontend (Settings → Replikation)
+# oder via API: PUT /api/replication/config { "role": "slave", ... }
+#
+# Voraussetzungen:
+#   - JetPack 4.6+ mit nvidia-container-runtime
+#   - .env.jetson im selben Verzeichnis (siehe .env.jetson.example)
+#
+# Images cross-bauen (auf x86-Host):
+#   docker buildx build --platform linux/arm64 -t devgrimoire-backend:arm64 ./backend --load
+#   docker buildx build --platform linux/arm64 -t devgrimoire-frontend:arm64 ./frontend --load
+#   docker save devgrimoire-backend:arm64 | ssh jetson docker load
+#   docker save devgrimoire-frontend:arm64 | ssh jetson docker load
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: devgrimoire-mongodb
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB}
+    entrypoint: ["/bin/bash", "-c", "if [ ! -f /keyfile/mongo-keyfile ]; then openssl rand -base64 756 > /keyfile/mongo-keyfile; fi && chmod 400 /keyfile/mongo-keyfile && chown 999:999 /keyfile/mongo-keyfile && exec docker-entrypoint.sh mongod --replSet rs0 --keyFile /keyfile/mongo-keyfile --wiredTigerCacheSizeGB 0.5"]
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_keyfile:/keyfile
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    healthcheck:
+      test: ["CMD", "mongosh", "-u", "${MONGO_USER}", "-p", "${MONGO_PASSWORD}", "--authenticationDatabase", "admin", "--eval", "rs.status().ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+
+  mongodb-init:
+    image: mongo:7
+    container_name: devgrimoire-mongodb-init
+    restart: "no"
+    depends_on:
+      mongodb:
+        condition: service_started
+    entrypoint: ["/bin/bash", "-c", "sleep 15 && mongosh 'mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongodb:27017/?authSource=admin&directConnection=true' --eval 'try { rs.status(); print(\"Replica set already initialized\"); } catch(e) { rs.initiate({ _id: \"rs0\", members: [{ _id: 0, host: \"mongodb:27017\" }] }); print(\"Replica set initiated\"); }'"]
+    environment:
+      MONGO_USER: ${MONGO_USER}
+      MONGO_PASSWORD: ${MONGO_PASSWORD}
+
+  ollama:
+    image: dustynv/ollama:r36.4.0
+    container_name: devgrimoire-ollama
+    restart: unless-stopped
+    runtime: nvidia
+    ports:
+      - "127.0.0.1:11434:11434"
+    environment:
+      OLLAMA_HOST: "0.0.0.0"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  backend:
+    image: devgrimoire-backend:arm64
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: devgrimoire-backend
+    restart: unless-stopped
+    ports:
+      - "3200:3000"
+    environment:
+      MONGODB_URI: ${MONGODB_URI}
+      PORT: 3000
+      NODE_HEAP_SIZE: 384
+      CORS_ORIGIN: http://localhost
+      AUTH_USERNAME: ${AUTH_USERNAME:-}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+      # RAG — lokales Ollama auf dem Jetson
+      RAG_EMBEDDING_PROVIDER: ollama
+      RAG_EMBEDDING_URL: http://ollama:11434
+      RAG_EMBEDDING_MODEL: nomic-embed-text
+      # RAG Fallback — externer Server (optional)
+      RAG_FALLBACK_PROVIDER: ${RAG_FALLBACK_PROVIDER:-}
+      RAG_FALLBACK_URL: ${RAG_FALLBACK_URL:-}
+      RAG_FALLBACK_MODEL: ${RAG_FALLBACK_MODEL:-}
+      # MinIO
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-devgrimoire}
+      MINIO_USE_SSL: "false"
+    volumes:
+      - lancedb_data:/app/data/lancedb
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    depends_on:
+      mongodb-init:
+        condition: service_completed_successfully
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/auth/status').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+
+  minio:
+    image: minio/minio:latest
+    container_name: devgrimoire-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    image: devgrimoire-frontend:arm64
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: devgrimoire-frontend
+    restart: unless-stopped
+    ports:
+      - "80:8080"
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  mongodb_data:
+  mongodb_keyfile:
+  lancedb_data:
+  minio_data:
+  ollama_data:

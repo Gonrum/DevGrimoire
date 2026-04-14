@@ -6,6 +6,7 @@ import { useDashboardEvents } from '../hooks/useProjectEvents';
 import { useToast } from '../components/Toast';
 import { STATUS_LABELS, STATUS_COLORS, PRIORITY_COLORS, PRIORITY_LABELS } from '../components/todo-utils';
 import Badge from '../components/ui/Badge';
+import Markdown from '../components/Markdown';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
 export default function Dashboard() {
@@ -115,9 +116,9 @@ export default function Dashboard() {
                   </Badge>
                 </div>
                 {p.description && (
-                  <p className="text-sm text-gray-400 mb-3 line-clamp-2">
-                    {p.description}
-                  </p>
+                  <div className="mb-3 max-h-12 overflow-hidden text-gray-400">
+                    <Markdown>{p.description}</Markdown>
+                  </div>
                 )}
                 {p.techStack.length > 0 && (
                   <div className="flex flex-wrap gap-1">

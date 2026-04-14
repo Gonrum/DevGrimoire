@@ -1,16 +1,20 @@
 import {
-  Controller, Get, Post, Put, Body, HttpCode,
+  Controller, Get, Post, Put, Patch, Param, Body, HttpCode,
   BadRequestException,
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { SettingsService } from '../settings/settings.service';
+import { ProjectsService } from '../projects/projects.service';
 import { ReplicationReceiveService } from './replication-receive.service';
 import { ReplicationPushService } from './replication-push.service';
 import { ReplicationFullSyncService } from './replication-full-sync.service';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../auth/schemas/user.schema';
 import {
   REPL_ROLE, REPL_SLAVE_URL, REPL_SLAVE_API_KEY,
-  REPL_MASTER_URL, REPL_LAST_SYNC, REPL_LAST_FULL_SYNC,
+  REPL_MASTER_URL, REPL_PEER_URL, REPL_PEER_API_KEY,
+  REPL_LAST_SYNC, REPL_LAST_FULL_SYNC,
   REPL_FULL_SYNC_CRON, REPL_INSTANCE_ID,
   ReplicationPayload, ReplicationConfig, ReplicationStatus,
 } from './replication.constants';
@@ -23,18 +27,52 @@ export class ReplicationController {
     private pushService: ReplicationPushService,
     private fullSyncService: ReplicationFullSyncService,
     private settingsService: SettingsService,
+    private projectsService: ProjectsService,
     private httpService: HttpService,
   ) {}
+
+  // ── Per-project replication opt-in ─────────────
+
+  @Get('projects')
+  async listProjectsForReplication() {
+    const projects = await this.projectsService.findAll(true);
+    return projects.map((p) => ({
+      _id: p._id.toString(),
+      name: p.name,
+      active: p.active,
+      favorite: p.favorite,
+      replicationEnabled: !!p.replicationConfig?.enabled,
+    }));
+  }
+
+  @Patch('projects/:id')
+  @Roles(UserRole.ADMIN)
+  async setProjectReplication(
+    @Param('id') id: string,
+    @Body() body: { enabled: boolean },
+  ) {
+    if (typeof body?.enabled !== 'boolean') {
+      throw new BadRequestException('enabled (boolean) is required');
+    }
+    const project = await this.projectsService.setReplicationEnabled(id, body.enabled);
+    return {
+      _id: project._id.toString(),
+      name: project.name,
+      replicationEnabled: !!project.replicationConfig?.enabled,
+    };
+  }
 
   // ── Config CRUD ──────────────────────────────────
 
   @Get('config')
   async getConfig(): Promise<ReplicationConfig> {
-    const [role, slaveUrl, slaveApiKey, masterUrl, cron, instanceId] = await Promise.all([
+    const [role, slaveUrl, slaveApiKey, masterUrl, peerUrl, peerApiKey, cron, instanceId] = await Promise.all([
       this.settingsService.getOrDefault(REPL_ROLE, 'standalone'),
       this.settingsService.get(REPL_SLAVE_URL),
       this.settingsService.get(REPL_SLAVE_API_KEY),
       this.settingsService.get(REPL_MASTER_URL),
+      this.settingsService.get(REPL_PEER_URL),
+      this.settingsService.get(REPL_PEER_API_KEY),
       this.settingsService.getOrDefault(REPL_FULL_SYNC_CRON, '0 3 * * *'),
       this.getOrCreateInstanceId(),
     ]);
@@ -44,6 +82,8 @@ export class ReplicationController {
       slaveUrl: slaveUrl || undefined,
       slaveApiKey: slaveApiKey ? '***' : undefined,
       masterUrl: masterUrl || undefined,
+      peerUrl: peerUrl || undefined,
+      peerApiKey: peerApiKey ? '***' : undefined,
       fullSyncCron: cron,
       instanceId,
     };
@@ -51,7 +91,7 @@ export class ReplicationController {
 
   @Put('config')
   async updateConfig(@Body() body: Partial<ReplicationConfig>): Promise<ReplicationConfig> {
-    if (body.role && !['standalone', 'master', 'slave'].includes(body.role)) {
+    if (body.role && !['standalone', 'master', 'slave', 'peer'].includes(body.role)) {
       throw new BadRequestException('Invalid role');
     }
     if (body.role !== undefined) await this.settingsService.set(REPL_ROLE, body.role);
@@ -60,6 +100,10 @@ export class ReplicationController {
       await this.settingsService.set(REPL_SLAVE_API_KEY, body.slaveApiKey);
     }
     if (body.masterUrl !== undefined) await this.settingsService.set(REPL_MASTER_URL, body.masterUrl);
+    if (body.peerUrl !== undefined) await this.settingsService.set(REPL_PEER_URL, body.peerUrl);
+    if (body.peerApiKey !== undefined && body.peerApiKey !== '***') {
+      await this.settingsService.set(REPL_PEER_API_KEY, body.peerApiKey);
+    }
     if (body.fullSyncCron !== undefined) await this.settingsService.set(REPL_FULL_SYNC_CRON, body.fullSyncCron);
 
     return this.getConfig();
@@ -78,15 +122,19 @@ export class ReplicationController {
 
     const stats = await this.pushService.getQueueStats();
 
-    // Test connectivity to peer
+    // Test connectivity to the configured counterparty (slave for master, peer-peer)
     let connected = false;
-    if (role === 'master') {
-      const slaveUrl = await this.settingsService.get(REPL_SLAVE_URL);
-      if (slaveUrl) {
+    if (role === 'master' || role === 'peer') {
+      const counterpartyUrl = role === 'peer'
+        ? await this.settingsService.get(REPL_PEER_URL)
+        : await this.settingsService.get(REPL_SLAVE_URL);
+      const apiKey = role === 'peer'
+        ? await this.settingsService.get(REPL_PEER_API_KEY)
+        : await this.settingsService.get(REPL_SLAVE_API_KEY);
+      if (counterpartyUrl) {
         try {
-          const apiKey = await this.settingsService.get(REPL_SLAVE_API_KEY);
           await firstValueFrom(
-            this.httpService.get(`${slaveUrl}/api/replication/status`, {
+            this.httpService.get(`${counterpartyUrl}/api/replication/status`, {
               headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
               timeout: 5000,
             }),
@@ -130,14 +178,23 @@ export class ReplicationController {
   @Post('test-connection')
   @HttpCode(200)
   async testConnection() {
-    const slaveUrl = await this.settingsService.get(REPL_SLAVE_URL);
-    const apiKey = await this.settingsService.get(REPL_SLAVE_API_KEY);
-    if (!slaveUrl) throw new BadRequestException('No slave URL configured');
+    const role = await this.settingsService.get(REPL_ROLE);
+    const counterpartyUrl = role === 'peer'
+      ? await this.settingsService.get(REPL_PEER_URL)
+      : await this.settingsService.get(REPL_SLAVE_URL);
+    const apiKey = role === 'peer'
+      ? await this.settingsService.get(REPL_PEER_API_KEY)
+      : await this.settingsService.get(REPL_SLAVE_API_KEY);
+    if (!counterpartyUrl) {
+      throw new BadRequestException(
+        role === 'peer' ? 'No peer URL configured' : 'No slave URL configured',
+      );
+    }
 
     const start = Date.now();
     try {
       await firstValueFrom(
-        this.httpService.get(`${slaveUrl}/api/replication/status`, {
+        this.httpService.get(`${counterpartyUrl}/api/replication/status`, {
           headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
           timeout: 10000,
         }),

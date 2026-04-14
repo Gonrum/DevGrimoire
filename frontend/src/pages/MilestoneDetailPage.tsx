@@ -456,7 +456,11 @@ export default function MilestoneDetailPage() {
             <div className="mb-5 bg-gray-900 border border-gray-800 rounded-lg p-3">
               <h3 className="text-sm font-medium text-gray-400 mb-2">{t('milestoneDetail.changelog')}</h3>
               {changelog.version && <p className="text-xs text-gray-500 mb-1">{t('common.version')}: {changelog.version}</p>}
-              {changelog.summary && <p className="text-xs text-gray-400 mb-2">{changelog.summary}</p>}
+              {changelog.summary && (
+                <div className="mb-2 text-gray-400">
+                  <Markdown>{changelog.summary}</Markdown>
+                </div>
+              )}
               <ul className="list-disc list-inside text-xs text-gray-400 space-y-0.5">
                 {changelog.changes.map((c, i) => <li key={i}>{c}</li>)}
               </ul>

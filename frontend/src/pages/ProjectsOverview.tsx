@@ -7,6 +7,7 @@ import { useToast } from '../components/Toast';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
+import Markdown from '../components/Markdown';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
 function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
@@ -242,9 +243,9 @@ export default function ProjectsOverview() {
                 </Badge>
               </div>
               {p.description && (
-                <p className="text-sm text-gray-400 mb-3 line-clamp-2">
-                  {p.description}
-                </p>
+                <div className="mb-3 max-h-12 overflow-hidden text-gray-400">
+                  <Markdown>{p.description}</Markdown>
+                </div>
               )}
               {p.techStack.length > 0 && (
                 <div className="flex flex-wrap gap-1">

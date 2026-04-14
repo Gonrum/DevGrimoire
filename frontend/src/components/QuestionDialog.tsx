@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
+import Markdown from './Markdown';
 
 interface PendingQuestion {
   _id: string;
@@ -123,11 +124,13 @@ export default function QuestionDialog() {
         {/* Body */}
         <div className="px-5 py-4">
           {current.context && (
-            <p className="text-xs text-gray-500 mb-2">{current.context}</p>
+            <div className="mb-2 text-gray-500">
+              <Markdown>{current.context}</Markdown>
+            </div>
           )}
-          <p className="text-gray-200 text-sm leading-relaxed">
-            {current.question}
-          </p>
+          <div className="text-gray-200">
+            <Markdown>{current.question}</Markdown>
+          </div>
         </div>
 
         {/* Actions */}

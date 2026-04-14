@@ -7,6 +7,7 @@ import EmptyState from './ui/EmptyState';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
+import Markdown from './Markdown';
 import { FormInput, FormSelect, FormTextarea } from './ui/FormField';
 
 const dbTypeColors: Record<DbType, string> = {
@@ -551,7 +552,9 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
                   <p className="text-xs text-gray-500 mb-1">DB: {schema.database}</p>
                 )}
                 {schema.description && (
-                  <p className="text-xs text-gray-400">{schema.description}</p>
+                  <div className="max-h-12 overflow-hidden text-gray-400">
+                    <Markdown>{schema.description}</Markdown>
+                  </div>
                 )}
                 {schema.tags.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-2">

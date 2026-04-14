@@ -1,4 +1,5 @@
-import { Controller, Logger, OnModuleDestroy, OnModuleInit, Query, Sse } from '@nestjs/common';
+import { Controller, Logger, OnModuleDestroy, OnModuleInit, Query, Req, Sse } from '@nestjs/common';
+import type { Request } from 'express';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
@@ -228,12 +229,22 @@ export class EventsController implements OnModuleInit, OnModuleDestroy {
 
   @Sse()
   sse(
+    @Req() req: Request,
     @Query('projectId') projectId?: string,
-    @Query('userId') userId?: string,
+    @Query('userId') queryUserId?: string,
   ): Observable<MessageEvent> {
+    // Trust the JWT-derived userId over any client-supplied query parameter.
+    const authedUserId =
+      (req as Request & { user?: { userId?: string } }).user?.userId || queryUserId;
+
     const projectEvents$ = this.events$.pipe(
       filter((event) => {
-        // Notification events go to ALL clients
+        // Privacy-scoped events (chat, future per-user entities) only flow to
+        // the owner. Without a userId on the SSE connection we drop them.
+        if (event.userId) {
+          return !!authedUserId && event.userId === authedUserId;
+        }
+        // Notification events go to ALL clients (they're already per-user-targeted at app level)
         if (event.entity === 'notification') return true;
         // Global events (projectId=null) go to ALL clients
         if (event.projectId === null) return true;
@@ -248,7 +259,7 @@ export class EventsController implements OnModuleInit, OnModuleDestroy {
         // Broadcast questions (no targetUserId) go to all clients
         if (!event.targetUserId) return true;
         // Targeted questions: only to the target user
-        if (userId) return event.targetUserId === userId;
+        if (authedUserId) return event.targetUserId === authedUserId;
         // No userId on SSE connection: show all (client filters)
         return true;
       }),

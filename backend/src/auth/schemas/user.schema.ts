@@ -8,6 +8,19 @@ export enum UserRole {
   USER = 'user',
 }
 
+export enum LlmMode {
+  SERVER = 'server',
+  BROWSER = 'browser',
+}
+
+export interface UserLlmConfig {
+  mode?: LlmMode;
+  endpoint?: string;
+  model?: string;
+  apiKey?: string;
+  fallbackEnabled?: boolean;
+}
+
 @Schema({ timestamps: true })
 export class User {
   @Prop({ required: true, unique: true })
@@ -24,6 +37,19 @@ export class User {
 
   @Prop({ default: true })
   active: boolean;
+
+  @Prop({
+    type: {
+      mode: { type: String, enum: Object.values(LlmMode), default: LlmMode.SERVER },
+      endpoint: { type: String, default: '' },
+      model: { type: String, default: '' },
+      apiKey: { type: String, default: '' },
+      fallbackEnabled: { type: Boolean, default: false },
+    },
+    default: () => ({}),
+    _id: false,
+  })
+  llmConfig: UserLlmConfig;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

@@ -11,6 +11,7 @@ import { RolesGuard } from './guards/roles.guard';
 import { RefreshToken, RefreshTokenSchema } from './schemas/refresh-token.schema';
 import { User, UserSchema } from './schemas/user.schema';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
+import { EncryptionService } from '../common/encryption.service';
 
 @Global()
 @Module({
@@ -34,7 +35,7 @@ import { ApiKeysModule } from '../api-keys/api-keys.module';
     ApiKeysModule,
   ],
   controllers: [AuthController, UsersController],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard],
+  providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard, EncryptionService],
   exports: [AuthService, JwtAuthGuard, RolesGuard],
 })
 export class AuthModule {}

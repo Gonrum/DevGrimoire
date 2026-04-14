@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { api, ReplicationConfig, ReplicationStatus } from '../api/client';
+import { api, ReplicationConfig, ReplicationStatus, ReplicationProjectEntry } from '../api/client';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
 
@@ -19,7 +19,25 @@ export default function ReplicationSettings() {
   const [role, setRole] = useState<ReplicationConfig['role']>('standalone');
   const [slaveUrl, setSlaveUrl] = useState('');
   const [slaveApiKey, setSlaveApiKey] = useState('');
+  const [peerUrl, setPeerUrl] = useState('');
+  const [peerApiKey, setPeerApiKey] = useState('');
   const [fullSyncCron, setFullSyncCron] = useState('0 3 * * *');
+
+  // Per-project replication opt-in (T-80)
+  const [projects, setProjects] = useState<ReplicationProjectEntry[] | null>(null);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+
+  const loadProjects = useCallback(async () => {
+    setProjectsLoading(true);
+    try {
+      const list = await api.replication.listProjects();
+      setProjects(list);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setProjectsLoading(false);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -33,6 +51,8 @@ export default function ReplicationSettings() {
       setRole(cfg.role);
       setSlaveUrl(cfg.slaveUrl || '');
       setSlaveApiKey('');
+      setPeerUrl(cfg.peerUrl || '');
+      setPeerApiKey('');
       setFullSyncCron(cfg.fullSyncCron);
     } catch (err) {
       setError((err as Error).message);
@@ -43,6 +63,15 @@ export default function ReplicationSettings() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Load project list when role isn't standalone
+  useEffect(() => {
+    if (role !== 'standalone') {
+      loadProjects();
+    } else {
+      setProjects(null);
+    }
+  }, [role, loadProjects]);
+
   const save = async () => {
     setSaving(true);
     setError(null);
@@ -52,6 +81,9 @@ export default function ReplicationSettings() {
       if (role === 'master') {
         data.slaveUrl = slaveUrl;
         if (slaveApiKey) data.slaveApiKey = slaveApiKey;
+      } else if (role === 'peer') {
+        data.peerUrl = peerUrl;
+        if (peerApiKey) data.peerApiKey = peerApiKey;
       }
       const updated = await api.replication.updateConfig(data);
       setConfig(updated);
@@ -63,6 +95,18 @@ export default function ReplicationSettings() {
       setError((err as Error).message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const toggleProjectReplication = async (id: string, enabled: boolean) => {
+    // Optimistic update
+    setProjects((prev) => prev?.map((p) => p._id === id ? { ...p, replicationEnabled: enabled } : p) ?? null);
+    try {
+      await api.replication.setProjectReplication(id, enabled);
+    } catch (err) {
+      // Roll back on failure
+      setProjects((prev) => prev?.map((p) => p._id === id ? { ...p, replicationEnabled: !enabled } : p) ?? null);
+      setError((err as Error).message);
     }
   };
 
@@ -139,7 +183,11 @@ export default function ReplicationSettings() {
           <option value="standalone">Standalone</option>
           <option value="master">Master</option>
           <option value="slave">Slave</option>
+          <option value="peer">{t('replication.rolePeer')}</option>
         </select>
+        {role === 'peer' && (
+          <p className="text-xs text-gray-500 mt-2">{t('replication.peerHint')}</p>
+        )}
       </div>
 
       {/* Master Config */}
@@ -163,6 +211,51 @@ export default function ReplicationSettings() {
               value={slaveApiKey}
               onChange={(e) => setSlaveApiKey(e.target.value)}
               placeholder={config?.slaveApiKey ? '***' : 'cv_...'}
+              className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">{t('replication.fullSyncCron')}</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={fullSyncCron}
+                onChange={(e) => setFullSyncCron(e.target.value)}
+                className="flex-1 bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-violet-500"
+              />
+              <Button variant="secondary" size="sm" onClick={() => setFullSyncCron('0 3 * * *')}>
+                3:00
+              </Button>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="primary" onClick={testConnection}>{t('replication.testConnection')}</Button>
+            <Button variant="secondary" onClick={triggerSync}>{t('replication.triggerSync')}</Button>
+          </div>
+        </div>
+      )}
+
+      {/* Peer Config */}
+      {role === 'peer' && (
+        <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 space-y-4">
+          <h2 className="text-sm font-medium text-gray-300">{t('replication.peerConfig')}</h2>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">{t('replication.peerUrl')}</label>
+            <input
+              type="text"
+              value={peerUrl}
+              onChange={(e) => setPeerUrl(e.target.value)}
+              placeholder="https://office.example.com"
+              className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">{t('replication.peerApiKey')}</label>
+            <input
+              type="password"
+              value={peerApiKey}
+              onChange={(e) => setPeerApiKey(e.target.value)}
+              placeholder={config?.peerApiKey ? '***' : 'cv_...'}
               className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
             />
           </div>
@@ -257,6 +350,47 @@ export default function ReplicationSettings() {
               </span>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Per-project replication opt-in (T-80) */}
+      {role !== 'standalone' && (
+        <div className="bg-gray-900 border border-gray-700 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-sm font-medium text-gray-300">{t('replication.projectSelectionTitle')}</h2>
+            <Button variant="ghost" size="xs" onClick={loadProjects} disabled={projectsLoading}>
+              ⟳
+            </Button>
+          </div>
+          <p className="text-xs text-gray-500 mb-3">{t('replication.projectSelectionHint')}</p>
+          {projectsLoading && !projects ? (
+            <p className="text-xs text-gray-600">{t('common.loading')}</p>
+          ) : projects && projects.length > 0 ? (
+            <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+              {projects.map((p) => (
+                <label
+                  key={p._id}
+                  className="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-gray-800 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={p.replicationEnabled}
+                    onChange={(e) => toggleProjectReplication(p._id, e.target.checked)}
+                    className="w-4 h-4 accent-violet-600"
+                  />
+                  <span className="text-sm text-gray-200 flex-1 truncate">{p.name}</span>
+                  {p.favorite && <span className="text-xs text-amber-400">★</span>}
+                  {p.replicationEnabled && (
+                    <span className="text-[10px] uppercase tracking-wide text-emerald-400 bg-emerald-900/20 border border-emerald-800/40 rounded px-1.5 py-0.5">
+                      {t('replication.projectSyncOn')}
+                    </span>
+                  )}
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-600">{t('replication.projectSelectionEmpty')}</p>
+          )}
         </div>
       )}
 

@@ -217,7 +217,9 @@ function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError 
         </span>
       </div>
       {todo.description && (
-        <p className="text-xs text-gray-500 mt-1 line-clamp-3">{todo.description}</p>
+        <div className="mt-1 max-h-20 overflow-hidden text-gray-500">
+          <Markdown>{todo.description}</Markdown>
+        </div>
       )}
       <p className="text-xs text-gray-600 mt-1">
         {new Date(todo.createdAt).toLocaleDateString(dateLocale, { day: '2-digit', month: '2-digit', year: '2-digit' })}

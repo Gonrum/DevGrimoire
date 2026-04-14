@@ -28,6 +28,13 @@ import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service
 import { SnippetsService } from './snippets/snippets.service';
 import { AttachmentsService } from './attachments/attachments.service';
 import { QuestionsService } from './questions/questions.service';
+import { LogsService } from './logs/logs.service';
+import { ReleasesService } from './releases/releases.service';
+import { ChatService } from './chat/chat.service';
+import { ChatLlmService } from './chat/chat-llm.service';
+import { ChatContextService } from './chat/chat-context.service';
+import { AuthService } from './auth/auth.service';
+import { UserRole } from './auth/schemas/user.schema';
 import { registerMcpTools } from './mcp-tools';
 
 // Load .env from project root (parent of backend/)
@@ -57,6 +64,22 @@ async function bootstrap() {
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['error', 'warn'],
   });
+
+  // Resolve a default user for stdio MCP — per-user scoped tools (chat_*) need
+  // an owner. Honor explicit MCP_STDIO_USER_ID env, else fall back to the first
+  // admin in the database.
+  if (!process.env.MCP_STDIO_USER_ID) {
+    try {
+      const authService = app.get(AuthService);
+      const users = await authService.findAllUsers();
+      const admin = users.find((u) => u.role === UserRole.ADMIN) ?? users[0];
+      if (admin) {
+        process.env.MCP_STDIO_USER_ID = admin._id.toString();
+      }
+    } catch {
+      // No users yet (auth disabled) — chat tools will throw if called
+    }
+  }
 
   const server = new Server(
     { name: 'DevGrimoire', version: '1.0.0' },
@@ -88,6 +111,11 @@ async function bootstrap() {
     snippetsService: app.get(SnippetsService),
     attachmentsService: app.get(AttachmentsService),
     questionsService: app.get(QuestionsService),
+    logsService: app.get(LogsService),
+    releasesService: app.get(ReleasesService),
+    chatService: app.get(ChatService),
+    chatLlmService: app.get(ChatLlmService),
+    chatContextService: app.get(ChatContextService),
   });
 
   const transport = new StdioServerTransport();

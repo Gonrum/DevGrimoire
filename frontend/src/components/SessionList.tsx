@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { Session } from '../api/client';
 import Card from './ui/Card';
 import EmptyState from './ui/EmptyState';
+import Markdown from './Markdown';
 
 export default function SessionList({ sessions }: { sessions: Session[] }) {
   const { t, i18n } = useTranslation();
@@ -19,7 +20,9 @@ export default function SessionList({ sessions }: { sessions: Session[] }) {
               {new Date(s.createdAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US')}
             </span>
           </div>
-          <p className="text-sm mb-3">{s.summary}</p>
+          <div className="mb-3">
+            <Markdown>{s.summary}</Markdown>
+          </div>
 
           {s.filesChanged.length > 0 && (
             <div className="mb-2">

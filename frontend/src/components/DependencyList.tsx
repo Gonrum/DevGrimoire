@@ -7,6 +7,7 @@ import EmptyState from './ui/EmptyState';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
+import Markdown from './Markdown';
 import { FormInput, FormSelect, FormTextarea } from './ui/FormField';
 
 const pmColors: Record<PackageManager, string> = {
@@ -326,7 +327,9 @@ export default function DependencyList({ entries, projectId }: { entries: Depend
                   <span className="text-gray-600 text-xs">{expandedId === dep._id ? '▲' : '▼'}</span>
                 </div>
                 {dep.description && (
-                  <p className="text-xs text-gray-400 mt-1">{dep.description}</p>
+                  <div className="mt-1 max-h-12 overflow-hidden text-gray-400">
+                    <Markdown>{dep.description}</Markdown>
+                  </div>
                 )}
               </div>
 

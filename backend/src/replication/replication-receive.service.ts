@@ -3,6 +3,7 @@ import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 import { SettingsService } from '../settings/settings.service';
 import { MinioService } from '../minio/minio.service';
+import { ProjectsService } from '../projects/projects.service';
 import { ReplicationPayload, REPL_INSTANCE_ID } from './replication.constants';
 
 /** Maps entity types to MongoDB collection names */
@@ -26,6 +27,7 @@ const ENTITY_COLLECTION: Record<string, string> = {
   snippet: 'snippets',
   attachment: 'attachments',
   activity: 'activities',
+  release: 'releases',
 };
 
 @Injectable()
@@ -36,7 +38,48 @@ export class ReplicationReceiveService {
     @InjectConnection() private readonly connection: Connection,
     private settingsService: SettingsService,
     private minioService: MinioService,
+    private projectsService: ProjectsService,
   ) {}
+
+  /**
+   * Decide whether a payload is allowed to be applied based on per-project
+   * replication opt-in. Skip-reasons:
+   *  - projectId set but the project doesn't exist locally → reject UNLESS
+   *    the payload itself is creating that project with enabled=true (bootstrap)
+   *  - project exists locally but `replicationConfig.enabled !== true` → reject
+   *  - no projectId (global entity like activity log) → never replicated
+   */
+  private async isProjectReplicated(payload: ReplicationPayload): Promise<{
+    allowed: boolean;
+    reason?: string;
+  }> {
+    const projectId = payload.event.projectId;
+    if (!projectId) {
+      return { allowed: false, reason: 'no projectId — global entities are not replicated' };
+    }
+
+    // Bootstrap path: incoming `project` create with replicationConfig.enabled=true
+    if (
+      payload.event.entity === 'project' &&
+      payload.event.action === 'created' &&
+      payload.document?.replicationConfig &&
+      typeof payload.document.replicationConfig === 'object'
+    ) {
+      const cfg = payload.document.replicationConfig as { enabled?: boolean };
+      if (cfg.enabled === true) return { allowed: true };
+    }
+
+    try {
+      const enabled = await this.projectsService.isReplicationEnabled(projectId);
+      if (!enabled) {
+        return { allowed: false, reason: 'project not configured for replication' };
+      }
+      return { allowed: true };
+    } catch {
+      // Project doesn't exist locally
+      return { allowed: false, reason: 'project does not exist locally — bootstrap required' };
+    }
+  }
 
   async applyChange(payload: ReplicationPayload): Promise<{ applied: boolean; reason?: string }> {
     // Check for echo prevention
@@ -53,6 +96,15 @@ export class ReplicationReceiveService {
     const db = this.connection.db;
     if (!db) {
       return { applied: false, reason: 'Database not available' };
+    }
+
+    // T-83: per-project replication opt-in check
+    const replCheck = await this.isProjectReplicated(payload);
+    if (!replCheck.allowed) {
+      this.logger.debug(
+        `Skipped replication apply (${payload.event.entity}/${payload.event.entityId}): ${replCheck.reason}`,
+      );
+      return { applied: false, reason: replCheck.reason };
     }
 
     const { ObjectId } = await import('mongodb');
@@ -80,6 +132,26 @@ export class ReplicationReceiveService {
       // Created or updated — upsert
       if (!payload.document) {
         return { applied: false, reason: 'No document in payload for create/update' };
+      }
+
+      // T-89: Last-Write-Wins. Compare the local doc's updatedAt against the
+      // incoming doc's updatedAt. If local is newer, drop this change. If
+      // either side has no timestamp, default to applying (defensive — better
+      // to overwrite an undated doc than to silently lose updates).
+      const incomingDoc = payload.document;
+      const incomingTs = this.parseTimestamp(incomingDoc.updatedAt);
+      if (incomingTs) {
+        const local = await coll.findOne(
+          { _id: new ObjectId(payload.event.entityId) },
+          { projection: { updatedAt: 1 } },
+        );
+        const localTs = local ? this.parseTimestamp((local as { updatedAt?: unknown }).updatedAt) : null;
+        if (localTs && localTs > incomingTs) {
+          this.logger.debug(
+            `LWW skipped: local ${payload.event.entity}/${payload.event.entityId} is newer (${localTs.toISOString()} > ${incomingTs.toISOString()})`,
+          );
+          return { applied: false, reason: 'LWW: local version is newer' };
+        }
       }
 
       // Prepare document for upsert — convert _id string to ObjectId
@@ -127,6 +199,22 @@ export class ReplicationReceiveService {
     }
   }
 
+  /**
+   * Parse a Mongo `updatedAt` value into a Date. Mongo serializes dates as
+   * ISO strings over JSON; if a Date object slips through, we accept it too.
+   * Returns null on missing/unparseable values so the caller can decide to
+   * default to "apply" rather than crashing the replication pipeline.
+   */
+  private parseTimestamp(value: unknown): Date | null {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    if (typeof value === 'string' || typeof value === 'number') {
+      const d = new Date(value);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    return null;
+  }
+
   /** Apply a full project sync — upsert all documents, remove stale ones */
   async applyFullSync(
     projectExport: Record<string, unknown>,
@@ -159,6 +247,7 @@ export class ReplicationReceiveService {
       snippets: 'snippets',
       attachments: 'attachments',
       activities: 'activities',
+      releases: 'releases',
     };
 
     for (const [key, collectionName] of Object.entries(exportCollectionMap)) {

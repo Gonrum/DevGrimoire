@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature, Manual, Soul, RecurringTask, Snippet, Attachment } from '../api/client';
+import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature, Manual, Soul, RecurringTask, Snippet, Attachment, LogStats, Release } from '../api/client';
 import TodoBoard from '../components/TodoBoard';
 import SessionList from '../components/SessionList';
 import KnowledgeList from '../components/KnowledgeList';
@@ -19,12 +19,15 @@ import CommitList from '../components/CommitList';
 import RecurringTaskList from '../components/RecurringTaskList';
 import SnippetList from '../components/SnippetList';
 import AttachmentList from '../components/AttachmentList';
+import LogList from '../components/LogList';
+import ReleaseList from '../components/ReleaseList';
 import GitRepoWidget from '../components/GitRepoWidget';
+import Markdown from '../components/Markdown';
 import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents';
 import Badge from '../components/ui/Badge';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
-type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files';
+type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases';
 
 export default function ProjectDetail() {
   const { t, i18n } = useTranslation();
@@ -50,6 +53,9 @@ export default function ProjectDetail() {
   const [commitCount, setCommitCount] = useState(0);
   const [storageEnabled, setStorageEnabled] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [releases, setReleases] = useState<Release[]>([]);
+  const [logStats, setLogStats] = useState<LogStats | null>(null);
+  const [logsKey, setLogsKey] = useState(0);
   const [envKey, setEnvKey] = useState(0);
   const [commitsKey, setCommitsKey] = useState(0);
   const [secretsKey, setSecretsKey] = useState(0);
@@ -92,8 +98,10 @@ export default function ProjectDetail() {
       api.recurringTasks.list({ projectId: id }),
       api.snippets.list(id),
       api.attachments.storageStatus(),
+      api.logs.stats(id),
+      api.releases.list(id),
     ])
-      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man, sl, cc, rts, snip, storage]) => {
+      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man, sl, cc, rts, snip, storage, ls, rels]) => {
         if (controller.signal.aborted) return;
         setProject(p);
         setTodos(t);
@@ -114,6 +122,8 @@ export default function ProjectDetail() {
         setRecurringTasks(rts);
         setSnippets(snip);
         setStorageEnabled(storage.enabled);
+        setLogStats(ls);
+        setReleases(rels);
         if (storage.enabled) {
           api.attachments.list(id).then(setAttachments).catch(() => {});
         }
@@ -150,6 +160,8 @@ export default function ProjectDetail() {
         'recurring-task': () => api.recurringTasks.list({ projectId: id }).then(setRecurringTasks),
         snippet: () => api.snippets.list(id).then(setSnippets),
         attachment: () => api.attachments.list(id).then(setAttachments),
+        release: () => api.releases.list(id).then(setReleases),
+        log: () => { api.logs.stats(id).then(setLogStats); setLogsKey((k) => k + 1); },
         commit: () => { api.commits.count(id).then((c) => setCommitCount(c.count)); setCommitsKey((k) => k + 1); },
       };
       refetchers[event.entity]?.();
@@ -210,6 +222,7 @@ export default function ProjectDetail() {
         { key: 'features', label: i18n.language === 'de' ? 'Fähigkeiten' : 'Abilities', count: features.length },
         { key: 'schemas', label: i18n.language === 'de' ? 'Blaupausen' : 'Blueprints', count: schemas.length },
         { key: 'dependencies', label: i18n.language === 'de' ? 'Zutaten' : 'Reagents', count: dependencies.length },
+        { key: 'releases', label: 'Releases', count: releases.length },
       ],
     },
     {
@@ -220,6 +233,7 @@ export default function ProjectDetail() {
         { key: 'secrets', label: i18n.language === 'de' ? 'Siegel' : 'Seals', count: secrets.length },
         { key: 'recurring-tasks', label: i18n.language === 'de' ? 'Riten' : 'Rites', count: recurringTasks.filter((rt) => rt.active).length },
         { key: 'commits', label: i18n.language === 'de' ? 'Vermerke' : 'Inscriptions', count: commitCount },
+        { key: 'logs', label: i18n.language === 'de' ? 'Orakel' : 'Oracles', count: logStats?.total || 0 },
       ],
     },
   ];
@@ -280,7 +294,9 @@ export default function ProjectDetail() {
           </Link>
         </div>
         {project.description && (
-          <p className="text-gray-400 mb-2">{project.description}</p>
+          <div className="mb-2 text-gray-400">
+            <Markdown>{project.description}</Markdown>
+          </div>
         )}
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs sm:text-sm text-gray-500">
           {project.path && <span>{t('projects.path')}: {project.path}</span>}
@@ -389,6 +405,8 @@ export default function ProjectDetail() {
           {tab === 'recurring-tasks' && <RecurringTaskList entries={recurringTasks} projectId={id!} />}
           {tab === 'commits' && <CommitList key={commitsKey} projectId={id!} gitRepositories={project.gitRepositories} />}
           {tab === 'files' && <AttachmentList projectId={id!} showUpload />}
+          {tab === 'releases' && <ReleaseList entries={releases} projectId={id!} />}
+          {tab === 'logs' && <LogList key={logsKey} projectId={id!} />}
           {tab === 'activity' && <ActivityList activities={activities} />}
         </div>
       </div>

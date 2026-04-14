@@ -43,6 +43,38 @@ export class ProjectsService {
     return this.projectModel.findOne({ name }).exec();
   }
 
+  /**
+   * Set or clear the per-project replication opt-in flag. Used by the
+   * replication controller's project-config endpoint. Returns the updated
+   * project so the caller can forward the new state to the UI.
+   */
+  async setReplicationEnabled(id: string, enabled: boolean): Promise<ProjectDocument> {
+    const project = await this.projectModel
+      .findByIdAndUpdate(id, { replicationConfig: { enabled } }, { new: true })
+      .exec();
+    if (!project) throw new NotFoundException(`Project ${id} not found`);
+    this.eventEmitter.emit(PROJECT_CHANGED, {
+      projectId: id,
+      entity: 'project',
+      action: 'updated',
+      entityId: id,
+      summary: `Replikation für "${project.name}" ${enabled ? 'aktiviert' : 'deaktiviert'}`,
+    });
+    return project;
+  }
+
+  /** Returns true if the project is opted in for replication. Used as a fast
+   *  filter by push/receive/full-sync services — avoids `findById` overhead
+   *  by only projecting the single field. */
+  async isReplicationEnabled(id: string): Promise<boolean> {
+    const project = await this.projectModel
+      .findById(id)
+      .select('replicationConfig')
+      .lean<{ replicationConfig?: { enabled?: boolean } } | null>()
+      .exec();
+    return !!project?.replicationConfig?.enabled;
+  }
+
   async update(id: string, dto: UpdateProjectDto): Promise<ProjectDocument> {
     const project = await this.projectModel
       .findByIdAndUpdate(id, dto, { new: true })

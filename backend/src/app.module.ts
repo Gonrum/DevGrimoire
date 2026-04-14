@@ -39,6 +39,9 @@ import { ReplicationModule } from './replication/replication.module';
 import { ReplicationReadonlyGuard } from './replication/replication-readonly.guard';
 import { RequestContextInterceptor } from './common/request-context.interceptor';
 import { QuestionsModule } from './questions/questions.module';
+import { LogsModule } from './logs/logs.module';
+import { ReleasesModule } from './releases/releases.module';
+import { ChatModule } from './chat/chat.module';
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
@@ -82,6 +85,9 @@ if (!MONGODB_URI) {
     AttachmentsModule,
     ReplicationModule,
     QuestionsModule,
+    LogsModule,
+    ReleasesModule,
+    ChatModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

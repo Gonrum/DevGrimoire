@@ -8,6 +8,7 @@ import Card from './ui/Card';
 import Badge from './ui/Badge';
 import ConfirmButton from './ui/ConfirmButton';
 import EmptyState from './ui/EmptyState';
+import Markdown from './Markdown';
 import i18n from '../i18n';
 
 const STATUS_LABELS: Record<Milestone['status'], () => string> = {
@@ -89,7 +90,9 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
       </div>
 
       {milestone.description && (
-        <p className="text-xs text-gray-500 mb-3">{milestone.description}</p>
+        <div className="mb-3 text-gray-500">
+          <Markdown>{milestone.description}</Markdown>
+        </div>
       )}
 
       {milestone.dueDate && (

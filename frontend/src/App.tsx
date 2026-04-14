@@ -27,6 +27,7 @@ import { AuthProvider, useAuth } from './hooks/useAuth';
 import { configureAuth, api } from './api/client';
 import ParticleBackground from './components/ParticleBackground';
 import QuestionDialog from './components/QuestionDialog';
+import ChatDock from './components/ChatDock';
 
 function NotFound() {
   const { t } = useTranslation();
@@ -291,6 +292,7 @@ function AppShell() {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
+      <ChatDock />
     </div>
   );
 }

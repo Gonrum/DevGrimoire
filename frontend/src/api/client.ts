@@ -220,12 +220,23 @@ export interface Notification {
   createdAt: string;
 }
 
+export type LlmMode = 'server' | 'browser';
+
+export interface UserLlmConfig {
+  mode?: LlmMode;
+  endpoint?: string;
+  model?: string;
+  apiKey?: string;
+  fallbackEnabled?: boolean;
+}
+
 export interface UserInfo {
   _id: string;
   username: string;
   email?: string;
   role: 'admin' | 'user';
   active: boolean;
+  llmConfig?: UserLlmConfig;
   createdAt: string;
   updatedAt: string;
 }
@@ -419,6 +430,30 @@ export interface CommitEntry {
   createdAt: string;
 }
 
+export interface LogEntry {
+  _id: string;
+  projectId: string;
+  level: 'debug' | 'info' | 'warn' | 'error';
+  message: string;
+  service?: string;
+  area?: string;
+  environment?: string;
+  metadata?: Record<string, unknown>;
+  tags: string[];
+  source?: string;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LogStats {
+  total: number;
+  byLevel: Record<string, number>;
+  byService: { service: string; count: number }[];
+  oldestEntry: string | null;
+  newestEntry: string | null;
+}
+
 export interface Attachment {
   _id: string;
   projectId: string;
@@ -436,12 +471,23 @@ export interface Attachment {
 }
 
 export interface ReplicationConfig {
-  role: 'standalone' | 'master' | 'slave';
+  role: 'standalone' | 'master' | 'slave' | 'peer';
   slaveUrl?: string;
   slaveApiKey?: string;
   masterUrl?: string;
+  /** Counterparty URL when role=peer (symmetric bidirectional sync). */
+  peerUrl?: string;
+  peerApiKey?: string;
   fullSyncCron: string;
   instanceId: string;
+}
+
+export interface ReplicationProjectEntry {
+  _id: string;
+  name: string;
+  active: boolean;
+  favorite: boolean;
+  replicationEnabled: boolean;
 }
 
 export interface ReplicationStatus {
@@ -452,6 +498,36 @@ export interface ReplicationStatus {
   lastFullSync: string | null;
   queueSize: number;
   failedCount: number;
+}
+
+export type ReleaseType = 'manual' | 'gitlab';
+export type ReleasePlatform = 'android' | 'ios' | 'web' | 'desktop' | 'docker' | 'other';
+export type ReleaseStatus = 'draft' | 'published' | 'archived';
+
+export interface ReleaseAsset {
+  name: string;
+  url: string;
+  size?: number;
+  format?: string;
+}
+
+export interface Release {
+  _id: string;
+  projectId: string;
+  version: string;
+  title?: string;
+  description?: string;
+  releaseType: ReleaseType;
+  platform: ReleasePlatform;
+  status: ReleaseStatus;
+  downloadUrl?: string;
+  gitlabReleaseId?: string;
+  gitlabTagName?: string;
+  assets: ReleaseAsset[];
+  tags: string[];
+  repoLabel?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export const api = {
@@ -880,11 +956,48 @@ export const api = {
       return `${BASE_URL}/attachments/${id}/preview${qs}`;
     },
   },
+  logs: {
+    list: (projectId: string, filters?: { level?: string; service?: string; search?: string; startDate?: string; endDate?: string; limit?: number; offset?: number }) => {
+      const params = new URLSearchParams({ projectId });
+      if (filters?.level) params.set('level', filters.level);
+      if (filters?.service) params.set('service', filters.service);
+      if (filters?.search) params.set('search', filters.search);
+      if (filters?.startDate) params.set('startDate', filters.startDate);
+      if (filters?.endDate) params.set('endDate', filters.endDate);
+      if (filters?.limit) params.set('limit', String(filters.limit));
+      if (filters?.offset) params.set('offset', String(filters.offset));
+      return request<LogEntry[]>(`/logs?${params}`);
+    },
+    stats: (projectId: string) =>
+      request<LogStats>(`/logs/stats?projectId=${projectId}`),
+  },
+  releases: {
+    list: (projectId: string, filters?: { status?: ReleaseStatus; platform?: ReleasePlatform; releaseType?: ReleaseType }) => {
+      const params = new URLSearchParams({ projectId });
+      if (filters?.status) params.set('status', filters.status);
+      if (filters?.platform) params.set('platform', filters.platform);
+      if (filters?.releaseType) params.set('releaseType', filters.releaseType);
+      return request<Release[]>(`/releases?${params}`);
+    },
+    get: (id: string) => request<Release>(`/releases/${id}`),
+    create: (data: Partial<Release>) =>
+      request<Release>('/releases', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<Release>) =>
+      request<Release>(`/releases/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/releases/${id}`, { method: 'DELETE' }),
+  },
   replication: {
     getConfig: () => request<ReplicationConfig>('/replication/config'),
     updateConfig: (data: Partial<ReplicationConfig>) =>
       request<ReplicationConfig>('/replication/config', { method: 'PUT', body: JSON.stringify(data) }),
     getStatus: () => request<ReplicationStatus>('/replication/status'),
+    listProjects: () => request<ReplicationProjectEntry[]>('/replication/projects'),
+    setProjectReplication: (id: string, enabled: boolean) =>
+      request<{ _id: string; name: string; replicationEnabled: boolean }>(
+        `/replication/projects/${id}`,
+        { method: 'PATCH', body: JSON.stringify({ enabled }) },
+      ),
     testConnection: () =>
       request<{ success: boolean; latency: number; error?: string }>('/replication/test-connection', { method: 'POST' }),
     triggerFullSync: () =>
@@ -896,7 +1009,7 @@ export const api = {
   },
   profile: {
     get: () => request<UserInfo>('/auth/profile'),
-    update: (data: { username?: string; email?: string }) =>
+    update: (data: { username?: string; email?: string; llmConfig?: UserLlmConfig }) =>
       request<UserInfo>('/auth/profile', { method: 'PATCH', body: JSON.stringify(data) }),
     changePassword: (oldPassword: string, newPassword: string) =>
       request<{ message: string }>('/auth/change-password', {
@@ -904,4 +1017,271 @@ export const api = {
         body: JSON.stringify({ oldPassword, newPassword }),
       }),
   },
+  chat: {
+    getConfig: () => request<ChatConfig>('/chat/config'),
+    updateConfig: (data: Partial<ChatConfig>) =>
+      request<ChatConfig>('/chat/config', { method: 'PUT', body: JSON.stringify(data) }),
+    testEndpoint: (endpoint: ChatEndpoint) =>
+      request<{ ok: boolean; error?: string; models?: string[] }>('/chat/config/test', {
+        method: 'POST',
+        body: JSON.stringify(endpoint),
+      }),
+    listSessions: (projectId: string, includeArchived = false) => {
+      const params = new URLSearchParams({ projectId });
+      if (includeArchived) params.set('includeArchived', 'true');
+      return request<ChatSession[]>(`/chat/sessions?${params}`);
+    },
+    getSession: (id: string) => request<ChatSession>(`/chat/sessions/${id}`),
+    createSession: (projectId: string, title?: string) =>
+      request<ChatSession>('/chat/sessions', {
+        method: 'POST',
+        body: JSON.stringify({ projectId, title }),
+      }),
+    updateSession: (id: string, title: string) =>
+      request<ChatSession>(`/chat/sessions/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ title }),
+      }),
+    deleteSession: (id: string) =>
+      request<void>(`/chat/sessions/${id}`, { method: 'DELETE' }),
+    prepareMessage: (sessionId: string, content: string, attachmentIds?: string[]) =>
+      request<ChatPreparedPrompt>(`/chat/sessions/${sessionId}/prepare`, {
+        method: 'POST',
+        body: JSON.stringify({ content, attachmentIds }),
+      }),
+    uploadAttachment: async (sessionId: string, file: File): Promise<ChatAttachmentUploadResult> => {
+      const headers: Record<string, string> = {};
+      const token = getAccessToken?.();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${BASE_URL}/chat/sessions/${sessionId}/attachments`, {
+        method: 'POST',
+        headers,
+        body: form,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: res.statusText }));
+        throw new Error(err.message || res.statusText);
+      }
+      return res.json();
+    },
+    persistMessage: (sessionId: string, data: ChatPersistInput) =>
+      request<ChatSession>(`/chat/sessions/${sessionId}/persist`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    executeTool: (sessionId: string, payload: ChatExecuteToolInput) =>
+      request<ChatToolExecutionResult>(`/chat/sessions/${sessionId}/tools/execute`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    streamMessage: async (
+      sessionId: string,
+      content: string,
+      attachmentIds: string[] | undefined,
+      handlers: {
+        onContext?: (refs: ChatContextRef[]) => void;
+        onToken?: (token: string) => void;
+        onToolCall?: (call: { id: string; name: string; arguments: string }) => void;
+        onToolResult?: (result: { id: string; success: boolean; summary: string }) => void;
+        onDone?: (reason?: string) => void;
+        onError?: (message: string) => void;
+      },
+      signal?: AbortSignal,
+    ): Promise<void> => {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const token = getAccessToken?.();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`${BASE_URL}/chat/sessions/${sessionId}/message`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ content, attachmentIds }),
+        signal,
+      });
+      if (!res.ok || !res.body) {
+        const error = await res.json().catch(() => ({ message: res.statusText }));
+        throw new Error(error.message || res.statusText);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const chunks = buffer.split('\n\n');
+          buffer = chunks.pop() ?? '';
+          for (const chunk of chunks) {
+            const line = chunk.split('\n').find((l) => l.startsWith('data:'));
+            if (!line) continue;
+            const data = line.slice(5).trim();
+            if (!data) continue;
+            try {
+              const event = JSON.parse(data) as
+                | { type: 'context'; refs: ChatContextRef[] }
+                | { type: 'token'; content: string }
+                | { type: 'tool_call'; id: string; name: string; arguments: string }
+                | { type: 'tool_result'; id: string; success: boolean; summary: string }
+                | { type: 'done'; reason?: string }
+                | { type: 'error'; message: string };
+              if (event.type === 'context') handlers.onContext?.(event.refs);
+              else if (event.type === 'token') handlers.onToken?.(event.content);
+              else if (event.type === 'tool_call') handlers.onToolCall?.({ id: event.id, name: event.name, arguments: event.arguments });
+              else if (event.type === 'tool_result') handlers.onToolResult?.({ id: event.id, success: event.success, summary: event.summary });
+              else if (event.type === 'done') handlers.onDone?.(event.reason);
+              else if (event.type === 'error') handlers.onError?.(event.message);
+            } catch {
+              /* ignore malformed event */
+            }
+          }
+        }
+      } finally {
+        try {
+          reader.releaseLock();
+        } catch {
+          /* noop */
+        }
+      }
+    },
+  },
 };
+
+export type ChatProvider =
+  | 'lmstudio'
+  | 'openai-compatible'
+  | 'anthropic'
+  | 'openai';
+
+export interface ChatEndpoint {
+  provider: ChatProvider;
+  url: string;
+  model: string;
+  /**
+   * Klartext-Key nur beim schreiben. Leer/undefined beim Update = unverändert,
+   * expliziter leerer String (über sentinel) = löschen. Nach dem Laden vom Server
+   * ist dieses Feld NIE gesetzt — stattdessen `hasApiKey`.
+   */
+  apiKey?: string;
+  /** Response-only: zeigt an ob ein Key beim Server liegt. */
+  hasApiKey?: boolean;
+  /** Wenn true: Endpoint akzeptiert Bild-Anhänge (vision model geladen). */
+  visionCapable?: boolean;
+}
+
+export interface ChatConfig {
+  enabled?: boolean;
+  endpoints: ChatEndpoint[];
+  temperature?: number;
+  maxTokens?: number;
+  topK?: number;
+  historyLimit?: number;
+  toolsEnabled?: boolean;
+  toolsAllowlist?: string[];
+  toolsMaxIterations?: number;
+  availableTools?: string[];
+  toolGroups?: Record<string, string[]>;
+  /** Names of tools that mutate state — UI styles them with a warning. */
+  writeTools?: string[];
+}
+
+export interface ChatContextRef {
+  entity: string;
+  entityId: string;
+  title: string;
+  score?: number;
+}
+
+export interface ChatToolCallRecord {
+  id: string;
+  name: string;
+  arguments: string;
+  result?: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface ChatAttachmentRef {
+  attachmentId: string;
+  fileName: string;
+  size: number;
+  extractedLength?: number;
+  kind?: 'text' | 'image';
+}
+
+export interface ChatAttachmentUploadResult {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+}
+
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+  contextUsed?: ChatContextRef[];
+  toolCalls?: ChatToolCallRecord[];
+  attachments?: ChatAttachmentRef[];
+}
+
+export interface ChatSession {
+  _id: string;
+  projectId: string;
+  title: string;
+  messages: ChatMessage[];
+  archived: boolean;
+  model?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatPreparedTool {
+  type: 'function';
+  function: { name: string; description?: string; parameters?: unknown };
+}
+
+export interface ChatPreparedPrompt {
+  projectId: string;
+  systemPrompt: string;
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  contextRefs: ChatContextRef[];
+  attachmentRefs?: ChatAttachmentRef[];
+  attachmentStats?: {
+    total: number;
+    included: number;
+    droppedByBudget: number;
+    totalChars: number;
+  };
+  tools?: ChatPreparedTool[];
+  toolsEnabled: boolean;
+  toolsAllowlist: string[];
+  toolsMaxIterations: number;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export interface ChatPersistInput {
+  userContent: string;
+  assistantContent?: string;
+  contextRefs?: ChatContextRef[];
+  toolCalls?: ChatToolCallRecord[];
+  attachmentIds?: string[];
+}
+
+export interface ChatExecuteToolInput {
+  name: string;
+  projectId?: string;
+  arguments?: Record<string, unknown>;
+}
+
+export interface ChatToolExecutionResult {
+  success: boolean;
+  error?: string;
+  result?: unknown;
+  /** Truncated JSON string suitable for appending to LLM message history */
+  content: string;
+  /** Short human-readable summary for UI */
+  summary: string;
+}

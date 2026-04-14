@@ -47,6 +47,21 @@ export class Project {
 
   @Prop({ type: [GitRepositorySchema], default: [] })
   gitRepositories: GitRepository[];
+
+  /**
+   * Replication opt-in per project. When `enabled: true`, this project's
+   * changes are pushed to / accepted from configured peer/slave. Default is
+   * implicit (undefined = not replicated) so adding the feature doesn't
+   * suddenly leak data from existing installations.
+   */
+  @Prop({
+    type: {
+      enabled: { type: Boolean, default: false },
+      _id: false,
+    },
+    default: undefined,
+  })
+  replicationConfig?: { enabled: boolean };
 }
 
 export const ProjectSchema = SchemaFactory.createForClass(Project);

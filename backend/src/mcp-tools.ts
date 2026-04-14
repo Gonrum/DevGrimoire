@@ -27,6 +27,11 @@ import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service
 import { SnippetsService } from './snippets/snippets.service';
 import { AttachmentsService } from './attachments/attachments.service';
 import { QuestionsService } from './questions/questions.service';
+import { LogsService } from './logs/logs.service';
+import { ReleasesService } from './releases/releases.service';
+import { ChatService } from './chat/chat.service';
+import { ChatLlmService } from './chat/chat-llm.service';
+import { ChatContextService } from './chat/chat-context.service';
 import { RequestContext } from './common/request-context';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 
@@ -96,6 +101,22 @@ function textResult(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
 }
 
+/**
+ * Resolve the userId for per-user scoped tools (chat_*).
+ * - HTTP MCP transport: derived from the API key during auth middleware via RequestContext
+ * - stdio MCP: falls back to MCP_STDIO_USER_ID env (set at bootstrap from first admin)
+ * Throws if neither is available.
+ */
+function requireUserId(): string {
+  const userId = RequestContext.getUser()?.userId || process.env.MCP_STDIO_USER_ID;
+  if (!userId) {
+    throw new Error(
+      'No user context available — set MCP_STDIO_USER_ID env or call this tool via an authenticated MCP transport.',
+    );
+  }
+  return userId;
+}
+
 function compactList<T extends Record<string, unknown>>(items: T[], stripFields: string[]): Record<string, unknown>[] {
   return items.map((item) => {
     const obj = typeof item.toJSON === 'function' ? (item as any).toJSON() : { ...item };
@@ -154,6 +175,11 @@ export interface McpServices {
   snippetsService: SnippetsService;
   attachmentsService: AttachmentsService;
   questionsService: QuestionsService;
+  logsService: LogsService;
+  releasesService: ReleasesService;
+  chatService: ChatService;
+  chatLlmService: ChatLlmService;
+  chatContextService: ChatContextService;
 }
 
 const tools = [
@@ -1199,6 +1225,96 @@ const tools = [
     },
   },
   {
+    name: 'release_create',
+    description: 'Create a release for a project. Supports manual releases and GitLab-synced releases.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        version: { type: 'string', description: 'Release version (e.g. 1.2.0)' },
+        title: { type: 'string', description: 'Release title' },
+        description: { type: 'string', description: 'Release notes (Markdown)' },
+        releaseType: { type: 'string', enum: ['manual', 'gitlab'], description: 'Release type (default: manual)' },
+        platform: { type: 'string', enum: ['android', 'ios', 'web', 'desktop', 'docker', 'other'], description: 'Target platform (default: other)' },
+        status: { type: 'string', enum: ['draft', 'published', 'archived'], description: 'Release status (default: draft)' },
+        downloadUrl: { type: 'string', description: 'Direct download URL' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags' },
+        assets: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, url: { type: 'string' }, size: { type: 'number' }, format: { type: 'string' } }, required: ['name', 'url'] }, description: 'Release assets (binaries, links)' },
+      },
+      required: ['projectId', 'version'],
+    },
+  },
+  {
+    name: 'release_list',
+    description: 'List project releases (compact: version, title, platform, status, releaseType, tags). Use release_get for full details.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        status: { type: 'string', enum: ['draft', 'published', 'archived'], description: 'Filter by status' },
+        platform: { type: 'string', enum: ['android', 'ios', 'web', 'desktop', 'docker', 'other'], description: 'Filter by platform' },
+        releaseType: { type: 'string', enum: ['manual', 'gitlab'], description: 'Filter by release type' },
+        limit: { type: 'number', description: 'Max items to return' },
+        offset: { type: 'number', description: 'Skip first N items' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'release_get',
+    description: 'Get a single release with full details including description and assets.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Release MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'release_update',
+    description: 'Update a release (version, title, description, status, platform, assets, tags).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Release MongoDB ID' },
+        version: { type: 'string' },
+        title: { type: 'string' },
+        description: { type: 'string' },
+        releaseType: { type: 'string', enum: ['manual', 'gitlab'] },
+        platform: { type: 'string', enum: ['android', 'ios', 'web', 'desktop', 'docker', 'other'] },
+        status: { type: 'string', enum: ['draft', 'published', 'archived'] },
+        downloadUrl: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+        assets: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, url: { type: 'string' }, size: { type: 'number' }, format: { type: 'string' } }, required: ['name', 'url'] } },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'release_delete',
+    description: 'Delete a release.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Release MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'release_sync_gitlab',
+    description: 'Sync releases from GitLab for a project. Fetches all releases from configured GitLab repositories and creates/updates them locally.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        repoIndex: { type: 'number', description: 'Optional: sync only specific repository by index (0-based)' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
     name: 'soul_get',
     description: 'Get the project soul (identity, principles, conventions, boundaries). The soul defines how the agent should work with this project. Returns null if no soul is defined yet.',
     inputSchema: {
@@ -1538,10 +1654,113 @@ const tools = [
       required: ['id'],
     },
   },
+  {
+    name: 'log_list',
+    description: 'List application logs for a project. Logs are sent by external apps via API key and auto-deleted after 5 days. Filter by level, service, date range, or full-text search.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        level: { type: 'string', enum: ['debug', 'info', 'warn', 'error'], description: 'Filter by log level' },
+        service: { type: 'string', description: 'Filter by service name' },
+        search: { type: 'string', description: 'Full-text search in message, service, area' },
+        startDate: { type: 'string', description: 'Start date ISO string (e.g. 2026-04-01)' },
+        endDate: { type: 'string', description: 'End date ISO string (e.g. 2026-04-07)' },
+        limit: { type: 'number', description: 'Max entries to return (default 50)' },
+        offset: { type: 'number', description: 'Skip entries for pagination' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'log_search',
+    description: 'Search application logs by full-text query. Returns matching log entries with message snippets.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        query: { type: 'string', description: 'Search query (full-text)' },
+        level: { type: 'string', enum: ['debug', 'info', 'warn', 'error'], description: 'Filter by log level' },
+        limit: { type: 'number', description: 'Max entries to return (default 50)' },
+      },
+      required: ['projectId', 'query'],
+    },
+  },
+  {
+    name: 'log_stats',
+    description: 'Get log statistics for a project: total count, breakdown by level and service, oldest/newest entry.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'chat_create',
+    description: 'Create a new chat session for a project. Returns the session id which is needed for chat_send and chat_get.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        title: { type: 'string', description: 'Optional session title (default: timestamp)' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'chat_list',
+    description: 'List chat sessions of a project (compact: id, title, message count, updatedAt). Use chat_get for full messages. Archived sessions are excluded by default.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        includeArchived: { type: 'boolean', description: 'Include archived sessions (default false)' },
+        limit: { type: 'number', description: 'Max items to return' },
+        offset: { type: 'number', description: 'Skip first N items' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'chat_get',
+    description: 'Get a chat session with all messages (role, content, contextUsed, toolCalls, timestamp).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Chat session MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'chat_send',
+    description: 'Send a user message to a chat session and return the assistant response (non-streaming, blocks until complete). Both messages are persisted in the session. Tool-calling and the configured RAG context are applied just like in the web UI; tool-call iteration honors the global toolsMaxIterations setting. Note: this can take several seconds depending on the LLM endpoint.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        sessionId: { type: 'string', description: 'Chat session MongoDB ID' },
+        content: { type: 'string', description: 'User message text' },
+      },
+      required: ['sessionId', 'content'],
+    },
+  },
+  {
+    name: 'chat_delete',
+    description: 'Delete a chat session and all its messages.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Chat session MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, logsService, releasesService, chatService, chatLlmService, chatContextService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -1550,6 +1769,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
     const a = args as Record<string, unknown>;
 
     try {
+      // Global chat-feature gate: chat_* tools refuse when admin disabled chat.
+      if (name.startsWith('chat_') && !(await chatLlmService.isEnabled())) {
+        return errorResult('Chat feature is disabled by an administrator');
+      }
+
       let result: unknown;
 
       switch (name) {
@@ -1568,7 +1792,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'project_list': {
           const projects = await projectsService.findAll(optionalBoolean(a, 'active'), optionalBoolean(a, 'favorite'));
-          result = compactList(projects as any, ['instructions', 'components', '__v']);
+          result = compactList(projects as any, ['instructions', 'components', '__v', 'description', 'repository', 'todoNumberFormat', 'milestoneNumberFormat', 'gitRepositories', 'createdAt', 'updatedAt']);
           break;
         }
         case 'project_get': {
@@ -1617,6 +1841,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             recurringTasksService.removeByProject(id),
             snippetsService.removeByProject(id),
             attachmentsService.removeByProject(id),
+            releasesService.removeByProject(id),
           ]);
           result = { deleted: true, id };
           break;
@@ -2248,6 +2473,62 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           await featuresService.remove(requireString(a, 'id'));
           result = { deleted: true, id: requireString(a, 'id') };
           break;
+        case 'release_create': {
+          const rel = await releasesService.create({
+            projectId: requireString(a, 'projectId'),
+            version: requireString(a, 'version'),
+            title: optionalString(a, 'title'),
+            description: optionalString(a, 'description'),
+            releaseType: optionalString(a, 'releaseType') as any,
+            platform: optionalString(a, 'platform') as any,
+            status: optionalString(a, 'status') as any,
+            downloadUrl: optionalString(a, 'downloadUrl'),
+            tags: optionalStringArray(a, 'tags'),
+            assets: a.assets as any,
+          });
+          result = compactCreateResult(rel, { version: (rel as any).version });
+          break;
+        }
+        case 'release_list': {
+          const releases = await releasesService.findByProject(
+            requireString(a, 'projectId'),
+            {
+              status: optionalString(a, 'status') as any,
+              platform: optionalString(a, 'platform') as any,
+              releaseType: optionalString(a, 'releaseType') as any,
+            },
+            optionalNumber(a, 'limit'),
+            optionalNumber(a, 'offset'),
+          );
+          result = compactList(releases as any, ['description', 'assets', 'downloadUrl', 'gitlabReleaseId', 'gitlabTagName', 'repoLabel', '__v']);
+          break;
+        }
+        case 'release_get':
+          result = await releasesService.findById(requireString(a, 'id'));
+          break;
+        case 'release_update':
+          result = compactUpdateResult(await releasesService.update(requireString(a, 'id'), {
+            version: optionalString(a, 'version'),
+            title: optionalString(a, 'title'),
+            description: optionalString(a, 'description'),
+            releaseType: optionalString(a, 'releaseType') as any,
+            platform: optionalString(a, 'platform') as any,
+            status: optionalString(a, 'status') as any,
+            downloadUrl: optionalString(a, 'downloadUrl'),
+            tags: optionalStringArray(a, 'tags'),
+            assets: a.assets as any,
+          }));
+          break;
+        case 'release_delete':
+          await releasesService.remove(requireString(a, 'id'));
+          result = { deleted: true, id: requireString(a, 'id') };
+          break;
+        case 'release_sync_gitlab':
+          result = await releasesService.syncGitlab(
+            requireString(a, 'projectId'),
+            optionalNumber(a, 'repoIndex'),
+          );
+          break;
         case 'dependency_add': {
           const dep = await dependenciesService.create({
             projectId: requireString(a, 'projectId'),
@@ -2597,6 +2878,143 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'attachment_delete': {
           await attachmentsService.remove(requireString(a, 'id'));
           result = { deleted: true };
+          break;
+        }
+        case 'log_list': {
+          const logs = await logsService.findByProject(requireString(a, 'projectId'), {
+            level: optionalString(a, 'level'),
+            service: optionalString(a, 'service'),
+            search: optionalString(a, 'search'),
+            startDate: optionalString(a, 'startDate'),
+            endDate: optionalString(a, 'endDate'),
+            limit: optionalNumber(a, 'limit'),
+            offset: optionalNumber(a, 'offset'),
+          });
+          result = (logs as any[]).map((l: any) => ({
+            _id: l._id,
+            level: l.level,
+            message: snippet(l.message, 300),
+            service: l.service,
+            area: l.area,
+            environment: l.environment,
+            tags: l.tags,
+            source: l.source,
+            createdAt: l.createdAt,
+          }));
+          break;
+        }
+        case 'log_search': {
+          const searchLogs = await logsService.findByProject(requireString(a, 'projectId'), {
+            search: requireString(a, 'query'),
+            level: optionalString(a, 'level'),
+            limit: optionalNumber(a, 'limit'),
+          });
+          result = (searchLogs as any[]).map((l: any) => ({
+            _id: l._id,
+            level: l.level,
+            message: snippet(l.message, 300),
+            service: l.service,
+            area: l.area,
+            environment: l.environment,
+            tags: l.tags,
+            createdAt: l.createdAt,
+          }));
+          break;
+        }
+        case 'log_stats': {
+          result = await logsService.stats(requireString(a, 'projectId'));
+          break;
+        }
+        case 'chat_create': {
+          const created = await chatService.createSession(
+            requireString(a, 'projectId'),
+            requireUserId(),
+            optionalString(a, 'title'),
+          );
+          result = { _id: (created as any)._id, title: (created as any).title };
+          break;
+        }
+        case 'chat_list': {
+          const sessions = await chatService.listSessions(
+            requireString(a, 'projectId'),
+            requireUserId(),
+            {
+              includeArchived: optionalBoolean(a, 'includeArchived'),
+              limit: optionalNumber(a, 'limit'),
+              offset: optionalNumber(a, 'offset'),
+            },
+          );
+          result = (sessions as any[]).map((s) => ({
+            _id: s._id,
+            title: s.title,
+            messageCount: Array.isArray(s.messages) ? s.messages.length : 0,
+            archived: s.archived,
+            updatedAt: s.updatedAt,
+          }));
+          break;
+        }
+        case 'chat_get': {
+          const session = await chatService.findById(requireString(a, 'id'), requireUserId());
+          result = {
+            _id: (session as any)._id,
+            projectId: (session as any).projectId,
+            title: (session as any).title,
+            archived: (session as any).archived,
+            messages: ((session as any).messages || []).map((m: any) => ({
+              role: m.role,
+              content: m.content,
+              timestamp: m.timestamp,
+              contextUsed: m.contextUsed,
+              toolCalls: m.toolCalls,
+            })),
+            createdAt: (session as any).createdAt,
+            updatedAt: (session as any).updatedAt,
+          };
+          break;
+        }
+        case 'chat_delete': {
+          await chatService.deleteSession(requireString(a, 'id'), requireUserId());
+          result = { deleted: true };
+          break;
+        }
+        case 'chat_send': {
+          const sessionId = requireString(a, 'sessionId');
+          const content = requireString(a, 'content');
+          const userId = requireUserId();
+          const session = await chatService.findById(sessionId, userId);
+          const projectId = (session as any).projectId.toString();
+          const opts = await chatLlmService.getOptions();
+
+          const built = await chatContextService.build(projectId, content, (session as any).messages, {
+            topK: opts.topK,
+            historyLimit: opts.historyLimit,
+            toolsEnabled: opts.toolsEnabled,
+          });
+
+          // Plain streaming, collect tokens. Tool-calling within MCP chat_send is
+          // intentionally not supported in v1 — the LLM cannot dispatch tools
+          // back through the MCP transport. If you need tool-calling, use the
+          // web chat UI which has the full loop.
+          let assistantContent = '';
+          for await (const token of chatLlmService.streamChat(built.messages)) {
+            assistantContent += token;
+          }
+
+          // Persist user + assistant atomically
+          await chatService.appendMessages(sessionId, [
+            { role: 'user', content },
+            {
+              role: 'assistant',
+              content: assistantContent,
+              contextUsed: built.contextRefs,
+            },
+          ], userId);
+
+          result = {
+            sessionId,
+            assistantContent,
+            contextRefs: built.contextRefs,
+          };
           break;
         }
         default:

@@ -9,6 +9,7 @@ import { ReplicationController } from './replication.controller';
 import { ReplicationScheduler } from './replication.scheduler';
 import { ReplicationReadonlyGuard } from './replication-readonly.guard';
 import { SettingsModule } from '../settings/settings.module';
+import { ProjectsModule } from '../projects/projects.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { SettingsModule } from '../settings/settings.module';
       maxRedirects: 3,
     }),
     SettingsModule,
+    ProjectsModule,
   ],
   controllers: [ReplicationController],
   providers: [

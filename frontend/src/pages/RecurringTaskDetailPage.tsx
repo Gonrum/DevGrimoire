@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api, RecurringTask, RecurringFrequency, Todo } from '../api/client';
+import Markdown from '../components/Markdown';
 import MarkdownEditor from '../components/MarkdownEditor';
 import Button from '../components/ui/Button';
 import ConfirmButton from '../components/ui/ConfirmButton';
@@ -242,7 +243,9 @@ export default function RecurringTaskDetailPage() {
             {task.description && (
               <div>
                 <span className="text-xs text-gray-500">{t('common.description')}</span>
-                <p className="text-sm text-gray-300 mt-1 whitespace-pre-wrap">{task.description}</p>
+                <div className="mt-1 text-gray-300">
+                  <Markdown>{task.description}</Markdown>
+                </div>
               </div>
             )}
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-gray-500">

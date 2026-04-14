@@ -3,6 +3,7 @@ import { ChangelogEntry } from '../api/client';
 import Card from './ui/Card';
 import EmptyState from './ui/EmptyState';
 import Badge from './ui/Badge';
+import Markdown from './Markdown';
 
 export default function ChangelogList({ entries }: { entries: ChangelogEntry[] }) {
   const { t, i18n } = useTranslation();
@@ -37,7 +38,9 @@ export default function ChangelogList({ entries }: { entries: ChangelogEntry[] }
             </span>
           </div>
           {e.summary && (
-            <p className="text-sm text-gray-300 mb-2">{e.summary}</p>
+            <div className="mb-2 text-gray-300">
+              <Markdown>{e.summary}</Markdown>
+            </div>
           )}
           <ul className="text-sm text-gray-400 space-y-1">
             {e.changes.map((change, i) => (

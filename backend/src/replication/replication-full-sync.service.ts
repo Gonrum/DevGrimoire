@@ -7,7 +7,10 @@ import { SettingsService } from '../settings/settings.service';
 import { MinioService } from '../minio/minio.service';
 import {
   REPL_ROLE, REPL_SLAVE_URL, REPL_SLAVE_API_KEY,
+  REPL_PEER_URL, REPL_PEER_API_KEY,
   REPL_LAST_FULL_SYNC, REPL_INSTANCE_ID,
+  PUSHING_ROLES,
+  ReplicationRole,
 } from './replication.constants';
 import { randomUUID } from 'crypto';
 
@@ -31,6 +34,7 @@ const SYNC_COLLECTIONS: Record<string, string> = {
   snippets: 'snippets',
   attachments: 'attachments',
   activities: 'activities',
+  releases: 'releases',
 };
 
 @Injectable()
@@ -45,19 +49,23 @@ export class ReplicationFullSyncService {
     private httpService: HttpService,
   ) {}
 
-  /** Run full sync from master to slave — called by scheduler or manually */
+  /** Run full sync from master→slave or peer→peer. */
   async runFullSync(): Promise<{ projects: number; entities: number; errors: number }> {
-    const role = await this.settingsService.get(REPL_ROLE);
-    if (role !== 'master') return { projects: 0, entities: 0, errors: 0 };
+    const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
+    if (!role || !PUSHING_ROLES.has(role)) return { projects: 0, entities: 0, errors: 0 };
     if (this.syncing) {
       this.logger.warn('Full sync already in progress');
       return { projects: 0, entities: 0, errors: 0 };
     }
 
     this.syncing = true;
-    const slaveUrl = await this.settingsService.get(REPL_SLAVE_URL);
-    const apiKey = await this.settingsService.get(REPL_SLAVE_API_KEY);
-    if (!slaveUrl) {
+    const peerUrl = role === 'peer'
+      ? await this.settingsService.get(REPL_PEER_URL)
+      : await this.settingsService.get(REPL_SLAVE_URL);
+    const apiKey = role === 'peer'
+      ? await this.settingsService.get(REPL_PEER_API_KEY)
+      : await this.settingsService.get(REPL_SLAVE_API_KEY);
+    if (!peerUrl) {
       this.syncing = false;
       return { projects: 0, entities: 0, errors: 0 };
     }
@@ -75,7 +83,11 @@ export class ReplicationFullSyncService {
 
     try {
       const { ObjectId } = await import('mongodb');
-      const projects = await db.collection('projects').find({}).toArray();
+      // T-84: only sync projects that have explicitly opted in to replication.
+      // This prevents leaking private projects when a peer is configured.
+      const projects = await db.collection('projects')
+        .find({ 'replicationConfig.enabled': true })
+        .toArray();
 
       for (const project of projects) {
         const projectId = project._id;
@@ -116,10 +128,10 @@ export class ReplicationFullSyncService {
           }
         }
 
-        // Send to slave
+        // Send to peer (slave or peer-peer)
         try {
           const result = await firstValueFrom(
-            this.httpService.post(`${slaveUrl}/api/replication/full-sync`, exportData, {
+            this.httpService.post(`${peerUrl}/api/replication/full-sync`, exportData, {
               headers: {
                 'Content-Type': 'application/json',
                 ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),

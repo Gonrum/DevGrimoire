@@ -155,6 +155,18 @@ export class AttachmentsService {
     return { buffer: Buffer.concat(chunks), attachment };
   }
 
+  /**
+   * Return the extracted text content of an attachment, or null if extraction
+   * never produced any (binary file, extraction in flight, or extraction failed).
+   * Used by the chat module to inject file contents into prompt context.
+   */
+  async getText(id: string): Promise<{ text: string | null; attachment: AttachmentDocument }> {
+    const attachment = await this.attachmentModel.findById(id).exec();
+    if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
+    const raw = (attachment as unknown as { textContent?: string }).textContent;
+    return { text: raw && raw.length > 0 ? raw : null, attachment };
+  }
+
   async remove(id: string): Promise<void> {
     const attachment = await this.attachmentModel.findByIdAndDelete(id).exec();
     if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);

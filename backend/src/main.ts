@@ -34,9 +34,15 @@ import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service
 import { SnippetsService } from './snippets/snippets.service';
 import { AttachmentsService } from './attachments/attachments.service';
 import { QuestionsService } from './questions/questions.service';
+import { LogsService } from './logs/logs.service';
+import { ReleasesService } from './releases/releases.service';
+import { ChatService } from './chat/chat.service';
+import { ChatLlmService } from './chat/chat-llm.service';
+import { ChatContextService } from './chat/chat-context.service';
 import { registerMcpTools, McpServices } from './mcp-tools';
 import { ApiKeysService } from './api-keys/api-keys.service';
 import { AuthService } from './auth/auth.service';
+import { RequestContext, RequestUser } from './common/request-context';
 
 function createMcpServer(services: McpServices): Server {
   const server = new Server(
@@ -85,19 +91,28 @@ async function bootstrap() {
     snippetsService: app.get(SnippetsService),
     attachmentsService: app.get(AttachmentsService),
     questionsService: app.get(QuestionsService),
+    logsService: app.get(LogsService),
+    releasesService: app.get(ReleasesService),
+    chatService: app.get(ChatService),
+    chatLlmService: app.get(ChatLlmService),
+    chatContextService: app.get(ChatContextService),
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};
-  // Track which SSE sessions are already authenticated (by initial /sse request)
-  const authenticatedSessions = new Set<string>();
+  // Track authenticated SSE sessions and the user that owns them.
+  const authenticatedSessions = new Map<string, RequestUser>();
 
   // API Key auth middleware for MCP endpoints
   const apiKeysService = app.get(ApiKeysService);
   const authService = app.get(AuthService);
 
   const mcpAuthMiddleware = async (req: any, res: any, next: any) => {
-    // Skip auth if auth is not enabled
-    if (!authService.isAuthEnabled()) return next();
+    // Skip auth if auth is not enabled — still set a default user so per-user
+    // scoped tools (chat_*) can resolve an owner.
+    if (!authService.isAuthEnabled()) {
+      req.user = { userId: 'system', username: 'system', role: 'admin' } satisfies RequestUser;
+      return next();
+    }
 
     // Extract API key from Authorization header (Bearer cv_...) or query param
     let apiKey: string | undefined;
@@ -127,17 +142,29 @@ async function bootstrap() {
       return;
     }
 
+    // Mirror JwtAuthGuard pattern so RequestContext + per-user scoped tools work.
+    req.user = {
+      userId: validated.userId.toString(),
+      username: 'api-key',
+      role: 'user',
+    } satisfies RequestUser;
+
     next();
   };
 
   expressApp.use('/mcp', mcpAuthMiddleware);
   expressApp.use('/sse', mcpAuthMiddleware);
   expressApp.use('/messages', async (req: any, res: any, next: any) => {
-    // Skip auth if not enabled
-    if (!authService.isAuthEnabled()) return next();
+    // Skip auth if not enabled but still attach a default user
+    if (!authService.isAuthEnabled()) {
+      req.user = { userId: 'system', username: 'system', role: 'admin' } satisfies RequestUser;
+      return next();
+    }
     // /messages requests belong to an SSE session that was already authenticated on /sse
     const sessionId = req.query?.sessionId as string | undefined;
-    if (sessionId && authenticatedSessions.has(sessionId)) {
+    const cachedUser = sessionId ? authenticatedSessions.get(sessionId) : undefined;
+    if (cachedUser) {
+      req.user = cachedUser;
       return next();
     }
     // Fallback: check API key directly
@@ -184,7 +211,7 @@ async function bootstrap() {
         return;
       }
 
-      await transport.handleRequest(req, res, req.body);
+      await RequestContext.run(req.user, () => transport.handleRequest(req, res, req.body));
     } catch (error) {
       if (!res.headersSent) {
         res.status(500).json({
@@ -200,7 +227,9 @@ async function bootstrap() {
   expressApp.get('/sse', async (req: any, res: any) => {
     const transport = new SSEServerTransport('/messages', res);
     transports[transport.sessionId] = transport;
-    authenticatedSessions.add(transport.sessionId);
+    if (req.user) {
+      authenticatedSessions.set(transport.sessionId, req.user as RequestUser);
+    }
     res.on('close', () => {
       delete transports[transport.sessionId];
       authenticatedSessions.delete(transport.sessionId);
@@ -213,7 +242,7 @@ async function bootstrap() {
     const sessionId = req.query.sessionId as string;
     const transport = transports[sessionId];
     if (transport instanceof SSEServerTransport) {
-      await transport.handlePostMessage(req, res, req.body);
+      await RequestContext.run(req.user, () => transport.handlePostMessage(req, res, req.body));
     } else {
       res.status(400).json({
         jsonrpc: '2.0',

@@ -8,11 +8,15 @@ import { firstValueFrom } from 'rxjs';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { SettingsService } from '../settings/settings.service';
 import { MinioService } from '../minio/minio.service';
+import { ProjectsService } from '../projects/projects.service';
 import { ReplicationQueue, ReplicationQueueDocument } from './schemas/replication-queue.schema';
 import {
   REPL_ROLE, REPL_SLAVE_URL, REPL_SLAVE_API_KEY,
+  REPL_PEER_URL, REPL_PEER_API_KEY,
   REPL_INSTANCE_ID, REPL_LAST_SYNC,
+  PUSHING_ROLES,
   ReplicationPayload,
+  ReplicationRole,
 } from './replication.constants';
 import { randomUUID } from 'crypto';
 
@@ -38,6 +42,7 @@ const ENTITY_COLLECTION: Record<string, string> = {
   attachment: 'attachments',
   activity: 'activities',
   notification: 'notifications',
+  release: 'releases',
 };
 
 const MAX_ATTEMPTS = 5;
@@ -52,23 +57,43 @@ export class ReplicationPushService {
     @InjectModel(ReplicationQueue.name) private queueModel: Model<ReplicationQueueDocument>,
     private settingsService: SettingsService,
     private minioService: MinioService,
+    private projectsService: ProjectsService,
     private httpService: HttpService,
   ) {}
 
+  /**
+   * Per-project replication opt-in filter. Skips events whose project is not
+   * marked for replication. The `project` create event itself is allowed
+   * through when its document carries `replicationConfig.enabled=true`,
+   * because the project doesn't exist yet at the receiver.
+   */
+  private async isEventReplicable(event: ProjectChangeEvent): Promise<boolean> {
+    if (!event.projectId) return false; // project-less events (activity etc.) never replicate
+    if (event.entity === 'project' && event.action === 'created') {
+      // The project record's own enabled flag will be checked at receive; here
+      // we let it through because the project doesn't exist locally either.
+      return true;
+    }
+    return this.projectsService.isReplicationEnabled(event.projectId).catch(() => false);
+  }
+
   @OnEvent(PROJECT_CHANGED)
   async handleProjectChange(event: ProjectChangeEvent): Promise<void> {
-    const role = await this.settingsService.get(REPL_ROLE);
-    if (role !== 'master') return;
+    const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
+    if (!role || !PUSHING_ROLES.has(role)) return;
     if (!event.entityId) return;
 
     // Skip notification events — not worth replicating
     if (event.entity === 'notification') return;
 
+    // T-82: per-project replication opt-in
+    if (!(await this.isEventReplicable(event))) return;
+
     try {
       const payload = await this.buildPayload(event);
       if (!payload) return;
 
-      const sent = await this.pushToSlave(payload);
+      const sent = await this.pushToPeer(payload, role);
       if (!sent) {
         await this.enqueue(event, payload);
       }
@@ -81,6 +106,21 @@ export class ReplicationPushService {
         // If we can't even build the payload, skip
       }
     }
+  }
+
+  /** Resolve the peer URL + API key based on the current role.
+   *  Master pushes to `slaveUrl`, peer pushes to `peerUrl`. */
+  private async getPeerTarget(role: ReplicationRole): Promise<{ url?: string; apiKey?: string }> {
+    if (role === 'peer') {
+      return {
+        url: (await this.settingsService.get(REPL_PEER_URL)) ?? undefined,
+        apiKey: (await this.settingsService.get(REPL_PEER_API_KEY)) ?? undefined,
+      };
+    }
+    return {
+      url: (await this.settingsService.get(REPL_SLAVE_URL)) ?? undefined,
+      apiKey: (await this.settingsService.get(REPL_SLAVE_API_KEY)) ?? undefined,
+    };
   }
 
   private async buildPayload(event: ProjectChangeEvent): Promise<ReplicationPayload | null> {
@@ -140,14 +180,15 @@ export class ReplicationPushService {
     };
   }
 
-  private async pushToSlave(payload: ReplicationPayload): Promise<boolean> {
-    const slaveUrl = await this.settingsService.get(REPL_SLAVE_URL);
-    const apiKey = await this.settingsService.get(REPL_SLAVE_API_KEY);
-    if (!slaveUrl) return false;
+  /** Push a payload to the configured peer. Works for both master→slave and
+   *  peer→peer topologies; role decides which URL to use. */
+  private async pushToPeer(payload: ReplicationPayload, role: ReplicationRole): Promise<boolean> {
+    const { url, apiKey } = await this.getPeerTarget(role);
+    if (!url) return false;
 
     try {
       await firstValueFrom(
-        this.httpService.post(`${slaveUrl}/api/replication/receive`, payload, {
+        this.httpService.post(`${url}/api/replication/receive`, payload, {
           headers: {
             'Content-Type': 'application/json',
             ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
@@ -182,8 +223,8 @@ export class ReplicationPushService {
 
   /** Process queued items — called by scheduler */
   async processQueue(): Promise<number> {
-    const role = await this.settingsService.get(REPL_ROLE);
-    if (role !== 'master') return 0;
+    const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
+    if (!role || !PUSHING_ROLES.has(role)) return 0;
 
     const items = await this.queueModel
       .find({ status: 'pending' })
@@ -207,7 +248,7 @@ export class ReplicationPushService {
         sourceInstanceId: instanceId,
       };
 
-      const success = await this.pushToSlave(payload);
+      const success = await this.pushToPeer(payload, role);
       if (success) {
         await this.queueModel.findByIdAndUpdate(item._id, { status: 'sent' });
         sent++;
