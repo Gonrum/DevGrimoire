@@ -6,6 +6,7 @@ import { Changelog, ChangelogDocument } from './schemas/changelog.schema';
 import { CreateChangelogDto } from './dto/create-changelog.dto';
 import { UpdateChangelogDto } from './dto/update-changelog.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { projectIdFilter } from '../common/project-id-filter';
 
 @Injectable()
 export class ChangelogService {
@@ -32,7 +33,7 @@ export class ChangelogService {
     limit = 50,
   ): Promise<ChangelogDocument[]> {
     return this.changelogModel
-      .find({ projectId })
+      .find({ projectId: projectIdFilter(projectId) })
       .sort({ createdAt: -1 })
       .limit(limit)
       .exec();

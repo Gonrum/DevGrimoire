@@ -7,6 +7,7 @@ import { CreateDependencyDto } from './dto/create-dependency.dto';
 import { UpdateDependencyDto } from './dto/update-dependency.dto';
 import { BulkCreateDependencyDto } from './dto/bulk-create-dependency.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { projectIdFilter } from '../common/project-id-filter';
 
 @Injectable()
 export class DependenciesService {
@@ -69,7 +70,7 @@ export class DependenciesService {
     projectId: string,
     filters?: { packageManager?: PackageManager; category?: string; devDependency?: boolean },
   ): Promise<DependencyDocument[]> {
-    const query: Record<string, unknown> = { projectId };
+    const query: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (filters?.packageManager) query.packageManager = filters.packageManager;
     if (filters?.category) query.category = filters.category;
     if (filters?.devDependency !== undefined) query.devDependency = filters.devDependency;

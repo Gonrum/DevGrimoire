@@ -10,6 +10,7 @@ import { GitRepository } from './schemas/git-repository.schema';
 import { SecretsService } from '../secrets/secrets.service';
 import { ProjectsService } from '../projects/projects.service';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { projectIdFilter } from '../common/project-id-filter';
 
 @Injectable()
 export class CommitsService {
@@ -198,7 +199,7 @@ export class CommitsService {
       offset?: number;
     },
   ): Promise<CommitDocument[]> {
-    const filter: Record<string, unknown> = { projectId };
+    const filter: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (options?.branch) filter.branch = options.branch;
     if (options?.repoLabel) filter.repoLabel = options.repoLabel;
     if (options?.author) {
@@ -247,7 +248,7 @@ export class CommitsService {
   }
 
   async countByProject(projectId: string, repoLabel?: string): Promise<number> {
-    const filter: Record<string, unknown> = { projectId };
+    const filter: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (repoLabel) filter.repoLabel = repoLabel;
     return this.commitModel.countDocuments(filter).exec();
   }

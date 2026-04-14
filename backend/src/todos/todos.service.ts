@@ -8,6 +8,7 @@ import { CreateTodoDto } from './dto/create-todo.dto';
 import { UpdateTodoDto } from './dto/update-todo.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { CountersService } from '../counters/counters.service';
+import { projectIdFilter } from '../common/project-id-filter';
 import { formatEntityNumber } from '../common/number-format';
 
 const STATUS_ORDER: TodoStatus[] = [
@@ -103,7 +104,7 @@ export class TodosService {
     includeArchived?: boolean;
   }): Promise<TodoDocument[]> {
     const query: Record<string, unknown> = {};
-    if (filters.projectId) query.projectId = filters.projectId;
+    if (filters.projectId) query.projectId = projectIdFilter(filters.projectId);
     if (filters.statuses?.length) query.status = { $in: filters.statuses };
     else if (filters.status) query.status = filters.status;
     if (filters.priority) query.priority = filters.priority;

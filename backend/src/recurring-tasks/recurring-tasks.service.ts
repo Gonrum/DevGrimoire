@@ -8,6 +8,7 @@ import { UpdateRecurringTaskDto } from './dto/update-recurring-task.dto';
 import { TodosService } from '../todos/todos.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { projectIdFilter } from '../common/project-id-filter';
 
 @Injectable()
 export class RecurringTasksService {
@@ -43,7 +44,7 @@ export class RecurringTasksService {
 
   async findAll(filters?: { projectId?: string; systemOnly?: boolean; active?: boolean }): Promise<RecurringTaskDocument[]> {
     const query: Record<string, unknown> = {};
-    if (filters?.projectId) query.projectId = filters.projectId;
+    if (filters?.projectId) query.projectId = projectIdFilter(filters.projectId);
     if (filters?.systemOnly) query.projectId = { $exists: false };
     if (filters?.active !== undefined) query.active = filters.active;
     return this.recurringTaskModel.find(query).sort({ createdAt: -1 }).exec();

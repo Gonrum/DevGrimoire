@@ -9,6 +9,7 @@ import { PROJECT_CHANGED } from '../events/project-event';
 import { ProjectsService } from '../projects/projects.service';
 import { SecretsService } from '../secrets/secrets.service';
 import { validateGitBaseUrl } from '../commits/providers/url-validator';
+import { projectIdFilter } from '../common/project-id-filter';
 
 const FETCH_TIMEOUT = 30000;
 
@@ -41,7 +42,7 @@ export class ReleasesService {
     limit?: number,
     offset?: number,
   ): Promise<ReleaseDocument[]> {
-    const query: Record<string, unknown> = { projectId };
+    const query: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (filters?.status) query.status = filters.status;
     if (filters?.platform) query.platform = filters.platform;
     if (filters?.releaseType) query.releaseType = filters.releaseType;
@@ -60,7 +61,7 @@ export class ReleasesService {
   }
 
   async findByGitlabReleaseId(projectId: string, gitlabReleaseId: string): Promise<ReleaseDocument | null> {
-    return this.releaseModel.findOne({ projectId, gitlabReleaseId }).exec();
+    return this.releaseModel.findOne({ projectId: projectIdFilter(projectId), gitlabReleaseId }).exec();
   }
 
   async update(id: string, dto: UpdateReleaseDto): Promise<ReleaseDocument> {

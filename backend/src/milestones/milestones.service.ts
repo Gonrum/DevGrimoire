@@ -10,6 +10,7 @@ import { UpdateMilestoneDto } from './dto/update-milestone.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { CountersService } from '../counters/counters.service';
 import { formatEntityNumber } from '../common/number-format';
+import { projectIdFilter } from '../common/project-id-filter';
 
 @Injectable()
 export class MilestonesService {
@@ -22,13 +23,13 @@ export class MilestonesService {
   ) {}
 
   async findByNumber(projectId: string, number: number): Promise<MilestoneDocument> {
-    const ms = await this.milestoneModel.findOne({ projectId, number }).exec();
+    const ms = await this.milestoneModel.findOne({ projectId: projectIdFilter(projectId), number }).exec();
     if (!ms) throw new NotFoundException(`Milestone #${number} not found in project ${projectId}`);
     return ms;
   }
 
   async findByDisplayNumber(projectId: string, displayNumber: string): Promise<MilestoneDocument> {
-    const ms = await this.milestoneModel.findOne({ projectId, displayNumber }).exec();
+    const ms = await this.milestoneModel.findOne({ projectId: projectIdFilter(projectId), displayNumber }).exec();
     if (!ms) throw new NotFoundException(`Milestone "${displayNumber}" not found in project ${projectId}`);
     return ms;
   }
@@ -67,7 +68,7 @@ export class MilestonesService {
   }
 
   async findByProject(projectId: string, status?: MilestoneStatus, includeArchived?: boolean): Promise<MilestoneDocument[]> {
-    const query: Record<string, unknown> = { projectId };
+    const query: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (status) query.status = status;
     if (!includeArchived) query.archived = { $ne: true };
     return this.milestoneModel.find(query).sort({ createdAt: -1 }).exec();

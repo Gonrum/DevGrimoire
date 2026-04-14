@@ -6,6 +6,7 @@ import { Research, ResearchDocument } from './schemas/research.schema';
 import { CreateResearchDto } from './dto/create-research.dto';
 import { UpdateResearchDto } from './dto/update-research.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { projectIdFilter } from '../common/project-id-filter';
 
 @Injectable()
 export class ResearchService {
@@ -28,12 +29,12 @@ export class ResearchService {
   }
 
   async findByProject(projectId: string): Promise<ResearchDocument[]> {
-    return this.researchModel.find({ projectId }).sort({ updatedAt: -1 }).exec();
+    return this.researchModel.find({ projectId: projectIdFilter(projectId) }).sort({ updatedAt: -1 }).exec();
   }
 
   async search(query: string, projectId?: string): Promise<ResearchDocument[]> {
     const filter: Record<string, unknown> = { $text: { $search: query } };
-    if (projectId) filter.projectId = projectId;
+    if (projectId) filter.projectId = projectIdFilter(projectId);
     return this.researchModel
       .find(filter, { score: { $meta: 'textScore' } })
       .sort({ score: { $meta: 'textScore' } })

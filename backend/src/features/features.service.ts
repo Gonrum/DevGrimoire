@@ -6,6 +6,7 @@ import { Feature, FeatureDocument, FeatureStatus } from './schemas/feature.schem
 import { CreateFeatureDto } from './dto/create-feature.dto';
 import { UpdateFeatureDto } from './dto/update-feature.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { projectIdFilter } from '../common/project-id-filter';
 
 @Injectable()
 export class FeaturesService {
@@ -30,7 +31,7 @@ export class FeaturesService {
     projectId: string,
     filters?: { status?: FeatureStatus; category?: string },
   ): Promise<FeatureDocument[]> {
-    const query: Record<string, unknown> = { projectId };
+    const query: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (filters?.status) query.status = filters.status;
     if (filters?.category) query.category = filters.category;
     return this.featureModel.find(query).sort({ status: 1, name: 1 }).exec();

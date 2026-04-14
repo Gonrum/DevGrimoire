@@ -174,6 +174,7 @@ export class ReplicationReceiveService {
           try { return new ObjectId(id); } catch { return id; }
         });
       }
+      this.normalizeTimestamps(doc);
 
       await coll.replaceOne(
         { _id: new ObjectId(String(docId)) },
@@ -213,6 +214,22 @@ export class ReplicationReceiveService {
       return isNaN(d.getTime()) ? null : d;
     }
     return null;
+  }
+
+  /**
+   * Mutate in place: convert ISO-string timestamps (from JSON transport) back
+   * to real Date objects. Without this, BSON type comparison breaks the pull
+   * endpoint's `updatedAt: { $gt: Date }` filter — strings never compare as
+   * greater-than dates, so all replicated children become invisible to pull.
+   */
+  private normalizeTimestamps(doc: Record<string, unknown>): void {
+    for (const field of ['createdAt', 'updatedAt', 'timestamp', 'expiresAt', 'lastUsedAt']) {
+      const v = doc[field];
+      if (typeof v === 'string') {
+        const d = new Date(v);
+        if (!isNaN(d.getTime())) doc[field] = d;
+      }
+    }
   }
 
   /** Apply a full project sync — upsert all documents, remove stale ones */
@@ -269,6 +286,7 @@ export class ReplicationReceiveService {
           if (cleanDoc.projectId && typeof cleanDoc.projectId === 'string') {
             cleanDoc.projectId = new ObjectId(cleanDoc.projectId);
           }
+          this.normalizeTimestamps(cleanDoc);
 
           await coll.replaceOne(
             { _id: new ObjectId(String(id)) },

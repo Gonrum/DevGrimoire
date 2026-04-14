@@ -7,6 +7,7 @@ import { SchemaVersion, SchemaVersionDocument } from './schemas/schema-version.s
 import { CreateSchemaDto } from './dto/create-schema.dto';
 import { UpdateSchemaDto } from './dto/update-schema.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { projectIdFilter } from '../common/project-id-filter';
 
 @Injectable()
 export class SchemasService {
@@ -35,7 +36,7 @@ export class SchemasService {
     dbType?: string,
     tags?: string[],
   ): Promise<DbSchemaDocument[]> {
-    const filter: Record<string, unknown> = { projectId };
+    const filter: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (dbType) filter.dbType = dbType;
     if (tags?.length) filter.tags = { $all: tags };
     return this.dbSchemaModel.find(filter).sort({ name: 1 }).exec();

@@ -8,6 +8,7 @@ import { Attachment, AttachmentDocument } from './schemas/attachment.schema';
 import { UpdateAttachmentDto } from './dto/update-attachment.dto';
 import { MinioService } from '../minio/minio.service';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { projectIdFilter } from '../common/project-id-filter';
 
 /** Mimetypes treated as extractable text */
 const TEXT_MIMETYPES = new Set([
@@ -105,7 +106,7 @@ export class AttachmentsService {
     entityType?: string,
     entityId?: string,
   ): Promise<AttachmentDocument[]> {
-    const filter: Record<string, unknown> = { projectId };
+    const filter: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (entityType) filter.entityType = entityType;
     if (entityId) filter.entityId = entityId;
     return this.attachmentModel

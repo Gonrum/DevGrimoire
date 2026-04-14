@@ -5,6 +5,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { Activity, ActivityDocument } from './schemas/activity.schema';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { RequestContext } from '../common/request-context';
+import { projectIdFilter } from '../common/project-id-filter';
 
 @Injectable()
 export class ActivitiesService {
@@ -28,7 +29,7 @@ export class ActivitiesService {
 
   async findByProject(projectId: string, limit = 50): Promise<Activity[]> {
     return this.activityModel
-      .find({ projectId })
+      .find({ projectId: projectIdFilter(projectId) })
       .sort({ createdAt: -1 })
       .limit(limit)
       .lean()

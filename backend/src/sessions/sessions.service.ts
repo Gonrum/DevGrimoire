@@ -5,6 +5,7 @@ import { Model } from 'mongoose';
 import { Session, SessionDocument } from './schemas/session.schema';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { projectIdFilter } from '../common/project-id-filter';
 
 @Injectable()
 export class SessionsService {
@@ -30,7 +31,7 @@ export class SessionsService {
     limit = 10,
   ): Promise<SessionDocument[]> {
     return this.sessionModel
-      .find({ projectId })
+      .find({ projectId: projectIdFilter(projectId) })
       .sort({ createdAt: -1 })
       .limit(limit)
       .exec();
@@ -38,7 +39,7 @@ export class SessionsService {
 
   async findLatest(projectId: string): Promise<SessionDocument | null> {
     return this.sessionModel
-      .findOne({ projectId })
+      .findOne({ projectId: projectIdFilter(projectId) })
       .sort({ createdAt: -1 })
       .exec();
   }

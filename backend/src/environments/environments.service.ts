@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { Environment, EnvironmentDocument } from './schemas/environment.schema';
 import { CreateEnvironmentDto } from './dto/create-environment.dto';
 import { UpdateEnvironmentDto } from './dto/update-environment.dto';
+import { projectIdFilter } from '../common/project-id-filter';
 
 @Injectable()
 export class EnvironmentsService {
@@ -16,7 +17,7 @@ export class EnvironmentsService {
   }
 
   async findByProject(projectId: string): Promise<EnvironmentDocument[]> {
-    return this.envModel.find({ projectId }).sort({ name: 1 }).exec();
+    return this.envModel.find({ projectId: projectIdFilter(projectId) }).sort({ name: 1 }).exec();
   }
 
   async findById(id: string): Promise<EnvironmentDocument> {

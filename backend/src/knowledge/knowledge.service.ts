@@ -6,6 +6,7 @@ import { Knowledge, KnowledgeDocument } from './schemas/knowledge.schema';
 import { CreateKnowledgeDto } from './dto/create-knowledge.dto';
 import { UpdateKnowledgeDto } from './dto/update-knowledge.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { projectIdFilter } from '../common/project-id-filter';
 
 @Injectable()
 export class KnowledgeService {
@@ -40,11 +41,11 @@ export class KnowledgeService {
       filter.scope = 'global';
     } else if (options?.scope === 'project') {
       if (!projectId) throw new BadRequestException('projectId is required for scope "project"');
-      filter.projectId = projectId;
+      filter.projectId = projectIdFilter(projectId);
       filter.scope = 'project';
     } else if (projectId) {
       // Default: show project-specific + global entries
-      filter.$or = [{ projectId }, { scope: 'global' }];
+      filter.$or = [{ projectId: projectIdFilter(projectId) }, { scope: 'global' }];
     } else {
       // No projectId, no scope filter: return all
     }
@@ -66,11 +67,11 @@ export class KnowledgeService {
     if (scope === 'global') {
       filter.scope = 'global';
     } else if (scope === 'project' && projectId) {
-      filter.projectId = projectId;
+      filter.projectId = projectIdFilter(projectId);
       filter.scope = 'project';
     } else if (projectId) {
       // Show project-specific + global results
-      filter.$or = [{ projectId }, { scope: 'global' }];
+      filter.$or = [{ projectId: projectIdFilter(projectId) }, { scope: 'global' }];
       delete filter.projectId;
     }
     return this.knowledgeModel

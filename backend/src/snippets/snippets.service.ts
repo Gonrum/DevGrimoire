@@ -6,6 +6,7 @@ import { Snippet, SnippetDocument } from './schemas/snippet.schema';
 import { CreateSnippetDto } from './dto/create-snippet.dto';
 import { UpdateSnippetDto } from './dto/update-snippet.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { projectIdFilter } from '../common/project-id-filter';
 
 @Injectable()
 export class SnippetsService {
@@ -33,7 +34,7 @@ export class SnippetsService {
     category?: string,
     tag?: string,
   ): Promise<SnippetDocument[]> {
-    const filter: Record<string, unknown> = { projectId };
+    const filter: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (language) filter.language = language;
     if (category) filter.category = category;
     if (tag) filter.tags = tag;
@@ -47,7 +48,7 @@ export class SnippetsService {
     const filter: Record<string, unknown> = {
       $text: { $search: query },
     };
-    if (projectId) filter.projectId = projectId;
+    if (projectId) filter.projectId = projectIdFilter(projectId);
     return this.snippetModel
       .find(filter, { score: { $meta: 'textScore' } })
       .sort({ score: { $meta: 'textScore' } })

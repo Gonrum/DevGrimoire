@@ -6,6 +6,7 @@ import { Manual, ManualDocument } from './schemas/manual.schema';
 import { CreateManualDto } from './dto/create-manual.dto';
 import { UpdateManualDto } from './dto/update-manual.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { projectIdFilter } from '../common/project-id-filter';
 
 @Injectable()
 export class ManualsService {
@@ -28,7 +29,7 @@ export class ManualsService {
   }
 
   async findByProject(projectId: string, category?: string): Promise<ManualDocument[]> {
-    const filter: Record<string, unknown> = { projectId };
+    const filter: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (category) filter.category = category;
     return this.manualModel
       .find(filter)
