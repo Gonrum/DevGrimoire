@@ -1004,8 +1004,13 @@ export const api = {
       ),
     testConnection: () =>
       request<{ success: boolean; latency: number; error?: string }>('/replication/test-connection', { method: 'POST' }),
-    triggerFullSync: () =>
-      request<{ started: boolean; reason?: string }>('/replication/trigger-full-sync', { method: 'POST' }),
+    triggerFullSync: (projectId?: string) => {
+      const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+      return request<{ started: boolean; reason?: string; projectId?: string | null }>(
+        `/replication/trigger-full-sync${qs}`,
+        { method: 'POST' },
+      );
+    },
     triggerPull: () =>
       request<{ pulled: number; applied: number; skipped: number; rounds: number; error?: string }>(
         '/replication/trigger-pull',

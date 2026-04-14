@@ -49,8 +49,15 @@ export class ReplicationFullSyncService {
     private httpService: HttpService,
   ) {}
 
-  /** Run full sync from master→slave or peer→peer. */
-  async runFullSync(): Promise<{ projects: number; entities: number; errors: number }> {
+  /**
+   * Run full sync from master→slave or peer→peer.
+   *
+   * @param projectId optional filter — if set, only sync that single project
+   *   (must still be `replicationConfig.enabled=true` — otherwise early return
+   *   to avoid leaking non-opted-in data). Without the filter, iterate all
+   *   enabled projects like before.
+   */
+  async runFullSync(onlyProjectId?: string): Promise<{ projects: number; entities: number; errors: number }> {
     const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
     if (!role || !PUSHING_ROLES.has(role)) return { projects: 0, entities: 0, errors: 0 };
     if (this.syncing) {
@@ -85,9 +92,20 @@ export class ReplicationFullSyncService {
       const { ObjectId } = await import('mongodb');
       // T-84: only sync projects that have explicitly opted in to replication.
       // This prevents leaking private projects when a peer is configured.
-      const projects = await db.collection('projects')
-        .find({ 'replicationConfig.enabled': true })
-        .toArray();
+      // If a specific projectId was supplied (T-94 single-project trigger),
+      // narrow to that one — still enforcing the enabled flag to prevent
+      // accidental leaks via a misuse of the single-project path.
+      const filter: Record<string, unknown> = { 'replicationConfig.enabled': true };
+      if (onlyProjectId) {
+        try {
+          filter._id = new ObjectId(onlyProjectId);
+        } catch {
+          this.logger.warn(`runFullSync: invalid projectId "${onlyProjectId}", ignoring`);
+          this.syncing = false;
+          return { projects: 0, entities: 0, errors: 0 };
+        }
+      }
+      const projects = await db.collection('projects').find(filter).toArray();
 
       for (const project of projects) {
         const projectId = project._id;

@@ -109,15 +109,55 @@ export default function ReplicationSettings() {
     }
   };
 
+  /** Per-project in-flight sync tracker. Keyed by projectId, value = start ts
+   *  of the most recent trigger. UI shows a spinner until ~2s after start. */
+  const [syncingProjects, setSyncingProjects] = useState<Record<string, number>>({});
+
   const toggleProjectReplication = async (id: string, enabled: boolean) => {
     // Optimistic update
     setProjects((prev) => prev?.map((p) => p._id === id ? { ...p, replicationEnabled: enabled } : p) ?? null);
     try {
       await api.replication.setProjectReplication(id, enabled);
+      // Auto-sync when a project is being enabled so its existing data (todos,
+      // knowledge, etc.) flows to the peer without the user having to hunt for
+      // a separate button. Fire-and-forget — the backend fullSync runs async.
+      if (enabled) {
+        setSyncingProjects((prev) => ({ ...prev, [id]: Date.now() }));
+        api.replication.triggerFullSync(id)
+          .catch(() => {
+            // Silent — status card will show the next lastFullSync update either way
+          })
+          .finally(() => {
+            setTimeout(() => {
+              setSyncingProjects((prev) => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+              });
+            }, 2500);
+          });
+      }
     } catch (err) {
       // Roll back on failure
       setProjects((prev) => prev?.map((p) => p._id === id ? { ...p, replicationEnabled: !enabled } : p) ?? null);
       setError((err as Error).message);
+    }
+  };
+
+  const syncSingleProject = async (id: string) => {
+    setSyncingProjects((prev) => ({ ...prev, [id]: Date.now() }));
+    try {
+      await api.replication.triggerFullSync(id);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setTimeout(() => {
+        setSyncingProjects((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }, 2500);
     }
   };
 
@@ -413,26 +453,49 @@ export default function ReplicationSettings() {
             <p className="text-xs text-gray-600">{t('common.loading')}</p>
           ) : projects && projects.length > 0 ? (
             <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-              {projects.map((p) => (
-                <label
-                  key={p._id}
-                  className="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-gray-800 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={p.replicationEnabled}
-                    onChange={(e) => toggleProjectReplication(p._id, e.target.checked)}
-                    className="w-4 h-4 accent-violet-600"
-                  />
-                  <span className="text-sm text-gray-200 flex-1 truncate">{p.name}</span>
-                  {p.favorite && <span className="text-xs text-amber-400">★</span>}
-                  {p.replicationEnabled && (
-                    <span className="text-[10px] uppercase tracking-wide text-emerald-400 bg-emerald-900/20 border border-emerald-800/40 rounded px-1.5 py-0.5">
-                      {t('replication.projectSyncOn')}
-                    </span>
-                  )}
-                </label>
-              ))}
+              {projects.map((p) => {
+                const isSyncing = !!syncingProjects[p._id];
+                return (
+                  <div
+                    key={p._id}
+                    className="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-gray-800"
+                  >
+                    <input
+                      type="checkbox"
+                      id={`repl-${p._id}`}
+                      checked={p.replicationEnabled}
+                      onChange={(e) => toggleProjectReplication(p._id, e.target.checked)}
+                      className="w-4 h-4 accent-violet-600 cursor-pointer"
+                    />
+                    <label htmlFor={`repl-${p._id}`} className="text-sm text-gray-200 flex-1 truncate cursor-pointer">
+                      {p.name}
+                    </label>
+                    {p.favorite && <span className="text-xs text-amber-400">★</span>}
+                    {p.replicationEnabled && !isSyncing && (
+                      <span className="text-[10px] uppercase tracking-wide text-emerald-400 bg-emerald-900/20 border border-emerald-800/40 rounded px-1.5 py-0.5">
+                        {t('replication.projectSyncOn')}
+                      </span>
+                    )}
+                    {isSyncing && (
+                      <span className="text-[10px] uppercase tracking-wide text-cyan-300 bg-cyan-900/20 border border-cyan-800/40 rounded px-1.5 py-0.5 inline-flex items-center gap-1">
+                        <span className="animate-spin">⟳</span> {t('replication.projectSyncing')}
+                      </span>
+                    )}
+                    {p.replicationEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => syncSingleProject(p._id)}
+                        disabled={isSyncing}
+                        className="text-xs text-gray-500 hover:text-cyan-400 disabled:opacity-40 disabled:cursor-not-allowed px-1"
+                        title={t('replication.projectSyncNow')}
+                        aria-label={t('replication.projectSyncNow')}
+                      >
+                        ↻
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <p className="text-xs text-gray-600">{t('replication.projectSelectionEmpty')}</p>

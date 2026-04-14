@@ -361,13 +361,15 @@ export class ReplicationController {
 
   @Post('trigger-full-sync')
   @HttpCode(200)
-  async triggerFullSync() {
+  async triggerFullSync(@Query('projectId') projectId?: string) {
     if (this.fullSyncService.isSyncing()) {
       return { started: false, reason: 'Already syncing' };
     }
-    // Fire-and-forget
-    this.fullSyncService.runFullSync().catch(() => {});
-    return { started: true };
+    // Fire-and-forget. When projectId is present, only that single project
+    // is synced — used by the per-project "Sync now" button in the UI and
+    // by the auto-sync-on-enable flow.
+    this.fullSyncService.runFullSync(projectId || undefined).catch(() => {});
+    return { started: true, projectId: projectId || null };
   }
 
   @Post('queue/clear-failed')

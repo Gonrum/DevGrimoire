@@ -857,6 +857,8 @@
     "projectSelectionHint": "Nur freigeschaltete Projekte werden gepusht/empfangen. Persönliche Projekte bleiben lokal.",
     "projectSelectionEmpty": "Keine aktiven Projekte vorhanden.",
     "projectSyncOn": "Sync",
+    "projectSyncing": "synchronisiere…",
+    "projectSyncNow": "Dieses Projekt jetzt zur Gegenseite syncen",
     "synced": "synchron",
     "triggerPull": "Jetzt abholen",
     "pullHint": "Pull holt Änderungen vom Peer-Server (für Heim-Instanzen hinter NAT). Stündlicher Cron läuft automatisch.",

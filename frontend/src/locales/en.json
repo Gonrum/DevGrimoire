@@ -857,6 +857,8 @@
     "projectSelectionHint": "Only enabled projects are pushed/received. Personal projects stay local.",
     "projectSelectionEmpty": "No active projects.",
     "projectSyncOn": "Sync",
+    "projectSyncing": "syncing…",
+    "projectSyncNow": "Sync this project to peer now",
     "synced": "synced",
     "triggerPull": "Pull now",
     "pullHint": "Pull fetches changes from the peer server (for home instances behind NAT). Hourly cron runs automatically.",
