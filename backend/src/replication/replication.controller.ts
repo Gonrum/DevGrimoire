@@ -12,6 +12,7 @@ import { ReplicationReceiveService } from './replication-receive.service';
 import { ReplicationPushService } from './replication-push.service';
 import { ReplicationFullSyncService } from './replication-full-sync.service';
 import { ReplicationPullService } from './replication-pull.service';
+import { ReplicationScheduler } from './replication.scheduler';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/schemas/user.schema';
 import {
@@ -58,6 +59,7 @@ export class ReplicationController {
     private pushService: ReplicationPushService,
     private fullSyncService: ReplicationFullSyncService,
     private pullService: ReplicationPullService,
+    private scheduler: ReplicationScheduler,
     private settingsService: SettingsService,
     private projectsService: ProjectsService,
     private httpService: HttpService,
@@ -139,8 +141,17 @@ export class ReplicationController {
     if (body.peerApiKey !== undefined && body.peerApiKey !== '***') {
       await this.settingsService.set(REPL_PEER_API_KEY, body.peerApiKey);
     }
-    if (body.fullSyncCron !== undefined) await this.settingsService.set(REPL_FULL_SYNC_CRON, body.fullSyncCron);
-    if (body.pullCron !== undefined) await this.settingsService.set(REPL_PULL_CRON, body.pullCron);
+    if (body.fullSyncCron !== undefined) {
+      // Validate FIRST so we don't persist a bad expression that the scheduler
+      // would silently fail to apply on next restart. rescheduleFullSync throws
+      // BadRequestException on invalid cron, which Nest maps to 400.
+      this.scheduler.rescheduleFullSync(body.fullSyncCron);
+      await this.settingsService.set(REPL_FULL_SYNC_CRON, body.fullSyncCron);
+    }
+    if (body.pullCron !== undefined) {
+      this.scheduler.reschedulePull(body.pullCron);
+      await this.settingsService.set(REPL_PULL_CRON, body.pullCron);
+    }
 
     return this.getConfig();
   }

@@ -1,17 +1,25 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
+import { Injectable, Logger, OnModuleInit, BadRequestException } from '@nestjs/common';
+import { Cron, SchedulerRegistry } from '@nestjs/schedule';
+import { CronJob } from 'cron';
 import { ReplicationPushService } from './replication-push.service';
 import { ReplicationFullSyncService } from './replication-full-sync.service';
 import { ReplicationPullService } from './replication-pull.service';
 import { SettingsService } from '../settings/settings.service';
 import {
   REPL_ROLE,
+  REPL_FULL_SYNC_CRON,
+  REPL_PULL_CRON,
   PUSHING_ROLES,
   ReplicationRole,
 } from './replication.constants';
 
+const FULL_SYNC_JOB = 'replication.fullSync';
+const PULL_JOB = 'replication.pull';
+const DEFAULT_FULL_SYNC_CRON = '0 3 * * *';
+const DEFAULT_PULL_CRON = '0 * * * *';
+
 @Injectable()
-export class ReplicationScheduler {
+export class ReplicationScheduler implements OnModuleInit {
   private readonly logger = new Logger(ReplicationScheduler.name);
 
   constructor(
@@ -19,7 +27,18 @@ export class ReplicationScheduler {
     private fullSyncService: ReplicationFullSyncService,
     private pullService: ReplicationPullService,
     private settingsService: SettingsService,
+    private scheduler: SchedulerRegistry,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    // Bootstrap dynamic cron jobs from settings so they pick up persisted
+    // user changes across restarts. The push-queue poller stays static (it's
+    // an internal heartbeat, not user-configurable).
+    const fullSyncCron = (await this.settingsService.get(REPL_FULL_SYNC_CRON)) || DEFAULT_FULL_SYNC_CRON;
+    const pullCron = (await this.settingsService.get(REPL_PULL_CRON)) || DEFAULT_PULL_CRON;
+    this.registerCronJob(FULL_SYNC_JOB, fullSyncCron, () => this.runScheduledFullSync());
+    this.registerCronJob(PULL_JOB, pullCron, () => this.runScheduledPull());
+  }
 
   /** Process replication queue every 30 seconds (master + peer push backlog). */
   @Cron('*/30 * * * * *')
@@ -37,44 +56,69 @@ export class ReplicationScheduler {
     }
   }
 
-  /** Nightly full sync at 3 AM (master + peer). */
-  @Cron('0 3 * * *')
-  async nightlyFullSync(): Promise<void> {
+  /** Re-register the FullSync cron job with a new schedule. Called by the
+   *  controller when fullSyncCron is changed via PUT /config. Throws
+   *  BadRequestException on invalid expressions so the controller can 400. */
+  rescheduleFullSync(cron: string): void {
+    this.registerCronJob(FULL_SYNC_JOB, cron, () => this.runScheduledFullSync());
+    this.logger.log(`Full-sync cron rescheduled to "${cron}"`);
+  }
+
+  /** Re-register the Pull cron job with a new schedule. */
+  reschedulePull(cron: string): void {
+    this.registerCronJob(PULL_JOB, cron, () => this.runScheduledPull());
+    this.logger.log(`Pull cron rescheduled to "${cron}"`);
+  }
+
+  /** Validate + (re)register a cron job at the given expression. Idempotent:
+   *  removes any existing job with the same name first. */
+  private registerCronJob(name: string, cronExpr: string, onTick: () => void | Promise<void>): void {
+    let job: CronJob;
+    try {
+      // The CronJob constructor throws synchronously on bad expressions.
+      job = new CronJob(cronExpr, onTick);
+    } catch (err) {
+      throw new BadRequestException(
+        `Invalid cron expression "${cronExpr}": ${(err as Error).message}`,
+      );
+    }
+    if (this.scheduler.doesExist('cron', name)) {
+      this.scheduler.deleteCronJob(name);
+    }
+    this.scheduler.addCronJob(name, job);
+    job.start();
+  }
+
+  private async runScheduledFullSync(): Promise<void> {
     const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
     if (!role || !PUSHING_ROLES.has(role)) return;
 
-    this.logger.log('Starting nightly full sync...');
+    this.logger.log('Starting scheduled full sync...');
     try {
       const result = await this.fullSyncService.runFullSync();
       this.logger.log(
-        `Nightly sync done: ${result.projects} projects, ${result.entities} entities, ${result.errors} errors`,
+        `Scheduled sync done: ${result.projects} projects, ${result.entities} entities, ${result.errors} errors`,
       );
     } catch (err) {
-      this.logger.error(`Nightly full sync failed: ${(err as Error).message}`);
+      this.logger.error(`Scheduled full sync failed: ${(err as Error).message}`);
     }
   }
 
-  /**
-   * Hourly pull from the peer (only meaningful for `peer` role). Default cron
-   * is fixed at top-of-the-hour for simplicity; future iteration can register
-   * the schedule dynamically from REPL_PULL_CRON via SchedulerRegistry.
-   */
-  @Cron('0 * * * *')
-  async hourlyPull(): Promise<void> {
+  private async runScheduledPull(): Promise<void> {
     const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
     if (role !== 'peer') return;
 
     try {
       const result = await this.pullService.runPull();
       if (result.error) {
-        this.logger.warn(`Hourly pull error: ${result.error}`);
+        this.logger.warn(`Scheduled pull error: ${result.error}`);
       } else if (result.applied > 0 || result.skipped > 0) {
         this.logger.log(
-          `Hourly pull: ${result.pulled} pulled, ${result.applied} applied, ${result.skipped} skipped over ${result.rounds} round(s)`,
+          `Scheduled pull: ${result.pulled} pulled, ${result.applied} applied, ${result.skipped} skipped over ${result.rounds} round(s)`,
         );
       }
     } catch (err) {
-      this.logger.error(`Hourly pull failed: ${(err as Error).message}`);
+      this.logger.error(`Scheduled pull failed: ${(err as Error).message}`);
     }
   }
 }
