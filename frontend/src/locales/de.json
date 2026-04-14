@@ -857,7 +857,7 @@
     "projectSelectionHint": "Nur freigeschaltete Projekte werden gepusht/empfangen. Persönliche Projekte bleiben lokal.",
     "projectSelectionEmpty": "Keine aktiven Projekte vorhanden.",
     "projectSyncOn": "Sync",
-    "synced": "fertig"
+    "synced": "synchron"
   },
   "attachments": {
     "title": "Pergamente",
