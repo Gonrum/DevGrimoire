@@ -97,6 +97,125 @@ export class ReplicationController {
     };
   }
 
+  /**
+   * T-96: Admin browses projects that exist on the configured peer/slave.
+   * Useful for pulling in projects that only exist on the remote side. Returns
+   * peer's project list merged with local existence info so the UI can mark
+   * which entries are already mirrored here.
+   */
+  @Get('remote-projects')
+  @Roles(UserRole.ADMIN)
+  async listRemoteProjects() {
+    const role = await this.settingsService.get(REPL_ROLE);
+    const counterpartyUrl = role === 'peer'
+      ? await this.settingsService.get(REPL_PEER_URL)
+      : await this.settingsService.get(REPL_SLAVE_URL);
+    const apiKey = role === 'peer'
+      ? await this.settingsService.get(REPL_PEER_API_KEY)
+      : await this.settingsService.get(REPL_SLAVE_API_KEY);
+    if (!counterpartyUrl) {
+      throw new BadRequestException(
+        role === 'peer' ? 'No peer URL configured' : 'No slave URL configured',
+      );
+    }
+
+    let remote: Array<{
+      _id: string;
+      name: string;
+      active: boolean;
+      favorite: boolean;
+      replicationEnabled: boolean;
+    }>;
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(`${counterpartyUrl}/api/replication/projects`, {
+          headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+          timeout: 15000,
+        }),
+      );
+      remote = response.data;
+    } catch (err) {
+      throw new BadRequestException(`Peer unreachable: ${(err as Error).message}`);
+    }
+
+    // Build a lookup of local projects (includeInactive=true to cover archived)
+    const localProjects = await this.projectsService.findAll(true);
+    const localMap = new Map(
+      localProjects.map((p) => [
+        p._id.toString(),
+        { enabled: !!p.replicationConfig?.enabled },
+      ]),
+    );
+
+    return remote.map((rp) => ({
+      _id: rp._id,
+      name: rp.name,
+      active: rp.active,
+      favorite: rp.favorite,
+      remoteReplicationEnabled: rp.replicationEnabled,
+      existsLocally: localMap.has(rp._id),
+      localReplicationEnabled: localMap.get(rp._id)?.enabled ?? false,
+    }));
+  }
+
+  /**
+   * T-96: Import a peer-only project by asking the peer to enable replication
+   * for it. The peer's auto-sync-on-enable (commit 0bba09a) then pushes the
+   * project + entities here via the existing bootstrap path in applyFullSync.
+   * We don't create anything locally — the inbound full-sync does.
+   */
+  @Post('import-project/:id')
+  @HttpCode(202)
+  @Roles(UserRole.ADMIN)
+  async importProjectFromPeer(@Param('id') id: string) {
+    const role = await this.settingsService.get(REPL_ROLE);
+    const counterpartyUrl = role === 'peer'
+      ? await this.settingsService.get(REPL_PEER_URL)
+      : await this.settingsService.get(REPL_SLAVE_URL);
+    const apiKey = role === 'peer'
+      ? await this.settingsService.get(REPL_PEER_API_KEY)
+      : await this.settingsService.get(REPL_SLAVE_API_KEY);
+    if (!counterpartyUrl) {
+      throw new BadRequestException(
+        role === 'peer' ? 'No peer URL configured' : 'No slave URL configured',
+      );
+    }
+    if (!apiKey) {
+      throw new BadRequestException('Peer API key required to enable replication remotely');
+    }
+
+    try {
+      await firstValueFrom(
+        this.httpService.patch(
+          `${counterpartyUrl}/api/replication/projects/${id}`,
+          { enabled: true },
+          {
+            headers: { Authorization: `Bearer ${apiKey}` },
+            timeout: 15000,
+          },
+        ),
+      );
+    } catch (err) {
+      throw new BadRequestException(`Failed to enable replication on peer: ${(err as Error).message}`);
+    }
+
+    // If the project also exists locally, flip the local flag too. Keeps both
+    // sides symmetric and prevents LWW from dropping the peer's project-doc
+    // push when our local updatedAt happens to be newer.
+    try {
+      await this.projectsService.setReplicationEnabled(id, true);
+    } catch {
+      // Project doesn't exist locally yet — bootstrap will create it via
+      // applyFullSync/applyChange when the peer's auto-sync fires.
+    }
+
+    return {
+      triggered: true,
+      projectId: id,
+      message: 'Replication enabled on peer. Auto-sync will push the project shortly.',
+    };
+  }
+
   // ── Config CRUD ──────────────────────────────────
 
   @Get('config')

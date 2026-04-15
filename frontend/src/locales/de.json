@@ -864,7 +864,17 @@
     "pullHint": "Pull holt Änderungen vom Peer-Server (für Heim-Instanzen hinter NAT). Stündlicher Cron läuft automatisch.",
     "pullDone": "Pull fertig: {{applied}} angewendet, {{skipped}} übersprungen",
     "pullFailed": "Pull fehlgeschlagen",
-    "lastPull": "Letzter Pull"
+    "lastPull": "Letzter Pull",
+    "remoteProjectsTitle": "Projekte von der Gegenseite abrufen",
+    "remoteProjectsHint": "Projekte die nur auf dem Peer existieren. \"Importieren\" aktiviert Replikation dort und holt sie hierher.",
+    "remoteProjectsEmpty": "Keine Remote-Projekte gefunden.",
+    "remoteProjectsLoad": "Liste laden",
+    "remoteProjectImport": "Importieren",
+    "remoteProjectImportPending": "Importiere…",
+    "remoteProjectLocal": "bereits lokal",
+    "remoteProjectSynced": "gespiegelt",
+    "remoteProjectImported": "Replikation aktiviert — Projekt wird in Kürze synchronisiert",
+    "remoteProjectImportFailed": "Import fehlgeschlagen"
   },
   "attachments": {
     "title": "Pergamente",

@@ -864,7 +864,17 @@
     "pullHint": "Pull fetches changes from the peer server (for home instances behind NAT). Hourly cron runs automatically.",
     "pullDone": "Pull complete: {{applied}} applied, {{skipped}} skipped",
     "pullFailed": "Pull failed",
-    "lastPull": "Last pull"
+    "lastPull": "Last pull",
+    "remoteProjectsTitle": "Import projects from the counterparty",
+    "remoteProjectsHint": "Projects that only exist on the peer. \"Import\" enables replication there and pulls them here.",
+    "remoteProjectsEmpty": "No remote projects found.",
+    "remoteProjectsLoad": "Load list",
+    "remoteProjectImport": "Import",
+    "remoteProjectImportPending": "Importing…",
+    "remoteProjectLocal": "already local",
+    "remoteProjectSynced": "mirrored",
+    "remoteProjectImported": "Replication enabled — project will sync shortly",
+    "remoteProjectImportFailed": "Import failed"
   },
   "attachments": {
     "title": "Scrolls",

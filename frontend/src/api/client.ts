@@ -492,6 +492,16 @@ export interface ReplicationProjectEntry {
   replicationEnabled: boolean;
 }
 
+export interface RemoteProjectEntry {
+  _id: string;
+  name: string;
+  active: boolean;
+  favorite: boolean;
+  remoteReplicationEnabled: boolean;
+  existsLocally: boolean;
+  localReplicationEnabled: boolean;
+}
+
 export interface ReplicationStatus {
   role: string;
   instanceId: string;
@@ -1020,6 +1030,13 @@ export const api = {
       request<{ role: string; message: string }>('/replication/promote', { method: 'POST' }),
     clearFailed: () =>
       request<{ cleared: number }>('/replication/queue/clear-failed', { method: 'POST' }),
+    listRemoteProjects: () =>
+      request<RemoteProjectEntry[]>('/replication/remote-projects'),
+    importProjectFromPeer: (id: string) =>
+      request<{ triggered: boolean; projectId: string; message: string }>(
+        `/replication/import-project/${id}`,
+        { method: 'POST' },
+      ),
   },
   profile: {
     get: () => request<UserInfo>('/auth/profile'),

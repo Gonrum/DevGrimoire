@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { api, ReplicationConfig, ReplicationStatus, ReplicationProjectEntry } from '../api/client';
+import { api, ReplicationConfig, ReplicationStatus, ReplicationProjectEntry, RemoteProjectEntry } from '../api/client';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
 
@@ -26,6 +26,11 @@ export default function ReplicationSettings() {
   // Per-project replication opt-in (T-80)
   const [projects, setProjects] = useState<ReplicationProjectEntry[] | null>(null);
   const [projectsLoading, setProjectsLoading] = useState(false);
+
+  // Remote project browser (T-96)
+  const [remoteProjects, setRemoteProjects] = useState<RemoteProjectEntry[] | null>(null);
+  const [remoteLoading, setRemoteLoading] = useState(false);
+  const [importingIds, setImportingIds] = useState<Set<string>>(new Set());
 
   const loadProjects = useCallback(async () => {
     setProjectsLoading(true);
@@ -155,6 +160,44 @@ export default function ReplicationSettings() {
         setSyncingProjects((prev) => {
           const next = { ...prev };
           delete next[id];
+          return next;
+        });
+      }, 2500);
+    }
+  };
+
+  const loadRemoteProjects = useCallback(async () => {
+    setRemoteLoading(true);
+    setError(null);
+    try {
+      const list = await api.replication.listRemoteProjects();
+      setRemoteProjects(list);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRemoteLoading(false);
+    }
+  }, []);
+
+  const importRemoteProject = async (id: string) => {
+    setImportingIds((prev) => new Set(prev).add(id));
+    setError(null);
+    try {
+      await api.replication.importProjectFromPeer(id);
+      setSuccess(t('replication.remoteProjectImported'));
+      setTimeout(() => setSuccess(null), 4000);
+      // Give the peer's auto-sync a moment, then refresh both lists
+      setTimeout(() => {
+        loadRemoteProjects().catch(() => {});
+        loadProjects().catch(() => {});
+      }, 2500);
+    } catch (err) {
+      setError(`${t('replication.remoteProjectImportFailed')}: ${(err as Error).message}`);
+    } finally {
+      setTimeout(() => {
+        setImportingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
           return next;
         });
       }, 2500);
@@ -499,6 +542,68 @@ export default function ReplicationSettings() {
             </div>
           ) : (
             <p className="text-xs text-gray-600">{t('replication.projectSelectionEmpty')}</p>
+          )}
+        </div>
+      )}
+
+      {/* Remote project browser (T-96) — only useful when counterparty is configured */}
+      {role !== 'standalone' && (role === 'master' ? !!slaveUrl : !!peerUrl) && (
+        <div className="bg-gray-900 border border-gray-700 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-sm font-medium text-gray-300">{t('replication.remoteProjectsTitle')}</h2>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={loadRemoteProjects}
+              disabled={remoteLoading}
+            >
+              {remoteLoading ? '…' : (remoteProjects ? '⟳' : t('replication.remoteProjectsLoad'))}
+            </Button>
+          </div>
+          <p className="text-xs text-gray-500 mb-3">{t('replication.remoteProjectsHint')}</p>
+          {remoteProjects === null ? (
+            <p className="text-xs text-gray-600">—</p>
+          ) : remoteProjects.length === 0 ? (
+            <p className="text-xs text-gray-600">{t('replication.remoteProjectsEmpty')}</p>
+          ) : (
+            <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+              {remoteProjects.map((rp) => {
+                const isImporting = importingIds.has(rp._id);
+                const fullyMirrored = rp.existsLocally && rp.localReplicationEnabled;
+                return (
+                  <div
+                    key={rp._id}
+                    className="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-gray-800"
+                  >
+                    <span className="text-sm text-gray-200 flex-1 truncate">
+                      {rp.name}
+                    </span>
+                    {rp.favorite && <span className="text-xs text-amber-400">★</span>}
+                    {fullyMirrored ? (
+                      <span className="text-[10px] uppercase tracking-wide text-emerald-400 bg-emerald-900/20 border border-emerald-800/40 rounded px-1.5 py-0.5">
+                        {t('replication.remoteProjectSynced')}
+                      </span>
+                    ) : rp.existsLocally ? (
+                      <span className="text-[10px] uppercase tracking-wide text-gray-400 bg-gray-800/60 border border-gray-700 rounded px-1.5 py-0.5">
+                        {t('replication.remoteProjectLocal')}
+                      </span>
+                    ) : null}
+                    {!fullyMirrored && (
+                      <Button
+                        variant="secondary"
+                        size="xs"
+                        onClick={() => importRemoteProject(rp._id)}
+                        disabled={isImporting}
+                      >
+                        {isImporting
+                          ? t('replication.remoteProjectImportPending')
+                          : t('replication.remoteProjectImport')}
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
