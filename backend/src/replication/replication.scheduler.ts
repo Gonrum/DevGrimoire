@@ -97,7 +97,7 @@ export class ReplicationScheduler implements OnModuleInit {
     try {
       const result = await this.fullSyncService.runFullSync();
       this.logger.log(
-        `Scheduled sync done: ${result.projects} projects, ${result.entities} entities, ${result.errors} errors`,
+        `Scheduled sync done: ${result.projects} projects, ${result.entities} entities, ${result.skipped} LWW-skipped, ${result.errors} errors`,
       );
     } catch (err) {
       this.logger.error(`Scheduled full sync failed: ${(err as Error).message}`);

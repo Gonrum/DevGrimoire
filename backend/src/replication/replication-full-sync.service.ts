@@ -25,7 +25,7 @@ const SYNC_COLLECTIONS: Record<string, string> = {
   research: 'researches',
   environments: 'environments',
   secrets: 'secrets',
-  schemas: 'schemas',
+  schemas: 'dbschemas',
   dependencies: 'dependencies',
   features: 'features',
   souls: 'souls',
@@ -57,12 +57,12 @@ export class ReplicationFullSyncService {
    *   to avoid leaking non-opted-in data). Without the filter, iterate all
    *   enabled projects like before.
    */
-  async runFullSync(onlyProjectId?: string): Promise<{ projects: number; entities: number; errors: number }> {
+  async runFullSync(onlyProjectId?: string): Promise<{ projects: number; entities: number; errors: number; skipped: number }> {
     const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
-    if (!role || !PUSHING_ROLES.has(role)) return { projects: 0, entities: 0, errors: 0 };
+    if (!role || !PUSHING_ROLES.has(role)) return { projects: 0, entities: 0, errors: 0, skipped: 0 };
     if (this.syncing) {
       this.logger.warn('Full sync already in progress');
-      return { projects: 0, entities: 0, errors: 0 };
+      return { projects: 0, entities: 0, errors: 0, skipped: 0 };
     }
 
     this.syncing = true;
@@ -74,19 +74,20 @@ export class ReplicationFullSyncService {
       : await this.settingsService.get(REPL_SLAVE_API_KEY);
     if (!peerUrl) {
       this.syncing = false;
-      return { projects: 0, entities: 0, errors: 0 };
+      return { projects: 0, entities: 0, errors: 0, skipped: 0 };
     }
 
     this.logger.log('Starting full sync...');
     const db = this.connection.db;
     if (!db) {
       this.syncing = false;
-      return { projects: 0, entities: 0, errors: 0 };
+      return { projects: 0, entities: 0, errors: 0, skipped: 0 };
     }
 
     let totalProjects = 0;
     let totalEntities = 0;
     let totalErrors = 0;
+    let totalSkipped = 0;
 
     try {
       const { ObjectId } = await import('mongodb');
@@ -102,7 +103,7 @@ export class ReplicationFullSyncService {
         } catch {
           this.logger.warn(`runFullSync: invalid projectId "${onlyProjectId}", ignoring`);
           this.syncing = false;
-          return { projects: 0, entities: 0, errors: 0 };
+          return { projects: 0, entities: 0, errors: 0, skipped: 0 };
         }
       }
       const projects = await db.collection('projects').find(filter).toArray();
@@ -167,6 +168,7 @@ export class ReplicationFullSyncService {
           );
           totalEntities += (result.data as any)?.entities || 0;
           totalErrors += (result.data as any)?.errors || 0;
+          totalSkipped += (result.data as any)?.skipped || 0;
           totalProjects++;
         } catch (err) {
           this.logger.error(`Full sync failed for project ${projectId}: ${(err as Error).message}`);
@@ -175,14 +177,14 @@ export class ReplicationFullSyncService {
       }
 
       await this.settingsService.set(REPL_LAST_FULL_SYNC, new Date().toISOString());
-      this.logger.log(`Full sync completed: ${totalProjects} projects, ${totalEntities} entities, ${totalErrors} errors`);
+      this.logger.log(`Full sync completed: ${totalProjects} projects, ${totalEntities} entities, ${totalSkipped} LWW-skipped, ${totalErrors} errors`);
     } catch (err) {
       this.logger.error(`Full sync failed: ${(err as Error).message}`);
     } finally {
       this.syncing = false;
     }
 
-    return { projects: totalProjects, entities: totalEntities, errors: totalErrors };
+    return { projects: totalProjects, entities: totalEntities, errors: totalErrors, skipped: totalSkipped };
   }
 
   isSyncing(): boolean {

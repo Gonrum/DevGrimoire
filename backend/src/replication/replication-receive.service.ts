@@ -18,7 +18,7 @@ const ENTITY_COLLECTION: Record<string, string> = {
   research: 'researches',
   environment: 'environments',
   secret: 'secrets',
-  schema: 'schemas',
+  schema: 'dbschemas',
   dependency: 'dependencies',
   feature: 'features',
   soul: 'souls',
@@ -235,13 +235,18 @@ export class ReplicationReceiveService {
   /** Apply a full project sync — upsert all documents, remove stale ones */
   async applyFullSync(
     projectExport: Record<string, unknown>,
-  ): Promise<{ entities: number; errors: number }> {
+  ): Promise<{ entities: number; errors: number; skipped: number }> {
     const db = this.connection.db;
-    if (!db) return { entities: 0, errors: 0 };
+    if (!db) return { entities: 0, errors: 0, skipped: 0 };
 
     const { ObjectId } = await import('mongodb');
     let entities = 0;
     let errors = 0;
+    let skipped = 0;
+
+    // Collections without an `updatedAt` field (append-only or timestamped via
+    // different fields) — always upsert without LWW check.
+    const lwwExemptCollections = new Set(['activities', 'commits']);
 
     // Map of export key → collection name
     const exportCollectionMap: Record<string, string> = {
@@ -255,7 +260,7 @@ export class ReplicationReceiveService {
       research: 'researches',
       environments: 'environments',
       secrets: 'secrets',
-      schemas: 'schemas',
+      schemas: 'dbschemas',
       dependencies: 'dependencies',
       features: 'features',
       souls: 'souls',
@@ -288,8 +293,30 @@ export class ReplicationReceiveService {
           }
           this.normalizeTimestamps(cleanDoc);
 
+          // LWW: skip upsert when the local doc has a newer `updatedAt` than
+          // the incoming snapshot. Without this, a scheduled full-sync from an
+          // instance with stale live-push queue would overwrite edits made on
+          // the receiving side. Mirrors the check in applyChange().
+          const docObjectId = new ObjectId(String(id));
+          if (!lwwExemptCollections.has(collectionName)) {
+            const incomingTs = this.parseTimestamp(cleanDoc.updatedAt);
+            if (incomingTs) {
+              const local = await coll.findOne(
+                { _id: docObjectId },
+                { projection: { updatedAt: 1 } },
+              );
+              const localTs = local
+                ? this.parseTimestamp((local as { updatedAt?: unknown }).updatedAt)
+                : null;
+              if (localTs && localTs > incomingTs) {
+                skipped++;
+                continue;
+              }
+            }
+          }
+
           await coll.replaceOne(
-            { _id: new ObjectId(String(id)) },
+            { _id: docObjectId },
             cleanDoc,
             { upsert: true },
           );
@@ -311,6 +338,6 @@ export class ReplicationReceiveService {
       }
     }
 
-    return { entities, errors };
+    return { entities, errors, skipped };
   }
 }

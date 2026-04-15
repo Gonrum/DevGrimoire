@@ -36,7 +36,7 @@ const PULL_ENTITY_COLLECTIONS: Record<string, string> = {
   research: 'researches',
   environment: 'environments',
   secret: 'secrets',
-  schema: 'schemas',
+  schema: 'dbschemas',
   dependency: 'dependencies',
   feature: 'features',
   soul: 'souls',
