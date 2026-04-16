@@ -1,0 +1,7 @@
+[botdetection.ip_limit]
+link_token = false
+
+[real_ip]
+x_for = 0
+ipv4_prefix = 32
+ipv6_prefix = 56

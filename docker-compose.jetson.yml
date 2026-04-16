@@ -78,6 +78,30 @@ services:
       retries: 10
       start_period: 60s
 
+  # SearXNG — self-hosted meta search engine for MCP web_search/web_fetch tools
+  searxng:
+    image: searxng/searxng:latest
+    container_name: devgrimoire-searxng
+    restart: unless-stopped
+    environment:
+      SEARXNG_BASE_URL: "http://searxng:8888/"
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-change-me-to-a-random-32-char-string}
+      UWSGI_WORKERS: 1
+      UWSGI_THREADS: 2
+    volumes:
+      - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ./docker/searxng/limiter.toml:/etc/searxng/limiter.toml:ro
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8888/healthz || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   backend:
     image: devgrimoire-backend:arm64
     build:
@@ -107,6 +131,8 @@ services:
       RAG_FALLBACK_PROVIDER: ${RAG_FALLBACK_PROVIDER:-}
       RAG_FALLBACK_URL: ${RAG_FALLBACK_URL:-}
       RAG_FALLBACK_MODEL: ${RAG_FALLBACK_MODEL:-}
+      # Web Search (MCP web_search/web_fetch)
+      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8888}
       # MinIO
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
@@ -125,6 +151,8 @@ services:
         condition: service_completed_successfully
       ollama:
         condition: service_healthy
+      searxng:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/auth/status').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
       interval: 15s

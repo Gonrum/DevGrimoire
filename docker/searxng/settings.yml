@@ -1,0 +1,86 @@
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "DevGrimoire Search"
+  contact_url: false
+  enable_metrics: false
+
+server:
+  base_url: "http://searxng:8888/"
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  method: "GET"
+  default_http_headers:
+    X-Content-Type-Options: nosniff
+    X-Download-Options: noopen
+    X-Robots-Tag: noindex, nofollow
+    Referrer-Policy: no-referrer
+
+search:
+  safe_search: 1
+  autocomplete: ""
+  default_lang: "de"
+  languages:
+    - de
+    - en
+  formats:
+    - html
+    - json
+
+ui:
+  static_use_hash: true
+
+outgoing:
+  request_timeout: 5.0
+  max_request_timeout: 10.0
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true
+  useragent_suffix: "DevGrimoire/1.0"
+
+botdetection:
+  ip_limit:
+    link_token: false
+
+engines:
+  - name: duckduckgo
+    disabled: false
+    timeout: 4.0
+
+  - name: wikipedia
+    disabled: false
+    timeout: 3.0
+
+  - name: wikidata
+    disabled: false
+    timeout: 3.0
+
+  - name: google
+    disabled: false
+    timeout: 5.0
+
+  - name: bing
+    disabled: false
+    timeout: 5.0
+
+  - name: qwant
+    disabled: false
+    timeout: 4.0
+
+  - name: github
+    disabled: false
+    timeout: 5.0
+
+  - name: stackoverflow
+    disabled: false
+    timeout: 5.0
+
+  - name: mdn
+    disabled: false
+    timeout: 4.0
+
+  - name: arxiv
+    disabled: false
+    timeout: 5.0
