@@ -33,6 +33,8 @@ import { ReleasesService } from './releases/releases.service';
 import { ChatService } from './chat/chat.service';
 import { ChatLlmService } from './chat/chat-llm.service';
 import { ChatContextService } from './chat/chat-context.service';
+import { WebSearchService } from './web-search/services/web-search.service';
+import { ReadabilityService } from './web-search/services/readability.service';
 import { AuthService } from './auth/auth.service';
 import { UserRole } from './auth/schemas/user.schema';
 import { registerMcpTools } from './mcp-tools';
@@ -116,6 +118,8 @@ async function bootstrap() {
     chatService: app.get(ChatService),
     chatLlmService: app.get(ChatLlmService),
     chatContextService: app.get(ChatContextService),
+    webSearchService: app.get(WebSearchService),
+    readabilityService: app.get(ReadabilityService),
   });
 
   const transport = new StdioServerTransport();

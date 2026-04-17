@@ -11,6 +11,9 @@ import { DependenciesService } from '../dependencies/dependencies.service';
 import { FeaturesService } from '../features/features.service';
 import { RagService } from '../rag/rag.service';
 import { LogsService } from '../logs/logs.service';
+import { WebSearchService } from '../web-search/services/web-search.service';
+import { ReadabilityService } from '../web-search/services/readability.service';
+import { SearchCategory, SearchTimeRange } from '../web-search/dto/web-search.dto';
 
 /**
  * Tools split by read/write so the Settings UI can surface write tools with a
@@ -18,7 +21,7 @@ import { LogsService } from '../logs/logs.service';
  * keep them opt-in by default (see DEFAULT_TOOLS_ALLOWLIST in chat-llm.service.ts).
  */
 export const TOOL_GROUPS: Record<
-  'tasks_read' | 'tasks_write' | 'knowledge_read' | 'knowledge_write' | 'project_read' | 'project_write',
+  'tasks_read' | 'tasks_write' | 'knowledge_read' | 'knowledge_write' | 'project_read' | 'project_write' | 'external_read',
   string[]
 > = {
   tasks_read: ['todo_list', 'todo_get', 'milestone_list', 'milestone_get', 'changelog_list', 'changelog_get'],
@@ -42,6 +45,7 @@ export const TOOL_GROUPS: Record<
   knowledge_write: ['knowledge_save', 'knowledge_update', 'research_save', 'manual_create', 'manual_update'],
   project_read: ['session_get', 'schema_list', 'schema_get', 'dependency_list', 'feature_list'],
   project_write: ['session_save', 'feature_create', 'feature_update', 'dependency_add'],
+  external_read: ['web_search', 'web_fetch'],
 };
 
 export const ALL_TOOL_NAMES: string[] = Object.values(TOOL_GROUPS).flat();
@@ -81,7 +85,7 @@ type JsonSchemaProp = {
   type: string;
   description?: string;
   enum?: string[];
-  items?: { type: string };
+  items?: { type: string; enum?: string[] };
 };
 
 type JsonSchema = {
@@ -186,6 +190,34 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
         limit: { type: 'number', description: 'Default 10' },
       },
       required: ['query'],
+    },
+  },
+  web_search: {
+    name: 'web_search',
+    description: 'Sucht im öffentlichen Web via SearXNG. Nur lesend + gecacht. Für Projekt-Wissen lieber rag_search verwenden.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Suchanfrage in natürlicher Sprache' },
+        language: { type: 'string', description: 'ISO 639-1 Code (z.B. "de", "en")' },
+        categories: { type: 'array', items: { type: 'string', enum: ['general', 'news', 'science', 'it', 'files'] }, description: 'SearXNG-Kategorien' },
+        timeRange: { type: 'string', enum: ['day', 'week', 'month', 'year'], description: 'Zeitfenster für die Treffer' },
+        limit: { type: 'number', description: 'Max. Treffer (1–20, Default 10)' },
+      },
+      required: ['query'],
+    },
+  },
+  web_fetch: {
+    name: 'web_fetch',
+    description: 'Lädt eine URL und extrahiert den Artikeltext via Readability. SSRF-geschützt (blockiert interne IPs). Mit raw=true plain text ohne Readability. Binärdateien (PDF, Bilder) werden abgelehnt.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Öffentliche http(s)-URL' },
+        raw: { type: 'boolean', description: 'Readability überspringen und roh zurückgeben' },
+        maxLength: { type: 'number', description: 'Text auf N Zeichen kürzen (Default 50000, Max 200000)' },
+      },
+      required: ['url'],
     },
   },
   knowledge_search: {
@@ -576,6 +608,8 @@ export class ChatToolsService {
     private readonly features: FeaturesService,
     private readonly rag: RagService,
     private readonly logs: LogsService,
+    private readonly webSearch: WebSearchService,
+    private readonly readability: ReadabilityService,
   ) {}
 
   /** Fire-and-forget audit log for a write-tool call. Never throws. */
@@ -747,6 +781,54 @@ export class ChatToolsService {
               snippet: r.content.slice(0, 400),
               score: r.score,
             })),
+          };
+        }
+        case 'web_search': {
+          const query = args.query as string | undefined;
+          if (!query) return { success: false, error: 'query required' };
+          const response = await this.webSearch.search({
+            query,
+            language: args.language as string | undefined,
+            categories: args.categories as SearchCategory[] | undefined,
+            timeRange: args.timeRange as SearchTimeRange | undefined,
+            limit: typeof args.limit === 'number' ? args.limit : undefined,
+          });
+          return {
+            success: true,
+            result: {
+              query: response.query,
+              totalResults: response.totalResults,
+              cached: response.cached,
+              results: response.results.map((r) => ({
+                title: r.title,
+                url: r.url,
+                snippet: r.snippet,
+                engine: r.engine,
+                publishedDate: r.publishedDate,
+              })),
+            },
+          };
+        }
+        case 'web_fetch': {
+          const url = args.url as string | undefined;
+          if (!url) return { success: false, error: 'url required' };
+          const response = await this.readability.fetch({
+            url,
+            raw: args.raw as boolean | undefined,
+            maxLength: typeof args.maxLength === 'number' ? args.maxLength : undefined,
+          });
+          return {
+            success: true,
+            result: {
+              title: response.title,
+              url: response.url,
+              siteName: response.siteName,
+              excerpt: response.excerpt,
+              publishedDate: response.publishedDate,
+              contentLength: response.contentLength,
+              cached: response.cached,
+              content: response.content,
+            },
           };
         }
         case 'knowledge_search': {

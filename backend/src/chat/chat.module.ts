@@ -23,6 +23,7 @@ import { FeaturesModule } from '../features/features.module';
 import { LogsModule } from '../logs/logs.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
 import { MinioModule } from '../minio/minio.module';
+import { WebSearchModule } from '../web-search/web-search.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { MinioModule } from '../minio/minio.module';
     LogsModule,
     AttachmentsModule,
     MinioModule,
+    WebSearchModule,
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatLlmService, ChatContextService, ChatToolsService, EncryptionService],

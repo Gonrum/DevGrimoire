@@ -32,7 +32,7 @@ const VALID_CATEGORIES: ReadonlySet<SearchCategory> = new Set([
 @Injectable()
 export class WebSearchService {
   private readonly logger = new Logger(WebSearchService.name);
-  private readonly envUrl = process.env.SEARXNG_URL || 'http://searxng:8888';
+  private readonly envUrl = process.env.SEARXNG_URL || 'http://searxng:8080';
 
   constructor(
     private readonly http: HttpService,

@@ -38,7 +38,7 @@ services:
     container_name: devgrimoire-searxng
     restart: unless-stopped
     environment:
-      SEARXNG_BASE_URL: "http://searxng:8888/"
+      SEARXNG_BASE_URL: "http://searxng:8080/"
       SEARXNG_SECRET: ${SEARXNG_SECRET:-change-me-to-a-random-32-char-string}
       UWSGI_WORKERS: 2
       UWSGI_THREADS: 4
@@ -46,7 +46,7 @@ services:
       - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
       - ./docker/searxng/limiter.toml:/etc/searxng/limiter.toml:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://localhost:8888/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8080/healthz || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -81,7 +81,7 @@ services:
       RAG_FALLBACK_MODEL: ${RAG_FALLBACK_MODEL:-}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       # Web Search (MCP web_search/web_fetch)
-      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8888}
+      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
       # MinIO (optional — file storage)
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-}
       MINIO_PORT: ${MINIO_PORT:-9000}

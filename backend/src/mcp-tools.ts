@@ -32,6 +32,9 @@ import { ReleasesService } from './releases/releases.service';
 import { ChatService } from './chat/chat.service';
 import { ChatLlmService } from './chat/chat-llm.service';
 import { ChatContextService } from './chat/chat-context.service';
+import { WebSearchService } from './web-search/services/web-search.service';
+import { ReadabilityService } from './web-search/services/readability.service';
+import { SearchCategory, SearchTimeRange } from './web-search/dto/web-search.dto';
 import { RequestContext } from './common/request-context';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 
@@ -52,6 +55,16 @@ async function ragHttpGet(path: string): Promise<any> {
 async function ragHttpPost(path: string): Promise<any> {
   const res = await fetch(`${RAG_BACKEND_URL}${path}`, { method: 'POST', headers: ragHeaders() });
   if (!res.ok) throw new Error(`RAG backend error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+async function backendHttpPostJson(path: string, body: unknown): Promise<any> {
+  const res = await fetch(`${RAG_BACKEND_URL}${path}`, {
+    method: 'POST',
+    headers: { ...ragHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Backend error: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
@@ -180,6 +193,8 @@ export interface McpServices {
   chatService: ChatService;
   chatLlmService: ChatLlmService;
   chatContextService: ChatContextService;
+  webSearchService: WebSearchService;
+  readabilityService: ReadabilityService;
 }
 
 const tools = [
@@ -1421,6 +1436,34 @@ const tools = [
     },
   },
   {
+    name: 'web_search',
+    description: 'Search the public web via the configured SearXNG instance. Returns title/url/snippet per hit. Read-only and cached. Intended for external research — for in-project search use rag_search.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'Natural-language search query' },
+        language: { type: 'string', description: 'ISO 639-1 code, e.g. "de" or "en" (default from settings)' },
+        categories: { type: 'array', items: { type: 'string', enum: ['general', 'news', 'science', 'it', 'files'] }, description: 'Restrict to these SearXNG categories' },
+        timeRange: { type: 'string', enum: ['day', 'week', 'month', 'year'], description: 'Limit to results from the given time window' },
+        limit: { type: 'number', description: 'Max results (1–20, default 10)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'web_fetch',
+    description: 'Fetch a URL and extract readable article text via Readability + DOMPurify. SSRF-protected (blocks private/loopback IPs). Use raw=true to get raw text without Readability (e.g. for plain-text files). Binary content (PDF, images) is rejected — use attachment_upload for those.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        url: { type: 'string', description: 'Public http:// or https:// URL to fetch' },
+        raw: { type: 'boolean', description: 'Skip Readability and return raw text (default false)' },
+        maxLength: { type: 'number', description: 'Truncate extracted text to N characters (default 50000, max 200000)' },
+      },
+      required: ['url'],
+    },
+  },
+  {
     name: 'recurring_task_create',
     description: 'Create a recurring task. With projectId: creates todos in that project. Without projectId: system-wide task that creates notifications.',
     inputSchema: {
@@ -1760,7 +1803,7 @@ const tools = [
 ];
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, logsService, releasesService, chatService, chatLlmService, chatContextService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -2690,6 +2733,41 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             result = await ragHttpGet('/api/rag/status');
           } else {
             result = await ragService.status();
+          }
+          break;
+        }
+        case 'web_search': {
+          const query = requireString(a, 'query');
+          const language = optionalString(a, 'language');
+          const categories = optionalStringArray(a, 'categories') as SearchCategory[] | undefined;
+          const timeRange = optionalString(a, 'timeRange') as SearchTimeRange | undefined;
+          const limit = optionalNumber(a, 'limit');
+          if (process.env.MCP_STDIO === 'true') {
+            const params = new URLSearchParams({ q: query });
+            if (language) params.set('language', language);
+            if (categories?.length) params.set('categories', categories.join(','));
+            if (timeRange) params.set('timeRange', timeRange);
+            if (limit !== undefined) params.set('limit', String(limit));
+            result = await ragHttpGet(`/api/web-search/search?${params}`);
+          } else {
+            result = await webSearchService.search({
+              query,
+              language,
+              categories,
+              timeRange,
+              limit,
+            });
+          }
+          break;
+        }
+        case 'web_fetch': {
+          const url = requireString(a, 'url');
+          const raw = optionalBoolean(a, 'raw');
+          const maxLength = optionalNumber(a, 'maxLength');
+          if (process.env.MCP_STDIO === 'true') {
+            result = await backendHttpPostJson('/api/web-search/fetch', { url, raw, maxLength });
+          } else {
+            result = await readabilityService.fetch({ url, raw, maxLength });
           }
           break;
         }

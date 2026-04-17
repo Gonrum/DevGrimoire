@@ -596,6 +596,7 @@
     "chatToolsGroup_knowledge_write": "Wissen & Suche (schreiben)",
     "chatToolsGroup_project_read": "Projekt-Daten (lesen)",
     "chatToolsGroup_project_write": "Projekt-Daten (schreiben)",
+    "chatToolsGroup_external_read": "Websuche & Artikel abrufen",
     "chatToolsWriteBadge": "Schreibend",
     "chatToolsWriteBanner": "Aktive schreibende Tools: {{count}} – der Chat-Assistent kann damit Daten anlegen oder verändern.",
     "chatToolsSelectAllWriteConfirm": "Wirklich {{count}} schreibende Tools aktivieren? Der Chat-Assistent kann dann Daten anlegen, ändern oder Kommentare schreiben.",
