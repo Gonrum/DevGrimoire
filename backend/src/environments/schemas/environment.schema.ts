@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import { HydratedDocument, Types } from 'mongoose';
 
 export class EnvVariable {
   key: string;
@@ -10,8 +10,8 @@ export type EnvironmentDocument = HydratedDocument<Environment>;
 
 @Schema({ timestamps: true })
 export class Environment {
-  @Prop({ required: true })
-  projectId: string;
+  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
+  projectId: Types.ObjectId;
 
   @Prop({ required: true })
   name: string;

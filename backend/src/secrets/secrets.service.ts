@@ -109,7 +109,7 @@ export class SecretsService {
     const obj = secret.toObject();
     return {
       _id: obj._id.toString(),
-      projectId: obj.projectId,
+      projectId: obj.projectId.toString(),
       environmentId: obj.environmentId,
       key: obj.key,
       description: obj.description,

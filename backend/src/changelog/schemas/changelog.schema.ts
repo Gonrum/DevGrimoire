@@ -1,12 +1,12 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import { HydratedDocument, Types } from 'mongoose';
 
 export type ChangelogDocument = HydratedDocument<Changelog>;
 
 @Schema({ timestamps: true })
 export class Changelog {
-  @Prop({ required: true, index: true })
-  projectId: string;
+  @Prop({ type: Types.ObjectId, ref: 'Project', required: true, index: true })
+  projectId: Types.ObjectId;
 
   @Prop()
   version: string;
