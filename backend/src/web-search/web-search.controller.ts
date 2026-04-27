@@ -1,4 +1,5 @@
 import { Controller, Get, Post, UseGuards, Query, Body, BadRequestException } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { WebSearchService } from './services/web-search.service';
 import { ReadabilityService } from './services/readability.service';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -43,6 +44,7 @@ export class WebSearchController {
   }
 
   @Get('search')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   async search(
     @Query('q') q: string,
     @Query('language') language?: string,
@@ -65,6 +67,7 @@ export class WebSearchController {
   }
 
   @Post('fetch')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   async fetch(@Body() body: { url: string; raw?: boolean; maxLength?: number }) {
     if (!body?.url) throw new BadRequestException('Field "url" is required');
     return this.readabilityService.fetch({

@@ -3,6 +3,7 @@ import { HttpModule } from '@nestjs/axios';
 import { MongooseModule } from '@nestjs/mongoose';
 import { WebSearchService } from './services/web-search.service';
 import { ReadabilityService } from './services/readability.service';
+import { WebSearchRateLimiterService } from './services/web-search-rate-limiter.service';
 import { WebSearchController } from './web-search.controller';
 import { SettingsModule } from '../settings/settings.module';
 import { WebSearchCache, WebSearchCacheSchema } from './schemas/web-search-cache.schema';
@@ -21,7 +22,7 @@ import { WebFetchCache, WebFetchCacheSchema } from './schemas/web-fetch-cache.sc
     SettingsModule,
   ],
   controllers: [WebSearchController],
-  providers: [WebSearchService, ReadabilityService],
-  exports: [WebSearchService, ReadabilityService],
+  providers: [WebSearchService, ReadabilityService, WebSearchRateLimiterService],
+  exports: [WebSearchService, ReadabilityService, WebSearchRateLimiterService],
 })
 export class WebSearchModule {}

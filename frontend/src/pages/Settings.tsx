@@ -4,6 +4,7 @@ import { api, ApiKeyInfo, ChatConfig, ChatEndpoint, ChatProvider, UserLlmConfig,
 import { useAuth } from '../hooks/useAuth';
 import UserManagement from './UserManagement';
 import ReplicationSettings from '../components/ReplicationSettings';
+import WebSearchSettings from '../components/WebSearchSettings';
 import Button from '../components/ui/Button';
 import ConfirmButton from '../components/ui/ConfirmButton';
 
@@ -40,7 +41,7 @@ Wenn du Tasks bearbeitest, halte dich an den Status-Workflow:
 - Teste Änderungen bevor du sie als fertig markierst
 `;
 
-type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'chat' | 'users' | 'replication';
+type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'chat' | 'websearch' | 'users' | 'replication';
 
 const CHAT_PROVIDER_DEFAULT_URL: Record<ChatProvider, string> = {
   lmstudio: 'http://localhost:1234',
@@ -513,6 +514,7 @@ export default function Settings() {
     { key: 'notifications', label: t('settings.tabNotifications') },
     { key: 'myllm', label: t('settings.tabMyLlm') },
     { key: 'chat', label: t('settings.tabChat'), adminOnly: true },
+    { key: 'websearch', label: t('settings.tabWebSearch'), adminOnly: true },
     { key: 'users', label: t('settings.tabUsers'), adminOnly: true },
     { key: 'replication', label: t('settings.tabReplication'), adminOnly: true },
   ];
@@ -1335,6 +1337,8 @@ export default function Settings() {
       )}
 
       {tab === 'users' && isAdmin && <UserManagement />}
+      {tab === 'websearch' && isAdmin && <WebSearchSettings />}
+
       {tab === 'replication' && isAdmin && <ReplicationSettings />}
     </div>
   );

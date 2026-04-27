@@ -5,6 +5,7 @@ import { Model } from 'mongoose';
 import { createHash } from 'crypto';
 import { AxiosError } from 'axios';
 import { SettingsService } from '../../settings/settings.service';
+import { WebSearchRateLimiterService } from './web-search-rate-limiter.service';
 import { WebSearchCache, WebSearchCacheDocument } from '../schemas/web-search-cache.schema';
 import {
   WebSearchQuery,
@@ -37,6 +38,7 @@ export class WebSearchService {
   constructor(
     private readonly http: HttpService,
     private readonly settings: SettingsService,
+    private readonly rateLimiter: WebSearchRateLimiterService,
     @InjectModel(WebSearchCache.name)
     private readonly cacheModel: Model<WebSearchCacheDocument>,
   ) {}
@@ -106,6 +108,9 @@ export class WebSearchService {
     if (cached) {
       return { ...(cached.payload as unknown as WebSearchResponse), cached: true };
     }
+
+    // Rate-limit only on cache miss — cached responses are free.
+    this.rateLimiter.consume('search');
 
     const url = await this.getSearxngUrl();
     const params: Record<string, string> = {

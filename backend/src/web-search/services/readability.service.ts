@@ -10,6 +10,8 @@ import DOMPurify from 'isomorphic-dompurify';
 import { AxiosError } from 'axios';
 import { HttpService } from '@nestjs/axios';
 import { WebSearchService } from './web-search.service';
+import { WebSearchRateLimiterService } from './web-search-rate-limiter.service';
+import { ConcurrencyLimiter } from './concurrency-limiter';
 import { WebFetchCache, WebFetchCacheDocument } from '../schemas/web-fetch-cache.schema';
 import { WebFetchResponse, WebFetchQuery } from '../dto/web-search.dto';
 
@@ -18,14 +20,17 @@ const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const DEFAULT_MAX_LENGTH = 50_000;
 const USER_AGENT = 'DevGrimoire-WebFetch/1.0 (+https://github.com/devgrimoire)';
+const MAX_CONCURRENT_FETCHES = 3;
 
 @Injectable()
 export class ReadabilityService {
   private readonly logger = new Logger(ReadabilityService.name);
+  private readonly fetchLimiter = new ConcurrencyLimiter(MAX_CONCURRENT_FETCHES);
 
   constructor(
     private readonly http: HttpService,
     private readonly webSearchService: WebSearchService,
+    private readonly rateLimiter: WebSearchRateLimiterService,
     @InjectModel(WebFetchCache.name)
     private readonly cacheModel: Model<WebFetchCacheDocument>,
   ) {}
@@ -47,7 +52,12 @@ export class ReadabilityService {
       return { ...(cached.payload as unknown as WebFetchResponse), cached: true };
     }
 
-    const { body, finalUrl, contentType } = await this.safeFetch(normalizedUrl);
+    // Rate-limit only on cache miss — cached responses are free.
+    this.rateLimiter.consume('fetch');
+
+    const { body, finalUrl, contentType } = await this.fetchLimiter.run(() =>
+      this.safeFetch(normalizedUrl),
+    );
 
     let response: WebFetchResponse;
 

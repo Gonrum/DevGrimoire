@@ -715,6 +715,22 @@ export const api = {
         body: JSON.stringify({ value }),
       }),
   },
+  webSearch: {
+    health: () =>
+      request<{ enabled: boolean; searxng: { ok: boolean; url: string; error?: string } }>(
+        '/web-search/health',
+      ),
+    stats: () =>
+      request<{
+        search: { cached: number; oldestEntry?: string };
+        fetch: { cached: number; oldestEntry?: string };
+      }>('/web-search/stats'),
+    clearCache: () =>
+      request<{ search: { deleted: number }; fetch: { deleted: number } }>(
+        '/web-search/cache/clear',
+        { method: 'POST' },
+      ),
+  },
   research: {
     list: (projectId: string) =>
       request<ResearchEntry[]>(`/research?projectId=${projectId}`),
