@@ -532,9 +532,11 @@ app.post('/exec', async (req, res) => {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) timeoutMs = EXEC_DEFAULT_TIMEOUT_MS;
   if (timeoutMs > EXEC_MAX_TIMEOUT_MS) timeoutMs = EXEC_MAX_TIMEOUT_MS;
 
-  if (!await workspaceExists(id)) {
-    return res.status(404).json({ error: 'workspace directory does not exist — clone first' });
-  }
+  // Lazy-create the workspace dir so empty/just-created workspaces support
+  // exec from the get-go (mkdir/git clone/curl/whatever). For tools that
+  // strictly need an existing clone (/pull, /tree, /read, /search, /status,
+  // /size) we still 404.
+  await ensureWorkspaceDir(id);
   const cwd = workspaceRoot(id);
   const env = buildExecEnv(req.body?.env);
 
@@ -570,9 +572,11 @@ app.post('/exec/stream', async (req, res) => {
   if (isCommandBlacklisted(command)) {
     return res.status(400).json({ error: 'command rejected by safety blacklist' });
   }
-  if (!await workspaceExists(id)) {
-    return res.status(404).json({ error: 'workspace directory does not exist — clone first' });
-  }
+  // Lazy-create the workspace dir so empty/just-created workspaces support
+  // exec from the get-go (mkdir/git clone/curl/whatever). For tools that
+  // strictly need an existing clone (/pull, /tree, /read, /search, /status,
+  // /size) we still 404.
+  await ensureWorkspaceDir(id);
   let timeoutMs = Number(req.body?.timeout ?? EXEC_DEFAULT_TIMEOUT_MS);
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) timeoutMs = EXEC_DEFAULT_TIMEOUT_MS;
   if (timeoutMs > EXEC_MAX_TIMEOUT_MS) timeoutMs = EXEC_MAX_TIMEOUT_MS;
