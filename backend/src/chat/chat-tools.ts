@@ -14,6 +14,14 @@ import { LogsService } from '../logs/logs.service';
 import { WebSearchService } from '../web-search/services/web-search.service';
 import { ReadabilityService } from '../web-search/services/readability.service';
 import { SearchCategory, SearchTimeRange } from '../web-search/dto/web-search.dto';
+import { WorkspacesService } from '../workspaces/workspaces.service';
+import { WorkspaceClient } from '../workspaces/workspace-client.service';
+import { SnippetsService } from '../snippets/snippets.service';
+import { AttachmentsService } from '../attachments/attachments.service';
+import { RecurringTasksService } from '../recurring-tasks/recurring-tasks.service';
+import { ReleasesService } from '../releases/releases.service';
+import { SoulsService } from '../souls/souls.service';
+import { CommitsService } from '../commits/commits.service';
 
 /**
  * Tools split by read/write so the Settings UI can surface write tools with a
@@ -21,30 +29,68 @@ import { SearchCategory, SearchTimeRange } from '../web-search/dto/web-search.dt
  * keep them opt-in by default (see DEFAULT_TOOLS_ALLOWLIST in chat-llm.service.ts).
  */
 export const TOOL_GROUPS: Record<
-  'tasks_read' | 'tasks_write' | 'knowledge_read' | 'knowledge_write' | 'project_read' | 'project_write' | 'external_read',
+  | 'tasks_read'
+  | 'tasks_write'
+  | 'knowledge_read'
+  | 'knowledge_write'
+  | 'project_read'
+  | 'project_write'
+  | 'workspace_read'
+  | 'workspace_write'
+  | 'external_read',
   string[]
 > = {
-  tasks_read: ['todo_list', 'todo_get', 'milestone_list', 'milestone_get', 'changelog_list', 'changelog_get'],
+  tasks_read: [
+    'todo_list', 'todo_get', 'milestone_list', 'milestone_get',
+    'changelog_list', 'changelog_get',
+    'recurring_task_list', 'recurring_task_get',
+  ],
   tasks_write: [
-    'todo_create',
-    'todo_update',
-    'todo_comment',
-    'milestone_create',
-    'milestone_update',
+    'todo_create', 'todo_update', 'todo_comment',
+    'milestone_create', 'milestone_update',
     'changelog_add',
+    'recurring_task_create', 'recurring_task_update',
   ],
   knowledge_read: [
     'rag_search',
-    'knowledge_search',
-    'knowledge_get',
-    'research_search',
-    'research_get',
-    'manual_list',
-    'manual_get',
+    'knowledge_search', 'knowledge_get',
+    'research_search', 'research_get',
+    'manual_list', 'manual_get',
+    'snippet_list', 'snippet_get', 'snippet_search',
   ],
-  knowledge_write: ['knowledge_save', 'knowledge_update', 'research_save', 'manual_create', 'manual_update'],
-  project_read: ['session_get', 'schema_list', 'schema_get', 'dependency_list', 'feature_list'],
-  project_write: ['session_save', 'feature_create', 'feature_update', 'dependency_add'],
+  knowledge_write: [
+    'knowledge_save', 'knowledge_update',
+    'research_save',
+    'manual_create', 'manual_update',
+    'snippet_save', 'snippet_update',
+  ],
+  project_read: [
+    'session_get',
+    'schema_list', 'schema_get',
+    'dependency_list', 'feature_list',
+    'soul_get',
+    'commit_list', 'commit_search',
+    'log_list', 'log_search', 'log_stats',
+    'release_list', 'release_get',
+    'attachment_list', 'attachment_get', 'attachment_download',
+  ],
+  project_write: [
+    'session_save',
+    'feature_create', 'feature_update',
+    'dependency_add',
+    'soul_update',
+    'commit_sync',
+    'attachment_upload',
+    'release_create', 'release_update', 'release_sync_gitlab',
+  ],
+  workspace_read: [
+    'workspace_list', 'workspace_get',
+    'workspace_tree', 'workspace_read', 'workspace_search', 'workspace_status',
+  ],
+  workspace_write: [
+    'workspace_create', 'workspace_update', 'workspace_archive', 'workspace_delete',
+    'workspace_clone', 'workspace_pull', 'workspace_exec',
+  ],
   external_read: ['web_search', 'web_fetch'],
 };
 
@@ -55,6 +101,7 @@ export const WRITE_TOOL_NAMES: Set<string> = new Set([
   ...TOOL_GROUPS.tasks_write,
   ...TOOL_GROUPS.knowledge_write,
   ...TOOL_GROUPS.project_write,
+  ...TOOL_GROUPS.workspace_write,
 ]);
 
 /**
@@ -579,6 +626,436 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
       required: ['name', 'version', 'packageManager'],
     },
   },
+
+  // --- Recurring tasks ---
+  recurring_task_list: {
+    name: 'recurring_task_list',
+    description: 'Listet wiederkehrende Tasks (compact).',
+    parameters: { type: 'object', properties: { projectId: PROJECT_ID_PROP } },
+  },
+  recurring_task_get: {
+    name: 'recurring_task_get',
+    description: 'Lädt einen Recurring Task mit allen Feldern.',
+    parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  recurring_task_create: {
+    name: 'recurring_task_create',
+    description: 'Legt einen Recurring Task an. Mit projectId: erzeugt Todos. Ohne: System-Notification.',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        title: { type: 'string' },
+        description: { type: 'string' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+        tags: { type: 'array', items: { type: 'string' } },
+        milestoneId: { type: 'string' },
+        frequency: { type: 'string', enum: ['daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'] },
+        weekday: { type: 'number' },
+        monthDay: { type: 'number' },
+      },
+      required: ['title', 'frequency'],
+    },
+  },
+  recurring_task_update: {
+    name: 'recurring_task_update',
+    description: 'Aktualisiert einen Recurring Task.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        title: { type: 'string' },
+        description: { type: 'string' },
+        active: { type: 'boolean' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['id'],
+    },
+  },
+
+  // --- Snippets ---
+  snippet_list: {
+    name: 'snippet_list',
+    description: 'Listet Code-Snippets (compact, ohne Code-Body).',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        language: { type: 'string' },
+        category: { type: 'string' },
+        tag: { type: 'string' },
+      },
+    },
+  },
+  snippet_get: {
+    name: 'snippet_get',
+    description: 'Lädt einen Snippet inkl. Code.',
+    parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  snippet_search: {
+    name: 'snippet_search',
+    description: 'Volltext-Suche über Snippets (Code + Title + Description).',
+    parameters: {
+      type: 'object',
+      properties: { q: { type: 'string' }, projectId: PROJECT_ID_PROP },
+      required: ['q'],
+    },
+  },
+  snippet_save: {
+    name: 'snippet_save',
+    description: 'Speichert einen Code-Snippet.',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        title: { type: 'string' },
+        language: { type: 'string', description: 'lowercase, z.B. typescript, python, sql, bash' },
+        code: { type: 'string' },
+        description: { type: 'string' },
+        category: { type: 'string' },
+        fileName: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['title', 'language', 'code'],
+    },
+  },
+  snippet_update: {
+    name: 'snippet_update',
+    description: 'Aktualisiert einen Snippet.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        title: { type: 'string' },
+        language: { type: 'string' },
+        code: { type: 'string' },
+        description: { type: 'string' },
+        category: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['id'],
+    },
+  },
+
+  // --- Soul ---
+  soul_get: {
+    name: 'soul_get',
+    description: 'Lädt die Project Soul (Vision, Prinzipien, Konventionen, Boundaries). null wenn nicht definiert.',
+    parameters: { type: 'object', properties: { projectId: PROJECT_ID_PROP } },
+  },
+  soul_update: {
+    name: 'soul_update',
+    description: 'Setzt/aktualisiert die Project Soul (partial update — nur die übergebenen Sections werden geändert).',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        vision: { type: 'string' },
+        principles: { type: 'string' },
+        conventions: { type: 'string' },
+        communication: { type: 'string' },
+        boundaries: { type: 'string' },
+        workflow: { type: 'string' },
+        quality: { type: 'string' },
+      },
+    },
+  },
+
+  // --- Commits ---
+  commit_list: {
+    name: 'commit_list',
+    description: 'Listet Commits (compact: shortSha, message, author, date, repoLabel). Aus GitHub/GitLab synced.',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        limit: { type: 'number', description: 'Default 50' },
+        repoLabel: { type: 'string' },
+      },
+    },
+  },
+  commit_search: {
+    name: 'commit_search',
+    description: 'Volltext-Suche in Commit-Messages.',
+    parameters: {
+      type: 'object',
+      properties: { projectId: PROJECT_ID_PROP, q: { type: 'string' } },
+      required: ['q'],
+    },
+  },
+  commit_sync: {
+    name: 'commit_sync',
+    description: 'Triggert manuelle Commit-Synchronisation aus konfigurierten Git-Repositories.',
+    parameters: { type: 'object', properties: { projectId: PROJECT_ID_PROP } },
+  },
+
+  // --- Logs ---
+  log_list: {
+    name: 'log_list',
+    description: 'Listet Application-Logs (kommen von externen Apps via API-Key, TTL 5 Tage).',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        level: { type: 'string', enum: ['debug', 'info', 'warn', 'error'] },
+        service: { type: 'string' },
+        search: { type: 'string' },
+        startDate: { type: 'string' },
+        endDate: { type: 'string' },
+        limit: { type: 'number' },
+      },
+    },
+  },
+  log_search: {
+    name: 'log_search',
+    description: 'Volltext-Suche über Logs (alias für log_list mit search-param).',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        q: { type: 'string' },
+        level: { type: 'string', enum: ['debug', 'info', 'warn', 'error'] },
+      },
+      required: ['q'],
+    },
+  },
+  log_stats: {
+    name: 'log_stats',
+    description: 'Log-Statistiken: Total, breakdown nach Level + Service, oldest/newest.',
+    parameters: { type: 'object', properties: { projectId: PROJECT_ID_PROP } },
+  },
+
+  // --- Releases ---
+  release_list: {
+    name: 'release_list',
+    description: 'Listet Releases (compact).',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        status: { type: 'string', enum: ['draft', 'published', 'archived'] },
+        platform: { type: 'string' },
+        releaseType: { type: 'string', enum: ['manual', 'gitlab'] },
+      },
+    },
+  },
+  release_get: {
+    name: 'release_get',
+    description: 'Lädt ein Release mit Description und Assets.',
+    parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  release_create: {
+    name: 'release_create',
+    description: 'Legt ein Release an (manual oder gitlab-synced).',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        version: { type: 'string' },
+        title: { type: 'string' },
+        description: { type: 'string' },
+        releaseType: { type: 'string', enum: ['manual', 'gitlab'] },
+        platform: { type: 'string', enum: ['android', 'ios', 'web', 'desktop', 'docker', 'other'] },
+        status: { type: 'string', enum: ['draft', 'published', 'archived'] },
+        downloadUrl: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['version'],
+    },
+  },
+  release_update: {
+    name: 'release_update',
+    description: 'Aktualisiert ein Release.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        version: { type: 'string' },
+        title: { type: 'string' },
+        description: { type: 'string' },
+        status: { type: 'string', enum: ['draft', 'published', 'archived'] },
+      },
+      required: ['id'],
+    },
+  },
+  release_sync_gitlab: {
+    name: 'release_sync_gitlab',
+    description: 'Synchronisiert Releases aus konfigurierten GitLab-Repos.',
+    parameters: {
+      type: 'object',
+      properties: { projectId: PROJECT_ID_PROP, repoIndex: { type: 'number' } },
+    },
+  },
+
+  // --- Attachments ---
+  attachment_list: {
+    name: 'attachment_list',
+    description: 'Listet Datei-Attachments. Filter optional nach entityType/entityId.',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        entityType: { type: 'string' },
+        entityId: { type: 'string' },
+        limit: { type: 'number' },
+      },
+    },
+  },
+  attachment_get: {
+    name: 'attachment_get',
+    description: 'Metadaten einer Datei (kein Inhalt).',
+    parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  attachment_download: {
+    name: 'attachment_download',
+    description: 'Lädt Inhalt einer Datei. Text-Files direkt, Binärdateien als base64 (max 5MB).',
+    parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  attachment_upload: {
+    name: 'attachment_upload',
+    description: 'Lädt eine Datei hoch (content base64-encoded). Optional an Entity heften (entityType+entityId).',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        fileName: { type: 'string' },
+        content: { type: 'string', description: 'base64-encoded' },
+        mimeType: { type: 'string' },
+        entityType: { type: 'string' },
+        entityId: { type: 'string' },
+        description: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['fileName', 'content'],
+    },
+  },
+
+  // --- Workspaces (M-22) ---
+  workspace_list: {
+    name: 'workspace_list',
+    description: 'Listet Workspaces eines Projekts. Filter nach Status.',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        status: { type: 'string', enum: ['active', 'archived', 'cleaning'] },
+      },
+    },
+  },
+  workspace_get: {
+    name: 'workspace_get',
+    description: 'Lädt einen Workspace (id ODER projectId+name).',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string' }, projectId: PROJECT_ID_PROP, name: { type: 'string' } },
+    },
+  },
+  workspace_create: {
+    name: 'workspace_create',
+    description: 'Legt einen Workspace an. Name muss slug-kompatibel sein ([a-z0-9][a-z0-9_-]*).',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        name: { type: 'string' },
+        description: { type: 'string' },
+        repoUrl: { type: 'string' },
+        branch: { type: 'string' },
+      },
+      required: ['name'],
+    },
+  },
+  workspace_update: {
+    name: 'workspace_update',
+    description: 'Aktualisiert Workspace-Metadaten.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        repoUrl: { type: 'string' },
+        branch: { type: 'string' },
+      },
+      required: ['id'],
+    },
+  },
+  workspace_archive: {
+    name: 'workspace_archive',
+    description: 'Archiviert einen Workspace (status=archived). Disk bleibt.',
+    parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  workspace_delete: {
+    name: 'workspace_delete',
+    description: 'Hard-Delete eines Workspaces. Backend fragt User vor Ausführung via ask_user. Returns {deleted:false, aborted:true} bei Cancel.',
+    parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  workspace_clone: {
+    name: 'workspace_clone',
+    description: 'Klont ein Repo (depth=1). Schlägt fehl wenn Workspace schon ein Repo hat — dann workspace_pull.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string' }, repoUrl: { type: 'string' }, branch: { type: 'string' } },
+      required: ['id', 'repoUrl'],
+    },
+  },
+  workspace_pull: {
+    name: 'workspace_pull',
+    description: 'git pull --ff-only.',
+    parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  workspace_tree: {
+    name: 'workspace_tree',
+    description: 'Directory-Tree (depth default 3, max 8). Skip .git.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string' }, path: { type: 'string' }, depth: { type: 'number' } },
+      required: ['id'],
+    },
+  },
+  workspace_read: {
+    name: 'workspace_read',
+    description: 'Liest eine Datei (UTF-8, max 5MB). Path-Traversal blocked.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string' }, path: { type: 'string' } },
+      required: ['id', 'path'],
+    },
+  },
+  workspace_search: {
+    name: 'workspace_search',
+    description: 'ripgrep über den Workspace. Optional include/exclude globs.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        query: { type: 'string' },
+        include: { type: 'array', items: { type: 'string' } },
+        exclude: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['id', 'query'],
+    },
+  },
+  workspace_status: {
+    name: 'workspace_status',
+    description: 'git status --porcelain --branch.',
+    parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  workspace_exec: {
+    name: 'workspace_exec',
+    description: 'Shell-Command im Sandbox-Container. Default-Timeout 60s, max 600s. Blacklist + scrubbed env. Audit-logged.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        command: { type: 'string' },
+        timeout: { type: 'number' },
+        env: { type: 'object', description: 'Optional env vars (keys [A-Z_][A-Z0-9_]*, values <=4KB).' },
+      },
+      required: ['id', 'command'],
+    },
+  },
 };
 
 export interface ToolContext {
@@ -610,6 +1087,14 @@ export class ChatToolsService {
     private readonly logs: LogsService,
     private readonly webSearch: WebSearchService,
     private readonly readability: ReadabilityService,
+    private readonly workspaces: WorkspacesService,
+    private readonly workspaceClient: WorkspaceClient,
+    private readonly snippets: SnippetsService,
+    private readonly attachments: AttachmentsService,
+    private readonly recurringTasks: RecurringTasksService,
+    private readonly releases: ReleasesService,
+    private readonly souls: SoulsService,
+    private readonly commits: CommitsService,
   ) {}
 
   /** Fire-and-forget audit log for a write-tool call. Never throws. */
@@ -1182,6 +1667,496 @@ export class ChatToolsService {
             tags: args.tags as string[] | undefined,
           });
           return { success: true, result: { id: d._id.toString(), name: d.name, version: d.version } };
+        }
+
+        // ─── Recurring tasks ─────────────────────────────────────────────
+        case 'recurring_task_list': {
+          const items = await this.recurringTasks.findAll({
+            projectId: projectId || (args.projectId as string | undefined),
+            systemOnly: args.systemOnly as boolean | undefined,
+          });
+          return {
+            success: true,
+            result: items.map((r) => ({
+              id: r._id.toString(),
+              title: r.title,
+              frequency: r.frequency,
+              active: r.active,
+              priority: r.priority,
+              tags: r.tags,
+              projectId: r.projectId?.toString(),
+            })),
+          };
+        }
+        case 'recurring_task_get': {
+          const r = await this.recurringTasks.findById(args.id as string);
+          return { success: true, result: r.toObject() };
+        }
+        case 'recurring_task_create': {
+          if (!projectId && !args.projectId) {
+            // System-wide tasks (without projectId) require explicit user opt-in
+            // — the chat agent shouldn't be creating cross-project notifications
+            // unprompted. Force projectId-scoping like other write tools.
+            return { success: false, error: 'projectId required for chat-created recurring tasks' };
+          }
+          const r = await this.recurringTasks.create({
+            projectId: (projectId || args.projectId) as string,
+            title: args.title as string,
+            description: args.description as string | undefined,
+            priority: args.priority as never,
+            tags: args.tags as string[] | undefined,
+            milestoneId: args.milestoneId as string | undefined,
+            frequency: args.frequency as never,
+            dayOfWeek: args.weekday as number | undefined,
+            dayOfMonth: args.monthDay as number | undefined,
+          });
+          return { success: true, result: { id: r._id.toString(), title: r.title } };
+        }
+        case 'recurring_task_update': {
+          const r = await this.recurringTasks.update(args.id as string, {
+            title: args.title as string | undefined,
+            description: args.description as string | undefined,
+            active: args.active as boolean | undefined,
+            priority: args.priority as never,
+            tags: args.tags as string[] | undefined,
+          });
+          return { success: true, result: { id: r._id.toString(), title: r.title, active: r.active } };
+        }
+
+        // ─── Snippets ─────────────────────────────────────────────────────
+        case 'snippet_list': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const items = await this.snippets.findByProject(
+            projectId,
+            args.language as string | undefined,
+            args.category as string | undefined,
+            args.tag as string | undefined,
+          );
+          return {
+            success: true,
+            result: items.map((s) => ({
+              id: s._id.toString(),
+              title: s.title,
+              language: s.language,
+              category: s.category,
+              tags: s.tags,
+              fileName: s.fileName,
+            })),
+          };
+        }
+        case 'snippet_get': {
+          const s = await this.snippets.findById(args.id as string);
+          return { success: true, result: s.toObject() };
+        }
+        case 'snippet_search': {
+          const items = await this.snippets.search(
+            args.q as string,
+            projectId || (args.projectId as string | undefined),
+          );
+          return {
+            success: true,
+            result: items.map((s) => ({
+              id: s._id.toString(),
+              title: s.title,
+              language: s.language,
+              snippet: (s.code || '').slice(0, 200),
+            })),
+          };
+        }
+        case 'snippet_save': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const s = await this.snippets.create({
+            projectId,
+            title: args.title as string,
+            language: (args.language as string).toLowerCase(),
+            code: args.code as string,
+            description: args.description as string | undefined,
+            category: args.category as string | undefined,
+            fileName: args.fileName as string | undefined,
+            tags: args.tags as string[] | undefined,
+          });
+          return { success: true, result: { id: s._id.toString(), title: s.title } };
+        }
+        case 'snippet_update': {
+          const s = await this.snippets.update(args.id as string, {
+            title: args.title as string | undefined,
+            language: args.language ? (args.language as string).toLowerCase() : undefined,
+            code: args.code as string | undefined,
+            description: args.description as string | undefined,
+            category: args.category as string | undefined,
+            tags: args.tags as string[] | undefined,
+          });
+          return { success: true, result: { id: s._id.toString(), title: s.title } };
+        }
+
+        // ─── Soul ────────────────────────────────────────────────────────
+        case 'soul_get': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const s = await this.souls.findByProject(projectId);
+          return { success: true, result: s ? s.toObject() : null };
+        }
+        case 'soul_update': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const s = await this.souls.upsert(projectId, {
+            vision: args.vision as string | undefined,
+            principles: args.principles as string | undefined,
+            conventions: args.conventions as string | undefined,
+            communication: args.communication as string | undefined,
+            boundaries: args.boundaries as string | undefined,
+            workflow: args.workflow as string | undefined,
+            quality: args.quality as string | undefined,
+          });
+          return { success: true, result: { id: s._id.toString(), updated: true } };
+        }
+
+        // ─── Commits ─────────────────────────────────────────────────────
+        case 'commit_list': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const limit = typeof args.limit === 'number' ? args.limit : 50;
+          const items = await this.commits.findByProject(projectId, {
+            limit,
+            repoLabel: args.repoLabel as string | undefined,
+          });
+          return {
+            success: true,
+            result: items.map((c) => ({
+              shortSha: (c as unknown as { sha?: string }).sha?.slice(0, 7),
+              message: ((c as unknown as { message?: string }).message || '').split('\n')[0],
+              author: (c as unknown as { author?: string }).author,
+              date: (c as unknown as { committedAt?: Date }).committedAt,
+              repoLabel: (c as unknown as { repoLabel?: string }).repoLabel,
+            })),
+          };
+        }
+        case 'commit_search': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const items = await this.commits.search(projectId, args.q as string);
+          return {
+            success: true,
+            result: items.map((c) => ({
+              shortSha: (c as unknown as { sha?: string }).sha?.slice(0, 7),
+              message: ((c as unknown as { message?: string }).message || '').split('\n')[0],
+              author: (c as unknown as { author?: string }).author,
+              date: (c as unknown as { committedAt?: Date }).committedAt,
+            })),
+          };
+        }
+        case 'commit_sync': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const result = await this.commits.syncAllForProject(projectId);
+          return { success: true, result };
+        }
+
+        // ─── Logs ────────────────────────────────────────────────────────
+        case 'log_list': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const items = await this.logs.findByProject(projectId, {
+            level: args.level as string | undefined,
+            service: args.service as string | undefined,
+            search: args.search as string | undefined,
+            startDate: args.startDate as string | undefined,
+            endDate: args.endDate as string | undefined,
+            limit: args.limit as number | undefined,
+          });
+          return {
+            success: true,
+            result: items.map((l) => ({
+              id: (l._id as unknown as { toString(): string }).toString(),
+              level: l.level,
+              service: l.service,
+              area: l.area,
+              message: (l.message || '').slice(0, 400),
+              createdAt: (l as unknown as { createdAt?: Date }).createdAt,
+            })),
+          };
+        }
+        case 'log_search': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const items = await this.logs.findByProject(projectId, {
+            search: args.q as string,
+            level: args.level as string | undefined,
+            limit: 50,
+          });
+          return {
+            success: true,
+            result: items.map((l) => ({
+              level: l.level,
+              service: l.service,
+              snippet: (l.message || '').slice(0, 200),
+              createdAt: (l as unknown as { createdAt?: Date }).createdAt,
+            })),
+          };
+        }
+        case 'log_stats': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          return { success: true, result: await this.logs.stats(projectId) };
+        }
+
+        // ─── Releases ────────────────────────────────────────────────────
+        case 'release_list': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const items = await this.releases.findByProject(projectId, {
+            status: args.status as never,
+            platform: args.platform as never,
+            releaseType: args.releaseType as never,
+          });
+          return {
+            success: true,
+            result: items.map((r) => ({
+              id: r._id.toString(),
+              version: r.version,
+              title: r.title,
+              status: r.status,
+              platform: r.platform,
+              releaseType: r.releaseType,
+              tags: r.tags,
+            })),
+          };
+        }
+        case 'release_get': {
+          const r = await this.releases.findById(args.id as string);
+          return { success: true, result: r.toObject() };
+        }
+        case 'release_create': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const r = await this.releases.create({
+            projectId,
+            version: args.version as string,
+            title: args.title as string | undefined,
+            description: args.description as string | undefined,
+            releaseType: args.releaseType as never,
+            platform: args.platform as never,
+            status: args.status as never,
+            downloadUrl: args.downloadUrl as string | undefined,
+            tags: args.tags as string[] | undefined,
+          } as never);
+          return { success: true, result: { id: r._id.toString(), version: r.version } };
+        }
+        case 'release_update': {
+          const r = await this.releases.update(args.id as string, {
+            version: args.version as string | undefined,
+            title: args.title as string | undefined,
+            description: args.description as string | undefined,
+            status: args.status as never,
+          });
+          return { success: true, result: { id: r._id.toString(), version: r.version } };
+        }
+        case 'release_sync_gitlab': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const result = await this.releases.syncGitlab(
+            projectId,
+            args.repoIndex as number | undefined,
+          );
+          return { success: true, result };
+        }
+
+        // ─── Attachments ─────────────────────────────────────────────────
+        case 'attachment_list': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const items = await this.attachments.findByProject(
+            projectId,
+            args.entityType as string | undefined,
+            args.entityId as string | undefined,
+          );
+          const limit = typeof args.limit === 'number' ? args.limit : 50;
+          return {
+            success: true,
+            result: items.slice(0, limit).map((a) => ({
+              id: a._id.toString(),
+              fileName: a.originalName,
+              mimeType: a.mimeType,
+              size: a.size,
+              entityType: a.entityType,
+              entityId: a.entityId?.toString(),
+            })),
+          };
+        }
+        case 'attachment_get': {
+          const a = await this.attachments.findById(args.id as string);
+          return {
+            success: true,
+            result: {
+              id: a._id.toString(),
+              fileName: a.originalName,
+              mimeType: a.mimeType,
+              size: a.size,
+              tags: a.tags,
+              description: a.description,
+            },
+          };
+        }
+        case 'attachment_download': {
+          const { text, attachment } = await this.attachments.getText(args.id as string);
+          if (text != null) {
+            return {
+              success: true,
+              result: {
+                fileName: attachment.originalName,
+                mimeType: attachment.mimeType,
+                size: attachment.size,
+                kind: 'text',
+                content: text,
+              },
+            };
+          }
+          const { buffer } = await this.attachments.getContent(args.id as string);
+          // Cap binary download at ~3MB after base64 expansion to keep prompts sane.
+          if (buffer.length > 3 * 1024 * 1024) {
+            return { success: false, error: `binary file too large for chat context (${buffer.length} bytes)` };
+          }
+          return {
+            success: true,
+            result: {
+              fileName: attachment.originalName,
+              mimeType: attachment.mimeType,
+              size: attachment.size,
+              kind: 'binary',
+              base64: buffer.toString('base64'),
+            },
+          };
+        }
+        case 'attachment_upload': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const a = await this.attachments.createFromBase64(
+            {
+              projectId,
+              fileName: args.fileName as string,
+              mimeType: args.mimeType as string | undefined,
+              entityType: args.entityType as string | undefined,
+              entityId: args.entityId as string | undefined,
+              description: args.description as string | undefined,
+              tags: args.tags as string[] | undefined,
+            },
+            args.content as string,
+          );
+          return { success: true, result: { id: a._id.toString(), fileName: a.originalName, size: a.size } };
+        }
+
+        // ─── Workspaces (M-22) ───────────────────────────────────────────
+        case 'workspace_list': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const items = await this.workspaces.findByProject(
+            projectId,
+            args.status as never,
+          );
+          return {
+            success: true,
+            result: items.map((w) => ({
+              id: w._id.toString(),
+              name: w.name,
+              status: w.status,
+              repoUrl: w.repoUrl,
+              branch: w.branch,
+              sizeBytes: w.sizeBytes,
+              lastActivityAt: w.lastActivityAt,
+            })),
+          };
+        }
+        case 'workspace_get': {
+          if (args.id) {
+            const w = await this.workspaces.findById(args.id as string);
+            return { success: true, result: w.toObject() };
+          }
+          if (!projectId) return { success: false, error: 'projectId or id required' };
+          const w = await this.workspaces.findByName(projectId, args.name as string);
+          return { success: true, result: w.toObject() };
+        }
+        case 'workspace_create': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const w = await this.workspaces.create({
+            projectId,
+            name: args.name as string,
+            description: args.description as string | undefined,
+            repoUrl: args.repoUrl as string | undefined,
+            branch: args.branch as string | undefined,
+          });
+          return { success: true, result: { id: w._id.toString(), name: w.name, path: w.path } };
+        }
+        case 'workspace_update': {
+          const w = await this.workspaces.update(args.id as string, {
+            name: args.name as string | undefined,
+            description: args.description as string | undefined,
+            repoUrl: args.repoUrl as string | undefined,
+            branch: args.branch as string | undefined,
+          });
+          return { success: true, result: { id: w._id.toString(), name: w.name } };
+        }
+        case 'workspace_archive': {
+          const w = await this.workspaces.archive(args.id as string);
+          return { success: true, result: { id: w._id.toString(), status: w.status } };
+        }
+        case 'workspace_delete': {
+          // Chat path goes straight through — the user is already in the chat
+          // dock and explicitly asked. The MCP path adds an ask_user dialog
+          // (see mcp-tools.ts), but here the chat IS the user-interface.
+          await this.workspaces.remove(args.id as string);
+          return { success: true, result: { deleted: true, id: args.id } };
+        }
+        case 'workspace_clone': {
+          const w = await this.workspaces.findById(args.id as string);
+          const sidecar = await this.workspaceClient.clone(
+            w._id.toString(),
+            args.repoUrl as string,
+            args.branch as string | undefined,
+          );
+          let sizeBytes: number | undefined;
+          try {
+            sizeBytes = (await this.workspaceClient.size(w._id.toString())).sizeBytes;
+          } catch {
+            sizeBytes = undefined;
+          }
+          await this.workspaces.touch(w._id.toString(), sizeBytes);
+          return { success: true, result: { cloned: true, sizeBytes, sidecar } };
+        }
+        case 'workspace_pull': {
+          const w = await this.workspaces.findById(args.id as string);
+          const sidecar = await this.workspaceClient.pull(w._id.toString());
+          await this.workspaces.touch(w._id.toString());
+          return { success: true, result: { pulled: true, sidecar } };
+        }
+        case 'workspace_tree': {
+          const w = await this.workspaces.findById(args.id as string);
+          const tree = await this.workspaceClient.tree(
+            w._id.toString(),
+            args.path as string | undefined,
+            args.depth as number | undefined,
+          );
+          await this.workspaces.touch(w._id.toString());
+          return { success: true, result: tree };
+        }
+        case 'workspace_read': {
+          const w = await this.workspaces.findById(args.id as string);
+          const file = await this.workspaceClient.read(w._id.toString(), args.path as string);
+          await this.workspaces.touch(w._id.toString());
+          return { success: true, result: file };
+        }
+        case 'workspace_search': {
+          const w = await this.workspaces.findById(args.id as string);
+          const search = await this.workspaceClient.search(
+            w._id.toString(),
+            args.query as string,
+            args.include as string[] | undefined,
+            args.exclude as string[] | undefined,
+          );
+          await this.workspaces.touch(w._id.toString());
+          return { success: true, result: search };
+        }
+        case 'workspace_status': {
+          const w = await this.workspaces.findById(args.id as string);
+          const status = await this.workspaceClient.status(w._id.toString());
+          await this.workspaces.touch(w._id.toString());
+          return { success: true, result: status };
+        }
+        case 'workspace_exec': {
+          const w = await this.workspaces.findById(args.id as string);
+          const exec = await this.workspaceClient.exec(
+            w._id.toString(),
+            args.command as string,
+            args.timeout as number | undefined,
+            args.env as Record<string, string> | undefined,
+          );
+          await this.workspaces.touch(w._id.toString());
+          return { success: true, result: exec };
         }
 
         default:

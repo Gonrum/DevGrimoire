@@ -682,6 +682,8 @@
     "chatToolsGroup_project_read": "Project data (read)",
     "chatToolsGroup_project_write": "Project data (write)",
     "chatToolsGroup_external_read": "Web search & article fetch",
+    "chatToolsGroup_workspace_read": "Workspaces (read)",
+    "chatToolsGroup_workspace_write": "Workspaces (write)",
     "chatToolsWriteBadge": "Write",
     "chatToolsWriteBanner": "Active write tools: {{count}} — the chat assistant can create or modify data.",
     "chatToolsSelectAllWriteConfirm": "Really enable {{count}} write tools? The chat assistant will be able to create, modify, or comment on data.",

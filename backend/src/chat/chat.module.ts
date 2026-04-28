@@ -25,6 +25,11 @@ import { AttachmentsModule } from '../attachments/attachments.module';
 import { MinioModule } from '../minio/minio.module';
 import { WebSearchModule } from '../web-search/web-search.module';
 import { WorkspacesModule } from '../workspaces/workspaces.module';
+import { SnippetsModule } from '../snippets/snippets.module';
+import { RecurringTasksModule } from '../recurring-tasks/recurring-tasks.module';
+import { ReleasesModule } from '../releases/releases.module';
+import { SoulsModule } from '../souls/souls.module';
+import { CommitsModule } from '../commits/commits.module';
 
 @Module({
   imports: [
@@ -49,6 +54,11 @@ import { WorkspacesModule } from '../workspaces/workspaces.module';
     MinioModule,
     WebSearchModule,
     WorkspacesModule,
+    SnippetsModule,
+    RecurringTasksModule,
+    ReleasesModule,
+    SoulsModule,
+    CommitsModule,
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatLlmService, ChatContextService, ChatToolsService, EncryptionService],
