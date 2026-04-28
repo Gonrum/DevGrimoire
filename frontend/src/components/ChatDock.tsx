@@ -10,12 +10,14 @@ import {
   ChatToolCallRecord,
   Project,
   UserLlmConfig,
+  Workspace,
 } from '../api/client';
 import { streamBrowserLlm, BrowserLlmMessage } from '../api/browserLlmClient';
 import Markdown from './Markdown';
 import Button from './ui/Button';
 
 const LAST_SESSION_KEY_PREFIX = 'devgrimoire_chat_last_session:';
+const LAST_WORKSPACE_KEY_PREFIX = 'devgrimoire_chat_last_workspace:';
 const DOCK_WIDTH_KEY = 'devgrimoire_chat_dock_width';
 const DOCK_DEFAULT_WIDTH = 440;
 const DOCK_MIN_WIDTH = 320;
@@ -94,6 +96,8 @@ export default function ChatDock() {
   const [featureEnabled, setFeatureEnabled] = useState<boolean>(true);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [session, setSession] = useState<ChatSession | null>(null);
   const [draft, setDraft] = useState('');
@@ -286,6 +290,42 @@ export default function ChatDock() {
     }
   }, []);
 
+  // Load active workspaces for the selected project + restore the last
+  // explicitly-picked workspace from localStorage. Switching projects
+  // resets the active workspace so a stale id never leaks across projects.
+  useEffect(() => {
+    if (!projectId) {
+      setWorkspaces([]);
+      setActiveWorkspaceId(null);
+      return;
+    }
+    let cancelled = false;
+    api.workspaces
+      .list(projectId, 'active')
+      .then((list) => {
+        if (cancelled) return;
+        setWorkspaces(list);
+        const stored = typeof window !== 'undefined'
+          ? window.localStorage.getItem(LAST_WORKSPACE_KEY_PREFIX + projectId)
+          : null;
+        const valid = stored && list.some((w) => w._id === stored) ? stored : null;
+        setActiveWorkspaceId(valid);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setWorkspaces([]);
+        setActiveWorkspaceId(null);
+      });
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  const setActiveWorkspaceWithPersist = useCallback((wsId: string | null) => {
+    setActiveWorkspaceId(wsId);
+    if (typeof window === 'undefined' || !projectId) return;
+    if (wsId) window.localStorage.setItem(LAST_WORKSPACE_KEY_PREFIX + projectId, wsId);
+    else window.localStorage.removeItem(LAST_WORKSPACE_KEY_PREFIX + projectId);
+  }, [projectId]);
+
   // Load detailed session with messages
   const loadSession = useCallback(async (id: string) => {
     setLoadingSession(true);
@@ -432,9 +472,10 @@ export default function ChatDock() {
           },
         },
         abort.signal,
+        activeWorkspaceId,
       );
     },
-    [],
+    [activeWorkspaceId],
   );
 
   const runBrowserStream = useCallback(
@@ -448,7 +489,7 @@ export default function ChatDock() {
       if (!llm.endpoint?.trim() || !llm.model?.trim()) {
         throw new Error(t('chat.browserMissingConfig'));
       }
-      const prep = await api.chat.prepareMessage(sessionId, content, attachmentIds);
+      const prep = await api.chat.prepareMessage(sessionId, content, attachmentIds, activeWorkspaceId);
       setStreaming((s) => s ? { ...s, contextRefs: prep.contextRefs } : s);
 
       const conversation: BrowserLlmMessage[] = prep.messages.map((m) => ({
@@ -572,7 +613,7 @@ export default function ChatDock() {
         setStreaming(null);
       }
     },
-    [t],
+    [t, activeWorkspaceId],
   );
 
   const sendMessage = useCallback(async () => {
@@ -812,6 +853,23 @@ export default function ChatDock() {
                   </button>
                 )}
               </div>
+              {projectId && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-gray-500 shrink-0 w-16">{t('chat.workspace')}</label>
+                  <select
+                    value={activeWorkspaceId ?? ''}
+                    onChange={(e) => setActiveWorkspaceWithPersist(e.target.value || null)}
+                    disabled={workspaces.length === 0}
+                    className="flex-1 bg-gray-800 border border-gray-700 text-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
+                    title={t('chat.workspaceHint')}
+                  >
+                    <option value="">{t('chat.workspaceNone')}</option>
+                    {workspaces.map((w) => (
+                      <option key={w._id} value={w._id}>{w.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* Messages */}

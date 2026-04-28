@@ -24,6 +24,7 @@ import { LogsModule } from '../logs/logs.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
 import { MinioModule } from '../minio/minio.module';
 import { WebSearchModule } from '../web-search/web-search.module';
+import { WorkspacesModule } from '../workspaces/workspaces.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { WebSearchModule } from '../web-search/web-search.module';
     AttachmentsModule,
     MinioModule,
     WebSearchModule,
+    WorkspacesModule,
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatLlmService, ChatContextService, ChatToolsService, EncryptionService],

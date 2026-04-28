@@ -25,6 +25,8 @@ import { ChatContextService, AttachmentForContext } from './chat-context.service
 import { ChatToolsService, ALL_TOOL_NAMES, TOOL_GROUPS, WRITE_TOOL_NAMES } from './chat-tools';
 import { ChatAttachmentRef, ChatToolCallRecord } from './schemas/chat-session.schema';
 import { AttachmentsService } from '../attachments/attachments.service';
+import { WorkspacesService } from '../workspaces/workspaces.service';
+import { WorkspaceDocument } from '../workspaces/schemas/workspace.schema';
 import { MinioService } from '../minio/minio.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/schemas/user.schema';
@@ -118,7 +120,28 @@ export class ChatController {
     private readonly tools: ChatToolsService,
     private readonly attachments: AttachmentsService,
     private readonly minio: MinioService,
+    private readonly workspaces: WorkspacesService,
   ) {}
+
+  /**
+   * Resolves a workspaceId from the message DTO, returning the workspace
+   * doc only if it exists AND belongs to this project. Anything else
+   * (missing id, wrong project, deleted) silently degrades to null so a
+   * stale frontend selection never blocks a chat turn.
+   */
+  private async resolveActiveWorkspace(
+    workspaceId: string | undefined,
+    projectId: string,
+  ): Promise<WorkspaceDocument | null> {
+    if (!workspaceId) return null;
+    try {
+      const ws = await this.workspaces.findById(workspaceId);
+      if (ws.projectId.toString() !== projectId) return null;
+      return ws;
+    } catch {
+      return null;
+    }
+  }
 
   /**
    * Resolve attachment IDs to their extracted text (for text files) or base64 data
@@ -382,12 +405,14 @@ export class ChatController {
     const projectId = session.projectId.toString();
     const opts = await this.llm.getOptions();
     const { forContext, images, refs } = await this.loadAttachmentsForContext(projectId, dto.attachmentIds);
+    const activeWorkspace = await this.resolveActiveWorkspace(dto.workspaceId, projectId);
     const built = await this.context.build(projectId, dto.content, session.messages, {
       topK: opts.topK,
       historyLimit: opts.historyLimit,
       toolsEnabled: opts.toolsEnabled,
       attachments: forContext,
       images,
+      activeWorkspace,
     });
     const useTools = opts.toolsEnabled && opts.toolsAllowlist.length > 0;
     return {
@@ -527,12 +552,14 @@ export class ChatController {
     const afterUser = await this.chatService.findById(id, userId);
     const historyWithoutCurrent = afterUser.messages.slice(0, -1);
     const opts = await this.llm.getOptions();
+    const activeWorkspace = await this.resolveActiveWorkspace(dto.workspaceId, projectId);
     const built = await this.context.build(projectId, dto.content, historyWithoutCurrent, {
       topK: opts.topK,
       historyLimit: opts.historyLimit,
       toolsEnabled: opts.toolsEnabled,
       attachments: attachmentsForContext,
       images: attachmentImages,
+      activeWorkspace,
     });
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');

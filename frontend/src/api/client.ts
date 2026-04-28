@@ -1133,10 +1133,10 @@ export const api = {
       }),
     deleteSession: (id: string) =>
       request<void>(`/chat/sessions/${id}`, { method: 'DELETE' }),
-    prepareMessage: (sessionId: string, content: string, attachmentIds?: string[]) =>
+    prepareMessage: (sessionId: string, content: string, attachmentIds?: string[], workspaceId?: string | null) =>
       request<ChatPreparedPrompt>(`/chat/sessions/${sessionId}/prepare`, {
         method: 'POST',
-        body: JSON.stringify({ content, attachmentIds }),
+        body: JSON.stringify({ content, attachmentIds, workspaceId: workspaceId ?? undefined }),
       }),
     uploadAttachment: async (sessionId: string, file: File): Promise<ChatAttachmentUploadResult> => {
       const headers: Record<string, string> = {};
@@ -1178,6 +1178,7 @@ export const api = {
         onError?: (message: string) => void;
       },
       signal?: AbortSignal,
+      workspaceId?: string | null,
     ): Promise<void> => {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       const token = getAccessToken?.();
@@ -1185,7 +1186,7 @@ export const api = {
       const res = await fetch(`${BASE_URL}/chat/sessions/${sessionId}/message`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ content, attachmentIds }),
+        body: JSON.stringify({ content, attachmentIds, workspaceId: workspaceId ?? undefined }),
         signal,
       });
       if (!res.ok || !res.body) {

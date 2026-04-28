@@ -35,6 +35,15 @@ export class SendChatMessageDto {
   @IsArray()
   @IsString({ each: true })
   attachmentIds?: string[];
+
+  /**
+   * Active workspace whose name/path/repo are prepended as a one-line
+   * system context to the user message. Tells the agent where it is
+   * working without forcing it to call workspace_get every turn.
+   */
+  @IsOptional()
+  @IsMongoId()
+  workspaceId?: string;
 }
 
 export const CHAT_PROVIDERS = [
@@ -146,6 +155,10 @@ export class PrepareChatMessageDto {
   @IsArray()
   @IsString({ each: true })
   attachmentIds?: string[];
+
+  @IsOptional()
+  @IsMongoId()
+  workspaceId?: string;
 }
 
 export class PersistedContextRefDto {

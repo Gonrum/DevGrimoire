@@ -3,6 +3,19 @@ import { ProjectsService } from '../projects/projects.service';
 import { RagService } from '../rag/rag.service';
 import { ChatMessage, ChatContextRef } from './schemas/chat-session.schema';
 import { LlmMessage, LlmImageInput } from './chat-llm.service';
+import { WorkspaceDocument } from '../workspaces/schemas/workspace.schema';
+
+function shortenRepo(url?: string): string {
+  if (!url) return '';
+  return url.replace(/^https?:\/\//, '').replace(/\.git$/, '');
+}
+
+function workspaceContextLine(ws: WorkspaceDocument): string {
+  const parts: string[] = [`name: ${ws.name}`, `path: ${ws.path}`, `id: ${ws._id.toString()}`];
+  const repo = shortenRepo(ws.repoUrl);
+  if (repo) parts.push(`repo: ${repo} (${ws.branch || 'main'})`);
+  return `[Active Workspace | ${parts.join(' | ')}]`;
+}
 
 export interface ContextBuildResult {
   systemPrompt: string;
@@ -54,6 +67,7 @@ export class ChatContextService {
       toolsEnabled?: boolean;
       attachments?: AttachmentForContext[];
       images?: LlmImageInput[];
+      activeWorkspace?: WorkspaceDocument | null;
     } = {},
   ): Promise<ContextBuildResult> {
     const toolsEnabled = options.toolsEnabled ?? false;
@@ -61,6 +75,7 @@ export class ChatContextService {
     const historyLimit = options.historyLimit ?? 10;
     const attachments = options.attachments ?? [];
     const images = options.images;
+    const activeWorkspace = options.activeWorkspace ?? null;
 
     const project = await this.projects.findById(projectId);
 
@@ -145,10 +160,17 @@ ${contextSection}${attachmentSection}`;
       .filter((m) => m.role !== 'system')
       .map((m) => ({ role: m.role, content: m.content }));
 
+    // Prepend the workspace context line to THIS turn's user message only —
+    // we deliberately don't rewrite history so older turns reflect what was
+    // active back then, not now.
+    const userContent = activeWorkspace
+      ? `${workspaceContextLine(activeWorkspace)}\n\n${userMessage}`
+      : userMessage;
+
     const messages: LlmMessage[] = [
       { role: 'system', content: systemPrompt },
       ...historyMessages,
-      { role: 'user', content: userMessage },
+      { role: 'user', content: userContent },
     ];
 
     const contextRefs: ChatContextRef[] = ragResults.map((r) => ({
