@@ -41,6 +41,7 @@ import { ChatLlmService } from './chat/chat-llm.service';
 import { ChatContextService } from './chat/chat-context.service';
 import { WebSearchService } from './web-search/services/web-search.service';
 import { ReadabilityService } from './web-search/services/readability.service';
+import { WorkspacesService } from './workspaces/workspaces.service';
 import { registerMcpTools, McpServices } from './mcp-tools';
 import { ApiKeysService } from './api-keys/api-keys.service';
 import { AuthService } from './auth/auth.service';
@@ -100,6 +101,7 @@ async function bootstrap() {
     chatContextService: app.get(ChatContextService),
     webSearchService: app.get(WebSearchService),
     readabilityService: app.get(ReadabilityService),
+    workspacesService: app.get(WorkspacesService),
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};
@@ -147,11 +149,21 @@ async function bootstrap() {
     }
 
     // Mirror JwtAuthGuard pattern so RequestContext + per-user scoped tools work.
+    const owner = await authService.findUserById(validated.userId.toString());
+    if (!owner) {
+      res.status(401).json({
+        jsonrpc: '2.0',
+        error: { code: -32001, message: 'Unauthorized: API key owner no longer exists.' },
+        id: null,
+      });
+      return;
+    }
     req.user = {
       userId: validated.userId.toString(),
-      username: 'api-key',
-      role: 'user',
+      username: owner.username,
+      role: owner.role,
     } satisfies RequestUser;
+    req.apiKey = validated;
 
     next();
   };
@@ -215,7 +227,7 @@ async function bootstrap() {
         return;
       }
 
-      await RequestContext.run(req.user, () => transport.handleRequest(req, res, req.body));
+      await RequestContext.run(req.user, req.apiKey, () => transport.handleRequest(req, res, req.body));
     } catch (error) {
       if (!res.headersSent) {
         res.status(500).json({
@@ -246,7 +258,7 @@ async function bootstrap() {
     const sessionId = req.query.sessionId as string;
     const transport = transports[sessionId];
     if (transport instanceof SSEServerTransport) {
-      await RequestContext.run(req.user, () => transport.handlePostMessage(req, res, req.body));
+      await RequestContext.run(req.user, undefined, () => transport.handlePostMessage(req, res, req.body));
     } else {
       res.status(400).json({
         jsonrpc: '2.0',

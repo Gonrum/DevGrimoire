@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth';
 import UserManagement from './UserManagement';
 import ReplicationSettings from '../components/ReplicationSettings';
 import WebSearchSettings from '../components/WebSearchSettings';
+import ApiKeyToolEditor from '../components/ApiKeyToolEditor';
 import Button from '../components/ui/Button';
 import ConfirmButton from '../components/ui/ConfirmButton';
 
@@ -136,6 +137,8 @@ export default function Settings() {
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [editingApiKeyId, setEditingApiKeyId] = useState<string | null>(null);
+
 
   // Notification push categories
   const [pushCategories, setPushCategories] = useState<Record<string, boolean>>({});
@@ -173,6 +176,7 @@ export default function Settings() {
   const [llmHasStoredKey, setLlmHasStoredKey] = useState(false);
   const [llmTestState, setLlmTestState] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [llmTestMessage, setLlmTestMessage] = useState<string>('');
+  const [dictationEnabled, setDictationEnabled] = useState(localStorage.getItem('dg_dictation_enabled') !== 'false');
 
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
@@ -455,6 +459,11 @@ export default function Settings() {
     }
   };
 
+  const saveApiKeyTools = async (id: string, tools: string[] | null) => {
+    await api.apiKeys.update(id, { allowedTools: tools });
+    await loadApiKeys();
+  };
+
   const createApiKey = async () => {
     if (!apiKeyName.trim()) return;
     setApiKeyCreating(true);
@@ -490,7 +499,19 @@ export default function Settings() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const toggleDictation = () => {
+    const next = !dictationEnabled;
+    setDictationEnabled(next);
+    localStorage.setItem('dg_dictation_enabled', String(next));
+  };
+
+  const resetDictationConsent = () => {
+    localStorage.removeItem('speech_consent');
+    alert(t('settings.dictationConsentReset') || 'Consent zurückgesetzt');
+  };
+
   const save = async () => {
+
     setSaving(true);
     setError(null);
     try {
@@ -706,13 +727,30 @@ export default function Settings() {
                           : t('common.noExpiry')}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <ConfirmButton
-                          onConfirm={() => deleteApiKey(key._id)}
-                          label={t('common.delete')}
-                          confirmLabel={t('common.confirmDelete')}
-                          variant="danger"
-                          size="xs"
-                        />
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="secondary"
+                            size="xs"
+                            onClick={() =>
+                              setEditingApiKeyId(
+                                editingApiKeyId === key._id ? null : key._id,
+                              )
+                            }
+                          >
+                            {Array.isArray(key.allowedTools)
+                              ? t('settings.apiKeyToolsScoped', {
+                                  count: key.allowedTools.length,
+                                })
+                              : t('settings.apiKeyToolsAll')}
+                          </Button>
+                          <ConfirmButton
+                            onConfirm={() => deleteApiKey(key._id)}
+                            label={t('common.delete')}
+                            confirmLabel={t('common.confirmDelete')}
+                            variant="danger"
+                            size="xs"
+                          />
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -720,6 +758,18 @@ export default function Settings() {
               </table>
             </div>
           )}
+
+          {editingApiKeyId && (() => {
+            const key = apiKeys.find((k) => k._id === editingApiKeyId);
+            if (!key) return null;
+            return (
+              <ApiKeyToolEditor
+                apiKey={key}
+                onSave={(tools) => saveApiKeyTools(key._id, tools)}
+                onClose={() => setEditingApiKeyId(null)}
+              />
+            );
+          })()}
 
           <div className="mt-8 bg-gray-800/50 border border-gray-700 rounded-lg p-4">
             <h2 className="text-sm font-medium text-gray-300 mb-2">{t('settings.apiKeyUsageTitle')}</h2>
@@ -736,96 +786,130 @@ export default function Settings() {
         </>
       )}
 
-      {tab === 'notifications' && (() => {
-        const mcpCats = PUSH_CATEGORIES.filter((c) => c.group === 'mcp');
-        const allMcpOn = mcpCats.every((c) => pushCategories[c.key]);
-        const someMcpOn = mcpCats.some((c) => pushCategories[c.key]);
+       {tab === 'notifications' && (
+         <>
+           <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 mb-6 flex items-center justify-between gap-4">
+             <div>
+               <div className="text-sm font-medium text-gray-200">{t('settings.dictationEnabled')}</div>
+               <div className="text-xs text-gray-500 mt-0.5">{t('settings.dictationEnabledDesc')}</div>
+             </div>
+             <div className="flex items-center gap-3">
+               <button
+                 type="button"
+                 role="switch"
+                 aria-checked={dictationEnabled}
+                 onClick={toggleDictation}
+                 className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+                   dictationEnabled ? 'bg-violet-600' : 'bg-gray-600'
+                 }`}
+               >
+                 <span
+                   className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
+                     dictationEnabled ? 'translate-x-5' : 'translate-x-0'
+                   }`}
+                 />
+               </button>
+               <Button size="xs" variant="secondary" onClick={resetDictationConsent}>
+                 {t('settings.dictationResetConsent')}
+               </Button>
+             </div>
+           </div>
 
-        const Toggle = ({ checked, onClick }: { checked: boolean; onClick: () => void }) => (
-          <button
-            type="button"
-            role="switch"
-            aria-checked={checked}
-            onClick={onClick}
-            disabled={pushSaving}
-            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
-              checked ? 'bg-violet-600' : 'bg-gray-600'
-            }`}
-          >
-            <span
-              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
-                checked ? 'translate-x-5' : 'translate-x-0'
-              }`}
-            />
-          </button>
-        );
+           {(() => {
+             const mcpCats = PUSH_CATEGORIES.filter((c) => c.group === 'mcp');
+             const allMcpOn = mcpCats.every((c) => pushCategories[c.key]);
+             const someMcpOn = mcpCats.some((c) => pushCategories[c.key]);
 
-        return (
-          <>
-            <p className="text-gray-400 mb-6">
-              {t('settings.notificationsDescription')}
-            </p>
+             const Toggle = ({ checked, onClick }: { checked: boolean; onClick: () => void }) => (
+               <button
+                 type="button"
+                 role="switch"
+                 aria-checked={checked}
+                 onClick={onClick}
+                 disabled={pushSaving}
+                 className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+                   checked ? 'bg-violet-600' : 'bg-gray-600'
+                 }`}
+               >
+                 <span
+                   className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
+                     checked ? 'translate-x-5' : 'translate-x-0'
+                   }`}
+                 />
+               </button>
+             );
 
-            {pushLoading ? (
-              <div className="text-gray-500 py-10 text-center">{t('common.loading')}</div>
-            ) : (
-              <div className="space-y-6">
-                {/* notify_user — standalone */}
-                {PUSH_CATEGORIES.filter((c) => !c.group).map((cat) => (
-                  <div
-                    key={cat.key}
-                    className="bg-gray-900 border border-gray-700 rounded-lg p-4 flex items-center justify-between gap-4"
-                  >
-                    <div>
-                      <div className="text-sm font-medium text-gray-200">
-                        {t(`settings.pushCategory_${cat.key}`)}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-0.5">
-                        {t(`settings.pushCategory_${cat.key}_desc`)}
-                      </div>
-                    </div>
-                    <Toggle checked={pushCategories[cat.key] ?? false} onClick={() => togglePushCategory(cat.key)} />
-                  </div>
-                ))}
+             return (
+               <>
+                 <p className="text-gray-400 mb-6">
+                   {t('settings.notificationsDescription')}
+                 </p>
 
-                {/* MCP Tool-Aufrufe — grouped */}
-                <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-800/50">
-                    <div>
-                      <div className="text-sm font-medium text-gray-200">{t('settings.pushGroup_mcp')}</div>
-                      <div className="text-xs text-gray-500 mt-0.5">{t('settings.pushGroup_mcp_desc')}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500">
-                        {someMcpOn ? `${mcpCats.filter((c) => pushCategories[c.key]).length}/${mcpCats.length}` : t('common.none')}
-                      </span>
-                      <Toggle checked={allMcpOn} onClick={toggleAllMcp} />
-                    </div>
-                  </div>
-                  <div className="divide-y divide-gray-800">
-                    {mcpCats.map((cat) => (
-                      <div
-                        key={cat.key}
-                        className="flex items-center justify-between px-4 py-3 gap-4"
-                      >
-                        <div>
-                          <div className="text-sm text-gray-300">
-                            {t(`settings.pushCategory_${cat.key}`)}
-                          </div>
-                          <div className="text-xs text-gray-600 mt-0.5">
-                            {t(`settings.pushCategory_${cat.key}_desc`)}
-                          </div>
-                        </div>
-                        <Toggle checked={pushCategories[cat.key] ?? false} onClick={() => togglePushCategory(cat.key)} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </>
-        );
-      })()}
+                 {pushLoading ? (
+                   <div className="text-gray-500 py-10 text-center">{t('common.loading')}</div>
+                 ) : (
+                   <div className="space-y-6">
+                     {/* notify_user — standalone */}
+                     {PUSH_CATEGORIES.filter((c) => !c.group).map((cat) => (
+                       <div
+                         key={cat.key}
+                         className="bg-gray-900 border border-gray-700 rounded-lg p-4 flex items-center justify-between gap-4"
+                       >
+                         <div>
+                           <div className="text-sm font-medium text-gray-200">
+                             {t(`settings.pushCategory_${cat.key}`)}
+                           </div>
+                           <div className="text-xs text-gray-500 mt-0.5">
+                             {t(`settings.pushCategory_${cat.key}_desc`)}
+                           </div>
+                         </div>
+                         <Toggle checked={pushCategories[cat.key] ?? false} onClick={() => togglePushCategory(cat.key)} />
+                       </div>
+                     ))}
+
+                     {/* MCP Tool-Aufrufe — grouped */}
+                     <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
+                       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-800/50">
+                         <div>
+                           <div className="text-sm font-medium text-gray-200">{t('settings.pushGroup_mcp')}</div>
+                           <div className="text-xs text-gray-500 mt-0.5">{t('settings.pushGroup_mcp_desc')}</div>
+                         </div>
+                         <div className="flex items-center gap-2">
+                           <span className="text-xs text-gray-500">
+                             {someMcpOn ? `${mcpCats.filter((c) => pushCategories[c.key]).length}/${mcpCats.length}` : t('common.none')}
+                           </span>
+                           <Toggle checked={allMcpOn} onClick={toggleAllMcp} />
+                         </div>
+                       </div>
+                       <div className="divide-y divide-gray-800">
+                         {mcpCats.map((cat) => (
+                           <div
+                             key={cat.key}
+                             className="flex items-center justify-between px-4 py-3 gap-4"
+                           >
+                             <div>
+                               <div className="text-sm text-gray-300">
+                                 {t(`settings.pushCategory_${cat.key}`)}
+                               </div>
+                               <div className="text-xs text-gray-600 mt-0.5">
+                                 {t(`settings.pushCategory_${cat.key}_desc`)}
+                               </div>
+                             </div>
+                             <Toggle checked={pushCategories[cat.key] ?? false} onClick={() => togglePushCategory(cat.key)} />
+                           </div>
+                         ))}
+                       </div>
+                     </div>
+                   </div>
+                 )}
+               </>
+             );
+           })()}
+         </>
+       )}
+
+
+
 
       {tab === 'chat' && isAdmin && (
         <>

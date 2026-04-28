@@ -24,6 +24,7 @@ import { SettingsModule } from './settings/settings.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SearchModule } from './search/search.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
+import { McpMetaModule } from './mcp-meta/mcp-meta.module';
 import { SchemasModule } from './schemas/schemas.module';
 import { DependenciesModule } from './dependencies/dependencies.module';
 import { FeaturesModule } from './features/features.module';
@@ -43,6 +44,7 @@ import { LogsModule } from './logs/logs.module';
 import { ReleasesModule } from './releases/releases.module';
 import { ChatModule } from './chat/chat.module';
 import { WebSearchModule } from './web-search/web-search.module';
+import { WorkspacesModule } from './workspaces/workspaces.module';
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
@@ -73,6 +75,7 @@ if (!MONGODB_URI) {
     NotificationsModule,
     SearchModule,
     ApiKeysModule,
+    McpMetaModule,
     SchemasModule,
     DependenciesModule,
     FeaturesModule,
@@ -90,6 +93,7 @@ if (!MONGODB_URI) {
     ReleasesModule,
     ChatModule,
     WebSearchModule,
+    WorkspacesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

@@ -25,6 +25,11 @@ export class ApiKey {
 
   @Prop({ default: true })
   active: boolean;
+
+  // default: undefined — Mongoose would otherwise default arrays to [],
+  // which would mean "no tools" for every new key. undefined = "all tools".
+  @Prop({ type: [String], default: undefined })
+  allowedTools?: string[];
 }
 
 export const ApiKeySchema = SchemaFactory.createForClass(ApiKey);

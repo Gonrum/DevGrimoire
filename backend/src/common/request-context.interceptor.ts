@@ -7,8 +7,9 @@ export class RequestContextInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const req = context.switchToHttp().getRequest();
     const user = req.user;
+    const apiKey = req.apiKey;
     return new Observable((subscriber) => {
-      RequestContext.run(user, () => {
+      RequestContext.run(user, apiKey, () => {
         next.handle().subscribe(subscriber);
       });
     });

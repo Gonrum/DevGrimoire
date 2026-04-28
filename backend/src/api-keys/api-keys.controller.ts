@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Delete,
   Body,
   Param,
@@ -9,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { ApiKeysService } from './api-keys.service';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
+import { UpdateApiKeyDto } from './dto/update-api-key.dto';
 
 @Controller('api-keys')
 export class ApiKeysController {
@@ -36,6 +38,15 @@ export class ApiKeysController {
   @Get()
   async list(@Req() req: any) {
     return this.apiKeysService.list(req.user.userId);
+  }
+
+  @Put(':id')
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateApiKeyDto,
+    @Req() req: any,
+  ) {
+    return this.apiKeysService.update(id, req.user.userId, dto);
   }
 
   @Delete(':id')

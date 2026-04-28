@@ -35,6 +35,7 @@ import { ChatLlmService } from './chat/chat-llm.service';
 import { ChatContextService } from './chat/chat-context.service';
 import { WebSearchService } from './web-search/services/web-search.service';
 import { ReadabilityService } from './web-search/services/readability.service';
+import { WorkspacesService } from './workspaces/workspaces.service';
 import { AuthService } from './auth/auth.service';
 import { UserRole } from './auth/schemas/user.schema';
 import { registerMcpTools } from './mcp-tools';
@@ -120,6 +121,7 @@ async function bootstrap() {
     chatContextService: app.get(ChatContextService),
     webSearchService: app.get(WebSearchService),
     readabilityService: app.get(ReadabilityService),
+    workspacesService: app.get(WorkspacesService),
   });
 
   const transport = new StdioServerTransport();

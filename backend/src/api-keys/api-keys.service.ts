@@ -60,6 +60,39 @@ export class ApiKeysService {
       .exec();
   }
 
+  async update(
+    id: string,
+    userId: string,
+    updateData: { name?: string; allowedTools?: string[] | null },
+  ): Promise<ApiKeyDocument> {
+    const patch: Record<string, unknown> = {};
+    const unset: Record<string, unknown> = {};
+
+    if (updateData.name !== undefined) patch.name = updateData.name;
+
+    // allowedTools handling:
+    //   null  → unset (all tools allowed, default)
+    //   []    → set empty array (explicitly no tools)
+    //   [...] → set whitelist
+    //   undefined → leave unchanged
+    if (updateData.allowedTools === null) {
+      unset.allowedTools = '';
+    } else if (Array.isArray(updateData.allowedTools)) {
+      patch.allowedTools = updateData.allowedTools;
+    }
+
+    const ops: Record<string, unknown> = {};
+    if (Object.keys(patch).length) ops.$set = patch;
+    if (Object.keys(unset).length) ops.$unset = unset;
+
+    const apiKey = await this.apiKeyModel
+      .findOneAndUpdate({ _id: id, userId }, ops, { new: true })
+      .select('-keyHash')
+      .exec();
+    if (!apiKey) throw new NotFoundException(`API Key ${id} not found`);
+    return apiKey;
+  }
+
   async revoke(keyId: string, userId: string): Promise<void> {
     const result = await this.apiKeyModel.findOneAndDelete({
       _id: keyId,

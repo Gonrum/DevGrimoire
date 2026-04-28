@@ -61,7 +61,10 @@
     "noExpiry": "No expiry",
     "ofTotal": "of",
     "more": "+ {{count}} more",
-    "unknown": "Unknown"
+    "unknown": "Unknown",
+    "saveSuccess": "Saved",
+    "selectAll": "Select all",
+    "deselectAll": "Deselect all"
   },
   "nav": {
     "dashboard": "Grimoire",
@@ -454,7 +457,17 @@
     "deleteAll": "Delete all",
     "delete": "Delete",
     "noNotifications": "No notifications",
-    "justNow": "just now"
+    "justNow": "just now",
+    "speech": {
+      "dictation": "Dictation",
+      "stopDictation": "Stop",
+      "notSupported": "Only available over HTTPS or localhost",
+      "consentTitle": "Enable Speech Input",
+      "consentText": "To use speech input, your audio will be sent to your browser's STT provider (typically Google). Do you agree?",
+      "consentConfirm": "Agree",
+      "consentCancel": "Cancel",
+      "settingsToggle": "Allow Speech Input"
+    }
   },
   "connection": {
     "connected": "Live connection active",
@@ -550,6 +563,17 @@
     "apiKeyTableExpiry": "Expiry",
     "apiKeyUsageTitle": "Usage",
     "apiKeyUsageText": "API Keys can be used for MCP server and REST API access:",
+    "apiKeyToolScoping": "Tool access",
+    "apiKeyToolScopingDescription": "Restrict which MCP tools an agent with this API key can call.",
+    "apiKeyToolModeAll": "All tools allowed",
+    "apiKeyToolModeAllDesc": "Default — the agent sees and can call every tool.",
+    "apiKeyToolModeScoped": "Selected tools",
+    "apiKeyToolModeScopedDesc": "Only ticked tools are visible and callable.",
+    "apiKeyToolScopingEmptyWarning": "Warning: this key cannot call any tools right now.",
+    "apiKeyToolCountSelected": "{{count}} of {{total}} selected",
+    "apiKeyToolsAll": "All tools",
+    "apiKeyToolsScoped": "Tools: {{count}}",
+    "apiKeyToolSearchPlaceholder": "Filter by tool name or description...",
     "tabChat": "Chat",
     "tabWebSearch": "Web Search",
     "webSearch": {

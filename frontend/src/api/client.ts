@@ -248,7 +248,9 @@ export interface ApiKeyInfo {
   lastUsedAt?: string;
   expiresAt?: string;
   active: boolean;
+  allowedTools?: string[];
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface ApiKeyCreateResponse extends ApiKeyInfo {
@@ -764,8 +766,14 @@ export const api = {
     list: () => request<ApiKeyInfo[]>('/api-keys'),
     create: (data: { name: string; expiresAt?: string }) =>
       request<ApiKeyCreateResponse>('/api-keys', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: { name?: string; allowedTools?: string[] | null }) =>
+      request<ApiKeyInfo>(`/api-keys/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/api-keys/${id}`, { method: 'DELETE' }),
+  },
+  mcp: {
+    tools: () =>
+      request<{ name: string; description: string; group: string }[]>('/mcp/tools'),
   },
   schemas: {
     list: (projectId: string, dbType?: string) => {

@@ -61,7 +61,10 @@
     "noExpiry": "Kein Ablauf",
     "ofTotal": "von",
     "more": "+ {{count}} weitere",
-    "unknown": "Unbekannt"
+    "unknown": "Unbekannt",
+    "saveSuccess": "Gespeichert",
+    "selectAll": "Alle auswählen",
+    "deselectAll": "Alle abwählen"
   },
   "nav": {
     "dashboard": "Grimoire",
@@ -454,7 +457,17 @@
     "deleteAll": "Alle löschen",
     "delete": "Löschen",
     "noNotifications": "Keine Benachrichtigungen",
-    "justNow": "gerade eben"
+    "justNow": "gerade eben",
+    "speech": {
+      "dictation": "Diktieren",
+      "stopDictation": "Stoppen",
+      "notSupported": "Nur über HTTPS oder localhost verfügbar",
+      "consentTitle": "Spracheingabe aktivieren",
+      "consentText": "Um die Spracheingabe zu nutzen, wird dein Audio an den STT-Provider deines Browsers (i. d. R. Google) gesendet. Einverstanden?",
+      "consentConfirm": "Zustimmen",
+      "consentCancel": "Abbrechen",
+      "settingsToggle": "Spracheingabe erlauben"
+    }
   },
   "connection": {
     "connected": "Live-Verbindung aktiv",
@@ -550,6 +563,17 @@
     "apiKeyTableExpiry": "Ablauf",
     "apiKeyUsageTitle": "Verwendung",
     "apiKeyUsageText": "API Keys können für MCP-Server und REST API Zugriff verwendet werden:",
+    "apiKeyToolScoping": "Tool-Zugriff",
+    "apiKeyToolScopingDescription": "Beschränke welche MCP-Tools ein Agent mit diesem API-Key aufrufen darf.",
+    "apiKeyToolModeAll": "Alle Tools erlaubt",
+    "apiKeyToolModeAllDesc": "Standard — der Agent sieht und nutzt alle Tools.",
+    "apiKeyToolModeScoped": "Ausgewählte Tools",
+    "apiKeyToolModeScopedDesc": "Nur die markierten Tools sind sichtbar und aufrufbar.",
+    "apiKeyToolScopingEmptyWarning": "Achtung: Dieser Key kann aktuell keine Tools aufrufen.",
+    "apiKeyToolCountSelected": "{{count}} von {{total}} ausgewählt",
+    "apiKeyToolsAll": "Alle Tools",
+    "apiKeyToolsScoped": "Tools: {{count}}",
+    "apiKeyToolSearchPlaceholder": "Nach Tool-Name oder Beschreibung filtern...",
     "tabChat": "Chat",
     "tabWebSearch": "Websuche",
     "webSearch": {

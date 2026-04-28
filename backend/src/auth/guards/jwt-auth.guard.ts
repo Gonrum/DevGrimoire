@@ -48,11 +48,16 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       if (!validated) {
         throw new UnauthorizedException('Invalid or expired API key');
       }
-      // Set minimal user object for downstream handlers
+      // Inherit role from the owning user so @Roles()-guarded endpoints
+      // (e.g. replication admin routes) work with API-key auth.
+      const owner = await this.authService.findUserById(validated.userId.toString());
+      if (!owner) {
+        throw new UnauthorizedException('API key owner no longer exists');
+      }
       request.user = {
         userId: validated.userId.toString(),
-        username: 'api-key',
-        role: 'user',
+        username: owner.username,
+        role: owner.role,
         apiKeyId: validated._id.toString(),
       };
       return true;

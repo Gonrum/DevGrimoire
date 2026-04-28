@@ -25,6 +25,8 @@ import { CommitsService } from './commits/commits.service';
 import { RagService } from './rag/rag.service';
 import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
 import { SnippetsService } from './snippets/snippets.service';
+import { WorkspacesService } from './workspaces/workspaces.service';
+import { WorkspaceStatus } from './workspaces/schemas/workspace.schema';
 import { AttachmentsService } from './attachments/attachments.service';
 import { QuestionsService } from './questions/questions.service';
 import { LogsService } from './logs/logs.service';
@@ -195,6 +197,7 @@ export interface McpServices {
   chatContextService: ChatContextService;
   webSearchService: WebSearchService;
   readabilityService: ReadabilityService;
+  workspacesService: WorkspacesService;
 }
 
 const tools = [
@@ -1464,6 +1467,83 @@ const tools = [
     },
   },
   {
+    name: 'workspace_create',
+    description: 'Create a code workspace bound to a project. The workspace is a sidecar-container scratch space for clone/pull/read/search operations. Name must be slug-compatible ([a-z0-9][a-z0-9_-]*, max 64) — it is used as a directory segment. The actual filesystem allocation happens lazily when the first operation runs against it.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        name: { type: 'string', description: 'Workspace name — slug-compatible, unique per project' },
+        description: { type: 'string', description: 'Optional description' },
+        repoUrl: { type: 'string', description: 'Optional repository URL (can be set later)' },
+        branch: { type: 'string', description: 'Branch to track (default "main")' },
+        createdBySessionId: { type: 'string', description: 'Optional chat-session reference for traceability' },
+      },
+      required: ['projectId', 'name'],
+    },
+  },
+  {
+    name: 'workspace_list',
+    description: 'List workspaces of a project. Filter by status (active/archived/cleaning).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        status: { type: 'string', enum: ['active', 'archived', 'cleaning'], description: 'Optional status filter' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'workspace_get',
+    description: 'Get a workspace by ID, or by projectId+name. Returns full document including path and lastActivityAt.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Workspace MongoDB ID (alternative to projectId+name)' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (use with name)' },
+        name: { type: 'string', description: 'Workspace name (use with projectId)' },
+      },
+    },
+  },
+  {
+    name: 'workspace_update',
+    description: 'Update workspace metadata. Path stays bound to the workspace _id and is never reassigned.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Workspace MongoDB ID' },
+        name: { type: 'string', description: 'New name (must stay slug-compatible)' },
+        description: { type: 'string' },
+        repoUrl: { type: 'string' },
+        branch: { type: 'string' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'workspace_archive',
+    description: 'Archive a workspace (sets status="archived"). Archived workspaces stay in the DB but are excluded from default listings and become eligible for the TTL garbage-collector.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Workspace MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'workspace_delete',
+    description: 'Hard-delete a workspace. Per project policy this should always be confirmed with the user via ask_user before invoking — the agent must not silently delete user-visible workspaces.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Workspace MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
     name: 'recurring_task_create',
     description: 'Create a recurring task. With projectId: creates todos in that project. Without projectId: system-wide task that creates notifications.',
     inputSchema: {
@@ -1802,16 +1882,76 @@ const tools = [
   },
 ];
 
-export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService } = services;
+function isToolAllowed(toolName: string): boolean {
+  const apiKey = RequestContext.getApiKey();
+  if (!apiKey) return true;
+  if (!Array.isArray(apiKey.allowedTools)) return true;
+  return apiKey.allowedTools.includes(toolName);
+}
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+export function toolGroup(name: string): 'Task-Management' | 'Wissen & Suche' | 'External-Read' | 'Projekt-Daten' {
+  if (
+    name.startsWith('todo_') ||
+    name.startsWith('milestone_') ||
+    name.startsWith('recurring_task_')
+  ) {
+    return 'Task-Management';
+  }
+  if (
+    name.startsWith('knowledge_') ||
+    name.startsWith('session_') ||
+    name.startsWith('changelog_') ||
+    name.startsWith('research_') ||
+    name.startsWith('manual_') ||
+    name.startsWith('snippet_') ||
+    name.startsWith('rag_') ||
+    name.startsWith('chat_')
+  ) {
+    return 'Wissen & Suche';
+  }
+  if (name.startsWith('web_')) {
+    return 'External-Read';
+  }
+  return 'Projekt-Daten';
+}
+
+export interface McpToolCatalogEntry {
+  name: string;
+  description: string;
+  group: ReturnType<typeof toolGroup>;
+}
+
+export function getToolCatalog(): McpToolCatalogEntry[] {
+  return tools
+    .map((t) => ({
+      name: t.name,
+      description: (t as { description?: string }).description ?? '',
+      group: toolGroup(t.name),
+    }))
+    .sort((a, b) => {
+      if (a.group !== b.group) return a.group.localeCompare(b.group);
+      return a.name.localeCompare(b.name);
+    });
+}
+
+export function registerMcpTools(server: Server, services: McpServices): void {
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService } = services;
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const filteredTools = tools.filter((t) => isToolAllowed(t.name));
+    return { tools: filteredTools };
+  });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args = {} } = request.params;
-    const a = args as Record<string, unknown>;
+    
+    if (!isToolAllowed(name)) {
+      return errorResult(`Tool ${name} is not allowed for the current API key.`);
+    }
 
+    const a = args as Record<string, unknown>;
     try {
+
       // Global chat-feature gate: chat_* tools refuse when admin disabled chat.
       if (name.startsWith('chat_') && !(await chatLlmService.isEnabled())) {
         return errorResult('Chat feature is disabled by an administrator');
@@ -1885,6 +2025,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             snippetsService.removeByProject(id),
             attachmentsService.removeByProject(id),
             releasesService.removeByProject(id),
+            workspacesService.removeByProject(id),
           ]);
           result = { deleted: true, id };
           break;
@@ -2769,6 +2910,58 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           } else {
             result = await readabilityService.fetch({ url, raw, maxLength });
           }
+          break;
+        }
+        case 'workspace_create': {
+          const ws = await workspacesService.create({
+            projectId: requireString(a, 'projectId'),
+            name: requireString(a, 'name'),
+            description: optionalString(a, 'description'),
+            repoUrl: optionalString(a, 'repoUrl'),
+            branch: optionalString(a, 'branch'),
+            createdBySessionId: optionalString(a, 'createdBySessionId'),
+          });
+          result = compactCreateResult(ws, { path: ws.path, status: ws.status });
+          break;
+        }
+        case 'workspace_list': {
+          const list = await workspacesService.findByProject(
+            requireString(a, 'projectId'),
+            optionalString(a, 'status') as WorkspaceStatus | undefined,
+          );
+          result = compactList(list as any[], ['description']);
+          break;
+        }
+        case 'workspace_get': {
+          const id = optionalString(a, 'id');
+          if (id) {
+            result = await workspacesService.findById(id);
+          } else {
+            result = await workspacesService.findByName(
+              requireString(a, 'projectId'),
+              requireString(a, 'name'),
+            );
+          }
+          break;
+        }
+        case 'workspace_update': {
+          result = compactUpdateResult(
+            await workspacesService.update(requireString(a, 'id'), {
+              name: optionalString(a, 'name'),
+              description: optionalString(a, 'description'),
+              repoUrl: optionalString(a, 'repoUrl'),
+              branch: optionalString(a, 'branch'),
+            }),
+          );
+          break;
+        }
+        case 'workspace_archive': {
+          result = compactUpdateResult(await workspacesService.archive(requireString(a, 'id')));
+          break;
+        }
+        case 'workspace_delete': {
+          await workspacesService.remove(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
           break;
         }
         case 'recurring_task_create': {
