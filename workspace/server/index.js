@@ -112,6 +112,69 @@ async function ensureWorkspaceDir(workspaceId) {
   return root;
 }
 
+/**
+ * Per-workspace cwd state. Each /exec call writes `pwd` into this file at
+ * the end so the next /exec can resume from the same directory — gives
+ * the manual terminal a working `cd`/`mkdir foo && cd foo` workflow
+ * without needing a real PTY. Stored OUTSIDE the workspace volume's user
+ * tree (in /tmp) so the user's own files can never collide with it.
+ */
+const CWD_STATE_DIR = '/tmp/dg-cwd';
+
+async function readCwdState(workspaceId) {
+  try {
+    const raw = await fsp.readFile(`${CWD_STATE_DIR}/${workspaceId}`, 'utf8');
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    // Reject anything that escaped the workspace root since the last call —
+    // a symlink swap or `cd /etc` should not stick across exec boundaries.
+    const root = workspaceRoot(workspaceId);
+    const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
+    if (trimmed !== root && !trimmed.startsWith(rootWithSep)) return null;
+    return trimmed;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureCwdStateDir() {
+  await fsp.mkdir(CWD_STATE_DIR, { recursive: true });
+}
+
+function cwdStatePath(workspaceId) {
+  return `${CWD_STATE_DIR}/${workspaceId}`;
+}
+
+/**
+ * Wrap a user command so that:
+ *   1. it starts in the workspace's last-known cwd (or root on first call)
+ *   2. the resulting cwd is persisted to the state file
+ * The wrapper runs unconditionally (set -m off, single-quote escaping the
+ * inner cwd) — even if the user's command exits non-zero, we still update
+ * the state from wherever bash ended up.
+ */
+function wrapWithCwdState(userCmd, startCwd, statePath, workspaceRootDir) {
+  // Single-quote-escape any path going into the bash wrapper — wrap each
+  // ' as '\\'' so bash sees a literal string. Same trick as `printf %q`
+  // but we don't rely on it being present across all bash builds.
+  const sq = (s) => s.replace(/'/g, `'\\''`);
+  const safeCwd = sq(startCwd);
+  const safeStatePath = sq(statePath);
+  const safeRoot = sq(workspaceRootDir);
+  // Only persist the resulting cwd when it stays inside the workspace
+  // root. If the user's command escaped (`cd /etc`), we silently leave
+  // the state file untouched so the *next* exec resumes from the last
+  // good cwd instead of getting reset to root.
+  return [
+    `cd '${safeCwd}' 2>/dev/null || cd '${safeRoot}'`,
+    `{ ${userCmd}; }`,
+    `__DG_RC=$?`,
+    `__DG_PWD="$(pwd)"`,
+    `case "$__DG_PWD" in '${safeRoot}'|'${safeRoot}'/*) printf %s "$__DG_PWD" > '${safeStatePath}' 2>/dev/null;; esac`,
+    `exit $__DG_RC`,
+  ].join('; ');
+}
+
 async function workspaceExists(workspaceId) {
   try {
     const stat = await fsp.stat(workspaceRoot(workspaceId));
@@ -536,11 +599,15 @@ app.post('/exec', async (req, res) => {
   // exec from the get-go (mkdir/git clone/curl/whatever). For tools that
   // strictly need an existing clone (/pull, /tree, /read, /search, /status,
   // /size) we still 404.
-  await ensureWorkspaceDir(id);
-  const cwd = workspaceRoot(id);
+  const cwd = await ensureWorkspaceDir(id);
+  await ensureCwdStateDir();
+  const startCwd = (await readCwdState(id)) || cwd;
+  const wrappedCommand = wrapWithCwdState(command, startCwd, cwdStatePath(id), cwd);
   const env = buildExecEnv(req.body?.env);
 
-  const result = await runExec({ command, cwd, timeoutMs, env });
+  const result = await runExec({ command: wrappedCommand, cwd, timeoutMs, env });
+  // Echo the resulting cwd back so callers can show it in a prompt.
+  result.cwd = (await readCwdState(id)) || cwd;
   console.log(JSON.stringify({
     type: 'exec',
     workspaceId: id,
@@ -576,7 +643,8 @@ app.post('/exec/stream', async (req, res) => {
   // exec from the get-go (mkdir/git clone/curl/whatever). For tools that
   // strictly need an existing clone (/pull, /tree, /read, /search, /status,
   // /size) we still 404.
-  await ensureWorkspaceDir(id);
+  const cwd = await ensureWorkspaceDir(id);
+  await ensureCwdStateDir();
   let timeoutMs = Number(req.body?.timeout ?? EXEC_DEFAULT_TIMEOUT_MS);
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) timeoutMs = EXEC_DEFAULT_TIMEOUT_MS;
   if (timeoutMs > EXEC_MAX_TIMEOUT_MS) timeoutMs = EXEC_MAX_TIMEOUT_MS;
@@ -590,13 +658,28 @@ app.post('/exec/stream', async (req, res) => {
 
   const startedAt = Date.now();
   const env = buildExecEnv(req.body?.env);
-  const cwd = workspaceRoot(id);
+
+  // Wrap the command so cd persists across calls (see wrapWithCwdState).
+  const startCwd = (await readCwdState(id)) || cwd;
+  const wrappedCommand = wrapWithCwdState(command, startCwd, cwdStatePath(id), cwd);
 
   let lastEvent = null;
-  await runExecStream({ command, cwd, timeoutMs, env, abortSignal: abort.signal }, (ev) => {
+  await runExecStream({ command: wrappedCommand, cwd, timeoutMs, env, abortSignal: abort.signal }, (ev) => {
     lastEvent = ev;
+    // Inject the resulting cwd into the done event so the frontend can
+    // render it in the prompt without an extra round-trip.
+    if (ev.type === 'done') {
+      // Read synchronously-after-the-fact via a final fs op — done event
+      // emits before the wrapper writes? No: bash exits AFTER `pwd > file`,
+      // and the child's `close` fires AFTER bash exits, so the file is
+      // flushed by then. We resolve the read async below before flushing.
+    }
     if (!res.writableEnded) res.write(JSON.stringify(ev) + '\n');
   });
+  // After the stream finished, send a small follow-up event with the new
+  // cwd. Done event was already on the wire; this is a sibling event.
+  const newCwd = (await readCwdState(id)) || cwd;
+  if (!res.writableEnded) res.write(JSON.stringify({ type: 'cwd', cwd: newCwd }) + '\n');
   if (!res.writableEnded) res.end();
 
   const done = lastEvent && lastEvent.type === 'done' ? lastEvent : null;
@@ -621,6 +704,9 @@ app.post('/cleanup', async (req, res) => {
   }
   if (!await workspaceExists(id)) return res.json({ ok: true, removed: false });
   await fsp.rm(root, { recursive: true, force: true });
+  // Drop the per-workspace cwd state too so a re-created workspace with
+  // the same id (TTL-resurrection corner case) starts at root.
+  await fsp.rm(cwdStatePath(id), { force: true });
   res.json({ ok: true, removed: true });
 });
 

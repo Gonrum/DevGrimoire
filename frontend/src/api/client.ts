@@ -377,7 +377,8 @@ export type WorkspaceStreamEvent =
       stderrTruncated: boolean;
       stdoutBytes: number;
       stderrBytes: number;
-    };
+    }
+  | { type: 'cwd'; cwd: string };
 
 export interface Workspace {
   _id: string;

@@ -51,6 +51,7 @@ export default function WorkspaceTerminal({ workspace, onClose }: Props) {
   const [draft, setDraft] = useState('');
   const [output, setOutput] = useState<OutputLine[]>([]);
   const [running, setRunning] = useState(false);
+  const [cwd, setCwd] = useState<string>(workspace.path.replace(/\/$/, ''));
   const lineSeqRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const outputEndRef = useRef<HTMLDivElement | null>(null);
@@ -118,6 +119,9 @@ export default function WorkspaceTerminal({ workspace, onClose }: Props) {
                 appendLine('meta', `▸ ${reason}`);
                 break;
               }
+              case 'cwd':
+                setCwd(event.cwd);
+                break;
             }
           },
           abort.signal,
@@ -200,6 +204,16 @@ export default function WorkspaceTerminal({ workspace, onClose }: Props) {
     error: 'text-red-400 font-semibold',
   }), []);
 
+  // Show /workspaces/<id> as ~ in the prompt and any sub-dir as ~/<rel>
+  // so the user gets a familiar shell-style location indicator without
+  // the noisy long mongodb id every line.
+  const promptPath = useMemo(() => {
+    const root = workspace.path.replace(/\/$/, '');
+    if (cwd === root) return '~';
+    if (cwd.startsWith(root + '/')) return '~/' + cwd.slice(root.length + 1);
+    return cwd;
+  }, [cwd, workspace.path]);
+
   return (
     <div className="flex flex-col h-[70vh] min-h-[420px]">
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800">
@@ -241,7 +255,9 @@ export default function WorkspaceTerminal({ workspace, onClose }: Props) {
       </div>
 
       <div className="border-t border-gray-800 px-3 py-2 flex items-center gap-2 bg-gray-950">
-        <span className="font-mono text-xs text-cyan-400 select-none">$</span>
+        <span className="font-mono text-xs text-cyan-400 select-none truncate max-w-[40%]" title={cwd}>
+          {promptPath} $
+        </span>
         <input
           ref={inputRef}
           type="text"
