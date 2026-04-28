@@ -16,6 +16,30 @@ const MAX_TREE_DEPTH = 8;
 const MAX_TREE_ENTRIES = 5000;
 const SEARCH_TIMEOUT_MS = 30_000;
 const GIT_TIMEOUT_MS = 5 * 60_000;
+const EXEC_DEFAULT_TIMEOUT_MS = 60_000;
+const EXEC_MAX_TIMEOUT_MS = 600_000; // 10 min ceiling for slow build steps
+const EXEC_OUTPUT_CAP_BYTES = 1 * 1024 * 1024; // 1MB per stream
+
+// Patterns that are rejected hard at the sidecar before the shell ever sees
+// them. Caught at substring level so they fire even when wrapped in pipes
+// or quoting. Not exhaustive — defence-in-depth, never the only line.
+const EXEC_BLACKLIST = [
+  /\brm\s+-rf?\s+(\/|--no-preserve-root)/i,    // rm -rf /
+  /\bcurl\b[^|;&]*\|\s*(sh|bash|zsh)\b/i,      // curl ... | sh
+  /\bwget\b[^|;&]*\|\s*(sh|bash|zsh)\b/i,      // wget ... | sh
+  /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/,   // fork bomb
+  /\bmkfs\b/i,                                  // format filesystems
+  /\bdd\s+if=.*\s+of=\/dev\//i,                 // direct device writes
+  /\bshutdown\b|\breboot\b|\bhalt\b/i,
+];
+
+// Process environment passed to /exec children. We strip everything by
+// default and only pass the bare minimum a shell needs to run. Caller-
+// supplied env on /exec is whitelisted on top of this (Phase-5 secrets).
+const EXEC_ENV_WHITELIST_KEYS = ['PATH', 'HOME', 'USER', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'SHELL'];
+// Caller-supplied env vars must match this pattern — no =, no $, no spaces.
+const EXEC_ENV_KEY_PATTERN = /^[A-Z_][A-Z0-9_]{0,63}$/;
+const EXEC_ENV_VALUE_MAX_LEN = 4096;
 
 if (!TOKEN || TOKEN.length < 16) {
   console.error('FATAL: WORKSPACE_API_TOKEN env var must be set and at least 16 chars long');
@@ -299,10 +323,130 @@ app.post('/status', async (req, res) => {
   res.json({ status: result.stdout });
 });
 
-app.post('/exec', (_req, res) => {
-  // Phase 4 (T-148): exec is intentionally disabled until the safety net
-  // (timeout, process-group kill, command blacklist, audit log) is in place.
-  res.status(501).json({ error: 'exec not implemented in phase 2 — see T-148' });
+function buildExecEnv(callerEnv) {
+  const safe = {};
+  for (const key of EXEC_ENV_WHITELIST_KEYS) {
+    if (process.env[key] !== undefined) safe[key] = process.env[key];
+  }
+  if (callerEnv && typeof callerEnv === 'object' && !Array.isArray(callerEnv)) {
+    for (const [k, v] of Object.entries(callerEnv)) {
+      if (!EXEC_ENV_KEY_PATTERN.test(k)) continue;
+      if (typeof v !== 'string' || v.length > EXEC_ENV_VALUE_MAX_LEN) continue;
+      safe[k] = v;
+    }
+  }
+  return safe;
+}
+
+function isCommandBlacklisted(command) {
+  return EXEC_BLACKLIST.some((re) => re.test(command));
+}
+
+/**
+ * Spawns the command via `bash -lc` so users get pipes / globbing / env
+ * expansion. Detached so we own the whole process group and can SIGKILL
+ * children of children on timeout.
+ */
+function runExec({ command, cwd, timeoutMs, env }) {
+  return new Promise((resolve) => {
+    const child = spawn('/bin/bash', ['-lc', command], {
+      cwd,
+      env,
+      detached: true,                  // own process group
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const startedAt = Date.now();
+    let stdout = Buffer.alloc(0);
+    let stderr = Buffer.alloc(0);
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
+    let timedOut = false;
+    let killedAt = null;
+
+    const append = (current, chunk, capRef) => {
+      if (current.length >= EXEC_OUTPUT_CAP_BYTES) { capRef.truncated = true; return current; }
+      const remaining = EXEC_OUTPUT_CAP_BYTES - current.length;
+      const slice = chunk.length > remaining ? chunk.subarray(0, remaining) : chunk;
+      if (chunk.length > remaining) capRef.truncated = true;
+      return Buffer.concat([current, slice]);
+    };
+    const stdoutRef = { get truncated() { return stdoutTruncated; }, set truncated(v) { stdoutTruncated = v; } };
+    const stderrRef = { get truncated() { return stderrTruncated; }, set truncated(v) { stderrTruncated = v; } };
+    child.stdout.on('data', (c) => { stdout = append(stdout, c, stdoutRef); });
+    child.stderr.on('data', (c) => { stderr = append(stderr, c, stderrRef); });
+
+    // SIGTERM after timeout, then SIGKILL after a 5s grace period. We kill
+    // the negative pid to take down the whole process group (npm spawns
+    // node spawns…) so nothing leaks.
+    const killPg = (signal) => {
+      try { process.kill(-child.pid, signal); } catch { /* group may be gone */ }
+    };
+    const softTimer = setTimeout(() => {
+      timedOut = true;
+      killedAt = Date.now();
+      killPg('SIGTERM');
+    }, timeoutMs);
+    const hardTimer = setTimeout(() => killPg('SIGKILL'), timeoutMs + 5_000);
+
+    child.on('error', (err) => {
+      clearTimeout(softTimer); clearTimeout(hardTimer);
+      resolve({
+        exitCode: null, signal: null, timedOut, durationMs: Date.now() - startedAt,
+        stdout: '', stderr: String(err && err.message ? err.message : err),
+        stdoutTruncated: false, stderrTruncated: false,
+      });
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(softTimer); clearTimeout(hardTimer);
+      resolve({
+        exitCode: code,
+        signal,
+        timedOut,
+        killedAt,
+        durationMs: Date.now() - startedAt,
+        stdout: stdout.toString('utf8'),
+        stderr: stderr.toString('utf8'),
+        stdoutTruncated,
+        stderrTruncated,
+      });
+    });
+  });
+}
+
+app.post('/exec', async (req, res) => {
+  const id = requireWorkspaceId(req, res); if (!id) return;
+  const command = req.body?.command;
+  if (typeof command !== 'string' || !command.trim()) {
+    return res.status(400).json({ error: 'command must be a non-empty string' });
+  }
+  if (command.length > 8 * 1024) {
+    return res.status(400).json({ error: 'command too long (max 8KB)' });
+  }
+  if (isCommandBlacklisted(command)) {
+    return res.status(400).json({ error: 'command rejected by safety blacklist' });
+  }
+
+  let timeoutMs = Number(req.body?.timeout ?? EXEC_DEFAULT_TIMEOUT_MS);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) timeoutMs = EXEC_DEFAULT_TIMEOUT_MS;
+  if (timeoutMs > EXEC_MAX_TIMEOUT_MS) timeoutMs = EXEC_MAX_TIMEOUT_MS;
+
+  if (!await workspaceExists(id)) {
+    return res.status(404).json({ error: 'workspace directory does not exist — clone first' });
+  }
+  const cwd = workspaceRoot(id);
+  const env = buildExecEnv(req.body?.env);
+
+  const result = await runExec({ command, cwd, timeoutMs, env });
+  console.log(JSON.stringify({
+    type: 'exec',
+    workspaceId: id,
+    durationMs: result.durationMs,
+    exitCode: result.exitCode,
+    timedOut: result.timedOut,
+    cmdLen: command.length,
+    cmdPreview: command.slice(0, 120),
+  }));
+  res.json(result);
 });
 
 app.post('/cleanup', async (req, res) => {

@@ -20,6 +20,17 @@ export interface TreeResponse { root: string; depth: number; truncated: boolean;
 export interface SearchResponse { matches: string; truncated: boolean; timedOut: boolean }
 export interface StatusResponse { status: string }
 export interface SizeResponse { sizeBytes: number }
+export interface ExecResponse {
+  exitCode: number | null;
+  signal: string | null;
+  timedOut: boolean;
+  killedAt?: number | null;
+  durationMs: number;
+  stdout: string;
+  stderr: string;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+}
 
 /**
  * HTTP client for the workspace sidecar. The sidecar runs on the
@@ -105,5 +116,21 @@ export class WorkspaceClient {
 
   size(workspaceId: string): Promise<SizeResponse> {
     return this.post<SizeResponse>('/size', { workspaceId });
+  }
+
+  exec(
+    workspaceId: string,
+    command: string,
+    timeoutMs?: number,
+    env?: Record<string, string>,
+  ): Promise<ExecResponse> {
+    // HTTP timeout includes the sidecar's grace period after SIGTERM (5s)
+    // plus a small buffer so we never undercut the in-process timer.
+    const limit = Math.min(timeoutMs ?? 60_000, 600_000);
+    return this.post<ExecResponse>(
+      '/exec',
+      { workspaceId, command, timeout: limit, env },
+      limit + 10_000,
+    );
   }
 }

@@ -1536,7 +1536,7 @@ const tools = [
   },
   {
     name: 'workspace_delete',
-    description: 'Hard-delete a workspace. Per project policy this should always be confirmed with the user via ask_user before invoking — the agent must not silently delete user-visible workspaces.',
+    description: 'Hard-delete a workspace including the entire clone on disk. The backend asks the user for confirmation via ask_user BEFORE deleting — the agent does not need to (and cannot bypass it). Returns {deleted:false, aborted:true, reason} on cancel/timeout. Use workspace_archive instead if you only want to hide the workspace.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -1625,6 +1625,24 @@ const tools = [
         id: { type: 'string', description: 'Workspace MongoDB ID' },
       },
       required: ['id'],
+    },
+  },
+  {
+    name: 'workspace_exec',
+    description: 'Execute a shell command inside the workspace sidecar. Sandboxed: runs as a non-root user in an isolated container with no access to DevGrimoire credentials, scrubbed environment (only PATH/HOME/USER/LANG/SHELL/TERM by default), per-call SIGTERM→SIGKILL timeout (default 60s, max 600s) and a regex blacklist for catastrophically dangerous patterns (rm -rf /, curl|sh, fork bombs). Output is capped at 1MB per stream. Use this for build/lint/test commands AFTER analysing the code with workspace_read/search — never as a first step. Audit-logged per call.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Workspace MongoDB ID' },
+        command: { type: 'string', description: 'Shell command (executed under bash -lc, supports pipes/globbing). Max 8KB.' },
+        timeout: { type: 'number', description: 'Timeout in milliseconds (default 60000, max 600000)' },
+        env: {
+          type: 'object',
+          description: 'Optional caller-supplied env vars. Keys must match [A-Z_][A-Z0-9_]{0,63}, values <=4KB. Invalid entries are silently dropped.',
+          additionalProperties: { type: 'string' },
+        },
+      },
+      required: ['id', 'command'],
     },
   },
   {
@@ -3044,8 +3062,46 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'workspace_delete': {
-          await workspacesService.remove(requireString(a, 'id'));
-          result = { deleted: true, id: a.id };
+          const id = requireString(a, 'id');
+          const ws = await workspacesService.findById(id);
+
+          // T-149: backend-enforced confirmation. Skipping ask_user is not
+          // an option that the agent can choose — the only path to actually
+          // deleting is the user picking the explicit confirm option below.
+          // For trusted automation we'll add a per-API-key bypass later.
+          const sizeMb = (ws.sizeBytes / (1024 * 1024)).toFixed(1);
+          const lastSeen = ws.lastActivityAt ? ws.lastActivityAt.toISOString().slice(0, 16).replace('T', ' ') : 'unknown';
+          const CONFIRM = 'Yes, delete permanently';
+          const CANCEL = 'Cancel';
+          const userId = RequestContext.getUser()?.userId;
+          const question = await questionsService.create(
+            {
+              question: `Workspace "${ws.name}" wirklich unwiderruflich löschen?`,
+              options: [CONFIRM, CANCEL],
+              context: `Größe: ${sizeMb} MB, zuletzt aktiv: ${lastSeen}, projectId: ${ws.projectId.toString()}`,
+              projectId: ws.projectId.toString(),
+              timeoutSeconds: 300,
+            },
+            userId,
+          );
+          const answer = await questionsService.waitForAnswer(
+            question._id.toString(),
+            question.timeoutMs,
+          );
+          if (!answer.answered || answer.answer !== CONFIRM) {
+            result = {
+              deleted: false,
+              aborted: true,
+              reason: answer.answered
+                ? `user did not confirm (chose "${answer.answer}")`
+                : 'confirmation question expired without an answer',
+              questionId: question._id.toString(),
+            };
+            break;
+          }
+
+          await workspacesService.remove(id);
+          result = { deleted: true, id, confirmedBy: answer.answeredBy };
           break;
         }
         case 'workspace_clone': {
@@ -3115,6 +3171,44 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const status = await workspaceClient.status(ws._id.toString());
           await workspacesService.touch(id);
           result = status;
+          break;
+        }
+        case 'workspace_exec': {
+          const id = requireString(a, 'id');
+          const command = requireString(a, 'command');
+          const timeoutMs = optionalNumber(a, 'timeout');
+          const callerEnv = (a.env && typeof a.env === 'object' && !Array.isArray(a.env))
+            ? (a.env as Record<string, string>)
+            : undefined;
+          const ws = await workspacesService.findById(id);
+          const exec = await workspaceClient.exec(ws._id.toString(), command, timeoutMs, callerEnv);
+          await workspacesService.touch(id);
+
+          // Audit log — best-effort, never blocks the exec response.
+          logsService
+            .create({
+              projectId: ws.projectId.toString(),
+              level: exec.exitCode === 0 ? 'info' : 'warn',
+              message: `workspace_exec ${exec.timedOut ? 'TIMED OUT' : `exit=${exec.exitCode}`} (${exec.durationMs}ms): ${command.slice(0, 200)}`,
+              service: 'workspaces',
+              area: 'exec',
+              tags: ['workspace_exec', `ws:${id}`],
+              metadata: {
+                workspaceId: id,
+                command,
+                exitCode: exec.exitCode,
+                signal: exec.signal,
+                timedOut: exec.timedOut,
+                durationMs: exec.durationMs,
+                stdoutTruncated: exec.stdoutTruncated,
+                stderrTruncated: exec.stderrTruncated,
+              },
+            })
+            .catch((err: unknown) => {
+              console.warn('workspace_exec audit log failed', (err as Error)?.message);
+            });
+
+          result = exec;
           break;
         }
         case 'recurring_task_create': {
