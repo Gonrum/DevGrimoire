@@ -390,7 +390,8 @@
     "prompt": "z.B. ls -la · git status · npm run lint",
     "running": "läuft …",
     "run": "Ausführen",
-    "cancel": "Abbrechen"
+    "cancel": "Abbrechen",
+    "ptyHint": "Echtes Bash-Terminal — cd, env vars, vim/htop, alles wie gewohnt. Strg+C bricht den Vordergrund-Prozess ab; Tab zum Schließen reicht."
   },
   "snippets": {
     "newSnippet": "+ Neues Snippet",

@@ -11,6 +11,14 @@ export function configureAuth(
   onUnauthorized = refreshHandler;
 }
 
+/**
+ * Read-only accessor for components that need to attach the token to a
+ * non-fetch transport (e.g. WebSocket query params for the terminal).
+ */
+export function getCurrentAccessToken(): string | null {
+  return getAccessToken?.() ?? null;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = getAccessToken?.();

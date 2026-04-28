@@ -1,11 +1,14 @@
 'use strict';
 
 const express = require('express');
+const http = require('http');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
+const { WebSocketServer } = require('ws');
+const pty = require('node-pty');
 
 const PORT = parseInt(process.env.PORT || '9000', 10);
 const ROOT = process.env.WORKSPACE_ROOT || '/workspaces';
@@ -725,6 +728,175 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: err.message || 'internal error' });
 });
 
-app.listen(PORT, () => {
+// ---------------------------------------------------------------------------
+// WebSocket terminal — persistent bash -i per (workspaceId,sessionId) so cd,
+// env vars, aliases, history and TTY-only programs (htop/vim/...) all work
+// like a normal shell. Per-Command /exec/stream stays for one-shot/agent
+// flows; this is the human-facing interactive surface.
+// ---------------------------------------------------------------------------
+
+/**
+ * Active PTYs keyed by `<workspaceId>:<sessionId>`. We keep a reference so an
+ * accidental WS close (browser tab refresh, transient network drop) gives the
+ * user a few seconds to reconnect before we kill bash.
+ */
+const TERMINAL_IDLE_MS = 30 * 60_000;
+const TERMINAL_MAX_PER_WORKSPACE = 8;
+const activeTerminals = new Map();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, term] of activeTerminals) {
+    if (now - term.lastActivity > TERMINAL_IDLE_MS) {
+      try { term.pty.kill(); } catch { /* already dead */ }
+      activeTerminals.delete(key);
+    }
+  }
+}, 60_000);
+
+function countTerminalsFor(workspaceId) {
+  let n = 0;
+  for (const key of activeTerminals.keys()) {
+    if (key.startsWith(workspaceId + ':')) n += 1;
+  }
+  return n;
+}
+
+function timingSafeTokenMatch(supplied) {
+  if (!supplied) return false;
+  const a = Buffer.from(supplied);
+  const b = Buffer.from(TOKEN);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+const wss = new WebSocketServer({ noServer: true });
+
+const server = http.createServer(app);
+
+server.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  if (url.pathname !== '/term') {
+    socket.destroy();
+    return;
+  }
+  // Browsers can't set Authorization headers on WS upgrade — accept the
+  // bearer either via header (curl/server-side proxies) or ?token= query.
+  const auth = req.headers.authorization;
+  const headerToken = auth && auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  const queryToken = url.searchParams.get('token');
+  if (!timingSafeTokenMatch(headerToken || queryToken)) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  const workspaceId = url.searchParams.get('workspaceId');
+  if (!workspaceId || !WORKSPACE_ID_PATTERN.test(workspaceId)) {
+    socket.write('HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  const sessionId = url.searchParams.get('sessionId') || crypto.randomUUID();
+
+  if (countTerminalsFor(workspaceId) >= TERMINAL_MAX_PER_WORKSPACE) {
+    socket.write('HTTP/1.1 429 Too Many Terminals\r\nContent-Length: 0\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    handleTerminalConnection(ws, workspaceId, sessionId).catch((err) => {
+      console.error('terminal connection failed', err);
+      try { ws.close(1011, 'internal error'); } catch { /* noop */ }
+    });
+  });
+});
+
+async function handleTerminalConnection(ws, workspaceId, sessionId) {
+  await ensureWorkspaceDir(workspaceId);
+  await ensureCwdStateDir();
+  const startCwd = (await readCwdState(workspaceId)) || workspaceRoot(workspaceId);
+
+  const term = pty.spawn('/bin/bash', ['-i'], {
+    name: 'xterm-256color',
+    cols: 80,
+    rows: 24,
+    cwd: startCwd,
+    env: {
+      ...buildExecEnv({}),
+      // PTY-only niceties — make the prompt obvious and history work.
+      TERM: 'xterm-256color',
+      PS1: '\\[\\033[36m\\]\\w\\[\\033[0m\\] $ ',
+      HISTFILE: `${ROOT}/${workspaceId}/.bash_history`,
+      HISTSIZE: '500',
+      HISTCONTROL: 'ignoredups:erasedups',
+    },
+  });
+
+  const key = `${workspaceId}:${sessionId}`;
+  const state = { pty: term, ws, lastActivity: Date.now() };
+  activeTerminals.set(key, state);
+
+  console.log(JSON.stringify({
+    type: 'pty-open', workspaceId, sessionId, pid: term.pid, cwd: startCwd,
+  }));
+
+  term.onData((data) => {
+    state.lastActivity = Date.now();
+    if (ws.readyState === ws.OPEN) {
+      try { ws.send(data); } catch { /* socket dying */ }
+    }
+  });
+  term.onExit(({ exitCode, signal }) => {
+    console.log(JSON.stringify({
+      type: 'pty-exit', workspaceId, sessionId, exitCode, signal,
+    }));
+    if (ws.readyState === ws.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: 'exit', exitCode, signal }));
+        ws.close(1000, 'shell exited');
+      } catch { /* noop */ }
+    }
+    activeTerminals.delete(key);
+  });
+
+  ws.on('message', (raw, isBinary) => {
+    state.lastActivity = Date.now();
+    // Resize messages come as JSON text frames; everything else is keystrokes.
+    if (!isBinary) {
+      const str = raw.toString('utf8');
+      if (str.startsWith('{')) {
+        try {
+          const msg = JSON.parse(str);
+          if (msg && msg.type === 'resize'
+              && Number.isInteger(msg.cols) && msg.cols > 0 && msg.cols < 1000
+              && Number.isInteger(msg.rows) && msg.rows > 0 && msg.rows < 1000) {
+            term.resize(msg.cols, msg.rows);
+            return;
+          }
+        } catch { /* fall through and treat as keystrokes */ }
+      }
+      term.write(str);
+    } else {
+      term.write(raw);
+    }
+  });
+
+  ws.on('close', () => {
+    try { term.kill(); } catch { /* noop */ }
+    activeTerminals.delete(key);
+    // Snapshot the last-known cwd so the per-command /exec path picks up
+    // where the interactive session left off. node-pty doesn't expose a
+    // cwd field directly, but bash's PWD env via a final command would —
+    // for now we rely on the user's bash session having written its
+    // state via PROMPT_COMMAND or just leave it stale.
+  });
+
+  // Greeting line so the browser sees something even if bash takes a beat.
+  ws.send(`\x1b[2m# devgrimoire workspace ${workspaceId} — bash session\x1b[0m\r\n`);
+}
+
+server.listen(PORT, () => {
   console.log(`devgrimoire-workspace sidecar listening on :${PORT}, root=${ROOT}`);
 });

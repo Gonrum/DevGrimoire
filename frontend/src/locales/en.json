@@ -390,7 +390,8 @@
     "prompt": "e.g. ls -la · git status · npm run lint",
     "running": "running …",
     "run": "Run",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "ptyHint": "Real bash terminal — cd, env vars, vim/htop all work. Ctrl+C aborts the foreground process; close the modal when done."
   },
   "snippets": {
     "newSnippet": "+ New Snippet",

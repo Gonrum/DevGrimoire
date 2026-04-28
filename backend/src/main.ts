@@ -46,6 +46,8 @@ import { WorkspaceClient } from './workspaces/workspace-client.service';
 import { registerMcpTools, McpServices } from './mcp-tools';
 import { ApiKeysService } from './api-keys/api-keys.service';
 import { AuthService } from './auth/auth.service';
+import { JwtService } from '@nestjs/jwt';
+import WebSocket, { WebSocketServer } from 'ws';
 import { RequestContext, RequestUser } from './common/request-context';
 
 function createMcpServer(services: McpServices): Server {
@@ -288,6 +290,89 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
+
+  // ─── WebSocket terminal proxy ────────────────────────────────────────
+  // Browsers can't set Authorization headers on the WS upgrade, so the JWT
+  // arrives in the ?token= query param. We validate, look up the workspace,
+  // then open an upstream WS to the sidecar (using the shared bearer that
+  // never leaves the server-to-server hop) and pipe frames in both
+  // directions. /api/workspaces/:id/exec/stream stays for one-shot agent
+  // calls — this WS is for the interactive PTY only.
+  const jwt = app.get(JwtService);
+  const workspacesService = app.get(WorkspacesService);
+  const SIDECAR_URL = (process.env.WORKSPACE_API_URL || 'http://workspace:9000').replace(/\/$/, '');
+  const SIDECAR_TOKEN = process.env.WORKSPACE_API_TOKEN || '';
+  const SIDECAR_WS_URL = SIDECAR_URL.replace(/^http/i, 'ws') + '/term';
+  const proxyWss = new WebSocketServer({ noServer: true });
+  const TERMINAL_ROUTE = /^\/api\/workspaces\/([a-f0-9]{24})\/terminal\/?$/i;
+
+  const httpServer = app.getHttpServer();
+  httpServer.on('upgrade', async (req: import('http').IncomingMessage, socket: import('net').Socket, head: Buffer) => {
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const match = TERMINAL_ROUTE.exec(url.pathname);
+    if (!match) return; // let other upgrades fall through to whatever else listens
+
+    const reject = (status: number, msg: string) => {
+      socket.write(`HTTP/1.1 ${status} ${msg}\r\nContent-Length: 0\r\n\r\n`);
+      socket.destroy();
+    };
+
+    if (!SIDECAR_TOKEN) return reject(503, 'Sidecar Not Configured');
+    const token = url.searchParams.get('token');
+    if (!token) return reject(401, 'Unauthorized');
+
+    let userId: string | undefined;
+    try {
+      const payload = jwt.verify(token) as { sub?: string; userId?: string };
+      // Auth signs JWTs with the standard `sub` claim (user id) plus a
+      // legacy `userId` field on some paths — accept either.
+      userId = payload.sub || payload.userId;
+    } catch {
+      return reject(401, 'Unauthorized');
+    }
+    if (!userId) return reject(401, 'Unauthorized');
+
+    const workspaceId = match[1];
+    try {
+      await workspacesService.findById(workspaceId);
+    } catch {
+      return reject(404, 'Not Found');
+    }
+
+    const sessionId = url.searchParams.get('sessionId') || '';
+    const upstreamUrl = new URL(SIDECAR_WS_URL);
+    upstreamUrl.searchParams.set('workspaceId', workspaceId);
+    if (sessionId) upstreamUrl.searchParams.set('sessionId', sessionId);
+
+    const upstream = new WebSocket(upstreamUrl.toString(), {
+      headers: { Authorization: `Bearer ${SIDECAR_TOKEN}` },
+    });
+
+    upstream.on('open', () => {
+      proxyWss.handleUpgrade(req, socket, head, (clientWs) => {
+        const close = (code = 1000, reason = '') => {
+          try { clientWs.close(code, reason); } catch { /* noop */ }
+          try { upstream.close(code, reason); } catch { /* noop */ }
+        };
+        clientWs.on('message', (data, isBinary) => {
+          if (upstream.readyState === WebSocket.OPEN) {
+            try { upstream.send(data, { binary: isBinary }); } catch { /* noop */ }
+          }
+        });
+        upstream.on('message', (data, isBinary) => {
+          if (clientWs.readyState === WebSocket.OPEN) {
+            try { clientWs.send(data, { binary: isBinary }); } catch { /* noop */ }
+          }
+        });
+        clientWs.on('close', (code) => close(code));
+        upstream.on('close', (code) => close(code));
+        clientWs.on('error', () => close(1011, 'client error'));
+        upstream.on('error', () => close(1011, 'upstream error'));
+      });
+    });
+
+    upstream.on('error', () => reject(502, 'Bad Gateway'));
+  });
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
