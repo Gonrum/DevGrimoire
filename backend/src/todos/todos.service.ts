@@ -108,7 +108,7 @@ export class TodosService {
     if (filters.statuses?.length) query.status = { $in: filters.statuses };
     else if (filters.status) query.status = filters.status;
     if (filters.priority) query.priority = filters.priority;
-    if (filters.milestoneId) query.milestoneId = filters.milestoneId;
+    if (filters.milestoneId) query.milestoneId = projectIdFilter(filters.milestoneId);
     if (filters.tag) query.tags = filters.tag;
     if (!filters.includeArchived) query.archived = { $ne: true };
     return this.todoModel.find(query).sort({ priority: 1, createdAt: -1 }).exec();
