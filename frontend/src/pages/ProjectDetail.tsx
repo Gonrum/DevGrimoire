@@ -18,6 +18,7 @@ import SoulView from '../components/SoulView';
 import CommitList from '../components/CommitList';
 import RecurringTaskList from '../components/RecurringTaskList';
 import SnippetList from '../components/SnippetList';
+import WorkspaceList from '../components/WorkspaceList';
 import AttachmentList from '../components/AttachmentList';
 import LogList from '../components/LogList';
 import ReleaseList from '../components/ReleaseList';
@@ -27,7 +28,7 @@ import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents'
 import Badge from '../components/ui/Badge';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
-type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases';
+type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces';
 
 export default function ProjectDetail() {
   const { t, i18n } = useTranslation();
@@ -229,6 +230,7 @@ export default function ProjectDetail() {
       label: t('sidebar.system'),
       items: [
         { key: 'soul', label: t('soul.title'), count: (['vision', 'principles', 'conventions', 'communication', 'boundaries', 'workflow', 'quality'] as const).filter((k) => soul?.[k]?.trim()).length },
+        { key: 'workspaces', label: i18n.language === 'de' ? 'Werkstätten' : 'Workshops', count: 0 },
         { key: 'environments', label: i18n.language === 'de' ? 'Reiche' : 'Realms', count: environments.length },
         { key: 'secrets', label: i18n.language === 'de' ? 'Siegel' : 'Seals', count: secrets.length },
         { key: 'recurring-tasks', label: i18n.language === 'de' ? 'Riten' : 'Rites', count: recurringTasks.filter((rt) => rt.active).length },
@@ -399,6 +401,7 @@ export default function ProjectDetail() {
           {tab === 'schemas' && <SchemaList entries={schemas} projectId={id!} />}
           {tab === 'dependencies' && <DependencyList entries={dependencies} projectId={id!} />}
           {tab === 'snippets' && <SnippetList entries={snippets} projectId={id!} />}
+          {tab === 'workspaces' && <WorkspaceList projectId={id!} />}
           {tab === 'research' && <ResearchList entries={research} />}
           {tab === 'environments' && <EnvironmentList key={envKey} projectId={id!} />}
           {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id!} />}

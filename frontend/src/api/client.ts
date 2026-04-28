@@ -359,6 +359,24 @@ export interface Feature {
   updatedAt: string;
 }
 
+export type WorkspaceStatus = 'active' | 'archived' | 'cleaning';
+
+export interface Workspace {
+  _id: string;
+  projectId: string;
+  name: string;
+  description?: string;
+  repoUrl?: string;
+  branch: string;
+  path: string;
+  status: WorkspaceStatus;
+  sizeBytes: number;
+  lastActivityAt: string;
+  createdBySessionId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Snippet {
   _id: string;
   projectId: string;
@@ -856,6 +874,22 @@ export const api = {
       }),
     branches: (projectId: string, repoIndex: number) =>
       request<{ name: string; isDefault: boolean }[]>(`/commits/branches?projectId=${projectId}&repoIndex=${repoIndex}`),
+  },
+  workspaces: {
+    list: (projectId: string, status?: WorkspaceStatus) => {
+      const params = new URLSearchParams({ projectId });
+      if (status) params.set('status', status);
+      return request<Workspace[]>(`/workspaces?${params}`);
+    },
+    get: (id: string) => request<Workspace>(`/workspaces/${id}`),
+    create: (data: { projectId: string; name: string; description?: string; repoUrl?: string; branch?: string }) =>
+      request<Workspace>('/workspaces', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<Pick<Workspace, 'name' | 'description' | 'repoUrl' | 'branch'>>) =>
+      request<Workspace>(`/workspaces/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    archive: (id: string) =>
+      request<Workspace>(`/workspaces/${id}/archive`, { method: 'POST' }),
+    delete: (id: string) =>
+      request<void>(`/workspaces/${id}`, { method: 'DELETE' }),
   },
   snippets: {
     list: (projectId: string, filters?: { language?: string; category?: string; tag?: string }) => {

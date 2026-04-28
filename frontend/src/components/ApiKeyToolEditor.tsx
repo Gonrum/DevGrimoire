@@ -13,6 +13,47 @@ interface ToolOption {
 
 type Mode = 'all' | 'scoped';
 
+interface ToolPreset {
+  id: string;
+  labelKey: string;
+  descKey: string;
+  tools: string[];
+}
+
+// Curated tool sets surfaced as one-click presets in the editor. Selecting a
+// preset switches the editor into 'scoped' mode and replaces the current
+// allow-list — the user can then fine-tune individual tools afterwards.
+const TOOL_PRESETS: ToolPreset[] = [
+  {
+    id: 'code-analyst',
+    labelKey: 'settings.apiKeyToolPresetCodeAnalyst',
+    descKey: 'settings.apiKeyToolPresetCodeAnalystDesc',
+    tools: [
+      // Workspace CRUD
+      'workspace_create', 'workspace_list', 'workspace_get',
+      'workspace_update', 'workspace_delete', 'workspace_archive',
+      // Workspace operations
+      'workspace_clone', 'workspace_pull', 'workspace_tree',
+      'workspace_read', 'workspace_search', 'workspace_status',
+      'workspace_exec',
+      // DevGrimoire persistence the agent should use to record findings
+      'todo_create', 'todo_list', 'milestone_list',
+      'knowledge_save', 'snippet_save',
+    ],
+  },
+  {
+    id: 'bonsai-minimal',
+    labelKey: 'settings.apiKeyToolPresetBonsai',
+    descKey: 'settings.apiKeyToolPresetBonsaiDesc',
+    tools: [
+      'project_get', 'todo_list', 'todo_get', 'todo_create',
+      'todo_update', 'todo_comment',
+      'rag_search', 'knowledge_save',
+      'session_save', 'ask_user', 'notify_user',
+    ],
+  },
+];
+
 interface Props {
   apiKey: ApiKeyInfo;
   onSave: (allowedTools: string[] | null) => Promise<void>;
@@ -90,6 +131,32 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
     if (!catalog) return;
     setSelected(enabled ? new Set(catalog.map((tool) => tool.name)) : new Set());
   };
+
+  const applyPreset = (preset: ToolPreset) => {
+    if (!catalog) return;
+    // Drop preset entries that don't exist in the live catalog so an outdated
+    // preset never silently grants nothing — quietly ignore unknowns.
+    const known = new Set(catalog.map((tool) => tool.name));
+    const next = new Set(preset.tools.filter((name) => known.has(name)));
+    setMode('scoped');
+    setSelected(next);
+  };
+
+  // Match a preset by exact tool-set membership so the active preset can be
+  // highlighted even after the user toggles individual tools (resets pill
+  // highlight when divergent).
+  const activePresetId = useMemo(() => {
+    if (mode !== 'scoped') return null;
+    for (const preset of TOOL_PRESETS) {
+      if (preset.tools.length !== selected.size) continue;
+      let match = true;
+      for (const name of preset.tools) {
+        if (!selected.has(name)) { match = false; break; }
+      }
+      if (match) return preset.id;
+    }
+    return null;
+  }, [mode, selected]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -179,6 +246,34 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
             </div>
           ) : (
             <>
+              <div className="mb-4">
+                <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-2">
+                  {t('settings.apiKeyToolPresets')}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {TOOL_PRESETS.map((preset) => {
+                    const active = activePresetId === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => applyPreset(preset)}
+                        title={t(preset.descKey)}
+                        className={
+                          'text-xs px-3 py-1.5 rounded border transition-colors ' +
+                          (active
+                            ? 'bg-violet-700 border-violet-500 text-white'
+                            : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-violet-600 hover:text-violet-300')
+                        }
+                      >
+                        {t(preset.labelKey)}
+                        <span className="ml-2 text-[10px] opacity-70">({preset.tools.length})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="flex flex-col sm:flex-row gap-2 mb-4">
                 <input
                   type="text"
