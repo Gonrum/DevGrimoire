@@ -42,6 +42,7 @@ const COLLECTION_ENTITY_MAP: Record<string, ProjectChangeEvent['entity']> = {
   features: 'feature',
   souls: 'soul',
   commits: 'commit',
+  workspaces: 'workspace',
 };
 
 /** Collections watched separately (not ProjectChangeEvent) */

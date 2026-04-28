@@ -20,7 +20,14 @@ import {
 } from './replication.constants';
 import { randomUUID } from 'crypto';
 
-/** Maps entity types to MongoDB collection names */
+/**
+ * Maps entity types to MongoDB collection names.
+ *
+ * NOTE: `workspace` is intentionally absent — workspaces represent local
+ * sidecar-container state (clones, scratch files) that is not replicated
+ * across instances. Pushed workspace events are silently dropped here
+ * (`buildPayload` returns null when the entity has no collection mapping).
+ */
 const ENTITY_COLLECTION: Record<string, string> = {
   project: 'projects',
   todo: 'todos',
