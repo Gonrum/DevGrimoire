@@ -109,6 +109,17 @@ export class WorkspacesService {
       .exec();
   }
 
+  /**
+   * Bumps `lastActivityAt` and optionally updates `sizeBytes`. Used by the
+   * MCP read-only tools after each sidecar call so the TTL garbage-collector
+   * (T-155) does not reap workspaces an agent is actively working with.
+   */
+  async touch(id: string, sizeBytes?: number): Promise<void> {
+    const patch: Record<string, unknown> = { lastActivityAt: new Date() };
+    if (typeof sizeBytes === 'number' && sizeBytes >= 0) patch.sizeBytes = sizeBytes;
+    await this.workspaceModel.updateOne({ _id: id }, { $set: patch }).exec();
+  }
+
   private emit(ws: WorkspaceDocument, action: 'created' | 'updated' | 'deleted', summary: string) {
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: ws.projectId.toString(),

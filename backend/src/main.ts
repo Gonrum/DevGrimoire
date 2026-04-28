@@ -42,6 +42,7 @@ import { ChatContextService } from './chat/chat-context.service';
 import { WebSearchService } from './web-search/services/web-search.service';
 import { ReadabilityService } from './web-search/services/readability.service';
 import { WorkspacesService } from './workspaces/workspaces.service';
+import { WorkspaceClient } from './workspaces/workspace-client.service';
 import { registerMcpTools, McpServices } from './mcp-tools';
 import { ApiKeysService } from './api-keys/api-keys.service';
 import { AuthService } from './auth/auth.service';
@@ -102,6 +103,7 @@ async function bootstrap() {
     webSearchService: app.get(WebSearchService),
     readabilityService: app.get(ReadabilityService),
     workspacesService: app.get(WorkspacesService),
+    workspaceClient: app.get(WorkspaceClient),
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};

@@ -27,6 +27,7 @@ import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service
 import { SnippetsService } from './snippets/snippets.service';
 import { WorkspacesService } from './workspaces/workspaces.service';
 import { WorkspaceStatus } from './workspaces/schemas/workspace.schema';
+import { WorkspaceClient } from './workspaces/workspace-client.service';
 import { AttachmentsService } from './attachments/attachments.service';
 import { QuestionsService } from './questions/questions.service';
 import { LogsService } from './logs/logs.service';
@@ -198,6 +199,7 @@ export interface McpServices {
   webSearchService: WebSearchService;
   readabilityService: ReadabilityService;
   workspacesService: WorkspacesService;
+  workspaceClient: WorkspaceClient;
 }
 
 const tools = [
@@ -1544,6 +1546,88 @@ const tools = [
     },
   },
   {
+    name: 'workspace_clone',
+    description: 'Clone a git repository into the workspace volume. Shallow clone (depth=1) by default. Fails if the workspace already contains a repository — use workspace_pull instead. Does NOT install dependencies; the agent must request that explicitly via a future exec tool.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Workspace MongoDB ID' },
+        repoUrl: { type: 'string', description: 'http(s) git URL' },
+        branch: { type: 'string', description: 'Optional branch to check out' },
+      },
+      required: ['id', 'repoUrl'],
+    },
+  },
+  {
+    name: 'workspace_pull',
+    description: 'Fast-forward git pull on an existing workspace clone. Fails when the workspace has no .git or the merge is non-fast-forward.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Workspace MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'workspace_tree',
+    description: 'List the directory tree of a workspace as a flat array of {path,type}. Default depth=3, max 8. Skips .git. Truncates at 5000 entries.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Workspace MongoDB ID' },
+        path: { type: 'string', description: 'Optional sub-path relative to workspace root (default ".")' },
+        depth: { type: 'number', description: 'Recursion depth (1-8, default 3)' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'workspace_read',
+    description: 'Read a single file from a workspace. UTF-8 only, max 5MB. Path must resolve inside the workspace root (../ escapes are rejected).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Workspace MongoDB ID' },
+        path: { type: 'string', description: 'File path relative to workspace root' },
+      },
+      required: ['id', 'path'],
+    },
+  },
+  {
+    name: 'workspace_search',
+    description: 'Run ripgrep across a workspace. Case-insensitive, max 50 matches per file, max 300 columns per line. Optional include/exclude globs.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Workspace MongoDB ID' },
+        query: { type: 'string', description: 'Search pattern (ripgrep regex)' },
+        include: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional glob whitelist (e.g. ["*.ts","src/**"])',
+        },
+        exclude: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional glob blacklist',
+        },
+      },
+      required: ['id', 'query'],
+    },
+  },
+  {
+    name: 'workspace_status',
+    description: 'Run git status --porcelain --branch on a workspace clone. Returns the raw porcelain output for programmatic parsing.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Workspace MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
     name: 'recurring_task_create',
     description: 'Create a recurring task. With projectId: creates todos in that project. Without projectId: system-wide task that creates notifications.',
     inputSchema: {
@@ -1935,7 +2019,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -2962,6 +3046,75 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'workspace_delete': {
           await workspacesService.remove(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
+          break;
+        }
+        case 'workspace_clone': {
+          const id = requireString(a, 'id');
+          const ws = await workspacesService.findById(id);
+          const sidecar = await workspaceClient.clone(
+            ws._id.toString(),
+            requireString(a, 'repoUrl'),
+            optionalString(a, 'branch'),
+          );
+          // Pull a fresh size after clone so the UI reflects disk usage.
+          let sizeBytes: number | undefined;
+          try {
+            const sizeRes = await workspaceClient.size(ws._id.toString());
+            sizeBytes = sizeRes.sizeBytes;
+          } catch {
+            sizeBytes = undefined;
+          }
+          await workspacesService.touch(id, sizeBytes);
+          result = { cloned: true, id, sizeBytes, sidecar };
+          break;
+        }
+        case 'workspace_pull': {
+          const id = requireString(a, 'id');
+          const ws = await workspacesService.findById(id);
+          const sidecar = await workspaceClient.pull(ws._id.toString());
+          await workspacesService.touch(id);
+          result = { pulled: true, id, sidecar };
+          break;
+        }
+        case 'workspace_tree': {
+          const id = requireString(a, 'id');
+          const ws = await workspacesService.findById(id);
+          const tree = await workspaceClient.tree(
+            ws._id.toString(),
+            optionalString(a, 'path'),
+            optionalNumber(a, 'depth'),
+          );
+          await workspacesService.touch(id);
+          result = tree;
+          break;
+        }
+        case 'workspace_read': {
+          const id = requireString(a, 'id');
+          const ws = await workspacesService.findById(id);
+          const file = await workspaceClient.read(ws._id.toString(), requireString(a, 'path'));
+          await workspacesService.touch(id);
+          result = file;
+          break;
+        }
+        case 'workspace_search': {
+          const id = requireString(a, 'id');
+          const ws = await workspacesService.findById(id);
+          const search = await workspaceClient.search(
+            ws._id.toString(),
+            requireString(a, 'query'),
+            optionalStringArray(a, 'include'),
+            optionalStringArray(a, 'exclude'),
+          );
+          await workspacesService.touch(id);
+          result = search;
+          break;
+        }
+        case 'workspace_status': {
+          const id = requireString(a, 'id');
+          const ws = await workspacesService.findById(id);
+          const status = await workspaceClient.status(ws._id.toString());
+          await workspacesService.touch(id);
+          result = status;
           break;
         }
         case 'recurring_task_create': {
