@@ -120,6 +120,18 @@ export class WorkspacesService {
     await this.workspaceModel.updateOne({ _id: id }, { $set: patch }).exec();
   }
 
+  /**
+   * Returns workspaces in `status` whose `lastActivityAt` is older than
+   * `threshold`. Used by the TTL garbage-collector to pick candidates for
+   * archive/delete. Sorted oldest-first so logs stay deterministic.
+   */
+  async findInactive(status: WorkspaceStatus, threshold: Date): Promise<WorkspaceDocument[]> {
+    return this.workspaceModel
+      .find({ status, lastActivityAt: { $lt: threshold } })
+      .sort({ lastActivityAt: 1 })
+      .exec();
+  }
+
   private emit(ws: WorkspaceDocument, action: 'created' | 'updated' | 'deleted', summary: string) {
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: ws.projectId.toString(),

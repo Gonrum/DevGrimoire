@@ -2,11 +2,14 @@ import { Body, Controller, Delete, Get, HttpCode, Param, ParseEnumPipe, Post, Pu
 import type { Request, Response } from 'express';
 import { WorkspacesService } from './workspaces.service';
 import { WorkspaceClient } from './workspace-client.service';
+import { WorkspaceTtlScheduler } from './workspace-ttl.scheduler';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { ExecWorkspaceDto } from './dto/exec-workspace.dto';
 import { WORKSPACE_STATUSES, WorkspaceStatus } from './schemas/workspace.schema';
 import { LogsService } from '../logs/logs.service';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../auth/schemas/user.schema';
 
 @Controller('workspaces')
 export class WorkspacesController {
@@ -14,7 +17,20 @@ export class WorkspacesController {
     private readonly workspacesService: WorkspacesService,
     private readonly workspaceClient: WorkspaceClient,
     private readonly logs: LogsService,
+    private readonly ttl: WorkspaceTtlScheduler,
   ) {}
+
+  /**
+   * Manually triggers a TTL sweep — useful for tests and for the admin
+   * 'run cleanup now' button. Returns counts of archived + deleted
+   * workspaces. Admin only.
+   */
+  @Post('ttl/sweep')
+  @HttpCode(200)
+  @Roles(UserRole.ADMIN)
+  triggerTtlSweep() {
+    return this.ttl.sweep();
+  }
 
   @Post()
   @HttpCode(201)
