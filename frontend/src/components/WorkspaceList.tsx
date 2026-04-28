@@ -9,6 +9,7 @@ import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
 import { FormInput, FormTextarea } from './ui/FormField';
 import { Dialog, Portal } from './ui/Dialog';
+import WorkspaceTerminal from './WorkspaceTerminal';
 
 interface CreateForm {
   name: string;
@@ -71,6 +72,7 @@ export default function WorkspaceList({ projectId }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<WorkspaceStatus | 'all'>('active');
   const [showCreate, setShowCreate] = useState(false);
+  const [terminalFor, setTerminalFor] = useState<Workspace | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -211,8 +213,9 @@ export default function WorkspaceList({ projectId }: Props) {
                   <Button
                     size="xs"
                     variant="secondary"
-                    disabled
-                    title={t('workspaces.terminalComingSoon')}
+                    onClick={() => setTerminalFor(ws)}
+                    disabled={ws.status === 'archived'}
+                    title={ws.status === 'archived' ? t('workspaces.archivedNoTerminal') : undefined}
                   >
                     {t('workspaces.openTerminal')}
                   </Button>
@@ -253,6 +256,14 @@ export default function WorkspaceList({ projectId }: Props) {
               />
             </div>
           </Dialog>
+        </Portal>
+      )}
+
+      {terminalFor && (
+        <Portal>
+          <div className="bg-gray-900 border border-violet-500/50 rounded-xl shadow-2xl shadow-violet-500/10 max-w-4xl w-full mx-4 overflow-hidden">
+            <WorkspaceTerminal workspace={terminalFor} onClose={() => setTerminalFor(null)} />
+          </div>
         </Portal>
       )}
     </div>

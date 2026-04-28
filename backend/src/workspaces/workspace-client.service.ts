@@ -133,4 +133,68 @@ export class WorkspaceClient {
       limit + 10_000,
     );
   }
+
+  /**
+   * Streams /exec/stream NDJSON events from the sidecar to `onEvent`.
+   * Uses native fetch (Node 20+) so we can iterate the response body
+   * without buffering. abortSignal cancels the upstream request, which
+   * makes the sidecar's req.on('close') fire and SIGKILL the child.
+   */
+  async execStream(
+    workspaceId: string,
+    command: string,
+    timeoutMs: number | undefined,
+    env: Record<string, string> | undefined,
+    abortSignal: AbortSignal,
+    onEvent: (event: Record<string, unknown>) => void,
+  ): Promise<void> {
+    if (!this.token) {
+      throw new ServiceUnavailableException(
+        'Workspace sidecar is not configured — set WORKSPACE_API_TOKEN to enable workspace_* tools',
+      );
+    }
+    const limit = Math.min(timeoutMs ?? 60_000, 600_000);
+    const url = `${this.baseUrl}/exec/stream`;
+    const body = JSON.stringify({ workspaceId, command, timeout: limit, env });
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
+      },
+      body,
+      signal: abortSignal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`sidecar ${res.status} /exec/stream: ${text}`);
+    }
+    if (!res.body) throw new Error('sidecar /exec/stream: empty response body');
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            onEvent(JSON.parse(trimmed));
+          } catch {
+            // skip malformed line — sidecar should never produce them
+          }
+        }
+      }
+      if (buf.trim()) {
+        try { onEvent(JSON.parse(buf.trim())); } catch { /* skip */ }
+      }
+    } finally {
+      try { reader.releaseLock(); } catch { /* noop */ }
+    }
+  }
 }

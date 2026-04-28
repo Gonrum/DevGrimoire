@@ -366,7 +366,7 @@
     "size": "Größe",
     "lastActivity": "Zuletzt aktiv",
     "openTerminal": "Terminal öffnen",
-    "terminalComingSoon": "Manuelles Terminal kommt mit T-153",
+    "archivedNoTerminal": "Archivierte Workspaces unterstützen kein Terminal",
     "archive": "Archivieren",
     "delete": "Löschen",
     "confirmArchive": "Sicher archivieren?",
@@ -381,6 +381,16 @@
     "formRepoUrl": "Repository-URL (optional)",
     "formBranch": "Branch (optional, default: main)",
     "nameHint": "Erlaubt: a-z, 0-9, '-', '_'. Muss mit Buchstabe oder Zahl beginnen, max 64 Zeichen."
+  },
+  "terminal": {
+    "workspace": "Workspace",
+    "copy": "Kopieren",
+    "clear": "Leeren",
+    "placeholder": "Befehl eingeben und Enter drücken (Pfeil hoch/runter für Verlauf, Strg+L leert, Strg+C bricht ab)",
+    "prompt": "z.B. ls -la · git status · npm run lint",
+    "running": "läuft …",
+    "run": "Ausführen",
+    "cancel": "Abbrechen"
   },
   "snippets": {
     "newSnippet": "+ Neues Snippet",

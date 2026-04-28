@@ -361,6 +361,24 @@ export interface Feature {
 
 export type WorkspaceStatus = 'active' | 'archived' | 'cleaning';
 
+export type WorkspaceStreamEvent =
+  | { type: 'stdout'; line: string }
+  | { type: 'stderr'; line: string }
+  | { type: 'truncated'; stream: 'stdout' | 'stderr' }
+  | { type: 'error'; message: string }
+  | {
+      type: 'done';
+      exitCode: number | null;
+      signal: string | null;
+      timedOut: boolean;
+      killReason: string | null;
+      durationMs: number;
+      stdoutTruncated: boolean;
+      stderrTruncated: boolean;
+      stdoutBytes: number;
+      stderrBytes: number;
+    };
+
 export interface Workspace {
   _id: string;
   projectId: string;
@@ -890,6 +908,57 @@ export const api = {
       request<Workspace>(`/workspaces/${id}/archive`, { method: 'POST' }),
     delete: (id: string) =>
       request<void>(`/workspaces/${id}`, { method: 'DELETE' }),
+    /**
+     * Streams shell command output via SSE for the manual terminal UI.
+     * Each `data:` frame is parsed and forwarded to onEvent. abortSignal
+     * aborts the upstream and triggers SIGKILL on the sidecar process.
+     */
+    execStream: async (
+      id: string,
+      command: string,
+      onEvent: (event: WorkspaceStreamEvent) => void,
+      signal: AbortSignal,
+      opts?: { timeout?: number; env?: Record<string, string> },
+    ): Promise<void> => {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const token = getAccessToken?.();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`${BASE_URL}/workspaces/${id}/exec/stream`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ command, timeout: opts?.timeout, env: opts?.env }),
+        signal,
+      });
+      if (!res.ok || !res.body) {
+        const err = await res.json().catch(() => ({ message: res.statusText }));
+        throw new Error(err.message || res.statusText);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const chunks = buf.split('\n\n');
+          buf = chunks.pop() ?? '';
+          for (const chunk of chunks) {
+            const line = chunk.split('\n').find((l) => l.startsWith('data:'));
+            if (!line) continue;
+            const data = line.slice(5).trim();
+            if (!data) continue;
+            try {
+              onEvent(JSON.parse(data) as WorkspaceStreamEvent);
+            } catch {
+              // skip malformed
+            }
+          }
+        }
+      } finally {
+        try { reader.releaseLock(); } catch { /* noop */ }
+      }
+    },
   },
   snippets: {
     list: (projectId: string, filters?: { language?: string; category?: string; tag?: string }) => {

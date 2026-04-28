@@ -5,11 +5,13 @@ import { Workspace, WorkspaceSchema } from './schemas/workspace.schema';
 import { WorkspacesService } from './workspaces.service';
 import { WorkspacesController } from './workspaces.controller';
 import { WorkspaceClient } from './workspace-client.service';
+import { LogsModule } from '../logs/logs.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Workspace.name, schema: WorkspaceSchema }]),
     HttpModule.register({ timeout: 60_000, maxRedirects: 0 }),
+    LogsModule,
   ],
   controllers: [WorkspacesController],
   providers: [WorkspacesService, WorkspaceClient],

@@ -413,6 +413,108 @@ function runExec({ command, cwd, timeoutMs, env }) {
   });
 }
 
+/**
+ * Streaming variant of runExec. Emits one event per line of stdout/stderr
+ * via `onEvent` and a final `done` (or `error`) event. The same safety
+ * layers as runExec apply: detached process group, SIGTERM→SIGKILL on
+ * timeout or upstream abort, 1MB cap per stream. The caller controls
+ * cancellation through `abortSignal`.
+ */
+function runExecStream({ command, cwd, timeoutMs, env, abortSignal }, onEvent) {
+  return new Promise((resolve) => {
+    const child = spawn('/bin/bash', ['-lc', command], {
+      cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const startedAt = Date.now();
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
+    let stdoutBuf = '';
+    let stderrBuf = '';
+    let timedOut = false;
+    let killReason = null;
+
+    const killPg = (signal) => {
+      try { process.kill(-child.pid, signal); } catch { /* gone */ }
+    };
+
+    const lineEmitter = (stream) => (chunk) => {
+      const cap = stream === 'stdout' ? stdoutBytes : stderrBytes;
+      if (cap >= EXEC_OUTPUT_CAP_BYTES) {
+        if (stream === 'stdout' && !stdoutTruncated) { stdoutTruncated = true; onEvent({ type: 'truncated', stream }); }
+        if (stream === 'stderr' && !stderrTruncated) { stderrTruncated = true; onEvent({ type: 'truncated', stream }); }
+        return;
+      }
+      const remaining = EXEC_OUTPUT_CAP_BYTES - cap;
+      const slice = chunk.length > remaining ? chunk.subarray(0, remaining) : chunk;
+      if (chunk.length > remaining) {
+        if (stream === 'stdout') stdoutTruncated = true; else stderrTruncated = true;
+      }
+      const text = slice.toString('utf8');
+      if (stream === 'stdout') stdoutBytes += slice.length; else stderrBytes += slice.length;
+      // Line-buffer so partial UTF-8/lines don't ship as half-events.
+      let buf = stream === 'stdout' ? stdoutBuf + text : stderrBuf + text;
+      const newlineIndex = buf.lastIndexOf('\n');
+      if (newlineIndex >= 0) {
+        const complete = buf.slice(0, newlineIndex);
+        const tail = buf.slice(newlineIndex + 1);
+        for (const line of complete.split('\n')) {
+          onEvent({ type: stream, line });
+        }
+        if (stream === 'stdout') stdoutBuf = tail; else stderrBuf = tail;
+      } else {
+        if (stream === 'stdout') stdoutBuf = buf; else stderrBuf = buf;
+      }
+    };
+    child.stdout.on('data', lineEmitter('stdout'));
+    child.stderr.on('data', lineEmitter('stderr'));
+
+    const softTimer = setTimeout(() => {
+      timedOut = true;
+      killReason = 'timeout';
+      killPg('SIGTERM');
+    }, timeoutMs);
+    const hardTimer = setTimeout(() => killPg('SIGKILL'), timeoutMs + 5_000);
+
+    const onAbort = () => {
+      if (killReason) return;
+      killReason = 'abort';
+      killPg('SIGTERM');
+      setTimeout(() => killPg('SIGKILL'), 2_000);
+    };
+    if (abortSignal) {
+      if (abortSignal.aborted) onAbort();
+      else abortSignal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    child.on('error', (err) => {
+      clearTimeout(softTimer); clearTimeout(hardTimer);
+      onEvent({ type: 'error', message: String(err && err.message ? err.message : err) });
+      resolve();
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(softTimer); clearTimeout(hardTimer);
+      // Flush trailing partial lines (no terminating newline).
+      if (stdoutBuf) onEvent({ type: 'stdout', line: stdoutBuf });
+      if (stderrBuf) onEvent({ type: 'stderr', line: stderrBuf });
+      onEvent({
+        type: 'done',
+        exitCode: code,
+        signal,
+        timedOut,
+        killReason,
+        durationMs: Date.now() - startedAt,
+        stdoutTruncated,
+        stderrTruncated,
+        stdoutBytes,
+        stderrBytes,
+      });
+      resolve();
+    });
+  });
+}
+
 app.post('/exec', async (req, res) => {
   const id = requireWorkspaceId(req, res); if (!id) return;
   const command = req.body?.command;
@@ -447,6 +549,63 @@ app.post('/exec', async (req, res) => {
     cmdPreview: command.slice(0, 120),
   }));
   res.json(result);
+});
+
+/**
+ * Streaming variant of /exec. Emits NDJSON (one JSON object per line) so
+ * the upstream can pipe the body through unchanged or repackage it as SSE.
+ * The same safety layers apply (blacklist, scrubbed env, timeouts, process
+ * group cleanup). Closing the upstream connection aborts the child via
+ * abortSignal → SIGTERM → SIGKILL.
+ */
+app.post('/exec/stream', async (req, res) => {
+  const id = requireWorkspaceId(req, res); if (!id) return;
+  const command = req.body?.command;
+  if (typeof command !== 'string' || !command.trim()) {
+    return res.status(400).json({ error: 'command must be a non-empty string' });
+  }
+  if (command.length > 8 * 1024) {
+    return res.status(400).json({ error: 'command too long (max 8KB)' });
+  }
+  if (isCommandBlacklisted(command)) {
+    return res.status(400).json({ error: 'command rejected by safety blacklist' });
+  }
+  if (!await workspaceExists(id)) {
+    return res.status(404).json({ error: 'workspace directory does not exist — clone first' });
+  }
+  let timeoutMs = Number(req.body?.timeout ?? EXEC_DEFAULT_TIMEOUT_MS);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) timeoutMs = EXEC_DEFAULT_TIMEOUT_MS;
+  if (timeoutMs > EXEC_MAX_TIMEOUT_MS) timeoutMs = EXEC_MAX_TIMEOUT_MS;
+
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  const abort = new AbortController();
+  req.on('close', () => abort.abort());
+
+  const startedAt = Date.now();
+  const env = buildExecEnv(req.body?.env);
+  const cwd = workspaceRoot(id);
+
+  let lastEvent = null;
+  await runExecStream({ command, cwd, timeoutMs, env, abortSignal: abort.signal }, (ev) => {
+    lastEvent = ev;
+    if (!res.writableEnded) res.write(JSON.stringify(ev) + '\n');
+  });
+  if (!res.writableEnded) res.end();
+
+  const done = lastEvent && lastEvent.type === 'done' ? lastEvent : null;
+  console.log(JSON.stringify({
+    type: 'exec-stream',
+    workspaceId: id,
+    durationMs: Date.now() - startedAt,
+    exitCode: done ? done.exitCode : null,
+    timedOut: done ? done.timedOut : true,
+    killReason: done ? done.killReason : 'aborted',
+    cmdLen: command.length,
+    cmdPreview: command.slice(0, 120),
+  }));
 });
 
 app.post('/cleanup', async (req, res) => {
