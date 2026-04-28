@@ -1,0 +1,16 @@
+{
+  "name": "devgrimoire-workspace-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sidecar HTTP API for DevGrimoire workspace operations (clone/pull/read/tree/search). Runs in an isolated container with a separate network and resource limits.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

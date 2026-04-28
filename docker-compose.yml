@@ -52,6 +52,43 @@ services:
       retries: 5
       start_period: 20s
 
+  # Workspace sidecar — isolated container that owns the per-project clone
+  # volume and exposes a small HTTP API consumed only by the API backend over
+  # the internal `workspace-api-net`. It has no route to MongoDB or the API.
+  workspace:
+    build:
+      context: ./workspace
+      dockerfile: Dockerfile
+    container_name: devgrimoire-workspace
+    restart: unless-stopped
+    environment:
+      WORKSPACE_API_TOKEN: ${WORKSPACE_API_TOKEN:?WORKSPACE_API_TOKEN must be set (>=16 chars) for the sidecar}
+      WORKSPACE_ROOT: /workspaces
+      PORT: 9000
+    volumes:
+      - workspace_data:/workspaces
+    networks:
+      - workspace-net      # outbound: git/npm/etc.
+      - workspace-api-net  # inbound: only the API backend
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN          # git checkout sets file ownership
+      - DAC_OVERRIDE   # allow operating across workspace subdirs
+      - FOWNER         # git index ownership checks
+      - SETUID         # node runtime
+      - SETGID
+
   backend:
     build:
       context: ./backend
@@ -62,7 +99,14 @@ services:
       - "3200:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - workspace-api-net  # only the API may talk to the sidecar
     environment:
+      # Sidecar wiring — backend resolves the sidecar via service DNS on
+      # the internal workspace-api-net. Token is the shared secret.
+      WORKSPACE_API_URL: ${WORKSPACE_API_URL:-http://workspace:9000}
+      WORKSPACE_API_TOKEN: ${WORKSPACE_API_TOKEN:-}
       MONGODB_URI: ${MONGODB_URI}
       PORT: 3000
       CORS_ORIGIN: http://localhost
@@ -140,4 +184,14 @@ volumes:
   mongodb_data:
   mongodb_keyfile:
   lancedb_data:
+  workspace_data:
   # minio_data:
+
+networks:
+  default:
+  # Outbound network for the workspace sidecar — git clones, npm pulls etc.
+  workspace-net:
+  # Internal-only bridge between API backend and workspace sidecar. The
+  # sidecar can therefore not reach MongoDB nor the wider docker network.
+  workspace-api-net:
+    internal: true
