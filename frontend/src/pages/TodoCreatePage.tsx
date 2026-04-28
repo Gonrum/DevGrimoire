@@ -5,6 +5,8 @@ import { api, Todo, Milestone } from '../api/client';
 import MarkdownEditor from '../components/MarkdownEditor';
 import Button from '../components/ui/Button';
 import { FormInput, FormSelect } from '../components/ui/FormField';
+import { DictationButton } from '../components/ui/DictationButton';
+import { SpeechConsentDialog } from '../components/ui/SpeechConsentDialog';
 
 export default function TodoCreatePage() {
   const { id } = useParams<{ id: string }>();
@@ -22,6 +24,8 @@ export default function TodoCreatePage() {
   const [creatingMilestone, setCreatingMilestone] = useState(false);
   const [storageEnabled, setStorageEnabled] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [speechConsent, setSpeechConsent] = useState(localStorage.getItem('speech_consent') === 'true');
+  const [showConsentDialog, setShowConsentDialog] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadMilestones = () => { if (id) api.milestones.list(id).then(setMilestones); };
@@ -36,6 +40,12 @@ export default function TodoCreatePage() {
     setMilestoneId(ms._id);
     loadMilestones();
   };
+
+  useEffect(() => {
+    if (!speechConsent) {
+        setShowConsentDialog(true);
+    }
+  }, [speechConsent]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,10 +82,24 @@ export default function TodoCreatePage() {
       <h1 className="text-xl font-bold mb-6">{t('todoCreate.title')}</h1>
 
       <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-4">
-        <FormInput label={t('common.title')} required type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('common.title')} autoFocus />
-        <div>
+        <div className="flex items-center gap-2">
+          <FormInput label={t('common.title')} required type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('common.title')} autoFocus />
+          {speechConsent && (
+            <DictationButton onTextUpdate={(text, isFinal) => {
+              setTitle(prev => isFinal ? prev + ' ' + text : text);
+            }} />
+          )}
+        </div>
+        <div className="-mt-4">
           <label className="block text-xs text-gray-500 mb-1">{t('common.description')}</label>
-          <MarkdownEditor value={description} onChange={setDescription} rows={5} placeholder={t('todoCreate.descriptionPlaceholder')} />
+          <div className="flex items-start gap-2">
+            <MarkdownEditor value={description} onChange={setDescription} rows={5} placeholder={t('todoCreate.descriptionPlaceholder')} />
+            {speechConsent && (
+              <DictationButton onTextUpdate={(text, isFinal) => {
+                setDescription(prev => isFinal ? prev + ' ' + text : text);
+              }} />
+            )}
+          </div>
         </div>
         <div className="flex flex-col sm:flex-row gap-4 items-start">
           <FormSelect label={t('common.priority')} value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}>
@@ -170,6 +194,15 @@ export default function TodoCreatePage() {
           </Button>
         </div>
       </form>
+      <SpeechConsentDialog 
+        isOpen={showConsentDialog} 
+        onClose={() => setShowConsentDialog(false)} 
+        onConsent={() => {
+          setSpeechConsent(true);
+          localStorage.setItem('speech_consent', 'true');
+          setShowConsentDialog(false);
+        }} 
+      />
     </div>
   );
 }
