@@ -15,6 +15,29 @@ const BASE_URL =
   (typeof window !== 'undefined' && (window as unknown as { __DG_API_URL__?: string }).__DG_API_URL__) ||
   '/api';
 
+// crypto.randomUUID() is only available in secure contexts (https or
+// localhost). DevGrimoire is often self-hosted over plain HTTP on a LAN
+// IP, so fall back to getRandomValues — the value is just a per-tab map
+// key on the sidecar, no cryptographic property required.
+function makeSessionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      // some old Safari throws when not in a secure context — fall through
+    }
+  }
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function buildWsUrl(workspaceId: string, sessionId: string): string {
   const token = getCurrentAccessToken();
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -61,7 +84,7 @@ export default function WorkspaceTerminal({ workspace, onClose }: Props) {
 
     // Persistent session id per Browser-tab+workspace mount so a brief
     // network hiccup re-attaches to the same bash on the sidecar.
-    const sessionId = crypto.randomUUID();
+    const sessionId = makeSessionId();
     const ws = new WebSocket(buildWsUrl(workspace._id, sessionId));
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
