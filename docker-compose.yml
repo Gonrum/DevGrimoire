@@ -55,6 +55,16 @@ services:
   # Workspace sidecar — isolated container that owns the per-project clone
   # volume and exposes a small HTTP API consumed only by the API backend over
   # the internal `workspace-api-net`. It has no route to MongoDB or the API.
+  #
+  # NETWORK REACH (operator note): the sidecar joins `workspace-net` (a
+  # regular bridge with NAT), so workspace_exec commands CAN reach hosts on
+  # the operator's own LAN — including services running on the docker host
+  # itself (e.g. an internal SQL server, dev tooling, router admin). This is
+  # intentional: a self-hosted instance often *needs* to query a local DB or
+  # internal API from the agent. RFC1918 / LAN egress filtering is left to
+  # the operator's host firewall (iptables/UFW/nftables) where it belongs.
+  # If you run this in a multi-tenant or untrusted-agent setting, gate
+  # egress at the host before exposing workspace_exec.
   workspace:
     build:
       context: ./workspace
