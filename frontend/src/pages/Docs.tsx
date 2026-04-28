@@ -320,15 +320,15 @@ openssl rand -hex 32`}</Code>
           <div className="space-y-2 text-sm text-gray-400">
             <div className="flex gap-3">
               <code className="text-green-400 shrink-0 w-44">GET /sse</code>
-              <span>Legacy SSE (Claude Code, Claude Desktop)</span>
+              <span>SSE (Claude Code, Claude Desktop, mcp-remote)</span>
             </div>
             <div className="flex gap-3">
               <code className="text-green-400 shrink-0 w-44">POST /messages</code>
-              <span>{isDE ? 'Legacy SSE Message-Endpoint' : 'Legacy SSE message endpoint'}</span>
+              <span>{isDE ? 'SSE Message-Endpoint' : 'SSE message endpoint'}</span>
             </div>
             <div className="flex gap-3">
               <code className="text-cyan-400 shrink-0 w-44">POST|GET|DELETE /mcp</code>
-              <span>{isDE ? 'Streamable HTTP (neuere Clients)' : 'Streamable HTTP (newer clients)'}</span>
+              <span>{isDE ? 'Streamable HTTP (empfohlen für neuere Clients und Multi-Session)' : 'Streamable HTTP (recommended for newer clients and multi-session)'}</span>
             </div>
           </div>
         </div>
