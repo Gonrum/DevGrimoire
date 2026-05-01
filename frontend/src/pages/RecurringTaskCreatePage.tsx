@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { api, RecurringFrequency, Project } from '../api/client';
 import MarkdownEditor from '../components/MarkdownEditor';
 import Button from '../components/ui/Button';
 import { FormInput, FormSelect } from '../components/ui/FormField';
+import { WorkflowPageShell } from '../components/ui/WorkflowShell';
 
 const FREQUENCIES: RecurringFrequency[] = ['daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'];
 
@@ -68,62 +69,59 @@ export default function RecurringTaskCreatePage() {
   const backLabel = isGlobal ? t('recurringTasks.globalTitle') : t('recurringTasks.backToProject');
 
   return (
-    <div>
-      <Link to={backLink} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">
-        &larr; {backLabel}
-      </Link>
-
-      <h1 className="text-xl font-bold mb-6">{t('recurringTasks.createTitle')}</h1>
-
-      <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-4">
-        <FormInput label={t('common.title')} required type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('common.title')} autoFocus />
+    <WorkflowPageShell backTo={backLink} backLabel={backLabel} title={t('recurringTasks.createTitle')}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <FormInput fieldClassName="w-full" label={t('common.title')} required type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('common.title')} autoFocus />
 
         {isGlobal && (
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">{t('recurringTasks.targetProject')}</label>
-            <select
-              value={selectedProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
-            >
-              <option value="">{t('recurringTasks.systemWideOption')}</option>
-              {projects.map((p) => (
-                <option key={p._id} value={p._id}>{p.name}</option>
-              ))}
-            </select>
-            <p className="text-xs text-gray-600 mt-1">{t('recurringTasks.systemWideHint')}</p>
-          </div>
+          <FormSelect
+            fieldClassName="w-full"
+            label={t('recurringTasks.targetProject')}
+            value={selectedProjectId}
+            onChange={(e) => setSelectedProjectId(e.target.value)}
+          >
+            <option value="">{t('recurringTasks.systemWideOption')}</option>
+            {projects.map((p) => (
+              <option key={p._id} value={p._id}>{p.name}</option>
+            ))}
+          </FormSelect>
+        )}
+        {isGlobal && (
+          <p className="-mt-2 text-xs text-gray-600">{t('recurringTasks.systemWideHint')}</p>
         )}
 
         <div>
           <label className="block text-xs text-gray-500 mb-1">{t('common.description')}</label>
           <MarkdownEditor value={description} onChange={setDescription} rows={4} placeholder={t('recurringTasks.descriptionPlaceholder')} />
         </div>
-        <div className="flex flex-col sm:flex-row gap-4 items-start">
-          <FormSelect label={t('common.priority')} value={priority} onChange={(e) => setPriority(e.target.value)}>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <FormSelect fieldClassName="w-full sm:w-44 shrink-0" label={t('common.priority')} value={priority} onChange={(e) => setPriority(e.target.value)}>
             <option value="low">{t('todoPriority.low')}</option>
             <option value="medium">{t('todoPriority.medium')}</option>
             <option value="high">{t('todoPriority.high')}</option>
             <option value="critical">{t('todoPriority.critical')}</option>
           </FormSelect>
-          <div className="flex-1 w-full sm:w-auto">
-            <label className="block text-xs text-gray-500 mb-1">{t('common.tags')}</label>
-            <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('todoCreate.tagsPlaceholder')}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
-          </div>
+          <FormInput
+            fieldClassName="flex-1 min-w-0 w-full"
+            label={t('common.tags')}
+            type="text"
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+            placeholder={t('todoCreate.tagsPlaceholder')}
+          />
         </div>
 
         <div className="border-t border-gray-800 pt-4">
           <h2 className="text-sm font-semibold text-gray-300 mb-3">{t('recurringTasks.schedule')}</h2>
-          <div className="flex flex-col sm:flex-row gap-4 items-start">
-            <FormSelect label={t('recurringTasks.frequency')} value={frequency} onChange={(e) => setFrequency(e.target.value as RecurringFrequency)}>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+            <FormSelect fieldClassName="w-full sm:flex-1" label={t('recurringTasks.frequency')} value={frequency} onChange={(e) => setFrequency(e.target.value as RecurringFrequency)}>
               {FREQUENCIES.map((f) => (
                 <option key={f} value={f}>{t(`recurringTasks.freq_${f}`)}</option>
               ))}
             </FormSelect>
 
             {showDayOfWeek && (
-              <FormSelect label={t('recurringTasks.dayOfWeek')} value={String(dayOfWeek)} onChange={(e) => setDayOfWeek(Number(e.target.value))}>
+              <FormSelect fieldClassName="w-full sm:flex-1" label={t('recurringTasks.dayOfWeek')} value={String(dayOfWeek)} onChange={(e) => setDayOfWeek(Number(e.target.value))}>
                 {[1, 2, 3, 4, 5, 6, 0].map((d) => (
                   <option key={d} value={d}>{t(`recurringTasks.day_${d}`)}</option>
                 ))}
@@ -131,7 +129,7 @@ export default function RecurringTaskCreatePage() {
             )}
 
             {showDayOfMonth && (
-              <FormSelect label={t('recurringTasks.dayOfMonth')} value={String(dayOfMonth)} onChange={(e) => setDayOfMonth(Number(e.target.value))}>
+              <FormSelect fieldClassName="w-full sm:flex-1" label={t('recurringTasks.dayOfMonth')} value={String(dayOfMonth)} onChange={(e) => setDayOfMonth(Number(e.target.value))}>
                 {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
                   <option key={d} value={d}>{d}.</option>
                 ))}
@@ -139,14 +137,14 @@ export default function RecurringTaskCreatePage() {
             )}
 
             {showMonth && (
-              <FormSelect label={t('recurringTasks.month')} value={String(month)} onChange={(e) => setMonth(Number(e.target.value))}>
+              <FormSelect fieldClassName="w-full sm:flex-1" label={t('recurringTasks.month')} value={String(month)} onChange={(e) => setMonth(Number(e.target.value))}>
                 {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
                   <option key={m} value={m}>{t(`recurringTasks.month_${m}`)}</option>
                 ))}
               </FormSelect>
             )}
 
-            <FormSelect label={t('recurringTasks.hour')} value={String(hour)} onChange={(e) => setHour(Number(e.target.value))}>
+            <FormSelect fieldClassName="w-full sm:flex-1" label={t('recurringTasks.hour')} value={String(hour)} onChange={(e) => setHour(Number(e.target.value))}>
               {Array.from({ length: 24 }, (_, i) => i).map((h) => (
                 <option key={h} value={h}>{`${String(h).padStart(2, '0')}:00`}</option>
               ))}
@@ -163,6 +161,6 @@ export default function RecurringTaskCreatePage() {
           </Button>
         </div>
       </form>
-    </div>
+    </WorkflowPageShell>
   );
 }
