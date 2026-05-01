@@ -1,15 +1,15 @@
-import { useEffect, useState, useRef, FormEvent } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Milestone, Todo, ChangelogEntry } from '../api/client';
 import Markdown from '../components/Markdown';
 import MarkdownEditor from '../components/MarkdownEditor';
+import TodoForm from '../components/TodoForm';
 import { useToast } from '../components/Toast';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import ConfirmButton from '../components/ui/ConfirmButton';
 import { LoadingText } from '../components/ui/LoadingSpinner';
-import { FormInput, FormSelect } from '../components/ui/FormField';
 
 const STATUS_COLORS: Record<Milestone['status'], string> = {
   open: 'bg-gray-700 text-gray-300',
@@ -79,43 +79,6 @@ function TodoAccordionItem({ todo, projectId }: { todo: Todo; projectId: string 
 
 function CreateTodoModal({ projectId, milestoneId, onCreated, onClose }: { projectId: string; milestoneId: string; onCreated: () => void; onClose: () => void }) {
   const { t } = useTranslation();
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<Todo['priority']>('medium');
-  const [tags, setTags] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [storageEnabled, setStorageEnabled] = useState(false);
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { api.attachments.storageStatus().then((s) => setStorageEnabled(s.enabled)).catch(() => {}); }, []);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) return;
-    setSaving(true);
-    try {
-      const todo = await api.todos.create({
-        projectId,
-        title: title.trim(),
-        description: description.trim() || undefined,
-        priority,
-        status: 'open',
-        tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
-        milestoneId,
-      } as Partial<Todo> & { milestoneId?: string });
-
-      if (pendingFiles.length > 0 && todo._id) {
-        for (const file of pendingFiles) {
-          await api.attachments.upload(projectId, file, { entityType: 'todo', entityId: todo._id }).catch(() => {});
-        }
-      }
-
-      onCreated();
-    } finally {
-      setSaving(false);
-    }
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
@@ -124,57 +87,15 @@ function CreateTodoModal({ projectId, milestoneId, onCreated, onClose }: { proje
           <h2 className="text-lg font-semibold text-gray-200">{t('todoCreate.title')}</h2>
           <button type="button" onClick={onClose} className="text-gray-500 hover:text-gray-300 text-xl leading-none">&times;</button>
         </div>
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          <FormInput label={t('common.title')} required type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('common.title')} autoFocus />
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">{t('common.description')}</label>
-            <MarkdownEditor value={description} onChange={setDescription} rows={4} placeholder={t('todoCreate.descriptionPlaceholder')} />
-          </div>
-          <div className="flex flex-col sm:flex-row gap-4 items-start">
-            <FormSelect label={t('common.priority')} value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}>
-              <option value="low">{t('todoPriority.low')}</option>
-              <option value="medium">{t('todoPriority.medium')}</option>
-              <option value="high">{t('todoPriority.high')}</option>
-              <option value="critical">{t('todoPriority.critical')}</option>
-            </FormSelect>
-            <div className="flex-1 w-full sm:w-auto">
-              <label className="block text-xs text-gray-500 mb-1">{t('common.tags')}</label>
-              <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('todoCreate.tagsPlaceholder')}
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
-            </div>
-          </div>
-          {storageEnabled && (
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">{t('attachments.attachments')}</label>
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="rounded-lg border-2 border-dashed border-gray-700 hover:border-gray-600 bg-gray-900/50 px-4 py-3 text-center cursor-pointer transition-colors"
-              >
-                <input ref={fileInputRef} type="file" multiple onChange={(e) => {
-                  if (e.target.files) { setPendingFiles((prev) => [...prev, ...Array.from(e.target.files!)]); e.target.value = ''; }
-                }} className="hidden" />
-                {pendingFiles.length === 0 ? (
-                  <p className="text-sm text-gray-500">{t('attachments.dropzone')}</p>
-                ) : (
-                  <div className="space-y-1">
-                    {pendingFiles.map((f, i) => (
-                      <div key={i} className="flex items-center justify-between text-sm text-gray-300">
-                        <span className="truncate">{f.name}</span>
-                        <button type="button" onClick={(e) => { e.stopPropagation(); setPendingFiles((prev) => prev.filter((_, j) => j !== i)); }} className="text-red-400 hover:text-red-300 ml-2 text-xs">&times;</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          <div className="flex gap-2 pt-2">
-            <Button type="submit" variant="primary" disabled={saving || !title.trim()}>
-              {saving ? t('common.creating') : t('common.create')}
-            </Button>
-            <Button type="button" onClick={onClose}>{t('common.cancel')}</Button>
-          </div>
-        </form>
+        <TodoForm
+          projectId={projectId}
+          initialMilestoneId={milestoneId}
+          descriptionRows={4}
+          submitSize="md"
+          className="p-5"
+          onCreated={onCreated}
+          onCancel={onClose}
+        />
       </div>
     </div>
   );

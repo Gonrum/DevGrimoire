@@ -41,6 +41,7 @@ export const DictationButton: React.FC<DictationButtonProps> = ({ onTextUpdate }
   if (!isSupported) {
     return (
       <Button
+        type="button"
         variant="secondary"
         size="sm"
         disabled
@@ -54,6 +55,7 @@ export const DictationButton: React.FC<DictationButtonProps> = ({ onTextUpdate }
 
   return (
     <Button
+      type="button"
       variant={isListening ? 'danger' : 'secondary'}
       size="sm"
       onClick={() => (isListening ? stopListening() : startListening())}
