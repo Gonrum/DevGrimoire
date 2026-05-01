@@ -6,6 +6,7 @@ import Button from '../components/ui/Button';
 import ConfirmButton from '../components/ui/ConfirmButton';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import Badge from '../components/ui/Badge';
+import { SettingsSection, SettingsShell } from '../components/ui/SettingsShell';
 
 const TEMPLATE_INSTRUCTIONS = `## Arbeitsweise
 1. Immer erst Planen und einen Überblick verschaffen
@@ -359,7 +360,10 @@ export default function ProjectSettings() {
   if (!project) return <p className="text-red-400">{t('projects.notFound')}</p>;
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <SettingsShell
+      title={t('projectSettings.title')}
+      maxWidth="max-w-4xl"
+    >
       <Link
         to={`/projects/${id}`}
         className="text-sm text-gray-500 hover:text-gray-300 mb-4 inline-block"
@@ -367,10 +371,7 @@ export default function ProjectSettings() {
         &larr; {project.name}
       </Link>
 
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold mb-1">{t('projectSettings.title')}</h1>
-        <p className="text-gray-400 text-sm">{project.name}</p>
-      </div>
+      <p className="mb-8 text-sm text-gray-400">{project.name}</p>
 
       <section className="mb-8 space-y-4">
         <h2 className="text-lg font-semibold text-cyan-400">{t('projectSettings.projectData')}</h2>
@@ -839,14 +840,11 @@ export default function ProjectSettings() {
         <ConfirmButton onConfirm={async () => { if (id) { await api.projects.delete(id); navigate('/'); } }} label={t('projectSettings.deleteProject')} confirmLabel={t('projectSettings.confirmDeleteProject')} size="lg" />
       </section>
 
-      <section className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
-        <h3 className="text-sm font-medium text-gray-300 mb-2">
-          {t('projectSettings.instructionsInfoTitle')}
-        </h3>
+      <SettingsSection title={t('projectSettings.instructionsInfoTitle')}>
         <p className="text-gray-500 text-sm leading-relaxed">
           {t('projectSettings.instructionsInfoText', { tool: 'project_get', file: 'CLAUDE.md' })}
         </p>
-      </section>
-    </div>
+      </SettingsSection>
+    </SettingsShell>
   );
 }
