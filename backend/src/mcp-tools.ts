@@ -2021,6 +2021,25 @@ export interface McpToolCatalogEntry {
   name: string;
   description: string;
   group: ReturnType<typeof toolGroup>;
+  isWrite: boolean;
+}
+
+const WRITE_TOOL_SUFFIX = /_(create|update|delete|save|set|add|comment|archive|sync|scan|reindex|clone|pull|exec|upload|send)$/;
+
+const SENSITIVE_READ_TOOLS = new Set<string>([
+  'secret_get',
+  'environment_export',
+]);
+
+const EXPLICIT_WRITE_TOOLS = new Set<string>([
+  'release_sync_gitlab',
+  'workspace_attachment_save',
+]);
+
+export function isWriteTool(name: string): boolean {
+  if (EXPLICIT_WRITE_TOOLS.has(name)) return true;
+  if (SENSITIVE_READ_TOOLS.has(name)) return true;
+  return WRITE_TOOL_SUFFIX.test(name);
 }
 
 export function getToolCatalog(): McpToolCatalogEntry[] {
@@ -2029,9 +2048,11 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
       name: t.name,
       description: (t as { description?: string }).description ?? '',
       group: toolGroup(t.name),
+      isWrite: isWriteTool(t.name),
     }))
     .sort((a, b) => {
       if (a.group !== b.group) return a.group.localeCompare(b.group);
+      if (a.isWrite !== b.isWrite) return a.isWrite ? 1 : -1;
       return a.name.localeCompare(b.name);
     });
 }

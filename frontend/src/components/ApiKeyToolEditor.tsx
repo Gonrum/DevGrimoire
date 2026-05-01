@@ -9,6 +9,7 @@ interface ToolOption {
   name: string;
   description: string;
   group: string;
+  isWrite: boolean;
 }
 
 type Mode = 'all' | 'scoped';
@@ -114,9 +115,15 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
     });
   };
 
-  const setAllInGroup = (group: string, enabled: boolean) => {
+  const setAllInGroup = (group: string, isWrite: boolean, enabled: boolean) => {
     if (!catalog) return;
-    const groupTools = catalog.filter((tool) => tool.group === group).map((tool) => tool.name);
+    const groupTools = catalog
+      .filter((tool) => tool.group === group && tool.isWrite === isWrite)
+      .map((tool) => tool.name);
+    if (enabled && isWrite && groupTools.length > 0) {
+      const msg = t('settings.apiKeyToolSelectAllWriteConfirm', { count: groupTools.length });
+      if (!window.confirm(msg)) return;
+    }
     setSelected((prev) => {
       const next = new Set(prev);
       for (const n of groupTools) {
@@ -129,6 +136,13 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
 
   const setAll = (enabled: boolean) => {
     if (!catalog) return;
+    if (enabled) {
+      const writeCount = catalog.filter((tool) => tool.isWrite).length;
+      if (writeCount > 0) {
+        const msg = t('settings.apiKeyToolSelectAllWriteConfirm', { count: writeCount });
+        if (!window.confirm(msg)) return;
+      }
+    }
     setSelected(enabled ? new Set(catalog.map((tool) => tool.name)) : new Set());
   };
 
@@ -176,6 +190,18 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
   };
 
   const scopedEmpty = mode === 'scoped' && selected.size === 0;
+
+  const activeWriteCount = useMemo(() => {
+    if (!catalog) return 0;
+    const writeTools = new Set(catalog.filter((tool) => tool.isWrite).map((tool) => tool.name));
+    let count = 0;
+    selected.forEach((n) => { if (writeTools.has(n)) count += 1; });
+    return count;
+  }, [catalog, selected]);
+
+  const totalWriteCount = useMemo(() => (
+    catalog?.filter((tool) => tool.isWrite).length ?? 0
+  ), [catalog]);
 
   return (
     <Card padding="md" className="mt-4">
@@ -225,6 +251,12 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
           </div>
         </label>
       </div>
+
+      {mode === 'all' && totalWriteCount > 0 && (
+        <div className="bg-red-900/20 border border-red-800/50 rounded px-3 py-2 mb-4 text-xs text-red-200">
+          ⚠ {t('settings.apiKeyToolAllWriteWarning', { count: totalWriteCount })}
+        </div>
+      )}
 
       {mode === 'scoped' && (
         <>
@@ -299,6 +331,12 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
                 })}
               </div>
 
+              {activeWriteCount > 0 && (
+                <div className="bg-red-900/20 border border-red-800/50 rounded px-3 py-2 mb-3 text-xs text-red-200">
+                  ⚠ {t('settings.apiKeyToolWriteBanner', { count: activeWriteCount })}
+                </div>
+              )}
+
               <div className="space-y-4 max-h-[480px] overflow-y-auto pr-1">
                 {groups.map((group) => {
                   const groupTools = filteredCatalog.filter((tool) => tool.group === group);
@@ -307,44 +345,77 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
                   const groupSelected = catalog.filter(
                     (tool) => tool.group === group && selected.has(tool.name),
                   ).length;
-                  const allSelected = groupSelected === groupTotal;
+
+                  const renderSubsection = (isWrite: boolean) => {
+                    const subTools = groupTools.filter((tool) => tool.isWrite === isWrite);
+                    if (subTools.length === 0) return null;
+                    const subTotal = catalog.filter((tool) => tool.group === group && tool.isWrite === isWrite).length;
+                    const subSelected = catalog.filter(
+                      (tool) => tool.group === group && tool.isWrite === isWrite && selected.has(tool.name),
+                    ).length;
+                    const allSelected = subSelected === subTotal;
+                    const boxCls = isWrite
+                      ? 'bg-red-950/20 border-red-900/50'
+                      : 'bg-gray-800/40 border-gray-800';
+                    return (
+                      <div key={`${group}-${isWrite ? 'write' : 'read'}`} className={`border rounded p-2.5 ${boxCls}`}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="text-[11px] font-medium text-gray-300 flex items-center gap-2">
+                            {isWrite ? t('settings.apiKeyToolWriteSection') : t('settings.apiKeyToolReadSection')}
+                            {isWrite && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] bg-red-900/60 text-red-200 border border-red-800 uppercase tracking-wide">
+                                {t('settings.apiKeyToolWriteBadge')}
+                              </span>
+                            )}
+                            <span className="text-gray-600 ml-1">{subSelected}/{subTotal}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setAllInGroup(group, isWrite, !allSelected)}
+                            className={`text-[10px] uppercase font-bold ${isWrite ? 'text-red-300 hover:text-red-200' : 'text-cyan-400 hover:text-cyan-300'}`}
+                          >
+                            {allSelected ? t('common.deselectAll') : t('common.selectAll')}
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                          {subTools.map((tool) => (
+                            <label
+                              key={tool.name}
+                              title={tool.description}
+                              className={`flex items-start gap-2 p-2 rounded border cursor-pointer transition-colors ${
+                                isWrite
+                                  ? 'border-red-900/40 bg-red-950/10 hover:bg-red-950/30'
+                                  : 'border-gray-800 bg-gray-800/50 hover:bg-gray-800'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selected.has(tool.name)}
+                                onChange={() => toggleTool(tool.name)}
+                                className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${isWrite ? 'accent-red-600' : 'accent-violet-600'}`}
+                              />
+                              <span className={`text-xs font-mono truncate ${isWrite ? 'text-red-200/90' : 'text-gray-300'}`}>
+                                {tool.name}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  };
 
                   return (
                     <div key={group} className="space-y-2">
-                      <div className="flex items-center justify-between px-1 sticky top-0 bg-gray-900 py-1">
+                      <div className="flex items-center justify-between px-1 sticky top-0 bg-gray-900 py-1 z-10">
                         <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
                           {group}{' '}
                           <span className="text-gray-600 normal-case ml-1">
                             {groupSelected}/{groupTotal}
                           </span>
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => setAllInGroup(group, !allSelected)}
-                          className="text-[10px] text-cyan-400 hover:text-cyan-300 uppercase font-bold"
-                        >
-                          {allSelected ? t('common.deselectAll') : t('common.selectAll')}
-                        </button>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                        {groupTools.map((tool) => (
-                          <label
-                            key={tool.name}
-                            title={tool.description}
-                            className="flex items-start gap-2 p-2 rounded border border-gray-800 bg-gray-800/50 hover:bg-gray-800 cursor-pointer transition-colors"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selected.has(tool.name)}
-                              onChange={() => toggleTool(tool.name)}
-                              className="w-3.5 h-3.5 mt-0.5 accent-violet-600 flex-shrink-0"
-                            />
-                            <span className="text-xs text-gray-300 font-mono truncate">
-                              {tool.name}
-                            </span>
-                          </label>
-                        ))}
-                      </div>
+                      {renderSubsection(false)}
+                      {renderSubsection(true)}
                     </div>
                   );
                 })}

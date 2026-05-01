@@ -818,7 +818,7 @@ export const api = {
   },
   mcp: {
     tools: () =>
-      request<{ name: string; description: string; group: string }[]>('/mcp/tools'),
+      request<{ name: string; description: string; group: string; isWrite: boolean }[]>('/mcp/tools'),
   },
   schemas: {
     list: (projectId: string, dbType?: string) => {
