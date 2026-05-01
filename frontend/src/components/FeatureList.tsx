@@ -8,6 +8,7 @@ import Badge from './ui/Badge';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
 import { FormInput, FormSelect, FormTextarea } from './ui/FormField';
+import TabToolbar from './ui/TabToolbar';
 import Markdown from './Markdown';
 
 const statusColors: Record<FeatureStatus, string> = {
@@ -259,60 +260,42 @@ export default function FeatureList({ entries, projectId }: { entries: Feature[]
     );
   }
 
+  const pillClass = (active: boolean, color: 'violet' | 'purple' = 'violet') => {
+    const activeBg = color === 'purple' ? 'bg-purple-600' : 'bg-violet-600';
+    return `text-xs px-2.5 py-1 rounded-full transition-colors ${active ? `${activeBg} text-white` : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`;
+  };
+
   return (
     <div>
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <button
-          onClick={() => { setEditingFeature(null); setShowForm(true); }}
-          className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors"
-        >
-          {t('features.newFeature')}
-        </button>
-        {statuses.length > 1 && (
-          <div className="flex flex-wrap gap-1.5">
-            <button
-              onClick={() => setSelectedStatus(null)}
-              className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
-                selectedStatus === null
-                  ? 'bg-violet-600 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              {t('common.all')} ({entries.length})
-            </button>
-            {statuses.map((s) => (
-              <button
-                key={s}
-                onClick={() => setSelectedStatus(selectedStatus === s ? null : s)}
-                className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
-                  selectedStatus === s
-                    ? 'bg-violet-600 text-white'
-                    : 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                }`}
-              >
-                {statusLabels[s]} ({entries.filter((e) => e.status === s).length})
-              </button>
-            ))}
-          </div>
+      <TabToolbar
+        className="mb-4"
+        primaryAction={(
+          <Button type="button" variant="primary" size="sm" onClick={() => { setEditingFeature(null); setShowForm(true); }}>
+            {t('features.newFeature')}
+          </Button>
         )}
-        {categories.length > 1 && (
-          <div className="flex flex-wrap gap-1.5">
-            {categories.map((c) => (
-              <button
-                key={c}
-                onClick={() => setSelectedCategory(selectedCategory === c ? null : c)}
-                className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
-                  selectedCategory === c
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                }`}
-              >
+        filters={(
+          <>
+            {statuses.length > 1 && (
+              <>
+                <button onClick={() => setSelectedStatus(null)} className={pillClass(selectedStatus === null)}>
+                  {t('common.all')} ({entries.length})
+                </button>
+                {statuses.map((s) => (
+                  <button key={s} onClick={() => setSelectedStatus(selectedStatus === s ? null : s)} className={pillClass(selectedStatus === s)}>
+                    {statusLabels[s]} ({entries.filter((e) => e.status === s).length})
+                  </button>
+                ))}
+              </>
+            )}
+            {categories.length > 1 && categories.map((c) => (
+              <button key={c} onClick={() => setSelectedCategory(selectedCategory === c ? null : c)} className={pillClass(selectedCategory === c, 'purple')}>
                 {c}
               </button>
             ))}
-          </div>
+          </>
         )}
-      </div>
+      />
 
       {entries.length === 0 ? (
         <EmptyState message={t('features.noFeatures')} />

@@ -12,6 +12,7 @@ import {
 import { useToast } from './Toast';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
+import TabToolbar from './ui/TabToolbar';
 
 interface Props {
   todos: Todo[];
@@ -397,100 +398,109 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
     setFilterTag('');
   };
 
+  const selectClass = 'bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500';
+
   return (
     <div>
-      <div className="flex items-center gap-3 mb-4">
-        <Link to={`/projects/${projectId}/todos/new`}
-          className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors">
-          {t('todos.newTask')}
-        </Link>
-        <div className="flex bg-gray-800 rounded-lg p-0.5 ml-auto">
-          <button type="button" onClick={() => setViewMode('kanban')}
-            className={`text-xs px-3 py-1 rounded-md transition-colors ${viewMode === 'kanban' ? 'bg-gray-700 text-gray-200' : 'text-gray-500 hover:text-gray-300'}`}>
-            {t('todos.kanban')}
-          </button>
-          <button type="button" onClick={() => setViewMode('list')}
-            className={`text-xs px-3 py-1 rounded-md transition-colors ${viewMode === 'list' ? 'bg-gray-700 text-gray-200' : 'text-gray-500 hover:text-gray-300'}`}>
-            {t('todos.list')}
-          </button>
-        </div>
-      </div>
+      <TabToolbar
+        className="mb-4"
+        primaryAction={(
+          <Link to={`/projects/${projectId}/todos/new`}
+            className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors">
+            {t('todos.newTask')}
+          </Link>
+        )}
+        search={(
+          <input type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') setSearchQuery(''); }}
+            placeholder={t('todos.searchPlaceholder')} aria-label={t('todos.searchPlaceholder')}
+            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+        )}
+        filters={(
+          <>
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} aria-label="Status filtern" className={selectClass}>
+              <option value="">{t('todos.allStatus')}</option>
+              {COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label()}</option>)}
+            </select>
+            <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} aria-label="Priorität filtern" className={selectClass}>
+              <option value="">{t('todos.allPriorities')}</option>
+              <option value="critical">{t('todoPriority.critical')}</option>
+              <option value="high">{t('todoPriority.high')}</option>
+              <option value="medium">{t('todoPriority.medium')}</option>
+              <option value="low">{t('todoPriority.low')}</option>
+            </select>
+            {milestones.length > 0 && (
+              <select value={filterMilestone} onChange={(e) => setFilterMilestone(e.target.value)} aria-label="Milestone filtern" className={selectClass}>
+                <option value="">{t('todos.allMilestones')}</option>
+                <option value="_none">{t('todos.noMilestone')}</option>
+                {milestones.map((ms) => <option key={ms._id} value={ms._id}>{ms.name}</option>)}
+              </select>
+            )}
+            {allTags.length > 0 && (
+              <select value={filterTag} onChange={(e) => setFilterTag(e.target.value)} aria-label="Tag filtern" className={selectClass}>
+                <option value="">{t('todos.allTags')}</option>
+                {allTags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
+              </select>
+            )}
+            {hasFilters && (
+              <button type="button" onClick={clearFilters} className="text-xs px-2 py-1 text-gray-500 hover:text-gray-300 transition-colors">
+                {t('todos.resetFilters')}
+              </button>
+            )}
+          </>
+        )}
+        viewToggle={(
+          <>
+            <div className="flex bg-gray-800 rounded-lg p-0.5">
+              <button type="button" onClick={() => setViewMode('kanban')}
+                className={`text-xs px-3 py-1 rounded-md transition-colors ${viewMode === 'kanban' ? 'bg-gray-700 text-gray-200' : 'text-gray-500 hover:text-gray-300'}`}>
+                {t('todos.kanban')}
+              </button>
+              <button type="button" onClick={() => setViewMode('list')}
+                className={`text-xs px-3 py-1 rounded-md transition-colors ${viewMode === 'list' ? 'bg-gray-700 text-gray-200' : 'text-gray-500 hover:text-gray-300'}`}>
+                {t('todos.list')}
+              </button>
+            </div>
+            <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} aria-label="Sortierung" className={selectClass}>
+              <option value="updated">{t('todos.sortUpdated')}</option>
+              <option value="created">{t('todos.sortCreated')}</option>
+              <option value="priority">{t('todos.sortPriority')}</option>
+              <option value="title">{t('todos.sortTitle')}</option>
+            </select>
+            <button type="button" onClick={() => setSortDir((d) => d === 'asc' ? 'desc' : 'asc')}
+              className="text-xs px-2 py-1 bg-gray-800 border border-gray-700 rounded text-gray-400 hover:text-gray-200 transition-colors"
+              title={sortDir === 'asc' ? t('todos.ascending') : t('todos.descending')}>
+              {sortDir === 'asc' ? '↑' : '↓'}
+            </button>
+          </>
+        )}
+        secondaryActions={(
+          <>
+            {archivableDone.length > 0 && (
+              <button type="button" onBlur={() => setConfirmArchiveAll(false)} onClick={async () => {
+                if (!confirmArchiveAll) { setConfirmArchiveAll(true); return; }
+                setConfirmArchiveAll(false);
+                try {
+                  await Promise.all(archivableDone.map((t) => api.todos.update(t._id, { archived: true } as Partial<Todo>)));
+                  onUpdate();
+                } catch (err: any) {
+                  showError(err.message || t('todos.archiveFailed'));
+                }
+              }}
+                className={`text-xs px-2 py-1 rounded transition-colors ${confirmArchiveAll ? 'bg-yellow-900/60 text-yellow-300' : 'text-gray-600 hover:text-gray-400'}`}>
+                {confirmArchiveAll ? t('todos.archiveConfirm', { count: archivableDone.length }) : t('todos.archiveCompleted', { count: archivableDone.length })}
+              </button>
+            )}
+            {archivedCount > 0 && (
+              <button type="button" onClick={() => setShowArchived(!showArchived)}
+                className={`text-xs px-2 py-1 rounded transition-colors ${showArchived ? 'bg-gray-700 text-gray-300' : 'text-gray-600 hover:text-gray-400'}`}>
+                {showArchived ? t('todos.hideArchive', { count: archivedCount }) : t('todos.showArchive', { count: archivedCount })}
+              </button>
+            )}
+          </>
+        )}
+      />
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <input type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Escape') setSearchQuery(''); }}
-          placeholder={t('todos.searchPlaceholder')} aria-label={t('todos.searchPlaceholder')}
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 min-w-[12rem] flex-1 sm:flex-none" />
-        <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} aria-label="Status filtern"
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500">
-          <option value="">{t('todos.allStatus')}</option>
-          {COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label()}</option>)}
-        </select>
-        <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} aria-label="Priorität filtern"
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500">
-          <option value="">{t('todos.allPriorities')}</option>
-          <option value="critical">{t('todoPriority.critical')}</option>
-          <option value="high">{t('todoPriority.high')}</option>
-          <option value="medium">{t('todoPriority.medium')}</option>
-          <option value="low">{t('todoPriority.low')}</option>
-        </select>
-        {milestones.length > 0 && (
-          <select value={filterMilestone} onChange={(e) => setFilterMilestone(e.target.value)} aria-label="Milestone filtern"
-            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500">
-            <option value="">{t('todos.allMilestones')}</option>
-            <option value="_none">{t('todos.noMilestone')}</option>
-            {milestones.map((ms) => <option key={ms._id} value={ms._id}>{ms.name}</option>)}
-          </select>
-        )}
-        {allTags.length > 0 && (
-          <select value={filterTag} onChange={(e) => setFilterTag(e.target.value)} aria-label="Tag filtern"
-            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500">
-            <option value="">{t('todos.allTags')}</option>
-            {allTags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
-          </select>
-        )}
-        <div className="flex items-center gap-1 sm:ml-auto w-full sm:w-auto">
-          <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} aria-label="Sortierung"
-            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500">
-            <option value="updated">{t('todos.sortUpdated')}</option>
-            <option value="created">{t('todos.sortCreated')}</option>
-            <option value="priority">{t('todos.sortPriority')}</option>
-            <option value="title">{t('todos.sortTitle')}</option>
-          </select>
-          <button type="button" onClick={() => setSortDir((d) => d === 'asc' ? 'desc' : 'asc')}
-            className="text-xs px-2 py-1 bg-gray-800 border border-gray-700 rounded text-gray-400 hover:text-gray-200 transition-colors"
-            title={sortDir === 'asc' ? t('todos.ascending') : t('todos.descending')}>
-            {sortDir === 'asc' ? '\u2191' : '\u2193'}
-          </button>
-        </div>
-        {hasFilters && (
-          <button type="button" onClick={clearFilters}
-            className="text-xs px-2 py-1 text-gray-500 hover:text-gray-300 transition-colors">
-            {t('todos.resetFilters')}
-          </button>
-        )}
-        {archivableDone.length > 0 && (
-          <button type="button" onBlur={() => setConfirmArchiveAll(false)} onClick={async () => {
-            if (!confirmArchiveAll) { setConfirmArchiveAll(true); return; }
-            setConfirmArchiveAll(false);
-            try {
-              await Promise.all(archivableDone.map((t) => api.todos.update(t._id, { archived: true } as Partial<Todo>)));
-              onUpdate();
-            } catch (err: any) {
-              showError(err.message || t('todos.archiveFailed'));
-            }
-          }}
-            className={`text-xs px-2 py-1 rounded transition-colors ${confirmArchiveAll ? 'bg-yellow-900/60 text-yellow-300' : 'text-gray-600 hover:text-gray-400'}`}>
-            {confirmArchiveAll ? t('todos.archiveConfirm', { count: archivableDone.length }) : t('todos.archiveCompleted', { count: archivableDone.length })}
-          </button>
-        )}
-        {archivedCount > 0 && (
-          <button type="button" onClick={() => setShowArchived(!showArchived)}
-            className={`text-xs px-2 py-1 rounded transition-colors ${showArchived ? 'bg-gray-700 text-gray-300' : 'text-gray-600 hover:text-gray-400'}`}>
-            {showArchived ? t('todos.hideArchive', { count: archivedCount }) : t('todos.showArchive', { count: archivedCount })}
-          </button>
-        )}
-      </div>
 
       {hasFilters && (
         <p className="text-xs text-gray-600 mb-3">{t('todos.filtered', { shown: filtered.length, total: todos.length })}</p>

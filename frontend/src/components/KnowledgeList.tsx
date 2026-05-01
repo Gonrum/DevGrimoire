@@ -10,6 +10,7 @@ import Badge from './ui/Badge';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
 import { FormInput, FormSelect } from './ui/FormField';
+import TabToolbar from './ui/TabToolbar';
 
 interface KnowledgeFormData {
   topic: string;
@@ -214,57 +215,35 @@ export default function KnowledgeList({
     );
   }
 
+  const pillClass = (active: boolean) => `text-xs px-2.5 py-1 rounded-full transition-colors ${active ? 'bg-violet-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`;
+
   return (
     <div>
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <Button
-          type="button"
-          variant="primary"
-          size="sm"
-          onClick={() => { setEditingEntry(null); setShowForm(true); }}
-        >
-          {t('knowledge.newEntry')}
-        </Button>
-        {entries.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            <button
-              onClick={() => setSelectedCategory(null)}
-              className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
-                selectedCategory === null
-                  ? 'bg-violet-600 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:text-gray-200'
-              }`}
-            >
+      <TabToolbar
+        className="mb-4"
+        primaryAction={(
+          <Button type="button" variant="primary" size="sm" onClick={() => { setEditingEntry(null); setShowForm(true); }}>
+            {t('knowledge.newEntry')}
+          </Button>
+        )}
+        filters={entries.length > 0 ? (
+          <>
+            <button onClick={() => setSelectedCategory(null)} className={pillClass(selectedCategory === null)}>
               {t('common.all')} ({entries.length})
             </button>
             {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
-                className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
-                  selectedCategory === cat
-                    ? 'bg-violet-600 text-white'
-                    : 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                }`}
-              >
+              <button key={cat} onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)} className={pillClass(selectedCategory === cat)}>
                 {cat} ({entries.filter((e) => e.category === cat).length})
               </button>
             ))}
             {entries.some((e) => !e.category) && (
-              <button
-                onClick={() => setSelectedCategory('__none__')}
-                className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
-                  selectedCategory === '__none__'
-                    ? 'bg-violet-600 text-white'
-                    : 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                }`}
-              >
+              <button onClick={() => setSelectedCategory('__none__')} className={pillClass(selectedCategory === '__none__')}>
                 {t('knowledge.noCategory')} ({entries.filter((e) => !e.category).length})
               </button>
             )}
-          </div>
-        )}
-      </div>
+          </>
+        ) : undefined}
+      />
       {entries.length === 0 ? (
         <EmptyState message={t('knowledge.noKnowledge')} />
       ) : visibleEntries.length === 0 ? (
