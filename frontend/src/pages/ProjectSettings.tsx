@@ -292,30 +292,32 @@ export default function ProjectSettings() {
         description={t('projectSettings.dataExportHelp')}
         className="mb-8"
       >
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                await api.transfer.export(id!, includeSecrets);
-              } catch (err) {
-                setError(err instanceof Error ? err.message : t('projectSettings.exportFailed'));
-              }
-            }}
-            className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors"
-          >
-            {t('projectSettings.exportProject')}
-          </button>
-          <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={includeSecrets}
-              onChange={(e) => setIncludeSecrets(e.target.checked)}
-              className="rounded border-gray-600 bg-gray-800 text-violet-500 focus:ring-violet-500"
-            />
-            {t('projectSettings.includeSecrets')}
-          </label>
-        </div>
+        <label className="mb-3 flex items-start gap-2 cursor-pointer text-sm text-gray-300">
+          <input
+            type="checkbox"
+            checked={includeSecrets}
+            onChange={(e) => setIncludeSecrets(e.target.checked)}
+            className="mt-0.5 rounded border-gray-600 bg-gray-800 text-violet-500 focus:ring-violet-500"
+          />
+          <span>{t('projectSettings.includeSecrets')}</span>
+        </label>
+        {includeSecrets && (
+          <div className="mb-3 rounded-lg border-2 border-amber-700 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
+            ⚠ {t('projectSettings.includeSecretsWarning')}
+          </div>
+        )}
+        <Button
+          variant="primary"
+          onClick={async () => {
+            try {
+              await api.transfer.export(id!, includeSecrets);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : t('projectSettings.exportFailed'));
+            }
+          }}
+        >
+          {t('projectSettings.exportProject')}
+        </Button>
       </SettingsSection>
 
       <SettingsSection title={t('projectSettings.instructionsInfoTitle')}>
@@ -332,7 +334,16 @@ export default function ProjectSettings() {
           description={t('projectSettings.dangerZoneHelp')}
           className="mb-8"
         >
-          <ConfirmButton onConfirm={async () => { if (id) { await api.projects.delete(id); navigate('/'); } }} label={t('projectSettings.deleteProject')} confirmLabel={t('projectSettings.confirmDeleteProject')} size="lg" />
+          <div className="mb-3 rounded-lg border-2 border-red-800/60 bg-red-950/40 px-3 py-2 text-xs text-red-200">
+            ⚠ {t('projectSettings.deleteProjectWarning', { name: project.name })}
+          </div>
+          <ConfirmButton
+            onConfirm={async () => { if (id) { await api.projects.delete(id); navigate('/'); } }}
+            label={t('projectSettings.deleteProject')}
+            confirmLabel={t('projectSettings.confirmDeleteProjectFor', { name: project.name })}
+            variant="danger-solid"
+            size="lg"
+          />
         </SettingsSection>
       )}
     </SettingsShell>
