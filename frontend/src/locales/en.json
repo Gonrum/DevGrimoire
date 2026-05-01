@@ -434,6 +434,29 @@
     "system": "Chamber"
   },
   "projectDetail": {
+    "tab": {
+      "todos": "Quests",
+      "milestones": "Artifacts",
+      "sessions": "Rituals",
+      "activity": "Traces",
+      "knowledge": "Knowledge",
+      "changelog": "Chronicles",
+      "manual": "Tome",
+      "research": "Studies",
+      "snippets": "Runes",
+      "files": "Scrolls",
+      "features": "Abilities",
+      "schemas": "Blueprints",
+      "dependencies": "Reagents",
+      "releases": "Releases",
+      "soul": "Soul",
+      "workspaces": "Workshops",
+      "environments": "Realms",
+      "secrets": "Seals",
+      "recurringTasks": "Rites",
+      "commits": "Inscriptions",
+      "logs": "Oracles"
+    },
     "tabDesc": {
       "todos": "Active quests, boards and backlog for this project.",
       "milestones": "Progress markers — group quests into releases.",

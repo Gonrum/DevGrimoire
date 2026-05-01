@@ -434,6 +434,29 @@
     "system": "Kammer"
   },
   "projectDetail": {
+    "tab": {
+      "todos": "Quests",
+      "milestones": "Artefakte",
+      "sessions": "Rituale",
+      "activity": "Spuren",
+      "knowledge": "Wissen",
+      "changelog": "Chroniken",
+      "manual": "Foliant",
+      "research": "Studien",
+      "snippets": "Runen",
+      "files": "Pergamente",
+      "features": "Fähigkeiten",
+      "schemas": "Blaupausen",
+      "dependencies": "Zutaten",
+      "releases": "Releases",
+      "soul": "Seele",
+      "workspaces": "Werkstätten",
+      "environments": "Reiche",
+      "secrets": "Siegel",
+      "recurringTasks": "Riten",
+      "commits": "Vermerke",
+      "logs": "Orakel"
+    },
     "tabDesc": {
       "todos": "Aktive Quests, Boards und Backlog dieses Projekts.",
       "milestones": "Verlaufsmarken — gruppieren Quests zu Releases.",
