@@ -3,12 +3,14 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Milestone, Todo, ChangelogEntry } from '../api/client';
 import Markdown from '../components/Markdown';
-import MarkdownEditor from '../components/MarkdownEditor';
+import MilestoneForm from '../components/MilestoneForm';
 import TodoForm from '../components/TodoForm';
 import { useToast } from '../components/Toast';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import ConfirmButton from '../components/ui/ConfirmButton';
+import DetailSection from '../components/ui/DetailSection';
+import { FormInput, FormTextarea } from '../components/ui/FormField';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
 const STATUS_COLORS: Record<Milestone['status'], string> = {
@@ -101,57 +103,6 @@ function CreateTodoModal({ projectId, milestoneId, onCreated, onClose }: { proje
   );
 }
 
-function MilestoneEditForm({ milestone, onSaved, onCancel }: { milestone: Milestone; onSaved: () => void; onCancel: () => void }) {
-  const { t } = useTranslation();
-  const [name, setName] = useState(milestone.name);
-  const [description, setDescription] = useState(milestone.description || '');
-  const [dueDate, setDueDate] = useState(milestone.dueDate ? milestone.dueDate.slice(0, 10) : '');
-  const [saving, setSaving] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setSaving(true);
-    try {
-      await api.milestones.update(milestone._id, {
-        name: name.trim(),
-        description: description.trim() || undefined,
-        dueDate: dueDate || undefined,
-      } as Partial<Milestone>);
-      onSaved();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-3">
-      <div>
-        <label className="block text-xs text-gray-500 mb-1">{t('common.name')}</label>
-        <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500" autoFocus />
-      </div>
-      <div>
-        <label className="block text-xs text-gray-500 mb-1">{t('common.description')}</label>
-        <MarkdownEditor value={description} onChange={setDescription} rows={4} placeholder={t('common.description')} />
-      </div>
-      <div>
-        <label className="block text-xs text-gray-500 mb-1">{t('milestoneCreate.dueDate')}</label>
-        <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500" />
-      </div>
-      <div className="flex gap-2 pt-2">
-        <Button type="submit" variant="primary" disabled={saving || !name.trim()}>
-          {saving ? t('common.saving') : t('common.save')}
-        </Button>
-        <Button type="button" onClick={onCancel}>
-          {t('common.cancel')}
-        </Button>
-      </div>
-    </form>
-  );
-}
-
 function ChangelogForm({ milestone, onCompleted, onCancel, showError }: { milestone: Milestone; onCompleted: () => void; onCancel: () => void; showError: (msg: string) => void }) {
   const { t } = useTranslation();
   const [clVersion, setClVersion] = useState('');
@@ -183,29 +134,29 @@ function ChangelogForm({ milestone, onCompleted, onCancel, showError }: { milest
   };
 
   return (
-    <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+    <form onSubmit={handleSubmit} className="space-y-4">
       <p className="text-sm font-medium text-gray-300">{t('milestones.createChangelog')}</p>
       <p className="text-xs text-gray-500">{t('milestoneDetail.changelogRequired')}</p>
-      <input
+      <FormInput
         type="text"
+        label={t('common.version')}
         placeholder={t('milestones.versionPlaceholder')}
         value={clVersion}
         onChange={(e) => setClVersion(e.target.value)}
-        className="w-full px-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-none"
       />
-      <input
+      <FormInput
         type="text"
+        label={t('changelog.summary')}
         placeholder={t('milestones.summaryPlaceholder')}
         value={clSummary}
         onChange={(e) => setClSummary(e.target.value)}
-        className="w-full px-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-none"
       />
-      <textarea
+      <FormTextarea
+        label={t('changelog.changes')}
         placeholder={t('milestones.changesPlaceholder')}
         value={clChanges}
         onChange={(e) => setClChanges(e.target.value)}
         rows={4}
-        className="w-full px-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-none resize-none"
         required
       />
       <div className="flex gap-2">
@@ -291,7 +242,13 @@ export default function MilestoneDetailPage() {
       {editing ? (
         <div className="max-w-3xl mx-auto">
           <h2 className="text-lg font-semibold mb-4">{t('milestoneDetail.editMilestone')}</h2>
-          <MilestoneEditForm milestone={milestone} onSaved={() => { setEditing(false); loadMilestone(); }} onCancel={() => setEditing(false)} />
+          <MilestoneForm
+            projectId={id!}
+            milestone={milestone}
+            submitSize="md"
+            onSaved={() => { setEditing(false); loadMilestone(); }}
+            onCancel={() => setEditing(false)}
+          />
         </div>
       ) : (
         <div className="max-w-3xl mx-auto">
@@ -318,8 +275,7 @@ export default function MilestoneDetailPage() {
             <Markdown className="text-gray-400 mb-5">{milestone.description}</Markdown>
           )}
 
-          {/* Progress */}
-          <div className="mb-5">
+          <DetailSection title={t('milestoneDetail.progress')} className="mb-5">
             <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
               <span>
                 {doneTodos.length} {t('milestoneDetail.progress')}
@@ -338,19 +294,19 @@ export default function MilestoneDetailPage() {
                 <div className="h-2 bg-purple-500 transition-all" style={{ width: `${reviewPercent}%` }} />
               )}
             </div>
-          </div>
+          </DetailSection>
 
-          {/* Todo list (accordion) */}
-          <div className="mb-5">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-gray-400">
-                {t('milestoneDetail.tasks')} <span className="text-gray-600">({milestoneTodos.length})</span>
-              </h3>
-              <Button type="button" size="sm" variant="none" className="bg-violet-900/60 hover:bg-violet-900 text-violet-300 text-xs"
+          <DetailSection
+            title={t('milestoneDetail.tasks')}
+            meta={milestoneTodos.length > 0 ? `(${milestoneTodos.length})` : undefined}
+            actions={(
+              <Button type="button" size="sm" variant="none" className="bg-violet-900/60 hover:bg-violet-900 text-violet-300"
                 onClick={() => setShowCreateTodo(true)}>
                 {t('milestoneDetail.newQuest')}
               </Button>
-            </div>
+            )}
+            className="mb-5"
+          >
             {milestoneTodos.length > 0 ? (
               <div className="space-y-1.5">
                 {[...openTodos, ...inProgressTodos, ...reviewTodos, ...doneTodos].map((todo) => (
@@ -360,7 +316,7 @@ export default function MilestoneDetailPage() {
             ) : (
               <p className="text-xs text-gray-600 italic">{t('milestoneDetail.noTasks')}</p>
             )}
-          </div>
+          </DetailSection>
 
           {/* Create Todo Modal */}
           {showCreateTodo && (
@@ -374,8 +330,7 @@ export default function MilestoneDetailPage() {
 
           {/* Linked Changelog */}
           {changelog && (
-            <div className="mb-5 bg-gray-900 border border-gray-800 rounded-lg p-3">
-              <h3 className="text-sm font-medium text-gray-400 mb-2">{t('milestoneDetail.changelog')}</h3>
+            <DetailSection title={t('milestoneDetail.changelog')} className="mb-5">
               {changelog.version && <p className="text-xs text-gray-500 mb-1">{t('common.version')}: {changelog.version}</p>}
               {changelog.summary && (
                 <div className="mb-2 text-gray-400">
@@ -385,19 +340,19 @@ export default function MilestoneDetailPage() {
               <ul className="list-disc list-inside text-xs text-gray-400 space-y-0.5">
                 {changelog.changes.map((c, i) => <li key={i}>{c}</li>)}
               </ul>
-            </div>
+            </DetailSection>
           )}
 
           {/* Changelog completion form */}
           {showChangelogForm && (
-            <div className="mb-5">
+            <DetailSection className="mb-5">
               <ChangelogForm
                 milestone={milestone}
                 onCompleted={() => { setShowChangelogForm(false); loadMilestone(); }}
                 onCancel={() => setShowChangelogForm(false)}
                 showError={showError}
               />
-            </div>
+            </DetailSection>
           )}
 
           {/* Timestamps */}
@@ -408,8 +363,8 @@ export default function MilestoneDetailPage() {
             )}
           </div>
 
-          {/* Actions */}
-          <div className="flex flex-wrap items-center gap-2 mb-8">
+          <DetailSection title={t('common.actions')} className="mb-8">
+            <div className="flex flex-wrap items-center gap-2">
             {milestone.status === 'open' && (
               <Button type="button" variant="none" size="sm" className="bg-yellow-900/60 hover:bg-yellow-900 text-yellow-300"
                 onClick={() => handleStatusChange('in_progress')}>
@@ -461,7 +416,8 @@ export default function MilestoneDetailPage() {
               size="sm"
               className="sm:ml-auto"
             />
-          </div>
+            </div>
+          </DetailSection>
         </div>
       )}
     </div>

@@ -12,23 +12,10 @@ import { useToast } from '../components/Toast';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import ConfirmButton from '../components/ui/ConfirmButton';
+import DetailSection from '../components/ui/DetailSection';
 import { FormInput, FormSelect } from '../components/ui/FormField';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import AttachmentList from '../components/AttachmentList';
-
-function DetailSection({ title, meta, children, className = '' }: { title?: ReactNode; meta?: ReactNode; children: ReactNode; className?: string }) {
-  return (
-    <section className={`border-t border-gray-800 pt-5 ${className}`}>
-      {title && (
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h3 className="text-sm font-medium text-gray-400">{title}</h3>
-          {meta && <div className="text-xs text-gray-600">{meta}</div>}
-        </div>
-      )}
-      {children}
-    </section>
-  );
-}
 
 function TodoLinkRow({ todo, projectId, trailing }: { todo: Todo; projectId?: string; trailing?: ReactNode }) {
   return (
