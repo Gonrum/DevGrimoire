@@ -432,6 +432,31 @@
     "catalog": "Inventar",
     "system": "Kammer"
   },
+  "projectDetail": {
+    "tabDesc": {
+      "todos": "Aktive Quests, Boards und Backlog dieses Projekts.",
+      "milestones": "Verlaufsmarken — gruppieren Quests zu Releases.",
+      "sessions": "Gespeicherte Arbeitssitzungen mit Zusammenfassung und nächsten Schritten.",
+      "knowledge": "Langfristiges Projektwissen, Architektur und Patterns.",
+      "changelog": "Veröffentlichungs- und Änderungs-Historie.",
+      "research": "Recherchen mit Quellen und Befunden.",
+      "snippets": "Wiederverwendbare Code-Snippets, Queries und Patterns.",
+      "features": "Feature-Katalog mit Status, Priorität und Version.",
+      "schemas": "Datenbank-Schemas mit Feldern, Indizes und Versionen.",
+      "dependencies": "Externe Pakete und ihre Versionen pro Paketmanager.",
+      "releases": "Releases inkl. Assets und GitLab-Sync.",
+      "workspaces": "Sandbox-Container, in denen der Agent Code klonen und ausführen kann.",
+      "environments": "Umgebungen (dev/staging/prod) mit Variablen.",
+      "secrets": "Verschlüsselte Secrets pro Projekt oder Umgebung.",
+      "recurringTasks": "Wiederkehrende Aufgaben — Riten und Routinen.",
+      "commits": "Commit-Historie aus verbundenen Git-Repositories.",
+      "files": "Dateianhänge und Pergamente dieses Projekts.",
+      "logs": "Eingehende Application-Logs und Statistik.",
+      "activity": "Spuren — chronologische Tool-Aktivitäten.",
+      "manual": "Handbuch-Einträge — kategorisierte Dokumentation.",
+      "soul": "Vision, Prinzipien und Konventionen dieses Projekts."
+    }
+  },
   "workspaces": {
     "title": "Werkstätten",
     "subtitle": "Sandbox-Container, in denen der Agent Code klonen, lesen und ausführen kann.",

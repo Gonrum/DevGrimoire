@@ -432,6 +432,31 @@
     "catalog": "Inventory",
     "system": "Chamber"
   },
+  "projectDetail": {
+    "tabDesc": {
+      "todos": "Active quests, boards and backlog for this project.",
+      "milestones": "Progress markers — group quests into releases.",
+      "sessions": "Saved working sessions with summary and next steps.",
+      "knowledge": "Long-term project knowledge, architecture and patterns.",
+      "changelog": "Release and change history.",
+      "research": "Investigations with sources and findings.",
+      "snippets": "Reusable code snippets, queries and patterns.",
+      "features": "Feature catalogue with status, priority and version.",
+      "schemas": "Database schemas with fields, indexes and versions.",
+      "dependencies": "External packages and versions per package manager.",
+      "releases": "Releases including assets and GitLab sync.",
+      "workspaces": "Sandbox containers where the agent can clone and run code.",
+      "environments": "Environments (dev/staging/prod) with variables.",
+      "secrets": "Encrypted secrets per project or environment.",
+      "recurringTasks": "Recurring tasks — rites and routines.",
+      "commits": "Commit history from connected git repositories.",
+      "files": "File attachments and scrolls of this project.",
+      "logs": "Incoming application logs and statistics.",
+      "activity": "Traces — chronological tool activity.",
+      "manual": "Handbook entries — categorised documentation.",
+      "soul": "Vision, principles and conventions of this project."
+    }
+  },
   "workspaces": {
     "title": "Workshops",
     "subtitle": "Sandbox containers where the agent can clone, read and run code.",

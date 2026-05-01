@@ -27,6 +27,7 @@ import Markdown from '../components/Markdown';
 import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents';
 import Badge from '../components/ui/Badge';
 import { LoadingText } from '../components/ui/LoadingSpinner';
+import ProjectTabShell from '../components/ui/ProjectTabShell';
 
 type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces';
 
@@ -244,7 +245,35 @@ export default function ProjectDetail() {
     },
   ];
 
-  const currentTabLabel = navGroups.flatMap((g) => g.items).find((i) => i.key === tab)?.label || tab;
+  const allTabs = navGroups.flatMap((g) => g.items);
+  const currentTab = allTabs.find((i) => i.key === tab);
+  const currentTabLabel = currentTab?.label || tab;
+  const currentTabCount = currentTab?.count;
+
+  const TAB_DESCRIPTIONS: Partial<Record<Tab, string>> = {
+    todos: t('projectDetail.tabDesc.todos'),
+    milestones: t('projectDetail.tabDesc.milestones'),
+    sessions: t('projectDetail.tabDesc.sessions'),
+    knowledge: t('projectDetail.tabDesc.knowledge'),
+    changelog: t('projectDetail.tabDesc.changelog'),
+    research: t('projectDetail.tabDesc.research'),
+    snippets: t('projectDetail.tabDesc.snippets'),
+    features: t('projectDetail.tabDesc.features'),
+    schemas: t('projectDetail.tabDesc.schemas'),
+    dependencies: t('projectDetail.tabDesc.dependencies'),
+    releases: t('projectDetail.tabDesc.releases'),
+    workspaces: t('projectDetail.tabDesc.workspaces'),
+    environments: t('projectDetail.tabDesc.environments'),
+    secrets: t('projectDetail.tabDesc.secrets'),
+    'recurring-tasks': t('projectDetail.tabDesc.recurringTasks'),
+    commits: t('projectDetail.tabDesc.commits'),
+    files: t('projectDetail.tabDesc.files'),
+    logs: t('projectDetail.tabDesc.logs'),
+    activity: t('projectDetail.tabDesc.activity'),
+    manual: t('projectDetail.tabDesc.manual'),
+    soul: t('projectDetail.tabDesc.soul'),
+  };
+  const currentTabDescription = TAB_DESCRIPTIONS[tab];
 
   const sidebarNav = (onSelect?: () => void) => (
     <nav className="space-y-5">
@@ -380,41 +409,43 @@ export default function ProjectDetail() {
 
         {/* Content area */}
         <div className="flex-1 min-w-0">
-          {tab === 'todos' && (
-            <TodoBoard
-              todos={todos}
-              milestones={milestones}
-              projectId={id!}
-              onUpdate={() => api.todos.list({ projectId: id }).then(setTodos)}
-            />
-          )}
-          {tab === 'soul' && <SoulView projectId={id!} soul={soul} onUpdate={() => api.souls.get(id!).then(setSoul)} />}
-          {tab === 'milestones' && (
-            <MilestoneList
-              milestones={milestones}
-              todos={todos}
-              projectId={id!}
-              onUpdate={() => api.milestones.list(id!).then(setMilestones)}
-            />
-          )}
-          {tab === 'sessions' && <SessionList sessions={sessions} />}
-          {tab === 'knowledge' && <KnowledgeList entries={knowledge} projectId={id!} onUpdate={() => api.knowledge.list(id!).then(setKnowledge)} />}
-          {tab === 'changelog' && <ChangelogList entries={changelog} projectId={id!} project={project} onUpdate={() => api.changelog.list(id!).then(setChangelog)} />}
-          {tab === 'manual' && <ManualView projectId={id!} entries={manuals} onUpdate={() => api.manuals.list(id!).then(setManuals)} />}
-          {tab === 'features' && <FeatureList entries={features} projectId={id!} />}
-          {tab === 'schemas' && <SchemaList entries={schemas} projectId={id!} />}
-          {tab === 'dependencies' && <DependencyList entries={dependencies} projectId={id!} />}
-          {tab === 'snippets' && <SnippetList entries={snippets} projectId={id!} />}
-          {tab === 'workspaces' && <WorkspaceList projectId={id!} />}
-          {tab === 'research' && <ResearchList entries={research} projectId={id!} onUpdate={() => api.research.list(id!).then(setResearch)} />}
-          {tab === 'environments' && <EnvironmentList key={envKey} projectId={id!} />}
-          {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id!} />}
-          {tab === 'recurring-tasks' && <RecurringTaskList entries={recurringTasks} projectId={id!} />}
-          {tab === 'commits' && <CommitList key={commitsKey} projectId={id!} gitRepositories={project.gitRepositories} />}
-          {tab === 'files' && <AttachmentList projectId={id!} showUpload />}
-          {tab === 'releases' && <ReleaseList entries={releases} projectId={id!} />}
-          {tab === 'logs' && <LogList key={logsKey} projectId={id!} />}
-          {tab === 'activity' && <ActivityList activities={activities} />}
+          <ProjectTabShell title={currentTabLabel} description={currentTabDescription} count={currentTabCount}>
+            {tab === 'todos' && (
+              <TodoBoard
+                todos={todos}
+                milestones={milestones}
+                projectId={id!}
+                onUpdate={() => api.todos.list({ projectId: id }).then(setTodos)}
+              />
+            )}
+            {tab === 'soul' && <SoulView projectId={id!} soul={soul} onUpdate={() => api.souls.get(id!).then(setSoul)} />}
+            {tab === 'milestones' && (
+              <MilestoneList
+                milestones={milestones}
+                todos={todos}
+                projectId={id!}
+                onUpdate={() => api.milestones.list(id!).then(setMilestones)}
+              />
+            )}
+            {tab === 'sessions' && <SessionList sessions={sessions} />}
+            {tab === 'knowledge' && <KnowledgeList entries={knowledge} projectId={id!} onUpdate={() => api.knowledge.list(id!).then(setKnowledge)} />}
+            {tab === 'changelog' && <ChangelogList entries={changelog} projectId={id!} project={project} onUpdate={() => api.changelog.list(id!).then(setChangelog)} />}
+            {tab === 'manual' && <ManualView projectId={id!} entries={manuals} onUpdate={() => api.manuals.list(id!).then(setManuals)} />}
+            {tab === 'features' && <FeatureList entries={features} projectId={id!} />}
+            {tab === 'schemas' && <SchemaList entries={schemas} projectId={id!} />}
+            {tab === 'dependencies' && <DependencyList entries={dependencies} projectId={id!} />}
+            {tab === 'snippets' && <SnippetList entries={snippets} projectId={id!} />}
+            {tab === 'workspaces' && <WorkspaceList projectId={id!} />}
+            {tab === 'research' && <ResearchList entries={research} projectId={id!} onUpdate={() => api.research.list(id!).then(setResearch)} />}
+            {tab === 'environments' && <EnvironmentList key={envKey} projectId={id!} />}
+            {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id!} />}
+            {tab === 'recurring-tasks' && <RecurringTaskList entries={recurringTasks} projectId={id!} />}
+            {tab === 'commits' && <CommitList key={commitsKey} projectId={id!} gitRepositories={project.gitRepositories} />}
+            {tab === 'files' && <AttachmentList projectId={id!} showUpload />}
+            {tab === 'releases' && <ReleaseList entries={releases} projectId={id!} />}
+            {tab === 'logs' && <LogList key={logsKey} projectId={id!} />}
+            {tab === 'activity' && <ActivityList activities={activities} />}
+          </ProjectTabShell>
         </div>
       </div>
     </div>
