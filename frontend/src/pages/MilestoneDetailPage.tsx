@@ -70,7 +70,7 @@ function TodoAccordionItem({ todo, projectId }: { todo: Todo; projectId: string 
             </div>
           )}
           <Link to={`/projects/${projectId}/todos/${todo._id}`}>
-            <Button type="button" size="sm" variant="none" className="bg-violet-900/60 hover:bg-violet-900 text-cyan-300">
+            <Button type="button" size="sm" variant="edit">
               {t('common.edit')}
             </Button>
           </Link>
@@ -293,8 +293,7 @@ export default function MilestoneDetailPage() {
             title={t('milestoneDetail.tasks')}
             meta={milestoneTodos.length > 0 ? `(${milestoneTodos.length})` : undefined}
             actions={(
-              <Button type="button" size="sm" variant="none" className="bg-violet-900/60 hover:bg-violet-900 text-violet-300"
-                onClick={() => setShowCreateTodo(true)}>
+              <Button type="button" size="sm" variant="accent" onClick={() => setShowCreateTodo(true)}>
                 {t('milestoneDetail.newQuest')}
               </Button>
             )}
@@ -359,34 +358,29 @@ export default function MilestoneDetailPage() {
           <DetailSection title={t('common.actions')} className="mb-8">
             <div className="flex flex-wrap items-center gap-2">
             {milestone.status === 'open' && (
-              <Button type="button" variant="none" size="sm" className="bg-yellow-900/60 hover:bg-yellow-900 text-yellow-300"
-                onClick={() => handleStatusChange('in_progress')}>
+              <Button type="button" variant="warning" size="sm" onClick={() => handleStatusChange('in_progress')}>
                 {t('todoTransitions.start')}
               </Button>
             )}
             {milestone.status === 'in_progress' && (
               <>
-                <Button type="button" variant="none" size="sm" className="bg-gray-700 hover:bg-gray-600 text-gray-300"
-                  onClick={() => handleStatusChange('open')}>
+                <Button type="button" variant="neutral" size="sm" onClick={() => handleStatusChange('open')}>
                   {t('milestoneDetail.backToOpen')}
                 </Button>
-                <Button type="button" variant="none" size="sm" className="bg-green-900/60 hover:bg-green-900 text-green-300"
-                  onClick={() => setShowChangelogForm(true)}>
+                <Button type="button" variant="success" size="sm" onClick={() => setShowChangelogForm(true)}>
                   {t('milestoneDetail.complete')}
                 </Button>
               </>
             )}
             {milestone.status === 'done' && (
-              <Button type="button" variant="none" size="sm" className="bg-yellow-900/60 hover:bg-yellow-900 text-yellow-300"
-                onClick={() => handleStatusChange('in_progress')}>
+              <Button type="button" variant="warning" size="sm" onClick={() => handleStatusChange('in_progress')}>
                 {t('milestoneDetail.reopenMilestone')}
               </Button>
             )}
-            <Button type="button" variant="none" size="sm" className="bg-violet-900/60 hover:bg-violet-900 text-cyan-300"
-              onClick={() => setEditing(true)}>
+            <Button type="button" variant="edit" size="sm" onClick={() => setEditing(true)}>
               {t('common.edit')}
             </Button>
-            <Button type="button" variant="none" size="sm" className="bg-gray-700 hover:bg-gray-600 text-gray-300"
+            <Button type="button" variant="neutral" size="sm"
               onClick={async () => {
                 try {
                   await api.milestones.update(milestone._id, { archived: !milestone.archived } as Partial<Milestone>);

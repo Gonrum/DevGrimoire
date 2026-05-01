@@ -38,11 +38,11 @@ export const STATUS_COLORS: Record<Todo['status'], string> = {
   done: 'bg-green-900 text-green-300',
 };
 
-export const TRANSITION_BUTTON_COLORS: Record<Todo['status'], string> = {
-  open: 'bg-gray-700 hover:bg-gray-600 text-gray-300',
-  in_progress: 'bg-yellow-900/60 hover:bg-yellow-900 text-yellow-300',
-  review: 'bg-purple-900/60 hover:bg-purple-900 text-purple-300',
-  done: 'bg-green-900/60 hover:bg-green-900 text-green-300',
+export const TRANSITION_BUTTON_VARIANT: Record<Todo['status'], 'neutral' | 'warning' | 'info' | 'success'> = {
+  open: 'neutral',
+  in_progress: 'warning',
+  review: 'info',
+  done: 'success',
 };
 
 export const STATUS_TRANSITIONS: Record<Todo['status'], { label: () => string; next: Todo['status'] }[]> = {

@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { api, Todo, Milestone } from '../api/client';
 import {
   PRIORITY_COLORS, PRIORITY_LABELS,
-  STATUS_COLORS, STATUS_LABELS, STATUS_TRANSITIONS, TRANSITION_BUTTON_COLORS,
+  STATUS_COLORS, STATUS_LABELS, STATUS_TRANSITIONS, TRANSITION_BUTTON_VARIANT,
 } from '../components/todo-utils';
 import Markdown from '../components/Markdown';
 import MarkdownEditor from '../components/MarkdownEditor';
@@ -211,15 +211,14 @@ export default function TodoDetailPage() {
           <DetailSection title={t('common.actions')} className="mb-8">
             <div className="flex flex-wrap items-center gap-2">
             {STATUS_TRANSITIONS[todo.status].map((tr) => (
-              <Button key={tr.next} type="button" variant="none" size="sm" onClick={() => handleStatusChange(tr.next)}
-                className={TRANSITION_BUTTON_COLORS[tr.next]}>
+              <Button key={tr.next} type="button" variant={TRANSITION_BUTTON_VARIANT[tr.next]} size="sm" onClick={() => handleStatusChange(tr.next)}>
                 {tr.label()}
               </Button>
             ))}
-            <Button type="button" variant="none" size="sm" className="bg-violet-900/60 hover:bg-violet-900 text-cyan-300" onClick={() => setEditing(true)}>
+            <Button type="button" variant="edit" size="sm" onClick={() => setEditing(true)}>
               {t('common.edit')}
             </Button>
-            <Button type="button" variant="none" size="sm" className="bg-gray-700 hover:bg-gray-600 text-gray-300" onClick={async () => {
+            <Button type="button" variant="neutral" size="sm" onClick={async () => {
               try {
                 await api.todos.update(todo._id, { archived: !todo.archived } as Partial<Todo>);
                 loadTodo();
