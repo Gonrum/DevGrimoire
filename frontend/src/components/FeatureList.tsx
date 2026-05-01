@@ -11,19 +11,7 @@ import { FormInput, FormSelect, FormTextarea } from './ui/FormField';
 import FilterPill from './ui/FilterPill';
 import TabToolbar from './ui/TabToolbar';
 import Markdown from './Markdown';
-
-const statusColors: Record<FeatureStatus, string> = {
-  planned: 'bg-gray-700 text-gray-300',
-  in_development: 'bg-violet-900/40 text-violet-300',
-  released: 'bg-green-900/40 text-green-300',
-  deprecated: 'bg-red-900/40 text-red-300',
-};
-
-const priorityColors: Record<FeaturePriority, string> = {
-  low: 'bg-gray-700 text-gray-400',
-  medium: 'bg-yellow-900/40 text-yellow-300',
-  high: 'bg-orange-900/40 text-orange-300',
-};
+import { CATEGORY_BADGE, featureStatusBadge, priorityBadge } from './ui/badge-tokens';
 
 interface FeatureFormData {
   name: string;
@@ -308,16 +296,16 @@ export default function FeatureList({ entries, projectId }: { entries: Feature[]
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-sm font-semibold">{feature.name}</h3>
-                    <Badge color={statusColors[feature.status]}>
+                    <Badge color={featureStatusBadge(feature.status)}>
                       {statusLabels[feature.status]}
                     </Badge>
                     {feature.priority && (
-                      <Badge color={priorityColors[feature.priority]}>
+                      <Badge color={priorityBadge(feature.priority)}>
                         {priorityLabels[feature.priority]}
                       </Badge>
                     )}
                     {feature.category && (
-                      <Badge color="bg-purple-900/40 text-purple-300">{feature.category}</Badge>
+                      <Badge color={CATEGORY_BADGE}>{feature.category}</Badge>
                     )}
                     {feature.version && (
                       <span className="text-xs font-mono text-gray-500">{feature.version}</span>

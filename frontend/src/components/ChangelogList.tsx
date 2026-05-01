@@ -5,6 +5,7 @@ import Card from './ui/Card';
 import EmptyState from './ui/EmptyState';
 import ListCardHeader from './ui/ListCardHeader';
 import Badge from './ui/Badge';
+import { COMPONENT_BADGE, VERSION_BADGE } from './ui/badge-tokens';
 import Markdown from './Markdown';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
@@ -240,12 +241,12 @@ export default function ChangelogList({
               <ListCardHeader
                 className="mb-2"
                 title={e.version ? (
-                  <Badge color="bg-violet-900/40 text-cyan-300" className="text-sm font-mono font-semibold">
+                  <Badge color={VERSION_BADGE} className="text-sm font-mono font-semibold">
                     v{e.version}
                   </Badge>
                 ) : t('changelog.untitled')}
                 badges={e.component ? (
-                  <Badge color="bg-purple-900/40 text-purple-300">{e.component}</Badge>
+                  <Badge color={COMPONENT_BADGE}>{e.component}</Badge>
                 ) : undefined}
                 meta={(
                   <span>
