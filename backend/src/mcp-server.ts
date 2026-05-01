@@ -37,6 +37,8 @@ import { WebSearchService } from './web-search/services/web-search.service';
 import { ReadabilityService } from './web-search/services/readability.service';
 import { WorkspacesService } from './workspaces/workspaces.service';
 import { WorkspaceClient } from './workspaces/workspace-client.service';
+import { WorkspaceGitTokensService } from './workspaces/workspace-git-tokens.service';
+import { WorkspaceCliTokenService } from './workspaces/workspace-cli-token.service';
 import { AuthService } from './auth/auth.service';
 import { UserRole } from './auth/schemas/user.schema';
 import { registerMcpTools } from './mcp-tools';
@@ -115,6 +117,7 @@ async function bootstrap() {
     snippetsService: app.get(SnippetsService),
     attachmentsService: app.get(AttachmentsService),
     questionsService: app.get(QuestionsService),
+    authService: app.get(AuthService),
     logsService: app.get(LogsService),
     releasesService: app.get(ReleasesService),
     chatService: app.get(ChatService),
@@ -124,6 +127,8 @@ async function bootstrap() {
     readabilityService: app.get(ReadabilityService),
     workspacesService: app.get(WorkspacesService),
     workspaceClient: app.get(WorkspaceClient),
+    workspaceGitTokens: app.get(WorkspaceGitTokensService),
+    workspaceCliToken: app.get(WorkspaceCliTokenService),
   });
 
   const transport = new StdioServerTransport();

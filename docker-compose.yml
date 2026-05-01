@@ -75,6 +75,9 @@ services:
       WORKSPACE_API_TOKEN: ${WORKSPACE_API_TOKEN:?WORKSPACE_API_TOKEN must be set (>=16 chars) for the sidecar}
       WORKSPACE_ROOT: /workspaces
       PORT: 9000
+      # Match MinIO MAX_FILE_SIZE (50MB default) so workspace_attachment_save can
+      # handle realistic build artifacts. Sidecar default is 5MB, far too small.
+      READ_MAX_BYTES: ${WORKSPACE_READ_MAX_BYTES:-52428800}
     volumes:
       - workspace_data:/workspaces
     networks:

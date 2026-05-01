@@ -32,6 +32,7 @@ export class WorkspacesService {
         sizeBytes: 0,
         lastActivityAt: new Date(),
         createdBySessionId: dto.createdBySessionId,
+        gitRepoId: dto.gitRepoId,
       });
       this.emit(ws, 'created', `Workspace "${ws.name}" erstellt`);
       return ws;

@@ -19,6 +19,13 @@ const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY_DAYS = 7;
 const BCRYPT_ROUNDS = 10;
 
+export interface ActiveUserSummary {
+  userId: string;
+  username: string;
+  role: UserRole;
+  lastSeenAt: Date;
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -156,6 +163,63 @@ export class AuthService {
   async findUserById(id: string): Promise<UserDocument | null> {
     const user = await this.userModel.findById(id).select('-passwordHash').exec();
     return user ? this.maskUserSecrets(user) : null;
+  }
+
+  async findByUsername(username: string): Promise<UserDocument | null> {
+    const user = await this.userModel
+      .findOne({ username })
+      .select('-passwordHash')
+      .exec();
+    return user ? this.maskUserSecrets(user) : null;
+  }
+
+  async findActiveUsers(windowMinutes = 15): Promise<ActiveUserSummary[]> {
+    const clampedWindowMinutes = Math.min(Math.max(Math.floor(windowMinutes), 1), 120);
+    const since = new Date(Date.now() - clampedWindowMinutes * 60 * 1000);
+    const now = new Date();
+
+    const tokenRows = await this.refreshTokenModel
+      .find({
+        expiresAt: { $gt: now },
+        updatedAt: { $gte: since },
+      })
+      .select('userId updatedAt createdAt')
+      .sort({ updatedAt: -1 })
+      .lean<Array<{ userId: string; updatedAt?: Date; createdAt?: Date }>>()
+      .exec();
+
+    const lastSeenByUserId = new Map<string, Date>();
+    for (const row of tokenRows) {
+      const lastSeenAt = row.updatedAt || row.createdAt;
+      if (!row.userId || !lastSeenAt || lastSeenByUserId.has(row.userId)) continue;
+      lastSeenByUserId.set(row.userId, lastSeenAt);
+    }
+
+    if (lastSeenByUserId.size === 0) return [];
+
+    const users = await this.userModel
+      .find({
+        _id: { $in: Array.from(lastSeenByUserId.keys()) },
+        active: true,
+      })
+      .select('username role')
+      .lean<Array<{ _id: unknown; username: string; role: UserRole }>>()
+      .exec();
+
+    return users
+      .map((user) => {
+        const userId = String(user._id);
+        const lastSeenAt = lastSeenByUserId.get(userId);
+        if (!lastSeenAt) return null;
+        return {
+          userId,
+          username: user.username,
+          role: user.role,
+          lastSeenAt,
+        };
+      })
+      .filter((user): user is ActiveUserSummary => user !== null)
+      .sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime());
   }
 
   private maskUserSecrets(user: UserDocument): UserDocument {

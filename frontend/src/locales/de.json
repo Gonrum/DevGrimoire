@@ -150,6 +150,7 @@
     "newTask": "+ Neue Quest",
     "kanban": "Kanban",
     "list": "Liste",
+    "searchPlaceholder": "Suche (Titel, Beschreibung, T-123)",
     "allStatus": "Alle Status",
     "allPriorities": "Alle Prioritäten",
     "allMilestones": "Alle Artefakte",
@@ -291,14 +292,54 @@
   },
   "knowledge": {
     "noKnowledge": "Noch keine Lore gespeichert.",
-    "noCategory": "Ohne Kategorie"
+    "noFiltered": "Keine Lore in dieser Kategorie.",
+    "noCategory": "Ohne Kategorie",
+    "newEntry": "Neue Lore",
+    "editEntry": "Lore bearbeiten",
+    "topic": "Thema",
+    "topicPlaceholder": "z.B. MCP Auth Flow",
+    "scope": "Geltungsbereich",
+    "scopeProject": "Nur dieses Kapitel",
+    "scopeGlobal": "Global",
+    "scopeGlobalShort": "Global",
+    "content": "Inhalt",
+    "contentPlaceholder": "Wissen, Entscheidungen oder Hinweise als Markdown festhalten...",
+    "created": "Lore \"{{topic}}\" erstellt",
+    "updated": "Lore \"{{topic}}\" aktualisiert",
+    "deleted": "Lore \"{{topic}}\" gelöscht"
   },
   "changelog": {
-    "noChangelog": "Noch keine Chronik-Einträge. Claude kann welche per MCP anlegen."
+    "noChangelog": "Noch keine Chronik-Einträge. Claude kann welche per MCP anlegen.",
+    "new": "+ Neuer Eintrag",
+    "edit": "Eintrag bearbeiten",
+    "version": "Version",
+    "versionPlaceholder": "z.B. 1.2.0",
+    "component": "Komponente",
+    "componentPlaceholder": "Backend, Frontend, ...",
+    "summary": "Zusammenfassung",
+    "summaryPlaceholder": "Optionale Kurzfassung (Markdown)",
+    "changes": "Änderungen",
+    "changePlaceholder": "feat: ...",
+    "addChange": "+ Zeile",
+    "created": "Chronik-Eintrag erstellt",
+    "updated": "Chronik-Eintrag aktualisiert",
+    "deleted": "Chronik-Eintrag gelöscht"
   },
   "research": {
     "noResearch": "Noch keine Schriftrollen vorhanden.",
-    "sources": "Quellen:"
+    "sources": "Quellen:",
+    "new": "+ Neue Schriftrolle",
+    "edit": "Schriftrolle bearbeiten",
+    "title": "Titel",
+    "titlePlaceholder": "Worum geht es?",
+    "content": "Inhalt",
+    "contentPlaceholder": "Recherche-Ergebnisse, Befunde, Vergleiche (Markdown)...",
+    "sourcesLabel": "Quellen (URLs / Referenzen)",
+    "sourcePlaceholder": "https://... oder Buch/Artikel",
+    "addSource": "+ Quelle",
+    "created": "Schriftrolle erstellt",
+    "updated": "Schriftrolle aktualisiert",
+    "deleted": "Schriftrolle gelöscht"
   },
   "schemas": {
     "newSchema": "+ Neues Schema",
@@ -380,6 +421,9 @@
     "formDescription": "Beschreibung (optional)",
     "formRepoUrl": "Repository-URL (optional)",
     "formBranch": "Branch (optional, default: main)",
+    "formGitRepo": "Token-Repository (optional)",
+    "formGitRepoDefault": "Standard (erstes Repo pro Provider)",
+    "formGitRepoHint": "Bei Multi-Repo-Projekten: aus welchem hinterlegten Repo das gh/glab-Token kommt.",
     "nameHint": "Erlaubt: a-z, 0-9, '-', '_'. Muss mit Buchstabe oder Zahl beginnen, max 64 Zeichen."
   },
   "terminal": {

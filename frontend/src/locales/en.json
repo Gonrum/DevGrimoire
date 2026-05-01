@@ -150,6 +150,7 @@
     "newTask": "+ New Quest",
     "kanban": "Kanban",
     "list": "List",
+    "searchPlaceholder": "Search (title, description, T-123)",
     "allStatus": "All Statuses",
     "allPriorities": "All Priorities",
     "allMilestones": "All Artifacts",
@@ -291,14 +292,54 @@
   },
   "knowledge": {
     "noKnowledge": "No arcana stored yet.",
-    "noCategory": "No Category"
+    "noFiltered": "No arcana in this category.",
+    "noCategory": "No Category",
+    "newEntry": "New Arcana",
+    "editEntry": "Edit Arcana",
+    "topic": "Topic",
+    "topicPlaceholder": "e.g. MCP auth flow",
+    "scope": "Scope",
+    "scopeProject": "This chapter only",
+    "scopeGlobal": "Global",
+    "scopeGlobalShort": "Global",
+    "content": "Content",
+    "contentPlaceholder": "Capture knowledge, decisions, or notes as Markdown...",
+    "created": "Arcana \"{{topic}}\" created",
+    "updated": "Arcana \"{{topic}}\" updated",
+    "deleted": "Arcana \"{{topic}}\" deleted"
   },
   "changelog": {
-    "noChangelog": "No chronicle entries yet. Claude can create them via MCP."
+    "noChangelog": "No chronicle entries yet. Claude can create them via MCP.",
+    "new": "+ New entry",
+    "edit": "Edit entry",
+    "version": "Version",
+    "versionPlaceholder": "e.g. 1.2.0",
+    "component": "Component",
+    "componentPlaceholder": "Backend, Frontend, ...",
+    "summary": "Summary",
+    "summaryPlaceholder": "Optional short summary (Markdown)",
+    "changes": "Changes",
+    "changePlaceholder": "feat: ...",
+    "addChange": "+ Line",
+    "created": "Changelog entry created",
+    "updated": "Changelog entry updated",
+    "deleted": "Changelog entry deleted"
   },
   "research": {
     "noResearch": "No scrolls yet.",
-    "sources": "Sources:"
+    "sources": "Sources:",
+    "new": "+ New scroll",
+    "edit": "Edit scroll",
+    "title": "Title",
+    "titlePlaceholder": "What is it about?",
+    "content": "Content",
+    "contentPlaceholder": "Research results, findings, comparisons (Markdown)...",
+    "sourcesLabel": "Sources (URLs / references)",
+    "sourcePlaceholder": "https://... or book/article",
+    "addSource": "+ Source",
+    "created": "Scroll created",
+    "updated": "Scroll updated",
+    "deleted": "Scroll deleted"
   },
   "schemas": {
     "newSchema": "+ New Schema",
@@ -380,6 +421,9 @@
     "formDescription": "Description (optional)",
     "formRepoUrl": "Repository URL (optional)",
     "formBranch": "Branch (optional, default: main)",
+    "formGitRepo": "Token repository (optional)",
+    "formGitRepoDefault": "Default (first repo per provider)",
+    "formGitRepoHint": "For multi-repo projects: which configured repo's token to inject for gh/glab.",
     "nameHint": "Allowed: a-z, 0-9, '-', '_'. Must start with a letter or digit, max 64 chars."
   },
   "terminal": {

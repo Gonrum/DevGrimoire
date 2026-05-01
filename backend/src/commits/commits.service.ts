@@ -58,10 +58,16 @@ export class CommitsService {
     const token = await this.getToken(repoConfig.tokenSecretId);
     const provider = this.getProvider(repoConfig.provider);
 
+    // `lastSyncAt` is only trustworthy AFTER we've actually fetched a commit
+    // (== `lastSyncSha` is set). Otherwise an initial mis-sync (wrong branch,
+    // 0-result first run) leaves lastSyncAt=now stuck — every subsequent sync
+    // filters everything out with `since=now`. Until we have a SHA, do a full
+    // fetch so we recover from those stuck states automatically.
+    const sinceForApi = repoConfig.lastSyncSha ? repoConfig.lastSyncAt : undefined;
     const result = await provider.fetchCommits(
       repoConfig,
       token,
-      repoConfig.lastSyncAt,
+      sinceForApi,
       repoConfig.lastEtag,
     );
 
@@ -114,15 +120,26 @@ export class CommitsService {
       );
     }
 
-    // Update sync metadata on the project
+    // Update sync metadata on the project. Don't advance lastSyncAt on a
+    // truly-empty initial sync (no SHA yet AND 0 commits returned) — that's
+    // the stuck-state we're guarding against above. Once we have any SHA,
+    // empty-result syncs are a legitimate "nothing new" and DO advance the
+    // timestamp so we hit the etag/304 fast path.
     const updatePath = `gitRepositories.${repoIndex}`;
-    await this.projectsService.updateRaw(projectId, {
-      $set: {
-        [`${updatePath}.lastSyncAt`]: new Date(),
-        [`${updatePath}.lastSyncSha`]: result.commits[0]?.sha || repoConfig.lastSyncSha,
-        ...(result.etag ? { [`${updatePath}.lastEtag`]: result.etag } : {}),
-      },
-    });
+    const newSha = result.commits[0]?.sha || repoConfig.lastSyncSha;
+    const set: Record<string, unknown> = {};
+    if (newSha) {
+      set[`${updatePath}.lastSyncSha`] = newSha;
+    }
+    if (newSha || repoConfig.lastSyncSha) {
+      set[`${updatePath}.lastSyncAt`] = new Date();
+    }
+    if (result.etag) {
+      set[`${updatePath}.lastEtag`] = result.etag;
+    }
+    if (Object.keys(set).length) {
+      await this.projectsService.updateRaw(projectId, { $set: set });
+    }
 
     if (newCommits > 0) {
       this.eventEmitter.emit(PROJECT_CHANGED, {

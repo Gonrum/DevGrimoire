@@ -331,6 +331,7 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
   const { t } = useTranslation();
   const { showError } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
+  const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterPriority, setFilterPriority] = useState<string>('');
   const [filterMilestone, setFilterMilestone] = useState<string>('');
@@ -364,12 +365,32 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
     if (filterMilestone === '_none') result = result.filter((t) => !t.milestoneId);
     else if (filterMilestone) result = result.filter((t) => t.milestoneId === filterMilestone);
     if (filterTag) result = result.filter((t) => t.tags.includes(filterTag));
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      const numberMatch = q.match(/^t?-?(\d+)$/i);
+      if (numberMatch) {
+        const num = parseInt(numberMatch[1], 10);
+        result = result.filter((t) =>
+          t.number === num ||
+          t.displayNumber?.toLowerCase() === q ||
+          t.title.toLowerCase().includes(q) ||
+          t.description?.toLowerCase().includes(q),
+        );
+      } else {
+        result = result.filter((t) =>
+          t.title.toLowerCase().includes(q) ||
+          t.description?.toLowerCase().includes(q) ||
+          t.tags.some((tag) => tag.toLowerCase().includes(q)),
+        );
+      }
+    }
     return sortTodos(result, sortKey, sortDir);
-  }, [todos, showArchived, filterStatus, filterPriority, filterMilestone, filterTag, sortKey, sortDir]);
+  }, [todos, showArchived, searchQuery, filterStatus, filterPriority, filterMilestone, filterTag, sortKey, sortDir]);
 
-  const hasFilters = filterStatus || filterPriority || filterMilestone || filterTag;
+  const hasFilters = !!(searchQuery.trim() || filterStatus || filterPriority || filterMilestone || filterTag);
 
   const clearFilters = () => {
+    setSearchQuery('');
     setFilterStatus('');
     setFilterPriority('');
     setFilterMilestone('');
@@ -396,6 +417,10 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
+        <input type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Escape') setSearchQuery(''); }}
+          placeholder={t('todos.searchPlaceholder')} aria-label={t('todos.searchPlaceholder')}
+          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 min-w-[12rem] flex-1 sm:flex-none" />
         <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} aria-label="Status filtern"
           className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500">
           <option value="">{t('todos.allStatus')}</option>

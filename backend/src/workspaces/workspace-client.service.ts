@@ -102,6 +102,15 @@ export class WorkspaceClient {
     return this.post<ReadResponse>('/read', { workspaceId, path });
   }
 
+  /** Binary-safe read — returns base64. Used by workspace_attachment_save to
+   *  forward arbitrary files (zip, png, apk, ...) to MinIO without UTF-8 mangling. */
+  readBase64(workspaceId: string, path: string): Promise<{ size: number; contentBase64: string }> {
+    return this.post<{ size: number; contentBase64: string }>(
+      '/read-base64',
+      { workspaceId, path },
+    );
+  }
+
   search(workspaceId: string, query: string, include?: string[], exclude?: string[]): Promise<SearchResponse> {
     return this.post<SearchResponse>('/search', { workspaceId, query, include, exclude });
   }

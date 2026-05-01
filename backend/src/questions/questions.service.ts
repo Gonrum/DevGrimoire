@@ -45,11 +45,7 @@ export class QuestionsService {
       context: dto.context,
       todoId: dto.todoId ? new Types.ObjectId(dto.todoId) : undefined,
       projectId: projectId ? new Types.ObjectId(projectId) : undefined,
-      targetUserId: dto.targetUserId
-        ? new Types.ObjectId(dto.targetUserId)
-        : userId
-          ? new Types.ObjectId(userId)
-          : undefined,
+      targetUserId: dto.targetUserId ? new Types.ObjectId(dto.targetUserId) : undefined,
       createdByUserId: userId ? new Types.ObjectId(userId) : undefined,
       timeoutMs,
       expiresAt,

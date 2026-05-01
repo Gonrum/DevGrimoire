@@ -25,4 +25,9 @@ export class UpdateWorkspaceDto {
   @IsString()
   @MaxLength(128)
   branch?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(48)
+  gitRepoId?: string;
 }

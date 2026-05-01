@@ -28,6 +28,8 @@ import { SnippetsService } from './snippets/snippets.service';
 import { WorkspacesService } from './workspaces/workspaces.service';
 import { WorkspaceStatus } from './workspaces/schemas/workspace.schema';
 import { WorkspaceClient } from './workspaces/workspace-client.service';
+import { WorkspaceGitTokensService } from './workspaces/workspace-git-tokens.service';
+import { WorkspaceCliTokenService } from './workspaces/workspace-cli-token.service';
 import { AttachmentsService } from './attachments/attachments.service';
 import { QuestionsService } from './questions/questions.service';
 import { LogsService } from './logs/logs.service';
@@ -40,6 +42,7 @@ import { ReadabilityService } from './web-search/services/readability.service';
 import { SearchCategory, SearchTimeRange } from './web-search/dto/web-search.dto';
 import { RequestContext } from './common/request-context';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
+import { AuthService } from './auth/auth.service';
 
 const RAG_BACKEND_URL = process.env.RAG_BACKEND_URL || 'http://localhost:3200';
 
@@ -191,6 +194,7 @@ export interface McpServices {
   snippetsService: SnippetsService;
   attachmentsService: AttachmentsService;
   questionsService: QuestionsService;
+  authService: AuthService;
   logsService: LogsService;
   releasesService: ReleasesService;
   chatService: ChatService;
@@ -200,6 +204,8 @@ export interface McpServices {
   readabilityService: ReadabilityService;
   workspacesService: WorkspacesService;
   workspaceClient: WorkspaceClient;
+  workspaceGitTokens: WorkspaceGitTokensService;
+  workspaceCliToken: WorkspaceCliTokenService;
 }
 
 const tools = [
@@ -626,8 +632,18 @@ const tools = [
     },
   },
   {
+    name: 'user_list_active',
+    description: 'List active DevGrimoire users for targeted ask_user questions. Returns only userId, username, role, and lastSeenAt. Use targetUsername with ask_user when possible.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        windowMinutes: { type: 'number', description: 'Activity window in minutes (default: 15, max: 120)' },
+      },
+    },
+  },
+  {
     name: 'ask_user',
-    description: 'Ask the user a question and wait for their answer. The question is shown in the DevGrimoire UI (via SSE + push notification). Use this when you need clarification, a decision, or missing information. If todoId is provided, the question and answer are documented as a comment on the todo.',
+    description: 'Ask users a question and wait for an answer. By default this is broadcast to all users. Set targetUsername (preferred) or targetUserId to ask one specific user. The question is shown in the DevGrimoire UI (via SSE + push notification). If todoId is provided, the question and answer are documented as a comment on the todo.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -636,6 +652,8 @@ const tools = [
         context: { type: 'string', description: 'Additional context to help the user understand the question' },
         todoId: { type: 'string', description: 'Todo MongoDB ID to link the question to a task (question + answer will be documented as comment)' },
         projectId: { type: 'string', description: 'Project MongoDB ID (auto-derived from todoId if set)' },
+        targetUsername: { type: 'string', description: 'Username to target. Takes precedence over targetUserId. Omit for broadcast.' },
+        targetUserId: { type: 'string', description: 'User MongoDB ID to target. Omit for broadcast.' },
         timeoutSeconds: { type: 'number', description: 'How long to wait for an answer (default: 300, max: 600)' },
       },
       required: ['question'],
@@ -1480,6 +1498,7 @@ const tools = [
         repoUrl: { type: 'string', description: 'Optional repository URL (can be set later)' },
         branch: { type: 'string', description: 'Branch to track (default "main")' },
         createdBySessionId: { type: 'string', description: 'Optional chat-session reference for traceability' },
+        gitRepoId: { type: 'string', description: 'Optional: pin this workspace to one of the project.gitRepositories[]._id values. The matching token is then injected as GH_TOKEN/GITLAB_TOKEN+GITLAB_HOST per workspace_exec call. Default (omitted): first repo per provider wins.' },
       },
       required: ['projectId', 'name'],
     },
@@ -1519,6 +1538,7 @@ const tools = [
         description: { type: 'string' },
         repoUrl: { type: 'string' },
         branch: { type: 'string' },
+        gitRepoId: { type: 'string', description: 'Pin/repin to a different project.gitRepositories[]._id, or empty string to fall back to the first-wins default.' },
       },
       required: ['id'],
     },
@@ -1643,6 +1663,27 @@ const tools = [
         },
       },
       required: ['id', 'command'],
+    },
+  },
+  {
+    name: 'workspace_attachment_save',
+    description: 'Copy a file from the workspace into the project Attachments (MinIO storage). The file is read binary-safe so zip/png/apk all work. Optionally link to an entity (todo/release/...) so it appears as that entity\'s attachment in the UI. Use this for build artefacts, test reports, screenshots, generated docs you want to keep beyond the workspace TTL.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Workspace MongoDB ID' },
+        path: { type: 'string', description: 'File path relative to the workspace root (e.g. "dist/app.zip")' },
+        fileName: { type: 'string', description: 'Optional override for the stored filename (default: basename of path)' },
+        entityType: { type: 'string', description: 'Optional: link to entity type (e.g. "todo", "release")' },
+        entityId: { type: 'string', description: 'Optional: linked entity MongoDB ID (requires entityType)' },
+        description: { type: 'string', description: 'Optional human-readable description' },
+        tags: {
+          type: 'array',
+          description: 'Optional tags (e.g. ["build", "v0.4.2"])',
+          items: { type: 'string' },
+        },
+      },
+      required: ['id', 'path'],
     },
   },
   {
@@ -2058,7 +2099,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, authService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -2432,14 +2473,29 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = { notificationId: notification._id.toString() };
           break;
         }
+        case 'user_list_active': {
+          const users = await authService.findActiveUsers(optionalNumber(a, 'windowMinutes') ?? 15);
+          result = { users };
+          break;
+        }
         case 'ask_user': {
           const userId = RequestContext.getUser()?.userId;
+          const targetUsername = optionalString(a, 'targetUsername');
+          let targetUserId = optionalString(a, 'targetUserId');
+          if (targetUsername) {
+            const targetUser = await authService.findByUsername(targetUsername);
+            if (!targetUser || !targetUser.active) {
+              throw new Error(`Unknown or inactive targetUsername: ${targetUsername}`);
+            }
+            targetUserId = targetUser._id.toString();
+          }
           const questionEntry = await questionsService.create({
             question: requireString(a, 'question'),
             options: optionalStringArray(a, 'options'),
             context: optionalString(a, 'context'),
             todoId: optionalString(a, 'todoId'),
             projectId: optionalString(a, 'projectId'),
+            targetUserId,
             timeoutSeconds: optionalNumber(a, 'timeoutSeconds'),
           }, userId);
           const timeoutMs = questionEntry.timeoutMs;
@@ -3043,6 +3099,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             repoUrl: optionalString(a, 'repoUrl'),
             branch: optionalString(a, 'branch'),
             createdBySessionId: optionalString(a, 'createdBySessionId'),
+            gitRepoId: optionalString(a, 'gitRepoId'),
           });
           result = compactCreateResult(ws, { path: ws.path, status: ws.status });
           break;
@@ -3074,6 +3131,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               description: optionalString(a, 'description'),
               repoUrl: optionalString(a, 'repoUrl'),
               branch: optionalString(a, 'branch'),
+              gitRepoId: optionalString(a, 'gitRepoId'),
             }),
           );
           break;
@@ -3128,9 +3186,16 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'workspace_clone': {
           const id = requireString(a, 'id');
           const ws = await workspacesService.findById(id);
+          // Auto-embed the matching git token in the clone URL so private repos
+          // work without manual `oauth2:$TOKEN@host` gymnastics. No-op if URL
+          // is already authenticated or no token matches.
+          const authenticatedUrl = await workspaceGitTokens.buildAuthenticatedCloneUrl(
+            ws,
+            requireString(a, 'repoUrl'),
+          );
           const sidecar = await workspaceClient.clone(
             ws._id.toString(),
-            requireString(a, 'repoUrl'),
+            authenticatedUrl,
             optionalString(a, 'branch'),
           );
           // Pull a fresh size after clone so the UI reflects disk usage.
@@ -3202,7 +3267,16 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             ? (a.env as Record<string, string>)
             : undefined;
           const ws = await workspacesService.findById(id);
-          const exec = await workspaceClient.exec(ws._id.toString(), command, timeoutMs, callerEnv);
+          // Auto-inject GH_TOKEN/GITLAB_TOKEN/GITLAB_HOST from project.gitRepositories
+          // so `gh`/`glab` work inside the sidecar without manual auth. Caller env wins.
+          const gitEnv = await workspaceGitTokens.resolveForWorkspace(ws);
+          // Auto-inject DG_* so the in-workspace `dg` CLI talks to the backend
+          // with a project-scoped token (1h TTL, T-168).
+          const dgEnv = workspaceCliToken.buildEnvFor(ws._id.toString(), ws.projectId.toString());
+          const mergedEnv = Object.keys(gitEnv).length || Object.keys(dgEnv).length || callerEnv
+            ? { ...gitEnv, ...dgEnv, ...(callerEnv ?? {}) }
+            : undefined;
+          const exec = await workspaceClient.exec(ws._id.toString(), command, timeoutMs, mergedEnv);
           await workspacesService.touch(id);
 
           // Audit log — best-effort, never blocks the exec response.
@@ -3230,6 +3304,42 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             });
 
           result = exec;
+          break;
+        }
+        case 'workspace_attachment_save': {
+          const id = requireString(a, 'id');
+          const path = requireString(a, 'path');
+          const ws = await workspacesService.findById(id);
+
+          // Binary-safe read so non-text artefacts (zip/png/apk) round-trip
+          // through MinIO without UTF-8 mangling.
+          const file = await workspaceClient.readBase64(ws._id.toString(), path);
+
+          const fileName = optionalString(a, 'fileName')
+            || path.split('/').filter(Boolean).pop()
+            || 'file';
+          const tags = Array.isArray(a.tags)
+            ? (a.tags as unknown[]).filter((t): t is string => typeof t === 'string')
+            : undefined;
+
+          const attachment = await attachmentsService.createFromBase64(
+            {
+              projectId: ws.projectId.toString(),
+              fileName,
+              entityType: optionalString(a, 'entityType'),
+              entityId: optionalString(a, 'entityId'),
+              description: optionalString(a, 'description'),
+              tags,
+            },
+            file.contentBase64,
+          );
+          await workspacesService.touch(id);
+          result = {
+            saved: true,
+            attachmentId: attachment._id.toString(),
+            fileName,
+            sizeBytes: file.size,
+          };
           break;
         }
         case 'recurring_task_create': {

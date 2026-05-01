@@ -32,4 +32,9 @@ export class CreateWorkspaceDto {
   @IsString()
   @MaxLength(64)
   createdBySessionId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(48)
+  gitRepoId?: string;
 }

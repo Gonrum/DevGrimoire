@@ -16,6 +16,8 @@ import { ReadabilityService } from '../web-search/services/readability.service';
 import { SearchCategory, SearchTimeRange } from '../web-search/dto/web-search.dto';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { WorkspaceClient } from '../workspaces/workspace-client.service';
+import { WorkspaceGitTokensService } from '../workspaces/workspace-git-tokens.service';
+import { WorkspaceCliTokenService } from '../workspaces/workspace-cli-token.service';
 import { SnippetsService } from '../snippets/snippets.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { RecurringTasksService } from '../recurring-tasks/recurring-tasks.service';
@@ -89,7 +91,7 @@ export const TOOL_GROUPS: Record<
   ],
   workspace_write: [
     'workspace_create', 'workspace_update', 'workspace_archive', 'workspace_delete',
-    'workspace_clone', 'workspace_pull', 'workspace_exec',
+    'workspace_clone', 'workspace_pull', 'workspace_exec', 'workspace_attachment_save',
   ],
   external_read: ['web_search', 'web_fetch'],
 };
@@ -1056,6 +1058,23 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
       required: ['id', 'command'],
     },
   },
+  workspace_attachment_save: {
+    name: 'workspace_attachment_save',
+    description: 'Datei aus dem Workspace ins Project-Attachments (MinIO) übernehmen. Binär-safe. Optional an Entity (todo/release) verlinken.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Workspace ID' },
+        path: { type: 'string', description: 'Pfad relativ zum Workspace-Root' },
+        fileName: { type: 'string' },
+        entityType: { type: 'string' },
+        entityId: { type: 'string' },
+        description: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['id', 'path'],
+    },
+  },
 };
 
 export interface ToolContext {
@@ -1089,6 +1108,8 @@ export class ChatToolsService {
     private readonly readability: ReadabilityService,
     private readonly workspaces: WorkspacesService,
     private readonly workspaceClient: WorkspaceClient,
+    private readonly workspaceGitTokens: WorkspaceGitTokensService,
+    private readonly workspaceCliToken: WorkspaceCliTokenService,
     private readonly snippets: SnippetsService,
     private readonly attachments: AttachmentsService,
     private readonly recurringTasks: RecurringTasksService,
@@ -2094,9 +2115,13 @@ export class ChatToolsService {
         }
         case 'workspace_clone': {
           const w = await this.workspaces.findById(args.id as string);
+          const authenticatedUrl = await this.workspaceGitTokens.buildAuthenticatedCloneUrl(
+            w,
+            args.repoUrl as string,
+          );
           const sidecar = await this.workspaceClient.clone(
             w._id.toString(),
-            args.repoUrl as string,
+            authenticatedUrl,
             args.branch as string | undefined,
           );
           let sizeBytes: number | undefined;
@@ -2149,14 +2174,52 @@ export class ChatToolsService {
         }
         case 'workspace_exec': {
           const w = await this.workspaces.findById(args.id as string);
+          const callerEnv = args.env as Record<string, string> | undefined;
+          const gitEnv = await this.workspaceGitTokens.resolveForWorkspace(w);
+          const dgEnv = this.workspaceCliToken.buildEnvFor(w._id.toString(), w.projectId.toString());
+          const mergedEnv = Object.keys(gitEnv).length || Object.keys(dgEnv).length || callerEnv
+            ? { ...gitEnv, ...dgEnv, ...(callerEnv ?? {}) }
+            : undefined;
           const exec = await this.workspaceClient.exec(
             w._id.toString(),
             args.command as string,
             args.timeout as number | undefined,
-            args.env as Record<string, string> | undefined,
+            mergedEnv,
           );
           await this.workspaces.touch(w._id.toString());
           return { success: true, result: exec };
+        }
+        case 'workspace_attachment_save': {
+          const w = await this.workspaces.findById(args.id as string);
+          const path = args.path as string;
+          const file = await this.workspaceClient.readBase64(w._id.toString(), path);
+          const fileName = (args.fileName as string | undefined)
+            || path.split('/').filter(Boolean).pop()
+            || 'file';
+          const tags = Array.isArray(args.tags)
+            ? (args.tags as unknown[]).filter((t): t is string => typeof t === 'string')
+            : undefined;
+          const attachment = await this.attachments.createFromBase64(
+            {
+              projectId: w.projectId.toString(),
+              fileName,
+              entityType: args.entityType as string | undefined,
+              entityId: args.entityId as string | undefined,
+              description: args.description as string | undefined,
+              tags,
+            },
+            file.contentBase64,
+          );
+          await this.workspaces.touch(w._id.toString());
+          return {
+            success: true,
+            result: {
+              saved: true,
+              attachmentId: attachment._id.toString(),
+              fileName,
+              sizeBytes: file.size,
+            },
+          };
         }
 
         default:

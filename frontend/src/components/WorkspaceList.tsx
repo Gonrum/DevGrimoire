@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { api, Workspace, WorkspaceStatus } from '../api/client';
+import { api, Workspace, WorkspaceStatus, GitRepository } from '../api/client';
 import { useToast } from './Toast';
 import Card from './ui/Card';
 import EmptyState from './ui/EmptyState';
@@ -16,9 +16,23 @@ interface CreateForm {
   description: string;
   repoUrl: string;
   branch: string;
+  gitRepoId: string;
 }
 
-const emptyCreate = (): CreateForm => ({ name: '', description: '', repoUrl: '', branch: '' });
+const emptyCreate = (): CreateForm => ({
+  name: '',
+  description: '',
+  repoUrl: '',
+  branch: '',
+  gitRepoId: '',
+});
+
+function gitRepoLabel(repo: GitRepository): string {
+  if (repo.label) return repo.label;
+  if (repo.provider === 'gitlab' && repo.gitlabProjectId) return repo.gitlabProjectId;
+  if (repo.owner && repo.repo) return `${repo.owner}/${repo.repo}`;
+  return repo._id ?? repo.provider;
+}
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 
@@ -73,11 +87,16 @@ export default function WorkspaceList({ projectId }: Props) {
   const [filter, setFilter] = useState<WorkspaceStatus | 'all'>('active');
   const [showCreate, setShowCreate] = useState(false);
   const [terminalFor, setTerminalFor] = useState<Workspace | null>(null);
+  const [gitRepos, setGitRepos] = useState<GitRepository[]>([]);
 
   const reload = useCallback(async () => {
     try {
-      const list = await api.workspaces.list(projectId);
+      const [list, project] = await Promise.all([
+        api.workspaces.list(projectId),
+        api.projects.get(projectId).catch(() => null),
+      ]);
       setItems(list);
+      setGitRepos(project?.gitRepositories ?? []);
       setLoadError(null);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : String(err));
@@ -247,6 +266,7 @@ export default function WorkspaceList({ projectId }: Props) {
           <Dialog onClose={() => setShowCreate(false)} title={t('workspaces.create')}>
             <div className="p-5">
               <CreateWorkspaceForm
+                gitRepos={gitRepos}
                 projectId={projectId}
                 onCancel={() => setShowCreate(false)}
                 onCreated={() => {
@@ -272,10 +292,12 @@ export default function WorkspaceList({ projectId }: Props) {
 
 function CreateWorkspaceForm({
   projectId,
+  gitRepos,
   onCancel,
   onCreated,
 }: {
   projectId: string;
+  gitRepos: GitRepository[];
   onCancel: () => void;
   onCreated: () => void;
 }) {
@@ -298,6 +320,7 @@ function CreateWorkspaceForm({
         description: form.description.trim() || undefined,
         repoUrl: form.repoUrl.trim() || undefined,
         branch: form.branch.trim() || undefined,
+        gitRepoId: form.gitRepoId || undefined,
       });
       showSuccess(t('workspaces.created'));
       onCreated();
@@ -339,6 +362,24 @@ function CreateWorkspaceForm({
         onChange={(e) => update({ branch: e.target.value })}
         placeholder="main"
       />
+      {gitRepos.length >= 1 && (
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">{t('workspaces.formGitRepo')}</label>
+          <select
+            value={form.gitRepoId}
+            onChange={(e) => update({ gitRepoId: e.target.value })}
+            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+          >
+            <option value="">{t('workspaces.formGitRepoDefault')}</option>
+            {gitRepos.map((r) => (
+              <option key={r._id} value={r._id ?? ''}>
+                [{r.provider === 'gitlab' ? 'GL' : 'GH'}] {gitRepoLabel(r)}
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-gray-500 mt-1">{t('workspaces.formGitRepoHint')}</p>
+        </div>
+      )}
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="secondary" type="button" onClick={onCancel} disabled={saving}>
           {t('common.cancel')}

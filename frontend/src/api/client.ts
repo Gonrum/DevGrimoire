@@ -138,7 +138,8 @@ export interface Session {
 
 export interface Knowledge {
   _id: string;
-  projectId: string;
+  projectId?: string;
+  scope?: 'global' | 'project';
   topic: string;
   content: string;
   tags: string[];
@@ -400,6 +401,7 @@ export interface Workspace {
   sizeBytes: number;
   lastActivityAt: string;
   createdBySessionId?: string;
+  gitRepoId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -665,6 +667,8 @@ export const api = {
     get: (id: string) => request<ChangelogEntry>(`/changelog/${id}`),
     create: (data: Partial<ChangelogEntry>) =>
       request<ChangelogEntry>('/changelog', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<ChangelogEntry>) =>
+      request<ChangelogEntry>(`/changelog/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/changelog/${id}`, { method: 'DELETE' }),
   },
@@ -909,9 +913,9 @@ export const api = {
       return request<Workspace[]>(`/workspaces?${params}`);
     },
     get: (id: string) => request<Workspace>(`/workspaces/${id}`),
-    create: (data: { projectId: string; name: string; description?: string; repoUrl?: string; branch?: string }) =>
+    create: (data: { projectId: string; name: string; description?: string; repoUrl?: string; branch?: string; gitRepoId?: string }) =>
       request<Workspace>('/workspaces', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: string, data: Partial<Pick<Workspace, 'name' | 'description' | 'repoUrl' | 'branch'>>) =>
+    update: (id: string, data: Partial<Pick<Workspace, 'name' | 'description' | 'repoUrl' | 'branch' | 'gitRepoId'>>) =>
       request<Workspace>(`/workspaces/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     archive: (id: string) =>
       request<Workspace>(`/workspaces/${id}/archive`, { method: 'POST' }),

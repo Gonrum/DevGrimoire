@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+# dg — DevGrimoire workspace CLI.
+# Talks to the backend's /internal/dg/* endpoints using a project-scoped JWT
+# that's auto-injected at every workspace_exec call (T-168). Token TTL is 1h
+# and refreshed on every exec, so a long agent session never sees an expired
+# token under normal usage.
+#
+# Required env (auto-injected — DON'T set manually):
+#   DG_API_URL       e.g. http://backend:3000/api/internal/dg
+#   DG_API_TOKEN     scoped JWT
+#   DG_WORKSPACE_ID  this workspace's MongoDB ID
+#   DG_PROJECT_ID    the workspace's project ID
+#
+# Subcommands:
+#   dg save <path> [--description=...] [--tags=a,b] [--filename=name]
+#                  [--entity-type=todo --entity-id=<id>]
+#   dg log <level> <message>          (level = debug|info|warn|error)
+#   dg note <topic> <content>         (or:  dg note <topic> -f <file>)
+#   dg todo <title> [--description=...] [--priority=low|medium|high|critical]
+#                   [--tags=a,b] [--milestone=<id>]
+#   dg whoami
+#   dg --help | dg --version
+
+set -euo pipefail
+
+DG_VERSION="0.1.0"
+
+usage() {
+    cat <<'EOF'
+dg — DevGrimoire workspace CLI
+
+  dg save <path> [--description=X] [--tags=a,b] [--filename=name]
+                 [--entity-type=todo --entity-id=<id>]
+  dg log <level> <message>          (level = debug|info|warn|error)
+  dg note <topic> <content>
+  dg note <topic> -f <file>
+  dg todo <title> [--description=X] [--priority=low|medium|high|critical]
+                  [--tags=a,b] [--milestone=<id>]
+  dg whoami
+  dg --help | dg --version
+
+Configured via DG_* env vars (auto-injected per workspace_exec call).
+EOF
+}
+
+require_env() {
+    if [[ -z "${DG_API_URL:-}" || -z "${DG_API_TOKEN:-}" ]]; then
+        echo "error: DG_API_URL / DG_API_TOKEN missing — dg only works inside a workspace exec call (auto-injected)." >&2
+        exit 2
+    fi
+}
+
+# JSON-encode a single string for embedding in payloads. Uses python3 because
+# it's already in the base image and handles unicode/special chars correctly.
+json_encode() {
+    python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.argv[1]))' "$1"
+}
+
+# Comma-separated list → JSON array of strings.
+json_encode_list() {
+    local IFS=','
+    read -ra parts <<<"$1"
+    python3 -c '
+import json, sys
+parts = [p.strip() for p in sys.argv[1:] if p.strip()]
+sys.stdout.write(json.dumps(parts))' "${parts[@]}"
+}
+
+# Pretty-print a successful response. Exits non-zero on HTTP error and prints
+# a clean error line — no JSON dump unless DG_DEBUG=1.
+api_post() {
+    local endpoint="$1"
+    local payload="$2"
+    local resp
+    local status
+    resp=$(curl -sS -w '\n%{http_code}' -X POST \
+        -H "Authorization: Bearer ${DG_API_TOKEN}" \
+        -H "Content-Type: application/json" \
+        --data-raw "$payload" \
+        "${DG_API_URL}/${endpoint}") || {
+            echo "error: network failure calling ${endpoint}" >&2
+            exit 1
+        }
+    status="${resp##*$'\n'}"
+    body="${resp%$'\n'*}"
+    if [[ "$status" -ge 200 && "$status" -lt 300 ]]; then
+        echo "$body"
+        return 0
+    fi
+    if [[ -n "${DG_DEBUG:-}" ]]; then
+        echo "error (HTTP $status): $body" >&2
+    else
+        local msg
+        msg=$(echo "$body" | python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+    m = d.get("message", "")
+    if isinstance(m, list): m = "; ".join(str(x) for x in m)
+    sys.stdout.write(m or d.get("error", "unknown error"))
+except Exception:
+    sys.stdout.write("HTTP %d" % '"$status"')' 2>/dev/null) || msg="HTTP $status"
+        echo "error: ${msg:-HTTP $status}" >&2
+    fi
+    exit 1
+}
+
+# Resolve a user-provided path (relative to cwd) into a path relative to the
+# workspace root. The sidecar /read-base64 expects workspace-root-relative.
+resolve_workspace_path() {
+    local input="$1"
+    if [[ -z "${DG_WORKSPACE_ID:-}" ]]; then
+        # Fall back to whatever the user gave us — backend will validate.
+        echo "$input"
+        return
+    fi
+    local root="/workspaces/${DG_WORKSPACE_ID}"
+    local abs
+    if [[ "$input" = /* ]]; then
+        abs="$input"
+    else
+        abs="$(cd "$(dirname "$input")" 2>/dev/null && pwd)/$(basename "$input")"
+    fi
+    case "$abs" in
+        "$root"/*) echo "${abs#$root/}" ;;
+        "$root") echo "." ;;
+        *) echo "$input" ;;  # leave as-is, backend will 400 if outside
+    esac
+}
+
+cmd_save() {
+    local path="" desc="" tags="" filename="" etype="" eid=""
+    if [[ $# -eq 0 ]]; then
+        echo "usage: dg save <path> [--description=...] [--tags=a,b] [--filename=name] [--entity-type=todo --entity-id=<id>]" >&2
+        exit 2
+    fi
+    path="$1"; shift
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --description=*) desc="${1#*=}" ;;
+            --description)   desc="$2"; shift ;;
+            --tags=*)        tags="${1#*=}" ;;
+            --tags)          tags="$2"; shift ;;
+            --filename=*)    filename="${1#*=}" ;;
+            --filename)      filename="$2"; shift ;;
+            --entity-type=*) etype="${1#*=}" ;;
+            --entity-type)   etype="$2"; shift ;;
+            --entity-id=*)   eid="${1#*=}" ;;
+            --entity-id)     eid="$2"; shift ;;
+            *) echo "unknown flag: $1" >&2; exit 2 ;;
+        esac
+        shift
+    done
+    require_env
+    local rel
+    rel=$(resolve_workspace_path "$path")
+    local payload="{\"path\":$(json_encode "$rel")"
+    [[ -n "$filename" ]] && payload+=",\"fileName\":$(json_encode "$filename")"
+    [[ -n "$desc" ]]     && payload+=",\"description\":$(json_encode "$desc")"
+    [[ -n "$etype" ]]    && payload+=",\"entityType\":$(json_encode "$etype")"
+    [[ -n "$eid" ]]      && payload+=",\"entityId\":$(json_encode "$eid")"
+    [[ -n "$tags" ]]     && payload+=",\"tags\":$(json_encode_list "$tags")"
+    payload+="}"
+    api_post save "$payload"
+}
+
+cmd_log() {
+    if [[ $# -lt 2 ]]; then
+        echo "usage: dg log <level> <message>" >&2
+        exit 2
+    fi
+    local level="$1"; shift
+    local message="$*"
+    require_env
+    local payload
+    payload="{\"level\":$(json_encode "$level"),\"message\":$(json_encode "$message")}"
+    api_post log "$payload"
+}
+
+cmd_note() {
+    if [[ $# -lt 2 ]]; then
+        echo "usage: dg note <topic> <content>   (or: dg note <topic> -f <file>)" >&2
+        exit 2
+    fi
+    local topic="$1"; shift
+    local content
+    if [[ "$1" = "-f" ]]; then
+        if [[ $# -lt 2 ]]; then
+            echo "error: -f requires a file path" >&2; exit 2
+        fi
+        content="$(<"$2")"
+    else
+        content="$*"
+    fi
+    require_env
+    local payload
+    payload="{\"topic\":$(json_encode "$topic"),\"content\":$(json_encode "$content")}"
+    api_post note "$payload"
+}
+
+cmd_todo() {
+    if [[ $# -lt 1 ]]; then
+        echo "usage: dg todo <title> [--description=X] [--priority=...] [--tags=a,b] [--milestone=<id>]" >&2
+        exit 2
+    fi
+    local title="$1"; shift
+    local desc="" priority="" tags="" milestone=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --description=*) desc="${1#*=}" ;;
+            --description)   desc="$2"; shift ;;
+            --priority=*)    priority="${1#*=}" ;;
+            --priority)      priority="$2"; shift ;;
+            --tags=*)        tags="${1#*=}" ;;
+            --tags)          tags="$2"; shift ;;
+            --milestone=*)   milestone="${1#*=}" ;;
+            --milestone)     milestone="$2"; shift ;;
+            *) echo "unknown flag: $1" >&2; exit 2 ;;
+        esac
+        shift
+    done
+    require_env
+    local payload="{\"title\":$(json_encode "$title")"
+    [[ -n "$desc" ]]      && payload+=",\"description\":$(json_encode "$desc")"
+    [[ -n "$priority" ]]  && payload+=",\"priority\":$(json_encode "$priority")"
+    [[ -n "$milestone" ]] && payload+=",\"milestoneId\":$(json_encode "$milestone")"
+    [[ -n "$tags" ]]      && payload+=",\"tags\":$(json_encode_list "$tags")"
+    payload+="}"
+    api_post todo "$payload"
+}
+
+cmd_whoami() {
+    require_env
+    api_post whoami "{}"
+}
+
+case "${1:-}" in
+    save)        shift; cmd_save "$@" ;;
+    log)         shift; cmd_log "$@" ;;
+    note)        shift; cmd_note "$@" ;;
+    todo)        shift; cmd_todo "$@" ;;
+    whoami)      shift; cmd_whoami ;;
+    -h|--help|help|"") usage ;;
+    -v|--version) echo "dg ${DG_VERSION}" ;;
+    *) echo "unknown subcommand: $1" >&2; usage >&2; exit 2 ;;
+esac

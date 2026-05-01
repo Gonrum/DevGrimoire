@@ -305,6 +305,33 @@ app.post('/read', async (req, res) => {
   }
 });
 
+/**
+ * Binary-safe variant of /read. Returns the file as base64 so the upstream can
+ * forward it to MinIO/Attachments without UTF-8 corruption. Same path-safety
+ * rules and size cap as /read — that endpoint stays utf-8-only because the
+ * common agent use-case is reading source code.
+ */
+app.post('/read-base64', async (req, res) => {
+  const id = requireWorkspaceId(req, res); if (!id) return;
+  const requested = req.body?.path;
+  if (typeof requested !== 'string' || !requested) {
+    return res.status(400).json({ error: 'path must be a non-empty string' });
+  }
+  try {
+    const target = await resolveInsideWorkspace(id, requested);
+    const stat = await fsp.stat(target);
+    if (!stat.isFile()) return res.status(400).json({ error: 'path is not a regular file' });
+    if (stat.size > READ_MAX_BYTES) {
+      return res.status(413).json({ error: `file too large (>${READ_MAX_BYTES} bytes)`, size: stat.size });
+    }
+    const buf = await fsp.readFile(target);
+    res.json({ size: stat.size, contentBase64: buf.toString('base64') });
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'file not found' });
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/tree', async (req, res) => {
   const id = requireWorkspaceId(req, res); if (!id) return;
   const requested = typeof req.body?.path === 'string' ? req.body.path : '.';

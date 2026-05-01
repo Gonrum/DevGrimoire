@@ -3,6 +3,8 @@ import type { Request, Response } from 'express';
 import { WorkspacesService } from './workspaces.service';
 import { WorkspaceClient } from './workspace-client.service';
 import { WorkspaceTtlScheduler } from './workspace-ttl.scheduler';
+import { WorkspaceGitTokensService } from './workspace-git-tokens.service';
+import { WorkspaceCliTokenService } from './workspace-cli-token.service';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { ExecWorkspaceDto } from './dto/exec-workspace.dto';
@@ -18,6 +20,8 @@ export class WorkspacesController {
     private readonly workspaceClient: WorkspaceClient,
     private readonly logs: LogsService,
     private readonly ttl: WorkspaceTtlScheduler,
+    private readonly workspaceGitTokens: WorkspaceGitTokensService,
+    private readonly workspaceCliToken: WorkspaceCliTokenService,
   ) {}
 
   /**
@@ -99,13 +103,22 @@ export class WorkspacesController {
       if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
     };
 
+    // Auto-inject GH_TOKEN/GITLAB_TOKEN/GITLAB_HOST from project.gitRepositories
+    // so `gh`/`glab` work inside the sidecar without manual auth. Caller env wins.
+    const gitEnv = await this.workspaceGitTokens.resolveForWorkspace(ws);
+    // Auto-inject DG_* so the in-workspace `dg` CLI works (T-168).
+    const dgEnv = this.workspaceCliToken.buildEnvFor(ws._id.toString(), ws.projectId.toString());
+    const mergedEnv = Object.keys(gitEnv).length || Object.keys(dgEnv).length || dto.env
+      ? { ...gitEnv, ...dgEnv, ...(dto.env ?? {}) }
+      : undefined;
+
     let lastDone: Record<string, unknown> | null = null;
     try {
       await this.workspaceClient.execStream(
         ws._id.toString(),
         dto.command,
         dto.timeout,
-        dto.env,
+        mergedEnv,
         abort.signal,
         (event) => {
           send(event);

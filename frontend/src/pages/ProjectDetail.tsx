@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature, Manual, Soul, RecurringTask, Snippet, Attachment, LogStats, Release } from '../api/client';
+import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature, Manual, Soul, RecurringTask, Snippet, Attachment, LogStats, Release, Workspace } from '../api/client';
 import TodoBoard from '../components/TodoBoard';
 import SessionList from '../components/SessionList';
 import KnowledgeList from '../components/KnowledgeList';
@@ -55,6 +55,7 @@ export default function ProjectDetail() {
   const [storageEnabled, setStorageEnabled] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [releases, setReleases] = useState<Release[]>([]);
+  const [workspaceCount, setWorkspaceCount] = useState(0);
   const [logStats, setLogStats] = useState<LogStats | null>(null);
   const [logsKey, setLogsKey] = useState(0);
   const [envKey, setEnvKey] = useState(0);
@@ -101,8 +102,9 @@ export default function ProjectDetail() {
       api.attachments.storageStatus(),
       api.logs.stats(id),
       api.releases.list(id),
+      api.workspaces.list(id, 'active').catch(() => [] as Workspace[]),
     ])
-      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man, sl, cc, rts, snip, storage, ls, rels]) => {
+      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man, sl, cc, rts, snip, storage, ls, rels, wss]) => {
         if (controller.signal.aborted) return;
         setProject(p);
         setTodos(t);
@@ -125,6 +127,7 @@ export default function ProjectDetail() {
         setStorageEnabled(storage.enabled);
         setLogStats(ls);
         setReleases(rels);
+        setWorkspaceCount(wss.length);
         if (storage.enabled) {
           api.attachments.list(id).then(setAttachments).catch(() => {});
         }
@@ -164,6 +167,7 @@ export default function ProjectDetail() {
         release: () => api.releases.list(id).then(setReleases),
         log: () => { api.logs.stats(id).then(setLogStats); setLogsKey((k) => k + 1); },
         commit: () => { api.commits.count(id).then((c) => setCommitCount(c.count)); setCommitsKey((k) => k + 1); },
+        workspace: () => api.workspaces.list(id, 'active').then((wss) => setWorkspaceCount(wss.length)).catch(() => undefined),
       };
       refetchers[event.entity]?.();
       // Cross-dependencies: todo changes affect milestone progress and vice versa
@@ -230,7 +234,7 @@ export default function ProjectDetail() {
       label: t('sidebar.system'),
       items: [
         { key: 'soul', label: t('soul.title'), count: (['vision', 'principles', 'conventions', 'communication', 'boundaries', 'workflow', 'quality'] as const).filter((k) => soul?.[k]?.trim()).length },
-        { key: 'workspaces', label: i18n.language === 'de' ? 'Werkstätten' : 'Workshops', count: 0 },
+        { key: 'workspaces', label: i18n.language === 'de' ? 'Werkstätten' : 'Workshops', count: workspaceCount },
         { key: 'environments', label: i18n.language === 'de' ? 'Reiche' : 'Realms', count: environments.length },
         { key: 'secrets', label: i18n.language === 'de' ? 'Siegel' : 'Seals', count: secrets.length },
         { key: 'recurring-tasks', label: i18n.language === 'de' ? 'Riten' : 'Rites', count: recurringTasks.filter((rt) => rt.active).length },
@@ -394,15 +398,15 @@ export default function ProjectDetail() {
             />
           )}
           {tab === 'sessions' && <SessionList sessions={sessions} />}
-          {tab === 'knowledge' && <KnowledgeList entries={knowledge} />}
-          {tab === 'changelog' && <ChangelogList entries={changelog} />}
+          {tab === 'knowledge' && <KnowledgeList entries={knowledge} projectId={id!} onUpdate={() => api.knowledge.list(id!).then(setKnowledge)} />}
+          {tab === 'changelog' && <ChangelogList entries={changelog} projectId={id!} project={project} onUpdate={() => api.changelog.list(id!).then(setChangelog)} />}
           {tab === 'manual' && <ManualView projectId={id!} entries={manuals} onUpdate={() => api.manuals.list(id!).then(setManuals)} />}
           {tab === 'features' && <FeatureList entries={features} projectId={id!} />}
           {tab === 'schemas' && <SchemaList entries={schemas} projectId={id!} />}
           {tab === 'dependencies' && <DependencyList entries={dependencies} projectId={id!} />}
           {tab === 'snippets' && <SnippetList entries={snippets} projectId={id!} />}
           {tab === 'workspaces' && <WorkspaceList projectId={id!} />}
-          {tab === 'research' && <ResearchList entries={research} />}
+          {tab === 'research' && <ResearchList entries={research} projectId={id!} onUpdate={() => api.research.list(id!).then(setResearch)} />}
           {tab === 'environments' && <EnvironmentList key={envKey} projectId={id!} />}
           {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id!} />}
           {tab === 'recurring-tasks' && <RecurringTaskList entries={recurringTasks} projectId={id!} />}

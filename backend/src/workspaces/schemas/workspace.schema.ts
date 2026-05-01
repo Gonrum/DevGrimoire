@@ -45,6 +45,15 @@ export class Workspace {
 
   @Prop()
   createdBySessionId?: string;
+
+  /**
+   * Optional reference to a `project.gitRepositories[]._id`. If set, the
+   * workspace_exec env-injection uses this specific repo's token instead of
+   * the per-provider first-wins default. Stored as a string (the embedded
+   * subdoc id) so the resolver can match it without populating refs.
+   */
+  @Prop()
+  gitRepoId?: string;
 }
 
 export const WorkspaceSchema = SchemaFactory.createForClass(Workspace);

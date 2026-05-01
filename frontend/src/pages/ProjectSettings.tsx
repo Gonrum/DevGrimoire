@@ -106,6 +106,7 @@ export default function ProjectSettings() {
     setRepoError(null);
     setValidating(true);
 
+    let createdSecretId: string | null = null;
     try {
       const parsed = parseRepoUrl(newRepoUrl, newRepoProvider);
 
@@ -132,6 +133,7 @@ export default function ProjectSettings() {
         description: `Git ${newRepoProvider} token for ${newRepoUrl}`,
         type: 'token',
       });
+      createdSecretId = secret._id;
 
       const newRepo: GitRepository = {
         provider: newRepoProvider,
@@ -146,10 +148,10 @@ export default function ProjectSettings() {
       };
 
       const updated = [...gitRepos, newRepo];
-      setGitRepos(updated);
 
-      // Save to project immediately
+      // Save to project first, only update local state on success
       await api.projects.update(id!, { gitRepositories: updated } as any);
+      setGitRepos(updated);
 
       // Reset form
       setNewRepoUrl('');
@@ -160,6 +162,14 @@ export default function ProjectSettings() {
       setShowAddRepo(false);
     } catch (err) {
       setRepoError(err instanceof Error ? err.message : 'Fehler beim Hinzufügen');
+      // Cleanup orphan secret if project update failed after secret creation
+      if (createdSecretId) {
+        try {
+          await api.secrets.delete(createdSecretId);
+        } catch {
+          // Ignore cleanup failure — surfacing it would mask the original error
+        }
+      }
     } finally {
       setValidating(false);
     }
@@ -167,8 +177,12 @@ export default function ProjectSettings() {
 
   const handleRemoveRepo = async (index: number) => {
     const updated = gitRepos.filter((_, i) => i !== index);
-    setGitRepos(updated);
-    await api.projects.update(id!, { gitRepositories: updated } as any);
+    try {
+      await api.projects.update(id!, { gitRepositories: updated } as any);
+      setGitRepos(updated);
+    } catch (err) {
+      setRepoError(err instanceof Error ? err.message : 'Fehler beim Entfernen');
+    }
   };
 
   const handleStartEditBranch = async (index: number) => {
@@ -191,10 +205,14 @@ export default function ProjectSettings() {
     const updated = gitRepos.map((r, i) =>
       i === index ? { ...r, defaultBranch: trimmed } : r,
     );
-    setGitRepos(updated);
     setEditingBranch(null);
     setBranchOptions([]);
-    await api.projects.update(id!, { gitRepositories: updated } as any);
+    try {
+      await api.projects.update(id!, { gitRepositories: updated } as any);
+      setGitRepos(updated);
+    } catch (err) {
+      setRepoError(err instanceof Error ? err.message : 'Fehler beim Branch-Wechsel');
+    }
   };
 
   const handleStartEditRepo = (index: number) => {
@@ -223,6 +241,7 @@ export default function ProjectSettings() {
     setEditRepoError(null);
     setEditValidating(true);
 
+    let createdSecretId: string | null = null;
     try {
       const parsed = parseRepoUrl(editRepoUrl, editRepoProvider);
       const oldRepo = gitRepos[editingRepoIndex];
@@ -253,6 +272,7 @@ export default function ProjectSettings() {
           type: 'token',
         });
         tokenSecretId = secret._id;
+        createdSecretId = secret._id;
       }
 
       const updatedRepo: GitRepository = {
@@ -268,11 +288,18 @@ export default function ProjectSettings() {
       };
 
       const updated = gitRepos.map((r, i) => (i === editingRepoIndex ? updatedRepo : r));
-      setGitRepos(updated);
       await api.projects.update(id!, { gitRepositories: updated } as any);
+      setGitRepos(updated);
       setEditingRepoIndex(null);
     } catch (err) {
       setEditRepoError(err instanceof Error ? err.message : 'Fehler beim Speichern');
+      if (createdSecretId) {
+        try {
+          await api.secrets.delete(createdSecretId);
+        } catch {
+          // Ignore cleanup failure — surfacing it would mask the original error
+        }
+      }
     } finally {
       setEditValidating(false);
     }
@@ -282,8 +309,12 @@ export default function ProjectSettings() {
     const updated = gitRepos.map((r, i) =>
       i === index ? { ...r, syncEnabled: !r.syncEnabled } : r,
     );
-    setGitRepos(updated);
-    await api.projects.update(id!, { gitRepositories: updated } as any);
+    try {
+      await api.projects.update(id!, { gitRepositories: updated } as any);
+      setGitRepos(updated);
+    } catch (err) {
+      setRepoError(err instanceof Error ? err.message : 'Fehler beim Umschalten');
+    }
   };
 
   const handleSave = async () => {
