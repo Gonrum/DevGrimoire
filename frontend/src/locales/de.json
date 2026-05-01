@@ -350,6 +350,7 @@
   },
   "changelog": {
     "noChangelog": "Noch keine Chronik-Einträge. Claude kann welche per MCP anlegen.",
+    "untitled": "Eintrag",
     "new": "+ Neuer Eintrag",
     "edit": "Eintrag bearbeiten",
     "version": "Version",

@@ -350,6 +350,7 @@
   },
   "changelog": {
     "noChangelog": "No chronicle entries yet. Claude can create them via MCP.",
+    "untitled": "Entry",
     "new": "+ New entry",
     "edit": "Edit entry",
     "version": "Version",

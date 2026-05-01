@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { ChangelogEntry, Project, api } from '../api/client';
 import Card from './ui/Card';
 import EmptyState from './ui/EmptyState';
+import ListCardHeader from './ui/ListCardHeader';
 import Badge from './ui/Badge';
 import Markdown from './Markdown';
 import Button from './ui/Button';
@@ -236,27 +237,28 @@ export default function ChangelogList({
         <div className="space-y-4">
           {entries.map((e) => (
             <Card key={e._id}>
-              <div className="flex items-center gap-3 mb-2 flex-wrap">
-                {e.version && (
+              <ListCardHeader
+                className="mb-2"
+                title={e.version ? (
                   <Badge color="bg-violet-900/40 text-cyan-300" className="text-sm font-mono font-semibold">
                     v{e.version}
                   </Badge>
+                ) : t('changelog.untitled')}
+                badges={e.component ? (
+                  <Badge color="bg-purple-900/40 text-purple-300">{e.component}</Badge>
+                ) : undefined}
+                meta={(
+                  <span>
+                    {new Date(e.createdAt).toLocaleDateString(i18n.language === 'de' ? 'de-DE' : 'en-US', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
                 )}
-                {e.component && (
-                  <Badge color="bg-purple-900/40 text-purple-300">
-                    {e.component}
-                  </Badge>
-                )}
-                <span className="text-xs text-gray-600 ml-auto">
-                  {new Date(e.createdAt).toLocaleDateString(i18n.language === 'de' ? 'de-DE' : 'en-US', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </span>
-              </div>
+              />
               {e.summary && (
                 <div className="mb-2 text-gray-300">
                   <Markdown>{e.summary}</Markdown>
