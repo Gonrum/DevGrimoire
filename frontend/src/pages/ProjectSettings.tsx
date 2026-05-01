@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { api, Project, GitRepository } from '../api/client';
 import Button from '../components/ui/Button';
 import ConfirmButton from '../components/ui/ConfirmButton';
+import { FormInput, FormTextarea } from '../components/ui/FormField';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import Badge from '../components/ui/Badge';
 import { SettingsSection, SettingsShell } from '../components/ui/SettingsShell';
@@ -376,59 +377,45 @@ export default function ProjectSettings() {
       <section className="mb-8 space-y-4">
         <h2 className="text-lg font-semibold text-cyan-400">{t('projectSettings.projectData')}</h2>
 
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">{t('common.name')} *</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
-          />
-        </div>
+        <FormInput
+          label={t('common.name')}
+          required
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
 
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">{t('common.description')}</label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={2}
-            className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 resize-none"
-          />
-        </div>
+        <FormTextarea
+          label={t('common.description')}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={2}
+        />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">{t('projects.path')}</label>
-            <input
-              type="text"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              placeholder="/home/user/project"
-              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">{t('projectSettings.repository')}</label>
-            <input
-              type="text"
-              value={repository}
-              onChange={(e) => setRepository(e.target.value)}
-              placeholder="https://github.com/..."
-              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">{t('projectSettings.techStack')}</label>
-          <input
+          <FormInput
+            label={t('projects.path')}
             type="text"
-            value={techStack}
-            onChange={(e) => setTechStack(e.target.value)}
-            placeholder="React, Node.js, MongoDB"
-            className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            placeholder="/home/user/project"
+          />
+          <FormInput
+            label={t('projectSettings.repository')}
+            type="text"
+            value={repository}
+            onChange={(e) => setRepository(e.target.value)}
+            placeholder="https://github.com/..."
           />
         </div>
+
+        <FormInput
+          label={t('projectSettings.techStack')}
+          type="text"
+          value={techStack}
+          onChange={(e) => setTechStack(e.target.value)}
+          placeholder="React, Node.js, MongoDB"
+        />
 
         <div className="flex items-center gap-3">
           <label className="text-xs text-gray-500">{t('common.status')}:</label>
@@ -459,26 +446,26 @@ export default function ProjectSettings() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">{t('projectSettings.taskFormat')}</label>
-            <input
+            <FormInput
+              label={t('projectSettings.taskFormat')}
               type="text"
               value={todoNumberFormat}
               onChange={(e) => setTodoNumberFormat(e.target.value)}
               placeholder="{type}-{n}"
-              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 font-mono"
+              className="font-mono"
             />
             <p className="text-xs text-gray-600 mt-1">
               {t('projectSettings.preview')}: {todoNumberFormat.replace(/\{n\}/g, '42').replace(/\{type\}/g, 'T').replace(/\{prefix\}/g, name).replace(/\{date\}/g, new Date().toISOString().slice(0, 10))}
             </p>
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">{t('projectSettings.milestoneFormat')}</label>
-            <input
+            <FormInput
+              label={t('projectSettings.milestoneFormat')}
               type="text"
               value={milestoneNumberFormat}
               onChange={(e) => setMilestoneNumberFormat(e.target.value)}
               placeholder="{type}-{n}"
-              className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 font-mono"
+              className="font-mono"
             />
             <p className="text-xs text-gray-600 mt-1">
               {t('projectSettings.preview')}: {milestoneNumberFormat.replace(/\{n\}/g, '5').replace(/\{type\}/g, 'M').replace(/\{prefix\}/g, name).replace(/\{date\}/g, new Date().toISOString().slice(0, 10))}

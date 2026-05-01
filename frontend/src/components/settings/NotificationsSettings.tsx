@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../../api/client';
 import Button from '../ui/Button';
 import { SettingsSection, SettingsTabHeader } from '../ui/SettingsShell';
+import { Switch } from '../ui/Switch';
 
 interface PushCategory {
   key: string;
@@ -29,27 +30,6 @@ const PUSH_CATEGORIES: PushCategory[] = [
   { key: 'mcp_commit', default: false, group: 'mcp' },
   { key: 'mcp_system', default: false, group: 'mcp' },
 ];
-
-function Toggle({ checked, onClick, disabled }: { checked: boolean; onClick: () => void; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={onClick}
-      disabled={disabled}
-      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
-        checked ? 'bg-violet-600' : 'bg-gray-600'
-      }`}
-    >
-      <span
-        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
-          checked ? 'translate-x-5' : 'translate-x-0'
-        }`}
-      />
-    </button>
-  );
-}
 
 export default function NotificationsSettings() {
   const { t } = useTranslation();
@@ -103,8 +83,7 @@ export default function NotificationsSettings() {
     savePushCategories(updated);
   };
 
-  const toggleDictation = () => {
-    const next = !dictationEnabled;
+  const toggleDictation = (next: boolean) => {
     setDictationEnabled(next);
     localStorage.setItem('dg_dictation_enabled', String(next));
   };
@@ -130,7 +109,7 @@ export default function NotificationsSettings() {
               <div className="mt-0.5 text-xs text-gray-500">{t('settings.dictationEnabledDesc')}</div>
             </div>
             <div className="flex items-center gap-3">
-              <Toggle checked={dictationEnabled} onClick={toggleDictation} />
+              <Switch checked={dictationEnabled} onChange={toggleDictation} />
               <Button size="xs" variant="secondary" onClick={resetDictationConsent}>
                 {t('settings.dictationResetConsent')}
               </Button>
@@ -153,9 +132,9 @@ export default function NotificationsSettings() {
                       {t(`settings.pushCategory_${cat.key}_desc`)}
                     </div>
                   </div>
-                  <Toggle
+                  <Switch
                     checked={pushCategories[cat.key] ?? false}
-                    onClick={() => togglePushCategory(cat.key)}
+                    onChange={() => togglePushCategory(cat.key)}
                     disabled={pushSaving}
                   />
                 </div>
@@ -174,7 +153,7 @@ export default function NotificationsSettings() {
                       ? `${mcpCats.filter((c) => pushCategories[c.key]).length}/${mcpCats.length}`
                       : t('common.none')}
                   </span>
-                  <Toggle checked={allMcpOn} onClick={toggleAllMcp} disabled={pushSaving} />
+                  <Switch checked={allMcpOn} onChange={() => toggleAllMcp()} disabled={pushSaving} />
                 </div>
               </div>
               <div className="divide-y divide-gray-800">
@@ -188,9 +167,9 @@ export default function NotificationsSettings() {
                         {t(`settings.pushCategory_${cat.key}_desc`)}
                       </div>
                     </div>
-                    <Toggle
+                    <Switch
                       checked={pushCategories[cat.key] ?? false}
-                      onClick={() => togglePushCategory(cat.key)}
+                      onChange={() => togglePushCategory(cat.key)}
                       disabled={pushSaving}
                     />
                   </div>

@@ -9,6 +9,7 @@ import ApiKeyToolEditor from '../components/ApiKeyToolEditor';
 import NotificationsSettings from '../components/settings/NotificationsSettings';
 import Button from '../components/ui/Button';
 import ConfirmButton from '../components/ui/ConfirmButton';
+import { FormInput, SecretInput } from '../components/ui/FormField';
 import { SettingsActions, SettingsSection, SettingsShell, SettingsTabHeader } from '../components/ui/SettingsShell';
 
 const DEFAULT_INSTRUCTIONS = `# DevGrimoire Agent-Instruktionen
@@ -554,28 +555,23 @@ export default function Settings() {
             </div>
           )}
 
-          <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 mb-6">
-            <h2 className="text-sm font-medium text-gray-300 mb-3">{t('settings.createApiKey')}</h2>
+          <SettingsSection title={t('settings.createApiKey')} className="mb-6">
             <div className="flex flex-col sm:flex-row sm:items-end gap-3">
-              <div className="flex-1">
-                <label className="block text-xs text-gray-500 mb-1">{t('settings.apiKeyName')}</label>
-                <input
-                  type="text"
-                  value={apiKeyName}
-                  onChange={(e) => setApiKeyName(e.target.value)}
-                  placeholder={t('settings.apiKeyNamePlaceholder')}
-                  className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">{t('settings.apiKeyExpiry')}</label>
-                <input
-                  type="date"
-                  value={apiKeyExpiry}
-                  onChange={(e) => setApiKeyExpiry(e.target.value)}
-                  className="bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
-                />
-              </div>
+              <FormInput
+                fieldClassName="flex-1 min-w-0"
+                label={t('settings.apiKeyName')}
+                type="text"
+                value={apiKeyName}
+                onChange={(e) => setApiKeyName(e.target.value)}
+                placeholder={t('settings.apiKeyNamePlaceholder')}
+              />
+              <FormInput
+                fieldClassName="w-full sm:w-auto"
+                label={t('settings.apiKeyExpiry')}
+                type="date"
+                value={apiKeyExpiry}
+                onChange={(e) => setApiKeyExpiry(e.target.value)}
+              />
               <Button
                 variant="primary"
                 onClick={createApiKey}
@@ -584,7 +580,7 @@ export default function Settings() {
                 {apiKeyCreating ? t('common.creating') : t('common.create')}
               </Button>
             </div>
-          </div>
+          </SettingsSection>
 
           {apiKeysLoading ? (
             <div className="text-gray-500 py-10 text-center">{t('common.loading')}</div>
@@ -1091,67 +1087,55 @@ export default function Settings() {
 
               {llmConfig.mode === 'browser' && (
                 <>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-1">
-                      {t('settings.myLlmEndpoint')}
-                    </label>
-                    <input
-                      type="url"
-                      value={llmConfig.endpoint || ''}
-                      onChange={(e) => {
-                        setLlmConfig((prev) => ({ ...prev, endpoint: e.target.value }));
-                        setLlmSavedMsg(false);
-                        setLlmTestState('idle');
-                      }}
-                      placeholder="http://localhost:1234"
-                      className="w-full bg-gray-950 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-100 font-mono focus:border-cyan-500 focus:outline-none"
-                    />
-                    <div className="text-xs text-gray-500 mt-1">{t('settings.myLlmEndpointHint')}</div>
-                  </div>
+                  <FormInput
+                    label={t('settings.myLlmEndpoint')}
+                    type="url"
+                    value={llmConfig.endpoint || ''}
+                    onChange={(e) => {
+                      setLlmConfig((prev) => ({ ...prev, endpoint: e.target.value }));
+                      setLlmSavedMsg(false);
+                      setLlmTestState('idle');
+                    }}
+                    placeholder="http://localhost:1234"
+                    className="font-mono"
+                    helpText={t('settings.myLlmEndpointHint')}
+                  />
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-1">
-                      {t('settings.myLlmModel')}
-                    </label>
-                    <input
-                      type="text"
-                      value={llmConfig.model || ''}
+                  <FormInput
+                    label={t('settings.myLlmModel')}
+                    type="text"
+                    value={llmConfig.model || ''}
+                    onChange={(e) => {
+                      setLlmConfig((prev) => ({ ...prev, model: e.target.value }));
+                      setLlmSavedMsg(false);
+                    }}
+                    placeholder="google/gemma-3-4b"
+                    className="font-mono"
+                    helpText={t('settings.myLlmModelHint')}
+                  />
+
+                  <div className="flex items-end gap-2">
+                    <SecretInput
+                      fieldClassName="flex-1 min-w-0"
+                      label={t('settings.myLlmApiKey')}
+                      value={llmConfig.apiKey || ''}
                       onChange={(e) => {
-                        setLlmConfig((prev) => ({ ...prev, model: e.target.value }));
+                        setLlmConfig((prev) => ({ ...prev, apiKey: e.target.value }));
                         setLlmSavedMsg(false);
                       }}
-                      placeholder="google/gemma-3-4b"
-                      className="w-full bg-gray-950 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-100 font-mono focus:border-cyan-500 focus:outline-none"
+                      placeholder={llmHasStoredKey ? t('settings.myLlmApiKeyStored') : ''}
+                      className="font-mono"
+                      helpText={t('settings.myLlmApiKeyHint')}
                     />
-                    <div className="text-xs text-gray-500 mt-1">{t('settings.myLlmModelHint')}</div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-1">
-                      {t('settings.myLlmApiKey')}
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        value={llmConfig.apiKey || ''}
-                        onChange={(e) => {
-                          setLlmConfig((prev) => ({ ...prev, apiKey: e.target.value }));
-                          setLlmSavedMsg(false);
-                        }}
-                        placeholder={llmHasStoredKey ? t('settings.myLlmApiKeyStored') : ''}
-                        className="flex-1 bg-gray-950 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-100 font-mono focus:border-cyan-500 focus:outline-none"
+                    {llmHasStoredKey && (
+                      <ConfirmButton
+                        variant="secondary"
+                        size="sm"
+                        label={t('settings.myLlmApiKeyClear')}
+                        onConfirm={clearStoredApiKey}
+                        disabled={llmSaving}
                       />
-                      {llmHasStoredKey && (
-                        <ConfirmButton
-                          variant="secondary"
-                          size="sm"
-                          label={t('settings.myLlmApiKeyClear')}
-                          onConfirm={clearStoredApiKey}
-                          disabled={llmSaving}
-                        />
-                      )}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">{t('settings.myLlmApiKeyHint')}</div>
+                    )}
                   </div>
 
                   <label className="flex items-start gap-2 cursor-pointer text-sm text-gray-300">
