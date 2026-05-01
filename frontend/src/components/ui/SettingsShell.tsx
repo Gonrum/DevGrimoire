@@ -20,32 +20,63 @@ export function SettingsShell<T extends string>({
   activeTab,
   onTabChange,
   children,
-  maxWidth = 'max-w-4xl',
+  maxWidth = 'max-w-5xl',
 }: SettingsShellProps<T>) {
+  const showSidebar = tabs.length > 1 && activeTab !== undefined && onTabChange !== undefined;
+
+  if (!showSidebar) {
+    return (
+      <div className={`${maxWidth} mx-auto`}>
+        <h1 className="mb-4 text-xl font-bold text-white sm:text-2xl">{title}</h1>
+        {children}
+      </div>
+    );
+  }
+
   return (
-    <div className={`${maxWidth} mx-auto`}>
-      <h1 className="mb-4 text-xl font-bold text-white sm:text-2xl">{title}</h1>
-      {tabs.length > 1 && activeTab && onTabChange && (
-        <div className="mb-6 overflow-x-auto border-b border-gray-800">
-          <div className="flex min-w-max gap-1">
-            {tabs.map((tab) => (
+    <div className={`${maxWidth} mx-auto flex gap-8`}>
+      <nav className="sticky top-8 hidden w-44 shrink-0 self-start md:block">
+        <h1 className="mb-3 text-base font-bold text-white">{title}</h1>
+        <ul className="space-y-1">
+          {tabs.map((tab) => (
+            <li key={tab.key}>
               <button
-                key={tab.key}
                 type="button"
-                onClick={() => onTabChange(tab.key)}
-                className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+                onClick={() => onTabChange!(tab.key)}
+                className={`w-full rounded px-3 py-1.5 text-left text-sm transition-colors ${
                   activeTab === tab.key
-                    ? 'border-cyan-400 text-cyan-400'
-                    : 'border-transparent text-gray-400 hover:text-gray-200'
+                    ? 'bg-gray-800 font-medium text-cyan-400'
+                    : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
                 }`}
               >
                 {tab.label}
               </button>
-            ))}
-          </div>
-        </div>
-      )}
-      {children}
+            </li>
+          ))}
+        </ul>
+      </nav>
+
+      <div className="fixed bottom-0 left-0 right-0 z-50 flex gap-1 overflow-x-auto border-t border-gray-800 bg-gray-900 px-2 py-1.5 md:hidden">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => onTabChange!(tab.key)}
+            className={`whitespace-nowrap rounded px-3 py-1.5 text-xs transition-colors ${
+              activeTab === tab.key
+                ? 'bg-gray-800 font-medium text-cyan-400'
+                : 'text-gray-500'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="min-w-0 flex-1 pb-16 md:pb-0">
+        <h1 className="mb-4 text-xl font-bold text-white sm:text-2xl md:hidden">{title}</h1>
+        {children}
+      </div>
     </div>
   );
 }
