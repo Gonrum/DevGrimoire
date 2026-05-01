@@ -11,6 +11,7 @@ import {
 } from './todo-utils';
 import { useToast } from './Toast';
 import Button from './ui/Button';
+import ButtonLink from './ui/ButtonLink';
 import ConfirmButton from './ui/ConfirmButton';
 import TabToolbar from './ui/TabToolbar';
 
@@ -405,10 +406,9 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
       <TabToolbar
         className="mb-4"
         primaryAction={(
-          <Link to={`/projects/${projectId}/todos/new`}
-            className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors">
+          <ButtonLink to={`/projects/${projectId}/todos/new`} variant="primary" size="sm">
             {t('todos.newTask')}
-          </Link>
+          </ButtonLink>
         )}
         search={(
           <input type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}

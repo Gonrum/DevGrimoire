@@ -10,6 +10,7 @@ import Badge from './ui/Badge';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
 import { FormInput, FormSelect } from './ui/FormField';
+import FilterPill from './ui/FilterPill';
 import TabToolbar from './ui/TabToolbar';
 
 interface KnowledgeFormData {
@@ -215,8 +216,6 @@ export default function KnowledgeList({
     );
   }
 
-  const pillClass = (active: boolean) => `text-xs px-2.5 py-1 rounded-full transition-colors ${active ? 'bg-violet-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`;
-
   return (
     <div>
       <TabToolbar
@@ -228,18 +227,18 @@ export default function KnowledgeList({
         )}
         filters={entries.length > 0 ? (
           <>
-            <button onClick={() => setSelectedCategory(null)} className={pillClass(selectedCategory === null)}>
-              {t('common.all')} ({entries.length})
-            </button>
+            <FilterPill active={selectedCategory === null} count={entries.length} onClick={() => setSelectedCategory(null)}>
+              {t('common.all')}
+            </FilterPill>
             {categories.map((cat) => (
-              <button key={cat} onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)} className={pillClass(selectedCategory === cat)}>
-                {cat} ({entries.filter((e) => e.category === cat).length})
-              </button>
+              <FilterPill key={cat} active={selectedCategory === cat} count={entries.filter((e) => e.category === cat).length} onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}>
+                {cat}
+              </FilterPill>
             ))}
             {entries.some((e) => !e.category) && (
-              <button onClick={() => setSelectedCategory('__none__')} className={pillClass(selectedCategory === '__none__')}>
-                {t('knowledge.noCategory')} ({entries.filter((e) => !e.category).length})
-              </button>
+              <FilterPill active={selectedCategory === '__none__'} count={entries.filter((e) => !e.category).length} onClick={() => setSelectedCategory('__none__')}>
+                {t('knowledge.noCategory')}
+              </FilterPill>
             )}
           </>
         ) : undefined}

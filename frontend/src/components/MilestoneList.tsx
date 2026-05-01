@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { api, Milestone, Todo } from '../api/client';
 import { useToast } from './Toast';
 import Button from './ui/Button';
+import ButtonLink from './ui/ButtonLink';
 import Card from './ui/Card';
 import Badge from './ui/Badge';
 import ConfirmButton from './ui/ConfirmButton';
@@ -225,10 +226,9 @@ export default function MilestoneList({ milestones, todos, projectId, onUpdate }
   return (
     <div>
       <div className="flex flex-wrap items-center gap-3 mb-4">
-        <Link to={`/projects/${projectId}/milestones/new`}
-          className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors">
+        <ButtonLink to={`/projects/${projectId}/milestones/new`} variant="primary" size="sm">
           {t('milestones.newMilestone')}
-        </Link>
+        </ButtonLink>
         {archivableDone.length > 0 && (
           <button type="button" onBlur={() => setConfirmArchiveAll(false)} onClick={async () => {
             if (!confirmArchiveAll) { setConfirmArchiveAll(true); return; }

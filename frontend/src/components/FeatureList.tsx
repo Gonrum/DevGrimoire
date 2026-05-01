@@ -8,6 +8,7 @@ import Badge from './ui/Badge';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
 import { FormInput, FormSelect, FormTextarea } from './ui/FormField';
+import FilterPill from './ui/FilterPill';
 import TabToolbar from './ui/TabToolbar';
 import Markdown from './Markdown';
 
@@ -260,11 +261,6 @@ export default function FeatureList({ entries, projectId }: { entries: Feature[]
     );
   }
 
-  const pillClass = (active: boolean, color: 'violet' | 'purple' = 'violet') => {
-    const activeBg = color === 'purple' ? 'bg-purple-600' : 'bg-violet-600';
-    return `text-xs px-2.5 py-1 rounded-full transition-colors ${active ? `${activeBg} text-white` : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`;
-  };
-
   return (
     <div>
       <TabToolbar
@@ -278,20 +274,20 @@ export default function FeatureList({ entries, projectId }: { entries: Feature[]
           <>
             {statuses.length > 1 && (
               <>
-                <button onClick={() => setSelectedStatus(null)} className={pillClass(selectedStatus === null)}>
-                  {t('common.all')} ({entries.length})
-                </button>
+                <FilterPill active={selectedStatus === null} count={entries.length} onClick={() => setSelectedStatus(null)}>
+                  {t('common.all')}
+                </FilterPill>
                 {statuses.map((s) => (
-                  <button key={s} onClick={() => setSelectedStatus(selectedStatus === s ? null : s)} className={pillClass(selectedStatus === s)}>
-                    {statusLabels[s]} ({entries.filter((e) => e.status === s).length})
-                  </button>
+                  <FilterPill key={s} active={selectedStatus === s} count={entries.filter((e) => e.status === s).length} onClick={() => setSelectedStatus(selectedStatus === s ? null : s)}>
+                    {statusLabels[s]}
+                  </FilterPill>
                 ))}
               </>
             )}
             {categories.length > 1 && categories.map((c) => (
-              <button key={c} onClick={() => setSelectedCategory(selectedCategory === c ? null : c)} className={pillClass(selectedCategory === c, 'purple')}>
+              <FilterPill key={c} active={selectedCategory === c} tone="purple" onClick={() => setSelectedCategory(selectedCategory === c ? null : c)}>
                 {c}
-              </button>
+              </FilterPill>
             ))}
           </>
         )}
