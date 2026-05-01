@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Todo, Milestone } from '../api/client';
@@ -16,19 +16,8 @@ import DetailSection from '../components/ui/DetailSection';
 import { FormInput, FormSelect } from '../components/ui/FormField';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { WorkflowPageShell } from '../components/ui/WorkflowShell';
+import TodoDependenciesSection from '../components/todo/TodoDependenciesSection';
 import AttachmentList from '../components/AttachmentList';
-
-function TodoLinkRow({ todo, projectId, trailing }: { todo: Todo; projectId?: string; trailing?: ReactNode }) {
-  return (
-    <div className="flex min-h-8 items-center gap-2 rounded border border-gray-800 bg-gray-900/40 px-2.5 py-1.5 text-xs">
-      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${todo.status === 'done' ? 'bg-green-500' : todo.status === 'in_progress' ? 'bg-yellow-500' : 'bg-gray-600'}`} />
-      <Link to={`/projects/${projectId}/todos/${todo._id}`} className="min-w-0 flex-1 text-gray-400 transition-colors hover:text-cyan-400">
-        <span className={`block truncate ${todo.status === 'done' ? 'text-gray-600 line-through' : ''}`}>{todo.title}</span>
-      </Link>
-      {trailing}
-    </div>
-  );
-}
 
 function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => void; onCancel: () => void }) {
   const { t } = useTranslation();
@@ -203,81 +192,14 @@ export default function TodoDetailPage() {
             </DetailSection>
           )}
 
-          {(() => {
-            const blockedBy = (todo.blockedBy || [])
-              .map((bid) => allTodos.find((t) => t._id === bid))
-              .filter(Boolean) as Todo[];
-            const blocks = allTodos.filter((t) => (t.blockedBy || []).includes(todo._id));
-            const availableDeps = allTodos.filter((t) => t._id !== todo._id && !(todo.blockedBy || []).includes(t._id));
-            const hasBlockers = blockedBy.some((b) => b.status !== 'done');
-
-            return (
-              <DetailSection title={t('todoDetail.dependencies')} className="mb-5">
-                {hasBlockers && (
-                  <div className="mb-3 flex items-center gap-1.5 rounded border border-red-900/50 bg-red-900/20 px-2.5 py-1.5 text-xs text-red-400">
-                    <span>{t('todoDetail.blocked')}</span>
-                  </div>
-                )}
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <p className="text-xs text-gray-600">{t('todoDetail.blockedBy')}</p>
-                    {blockedBy.length === 0 && <p className="text-xs italic text-gray-700">{t('common.none')}</p>}
-                    {blockedBy.map((dep) => (
-                      <TodoLinkRow
-                        key={dep._id}
-                        todo={dep}
-                        projectId={id}
-                        trailing={(
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                await api.todos.update(todo._id, { blockedBy: (todo.blockedBy || []).filter((b) => b !== dep._id) } as Partial<Todo>);
-                                loadTodo();
-                              } catch (err: any) {
-                                showError(err.message || t('todoDetail.removeDependencyFailed'));
-                              }
-                            }}
-                            className="shrink-0 text-gray-600 transition-colors hover:text-red-400"
-                            aria-label={t('todoDetail.removeDependencyFailed')}
-                          >
-                            &times;
-                          </button>
-                        )}
-                      />
-                    ))}
-                  </div>
-                  <div className="space-y-1.5">
-                    <p className="text-xs text-gray-600">{t('todoDetail.blocking')}</p>
-                    {blocks.length === 0 && <p className="text-xs italic text-gray-700">{t('common.none')}</p>}
-                    {blocks.map((dep) => (
-                      <TodoLinkRow key={dep._id} todo={dep} projectId={id} />
-                    ))}
-                  </div>
-                </div>
-                {availableDeps.length > 0 && (
-                  <FormSelect
-                    fieldClassName="mt-3"
-                    value=""
-                    onChange={async (e) => {
-                      if (!e.target.value) return;
-                      try {
-                        await api.todos.update(todo._id, { blockedBy: [...(todo.blockedBy || []), e.target.value] } as Partial<Todo>);
-                        loadTodo();
-                      } catch (err: any) {
-                        showError(err.message || t('todoDetail.addDependencyFailed'));
-                      }
-                    }}
-                  >
-                    <option value="">{t('todoDetail.addDependency')}</option>
-                    {availableDeps.map((t) => (
-                      <option key={t._id} value={t._id}>{t.title}</option>
-                    ))}
-                  </FormSelect>
-                )}
-              </DetailSection>
-            );
-          })()}
+          <TodoDependenciesSection
+            todo={todo}
+            allTodos={allTodos}
+            projectId={id}
+            onChanged={loadTodo}
+            onError={showError}
+            className="mb-5"
+          />
 
           <div className="text-xs text-gray-600 mb-5 space-y-0.5">
             <p>{t('common.created')}: {new Date(todo.createdAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US')}</p>
@@ -335,10 +257,15 @@ export default function TodoDetailPage() {
                 </div>
               ))}
             </div>
-            <div className="flex gap-2">
-              <input type="text" value={commentText} onChange={(e) => setCommentText(e.target.value)}
-                placeholder={t('todoDetail.commentPlaceholder')} onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
-                className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <FormInput
+                fieldClassName="flex-1 min-w-0 w-full"
+                type="text"
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                placeholder={t('todoDetail.commentPlaceholder')}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
+              />
               <Button type="button" variant="primary" onClick={handleAddComment} disabled={savingComment || !commentText.trim()}>
                 {savingComment ? '...' : t('common.send')}
               </Button>
