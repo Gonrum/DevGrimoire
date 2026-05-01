@@ -117,6 +117,12 @@
   },
   "projectSettings": {
     "title": "Settings",
+    "tabGeneral": "General",
+    "tabInstructions": "Instructions",
+    "tabGit": "Git",
+    "tabExport": "Export",
+    "tabDanger": "Danger Zone",
+    "groupAdvanced": "Advanced",
     "projectData": "Chapter Data",
     "repository": "Repository",
     "techStack": "Tech Stack (comma-separated)",
@@ -586,6 +592,9 @@
   },
   "settings": {
     "title": "Settings",
+    "groupPersonal": "Personal",
+    "groupSecurity": "Security",
+    "groupAdmin": "Admin",
     "tabInstructions": "Agent Instructions",
     "tabApiKeys": "API Keys",
     "tabUsers": "User Management",

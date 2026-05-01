@@ -452,15 +452,15 @@ export default function Settings() {
     setSaved(false);
   };
 
-  const tabs: { key: SettingsTab; label: string; adminOnly?: boolean }[] = [
-    { key: 'instructions', label: t('settings.tabInstructions') },
-    { key: 'apikeys', label: t('settings.tabApiKeys') },
-    { key: 'notifications', label: t('settings.tabNotifications') },
-    { key: 'myllm', label: t('settings.tabMyLlm') },
-    { key: 'chat', label: t('settings.tabChat'), adminOnly: true },
-    { key: 'websearch', label: t('settings.tabWebSearch'), adminOnly: true },
-    { key: 'users', label: t('settings.tabUsers'), adminOnly: true },
-    { key: 'replication', label: t('settings.tabReplication'), adminOnly: true },
+  const tabs: { key: SettingsTab; label: string; group?: string; adminOnly?: boolean }[] = [
+    { key: 'instructions', label: t('settings.tabInstructions'), group: t('settings.groupPersonal') },
+    { key: 'notifications', label: t('settings.tabNotifications'), group: t('settings.groupPersonal') },
+    { key: 'myllm', label: t('settings.tabMyLlm'), group: t('settings.groupPersonal') },
+    { key: 'apikeys', label: t('settings.tabApiKeys'), group: t('settings.groupSecurity') },
+    { key: 'chat', label: t('settings.tabChat'), group: t('settings.groupAdmin'), adminOnly: true },
+    { key: 'websearch', label: t('settings.tabWebSearch'), group: t('settings.groupAdmin'), adminOnly: true },
+    { key: 'users', label: t('settings.tabUsers'), group: t('settings.groupAdmin'), adminOnly: true },
+    { key: 'replication', label: t('settings.tabReplication'), group: t('settings.groupAdmin'), adminOnly: true },
   ];
 
   const visibleTabs = tabs.filter((tb) => !tb.adminOnly || isAdmin);

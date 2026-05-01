@@ -47,6 +47,8 @@ export default function ProjectSettings() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [includeSecrets, setIncludeSecrets] = useState(false);
+  type ProjectSettingsTab = 'general' | 'instructions' | 'git' | 'export' | 'danger';
+  const [tab, setTab] = useState<ProjectSettingsTab>('general');
   const [gitRepos, setGitRepos] = useState<GitRepository[]>([]);
   const [showAddRepo, setShowAddRepo] = useState(false);
   const [newRepoProvider, setNewRepoProvider] = useState<'github' | 'gitlab'>('github');
@@ -360,10 +362,22 @@ export default function ProjectSettings() {
   }
   if (!project) return <p className="text-red-400">{t('projects.notFound')}</p>;
 
+  const projectTabs: { key: ProjectSettingsTab; label: string; group?: string }[] = [
+    { key: 'general', label: t('projectSettings.tabGeneral') },
+    { key: 'instructions', label: t('projectSettings.tabInstructions') },
+    { key: 'git', label: t('projectSettings.tabGit') },
+    { key: 'export', label: t('projectSettings.tabExport'), group: t('projectSettings.groupAdvanced') },
+    { key: 'danger', label: t('projectSettings.tabDanger'), group: t('projectSettings.groupAdvanced') as string },
+  ];
+
+  const showSaveBar = tab === 'general' || tab === 'instructions' || tab === 'git';
+
   return (
     <SettingsShell
       title={t('projectSettings.title')}
-      maxWidth="max-w-4xl"
+      tabs={projectTabs}
+      activeTab={tab}
+      onTabChange={setTab}
     >
       <Link
         to={`/projects/${id}`}
@@ -372,8 +386,9 @@ export default function ProjectSettings() {
         &larr; {project.name}
       </Link>
 
-      <p className="mb-8 text-sm text-gray-400">{project.name}</p>
+      <p className="mb-6 text-sm text-gray-400">{project.name}</p>
 
+      {tab === 'general' && (<>
       <section className="mb-8 space-y-4">
         <h2 className="text-lg font-semibold text-cyan-400">{t('projectSettings.projectData')}</h2>
 
@@ -473,7 +488,9 @@ export default function ProjectSettings() {
           </div>
         </div>
       </section>
+      </>)}
 
+      {tab === 'instructions' && (
       <section className="mb-8">
         <div className="mb-3">
           <h2 className="text-lg font-semibold text-cyan-400">
@@ -498,7 +515,9 @@ export default function ProjectSettings() {
           </Button>
         )}
       </section>
+      )}
 
+      {tab === 'git' && (
       <section className="mb-8 space-y-4">
         <div>
           <h2 className="text-lg font-semibold text-cyan-400">Git Repositories</h2>
@@ -778,16 +797,20 @@ export default function ProjectSettings() {
           </Button>
         )}
       </section>
+      )}
 
-      <div className="flex items-center gap-3 mb-8">
-        <Button type="button" variant="primary" size="lg" onClick={handleSave} disabled={saving || !name.trim()}>
-          {saving ? t('common.saving') : t('projectSettings.saveAll')}
-        </Button>
-        {saved && (
-          <span className="text-sm text-green-400">{t('common.saved')}</span>
-        )}
-      </div>
+      {showSaveBar && (
+        <div className="sticky bottom-0 z-10 -mx-4 mb-8 flex items-center gap-3 border-t border-gray-800 bg-gray-950/95 px-4 py-3 backdrop-blur md:-mx-0 md:rounded-lg md:border md:bg-gray-900/80">
+          <Button type="button" variant="primary" size="lg" onClick={handleSave} disabled={saving || !name.trim()}>
+            {saving ? t('common.saving') : t('projectSettings.saveAll')}
+          </Button>
+          {saved && (
+            <span className="text-sm text-green-400">{t('common.saved')}</span>
+          )}
+        </div>
+      )}
 
+      {tab === 'export' && <>
       <SettingsSection
         tone="accent"
         title={t('projectSettings.dataExport')}
@@ -820,20 +843,23 @@ export default function ProjectSettings() {
         </div>
       </SettingsSection>
 
-      <SettingsSection
-        tone="danger"
-        title={t('projectSettings.dangerZone')}
-        description={t('projectSettings.dangerZoneHelp')}
-        className="mb-8"
-      >
-        <ConfirmButton onConfirm={async () => { if (id) { await api.projects.delete(id); navigate('/'); } }} label={t('projectSettings.deleteProject')} confirmLabel={t('projectSettings.confirmDeleteProject')} size="lg" />
-      </SettingsSection>
-
       <SettingsSection title={t('projectSettings.instructionsInfoTitle')}>
         <p className="text-gray-500 text-sm leading-relaxed">
           {t('projectSettings.instructionsInfoText', { tool: 'project_get', file: 'CLAUDE.md' })}
         </p>
       </SettingsSection>
+      </>}
+
+      {tab === 'danger' && (
+        <SettingsSection
+          tone="danger"
+          title={t('projectSettings.dangerZone')}
+          description={t('projectSettings.dangerZoneHelp')}
+          className="mb-8"
+        >
+          <ConfirmButton onConfirm={async () => { if (id) { await api.projects.delete(id); navigate('/'); } }} label={t('projectSettings.deleteProject')} confirmLabel={t('projectSettings.confirmDeleteProject')} size="lg" />
+        </SettingsSection>
+      )}
     </SettingsShell>
   );
 }

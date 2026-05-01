@@ -3,6 +3,7 @@ import { ReactNode } from 'react';
 interface SettingsTabItem<T extends string> {
   key: T;
   label: ReactNode;
+  group?: string;
 }
 
 interface SettingsShellProps<T extends string> {
@@ -33,27 +34,46 @@ export function SettingsShell<T extends string>({
     );
   }
 
+  const groups: { label?: string; items: SettingsTabItem<T>[] }[] = [];
+  for (const tab of tabs) {
+    const last = groups[groups.length - 1];
+    if (last && last.label === tab.group) {
+      last.items.push(tab);
+    } else {
+      groups.push({ label: tab.group, items: [tab] });
+    }
+  }
+
   return (
     <div className={`${maxWidth} mx-auto flex gap-8`}>
       <nav className="sticky top-8 hidden w-44 shrink-0 self-start md:block">
         <h1 className="mb-3 text-base font-bold text-white">{title}</h1>
-        <ul className="space-y-1">
-          {tabs.map((tab) => (
-            <li key={tab.key}>
-              <button
-                type="button"
-                onClick={() => onTabChange!(tab.key)}
-                className={`w-full rounded px-3 py-1.5 text-left text-sm transition-colors ${
-                  activeTab === tab.key
-                    ? 'bg-gray-800 font-medium text-cyan-400'
-                    : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
-                }`}
-              >
-                {tab.label}
-              </button>
-            </li>
-          ))}
-        </ul>
+        {groups.map((group, idx) => (
+          <div key={idx} className={idx > 0 ? 'mt-4 border-t border-gray-800 pt-3' : ''}>
+            {group.label && (
+              <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-gray-600">
+                {group.label}
+              </p>
+            )}
+            <ul className="space-y-1">
+              {group.items.map((tab) => (
+                <li key={tab.key}>
+                  <button
+                    type="button"
+                    onClick={() => onTabChange!(tab.key)}
+                    className={`w-full rounded px-3 py-1.5 text-left text-sm transition-colors ${
+                      activeTab === tab.key
+                        ? 'bg-gray-800 font-medium text-cyan-400'
+                        : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </nav>
 
       <div className="fixed bottom-0 left-0 right-0 z-50 flex gap-1 overflow-x-auto border-t border-gray-800 bg-gray-900 px-2 py-1.5 md:hidden">
