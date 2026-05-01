@@ -27,9 +27,9 @@ DevGrimoire gives Claude (the AI assistant) a persistent memory for your project
 
 ## Features
 
-- **109 MCP Tools** -- Claude can manage projects, todos, milestones, sessions, knowledge, changelogs, manuals, research, schemas, dependencies, features, snippets, environments, secrets, releases, logs, attachments, commits, recurring tasks, and more
+- **126 MCP Tools** -- Claude can manage projects, todos, milestones, sessions, knowledge, changelogs, manuals, research, schemas, dependencies, features, snippets, environments, secrets, releases, logs, attachments, commits, recurring tasks, workspaces, web search, chat sessions, and more
 - **Project Chat** -- In-dashboard chat with multi-provider LLM support (LM Studio, OpenAI-compatible, Anthropic, OpenAI), per-tool allowlist with read/write split, text + image attachments, vision models, audit logging
-- **RAG Semantic Search** -- LanceDB vector database with Ollama/LM Studio embeddings for meaning-based search across all entity types
+- **RAG Semantic Search** -- LanceDB vector database with Ollama/LM Studio embeddings for meaning-based search across indexed content entities
 - **Distributed Sync** -- Master/Slave for backup setups, **Peer mode for bidirectional sync** with last-write-wins; per-project opt-in keeps personal projects local while sharing only what you choose
 - **File Attachments** -- MinIO/S3-compatible storage for arbitrary files per project or per todo, automatic text extraction (incl. PDF) for RAG indexing
 - **Releases** -- Per-project release tracking with assets, GitLab sync, draft/published/archived workflow
@@ -47,7 +47,19 @@ DevGrimoire gives Claude (the AI assistant) a persistent memory for your project
 - **Two MCP Transports** -- Local stdio mode or remote via HTTP/SSE
 - **Docker Compose** -- One command for the entire stack
 
-## MCP Tools (109)
+## Documentation
+
+The README is the quick-start entry point. Detailed operational and integration docs live in [`docs/`](docs/):
+
+- [Setup](docs/setup.md) -- installation, required environment variables, Docker profiles, ports
+- [Security](docs/security.md) -- auth modes, API keys, MCP transport auth, secrets
+- [MCP Tools](docs/mcp-tools.md) -- current tool groups and maintenance notes
+- [UI Guidelines](docs/ui.md) -- frontend component usage and layout conventions
+- [Workspaces](docs/workspaces.md) -- workspace sidecar, network model, `workspace_*` tools
+- [Web Search](docs/web-search.md) -- SearXNG-backed `web_search` and `web_fetch`
+- [Operations](docs/operations.md) -- volumes, backup/restore, updates, runtime notes
+
+## MCP Tools (126)
 
 | Area | Tools | Description |
 |------|-------|-------------|
@@ -71,7 +83,10 @@ DevGrimoire gives Claude (the AI assistant) a persistent memory for your project
 | **Releases** | `release_create`, `_list`, `_get`, `_update`, `_delete`, `_sync_gitlab` | Per-project releases with assets, GitLab sync, draft/published/archived |
 | **Attachments** | `attachment_upload`, `_list`, `_get`, `_download`, `_delete` | Files in MinIO/S3, optional text extraction (incl. PDF) for RAG |
 | **Logs** | `log_list`, `_search`, `_stats` | Per-project structured log entries with TTL retention |
-| **RAG** | `rag_search`, `rag_reindex`, `rag_status` | Semantic vector search across all entities |
+| **RAG** | `rag_search`, `rag_reindex`, `rag_status` | Semantic vector search across indexed content entities |
+| **Web Search** | `web_search`, `web_fetch` | SearXNG-backed external search and readable page extraction |
+| **Workspaces** | `workspace_create`, `_list`, `_get`, `_update`, `_archive`, `_delete`, `_clone`, `_pull`, `_tree`, `_read`, `_search`, `_status`, `_exec`, `_attachment_save` | Isolated sidecar workspaces for repository analysis and build/test commands |
+| **Chat** | `chat_create`, `_list`, `_get`, `_send`, `_delete` | Project chat sessions through the configured LLM stack |
 | **Dialog** | `notify_user`, `ask_user` | Push notifications + interactive yes/no/text questions to the user |
 | **System** | `system_instructions_get`, `_set` | Global + per-project agent instructions |
 
@@ -91,7 +106,7 @@ cd DevGrimoire
 
 # 2. Configure environment variables
 cp .env.example .env
-# Edit .env (MongoDB credentials, auth, encryption key)
+# Edit .env (MongoDB credentials, auth, WORKSPACE_API_TOKEN, encryption key)
 
 # 3. Start the stack
 docker compose up -d
@@ -128,6 +143,7 @@ Environment variables in `.env`:
 | `AUTH_USERNAME` | Login username (first admin) | No* |
 | `AUTH_PASSWORD` | Login password | No* |
 | `JWT_SECRET` | Secret for JWT signing | With Auth |
+| `WORKSPACE_API_TOKEN` | Shared secret between backend and workspace sidecar; generate with `openssl rand -hex 32` | Yes |
 | `SECRETS_ENCRYPTION_KEY` | AES-256 key (64 hex characters) | For Secrets |
 | `VAPID_PUBLIC_KEY` | Web Push public key | For Push |
 | `VAPID_PRIVATE_KEY` | Web Push private key | For Push |
@@ -139,7 +155,7 @@ Environment variables in `.env`:
 | `RAG_FALLBACK_PROVIDER` | Fallback provider type | No |
 | `RAG_FALLBACK_URL` | Fallback server URL | No |
 | `RAG_FALLBACK_MODEL` | Fallback model name | No |
-| `OLLAMA_URL` | Ollama URL (default: `http://localhost:11434`) | No |
+| `OLLAMA_URL` | Ollama URL. In Docker, use `http://host.docker.internal:11434`; for local backend runs, `http://localhost:11434` is fine | No |
 | `CHAT_LLM_PROVIDER` | `lmstudio`, `openai-compatible`, `anthropic`, `openai` | For Chat |
 | `CHAT_LLM_URL` | Chat LLM endpoint URL | For Chat |
 | `CHAT_LLM_MODEL` | Chat model name | For Chat |
@@ -209,7 +225,7 @@ In `~/.claude.json`:
 }
 ```
 
-> **Note:** The MCP endpoints currently have no authentication. In a production environment, access should be restricted via firewall or VPN.
+> **Note:** When authentication is enabled, the HTTP MCP transports require a DevGrimoire API key (`Authorization: Bearer cv_...` or `?apiKey=cv_...`). When authentication is disabled, all endpoints including MCP are open and must be restricted via firewall or VPN.
 
 ## Authentication
 
@@ -268,7 +284,9 @@ DevGrimoire includes a built-in RAG (Retrieval-Augmented Generation) system for 
 
    # Optional: automatic fallback when primary is unavailable
    RAG_FALLBACK_PROVIDER=ollama
-   RAG_FALLBACK_URL=http://localhost:11434
+   # Backend in Docker: use host.docker.internal for services on the Docker host.
+   # Backend running directly on the host: localhost is fine.
+   RAG_FALLBACK_URL=http://host.docker.internal:11434
    RAG_FALLBACK_MODEL=nomic-embed-text-v2-moe
    ```
 
@@ -300,7 +318,7 @@ In-dashboard chat with a configurable LLM. Each chat session is scoped to a proj
 | `anthropic` | `x-api-key` required | Roadmap (T-71) | ✓ (Claude 3+) |
 | `openai` | Bearer required | ✓ | ✓ (GPT-4o etc.) |
 
-For Ollama specifically: configure as `openai-compatible` with URL `http://localhost:11434` -- the Ollama OpenAI compatibility shim covers tools and vision since v0.3. Native Ollama provider was retired in M-12; existing configs auto-migrate.
+For Ollama specifically: configure as `openai-compatible`. Use `http://host.docker.internal:11434` when the backend runs in Docker and Ollama runs on the host; use `http://localhost:11434` only for non-Docker backend runs. The Ollama OpenAI compatibility shim covers tools and vision since v0.3. Native Ollama provider was retired in M-12; existing configs auto-migrate.
 
 ### Tool-Calling
 
@@ -363,7 +381,7 @@ DevGrimoire/
 │   └── src/
 │       ├── main.ts                # REST API entry (NestJS HTTP, prefix /api)
 │       ├── mcp-server.ts          # MCP entry (stdio transport)
-│       ├── mcp-tools.ts           # MCP tool definitions (109 tools)
+│       ├── mcp-tools.ts           # MCP tool definitions (126 tools)
 │       ├── auth/                  # JWT auth, roles, API keys, user management
 │       ├── projects/              # Projects (schema, service, controller, DTOs)
 │       ├── todos/                 # Tasks (state machine, dependencies, comments)
@@ -409,6 +427,7 @@ DevGrimoire/
 │       └── hooks/                 # useAuth, useProjectEvents
 ├── docker-compose.yml             # Standard (replica set)
 ├── docker-compose.standalone.yml  # ARM/Standalone (without replica set)
+├── docs/                          # Setup, security, MCP, workspace, web-search, operations docs
 ├── .env.example
 ├── CLAUDE.md                      # Instructions for Claude Code
 └── README.md

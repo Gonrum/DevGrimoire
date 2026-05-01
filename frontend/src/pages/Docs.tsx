@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 
-type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'rag' | 'chat' | 'replication' | 'api' | 'logs' | 'git' | 'architecture';
+type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'ui' | 'rag' | 'chat' | 'replication' | 'api' | 'logs' | 'git' | 'architecture';
 
 export default function Docs() {
   const [active, setActive] = useState<DocsSection>('overview');
@@ -13,6 +13,7 @@ export default function Docs() {
     { key: 'setup', label: t('docs.navSetup') },
     { key: 'auth', label: t('docs.navAuth') },
     { key: 'mcp', label: t('docs.navMcp') },
+    { key: 'ui', label: 'UI' },
     { key: 'rag', label: 'RAG' },
     { key: 'chat', label: 'Chat' },
     { key: 'replication', label: t('docs.navReplication') },
@@ -71,6 +72,7 @@ export default function Docs() {
         {active === 'setup' && <SetupSection />}
         {active === 'auth' && <AuthSection />}
         {active === 'mcp' && <McpSection />}
+        {active === 'ui' && <UiSection />}
         {active === 'rag' && <RagSection />}
         {active === 'chat' && <ChatSection />}
         {active === 'replication' && <ReplicationDocsSection />}
@@ -212,9 +214,11 @@ cp .env.example .env
             {isDE ? (<>Wichtige Variablen in <Mono>.env</Mono>:</>) : (<>Important variables in <Mono>.env</Mono>:</>)}
           </p>
           <div className="mt-2 space-y-1 text-sm text-gray-400">
-            <EnvVar name="MONGO_ROOT_PASSWORD" desc={isDE ? 'MongoDB-Passwort' : 'MongoDB password'} />
+            <EnvVar name="MONGO_PASSWORD" desc={isDE ? 'MongoDB-Passwort' : 'MongoDB password'} />
             <EnvVar name="AUTH_USERNAME / AUTH_PASSWORD" desc={isDE ? 'Initiales Admin-Konto (wird beim Start in DB angelegt)' : 'Initial admin account (created in DB on startup)'} />
             <EnvVar name="JWT_SECRET" desc={isDE ? 'Geheimnis f\u00fcr JWT-Signierung' : 'Secret for JWT signing'} />
+            <EnvVar name="WORKSPACE_API_TOKEN" desc={isDE ? 'Pflicht-Secret f\u00fcr Backend \u2194 Workspace-Sidecar' : 'Required secret for backend \u2194 workspace sidecar'} />
+            <EnvVar name="SEARXNG_SECRET" desc={isDE ? 'Secret f\u00fcr die interne SearXNG-Instanz' : 'Secret for the internal SearXNG instance'} />
             <EnvVar name="SECRETS_ENCRYPTION_KEY" desc={isDE ? 'AES-256-Key f\u00fcr Secrets (64 Hex-Zeichen)' : 'AES-256 key for secrets (64 hex characters)'} />
           </div>
           <Code>{isDE
@@ -260,10 +264,15 @@ openssl rand -hex 32`}</Code>
   "mcpServers": {
     "devgrimoire": {
       "type": "sse",
-      "url": "http://[server]/sse"
+      "url": "http://[server]/sse?apiKey=cv_..."
     }
   }
 }`}</Code>
+          <p className="text-gray-500 text-xs mt-2">
+            {isDE
+              ? 'Wenn Auth deaktiviert ist, kann der apiKey-Query-Parameter weggelassen werden.'
+              : 'If auth is disabled, the apiKey query parameter can be omitted.'}
+          </p>
         </Step>
 
         <Step n={2} title="Claude Desktop App">
@@ -284,7 +293,7 @@ openssl rand -hex 32`}</Code>
   "mcpServers": {
     "devgrimoire": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://[server]/sse", "--allow-http"]
+      "args": ["-y", "mcp-remote", "http://[server]/sse?apiKey=cv_...", "--allow-http"]
     }
   }
 }`}</Code>
@@ -612,11 +621,11 @@ function McpSection() {
   const isDE = i18n.language === 'de';
   return (
     <>
-      <Section title={isDE ? 'MCP-Tools (109)' : 'MCP Tools (109)'}>
+      <Section title={isDE ? 'MCP-Tools (126)' : 'MCP Tools (126)'}>
         <p className="text-gray-400 text-sm mb-4">
           {isDE
-            ? 'Nach dem Anbinden stehen Claude 109 Tools zur Verf\u00fcgung, gruppiert nach Entit\u00e4t. List-Tools liefern kompakte \u00dcbersichten (nur Metadaten), Details holst du \u00fcber _get-Tools \u2014 das schont den Context.'
-            : 'After connecting, Claude has access to 109 tools, grouped by entity. List tools return compact overviews (metadata only), details fetched via _get tools \u2014 this keeps the context lean.'}
+            ? 'Nach dem Anbinden stehen Claude 126 Tools zur Verf\u00fcgung, gruppiert nach Entit\u00e4t. List-Tools liefern kompakte \u00dcbersichten (nur Metadaten), Details holst du \u00fcber _get-Tools \u2014 das schont den Context.'
+            : 'After connecting, Claude has access to 126 tools, grouped by entity. List tools return compact overviews (metadata only), details fetched via _get tools \u2014 this keeps the context lean.'}
         </p>
 
         <ToolGroup title={isDE ? 'Projekte' : 'Projects'} tools={[
@@ -779,6 +788,28 @@ function McpSection() {
           { name: 'rag_status', desc: isDE ? 'Index-Statistik, aktiver Embedding-Endpoint' : 'Index stats, active embedding endpoint' },
         ]} />
 
+        <ToolGroup title={isDE ? 'Web-Suche' : 'Web Search'} tools={[
+          { name: 'web_search', desc: isDE ? 'Externe Websuche \u00fcber SearXNG' : 'External web search via SearXNG' },
+          { name: 'web_fetch', desc: isDE ? 'URL abrufen und lesbaren Text extrahieren' : 'Fetch URL and extract readable text' },
+        ]} />
+
+        <ToolGroup title="Workspaces" tools={[
+          { name: 'workspace_create', desc: isDE ? 'Projektgebundenen Code-Workspace anlegen' : 'Create project-bound code workspace' },
+          { name: 'workspace_clone', desc: isDE ? 'Repository in den Workspace klonen' : 'Clone repository into workspace' },
+          { name: 'workspace_read', desc: isDE ? 'Datei im Workspace lesen' : 'Read a workspace file' },
+          { name: 'workspace_search', desc: isDE ? 'Workspace mit ripgrep durchsuchen' : 'Search workspace with ripgrep' },
+          { name: 'workspace_exec', desc: isDE ? 'Begrenzten Build-/Test-Befehl im Sidecar ausf\u00fchren' : 'Run bounded build/test command in sidecar' },
+          { name: 'workspace_attachment_save', desc: isDE ? 'Workspace-Artefakt als Attachment speichern' : 'Save workspace artifact as attachment' },
+        ]} />
+
+        <ToolGroup title="Chat" tools={[
+          { name: 'chat_create', desc: isDE ? 'Projekt-Chat-Session anlegen' : 'Create project chat session' },
+          { name: 'chat_list', desc: isDE ? 'Chat-Sessions eines Projekts auflisten' : 'List chat sessions for a project' },
+          { name: 'chat_get', desc: isDE ? 'Chat-Session mit Nachrichten laden' : 'Load chat session with messages' },
+          { name: 'chat_send', desc: isDE ? 'Nachricht an eine Chat-Session senden' : 'Send message to a chat session' },
+          { name: 'chat_delete', desc: isDE ? 'Chat-Session l\u00f6schen' : 'Delete chat session' },
+        ]} />
+
         <ToolGroup title={isDE ? 'Dialog' : 'Dialog'} tools={[
           { name: 'notify_user', desc: isDE ? 'Push-Notification an den User senden' : 'Send push notification to user' },
           { name: 'ask_user', desc: isDE ? 'Interaktive Frage stellen (yes/no/text), wartet auf Antwort' : 'Ask interactive question (yes/no/text), waits for reply' },
@@ -788,6 +819,68 @@ function McpSection() {
           { name: 'system_instructions_get', desc: isDE ? 'Globale + projekt-spezifische Agent-Instruktionen abrufen' : 'Get global + project-specific agent instructions' },
           { name: 'system_instructions_set', desc: isDE ? 'Globale Agent-Instruktionen setzen' : 'Set global agent instructions' },
         ]} />
+      </Section>
+    </>
+  );
+}
+
+function UiSection() {
+  const isDE = i18n.language === 'de';
+  return (
+    <>
+      <Section title={isDE ? 'UI-Grundsatz' : 'UI Principle'}>
+        <p className="text-gray-400 text-sm leading-relaxed">
+          {isDE
+            ? 'Neue Oberflächen sollen aus vorhandenen Komponenten und wiederverwendbaren Primitives entstehen. Wenn ein Pattern mehrfach vorkommt, wird es als Komponente ergänzt oder eine bestehende Komponente erweitert, statt Tailwind-Klassen pro Seite neu zu kopieren.'
+            : 'New UI should be built from existing components and reusable primitives. If a pattern appears more than once, add a component or extend an existing one instead of copying page-local Tailwind classes.'}
+        </p>
+      </Section>
+
+      <Section title={isDE ? 'Komponenten' : 'Components'}>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label="Button" value={<><Mono>components/ui/Button.tsx</Mono> - {isDE ? 'primäre, neutrale, destruktive und Ghost-Actions' : 'primary, neutral, destructive, and ghost actions'}</>} />
+          <InfoRow label="ConfirmButton" value={<><Mono>components/ui/ConfirmButton.tsx</Mono> - {isDE ? 'Bestätigung für irreversible Aktionen' : 'confirmation for irreversible actions'}</>} />
+          <InfoRow label="Badge" value={<><Mono>components/ui/Badge.tsx</Mono> - {isDE ? 'Status und kompakte Metadaten' : 'status and compact metadata'}</>} />
+          <InfoRow label="Card" value={<><Mono>components/ui/Card.tsx</Mono> - {isDE ? 'gerahmte Items und Panels, keine Card-in-Card-Layouts' : 'framed items and panels, no card-in-card layouts'}</>} />
+          <InfoRow label="FormField" value={<><Mono>components/ui/FormField.tsx</Mono> - {isDE ? 'Standardfelder mit Labels und konsistentem Fokus-State' : 'standard fields with labels and consistent focus state'}</>} />
+          <InfoRow label="Dialog" value={<><Mono>components/ui/Dialog.tsx</Mono> - {isDE ? 'Modal-Shell mit Portal' : 'modal shell with portal'}</>} />
+          <InfoRow label="MarkdownEditor" value={<><Mono>components/MarkdownEditor.tsx</Mono> - {isDE ? 'Markdown-Eingabe mit Vorschau' : 'Markdown input with preview'}</>} />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Formulare und Layout' : 'Forms and Layout'}>
+        <ul className="text-sm text-gray-400 space-y-2 list-disc list-inside">
+          <li>{isDE ? 'Wiederkehrende Create/Edit/Detail-Flows sollen eine gemeinsame Page- oder Modal-Shell verwenden.' : 'Repeated create/edit/detail flows should use a shared page or modal shell.'}</li>
+          <li>{isDE ? 'Felder in Flex-Reihen brauchen einen explizit wachsenden Wrapper; w-full am inneren input reicht nicht.' : 'Fields inside flex rows need an explicitly growing wrapper; w-full on the inner input is not enough.'}</li>
+          <li>{isDE ? 'Field-with-Action-Patterns, z.B. Eingabe plus Dictation-Button, sollen als wiederverwendbares Layout umgesetzt werden.' : 'Field-with-action patterns, such as input plus dictation button, should be implemented as reusable layout primitives.'}</li>
+          <li>{isDE ? 'Negative Margins zur Formularausrichtung vermeiden; stattdessen den Layout-Contract korrigieren.' : 'Avoid negative margins for form alignment; fix the layout contract instead.'}</li>
+          <li>{isDE ? 'Mobile Breakpoints explizit planen: volle Breite, stabile Action-Slots, kein Text-Overflow.' : 'Plan mobile breakpoints explicitly: full width, stable action slots, no text overflow.'}</li>
+        </ul>
+      </Section>
+
+      <Section title={isDE ? 'Visuelle Sprache' : 'Visual Language'}>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Oberflächen' : 'Surfaces'} value="gray-950 / gray-900 / gray-800" />
+          <InfoRow label={isDE ? 'Rahmen' : 'Borders'} value="gray-800 / gray-700" />
+          <InfoRow label={isDE ? 'Akzent' : 'Accent'} value="violet, cyan" />
+          <InfoRow label={isDE ? 'Status' : 'Status'} value="green, yellow, red, gray" />
+          <InfoRow label={isDE ? 'Effekte' : 'Effects'} value={<><Mono>glow-violet</Mono>, <Mono>glow-cyan</Mono>, <Mono>grimoire-card</Mono>, <Mono>grimoire-divider</Mono></>} />
+        </div>
+        <Hint>
+          {isDE
+            ? 'Effekte sparsam einsetzen. Operative Oberflächen sollen dicht, ruhig und scanbar bleiben.'
+            : 'Use effects sparingly. Operational screens should stay dense, quiet, and scannable.'}
+        </Hint>
+      </Section>
+
+      <Section title={isDE ? 'Review-Checkliste' : 'Review Checklist'}>
+        <ul className="text-sm text-gray-400 space-y-2 list-disc list-inside">
+          <li>{isDE ? 'Bestehende Komponenten wurden verwendet oder erweitert.' : 'Existing components were used or extended.'}</li>
+          <li>{isDE ? 'Wiederholte Tailwind-Patterns wurden nicht lokal dupliziert.' : 'Repeated Tailwind patterns were not duplicated locally.'}</li>
+          <li>{isDE ? 'Formfelder nutzen in Page- und Modal-Kontexten die volle verfügbare Breite.' : 'Form fields use the full available width in page and modal contexts.'}</li>
+          <li>{isDE ? 'Button-Varianten, Badges und Statusfarben sind mit benachbarten Screens konsistent.' : 'Button variants, badges, and status colors are consistent with nearby screens.'}</li>
+          <li>{isDE ? 'Mobile Layouts wurden auf Wrapping und Overflow geprüft.' : 'Mobile layouts were checked for wrapping and overflow.'}</li>
+        </ul>
       </Section>
     </>
   );
@@ -803,13 +896,13 @@ function ApiSection() {
             <>
               Das Backend stellt eine REST API unter <Mono>/api</Mono> bereit.
               Bei aktivierter Auth ben&ouml;tigen alle Endpunkte (au&szlig;er <Mono>/api/auth/*</Mono>) einen
-              g&uuml;ltigen JWT Bearer Token. Endpunkte mit <span className="text-purple-400">(Admin)</span> erfordern die Admin-Rolle.
+              g&uuml;ltigen JWT Bearer Token oder einen API Key. Endpunkte mit <span className="text-purple-400">(Admin)</span> erfordern die Admin-Rolle.
             </>
           ) : (
             <>
               The backend provides a REST API under <Mono>/api</Mono>.
               With auth enabled, all endpoints (except <Mono>/api/auth/*</Mono>) require a
-              valid JWT bearer token. Endpoints marked <span className="text-purple-400">(Admin)</span> require the admin role.
+              valid JWT bearer token or an API key. Endpoints marked <span className="text-purple-400">(Admin)</span> require the admin role.
             </>
           )}
         </p>
@@ -1159,7 +1252,7 @@ function RagSection() {
         <div className="space-y-2 text-sm text-gray-400">
           <InfoRow label="Vector DB" value={isDE ? 'LanceDB (embedded, kein extra Service nötig)' : 'LanceDB (embedded, no extra service needed)'} />
           <InfoRow label="Embeddings" value={isDE ? 'Ollama (CPU) oder OpenAI-kompatible API wie LM Studio (GPU)' : 'Ollama (CPU) or OpenAI-compatible API like LM Studio (GPU)'} />
-          <InfoRow label={isDE ? 'Indizierte Entitäten' : 'Indexed Entities'} value="Knowledge, Research, Manuals, Changelogs, Todos, Sessions" />
+          <InfoRow label={isDE ? 'Indizierte Entitäten' : 'Indexed Entities'} value="Knowledge, Research, Manuals, Changelogs, Todos, Sessions, Snippets, Attachments" />
           <InfoRow label="Auto-Sync" value={isDE ? 'Neue/geänderte/gelöschte Dokumente werden automatisch via Change Streams indexiert' : 'New/updated/deleted documents are automatically indexed via Change Streams'} />
           <InfoRow label="Fallback" value={isDE ? 'Automatischer Fallback von Primary (GPU) auf Secondary (CPU) wenn nicht erreichbar' : 'Automatic fallback from primary (GPU) to secondary (CPU) when unavailable'} />
         </div>
@@ -1185,7 +1278,7 @@ RAG_EMBEDDING_MODEL=text-embedding-nomic-embed-text-v2-moe
 
 # Optional: automatic fallback
 RAG_FALLBACK_PROVIDER=ollama
-RAG_FALLBACK_URL=http://localhost:11434
+RAG_FALLBACK_URL=http://host.docker.internal:11434
 RAG_FALLBACK_MODEL=nomic-embed-text-v2-moe`}</Code>
         </Step>
         <Step n={3} title={isDE ? 'Initialen Index aufbauen' : 'Build initial index'}>
@@ -1249,7 +1342,7 @@ RAG_FALLBACK_MODEL=nomic-embed-text-v2-moe`}</Code>
           <EnvVar name="RAG_FALLBACK_URL" desc={isDE ? 'Fallback-Server-URL (optional)' : 'Fallback server URL (optional)'} />
           <EnvVar name="RAG_FALLBACK_MODEL" desc={isDE ? 'Fallback-Modellname (optional)' : 'Fallback model name (optional)'} />
           <EnvVar name="RAG_MAX_INPUT_CHARS" desc={isDE ? 'Max. Zeichen pro Embedding (Default: 1800)' : 'Max chars per embedding (default: 1800)'} />
-          <EnvVar name="OLLAMA_URL" desc={isDE ? 'Ollama-URL (Default: http://localhost:11434)' : 'Ollama URL (default: http://localhost:11434)'} />
+          <EnvVar name="OLLAMA_URL" desc={isDE ? 'Ollama-URL (Docker: http://host.docker.internal:11434, lokal: http://localhost:11434)' : 'Ollama URL (Docker: http://host.docker.internal:11434, local: http://localhost:11434)'} />
         </div>
       </Section>
 
@@ -1394,8 +1487,8 @@ function ChatSection() {
         </div>
         <p className="text-gray-500 text-xs mt-3">
           {isDE
-            ? 'Ollama: nutze "openai-compatible" mit URL http://localhost:11434. Der native ollama-Provider wurde entfernt (M-12), bestehende Configs migrieren automatisch. Ollama\'s /v1-Shim unterstützt seit v0.3 Function-Calling und Vision.'
-            : 'Ollama: use "openai-compatible" with URL http://localhost:11434. The native ollama provider was retired (M-12); existing configs auto-migrate. Ollama\'s /v1 shim supports function calling and vision since v0.3.'}
+            ? 'Ollama: nutze "openai-compatible". Läuft das Backend in Docker und Ollama auf dem Host, verwende http://host.docker.internal:11434; bei lokalem Backend ist http://localhost:11434 korrekt. Der native ollama-Provider wurde entfernt (M-12), bestehende Configs migrieren automatisch. Ollama\'s /v1-Shim unterstützt seit v0.3 Function-Calling und Vision.'
+            : 'Ollama: use "openai-compatible". If the backend runs in Docker and Ollama runs on the host, use http://host.docker.internal:11434; for a local backend, http://localhost:11434 is correct. The native ollama provider was retired (M-12); existing configs auto-migrate. Ollama\'s /v1 shim supports function calling and vision since v0.3.'}
         </p>
       </Section>
 

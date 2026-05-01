@@ -13,11 +13,12 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
 interface FormInputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   required?: boolean;
+  fieldClassName?: string;
 }
 
-export function FormInput({ label, required, className = '', ...props }: FormInputProps) {
+export function FormInput({ label, required, fieldClassName = '', className = '', ...props }: FormInputProps) {
   return (
-    <div>
+    <div className={fieldClassName}>
       {label && <Label required={required}>{label}</Label>}
       <input className={`${inputBase} ${className}`} {...props} />
     </div>
@@ -27,11 +28,12 @@ export function FormInput({ label, required, className = '', ...props }: FormInp
 interface FormSelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   label?: string;
   required?: boolean;
+  fieldClassName?: string;
 }
 
-export function FormSelect({ label, required, className = '', children, ...props }: FormSelectProps) {
+export function FormSelect({ label, required, fieldClassName = '', className = '', children, ...props }: FormSelectProps) {
   return (
-    <div>
+    <div className={fieldClassName}>
       {label && <Label required={required}>{label}</Label>}
       <select className={`${inputBase} ${className}`} {...props}>
         {children}
@@ -43,11 +45,12 @@ export function FormSelect({ label, required, className = '', children, ...props
 interface FormTextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   label?: string;
   required?: boolean;
+  fieldClassName?: string;
 }
 
-export function FormTextarea({ label, required, className = '', ...props }: FormTextareaProps) {
+export function FormTextarea({ label, required, fieldClassName = '', className = '', ...props }: FormTextareaProps) {
   return (
-    <div>
+    <div className={fieldClassName}>
       {label && <Label required={required}>{label}</Label>}
       <textarea className={`${inputBase} resize-none ${className}`} {...props} />
     </div>

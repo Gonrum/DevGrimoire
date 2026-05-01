@@ -82,18 +82,20 @@ export default function TodoCreatePage() {
       <h1 className="text-xl font-bold mb-6">{t('todoCreate.title')}</h1>
 
       <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-4">
-        <div className="flex items-center gap-2">
-          <FormInput label={t('common.title')} required type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('common.title')} autoFocus />
+        <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+          <FormInput fieldClassName="flex-1 min-w-0 w-full" label={t('common.title')} required type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('common.title')} autoFocus />
           {speechConsent && (
             <DictationButton onTextUpdate={(text, isFinal) => {
               setTitle(prev => isFinal ? prev + ' ' + text : text);
             }} />
           )}
         </div>
-        <div className="-mt-4">
+        <div>
           <label className="block text-xs text-gray-500 mb-1">{t('common.description')}</label>
-          <div className="flex items-start gap-2">
-            <MarkdownEditor value={description} onChange={setDescription} rows={5} placeholder={t('todoCreate.descriptionPlaceholder')} />
+          <div className="flex flex-col sm:flex-row sm:items-start gap-2">
+            <div className="flex-1 min-w-0 w-full">
+              <MarkdownEditor value={description} onChange={setDescription} rows={5} placeholder={t('todoCreate.descriptionPlaceholder')} />
+            </div>
             {speechConsent && (
               <DictationButton onTextUpdate={(text, isFinal) => {
                 setDescription(prev => isFinal ? prev + ' ' + text : text);
@@ -102,33 +104,26 @@ export default function TodoCreatePage() {
           </div>
         </div>
         <div className="flex flex-col sm:flex-row gap-4 items-start">
-          <FormSelect label={t('common.priority')} value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}>
+          <FormSelect fieldClassName="w-full sm:w-44 shrink-0" label={t('common.priority')} value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}>
             <option value="low">{t('todoPriority.low')}</option>
             <option value="medium">{t('todoPriority.medium')}</option>
             <option value="high">{t('todoPriority.high')}</option>
             <option value="critical">{t('todoPriority.critical')}</option>
           </FormSelect>
-          <div className="flex-1 w-full sm:w-auto">
-            <label className="block text-xs text-gray-500 mb-1">{t('common.tags')}</label>
-            <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('todoCreate.tagsPlaceholder')}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
-          </div>
+          <FormInput fieldClassName="flex-1 min-w-0 w-full" label={t('common.tags')} type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('todoCreate.tagsPlaceholder')} />
         </div>
         <div>
-          <label className="block text-xs text-gray-500 mb-1">{t('todoCreate.milestone')}</label>
-          <div className="flex flex-wrap items-center gap-2">
-            <select value={milestoneId} onChange={(e) => setMilestoneId(e.target.value)}
-              className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500">
+          <div className="space-y-2">
+            <FormSelect fieldClassName="w-full" label={t('todoCreate.milestone')} value={milestoneId} onChange={(e) => setMilestoneId(e.target.value)}>
               <option value="">{t('todoCreate.noMilestone')}</option>
               {milestones.map((ms) => (
                 <option key={ms._id} value={ms._id}>{ms.name}</option>
               ))}
-            </select>
+            </FormSelect>
             {creatingMilestone ? (
-              <div className="flex items-center gap-2">
-                <input type="text" value={newMilestoneName} onChange={(e) => setNewMilestoneName(e.target.value)}
-                  placeholder={t('common.name')} autoFocus onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleCreateMilestone())}
-                  className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+              <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+                <FormInput fieldClassName="flex-1 min-w-0 w-full" type="text" value={newMilestoneName} onChange={(e) => setNewMilestoneName(e.target.value)}
+                  placeholder={t('common.name')} autoFocus onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleCreateMilestone())} />
                 <Button type="button" variant="primary" size="sm" disabled={!newMilestoneName.trim()} onClick={handleCreateMilestone}>
                   {t('common.create')}
                 </Button>
@@ -137,7 +132,7 @@ export default function TodoCreatePage() {
                 </Button>
               </div>
             ) : (
-              <Button type="button" size="sm" onClick={() => setCreatingMilestone(true)}>
+              <Button type="button" size="sm" className="w-full sm:w-auto" onClick={() => setCreatingMilestone(true)}>
                 {t('todoCreate.newMilestone')}
               </Button>
             )}
