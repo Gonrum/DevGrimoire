@@ -15,6 +15,7 @@ import ConfirmButton from '../components/ui/ConfirmButton';
 import DetailSection from '../components/ui/DetailSection';
 import { FormInput, FormSelect } from '../components/ui/FormField';
 import { LoadingText } from '../components/ui/LoadingSpinner';
+import { WorkflowPageShell } from '../components/ui/WorkflowShell';
 import AttachmentList from '../components/AttachmentList';
 
 function TodoLinkRow({ todo, projectId, trailing }: { todo: Todo; projectId?: string; trailing?: ReactNode }) {
@@ -150,16 +151,14 @@ export default function TodoDetailPage() {
   const comments = todo.comments || [];
 
   return (
-    <div>
-      <Link to={`/projects/${id}`} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; {t('todoDetail.backToProject')}</Link>
-
+    <WorkflowPageShell backTo={`/projects/${id}`} backLabel={t('todoDetail.backToProject')}>
       {editing ? (
-        <div className="max-w-3xl mx-auto">
+        <div>
           <h2 className="text-lg font-semibold mb-4">{t('todoDetail.editTask')}</h2>
           <TodoEditForm todo={todo} onSaved={() => { setEditing(false); loadTodo(); }} onCancel={() => setEditing(false)} />
         </div>
       ) : (
-        <div className="max-w-3xl mx-auto">
+        <div>
           <h1 className="text-xl font-bold mb-3">{todo.displayNumber && <span className="text-gray-500 font-normal mr-2">{todo.displayNumber}</span>}{todo.title}</h1>
 
           <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -358,6 +357,6 @@ export default function TodoDetailPage() {
           )}
         </div>
       )}
-    </div>
+    </WorkflowPageShell>
   );
 }

@@ -12,6 +12,7 @@ import ConfirmButton from '../components/ui/ConfirmButton';
 import DetailSection from '../components/ui/DetailSection';
 import { FormInput, FormTextarea } from '../components/ui/FormField';
 import { LoadingText } from '../components/ui/LoadingSpinner';
+import { WorkflowModalShell, WorkflowPageShell } from '../components/ui/WorkflowShell';
 
 const STATUS_COLORS: Record<Milestone['status'], string> = {
   open: 'bg-gray-700 text-gray-300',
@@ -83,23 +84,17 @@ function CreateTodoModal({ projectId, milestoneId, onCreated, onClose }: { proje
   const { t } = useTranslation();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
-          <h2 className="text-lg font-semibold text-gray-200">{t('todoCreate.title')}</h2>
-          <button type="button" onClick={onClose} className="text-gray-500 hover:text-gray-300 text-xl leading-none">&times;</button>
-        </div>
-        <TodoForm
-          projectId={projectId}
-          initialMilestoneId={milestoneId}
-          descriptionRows={4}
-          submitSize="md"
-          className="p-5"
-          onCreated={onCreated}
-          onCancel={onClose}
-        />
-      </div>
-    </div>
+    <WorkflowModalShell title={t('todoCreate.title')} onClose={onClose}>
+      <TodoForm
+        projectId={projectId}
+        initialMilestoneId={milestoneId}
+        descriptionRows={4}
+        submitSize="md"
+        className="p-5"
+        onCreated={onCreated}
+        onCancel={onClose}
+      />
+    </WorkflowModalShell>
   );
 }
 
@@ -236,11 +231,9 @@ export default function MilestoneDetailPage() {
   const reviewPercent = total > 0 ? Math.round((reviewTodos.length / total) * 100) : 0;
 
   return (
-    <div>
-      <Link to={`/projects/${id}`} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; {t('milestoneDetail.backToProject')}</Link>
-
+    <WorkflowPageShell backTo={`/projects/${id}`} backLabel={t('milestoneDetail.backToProject')}>
       {editing ? (
-        <div className="max-w-3xl mx-auto">
+        <div>
           <h2 className="text-lg font-semibold mb-4">{t('milestoneDetail.editMilestone')}</h2>
           <MilestoneForm
             projectId={id!}
@@ -251,7 +244,7 @@ export default function MilestoneDetailPage() {
           />
         </div>
       ) : (
-        <div className="max-w-3xl mx-auto">
+        <div>
           <h1 className="text-xl font-bold mb-3">
             {milestone.displayNumber && <span className="text-gray-500 font-normal mr-2">{milestone.displayNumber}</span>}
             {milestone.name}
@@ -420,6 +413,6 @@ export default function MilestoneDetailPage() {
           </DetailSection>
         </div>
       )}
-    </div>
+    </WorkflowPageShell>
   );
 }
