@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { api } from '../api/client';
 import i18n from '../i18n';
 
 type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'ui' | 'rag' | 'chat' | 'replication' | 'api' | 'logs' | 'git' | 'architecture';
@@ -258,9 +259,39 @@ openssl rand -hex 32`}</Code>
 
         <Step n={1} title="Claude Code CLI">
           <p className="text-gray-400 text-sm mb-2">
-            {isDE ? (<>In <Mono>~/.claude.json</Mono>:</>) : (<>In <Mono>~/.claude.json</Mono>:</>)}
+            {isDE
+              ? (<>Empfohlen: <Mono>claude mcp add</Mono> registriert den Server in der CLI &mdash; ohne manuelles Editieren von <Mono>~/.claude.json</Mono>.</>)
+              : (<>Recommended: <Mono>claude mcp add</Mono> registers the server in the CLI &mdash; no manual editing of <Mono>~/.claude.json</Mono> required.</>)}
           </p>
-          <Code>{`{
+          <Code>{`# Ohne Auth (Streamable HTTP, empfohlen)
+claude mcp add --transport http devgrimoire http://[server]/mcp
+
+# Mit API-Key (Header — empfohlen, Streamable HTTP)
+claude mcp add --transport http devgrimoire http://[server]/mcp \\
+  --header "Authorization: Bearer cv_..."
+
+# Mit API-Key (Query-Parameter, SSE)
+claude mcp add --transport sse devgrimoire "http://[server]/sse?apiKey=cv_..."`}</Code>
+          <Hint>
+            {isDE ? (
+              <>
+                <Mono>--scope user</Mono> macht den Server global verf&uuml;gbar, <Mono>--scope project</Mono> bindet ihn an das aktuelle Projekt, ohne Flag landet er nur lokal in diesem Repo.
+              </>
+            ) : (
+              <>
+                <Mono>--scope user</Mono> makes the server available globally, <Mono>--scope project</Mono> ties it to the current project, without a flag it stays local to this repo.
+              </>
+            )}
+          </Hint>
+
+          <details className="mt-4 group">
+            <summary className="cursor-pointer text-xs text-gray-500 hover:text-gray-300 select-none">
+              {isDE ? 'Alternative: manuelles JSON-Editing' : 'Alternative: manual JSON editing'}
+            </summary>
+            <p className="text-gray-400 text-sm mt-3 mb-2">
+              {isDE ? (<>In <Mono>~/.claude.json</Mono>:</>) : (<>In <Mono>~/.claude.json</Mono>:</>)}
+            </p>
+            <Code>{`{
   "mcpServers": {
     "devgrimoire": {
       "type": "sse",
@@ -268,11 +299,12 @@ openssl rand -hex 32`}</Code>
     }
   }
 }`}</Code>
-          <p className="text-gray-500 text-xs mt-2">
-            {isDE
-              ? 'Wenn Auth deaktiviert ist, kann der apiKey-Query-Parameter weggelassen werden.'
-              : 'If auth is disabled, the apiKey query parameter can be omitted.'}
-          </p>
+            <p className="text-gray-500 text-xs mt-2">
+              {isDE
+                ? 'Wenn Auth deaktiviert ist, kann der apiKey-Query-Parameter weggelassen werden.'
+                : 'If auth is disabled, the apiKey query parameter can be omitted.'}
+            </p>
+          </details>
         </Step>
 
         <Step n={2} title="Claude Desktop App">
@@ -523,9 +555,36 @@ function AuthSection() {
 
         <Step n={2} title={isDE ? 'MCP-Client konfigurieren' : 'Configure MCP client'}>
           <p className="text-gray-400 text-sm mb-2">
-            {isDE ? (<>Claude Code (<Mono>~/.claude.json</Mono>):</>) : (<>Claude Code (<Mono>~/.claude.json</Mono>):</>)}
+            {isDE
+              ? (<>Empfohlen via <Mono>claude mcp add</Mono>:</>)
+              : (<>Recommended via <Mono>claude mcp add</Mono>:</>)}
           </p>
-          <Code>{`{
+          <Code>{`# Header-Variante (Streamable HTTP, empfohlen)
+claude mcp add --transport http devgrimoire http://[server]/mcp \\
+  --header "Authorization: Bearer cv_..."
+
+# Query-Parameter (SSE — nutzbar wenn Header nicht gesetzt werden können)
+claude mcp add --transport sse devgrimoire "http://[server]/sse?apiKey=cv_..."`}</Code>
+          <p className="text-gray-500 text-xs mt-2">
+            {isDE ? (
+              <>
+                <Mono>SSE</Mono> nutzt <Mono>?apiKey=</Mono> im URL, weil EventSource keine Custom-Header unterst&uuml;tzt. Wenn Header m&ouml;glich sind &rarr; Streamable HTTP (<Mono>/mcp</Mono>) bevorzugen.
+              </>
+            ) : (
+              <>
+                <Mono>SSE</Mono> uses <Mono>?apiKey=</Mono> in the URL because EventSource does not support custom headers. If headers are possible, prefer Streamable HTTP (<Mono>/mcp</Mono>).
+              </>
+            )}
+          </p>
+
+          <details className="mt-4 group">
+            <summary className="cursor-pointer text-xs text-gray-500 hover:text-gray-300 select-none">
+              {isDE ? 'Alternative: manuelles JSON-Editing' : 'Alternative: manual JSON editing'}
+            </summary>
+            <p className="text-gray-400 text-sm mt-3 mb-2">
+              {isDE ? (<>Claude Code (<Mono>~/.claude.json</Mono>):</>) : (<>Claude Code (<Mono>~/.claude.json</Mono>):</>)}
+            </p>
+            <Code>{`{
   "mcpServers": {
     "devgrimoire": {
       "type": "sse",
@@ -533,10 +592,10 @@ function AuthSection() {
     }
   }
 }`}</Code>
-          <p className="text-gray-400 text-sm mt-3 mb-2">
-            {isDE ? 'Alternativ per Header (Streamable HTTP):' : 'Alternatively via header (Streamable HTTP):'}
-          </p>
-          <Code>{`{
+            <p className="text-gray-400 text-sm mt-3 mb-2">
+              {isDE ? 'Header-Variante (Streamable HTTP):' : 'Header variant (Streamable HTTP):'}
+            </p>
+            <Code>{`{
   "mcpServers": {
     "devgrimoire": {
       "type": "http",
@@ -547,6 +606,7 @@ function AuthSection() {
     }
   }
 }`}</Code>
+          </details>
         </Step>
 
         <Step n={3} title={isDE ? 'REST API mit API Key' : 'REST API with API Key'}>
@@ -619,13 +679,20 @@ curl http://[server]/api/projects?apiKey=cv_...`}</Code>
 
 function McpSection() {
   const isDE = i18n.language === 'de';
+  const [toolCount, setToolCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.mcp.tools().then((tools) => { if (!cancelled) setToolCount(tools.length); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const countLabel = toolCount ?? '\u2026';
   return (
     <>
-      <Section title={isDE ? 'MCP-Tools (126)' : 'MCP Tools (126)'}>
+      <Section title={isDE ? `MCP-Tools (${countLabel})` : `MCP Tools (${countLabel})`}>
         <p className="text-gray-400 text-sm mb-4">
           {isDE
-            ? 'Nach dem Anbinden stehen Claude 126 Tools zur Verf\u00fcgung, gruppiert nach Entit\u00e4t. List-Tools liefern kompakte \u00dcbersichten (nur Metadaten), Details holst du \u00fcber _get-Tools \u2014 das schont den Context.'
-            : 'After connecting, Claude has access to 126 tools, grouped by entity. List tools return compact overviews (metadata only), details fetched via _get tools \u2014 this keeps the context lean.'}
+            ? `Nach dem Anbinden stehen Claude ${countLabel} Tools zur Verf\u00fcgung, gruppiert nach Entit\u00e4t. List-Tools liefern kompakte \u00dcbersichten (nur Metadaten), Details holst du \u00fcber _get-Tools \u2014 das schont den Context.`
+            : `After connecting, Claude has access to ${countLabel} tools, grouped by entity. List tools return compact overviews (metadata only), details fetched via _get tools \u2014 this keeps the context lean.`}
         </p>
 
         <ToolGroup title={isDE ? 'Projekte' : 'Projects'} tools={[
