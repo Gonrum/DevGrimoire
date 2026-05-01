@@ -6,9 +6,10 @@ import UserManagement from './UserManagement';
 import ReplicationSettings from '../components/ReplicationSettings';
 import WebSearchSettings from '../components/WebSearchSettings';
 import ApiKeyToolEditor from '../components/ApiKeyToolEditor';
+import NotificationsSettings from '../components/settings/NotificationsSettings';
 import Button from '../components/ui/Button';
 import ConfirmButton from '../components/ui/ConfirmButton';
-import { SettingsSection, SettingsShell } from '../components/ui/SettingsShell';
+import { SettingsActions, SettingsSection, SettingsShell, SettingsTabHeader } from '../components/ui/SettingsShell';
 
 const DEFAULT_INSTRUCTIONS = `# DevGrimoire Agent-Instruktionen
 
@@ -91,32 +92,6 @@ function modelLooksVisionCapable(model: string): boolean {
   return VISION_MODEL_PATTERNS.some((re) => re.test(model));
 }
 
-interface PushCategory {
-  key: string;
-  default: boolean;
-  group?: string;
-}
-
-const PUSH_CATEGORIES: PushCategory[] = [
-  { key: 'notify_user', default: true },
-  { key: 'mcp_project', default: false, group: 'mcp' },
-  { key: 'mcp_todo', default: false, group: 'mcp' },
-  { key: 'mcp_milestone', default: false, group: 'mcp' },
-  { key: 'mcp_knowledge', default: false, group: 'mcp' },
-  { key: 'mcp_changelog', default: false, group: 'mcp' },
-  { key: 'mcp_session', default: false, group: 'mcp' },
-  { key: 'mcp_research', default: false, group: 'mcp' },
-  { key: 'mcp_manual', default: false, group: 'mcp' },
-  { key: 'mcp_schema', default: false, group: 'mcp' },
-  { key: 'mcp_dependency', default: false, group: 'mcp' },
-  { key: 'mcp_environment', default: false, group: 'mcp' },
-  { key: 'mcp_secret', default: false, group: 'mcp' },
-  { key: 'mcp_feature', default: false, group: 'mcp' },
-  { key: 'mcp_soul', default: false, group: 'mcp' },
-  { key: 'mcp_commit', default: false, group: 'mcp' },
-  { key: 'mcp_system', default: false, group: 'mcp' },
-];
-
 export default function Settings() {
   const { t, i18n } = useTranslation();
   const { user, authEnabled } = useAuth();
@@ -140,11 +115,6 @@ export default function Settings() {
   const [copied, setCopied] = useState(false);
   const [editingApiKeyId, setEditingApiKeyId] = useState<string | null>(null);
 
-
-  // Notification push categories
-  const [pushCategories, setPushCategories] = useState<Record<string, boolean>>({});
-  const [pushLoading, setPushLoading] = useState(false);
-  const [pushSaving, setPushSaving] = useState(false);
 
   // Chat config
   const [chatConfig, setChatConfig] = useState<ChatConfig>({
@@ -177,7 +147,6 @@ export default function Settings() {
   const [llmHasStoredKey, setLlmHasStoredKey] = useState(false);
   const [llmTestState, setLlmTestState] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [llmTestMessage, setLlmTestMessage] = useState<string>('');
-  const [dictationEnabled, setDictationEnabled] = useState(localStorage.getItem('dg_dictation_enabled') !== 'false');
 
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
@@ -206,42 +175,6 @@ export default function Settings() {
       setApiKeysLoading(false);
     }
   }, [t]);
-
-  const loadPushCategories = useCallback(async () => {
-    setPushLoading(true);
-    try {
-      const res = await api.settings.get('notification_push_categories');
-      const enabled = (res.value ?? PUSH_CATEGORIES.filter((c) => c.default).map((c) => c.key).join(',')).split(',').map((c) => c.trim()).filter(Boolean);
-      const state: Record<string, boolean> = {};
-      for (const cat of PUSH_CATEGORIES) {
-        state[cat.key] = enabled.includes(cat.key);
-      }
-      setPushCategories(state);
-    } catch { /* ignore */ }
-    setPushLoading(false);
-  }, []);
-
-  const savePushCategories = async (updated: Record<string, boolean>) => {
-    setPushCategories(updated);
-    setPushSaving(true);
-    try {
-      const value = Object.entries(updated).filter(([, v]) => v).map(([k]) => k).join(',');
-      await api.settings.set('notification_push_categories', value);
-    } catch { /* ignore */ }
-    setPushSaving(false);
-  };
-
-  const togglePushCategory = (key: string) => {
-    savePushCategories({ ...pushCategories, [key]: !pushCategories[key] });
-  };
-
-  const toggleAllMcp = () => {
-    const mcpKeys = PUSH_CATEGORIES.filter((c) => c.group === 'mcp').map((c) => c.key);
-    const allOn = mcpKeys.every((k) => pushCategories[k]);
-    const updated = { ...pushCategories };
-    for (const k of mcpKeys) updated[k] = !allOn;
-    savePushCategories(updated);
-  };
 
   const loadChatConfig = useCallback(async () => {
     setChatLoading(true);
@@ -274,10 +207,9 @@ export default function Settings() {
 
   useEffect(() => {
     if (tab === 'apikeys') loadApiKeys();
-    if (tab === 'notifications') loadPushCategories();
     if (tab === 'chat') loadChatConfig();
     if (tab === 'myllm') loadLlmConfig();
-  }, [tab, loadApiKeys, loadPushCategories, loadChatConfig, loadLlmConfig]);
+  }, [tab, loadApiKeys, loadChatConfig, loadLlmConfig]);
 
   /** Track which API-key fields are currently visible (toggle show/hide per row). */
   const [chatApiKeyVisible, setChatApiKeyVisible] = useState<Record<number, boolean>>({});
@@ -500,17 +432,6 @@ export default function Settings() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const toggleDictation = () => {
-    const next = !dictationEnabled;
-    setDictationEnabled(next);
-    localStorage.setItem('dg_dictation_enabled', String(next));
-  };
-
-  const resetDictationConsent = () => {
-    localStorage.removeItem('speech_consent');
-    alert(t('settings.dictationConsentReset') || 'Consent zurückgesetzt');
-  };
-
   const save = async () => {
 
     setSaving(true);
@@ -548,9 +469,7 @@ export default function Settings() {
 
       {tab === 'instructions' && (
         <>
-          <p className="text-gray-400 mb-6">
-            {t('settings.instructionsDescription', { tool: 'system_instructions_get' })}
-          </p>
+          <SettingsTabHeader description={t('settings.instructionsDescription', { tool: 'system_instructions_get' })} />
 
           {error && (
             <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-2 rounded mb-4">
@@ -579,14 +498,14 @@ export default function Settings() {
                 />
               </div>
 
-              <div className="flex items-center gap-3 mt-4">
+              <SettingsActions>
                 <Button variant="primary" size="lg" onClick={save} disabled={saving || saved}>
                   {saving ? t('common.saving') : t('common.save')}
                 </Button>
                 <Button size="lg" onClick={reset}>
                   {t('settings.resetDefault')}
                 </Button>
-              </div>
+              </SettingsActions>
 
               <SettingsSection title={t('settings.instructionsNote')} className="mt-8">
                 <p className="text-sm text-gray-400">
@@ -600,9 +519,7 @@ export default function Settings() {
 
       {tab === 'apikeys' && (
         <>
-          <p className="text-gray-400 mb-6">
-            {t('settings.apiKeysDescription')}
-          </p>
+          <SettingsTabHeader description={t('settings.apiKeysDescription')} />
 
           {apiKeyError && (
             <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-2 rounded mb-4">
@@ -766,134 +683,14 @@ export default function Settings() {
         </>
       )}
 
-       {tab === 'notifications' && (
-         <>
-           <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 mb-6 flex items-center justify-between gap-4">
-             <div>
-               <div className="text-sm font-medium text-gray-200">{t('settings.dictationEnabled')}</div>
-               <div className="text-xs text-gray-500 mt-0.5">{t('settings.dictationEnabledDesc')}</div>
-             </div>
-             <div className="flex items-center gap-3">
-               <button
-                 type="button"
-                 role="switch"
-                 aria-checked={dictationEnabled}
-                 onClick={toggleDictation}
-                 className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
-                   dictationEnabled ? 'bg-violet-600' : 'bg-gray-600'
-                 }`}
-               >
-                 <span
-                   className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
-                     dictationEnabled ? 'translate-x-5' : 'translate-x-0'
-                   }`}
-                 />
-               </button>
-               <Button size="xs" variant="secondary" onClick={resetDictationConsent}>
-                 {t('settings.dictationResetConsent')}
-               </Button>
-             </div>
-           </div>
-
-           {(() => {
-             const mcpCats = PUSH_CATEGORIES.filter((c) => c.group === 'mcp');
-             const allMcpOn = mcpCats.every((c) => pushCategories[c.key]);
-             const someMcpOn = mcpCats.some((c) => pushCategories[c.key]);
-
-             const Toggle = ({ checked, onClick }: { checked: boolean; onClick: () => void }) => (
-               <button
-                 type="button"
-                 role="switch"
-                 aria-checked={checked}
-                 onClick={onClick}
-                 disabled={pushSaving}
-                 className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
-                   checked ? 'bg-violet-600' : 'bg-gray-600'
-                 }`}
-               >
-                 <span
-                   className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
-                     checked ? 'translate-x-5' : 'translate-x-0'
-                   }`}
-                 />
-               </button>
-             );
-
-             return (
-               <>
-                 <p className="text-gray-400 mb-6">
-                   {t('settings.notificationsDescription')}
-                 </p>
-
-                 {pushLoading ? (
-                   <div className="text-gray-500 py-10 text-center">{t('common.loading')}</div>
-                 ) : (
-                   <div className="space-y-6">
-                     {/* notify_user — standalone */}
-                     {PUSH_CATEGORIES.filter((c) => !c.group).map((cat) => (
-                       <div
-                         key={cat.key}
-                         className="bg-gray-900 border border-gray-700 rounded-lg p-4 flex items-center justify-between gap-4"
-                       >
-                         <div>
-                           <div className="text-sm font-medium text-gray-200">
-                             {t(`settings.pushCategory_${cat.key}`)}
-                           </div>
-                           <div className="text-xs text-gray-500 mt-0.5">
-                             {t(`settings.pushCategory_${cat.key}_desc`)}
-                           </div>
-                         </div>
-                         <Toggle checked={pushCategories[cat.key] ?? false} onClick={() => togglePushCategory(cat.key)} />
-                       </div>
-                     ))}
-
-                     {/* MCP Tool-Aufrufe — grouped */}
-                     <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
-                       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-800/50">
-                         <div>
-                           <div className="text-sm font-medium text-gray-200">{t('settings.pushGroup_mcp')}</div>
-                           <div className="text-xs text-gray-500 mt-0.5">{t('settings.pushGroup_mcp_desc')}</div>
-                         </div>
-                         <div className="flex items-center gap-2">
-                           <span className="text-xs text-gray-500">
-                             {someMcpOn ? `${mcpCats.filter((c) => pushCategories[c.key]).length}/${mcpCats.length}` : t('common.none')}
-                           </span>
-                           <Toggle checked={allMcpOn} onClick={toggleAllMcp} />
-                         </div>
-                       </div>
-                       <div className="divide-y divide-gray-800">
-                         {mcpCats.map((cat) => (
-                           <div
-                             key={cat.key}
-                             className="flex items-center justify-between px-4 py-3 gap-4"
-                           >
-                             <div>
-                               <div className="text-sm text-gray-300">
-                                 {t(`settings.pushCategory_${cat.key}`)}
-                               </div>
-                               <div className="text-xs text-gray-600 mt-0.5">
-                                 {t(`settings.pushCategory_${cat.key}_desc`)}
-                               </div>
-                             </div>
-                             <Toggle checked={pushCategories[cat.key] ?? false} onClick={() => togglePushCategory(cat.key)} />
-                           </div>
-                         ))}
-                       </div>
-                     </div>
-                   </div>
-                 )}
-               </>
-             );
-           })()}
-         </>
-       )}
+      {tab === 'notifications' && <NotificationsSettings />}
 
 
 
 
       {tab === 'chat' && isAdmin && (
         <>
-          <p className="text-gray-400 mb-6">{t('settings.chatDescription')}</p>
+          <SettingsTabHeader description={t('settings.chatDescription')} />
 
           {chatLoading ? (
             <div className="text-gray-500 py-10 text-center">{t('common.loading')}</div>
@@ -1232,13 +1029,13 @@ export default function Settings() {
                 })()}
               </div>
 
-              <div className="flex items-center gap-3">
+              <SettingsActions className="mt-0">
                 <Button variant="primary" size="lg" onClick={saveChatConfig} disabled={chatSaving}>
                   {chatSaving ? t('common.saving') : t('common.save')}
                 </Button>
                 {chatSavedMsg && <span className="text-green-400 text-sm">✓ {t('settings.chatSaved')}</span>}
                 {chatSaveError && <span className="text-red-400 text-sm">✗ {chatSaveError}</span>}
-              </div>
+              </SettingsActions>
             </div>
           )}
         </>
@@ -1246,7 +1043,7 @@ export default function Settings() {
 
       {tab === 'myllm' && (
         <div className="space-y-4">
-          <p className="text-gray-400">{t('settings.myLlmDescription')}</p>
+          <SettingsTabHeader description={t('settings.myLlmDescription')} className="mb-0" />
 
           {typeof window !== 'undefined' && window.location.protocol === 'https:' && (
             <div className="bg-amber-900/30 border border-amber-700/60 text-amber-200 text-sm px-3 py-2 rounded">
@@ -1388,13 +1185,13 @@ export default function Settings() {
                 </>
               )}
 
-              <div className="flex items-center gap-3 pt-2 border-t border-gray-800">
+              <SettingsActions className="mt-0 border-t border-gray-800 pt-3">
                 <Button variant="primary" size="lg" onClick={saveLlmConfig} disabled={llmSaving}>
                   {llmSaving ? t('common.saving') : t('common.save')}
                 </Button>
                 {llmSavedMsg && <span className="text-green-400 text-sm">✓ {t('settings.myLlmSaved')}</span>}
                 {llmSaveError && <span className="text-red-400 text-sm">✗ {llmSaveError}</span>}
-              </div>
+              </SettingsActions>
             </div>
           )}
         </div>

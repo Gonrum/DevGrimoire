@@ -801,11 +801,12 @@ export default function ProjectSettings() {
         )}
       </div>
 
-      <section className="border-t border-gray-800 pt-6 mb-8">
-        <h2 className="text-lg font-semibold text-cyan-400 mb-2">{t('projectSettings.dataExport')}</h2>
-        <p className="text-gray-500 text-sm mb-3">
-          {t('projectSettings.dataExportHelp')}
-        </p>
+      <SettingsSection
+        tone="accent"
+        title={t('projectSettings.dataExport')}
+        description={t('projectSettings.dataExportHelp')}
+        className="mb-8"
+      >
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -830,15 +831,16 @@ export default function ProjectSettings() {
             {t('projectSettings.includeSecrets')}
           </label>
         </div>
-      </section>
+      </SettingsSection>
 
-      <section className="border-t border-gray-800 pt-6 mb-8">
-        <h2 className="text-lg font-semibold text-red-400 mb-2">{t('projectSettings.dangerZone')}</h2>
-        <p className="text-gray-500 text-sm mb-3">
-          {t('projectSettings.dangerZoneHelp')}
-        </p>
+      <SettingsSection
+        tone="danger"
+        title={t('projectSettings.dangerZone')}
+        description={t('projectSettings.dangerZoneHelp')}
+        className="mb-8"
+      >
         <ConfirmButton onConfirm={async () => { if (id) { await api.projects.delete(id); navigate('/'); } }} label={t('projectSettings.deleteProject')} confirmLabel={t('projectSettings.confirmDeleteProject')} size="lg" />
-      </section>
+      </SettingsSection>
 
       <SettingsSection title={t('projectSettings.instructionsInfoTitle')}>
         <p className="text-gray-500 text-sm leading-relaxed">
