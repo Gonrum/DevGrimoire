@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Todo, Milestone } from '../api/client';
@@ -12,8 +12,35 @@ import { useToast } from '../components/Toast';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import ConfirmButton from '../components/ui/ConfirmButton';
+import { FormInput, FormSelect } from '../components/ui/FormField';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import AttachmentList from '../components/AttachmentList';
+
+function DetailSection({ title, meta, children, className = '' }: { title?: ReactNode; meta?: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <section className={`border-t border-gray-800 pt-5 ${className}`}>
+      {title && (
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h3 className="text-sm font-medium text-gray-400">{title}</h3>
+          {meta && <div className="text-xs text-gray-600">{meta}</div>}
+        </div>
+      )}
+      {children}
+    </section>
+  );
+}
+
+function TodoLinkRow({ todo, projectId, trailing }: { todo: Todo; projectId?: string; trailing?: ReactNode }) {
+  return (
+    <div className="flex min-h-8 items-center gap-2 rounded border border-gray-800 bg-gray-900/40 px-2.5 py-1.5 text-xs">
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${todo.status === 'done' ? 'bg-green-500' : todo.status === 'in_progress' ? 'bg-yellow-500' : 'bg-gray-600'}`} />
+      <Link to={`/projects/${projectId}/todos/${todo._id}`} className="min-w-0 flex-1 text-gray-400 transition-colors hover:text-cyan-400">
+        <span className={`block truncate ${todo.status === 'done' ? 'text-gray-600 line-through' : ''}`}>{todo.title}</span>
+      </Link>
+      {trailing}
+    </div>
+  );
+}
 
 function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => void; onCancel: () => void }) {
   const { t } = useTranslation();
@@ -23,7 +50,7 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
   const [tags, setTags] = useState(todo.tags.join(', '));
   const [saving, setSaving] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
     setSaving(true);
@@ -41,32 +68,20 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3">
-      <div>
-        <label className="block text-xs text-gray-500 mb-1">{t('common.title')}</label>
-        <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
-          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500" autoFocus />
-      </div>
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <FormInput label={t('common.title')} required type="text" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
       <div>
         <label className="block text-xs text-gray-500 mb-1">{t('common.description')}</label>
         <MarkdownEditor value={description} onChange={setDescription} rows={4} placeholder={t('todos.descriptionPlaceholder')} />
       </div>
-      <div className="flex gap-3 items-center">
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">{t('common.priority')}</label>
-          <select value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}
-            className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500">
-            <option value="low">{t('todoPriority.low')}</option>
-            <option value="medium">{t('todoPriority.medium')}</option>
-            <option value="high">{t('todoPriority.high')}</option>
-            <option value="critical">{t('todoPriority.critical')}</option>
-          </select>
-        </div>
-        <div className="flex-1">
-          <label className="block text-xs text-gray-500 mb-1">{t('common.tags')}</label>
-          <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('common.commaSeparated')}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
-        </div>
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <FormSelect fieldClassName="w-full sm:w-44 shrink-0" label={t('common.priority')} value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}>
+          <option value="low">{t('todoPriority.low')}</option>
+          <option value="medium">{t('todoPriority.medium')}</option>
+          <option value="high">{t('todoPriority.high')}</option>
+          <option value="critical">{t('todoPriority.critical')}</option>
+        </FormSelect>
+        <FormInput fieldClassName="flex-1 min-w-0 w-full" label={t('common.tags')} type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('common.commaSeparated')} />
       </div>
       <div className="flex gap-2 pt-2">
         <Button type="submit" variant="primary" disabled={saving || !title.trim()}>
@@ -182,9 +197,8 @@ export default function TodoDetailPage() {
           )}
 
           {milestones.length > 0 && (
-            <div className="mb-4">
-              <label className="block text-xs text-gray-600 mb-1">{t('todoCreate.milestone')}</label>
-              <select
+            <DetailSection title={t('todoCreate.milestone')} className="mb-5">
+              <FormSelect
                 value={todo.milestoneId || ''}
                 onChange={async (e) => {
                   try {
@@ -194,14 +208,13 @@ export default function TodoDetailPage() {
                     showError(err.message || t('todoDetail.milestoneChangeFailed'));
                   }
                 }}
-                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500"
               >
                 <option value="">{t('todoCreate.noMilestone')}</option>
                 {milestones.map((ms) => (
                   <option key={ms._id} value={ms._id}>{ms.name}</option>
                 ))}
-              </select>
-            </div>
+              </FormSelect>
+            </DetailSection>
           )}
 
           {(() => {
@@ -213,52 +226,52 @@ export default function TodoDetailPage() {
             const hasBlockers = blockedBy.some((b) => b.status !== 'done');
 
             return (
-              <div className="mb-4 space-y-2">
+              <DetailSection title={t('todoDetail.dependencies')} className="mb-5">
                 {hasBlockers && (
-                  <div className="flex items-center gap-1.5 text-xs text-red-400 bg-red-900/20 border border-red-900/50 rounded px-2 py-1.5">
+                  <div className="mb-3 flex items-center gap-1.5 rounded border border-red-900/50 bg-red-900/20 px-2.5 py-1.5 text-xs text-red-400">
                     <span>{t('todoDetail.blocked')}</span>
                   </div>
                 )}
-                {blockedBy.length > 0 && (
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">{t('todoDetail.blockedBy')}</label>
-                    <div className="space-y-1">
-                      {blockedBy.map((dep) => (
-                        <div key={dep._id} className="flex items-center gap-2 text-xs">
-                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dep.status === 'done' ? 'bg-green-500' : dep.status === 'in_progress' ? 'bg-yellow-500' : 'bg-gray-600'}`} />
-                          <Link to={`/projects/${id}/todos/${dep._id}`} className="text-gray-400 hover:text-cyan-400 transition-colors">
-                            <span className={dep.status === 'done' ? 'line-through text-gray-600' : ''}>{dep.title}</span>
-                          </Link>
-                          <button type="button" onClick={async () => {
-                            try {
-                              await api.todos.update(todo._id, { blockedBy: (todo.blockedBy || []).filter((b) => b !== dep._id) } as Partial<Todo>);
-                              loadTodo();
-                            } catch (err: any) {
-                              showError(err.message || t('todoDetail.removeDependencyFailed'));
-                            }
-                          }} className="text-gray-600 hover:text-red-400 transition-colors ml-auto">&times;</button>
-                        </div>
-                      ))}
-                    </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-gray-600">{t('todoDetail.blockedBy')}</p>
+                    {blockedBy.length === 0 && <p className="text-xs italic text-gray-700">{t('common.none')}</p>}
+                    {blockedBy.map((dep) => (
+                      <TodoLinkRow
+                        key={dep._id}
+                        todo={dep}
+                        projectId={id}
+                        trailing={(
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await api.todos.update(todo._id, { blockedBy: (todo.blockedBy || []).filter((b) => b !== dep._id) } as Partial<Todo>);
+                                loadTodo();
+                              } catch (err: any) {
+                                showError(err.message || t('todoDetail.removeDependencyFailed'));
+                              }
+                            }}
+                            className="shrink-0 text-gray-600 transition-colors hover:text-red-400"
+                            aria-label={t('todoDetail.removeDependencyFailed')}
+                          >
+                            &times;
+                          </button>
+                        )}
+                      />
+                    ))}
                   </div>
-                )}
-                {blocks.length > 0 && (
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">{t('todoDetail.blocking')}</label>
-                    <div className="space-y-1">
-                      {blocks.map((dep) => (
-                        <div key={dep._id} className="flex items-center gap-2 text-xs">
-                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dep.status === 'done' ? 'bg-green-500' : dep.status === 'in_progress' ? 'bg-yellow-500' : 'bg-gray-600'}`} />
-                          <Link to={`/projects/${id}/todos/${dep._id}`} className="text-gray-400 hover:text-cyan-400 transition-colors">
-                            {dep.title}
-                          </Link>
-                        </div>
-                      ))}
-                    </div>
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-gray-600">{t('todoDetail.blocking')}</p>
+                    {blocks.length === 0 && <p className="text-xs italic text-gray-700">{t('common.none')}</p>}
+                    {blocks.map((dep) => (
+                      <TodoLinkRow key={dep._id} todo={dep} projectId={id} />
+                    ))}
                   </div>
-                )}
+                </div>
                 {availableDeps.length > 0 && (
-                  <select
+                  <FormSelect
+                    fieldClassName="mt-3"
                     value=""
                     onChange={async (e) => {
                       if (!e.target.value) return;
@@ -269,15 +282,14 @@ export default function TodoDetailPage() {
                         showError(err.message || t('todoDetail.addDependencyFailed'));
                       }
                     }}
-                    className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500"
                   >
                     <option value="">{t('todoDetail.addDependency')}</option>
                     {availableDeps.map((t) => (
                       <option key={t._id} value={t._id}>{t.title}</option>
                     ))}
-                  </select>
+                  </FormSelect>
                 )}
-              </div>
+              </DetailSection>
             );
           })()}
 
@@ -288,7 +300,8 @@ export default function TodoDetailPage() {
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 mb-8">
+          <DetailSection title={t('common.actions')} className="mb-8">
+            <div className="flex flex-wrap items-center gap-2">
             {STATUS_TRANSITIONS[todo.status].map((tr) => (
               <Button key={tr.next} type="button" variant="none" size="sm" onClick={() => handleStatusChange(tr.next)}
                 className={TRANSITION_BUTTON_COLORS[tr.next]}>
@@ -320,12 +333,10 @@ export default function TodoDetailPage() {
               size="sm"
               className="sm:ml-auto"
             />
-          </div>
+            </div>
+          </DetailSection>
 
-          <div className="border-t border-gray-800 pt-5">
-            <h3 className="text-sm font-medium text-gray-400 mb-3">
-              {t('todoDetail.comments')} {comments.length > 0 && <span className="text-gray-600">({comments.length})</span>}
-            </h3>
+          <DetailSection title={t('todoDetail.comments')} meta={comments.length > 0 ? `(${comments.length})` : undefined}>
             <div className="space-y-2 mb-3">
               {comments.length === 0 && <p className="text-xs text-gray-700 italic">{t('todoDetail.noComments')}</p>}
               {comments.map((c, i) => (
@@ -346,20 +357,17 @@ export default function TodoDetailPage() {
                 {savingComment ? '...' : t('common.send')}
               </Button>
             </div>
-          </div>
+          </DetailSection>
 
           {storageEnabled && (
-            <div className="border-t border-gray-800 pt-5">
-              <h3 className="text-sm font-medium text-gray-400 mb-3">
-                {t('attachments.attachments')}
-              </h3>
+            <DetailSection title={t('attachments.attachments')}>
               <AttachmentList
                 projectId={id!}
                 entityType="todo"
                 entityId={todoId!}
                 showUpload
               />
-            </div>
+            </DetailSection>
           )}
         </div>
       )}

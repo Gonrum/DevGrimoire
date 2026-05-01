@@ -224,6 +224,7 @@
     "blockedBy": "Blocked by",
     "blocking": "Blocking",
     "blocked": "Blocked",
+    "dependencies": "Dependencies",
     "addDependency": "+ Add dependency...",
     "removeDependencyFailed": "Failed to remove dependency",
     "milestoneChangeFailed": "Failed to change artifact",

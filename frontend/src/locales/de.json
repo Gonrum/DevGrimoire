@@ -224,6 +224,7 @@
     "blockedBy": "Blockiert von",
     "blocking": "Blockiert",
     "blocked": "Blockiert",
+    "dependencies": "Abhängigkeiten",
     "addDependency": "+ Abhängigkeit hinzufügen...",
     "removeDependencyFailed": "Abhängigkeit entfernen fehlgeschlagen",
     "milestoneChangeFailed": "Artefakt-Änderung fehlgeschlagen",
