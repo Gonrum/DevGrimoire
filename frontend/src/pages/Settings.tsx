@@ -722,9 +722,12 @@ export default function Settings() {
                 </label>
               </div>
 
-              <div className="bg-gray-900 border border-gray-700 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-sm font-medium text-gray-300">{t('settings.chatEndpoints')}</h2>
+              <SettingsSection
+                title={t('settings.chatEndpoints')}
+                description={t('settings.chatEndpointsDescription')}
+                meta={chatConfig.endpoints.length > 0 ? `${chatConfig.endpoints.length}` : undefined}
+              >
+                <div className="mb-3 flex justify-end">
                   <Button size="sm" onClick={addChatEndpoint}>{t('settings.chatAddEndpoint')}</Button>
                 </div>
 
@@ -868,57 +871,46 @@ export default function Settings() {
                     })}
                   </div>
                 )}
-              </div>
+              </SettingsSection>
 
-              <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">{t('settings.chatTemperature')}</label>
-                  <input
+              <SettingsSection title={t('settings.chatAdvancedTitle')} description={t('settings.chatAdvancedDescription')}>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <FormInput
+                    label={t('settings.chatTemperature')}
                     type="number"
                     step="0.1"
                     min="0"
                     max="2"
                     value={chatConfig.temperature ?? 0.7}
                     onChange={(e) => { setChatConfig((prev) => ({ ...prev, temperature: parseFloat(e.target.value) })); setChatSavedMsg(false); }}
-                    className="w-full bg-gray-800 border border-gray-700 text-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
                   />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">{t('settings.chatMaxTokens')}</label>
-                  <input
+                  <FormInput
+                    label={t('settings.chatMaxTokens')}
                     type="number"
                     min="1"
                     value={chatConfig.maxTokens ?? 2048}
                     onChange={(e) => { setChatConfig((prev) => ({ ...prev, maxTokens: parseInt(e.target.value, 10) })); setChatSavedMsg(false); }}
-                    className="w-full bg-gray-800 border border-gray-700 text-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
                   />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">{t('settings.chatTopK')}</label>
-                  <input
+                  <FormInput
+                    label={t('settings.chatTopK')}
                     type="number"
                     min="1"
                     max="20"
                     value={chatConfig.topK ?? 6}
                     onChange={(e) => { setChatConfig((prev) => ({ ...prev, topK: parseInt(e.target.value, 10) })); setChatSavedMsg(false); }}
-                    className="w-full bg-gray-800 border border-gray-700 text-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
                   />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">{t('settings.chatHistoryLimit')}</label>
-                  <input
+                  <FormInput
+                    label={t('settings.chatHistoryLimit')}
                     type="number"
                     min="1"
                     max="50"
                     value={chatConfig.historyLimit ?? 10}
                     onChange={(e) => { setChatConfig((prev) => ({ ...prev, historyLimit: parseInt(e.target.value, 10) })); setChatSavedMsg(false); }}
-                    className="w-full bg-gray-800 border border-gray-700 text-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
                   />
                 </div>
-              </div>
+              </SettingsSection>
 
-              {/* Tool-Calling Section */}
-              <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 space-y-3">
+              <SettingsSection title={t('settings.chatToolsTitle')} description={t('settings.chatToolsDescription')}>
                 <div className="flex items-center justify-between">
                   <label className="flex items-center gap-3 cursor-pointer">
                     <input
@@ -929,21 +921,19 @@ export default function Settings() {
                     />
                     <span className="text-sm font-medium text-gray-200">{t('settings.chatToolsEnable')}</span>
                   </label>
-                  <div className="w-32">
-                    <label className="block text-xs text-gray-500 mb-1">{t('settings.chatToolsMaxIterations')}</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="10"
-                      value={chatConfig.toolsMaxIterations ?? 5}
-                      onChange={(e) => { setChatConfig((prev) => ({ ...prev, toolsMaxIterations: parseInt(e.target.value, 10) })); setChatSavedMsg(false); }}
-                      disabled={!chatConfig.toolsEnabled}
-                      className="w-full bg-gray-800 border border-gray-700 text-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
-                    />
-                  </div>
+                  <FormInput
+                    fieldClassName="w-32"
+                    label={t('settings.chatToolsMaxIterations')}
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={chatConfig.toolsMaxIterations ?? 5}
+                    onChange={(e) => { setChatConfig((prev) => ({ ...prev, toolsMaxIterations: parseInt(e.target.value, 10) })); setChatSavedMsg(false); }}
+                    disabled={!chatConfig.toolsEnabled}
+                  />
                 </div>
 
-                <div className="bg-amber-900/20 border border-amber-800/40 rounded px-3 py-2 text-xs text-amber-200">
+                <div className="mt-3 bg-amber-900/20 border border-amber-800/40 rounded px-3 py-2 text-xs text-amber-200">
                   ⚠ {t('settings.chatToolsHint')}
                 </div>
 
@@ -1035,7 +1025,7 @@ export default function Settings() {
                     </div>
                   );
                 })()}
-              </div>
+              </SettingsSection>
 
               <SettingsActions className="mt-0">
                 <Button variant="primary" size="lg" onClick={saveChatConfig} disabled={chatSaving}>
