@@ -529,29 +529,27 @@ export default function Settings() {
           )}
 
           {revealedKey && (
-            <div className="bg-green-900/30 border border-green-700 rounded-lg p-4 mb-6">
-              <p className="text-green-300 text-sm font-medium mb-2">
-                {t('settings.apiKeyCreated')}
+            <div className="mb-6 rounded-lg border-2 border-amber-700 bg-amber-950/30 p-4">
+              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-300">
+                <span>⚠</span>
+                <span>{t('settings.apiKeyCreated')}</span>
+              </div>
+              <p className="mb-3 text-xs text-amber-200/90">
+                {t('settings.apiKeyRevealedWarning')}
               </p>
               <div className="flex items-center gap-2">
-                <code className="flex-1 bg-gray-900 text-green-400 px-3 py-2 rounded font-mono text-sm break-all">
+                <code className="flex-1 break-all rounded bg-gray-950 px-3 py-2 font-mono text-sm text-green-400">
                   {revealedKey}
                 </code>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => copyToClipboard(revealedKey)}
-                >
+                <Button variant="primary" size="sm" onClick={() => copyToClipboard(revealedKey)}>
                   {copied ? t('common.copied') : t('common.copy')}
                 </Button>
               </div>
-              <button
-                type="button"
-                onClick={() => setRevealedKey(null)}
-                className="text-xs text-gray-500 hover:text-gray-300 mt-2"
-              >
-                {t('common.close')}
-              </button>
+              <div className="mt-3 flex justify-end">
+                <Button variant="secondary" size="sm" onClick={() => setRevealedKey(null)}>
+                  {t('settings.apiKeyRevealedAck')}
+                </Button>
+              </div>
             </div>
           )}
 
@@ -582,100 +580,114 @@ export default function Settings() {
             </div>
           </SettingsSection>
 
-          {apiKeysLoading ? (
-            <div className="text-gray-500 py-10 text-center">{t('common.loading')}</div>
-          ) : apiKeys.length === 0 ? (
-            <div className="text-gray-500 py-10 text-center">{t('settings.noApiKeys')}</div>
-          ) : (
-            <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-x-auto">
-              <table className="w-full text-sm min-w-[600px]">
-                <thead>
-                  <tr className="border-b border-gray-700 bg-gray-800/50">
-                    <th className="text-left px-4 py-2 text-gray-400 font-medium">{t('settings.apiKeyTableName')}</th>
-                    <th className="text-left px-4 py-2 text-gray-400 font-medium">Key</th>
-                    <th className="text-left px-4 py-2 text-gray-400 font-medium">{t('settings.apiKeyTableCreated')}</th>
-                    <th className="text-left px-4 py-2 text-gray-400 font-medium">{t('settings.apiKeyTableLastUsed')}</th>
-                    <th className="text-left px-4 py-2 text-gray-400 font-medium">{t('settings.apiKeyTableExpiry')}</th>
-                    <th className="px-4 py-2"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {apiKeys.map((key) => (
-                    <tr key={key._id} className="border-b border-gray-800 last:border-0">
-                      <td className="px-4 py-3 text-gray-200">{key.name}</td>
-                      <td className="px-4 py-3">
-                        <code className="text-gray-400 font-mono text-xs">{key.prefix}...</code>
-                      </td>
-                      <td className="px-4 py-3 text-gray-400">
-                        {new Date(key.createdAt).toLocaleDateString(dateLocale)}
-                      </td>
-                      <td className="px-4 py-3 text-gray-400">
-                        {key.lastUsedAt
-                          ? new Date(key.lastUsedAt).toLocaleDateString(dateLocale)
-                          : t('common.neverUsed')}
-                      </td>
-                      <td className="px-4 py-3 text-gray-400">
-                        {key.expiresAt
-                          ? new Date(key.expiresAt).toLocaleDateString(dateLocale)
-                          : t('common.noExpiry')}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            variant="secondary"
-                            size="xs"
-                            onClick={() =>
-                              setEditingApiKeyId(
-                                editingApiKeyId === key._id ? null : key._id,
-                              )
-                            }
-                          >
-                            {Array.isArray(key.allowedTools)
-                              ? t('settings.apiKeyToolsScoped', {
-                                  count: key.allowedTools.length,
-                                })
-                              : t('settings.apiKeyToolsAll')}
-                          </Button>
-                          <ConfirmButton
-                            onConfirm={() => deleteApiKey(key._id)}
-                            label={t('common.delete')}
-                            confirmLabel={t('common.confirmDelete')}
-                            variant="danger"
-                            size="xs"
-                          />
-                        </div>
-                      </td>
+          <SettingsSection
+            title={t('settings.apiKeyActiveTitle')}
+            description={t('settings.apiKeyActiveDescription')}
+            meta={apiKeys.length > 0 ? `${apiKeys.length}` : undefined}
+            className="mb-6"
+          >
+            {apiKeysLoading ? (
+              <div className="py-8 text-center text-sm text-gray-500">{t('common.loading')}</div>
+            ) : apiKeys.length === 0 ? (
+              <div className="py-8 text-center text-sm text-gray-500">{t('settings.noApiKeys')}</div>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-gray-800">
+                <table className="w-full min-w-[600px] text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-800 bg-gray-800/50">
+                      <th className="px-4 py-2 text-left font-medium text-gray-400">{t('settings.apiKeyTableName')}</th>
+                      <th className="px-4 py-2 text-left font-medium text-gray-400">Key</th>
+                      <th className="px-4 py-2 text-left font-medium text-gray-400">{t('settings.apiKeyTableCreated')}</th>
+                      <th className="px-4 py-2 text-left font-medium text-gray-400">{t('settings.apiKeyTableLastUsed')}</th>
+                      <th className="px-4 py-2 text-left font-medium text-gray-400">{t('settings.apiKeyTableExpiry')}</th>
+                      <th className="px-4 py-2"></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  </thead>
+                  <tbody>
+                    {apiKeys.map((key) => {
+                      const isAllTools = !Array.isArray(key.allowedTools);
+                      const isExpired = key.expiresAt && new Date(key.expiresAt) < new Date();
+                      const isSelected = editingApiKeyId === key._id;
+                      return (
+                        <tr
+                          key={key._id}
+                          aria-current={isSelected ? 'true' : undefined}
+                          className={`border-b border-gray-800 last:border-0 ${isSelected ? 'bg-violet-900/20' : ''}`}
+                        >
+                          <td className="px-4 py-3 text-gray-200">
+                            <div className="flex items-center gap-2">
+                              {isAllTools && (
+                                <span title={t('settings.apiKeyRiskAllTools')} className="inline-block h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+                              )}
+                              {key.name}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <code className="font-mono text-xs text-gray-400">{key.prefix}...</code>
+                          </td>
+                          <td className="px-4 py-3 text-gray-400">
+                            {new Date(key.createdAt).toLocaleDateString(dateLocale)}
+                          </td>
+                          <td className="px-4 py-3 text-gray-400">
+                            {key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString(dateLocale) : t('common.neverUsed')}
+                          </td>
+                          <td className={`px-4 py-3 ${isExpired ? 'text-red-400' : 'text-gray-400'}`}>
+                            {key.expiresAt ? new Date(key.expiresAt).toLocaleDateString(dateLocale) : t('common.noExpiry')}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                variant={isSelected ? 'primary' : 'secondary'}
+                                size="xs"
+                                onClick={() => setEditingApiKeyId(isSelected ? null : key._id)}
+                              >
+                                {Array.isArray(key.allowedTools)
+                                  ? t('settings.apiKeyToolsScoped', { count: key.allowedTools.length })
+                                  : t('settings.apiKeyToolsAll')}
+                              </Button>
+                              <ConfirmButton
+                                onConfirm={() => deleteApiKey(key._id)}
+                                label={t('common.delete')}
+                                confirmLabel={t('common.confirmDelete')}
+                                variant="danger"
+                                size="xs"
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
-          {editingApiKeyId && (() => {
-            const key = apiKeys.find((k) => k._id === editingApiKeyId);
-            if (!key) return null;
-            return (
-              <ApiKeyToolEditor
-                apiKey={key}
-                onSave={(tools) => saveApiKeyTools(key._id, tools)}
-                onClose={() => setEditingApiKeyId(null)}
-              />
-            );
-          })()}
+            {editingApiKeyId && (() => {
+              const key = apiKeys.find((k) => k._id === editingApiKeyId);
+              if (!key) return null;
+              return (
+                <div className="mt-4 rounded-lg border border-violet-700/40 bg-violet-950/20 p-1">
+                  <div className="px-3 pt-2 text-xs uppercase tracking-wide text-violet-300">
+                    {t('settings.apiKeyToolAccessFor', { name: key.name })}
+                  </div>
+                  <ApiKeyToolEditor
+                    apiKey={key}
+                    onSave={(tools) => saveApiKeyTools(key._id, tools)}
+                    onClose={() => setEditingApiKeyId(null)}
+                  />
+                </div>
+              );
+            })()}
+          </SettingsSection>
 
-          <div className="mt-8 bg-gray-800/50 border border-gray-700 rounded-lg p-4">
-            <h2 className="text-sm font-medium text-gray-300 mb-2">{t('settings.apiKeyUsageTitle')}</h2>
-            <p className="text-sm text-gray-400 mb-2">
-              {t('settings.apiKeyUsageText')}
-            </p>
-            <div className="space-y-2 text-xs font-mono text-gray-400 bg-gray-900 rounded p-3">
+          <SettingsSection title={t('settings.apiKeyUsageTitle')} description={t('settings.apiKeyUsageText')}>
+            <div className="space-y-2 rounded bg-gray-950/60 p-3 font-mono text-xs text-gray-400">
               <div><span className="text-gray-500"># Header</span></div>
               <div>Authorization: Bearer cv_...</div>
               <div className="mt-2"><span className="text-gray-500"># Query Parameter</span></div>
               <div>?apiKey=cv_...</div>
             </div>
-          </div>
+          </SettingsSection>
         </>
       )}
 
