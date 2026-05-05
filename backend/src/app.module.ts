@@ -46,6 +46,7 @@ import { ChatModule } from './chat/chat.module';
 import { WebSearchModule } from './web-search/web-search.module';
 import { WorkspacesModule } from './workspaces/workspaces.module';
 import { CustomersModule } from './customers/customers.module';
+import { ContactsModule } from './contacts/contacts.module';
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
@@ -96,6 +97,7 @@ if (!MONGODB_URI) {
     WebSearchModule,
     WorkspacesModule,
     CustomersModule,
+    ContactsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
