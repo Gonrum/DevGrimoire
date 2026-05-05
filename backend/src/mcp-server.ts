@@ -40,6 +40,7 @@ import { WorkspaceClient } from './workspaces/workspace-client.service';
 import { WorkspaceGitTokensService } from './workspaces/workspace-git-tokens.service';
 import { WorkspaceCliTokenService } from './workspaces/workspace-cli-token.service';
 import { AuthService } from './auth/auth.service';
+import { CustomersService } from './customers/customers.service';
 import { UserRole } from './auth/schemas/user.schema';
 import { registerMcpTools } from './mcp-tools';
 
@@ -118,6 +119,7 @@ async function bootstrap() {
     attachmentsService: app.get(AttachmentsService),
     questionsService: app.get(QuestionsService),
     authService: app.get(AuthService),
+    customersService: app.get(CustomersService),
     logsService: app.get(LogsService),
     releasesService: app.get(ReleasesService),
     chatService: app.get(ChatService),

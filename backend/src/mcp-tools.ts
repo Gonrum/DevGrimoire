@@ -43,6 +43,7 @@ import { SearchCategory, SearchTimeRange } from './web-search/dto/web-search.dto
 import { RequestContext } from './common/request-context';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 import { AuthService } from './auth/auth.service';
+import { CustomersService } from './customers/customers.service';
 
 const RAG_BACKEND_URL = process.env.RAG_BACKEND_URL || 'http://localhost:3200';
 
@@ -195,6 +196,7 @@ export interface McpServices {
   attachmentsService: AttachmentsService;
   questionsService: QuestionsService;
   authService: AuthService;
+  customersService: CustomersService;
   logsService: LogsService;
   releasesService: ReleasesService;
   chatService: ChatService;
@@ -275,6 +277,149 @@ const tools = [
         id: { type: 'string', description: 'Project MongoDB ID' },
       },
       required: ['id'],
+    },
+  },
+  {
+    name: 'customer_create',
+    description: 'Create a customer file. Customers are a top-level context for deployments, knowledge, workflows, environments, secrets, files, monitoring, and contacts.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Unique customer name' },
+        description: { type: 'string', description: 'Markdown-capable customer description' },
+        status: { type: 'string', enum: ['lead', 'onboarding', 'active', 'paused', 'offboarding', 'cancelled', 'archived'], description: 'Customer lifecycle status' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags for filtering' },
+        primaryContactName: { type: 'string', description: 'Primary contact name' },
+        primaryContactEmail: { type: 'string', description: 'Primary contact email' },
+        primaryContactPhone: { type: 'string', description: 'Primary contact phone' },
+        website: { type: 'string', description: 'Customer website' },
+        notes: { type: 'string', description: 'Internal customer-file notes' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'customer_list',
+    description: 'List customer files (compact). Archived customers are excluded by default. Use customer_get for full details.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        status: { type: 'string', enum: ['lead', 'onboarding', 'active', 'paused', 'offboarding', 'cancelled', 'archived'], description: 'Filter by lifecycle status' },
+        tag: { type: 'string', description: 'Filter by exact tag' },
+        q: { type: 'string', description: 'Text search over name, description, tags, and notes' },
+        includeArchived: { type: 'boolean', description: 'Include archived customers' },
+        projectId: { type: 'string', description: 'Filter customers linked to this project' },
+        limit: { type: 'number', description: 'Max items to return' },
+        offset: { type: 'number', description: 'Skip first N items' },
+      },
+    },
+  },
+  {
+    name: 'customer_get',
+    description: 'Get a customer file by MongoDB ID with full details.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Customer MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'customer_update',
+    description: 'Update a customer file.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Customer MongoDB ID' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        status: { type: 'string', enum: ['lead', 'onboarding', 'active', 'paused', 'offboarding', 'cancelled', 'archived'] },
+        tags: { type: 'array', items: { type: 'string' } },
+        primaryContactName: { type: 'string' },
+        primaryContactEmail: { type: 'string' },
+        primaryContactPhone: { type: 'string' },
+        website: { type: 'string' },
+        notes: { type: 'string' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'customer_archive',
+    description: 'Archive a customer file. This does not delete linked projects or other data.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Customer MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'customer_project_link',
+    description: 'Link a project to a customer as a deployment. A project can be linked to multiple customers.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        customerId: { type: 'string', description: 'Customer MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        status: { type: 'string', enum: ['active', 'paused', 'archived'], description: 'Deployment status' },
+        role: { type: 'string', description: 'Role of this project for the customer' },
+        notes: { type: 'string', description: 'Deployment notes' },
+        environmentIds: { type: 'array', items: { type: 'string' }, description: 'Environment IDs relevant for this customer deployment' },
+      },
+      required: ['customerId', 'projectId'],
+    },
+  },
+  {
+    name: 'customer_project_list',
+    description: 'List project links/deployments for a customer.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        customerId: { type: 'string', description: 'Customer MongoDB ID' },
+      },
+      required: ['customerId'],
+    },
+  },
+  {
+    name: 'customer_project_update',
+    description: 'Update a customer-project link/deployment.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        customerId: { type: 'string', description: 'Customer MongoDB ID' },
+        linkId: { type: 'string', description: 'CustomerProjectLink MongoDB ID' },
+        status: { type: 'string', enum: ['active', 'paused', 'archived'] },
+        role: { type: 'string' },
+        notes: { type: 'string' },
+        environmentIds: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['customerId', 'linkId'],
+    },
+  },
+  {
+    name: 'customer_project_unlink',
+    description: 'Remove a project link/deployment from a customer. This does not delete the project.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        customerId: { type: 'string', description: 'Customer MongoDB ID' },
+        linkId: { type: 'string', description: 'CustomerProjectLink MongoDB ID' },
+      },
+      required: ['customerId', 'linkId'],
+    },
+  },
+  {
+    name: 'project_customer_links',
+    description: 'List all customer links/deployments for a project.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+      },
+      required: ['projectId'],
     },
   },
   {
@@ -2099,7 +2244,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, authService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, authService, customersService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -2194,6 +2339,94 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = { deleted: true, id };
           break;
         }
+        case 'customer_create': {
+          const customer = await customersService.create({
+            name: requireString(a, 'name'),
+            description: optionalString(a, 'description'),
+            status: optionalString(a, 'status') as any,
+            tags: optionalStringArray(a, 'tags'),
+            primaryContactName: optionalString(a, 'primaryContactName'),
+            primaryContactEmail: optionalString(a, 'primaryContactEmail'),
+            primaryContactPhone: optionalString(a, 'primaryContactPhone'),
+            website: optionalString(a, 'website'),
+            notes: optionalString(a, 'notes'),
+          });
+          result = compactCreateResult(customer, { name: (customer as any).name, status: (customer as any).status });
+          break;
+        }
+        case 'customer_list': {
+          const customers = await customersService.findAll({
+            status: optionalString(a, 'status') as any,
+            tag: optionalString(a, 'tag'),
+            q: optionalString(a, 'q'),
+            includeArchived: optionalBoolean(a, 'includeArchived'),
+            projectId: optionalString(a, 'projectId'),
+          });
+          const compactCustomers = compactList(customers as any, ['notes', '__v']);
+          result = applyPagination(compactCustomers, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
+          break;
+        }
+        case 'customer_get':
+          result = await customersService.findById(requireString(a, 'id'));
+          break;
+        case 'customer_update':
+          result = compactUpdateResult(await customersService.update(requireString(a, 'id'), {
+            name: optionalString(a, 'name'),
+            description: optionalString(a, 'description'),
+            status: optionalString(a, 'status') as any,
+            tags: optionalStringArray(a, 'tags'),
+            primaryContactName: optionalString(a, 'primaryContactName'),
+            primaryContactEmail: optionalString(a, 'primaryContactEmail'),
+            primaryContactPhone: optionalString(a, 'primaryContactPhone'),
+            website: optionalString(a, 'website'),
+            notes: optionalString(a, 'notes'),
+          }));
+          break;
+        case 'customer_archive':
+          result = compactUpdateResult(await customersService.archive(requireString(a, 'id')));
+          break;
+        case 'customer_project_link': {
+          const link = await customersService.createProjectLink(requireString(a, 'customerId'), {
+            projectId: requireString(a, 'projectId'),
+            status: optionalString(a, 'status') as any,
+            role: optionalString(a, 'role'),
+            notes: optionalString(a, 'notes'),
+            environmentIds: optionalStringArray(a, 'environmentIds'),
+          });
+          result = compactCreateResult(link, {
+            customerId: (link as any).customerId,
+            projectId: (link as any).projectId,
+          });
+          break;
+        }
+        case 'customer_project_list':
+          result = compactList(
+            await customersService.findProjectLinks(requireString(a, 'customerId')) as any,
+            ['__v'],
+          );
+          break;
+        case 'customer_project_update':
+          result = compactUpdateResult(await customersService.updateProjectLink(
+            requireString(a, 'customerId'),
+            requireString(a, 'linkId'),
+            {
+              status: optionalString(a, 'status') as any,
+              role: optionalString(a, 'role'),
+              notes: optionalString(a, 'notes'),
+              environmentIds: optionalStringArray(a, 'environmentIds'),
+            },
+          ));
+          break;
+        case 'customer_project_unlink':
+          await customersService.deleteProjectLink(requireString(a, 'customerId'), requireString(a, 'linkId'));
+          result = { deleted: true, id: a.linkId };
+          break;
+        case 'project_customer_links':
+          result = compactList(
+            await customersService.findLinksByProject(requireString(a, 'projectId')) as any,
+            ['__v'],
+          );
+          break;
         case 'todo_create': {
           const todo = await todosService.create({
             projectId: requireString(a, 'projectId'),
