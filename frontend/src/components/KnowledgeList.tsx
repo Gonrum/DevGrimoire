@@ -15,15 +15,15 @@ import TabToolbar from './ui/TabToolbar';
 
 interface KnowledgeFormData {
   topic: string;
-  scope: 'project' | 'global';
+  scope: 'project' | 'global' | 'customer';
   category: string;
   tags: string;
   content: string;
 }
 
-const emptyForm = (): KnowledgeFormData => ({
+const emptyForm = (defaultScope: KnowledgeFormData['scope']): KnowledgeFormData => ({
   topic: '',
-  scope: 'project',
+  scope: defaultScope,
   category: '',
   tags: '',
   content: '',
@@ -32,7 +32,7 @@ const emptyForm = (): KnowledgeFormData => ({
 function fromKnowledge(entry: Knowledge): KnowledgeFormData {
   return {
     topic: entry.topic,
-    scope: entry.scope === 'global' ? 'global' : 'project',
+    scope: entry.scope === 'global' ? 'global' : entry.scope === 'customer' ? 'customer' : 'project',
     category: entry.category || '',
     tags: entry.tags.join(', '),
     content: entry.content,
@@ -43,13 +43,15 @@ function KnowledgeForm({
   initial,
   editId,
   projectId,
+  customerId,
   categories,
   onDone,
   onCancel,
 }: {
   initial: KnowledgeFormData;
   editId?: string;
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   categories: string[];
   onDone: () => void;
   onCancel: () => void;
@@ -82,6 +84,7 @@ function KnowledgeForm({
           ...payload,
           scope: form.scope,
           projectId: form.scope === 'project' ? projectId : undefined,
+          customerId: form.scope === 'customer' ? customerId : undefined,
         });
         showSuccess(t('knowledge.created', { topic: payload.topic }));
       }
@@ -123,9 +126,10 @@ function KnowledgeForm({
           label={t('knowledge.scope')}
           value={form.scope}
           disabled={!!editId}
-          onChange={(e) => update({ scope: e.target.value as 'project' | 'global' })}
+          onChange={(e) => update({ scope: e.target.value as KnowledgeFormData['scope'] })}
         >
-          <option value="project">{t('knowledge.scopeProject')}</option>
+          {projectId && <option value="project">{t('knowledge.scopeProject')}</option>}
+          {customerId && <option value="customer">{t('knowledge.scopeCustomer')}</option>}
           <option value="global">{t('knowledge.scopeGlobal')}</option>
         </FormSelect>
         <FormInput
@@ -161,12 +165,16 @@ function KnowledgeForm({
 export default function KnowledgeList({
   entries,
   projectId,
+  customerId,
   onUpdate,
 }: {
   entries: Knowledge[];
-  projectId: string;
+  /** Project context — set this OR customerId. */
+  projectId?: string;
+  customerId?: string;
   onUpdate: () => void;
 }) {
+  const defaultScope: KnowledgeFormData['scope'] = customerId ? 'customer' : 'project';
   const { t, i18n } = useTranslation();
   const { showSuccess, showError } = useToast();
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -206,9 +214,10 @@ export default function KnowledgeList({
   if (showForm) {
     return (
       <KnowledgeForm
-        initial={editingEntry ? fromKnowledge(editingEntry) : emptyForm()}
+        initial={editingEntry ? fromKnowledge(editingEntry) : emptyForm(defaultScope)}
         editId={editingEntry?._id}
         projectId={projectId}
+        customerId={customerId}
         categories={categories}
         onDone={handleFormDone}
         onCancel={() => { setShowForm(false); setEditingEntry(null); }}
@@ -262,6 +271,11 @@ export default function KnowledgeList({
                   {e.scope === 'global' && (
                     <Badge color="bg-cyan-900/40 text-cyan-300">
                       {t('knowledge.scopeGlobalShort')}
+                    </Badge>
+                  )}
+                  {e.scope === 'customer' && (
+                    <Badge color="bg-amber-900/40 text-amber-300">
+                      {t('knowledge.scopeCustomerShort')}
                     </Badge>
                   )}
                 </div>

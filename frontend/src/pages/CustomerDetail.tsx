@@ -23,6 +23,7 @@ import Markdown from '../components/Markdown';
 import ProjectTabShell from '../components/ui/ProjectTabShell';
 import TodoBoard from '../components/TodoBoard';
 import RecurringTaskList from '../components/RecurringTaskList';
+import KnowledgeList from '../components/KnowledgeList';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { useToast } from '../components/Toast';
 
@@ -80,6 +81,7 @@ export default function CustomerDetail() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [customerTodos, setCustomerTodos] = useState<Todo[]>([]);
   const [customerRecurring, setCustomerRecurring] = useState<RecurringTask[]>([]);
+  const [customerKnowledge, setCustomerKnowledge] = useState<Knowledge[]>([]);
   const [aggregate, setAggregate] = useState<AggregatedData>(emptyAggregate);
   const [tab, setTab] = useState<Tab>('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -99,14 +101,16 @@ export default function CustomerDetail() {
       api.contacts.list(id).catch(() => [] as Contact[]),
       api.todos.list({ customerId: id }).catch(() => [] as Todo[]),
       api.recurringTasks.list({ customerId: id }).catch(() => [] as RecurringTask[]),
+      api.knowledge.listForCustomer(id).catch(() => [] as Knowledge[]),
     ])
-      .then(([customerData, linkData, projectData, contactData, todoData, recurringData]) => {
+      .then(([customerData, linkData, projectData, contactData, todoData, recurringData, knowledgeData]) => {
         setCustomer(customerData);
         setLinks(linkData);
         setProjects(projectData);
         setContacts(contactData);
         setCustomerTodos(todoData);
         setCustomerRecurring(recurringData);
+        setCustomerKnowledge(knowledgeData);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -222,7 +226,7 @@ export default function CustomerDetail() {
     {
       label: t('sidebar.knowledge'),
       items: [
-        { key: 'knowledge', label: t('customers.tab.knowledge'), count: aggregate.knowledge.length },
+        { key: 'knowledge', label: t('customers.tab.knowledge'), count: customerKnowledge.length },
         { key: 'workflows', label: t('customers.tab.workflows'), count: customerRecurring.filter((rt) => rt.active).length },
         { key: 'files', label: t('customers.tab.files'), count: aggregate.attachments.length },
       ],
@@ -504,10 +508,13 @@ export default function CustomerDetail() {
             )}
 
             {tab === 'knowledge' && (
-              <AggregatedKnowledgeTab
-                items={aggregate.knowledge}
+              <CustomerLoreTab
+                customerId={id}
+                entries={customerKnowledge}
+                aggregatedEntries={aggregate.knowledge}
                 projectsById={projectsById}
-                loading={aggLoading}
+                onUpdate={loadBase}
+                aggLoading={aggLoading}
               />
             )}
 
@@ -745,6 +752,49 @@ function AggregatedTodosTab({
           </Link>
         );
       })}
+    </div>
+  );
+}
+
+function CustomerLoreTab({
+  customerId,
+  entries,
+  aggregatedEntries,
+  projectsById,
+  onUpdate,
+  aggLoading,
+}: {
+  customerId: string;
+  entries: Knowledge[];
+  aggregatedEntries: Knowledge[];
+  projectsById: Map<string, Project>;
+  onUpdate: () => void;
+  aggLoading: boolean;
+}) {
+  const { t } = useTranslation();
+  const [showAggregated, setShowAggregated] = useState(false);
+  return (
+    <div className="space-y-6">
+      <KnowledgeList entries={entries} customerId={customerId} onUpdate={onUpdate} />
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowAggregated((s) => !s)}
+          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          {showAggregated ? '▾' : '▸'}{' '}
+          {t('customers.alsoLoreInProjects', { count: aggregatedEntries.length })}
+        </button>
+        {showAggregated && (
+          <div className="mt-3">
+            <AggregatedKnowledgeTab
+              items={aggregatedEntries}
+              projectsById={projectsById}
+              loading={aggLoading}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

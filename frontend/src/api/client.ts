@@ -185,7 +185,8 @@ export interface Session {
 export interface Knowledge {
   _id: string;
   projectId?: string;
-  scope?: 'global' | 'project';
+  customerId?: string;
+  scope?: 'global' | 'project' | 'customer';
   topic: string;
   content: string;
   tags: string[];
@@ -760,11 +761,20 @@ export const api = {
       request<Session>('/sessions', { method: 'POST', body: JSON.stringify(data) }),
   },
   knowledge: {
-    list: (projectId: string) =>
-      request<Knowledge[]>(`/knowledge?projectId=${projectId}`),
-    search: (query: string, projectId?: string) => {
+    list: (projectId: string | undefined, options?: { customerId?: string; scope?: string }) => {
+      const params = new URLSearchParams();
+      if (projectId) params.set('projectId', projectId);
+      if (options?.customerId) params.set('customerId', options.customerId);
+      if (options?.scope) params.set('scope', options.scope);
+      return request<Knowledge[]>(`/knowledge?${params}`);
+    },
+    listForCustomer: (customerId: string) =>
+      request<Knowledge[]>(`/knowledge?customerId=${customerId}`),
+    search: (query: string, projectId?: string, options?: { customerId?: string; scope?: string }) => {
       const params = new URLSearchParams({ q: query });
       if (projectId) params.set('projectId', projectId);
+      if (options?.customerId) params.set('customerId', options.customerId);
+      if (options?.scope) params.set('scope', options.scope);
       return request<Knowledge[]>(`/knowledge/search?${params}`);
     },
     get: (id: string) => request<Knowledge>(`/knowledge/${id}`),
