@@ -21,6 +21,7 @@ import Button from '../components/ui/Button';
 import EmptyState from '../components/ui/EmptyState';
 import Markdown from '../components/Markdown';
 import ProjectTabShell from '../components/ui/ProjectTabShell';
+import TodoBoard from '../components/TodoBoard';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { useToast } from '../components/Toast';
 
@@ -76,6 +77,7 @@ export default function CustomerDetail() {
   const [links, setLinks] = useState<CustomerProjectLink[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [customerTodos, setCustomerTodos] = useState<Todo[]>([]);
   const [aggregate, setAggregate] = useState<AggregatedData>(emptyAggregate);
   const [tab, setTab] = useState<Tab>('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -93,12 +95,14 @@ export default function CustomerDetail() {
       api.customers.listProjectLinks(id),
       api.projects.list({ active: true }),
       api.contacts.list(id).catch(() => [] as Contact[]),
+      api.todos.list({ customerId: id }).catch(() => [] as Todo[]),
     ])
-      .then(([customerData, linkData, projectData, contactData]) => {
+      .then(([customerData, linkData, projectData, contactData, todoData]) => {
         setCustomer(customerData);
         setLinks(linkData);
         setProjects(projectData);
         setContacts(contactData);
+        setCustomerTodos(todoData);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -191,6 +195,7 @@ export default function CustomerDetail() {
   if (!customer || !id) return <p className="text-red-400">{t('customers.notFound')}</p>;
 
   const openTodos = aggregate.todos.filter((todo) => todo.status !== 'done' && !todo.archived);
+  const openCustomerTodos = customerTodos.filter((todo) => todo.status !== 'done' && !todo.archived);
   const linkedOnlyEnvironments = aggregate.environments.filter((env) => {
     const linked = linkedEnvIdsByLink.get(env.projectId);
     return linked ? linked.has(env._id) : false;
@@ -206,7 +211,7 @@ export default function CustomerDetail() {
       items: [
         { key: 'overview', label: t('customers.tab.overview') },
         { key: 'projects', label: t('customers.tab.projects'), count: links.length },
-        { key: 'todos', label: t('customers.tab.todos'), count: openTodos.length },
+        { key: 'todos', label: t('customers.tab.todos'), count: openCustomerTodos.length },
         { key: 'activity', label: t('customers.tab.activity'), count: aggregate.activity.length },
       ],
     },
@@ -458,7 +463,10 @@ export default function CustomerDetail() {
                     </p>
                     <p>
                       {t('customers.openCustomerTodos')}:{' '}
-                      <span className="text-gray-300">{openTodos.length}</span>
+                      <span className="text-gray-300">{openCustomerTodos.length}</span>
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      {t('customers.openProjectTodosAggregated', { count: openTodos.length })}
                     </p>
                     <p>
                       {t('customers.tab.workflows')}:{' '}
@@ -481,10 +489,13 @@ export default function CustomerDetail() {
             )}
 
             {tab === 'todos' && (
-              <AggregatedTodosTab
-                todos={openTodos}
+              <CustomerQuestsTab
+                customerId={id}
+                todos={customerTodos}
+                aggregatedTodos={openTodos}
                 projectsById={projectsById}
-                loading={aggLoading}
+                onUpdate={loadBase}
+                aggLoading={aggLoading}
               />
             )}
 
@@ -638,6 +649,49 @@ function ProjectBadge({ project, projectId }: { project?: Project; projectId: st
   return <span className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-500">{projectId}</span>;
 }
 
+function CustomerQuestsTab({
+  customerId,
+  todos,
+  aggregatedTodos,
+  projectsById,
+  onUpdate,
+  aggLoading,
+}: {
+  customerId: string;
+  todos: Todo[];
+  aggregatedTodos: Todo[];
+  projectsById: Map<string, Project>;
+  onUpdate: () => void;
+  aggLoading: boolean;
+}) {
+  const { t } = useTranslation();
+  const [showAggregated, setShowAggregated] = useState(false);
+  return (
+    <div className="space-y-6">
+      <TodoBoard todos={todos} milestones={[]} customerId={customerId} onUpdate={onUpdate} />
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowAggregated((s) => !s)}
+          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          {showAggregated ? '▾' : '▸'}{' '}
+          {t('customers.alsoOpenInProjects', { count: aggregatedTodos.length })}
+        </button>
+        {showAggregated && (
+          <div className="mt-3">
+            <AggregatedTodosTab
+              todos={aggregatedTodos}
+              projectsById={projectsById}
+              loading={aggLoading}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AggregatedTodosTab({
   todos,
   projectsById,
@@ -653,11 +707,16 @@ function AggregatedTodosTab({
   return (
     <div className="space-y-2">
       {todos.map((todo) => {
-        const project = projectsById.get(todo.projectId);
+        const project = todo.projectId ? projectsById.get(todo.projectId) : undefined;
+        const detailHref = project
+          ? `/projects/${project._id}/todos/${todo._id}`
+          : todo.projectId
+            ? `/projects/${todo.projectId}`
+            : `/customers/${todo.customerId}/todos/${todo._id}`;
         return (
           <Link
             key={todo._id}
-            to={project ? `/projects/${project._id}/todos/${todo._id}` : `/projects/${todo.projectId}`}
+            to={detailHref}
             className="block bg-gray-900 border border-gray-800 rounded-lg p-3 hover:border-violet-700 transition-colors"
           >
             <div className="flex items-start justify-between gap-3">
@@ -669,7 +728,9 @@ function AggregatedTodosTab({
                   <span className="text-sm text-gray-100 truncate">{todo.title}</span>
                 </div>
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
-                  <ProjectBadge project={project} projectId={todo.projectId} />
+                  {todo.projectId && (
+                    <ProjectBadge project={project} projectId={todo.projectId} />
+                  )}
                   <Badge color="bg-gray-800 text-gray-400">{todo.status}</Badge>
                   <Badge color="bg-gray-800 text-gray-400">{todo.priority}</Badge>
                 </div>

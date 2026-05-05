@@ -143,6 +143,8 @@
     "quickFacts": "Quick Facts",
     "linkedProjects": "Deployments",
     "openCustomerTodos": "Open Customer Quests",
+    "openProjectTodosAggregated": "({{count}} from deployments)",
+    "alsoOpenInProjects": "Also open in deployments ({{count}})",
     "vitalStatus": "Vital Status",
     "noNotes": "No notes in the customer file.",
     "website": "Website",
@@ -377,6 +379,7 @@
   "todoDetail": {
     "editTask": "Edit Quest",
     "backToProject": "Back to chapter",
+    "backToCustomer": "Back to customer",
     "notFound": "Quest not found.",
     "blockedBy": "Blocked by",
     "blocking": "Blocking",

@@ -311,6 +311,8 @@ function AppShell() {
           <Route path="/customers/:id/links/:linkId/edit" element={<CustomerProjectLinkEditPage />} />
           <Route path="/customers/:id/contacts/new" element={<ContactCreatePage />} />
           <Route path="/customers/:id/contacts/:contactId/edit" element={<ContactEditPage />} />
+          <Route path="/customers/:id/todos/new" element={<TodoCreatePage />} />
+          <Route path="/customers/:id/todos/:todoId" element={<TodoDetailPage />} />
           <Route path="/projects/:id/todos/new" element={<TodoCreatePage />} />
           <Route path="/projects/:id/todos/:todoId" element={<TodoDetailPage />} />
           <Route path="/projects/:id/milestones/new" element={<MilestoneCreatePage />} />

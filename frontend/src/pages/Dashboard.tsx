@@ -150,7 +150,13 @@ export default function Dashboard() {
             {activeTodos.map((todo) => (
               <Link
                 key={todo._id}
-                to={`/projects/${todo.projectId}?tab=todos`}
+                to={
+                  todo.projectId
+                    ? `/projects/${todo.projectId}?tab=todos`
+                    : todo.customerId
+                      ? `/customers/${todo.customerId}?tab=todos`
+                      : '#'
+                }
                 className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 bg-gray-900 border border-gray-800 rounded-lg px-3 sm:px-4 py-3 hover:border-violet-500 transition-colors"
               >
                 <Badge color={STATUS_COLORS[todo.status]} rounded="full" className="whitespace-nowrap">
@@ -165,7 +171,9 @@ export default function Dashboard() {
                   {todo.title}
                 </span>
                 <span className="text-xs text-gray-600 whitespace-nowrap">
-                  {projectMap[todo.projectId] || t('common.unknown')}
+                  {todo.projectId
+                    ? projectMap[todo.projectId] || t('common.unknown')
+                    : t('customers.customerFile')}
                 </span>
               </Link>
             ))}

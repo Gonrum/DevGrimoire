@@ -143,6 +143,8 @@
     "quickFacts": "Schnellblick",
     "linkedProjects": "Einsätze",
     "openCustomerTodos": "Offene Kunden-Quests",
+    "openProjectTodosAggregated": "({{count}} aus den Einsätzen)",
+    "alsoOpenInProjects": "Auch in den Einsätzen offen ({{count}})",
     "vitalStatus": "Vitalstatus",
     "noNotes": "Keine Notizen in der Kundenakte.",
     "website": "Website",
@@ -377,6 +379,7 @@
   "todoDetail": {
     "editTask": "Quest bearbeiten",
     "backToProject": "Zurück zum Kapitel",
+    "backToCustomer": "Zurück zum Kunden",
     "notFound": "Quest nicht gefunden.",
     "blockedBy": "Blockiert von",
     "blocking": "Blockiert",
