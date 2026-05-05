@@ -44,6 +44,7 @@ import { RequestContext } from './common/request-context';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 import { AuthService } from './auth/auth.service';
 import { CustomersService } from './customers/customers.service';
+import { ContactsService } from './contacts/contacts.service';
 
 const RAG_BACKEND_URL = process.env.RAG_BACKEND_URL || 'http://localhost:3200';
 
@@ -197,6 +198,7 @@ export interface McpServices {
   questionsService: QuestionsService;
   authService: AuthService;
   customersService: CustomersService;
+  contactsService: ContactsService;
   logsService: LogsService;
   releasesService: ReleasesService;
   chatService: ChatService;
@@ -420,6 +422,75 @@ const tools = [
         projectId: { type: 'string', description: 'Project MongoDB ID' },
       },
       required: ['projectId'],
+    },
+  },
+  {
+    name: 'contact_create',
+    description: 'Create a contact for a customer (named person with role, email, phone, notes).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        customerId: { type: 'string', description: 'Customer MongoDB ID' },
+        name: { type: 'string', description: 'Contact name' },
+        role: { type: 'string', description: 'Role/title at the customer' },
+        email: { type: 'string', description: 'Email address' },
+        phone: { type: 'string', description: 'Phone number' },
+        notes: { type: 'string', description: 'Free-form notes' },
+        isPrimary: { type: 'boolean', description: 'Mark as primary/main contact' },
+        sortOrder: { type: 'number', description: 'Manual sort order within the customer' },
+      },
+      required: ['customerId', 'name'],
+    },
+  },
+  {
+    name: 'contact_list',
+    description: 'List all contacts for a customer (sorted: primary first, then by sortOrder).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        customerId: { type: 'string', description: 'Customer MongoDB ID' },
+      },
+      required: ['customerId'],
+    },
+  },
+  {
+    name: 'contact_get',
+    description: 'Get a single contact by MongoDB ID.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Contact MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'contact_update',
+    description: 'Update a contact.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Contact MongoDB ID' },
+        name: { type: 'string' },
+        role: { type: 'string' },
+        email: { type: 'string' },
+        phone: { type: 'string' },
+        notes: { type: 'string' },
+        isPrimary: { type: 'boolean' },
+        sortOrder: { type: 'number' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'contact_delete',
+    description: 'Delete a contact.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Contact MongoDB ID' },
+      },
+      required: ['id'],
     },
   },
   {
@@ -2244,7 +2315,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, authService, customersService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -2426,6 +2497,43 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             await customersService.findLinksByProject(requireString(a, 'projectId')) as any,
             ['__v'],
           );
+          break;
+        case 'contact_create': {
+          const contact = await contactsService.create(requireString(a, 'customerId'), {
+            name: requireString(a, 'name'),
+            role: optionalString(a, 'role'),
+            email: optionalString(a, 'email'),
+            phone: optionalString(a, 'phone'),
+            notes: optionalString(a, 'notes'),
+            isPrimary: optionalBoolean(a, 'isPrimary'),
+            sortOrder: optionalNumber(a, 'sortOrder'),
+          });
+          result = compactCreateResult(contact, { name: (contact as any).name });
+          break;
+        }
+        case 'contact_list':
+          result = compactList(
+            await contactsService.findByCustomer(requireString(a, 'customerId')) as any,
+            ['__v'],
+          );
+          break;
+        case 'contact_get':
+          result = await contactsService.findById(requireString(a, 'id'));
+          break;
+        case 'contact_update':
+          result = compactUpdateResult(await contactsService.update(requireString(a, 'id'), {
+            name: optionalString(a, 'name'),
+            role: optionalString(a, 'role'),
+            email: optionalString(a, 'email'),
+            phone: optionalString(a, 'phone'),
+            notes: optionalString(a, 'notes'),
+            isPrimary: optionalBoolean(a, 'isPrimary'),
+            sortOrder: optionalNumber(a, 'sortOrder'),
+          }));
+          break;
+        case 'contact_delete':
+          await contactsService.remove(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
           break;
         case 'todo_create': {
           const todo = await todosService.create({
