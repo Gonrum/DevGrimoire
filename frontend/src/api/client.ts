@@ -74,6 +74,37 @@ export interface Project {
   updatedAt: string;
 }
 
+export type CustomerStatus = 'lead' | 'onboarding' | 'active' | 'paused' | 'offboarding' | 'cancelled' | 'archived';
+
+export interface Customer {
+  _id: string;
+  name: string;
+  description?: string;
+  status: CustomerStatus;
+  tags: string[];
+  primaryContactName?: string;
+  primaryContactEmail?: string;
+  primaryContactPhone?: string;
+  website?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CustomerProjectLinkStatus = 'active' | 'paused' | 'archived';
+
+export interface CustomerProjectLink {
+  _id: string;
+  customerId: string;
+  projectId: string;
+  status: CustomerProjectLinkStatus;
+  role?: string;
+  notes?: string;
+  environmentIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ChangelogEntry {
   _id: string;
   projectId: string;
@@ -609,6 +640,55 @@ export const api = {
       request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/projects/${id}`, { method: 'DELETE' }),
+  },
+  customers: {
+    list: (filters?: {
+      status?: CustomerStatus;
+      tag?: string;
+      q?: string;
+      includeArchived?: boolean;
+      projectId?: string;
+    }) => {
+      const params = new URLSearchParams();
+      if (filters?.status) params.set('status', filters.status);
+      if (filters?.tag) params.set('tag', filters.tag);
+      if (filters?.q) params.set('q', filters.q);
+      if (filters?.includeArchived !== undefined) {
+        params.set('includeArchived', String(filters.includeArchived));
+      }
+      if (filters?.projectId) params.set('projectId', filters.projectId);
+      const qs = params.toString();
+      return request<Customer[]>(`/customers${qs ? `?${qs}` : ''}`);
+    },
+    get: (id: string) => request<Customer>(`/customers/${id}`),
+    create: (data: Partial<Customer>) =>
+      request<Customer>('/customers', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<Customer>) =>
+      request<Customer>(`/customers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    archive: (id: string) =>
+      request<Customer>(`/customers/${id}`, { method: 'DELETE' }),
+    listProjectLinks: (customerId: string) =>
+      request<CustomerProjectLink[]>(`/customers/${customerId}/project-links`),
+    listProjectCustomerLinks: (projectId: string) =>
+      request<CustomerProjectLink[]>(`/customers/by-project/${projectId}/links`),
+    createProjectLink: (customerId: string, data: Partial<CustomerProjectLink>) =>
+      request<CustomerProjectLink>(`/customers/${customerId}/project-links`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    updateProjectLink: (
+      customerId: string,
+      linkId: string,
+      data: Partial<CustomerProjectLink>,
+    ) =>
+      request<CustomerProjectLink>(`/customers/${customerId}/project-links/${linkId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    deleteProjectLink: (customerId: string, linkId: string) =>
+      request<void>(`/customers/${customerId}/project-links/${linkId}`, {
+        method: 'DELETE',
+      }),
   },
   todos: {
     list: (filters?: { projectId?: string; status?: string }) => {

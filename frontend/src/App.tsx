@@ -4,6 +4,13 @@ import { useTranslation } from 'react-i18next';
 import Dashboard from './pages/Dashboard';
 import ProjectsOverview from './pages/ProjectsOverview';
 import ProjectDetail from './pages/ProjectDetail';
+import ProjectCreatePage from './pages/ProjectCreatePage';
+import CustomersOverview from './pages/CustomersOverview';
+import CustomerDetail from './pages/CustomerDetail';
+import CustomerCreatePage from './pages/CustomerCreatePage';
+import CustomerEditPage from './pages/CustomerEditPage';
+import CustomerProjectLinkCreatePage from './pages/CustomerProjectLinkCreatePage';
+import CustomerProjectLinkEditPage from './pages/CustomerProjectLinkEditPage';
 import ProjectSettings from './pages/ProjectSettings';
 import TodoDetailPage from './pages/TodoDetailPage';
 import TodoCreatePage from './pages/TodoCreatePage';
@@ -183,6 +190,15 @@ function AppShell() {
               {t('nav.projects')}
             </NavLink>
             <NavLink
+              to="/customers"
+              end
+              className={({ isActive }) =>
+                isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'
+              }
+            >
+              {t('nav.customers')}
+            </NavLink>
+            <NavLink
               to="/recurring-tasks"
               className={({ isActive }) =>
                 isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'
@@ -240,6 +256,16 @@ function AppShell() {
               {t('nav.projects')}
             </NavLink>
             <NavLink
+              to="/customers"
+              end
+              onClick={() => setMobileMenuOpen(false)}
+              className={({ isActive }) =>
+                `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
+              }
+            >
+              {t('nav.customers')}
+            </NavLink>
+            <NavLink
               to="/recurring-tasks"
               onClick={() => setMobileMenuOpen(false)}
               className={({ isActive }) =>
@@ -273,7 +299,14 @@ function AppShell() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/projects" element={<ProjectsOverview />} />
+          <Route path="/projects/new" element={<ProjectCreatePage />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
+          <Route path="/customers" element={<CustomersOverview />} />
+          <Route path="/customers/new" element={<CustomerCreatePage />} />
+          <Route path="/customers/:id" element={<CustomerDetail />} />
+          <Route path="/customers/:id/edit" element={<CustomerEditPage />} />
+          <Route path="/customers/:id/links/new" element={<CustomerProjectLinkCreatePage />} />
+          <Route path="/customers/:id/links/:linkId/edit" element={<CustomerProjectLinkEditPage />} />
           <Route path="/projects/:id/todos/new" element={<TodoCreatePage />} />
           <Route path="/projects/:id/todos/:todoId" element={<TodoDetailPage />} />
           <Route path="/projects/:id/milestones/new" element={<MilestoneCreatePage />} />

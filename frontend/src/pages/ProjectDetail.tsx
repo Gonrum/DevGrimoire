@@ -23,6 +23,7 @@ import AttachmentList from '../components/AttachmentList';
 import LogList from '../components/LogList';
 import ReleaseList from '../components/ReleaseList';
 import GitRepoWidget from '../components/GitRepoWidget';
+import ProjectCustomerLinks from '../components/ProjectCustomerLinks';
 import Markdown from '../components/Markdown';
 import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents';
 import Badge from '../components/ui/Badge';
@@ -365,6 +366,7 @@ export default function ProjectDetail() {
             onNavigateToCommits={() => setTab('commits')}
           />
         )}
+        <ProjectCustomerLinks projectId={id!} environments={environments} />
       </div>
 
       {/* Mobile: Sidebar toggle */}

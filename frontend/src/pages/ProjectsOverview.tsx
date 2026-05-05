@@ -4,106 +4,11 @@ import { useTranslation } from 'react-i18next';
 import { api, Project } from '../api/client';
 import { useDashboardEvents } from '../hooks/useProjectEvents';
 import { useToast } from '../components/Toast';
-import Button from '../components/ui/Button';
+import ButtonLink from '../components/ui/ButtonLink';
 import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
 import Markdown from '../components/Markdown';
 import { LoadingText } from '../components/ui/LoadingSpinner';
-
-function ProjectCreateForm({ onCreated }: { onCreated: () => void }) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [path, setPath] = useState('');
-  const [repository, setRepository] = useState('');
-  const [techStack, setTechStack] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setSaving(true);
-    try {
-      await api.projects.create({
-        name: name.trim(),
-        description: description.trim() || undefined,
-        path: path.trim() || undefined,
-        repository: repository.trim() || undefined,
-        techStack: techStack.split(',').map((s) => s.trim()).filter(Boolean),
-      });
-      setName('');
-      setDescription('');
-      setPath('');
-      setRepository('');
-      setTechStack('');
-      setOpen(false);
-      onCreated();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (!open) {
-    return (
-      <Button type="button" variant="primary" size="lg" onClick={() => setOpen(true)} className="mb-6">
-        {t('projects.newProject')}
-      </Button>
-    );
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="mb-6 bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 max-w-xl">
-      <h3 className="text-sm font-semibold text-gray-300">{t('projects.createProject')}</h3>
-      <input
-        type="text"
-        placeholder={t('projects.projectName')}
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
-        autoFocus
-      />
-      <textarea
-        placeholder={t('projects.descriptionOptional')}
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        rows={2}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 resize-none"
-      />
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <input
-          type="text"
-          placeholder={t('projects.pathOptional')}
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
-        />
-        <input
-          type="text"
-          placeholder={t('projects.repositoryOptional')}
-          value={repository}
-          onChange={(e) => setRepository(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
-        />
-      </div>
-      <input
-        type="text"
-        placeholder={t('projects.techStackHint')}
-        value={techStack}
-        onChange={(e) => setTechStack(e.target.value)}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
-      />
-      <div className="flex gap-2">
-        <Button type="submit" variant="primary" disabled={saving || !name.trim()}>
-          {saving ? t('common.saving') : t('common.create')}
-        </Button>
-        <Button type="button" onClick={() => setOpen(false)}>
-          {t('common.cancel')}
-        </Button>
-      </div>
-    </form>
-  );
-}
 
 export default function ProjectsOverview() {
   const { t, i18n } = useTranslation();
@@ -171,7 +76,9 @@ export default function ProjectsOverview() {
     <div>
       <h1 className="text-xl sm:text-2xl font-bold mb-6 font-grimoire">{t('projects.overview')}</h1>
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
-        <ProjectCreateForm onCreated={loadProjects} />
+        <ButtonLink to="/projects/new" variant="primary" size="lg" className="justify-center">
+          {t('projects.newProject')}
+        </ButtonLink>
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
