@@ -87,7 +87,7 @@ export class SearchService {
       results.push({
         type: 'todo',
         id: t._id.toString(),
-        projectId: t.projectId.toString(),
+        projectId: t.projectId?.toString() ?? '',
         title: t.title,
         snippet: makeSnippet(t.description),
         status: t.status,

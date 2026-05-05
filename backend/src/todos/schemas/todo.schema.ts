@@ -31,8 +31,11 @@ export class TodoComment {
 
 @Schema({ timestamps: true })
 export class Todo {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
-  projectId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  projectId?: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Customer', index: true })
+  customerId?: Types.ObjectId;
 
   @Prop({ required: true })
   title: string;
@@ -73,7 +76,8 @@ export class Todo {
 
 export const TodoSchema = SchemaFactory.createForClass(Todo);
 TodoSchema.index({ projectId: 1, status: 1, priority: 1, createdAt: -1 });
+TodoSchema.index({ customerId: 1, status: 1, priority: 1, createdAt: -1 });
 TodoSchema.index(
-  { projectId: 1, number: 1 },
+  { projectId: 1, customerId: 1, number: 1 },
   { unique: true, partialFilterExpression: { number: { $type: 'number' } } },
 );

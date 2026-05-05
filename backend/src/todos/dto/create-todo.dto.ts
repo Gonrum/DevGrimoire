@@ -4,12 +4,18 @@ import {
   IsEnum,
   IsArray,
   IsMongoId,
+  ValidateIf,
 } from 'class-validator';
 import { TodoStatus, TodoPriority } from '../schemas/todo.schema';
 
 export class CreateTodoDto {
+  @ValidateIf((o) => !o.customerId)
   @IsMongoId()
-  projectId: string;
+  projectId?: string;
+
+  @ValidateIf((o) => !o.projectId)
+  @IsMongoId()
+  customerId?: string;
 
   @IsString()
   title: string;

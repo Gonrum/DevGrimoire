@@ -1,7 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Counter, CounterDocument } from './schemas/counter.schema';
+
+export interface CounterScope {
+  projectId?: string;
+  customerId?: string;
+}
 
 @Injectable()
 export class CountersService {
@@ -9,12 +14,28 @@ export class CountersService {
     @InjectModel(Counter.name) private counterModel: Model<CounterDocument>,
   ) {}
 
+  private scopeFilter(scope: CounterScope): Record<string, unknown> {
+    if (scope.projectId && scope.customerId) {
+      throw new BadRequestException('Counter scope must be either projectId OR customerId, not both');
+    }
+    if (scope.projectId) {
+      return { projectId: scope.projectId, customerId: null };
+    }
+    if (scope.customerId) {
+      return { projectId: null, customerId: scope.customerId };
+    }
+    throw new BadRequestException('Counter scope requires projectId or customerId');
+  }
+
   async getNextSequence(
-    projectId: string,
+    scope: CounterScope | string,
     entity: 'todo' | 'milestone',
   ): Promise<number> {
+    const filter = typeof scope === 'string'
+      ? { projectId: scope, customerId: null }
+      : this.scopeFilter(scope);
     const counter = await this.counterModel.findOneAndUpdate(
-      { projectId, entity },
+      { ...filter, entity },
       { $inc: { seq: 1 } },
       { upsert: true, returnDocument: 'after' },
     ).exec();
@@ -22,12 +43,15 @@ export class CountersService {
   }
 
   async setSequence(
-    projectId: string,
+    scope: CounterScope | string,
     entity: 'todo' | 'milestone',
     seq: number,
   ): Promise<void> {
+    const filter = typeof scope === 'string'
+      ? { projectId: scope, customerId: null }
+      : this.scopeFilter(scope);
     await this.counterModel.findOneAndUpdate(
-      { projectId, entity },
+      { ...filter, entity },
       { $set: { seq } },
       { upsert: true },
     ).exec();

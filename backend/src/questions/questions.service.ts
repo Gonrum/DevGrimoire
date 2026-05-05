@@ -36,7 +36,7 @@ export class QuestionsService {
     let projectId = dto.projectId;
     if (dto.todoId && !projectId) {
       const todo = await this.todosService.findById(dto.todoId);
-      projectId = todo.projectId.toString();
+      projectId = todo.projectId?.toString();
     }
 
     const entry = await this.questionModel.create({

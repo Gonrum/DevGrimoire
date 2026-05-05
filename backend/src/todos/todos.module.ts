@@ -5,6 +5,7 @@ import { Project, ProjectSchema } from '../projects/schemas/project.schema';
 import { TodosService } from './todos.service';
 import { TodosController } from './todos.controller';
 import { CountersModule } from '../counters/counters.module';
+import { CustomersModule } from '../customers/customers.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { CountersModule } from '../counters/counters.module';
       { name: Project.name, schema: ProjectSchema },
     ]),
     CountersModule,
+    CustomersModule,
   ],
   controllers: [TodosController],
   providers: [TodosService],

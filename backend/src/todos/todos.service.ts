@@ -8,6 +8,7 @@ import { CreateTodoDto } from './dto/create-todo.dto';
 import { UpdateTodoDto } from './dto/update-todo.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { CountersService } from '../counters/counters.service';
+import { CustomersService } from '../customers/customers.service';
 import { projectIdFilter } from '../common/project-id-filter';
 import { formatEntityNumber } from '../common/number-format';
 
@@ -24,6 +25,7 @@ export class TodosService {
     @InjectModel(Todo.name) private todoModel: Model<TodoDocument>,
     @InjectModel(Project.name) private projectModel: Model<ProjectDocument>,
     private countersService: CountersService,
+    private customersService: CustomersService,
     private eventEmitter: EventEmitter2,
   ) {}
 
@@ -74,18 +76,34 @@ export class TodosService {
   }
 
   async create(dto: CreateTodoDto): Promise<TodoDocument> {
-    const project = await this.projectModel.findById(dto.projectId).exec();
-    if (!project) throw new NotFoundException(`Project ${dto.projectId} not found`);
-    const seq = await this.countersService.getNextSequence(dto.projectId, 'todo');
-    const displayNumber = formatEntityNumber(
-      project.todoNumberFormat || '{type}-{n}',
-      seq,
-      project.name,
-      'T',
-    );
+    if (!dto.projectId && !dto.customerId) {
+      throw new BadRequestException('Todo requires either projectId or customerId');
+    }
+    if (dto.projectId && dto.customerId) {
+      throw new BadRequestException('Todo can have either projectId or customerId, not both');
+    }
+
+    let displayNumber: string;
+    let seq: number;
+    if (dto.projectId) {
+      const project = await this.projectModel.findById(dto.projectId).exec();
+      if (!project) throw new NotFoundException(`Project ${dto.projectId} not found`);
+      seq = await this.countersService.getNextSequence({ projectId: dto.projectId }, 'todo');
+      displayNumber = formatEntityNumber(
+        project.todoNumberFormat || '{type}-{n}',
+        seq,
+        project.name,
+        'T',
+      );
+    } else {
+      await this.customersService.findById(dto.customerId!);
+      seq = await this.countersService.getNextSequence({ customerId: dto.customerId! }, 'todo');
+      displayNumber = `CT-${seq}`;
+    }
+
     const todo = await this.todoModel.create({ ...dto, number: seq, displayNumber });
     this.eventEmitter.emit(PROJECT_CHANGED, {
-      projectId: todo.projectId.toString(),
+      projectId: todo.projectId?.toString() || null,
       entity: 'todo',
       action: 'created',
       entityId: todo._id.toString(),
@@ -96,6 +114,7 @@ export class TodosService {
 
   async findAll(filters: {
     projectId?: string;
+    customerId?: string;
     status?: TodoStatus;
     statuses?: TodoStatus[];
     priority?: string;
@@ -105,6 +124,7 @@ export class TodosService {
   }): Promise<TodoDocument[]> {
     const query: Record<string, unknown> = {};
     if (filters.projectId) query.projectId = projectIdFilter(filters.projectId);
+    if (filters.customerId) query.customerId = projectIdFilter(filters.customerId);
     if (filters.statuses?.length) query.status = { $in: filters.statuses };
     else if (filters.status) query.status = filters.status;
     if (filters.priority) query.priority = filters.priority;
@@ -136,7 +156,7 @@ export class TodosService {
     if (dto.priority) changes.push(`Priorität → ${dto.priority}`);
     if (dto.title) changes.push(`Titel geändert`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
-      projectId: todo.projectId.toString(),
+      projectId: todo.projectId?.toString() || null,
       entity: 'todo',
       action: 'updated',
       entityId: id,
@@ -149,7 +169,7 @@ export class TodosService {
     const result = await this.todoModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException(`Todo ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
-      projectId: result.projectId.toString(),
+      projectId: result.projectId?.toString() || null,
       entity: 'todo',
       action: 'deleted',
       entityId: id,
@@ -167,7 +187,7 @@ export class TodosService {
       .exec();
     if (!todo) throw new NotFoundException(`Todo ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
-      projectId: todo.projectId.toString(),
+      projectId: todo.projectId?.toString() || null,
       entity: 'todo',
       action: 'updated',
       entityId: id,
@@ -178,5 +198,9 @@ export class TodosService {
 
   async removeByProject(projectId: string): Promise<void> {
     await this.todoModel.deleteMany({ projectId }).exec();
+  }
+
+  async removeByCustomer(customerId: string): Promise<void> {
+    await this.todoModel.deleteMany({ customerId }).exec();
   }
 }

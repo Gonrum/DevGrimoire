@@ -495,11 +495,12 @@ const tools = [
   },
   {
     name: 'todo_create',
-    description: 'Create a new todo/task for a project',
+    description: 'Create a new todo/task. Belongs to either a project (projectId) or a customer (customerId) — exactly one of the two is required.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID for customer-scoped quests (mutually exclusive with projectId)' },
         title: { type: 'string', description: 'Todo title' },
         description: { type: 'string', description: 'Detailed description' },
         status: { type: 'string', enum: ['open', 'in_progress', 'review', 'done'] },
@@ -509,16 +510,17 @@ const tools = [
         blockedBy: { type: 'array', items: { type: 'string' }, description: 'Array of Todo MongoDB IDs that block this todo' },
         repoLabel: { type: 'string', description: 'Optional: associate todo with a specific repository label (e.g. "API", "Frontend")' },
       },
-      required: ['projectId', 'title'],
+      required: ['title'],
     },
   },
   {
     name: 'todo_list',
-    description: 'List todos (compact: id, title, status, priority, tags, milestoneId). Archived todos are excluded by default. Use todo_get for full details.',
+    description: 'List todos (compact: id, title, status, priority, tags, milestoneId). Filter by projectId for project todos or customerId for customer-scoped quests. Archived todos are excluded by default.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         projectId: { type: 'string', description: 'Filter by project ID' },
+        customerId: { type: 'string', description: 'Filter by customer ID (customer-scoped quests)' },
         status: { type: 'string', enum: ['open', 'in_progress', 'review', 'done'], description: 'Filter by status' },
         priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Filter by priority' },
         milestoneId: { type: 'string', description: 'Filter by milestone ID' },
@@ -2537,7 +2539,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         case 'todo_create': {
           const todo = await todosService.create({
-            projectId: requireString(a, 'projectId'),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
             title: requireString(a, 'title'),
             description: optionalString(a, 'description'),
             status: optionalString(a, 'status') as any,
@@ -2553,6 +2556,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'todo_list': {
           const todos = await todosService.findAll({
             projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
             status: optionalString(a, 'status') as any,
             priority: optionalString(a, 'priority'),
             milestoneId: optionalString(a, 'milestoneId'),
@@ -2560,7 +2564,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             includeArchived: optionalBoolean(a, 'includeArchived'),
           });
           const compactTodos = compactList(todos as any, ['description', 'comments', 'blockedBy', '__v']);
-          const todoLimit = optionalNumber(a, 'limit') ?? (optionalString(a, 'projectId') ? undefined : 50);
+          const scoped = optionalString(a, 'projectId') || optionalString(a, 'customerId');
+          const todoLimit = optionalNumber(a, 'limit') ?? (scoped ? undefined : 50);
           result = applyPagination(compactTodos, todoLimit, optionalNumber(a, 'offset'));
           break;
         }
