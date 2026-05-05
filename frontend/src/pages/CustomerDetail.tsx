@@ -22,6 +22,7 @@ import EmptyState from '../components/ui/EmptyState';
 import Markdown from '../components/Markdown';
 import ProjectTabShell from '../components/ui/ProjectTabShell';
 import TodoBoard from '../components/TodoBoard';
+import RecurringTaskList from '../components/RecurringTaskList';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { useToast } from '../components/Toast';
 
@@ -78,6 +79,7 @@ export default function CustomerDetail() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [customerTodos, setCustomerTodos] = useState<Todo[]>([]);
+  const [customerRecurring, setCustomerRecurring] = useState<RecurringTask[]>([]);
   const [aggregate, setAggregate] = useState<AggregatedData>(emptyAggregate);
   const [tab, setTab] = useState<Tab>('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -96,13 +98,15 @@ export default function CustomerDetail() {
       api.projects.list({ active: true }),
       api.contacts.list(id).catch(() => [] as Contact[]),
       api.todos.list({ customerId: id }).catch(() => [] as Todo[]),
+      api.recurringTasks.list({ customerId: id }).catch(() => [] as RecurringTask[]),
     ])
-      .then(([customerData, linkData, projectData, contactData, todoData]) => {
+      .then(([customerData, linkData, projectData, contactData, todoData, recurringData]) => {
         setCustomer(customerData);
         setLinks(linkData);
         setProjects(projectData);
         setContacts(contactData);
         setCustomerTodos(todoData);
+        setCustomerRecurring(recurringData);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -219,7 +223,7 @@ export default function CustomerDetail() {
       label: t('sidebar.knowledge'),
       items: [
         { key: 'knowledge', label: t('customers.tab.knowledge'), count: aggregate.knowledge.length },
-        { key: 'workflows', label: t('customers.tab.workflows'), count: aggregate.recurring.filter((rt) => rt.active).length },
+        { key: 'workflows', label: t('customers.tab.workflows'), count: customerRecurring.filter((rt) => rt.active).length },
         { key: 'files', label: t('customers.tab.files'), count: aggregate.attachments.length },
       ],
     },
@@ -470,7 +474,7 @@ export default function CustomerDetail() {
                     </p>
                     <p>
                       {t('customers.tab.workflows')}:{' '}
-                      <span className="text-gray-300">{aggregate.recurring.filter((rt) => rt.active).length}</span>
+                      <span className="text-gray-300">{customerRecurring.filter((rt) => rt.active).length}</span>
                     </p>
                   </div>
                 </div>
@@ -508,10 +512,12 @@ export default function CustomerDetail() {
             )}
 
             {tab === 'workflows' && (
-              <AggregatedRecurringTab
-                items={aggregate.recurring.filter((rt) => rt.active)}
+              <CustomerRitualsTab
+                customerId={id}
+                rituals={customerRecurring}
+                aggregatedRituals={aggregate.recurring.filter((rt) => rt.active)}
                 projectsById={projectsById}
-                loading={aggLoading}
+                aggLoading={aggLoading}
               />
             )}
 
@@ -779,6 +785,47 @@ function AggregatedKnowledgeTab({
   );
 }
 
+function CustomerRitualsTab({
+  customerId,
+  rituals,
+  aggregatedRituals,
+  projectsById,
+  aggLoading,
+}: {
+  customerId: string;
+  rituals: RecurringTask[];
+  aggregatedRituals: RecurringTask[];
+  projectsById: Map<string, Project>;
+  aggLoading: boolean;
+}) {
+  const { t } = useTranslation();
+  const [showAggregated, setShowAggregated] = useState(false);
+  return (
+    <div className="space-y-6">
+      <RecurringTaskList entries={rituals} customerId={customerId} />
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowAggregated((s) => !s)}
+          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          {showAggregated ? '▾' : '▸'}{' '}
+          {t('customers.alsoActiveInProjects', { count: aggregatedRituals.length })}
+        </button>
+        {showAggregated && (
+          <div className="mt-3">
+            <AggregatedRecurringTab
+              items={aggregatedRituals}
+              projectsById={projectsById}
+              loading={aggLoading}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AggregatedRecurringTab({
   items,
   projectsById,
@@ -794,16 +841,21 @@ function AggregatedRecurringTab({
   return (
     <div className="space-y-2">
       {items.map((rt) => {
-        const project = projectsById.get(rt.projectId);
+        const project = rt.projectId ? projectsById.get(rt.projectId) : undefined;
+        const detailHref = rt.customerId
+          ? `/customers/${rt.customerId}/recurring-tasks/${rt._id}`
+          : rt.projectId
+            ? `/projects/${rt.projectId}/recurring-tasks/${rt._id}`
+            : `/recurring-tasks/${rt._id}`;
         return (
           <Link
             key={rt._id}
-            to={`/projects/${rt.projectId}/recurring-tasks/${rt._id}`}
+            to={detailHref}
             className="block bg-gray-900 border border-gray-800 rounded-lg p-3 hover:border-violet-700 transition-colors"
           >
             <p className="text-sm text-gray-100">{rt.title}</p>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <ProjectBadge project={project} projectId={rt.projectId} />
+              {rt.projectId && <ProjectBadge project={project} projectId={rt.projectId} />}
               <Badge color="bg-gray-800 text-gray-400">{rt.frequency}</Badge>
               {rt.nextRun && (
                 <span className="text-xs text-gray-500">→ {new Date(rt.nextRun).toLocaleDateString()}</span>

@@ -8,24 +8,30 @@ const DAY_NAMES_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 interface Props {
   entries: RecurringTask[];
+  /** Project context — set this OR customerId, not both. Omit both for the global list. */
   projectId?: string;
+  customerId?: string;
   projectNames?: Record<string, string>;
 }
 
-export default function RecurringTaskList({ entries, projectId, projectNames }: Props) {
+export default function RecurringTaskList({ entries, projectId, customerId, projectNames }: Props) {
   const { t, i18n } = useTranslation();
   const lang = i18n.language;
   const dateFmtLocale = lang === 'de' ? 'de-DE' : 'en-US';
-  const isGlobal = !projectId;
+  const isGlobal = !projectId && !customerId;
 
-  const createLink = projectId
-    ? `/projects/${projectId}/recurring-tasks/new`
-    : '/recurring-tasks/new';
+  const createLink = customerId
+    ? `/customers/${customerId}/recurring-tasks/new`
+    : projectId
+      ? `/projects/${projectId}/recurring-tasks/new`
+      : '/recurring-tasks/new';
 
   const detailLink = (rt: RecurringTask) =>
-    rt.projectId
-      ? `/projects/${rt.projectId}/recurring-tasks/${rt._id}`
-      : `/recurring-tasks/${rt._id}`;
+    rt.customerId
+      ? `/customers/${rt.customerId}/recurring-tasks/${rt._id}`
+      : rt.projectId
+        ? `/projects/${rt.projectId}/recurring-tasks/${rt._id}`
+        : `/recurring-tasks/${rt._id}`;
 
   return (
     <div>

@@ -470,7 +470,8 @@ export type RecurringFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly' | '
 
 export interface RecurringTask {
   _id: string;
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   title: string;
   description?: string;
   priority?: 'low' | 'medium' | 'high' | 'critical';
@@ -1116,9 +1117,10 @@ export const api = {
       request<Soul>('/souls', { method: 'PUT', body: JSON.stringify(data) }),
   },
   recurringTasks: {
-    list: (filters?: { projectId?: string; systemOnly?: boolean; active?: boolean }) => {
+    list: (filters?: { projectId?: string; customerId?: string; systemOnly?: boolean; active?: boolean }) => {
       const params = new URLSearchParams();
       if (filters?.projectId) params.set('projectId', filters.projectId);
+      if (filters?.customerId) params.set('customerId', filters.customerId);
       if (filters?.systemOnly) params.set('systemOnly', 'true');
       if (filters?.active !== undefined) params.set('active', String(filters.active));
       const qs = params.toString();

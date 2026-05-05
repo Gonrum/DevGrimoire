@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { api, RecurringTask, RecurringFrequency, Todo } from '../api/client';
 import Markdown from '../components/Markdown';
 import MarkdownEditor from '../components/MarkdownEditor';
@@ -15,6 +15,23 @@ const FREQUENCIES: RecurringFrequency[] = ['daily', 'weekly', 'biweekly', 'month
 
 export default function RecurringTaskDetailPage() {
   const { id, recurringTaskId } = useParams<{ id?: string; recurringTaskId: string }>();
+  const location = useLocation();
+  const isCustomerScope = location.pathname.startsWith('/customers/');
+  const backLink = id
+    ? isCustomerScope
+      ? `/customers/${id}?tab=workflows`
+      : `/projects/${id}?tab=recurring-tasks`
+    : '/recurring-tasks';
+  const backLabel = id
+    ? isCustomerScope
+      ? 'recurringTasks.backToCustomer'
+      : 'recurringTasks.backToProject'
+    : 'recurringTasks.globalTitle';
+  const todoLinkBase = id
+    ? isCustomerScope
+      ? `/customers/${id}/todos`
+      : `/projects/${id}/todos`
+    : null;
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { showSuccess, showError } = useToast();
@@ -127,7 +144,7 @@ export default function RecurringTaskDetailPage() {
     if (!recurringTaskId) return;
     try {
       await api.recurringTasks.delete(recurringTaskId);
-      navigate(id ? `/projects/${id}?tab=recurring-tasks` : '/recurring-tasks');
+      navigate(backLink);
     } catch (err: any) {
       showError(err.message || t('common.errorDeleting'));
     }
@@ -142,8 +159,8 @@ export default function RecurringTaskDetailPage() {
 
   return (
     <div>
-      <Link to={id ? `/projects/${id}?tab=recurring-tasks` : '/recurring-tasks'} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">
-        &larr; {id ? t('recurringTasks.backToProject') : t('recurringTasks.globalTitle')}
+      <Link to={backLink} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">
+        &larr; {t(backLabel)}
       </Link>
 
       <div className="flex flex-wrap items-center gap-3 mb-6">
@@ -284,7 +301,7 @@ export default function RecurringTaskDetailPage() {
               {createdTodos.reverse().map((todo) => (
                 <Link
                   key={todo._id}
-                  to={`/projects/${id}/todos/${todo._id}`}
+                  to={todoLinkBase ? `${todoLinkBase}/${todo._id}` : '#'}
                   className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200 py-1"
                 >
                   <Badge color={

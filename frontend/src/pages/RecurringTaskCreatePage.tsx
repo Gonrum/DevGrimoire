@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { api, RecurringFrequency, Project } from '../api/client';
 import MarkdownEditor from '../components/MarkdownEditor';
 import Button from '../components/ui/Button';
@@ -11,9 +11,13 @@ const FREQUENCIES: RecurringFrequency[] = ['daily', 'weekly', 'biweekly', 'month
 
 export default function RecurringTaskCreatePage() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
+  const isCustomerScope = location.pathname.startsWith('/customers/');
+  const isGlobal = !id;
+  const projectId = isCustomerScope ? undefined : id;
+  const customerId = isCustomerScope ? id : undefined;
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const isGlobal = !id;
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState('medium');
@@ -42,9 +46,12 @@ export default function RecurringTaskCreatePage() {
     if (!title.trim()) return;
     setSaving(true);
     try {
-      const projectId = isGlobal ? (selectedProjectId || undefined) : id;
+      const targetProjectId = isCustomerScope
+        ? undefined
+        : isGlobal ? (selectedProjectId || undefined) : projectId;
       await api.recurringTasks.create({
-        projectId,
+        projectId: targetProjectId,
+        customerId,
         title: title.trim(),
         description: description.trim() || undefined,
         priority: priority as any,
@@ -55,7 +62,9 @@ export default function RecurringTaskCreatePage() {
         month: showMonth ? month : undefined,
         hour,
       });
-      if (isGlobal) {
+      if (isCustomerScope) {
+        navigate(`/customers/${id}?tab=workflows`);
+      } else if (isGlobal) {
         navigate('/recurring-tasks');
       } else {
         navigate(`/projects/${id}?tab=recurring-tasks`);
@@ -65,15 +74,19 @@ export default function RecurringTaskCreatePage() {
     }
   };
 
-  const backLink = isGlobal ? '/recurring-tasks' : `/projects/${id}?tab=recurring-tasks`;
-  const backLabel = isGlobal ? t('recurringTasks.globalTitle') : t('recurringTasks.backToProject');
+  const backLink = isCustomerScope
+    ? `/customers/${id}?tab=workflows`
+    : isGlobal ? '/recurring-tasks' : `/projects/${id}?tab=recurring-tasks`;
+  const backLabel = isCustomerScope
+    ? t('recurringTasks.backToCustomer')
+    : isGlobal ? t('recurringTasks.globalTitle') : t('recurringTasks.backToProject');
 
   return (
     <WorkflowPageShell backTo={backLink} backLabel={backLabel} title={t('recurringTasks.createTitle')}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <FormInput fieldClassName="w-full" label={t('common.title')} required type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('common.title')} autoFocus />
 
-        {isGlobal && (
+        {isGlobal && !isCustomerScope && (
           <FormSelect
             fieldClassName="w-full"
             label={t('recurringTasks.targetProject')}
@@ -86,7 +99,7 @@ export default function RecurringTaskCreatePage() {
             ))}
           </FormSelect>
         )}
-        {isGlobal && (
+        {isGlobal && !isCustomerScope && (
           <p className="-mt-2 text-xs text-gray-600">{t('recurringTasks.systemWideHint')}</p>
         )}
 
