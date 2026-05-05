@@ -28,17 +28,19 @@ export class KnowledgeController {
   @Get()
   findByProject(
     @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
     @Query('category') category?: string,
     @Query('scope') scope?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
-    if (!projectId && scope !== 'global') {
+    if (!projectId && !customerId && scope !== 'global') {
       throw new BadRequestException(
-        'projectId query parameter is required (unless scope=global)',
+        'projectId or customerId query parameter is required (unless scope=global)',
       );
     }
     return this.knowledgeService.findByProject(projectId, {
+      customerId,
       category,
       scope,
       limit: limit ? parseInt(limit, 10) : undefined,
@@ -50,12 +52,13 @@ export class KnowledgeController {
   search(
     @Query('q') query?: string,
     @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
     @Query('scope') scope?: string,
   ) {
     if (!query) {
       throw new BadRequestException('q query parameter is required');
     }
-    return this.knowledgeService.search(query, projectId, scope);
+    return this.knowledgeService.search(query, projectId, scope, customerId);
   }
 
   @Get(':id')

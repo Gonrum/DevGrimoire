@@ -620,12 +620,13 @@ const tools = [
   },
   {
     name: 'knowledge_save',
-    description: 'Save a knowledge entry (architecture decisions, patterns, conventions, notes). Use scope="global" for cross-project knowledge (projectId optional), scope="project" for project-specific (projectId required).',
+    description: 'Save a knowledge entry (architecture decisions, patterns, conventions, notes). scope="global" = cross-project, scope="project" = projectId required, scope="customer" = customerId required (customer-scoped lore).',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID (required for scope="project", optional for scope="global")' },
-        scope: { type: 'string', enum: ['global', 'project'], description: 'Scope: "global" for cross-project, "project" for project-specific (default: "project")' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (required for scope="project")' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (required for scope="customer")' },
+        scope: { type: 'string', enum: ['global', 'project', 'customer'], description: 'Scope: "global" cross-project, "project" project-specific, "customer" customer-specific (default: inferred from ids)' },
         topic: { type: 'string', description: 'Topic/title of the knowledge entry' },
         content: { type: 'string', description: 'The knowledge content' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' },
@@ -636,13 +637,14 @@ const tools = [
   },
   {
     name: 'knowledge_search',
-    description: 'Search knowledge base (returns compact results with content snippet). Use knowledge_get for full content. Without scope filter: returns both project-specific and global results.',
+    description: 'Search knowledge base (returns compact results with content snippet). Use knowledge_get for full content. With projectId/customerId: returns matching scope + global results.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         query: { type: 'string', description: 'Search query' },
-        projectId: { type: 'string', description: 'Scope search to a specific project (also includes global entries)' },
-        scope: { type: 'string', enum: ['global', 'project'], description: 'Filter by scope: "global" only global, "project" only project-specific' },
+        projectId: { type: 'string', description: 'Scope search to a project (also includes global entries)' },
+        customerId: { type: 'string', description: 'Scope search to a customer (also includes global entries)' },
+        scope: { type: 'string', enum: ['global', 'project', 'customer'], description: 'Filter strictly by scope' },
         limit: { type: 'number', description: 'Max items to return' },
       },
       required: ['query'],
@@ -650,12 +652,13 @@ const tools = [
   },
   {
     name: 'knowledge_list',
-    description: 'List knowledge entries (compact: id, topic, tags, category, scope). With projectId: shows project-specific + global entries. With scope="global": shows only global entries (no projectId needed).',
+    description: 'List knowledge entries (compact: id, topic, tags, category, scope). With projectId or customerId: shows that scope + global entries. With scope="global": only global.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         projectId: { type: 'string', description: 'Project MongoDB ID (shows project + global entries)' },
-        scope: { type: 'string', enum: ['global', 'project'], description: 'Filter by scope' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (shows customer + global entries)' },
+        scope: { type: 'string', enum: ['global', 'project', 'customer'], description: 'Filter strictly by scope' },
         category: { type: 'string', description: 'Filter by category' },
         limit: { type: 'number', description: 'Max items to return' },
         offset: { type: 'number', description: 'Skip first N items' },
@@ -2654,7 +2657,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'knowledge_save': {
-          const kScope = optionalString(a, 'scope') as 'global' | 'project' | undefined;
+          const kScope = optionalString(a, 'scope') as 'global' | 'project' | 'customer' | undefined;
           const kDto: any = {
             topic: requireString(a, 'topic'),
             content: requireString(a, 'content'),
@@ -2664,23 +2667,27 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           };
           const kPid = optionalString(a, 'projectId');
           if (kPid) kDto.projectId = kPid;
+          const kCid = optionalString(a, 'customerId');
+          if (kCid) kDto.customerId = kCid;
           const kEntry = await knowledgeService.create(kDto);
           result = compactCreateResult(kEntry, { topic: (kEntry as any).topic, scope: (kEntry as any).scope });
           break;
         }
         case 'knowledge_search': {
           const kProjectId = optionalString(a, 'projectId');
+          const kCustomerId = optionalString(a, 'customerId');
           const kSearchScope = optionalString(a, 'scope');
           const searchResults = await knowledgeService.search(
             requireString(a, 'query'),
             kProjectId,
             kSearchScope,
+            kCustomerId,
           );
           const limited = searchResults.slice(0, optionalNumber(a, 'limit') || 10);
           result = limited.map((item: any) => {
             const obj = typeof item.toJSON === 'function' ? item.toJSON() : { ...item };
-            if (kProjectId) {
-              // Project-scoped: return snippet
+            if (kProjectId || kCustomerId) {
+              // Scoped: return snippet
               obj.content = snippet(obj.content);
             } else {
               // Global search: only return compact metadata
@@ -2695,6 +2702,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const entries = await knowledgeService.findByProject(
             optionalString(a, 'projectId'),
             {
+              customerId: optionalString(a, 'customerId'),
               category: optionalString(a, 'category'),
               scope: optionalString(a, 'scope'),
               limit: optionalNumber(a, 'limit'),

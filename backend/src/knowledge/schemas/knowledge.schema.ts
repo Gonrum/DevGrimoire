@@ -8,7 +8,10 @@ export class Knowledge {
   @Prop({ type: Types.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: String, enum: ['global', 'project'], default: 'project' })
+  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  customerId?: Types.ObjectId;
+
+  @Prop({ type: String, enum: ['global', 'project', 'customer'], default: 'project' })
   scope: string;
 
   @Prop({ required: true })
@@ -26,5 +29,6 @@ export class Knowledge {
 
 export const KnowledgeSchema = SchemaFactory.createForClass(Knowledge);
 KnowledgeSchema.index({ projectId: 1 });
+KnowledgeSchema.index({ customerId: 1 });
 KnowledgeSchema.index({ scope: 1 });
 KnowledgeSchema.index({ topic: 'text', content: 'text', tags: 'text' });

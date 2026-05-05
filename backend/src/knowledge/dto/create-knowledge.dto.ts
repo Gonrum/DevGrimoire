@@ -9,12 +9,16 @@ import {
 
 export class CreateKnowledgeDto {
   @IsMongoId()
-  @ValidateIf((o) => o.scope !== 'global')
+  @ValidateIf((o) => o.scope === 'project')
   projectId?: string;
 
-  @IsIn(['global', 'project'])
+  @IsMongoId()
+  @ValidateIf((o) => o.scope === 'customer')
+  customerId?: string;
+
+  @IsIn(['global', 'project', 'customer'])
   @IsOptional()
-  scope?: 'global' | 'project';
+  scope?: 'global' | 'project' | 'customer';
 
   @IsString()
   topic: string;
