@@ -212,6 +212,28 @@
       "activity": "Chronicle"
     }
   },
+  "contacts": {
+    "newContact": "+ New contact",
+    "createContact": "Add new contact",
+    "createContactAction": "Add contact",
+    "createFailed": "Could not add contact",
+    "editContact": "Edit contact",
+    "updateFailed": "Could not save contact",
+    "deleteConfirm": "Really delete contact \"{{name}}\"?",
+    "deleteFailed": "Could not delete contact",
+    "notFound": "Contact not found.",
+    "noContacts": "No contacts on file yet.",
+    "quickAccess": "Primary contact on the customer",
+    "primary": "Primary contact",
+    "markPrimary": "Mark as primary contact",
+    "name": "Name *",
+    "role": "Role / function",
+    "rolePlaceholder": "e.g. Managing Director, IT lead, Accounting",
+    "email": "Email",
+    "phone": "Phone",
+    "notes": "Notes",
+    "sortOrder": "Sort order"
+  },
   "projectGit": {
     "title": "Git Repositories",
     "description": "Connect GitHub or GitLab repositories to sync commits.",

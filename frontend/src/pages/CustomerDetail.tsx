@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Activity,
   Attachment,
+  Contact,
   Customer,
   CustomerProjectLink,
   CustomerStatus,
@@ -74,6 +75,7 @@ export default function CustomerDetail() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [links, setLinks] = useState<CustomerProjectLink[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [aggregate, setAggregate] = useState<AggregatedData>(emptyAggregate);
   const [tab, setTab] = useState<Tab>('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -90,11 +92,13 @@ export default function CustomerDetail() {
       api.customers.get(id),
       api.customers.listProjectLinks(id),
       api.projects.list({ active: true }),
+      api.contacts.list(id).catch(() => [] as Contact[]),
     ])
-      .then(([customerData, linkData, projectData]) => {
+      .then(([customerData, linkData, projectData, contactData]) => {
         setCustomer(customerData);
         setLinks(linkData);
         setProjects(projectData);
+        setContacts(contactData);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -220,7 +224,7 @@ export default function CustomerDetail() {
         { key: 'environments', label: t('customers.tab.environments'), count: linkedOnlyEnvironments.length },
         { key: 'secrets', label: t('customers.tab.secrets'), count: linkedSecrets.length },
         { key: 'monitoring', label: t('customers.tab.monitoring') },
-        { key: 'contacts', label: t('customers.tab.contacts') },
+        { key: 'contacts', label: t('customers.tab.contacts'), count: contacts.length },
       ],
     },
   ];
@@ -528,7 +532,14 @@ export default function CustomerDetail() {
               <EmptyState message={t('customers.monitoringPlanned')} />
             )}
 
-            {tab === 'contacts' && <ContactsTab customer={customer} />}
+            {tab === 'contacts' && (
+              <ContactsTab
+                customer={customer}
+                customerId={id}
+                contacts={contacts}
+                onChanged={loadBase}
+              />
+            )}
 
             {tab === 'activity' && (
               <AggregatedActivityTab
@@ -867,49 +878,149 @@ function AggregatedActivityTab({
   );
 }
 
-function ContactsTab({ customer }: { customer: Customer }) {
+function ContactsTab({
+  customer,
+  customerId,
+  contacts,
+  onChanged,
+}: {
+  customer: Customer;
+  customerId: string;
+  contacts: Contact[];
+  onChanged: () => void;
+}) {
   const { t } = useTranslation();
-  const hasAny =
+  const { showError } = useToast();
+  const navigate = useNavigate();
+
+  const hasLegacy =
     customer.primaryContactName ||
     customer.primaryContactEmail ||
     customer.primaryContactPhone ||
     customer.website;
-  if (!hasAny) return <EmptyState message={t('customers.noContacts')} />;
+
+  const removeContact = async (contactId: string, name: string) => {
+    if (!window.confirm(t('contacts.deleteConfirm', { name }))) return;
+    try {
+      await api.contacts.remove(customerId, contactId);
+      onChanged();
+    } catch (err: any) {
+      showError(err.message || t('contacts.deleteFailed'));
+    }
+  };
+
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2 text-sm">
-      {customer.primaryContactName && (
-        <div className="flex gap-2">
-          <span className="text-gray-500 w-32 shrink-0">{t('customers.primaryContact')}</span>
-          <span className="text-gray-100">{customer.primaryContactName}</span>
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="primary"
+          onClick={() => navigate(`/customers/${customerId}/contacts/new`)}
+        >
+          {t('contacts.newContact')}
+        </Button>
+      </div>
+
+      {hasLegacy && (
+        <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4 space-y-2 text-sm">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
+            {t('contacts.quickAccess')}
+          </h3>
+          {customer.primaryContactName && (
+            <div className="flex gap-2">
+              <span className="text-gray-500 w-32 shrink-0">{t('customers.primaryContact')}</span>
+              <span className="text-gray-100">{customer.primaryContactName}</span>
+            </div>
+          )}
+          {customer.primaryContactEmail && (
+            <div className="flex gap-2">
+              <span className="text-gray-500 w-32 shrink-0">{t('customers.primaryContactEmail')}</span>
+              <a className="text-cyan-300 hover:text-cyan-200" href={`mailto:${customer.primaryContactEmail}`}>
+                {customer.primaryContactEmail}
+              </a>
+            </div>
+          )}
+          {customer.primaryContactPhone && (
+            <div className="flex gap-2">
+              <span className="text-gray-500 w-32 shrink-0">{t('customers.primaryContactPhone')}</span>
+              <a className="text-cyan-300 hover:text-cyan-200" href={`tel:${customer.primaryContactPhone}`}>
+                {customer.primaryContactPhone}
+              </a>
+            </div>
+          )}
+          {customer.website && (
+            <div className="flex gap-2">
+              <span className="text-gray-500 w-32 shrink-0">{t('customers.website')}</span>
+              <a
+                className="text-cyan-300 hover:text-cyan-200 break-all"
+                href={customer.website.startsWith('http') ? customer.website : `https://${customer.website}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {customer.website}
+              </a>
+            </div>
+          )}
         </div>
       )}
-      {customer.primaryContactEmail && (
-        <div className="flex gap-2">
-          <span className="text-gray-500 w-32 shrink-0">{t('customers.primaryContactEmail')}</span>
-          <a className="text-cyan-300 hover:text-cyan-200" href={`mailto:${customer.primaryContactEmail}`}>
-            {customer.primaryContactEmail}
-          </a>
-        </div>
-      )}
-      {customer.primaryContactPhone && (
-        <div className="flex gap-2">
-          <span className="text-gray-500 w-32 shrink-0">{t('customers.primaryContactPhone')}</span>
-          <a className="text-cyan-300 hover:text-cyan-200" href={`tel:${customer.primaryContactPhone}`}>
-            {customer.primaryContactPhone}
-          </a>
-        </div>
-      )}
-      {customer.website && (
-        <div className="flex gap-2">
-          <span className="text-gray-500 w-32 shrink-0">{t('customers.website')}</span>
-          <a
-            className="text-cyan-300 hover:text-cyan-200 break-all"
-            href={customer.website.startsWith('http') ? customer.website : `https://${customer.website}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {customer.website}
-          </a>
+
+      {contacts.length === 0 ? (
+        <EmptyState message={t('contacts.noContacts')} />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {contacts.map((contact) => (
+            <div key={contact._id} className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-sm font-semibold text-gray-100">{contact.name}</h4>
+                    {contact.isPrimary && (
+                      <Badge color="bg-amber-900/40 text-amber-300" rounded="full">
+                        {t('contacts.primary')}
+                      </Badge>
+                    )}
+                  </div>
+                  {contact.role && <p className="text-xs text-cyan-400 mt-0.5">{contact.role}</p>}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Link
+                    to={`/customers/${customerId}/contacts/${contact._id}/edit`}
+                    className="text-xs text-gray-500 hover:text-cyan-300"
+                  >
+                    {t('common.edit')}
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => removeContact(contact._id, contact.name)}
+                    className="text-xs text-gray-500 hover:text-red-300"
+                  >
+                    {t('common.delete')}
+                  </button>
+                </div>
+              </div>
+              <div className="mt-3 space-y-1 text-sm">
+                {contact.email && (
+                  <a
+                    className="block text-cyan-300 hover:text-cyan-200 break-all"
+                    href={`mailto:${contact.email}`}
+                  >
+                    {contact.email}
+                  </a>
+                )}
+                {contact.phone && (
+                  <a
+                    className="block text-cyan-300 hover:text-cyan-200"
+                    href={`tel:${contact.phone}`}
+                  >
+                    {contact.phone}
+                  </a>
+                )}
+              </div>
+              {contact.notes && (
+                <p className="text-xs text-gray-500 mt-2 whitespace-pre-wrap">{contact.notes}</p>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

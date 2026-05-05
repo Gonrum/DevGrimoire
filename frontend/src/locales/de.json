@@ -212,6 +212,28 @@
       "activity": "Chronik"
     }
   },
+  "contacts": {
+    "newContact": "+ Neuer Kontakt",
+    "createContact": "Neuen Kontakt anlegen",
+    "createContactAction": "Kontakt anlegen",
+    "createFailed": "Kontakt konnte nicht angelegt werden",
+    "editContact": "Kontakt bearbeiten",
+    "updateFailed": "Kontakt konnte nicht gespeichert werden",
+    "deleteConfirm": "Kontakt \"{{name}}\" wirklich löschen?",
+    "deleteFailed": "Kontakt konnte nicht gelöscht werden",
+    "notFound": "Kontakt nicht gefunden.",
+    "noContacts": "Noch keine Kontakte hinterlegt.",
+    "quickAccess": "Hauptkontakt am Kunden",
+    "primary": "Hauptansprechpartner",
+    "markPrimary": "Als Hauptansprechpartner markieren",
+    "name": "Name *",
+    "role": "Rolle / Funktion",
+    "rolePlaceholder": "z.B. Geschäftsführung, IT-Lead, Buchhaltung",
+    "email": "E-Mail",
+    "phone": "Telefon",
+    "notes": "Notizen",
+    "sortOrder": "Sortierung"
+  },
   "projectGit": {
     "title": "Git Repositories",
     "description": "GitHub- oder GitLab-Repositories verbinden, um Commits zu synchronisieren.",

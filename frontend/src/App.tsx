@@ -11,6 +11,8 @@ import CustomerCreatePage from './pages/CustomerCreatePage';
 import CustomerEditPage from './pages/CustomerEditPage';
 import CustomerProjectLinkCreatePage from './pages/CustomerProjectLinkCreatePage';
 import CustomerProjectLinkEditPage from './pages/CustomerProjectLinkEditPage';
+import ContactCreatePage from './pages/ContactCreatePage';
+import ContactEditPage from './pages/ContactEditPage';
 import ProjectSettings from './pages/ProjectSettings';
 import TodoDetailPage from './pages/TodoDetailPage';
 import TodoCreatePage from './pages/TodoCreatePage';
@@ -307,6 +309,8 @@ function AppShell() {
           <Route path="/customers/:id/edit" element={<CustomerEditPage />} />
           <Route path="/customers/:id/links/new" element={<CustomerProjectLinkCreatePage />} />
           <Route path="/customers/:id/links/:linkId/edit" element={<CustomerProjectLinkEditPage />} />
+          <Route path="/customers/:id/contacts/new" element={<ContactCreatePage />} />
+          <Route path="/customers/:id/contacts/:contactId/edit" element={<ContactEditPage />} />
           <Route path="/projects/:id/todos/new" element={<TodoCreatePage />} />
           <Route path="/projects/:id/todos/:todoId" element={<TodoDetailPage />} />
           <Route path="/projects/:id/milestones/new" element={<MilestoneCreatePage />} />

@@ -105,6 +105,20 @@ export interface CustomerProjectLink {
   updatedAt: string;
 }
 
+export interface Contact {
+  _id: string;
+  customerId: string;
+  name: string;
+  role?: string;
+  email?: string;
+  phone?: string;
+  notes?: string;
+  isPrimary: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ChangelogEntry {
   _id: string;
   projectId: string;
@@ -687,6 +701,26 @@ export const api = {
       }),
     deleteProjectLink: (customerId: string, linkId: string) =>
       request<void>(`/customers/${customerId}/project-links/${linkId}`, {
+        method: 'DELETE',
+      }),
+  },
+  contacts: {
+    list: (customerId: string) =>
+      request<Contact[]>(`/customers/${customerId}/contacts`),
+    get: (customerId: string, contactId: string) =>
+      request<Contact>(`/customers/${customerId}/contacts/${contactId}`),
+    create: (customerId: string, data: Partial<Contact>) =>
+      request<Contact>(`/customers/${customerId}/contacts`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (customerId: string, contactId: string, data: Partial<Contact>) =>
+      request<Contact>(`/customers/${customerId}/contacts/${contactId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    remove: (customerId: string, contactId: string) =>
+      request<void>(`/customers/${customerId}/contacts/${contactId}`, {
         method: 'DELETE',
       }),
   },
