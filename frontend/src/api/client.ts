@@ -139,7 +139,8 @@ export interface TodoComment {
 
 export interface Todo {
   _id: string;
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   title: string;
   description?: string;
   status: 'open' | 'in_progress' | 'review' | 'done';
@@ -725,9 +726,10 @@ export const api = {
       }),
   },
   todos: {
-    list: (filters?: { projectId?: string; status?: string }) => {
+    list: (filters?: { projectId?: string; customerId?: string; status?: string }) => {
       const params = new URLSearchParams();
       if (filters?.projectId) params.set('projectId', filters.projectId);
+      if (filters?.customerId) params.set('customerId', filters.customerId);
       if (filters?.status) params.set('status', filters.status);
       const qs = params.toString();
       return request<Todo[]>(`/todos${qs ? `?${qs}` : ''}`);

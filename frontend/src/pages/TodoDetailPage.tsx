@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Todo, Milestone } from '../api/client';
 import {
@@ -75,6 +75,10 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
 export default function TodoDetailPage() {
   const { id, todoId } = useParams<{ id: string; todoId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isCustomerScope = location.pathname.startsWith('/customers/');
+  const basePath = isCustomerScope ? `/customers/${id}` : `/projects/${id}`;
+  const backLabelKey = isCustomerScope ? 'todoDetail.backToCustomer' : 'todoDetail.backToProject';
   const { t, i18n } = useTranslation();
   const { showError } = useToast();
   const [todo, setTodo] = useState<Todo | null>(null);
@@ -96,12 +100,17 @@ export default function TodoDetailPage() {
 
   useEffect(() => { loadTodo(); }, [todoId]);
   useEffect(() => {
-    if (id) {
-      api.milestones.list(id).then(setMilestones);
-      api.todos.list({ projectId: id }).then(setAllTodos);
+    if (!id) return;
+    if (isCustomerScope) {
+      api.todos.list({ customerId: id }).then(setAllTodos);
+      setMilestones([]);
+      setStorageEnabled(false);
+      return;
     }
+    api.milestones.list(id).then(setMilestones);
+    api.todos.list({ projectId: id }).then(setAllTodos);
     api.attachments.storageStatus().then((s) => setStorageEnabled(s.enabled)).catch(() => {});
-  }, [id]);
+  }, [id, isCustomerScope]);
 
   const handleStatusChange = async (newStatus: Todo['status']) => {
     if (!todoId) return;
@@ -129,7 +138,7 @@ export default function TodoDetailPage() {
   if (error || !todo) {
     return (
       <div>
-        <Link to={`/projects/${id}`} className="text-sm text-gray-500 hover:text-gray-300 mb-4 inline-block">&larr; {t('todoDetail.backToProject')}</Link>
+        <Link to={basePath} className="text-sm text-gray-500 hover:text-gray-300 mb-4 inline-block">&larr; {t(backLabelKey)}</Link>
         <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
           <p className="text-red-400">{error || t('todoDetail.notFound')}</p>
         </div>
@@ -140,7 +149,7 @@ export default function TodoDetailPage() {
   const comments = todo.comments || [];
 
   return (
-    <WorkflowPageShell backTo={`/projects/${id}`} backLabel={t('todoDetail.backToProject')}>
+    <WorkflowPageShell backTo={basePath} backLabel={t(backLabelKey)}>
       {editing ? (
         <div>
           <h2 className="text-lg font-semibold mb-4">{t('todoDetail.editTask')}</h2>
@@ -192,14 +201,16 @@ export default function TodoDetailPage() {
             </DetailSection>
           )}
 
-          <TodoDependenciesSection
-            todo={todo}
-            allTodos={allTodos}
-            projectId={id}
-            onChanged={loadTodo}
-            onError={showError}
-            className="mb-5"
-          />
+          {!isCustomerScope && (
+            <TodoDependenciesSection
+              todo={todo}
+              allTodos={allTodos}
+              projectId={id}
+              onChanged={loadTodo}
+              onError={showError}
+              className="mb-5"
+            />
+          )}
 
           <div className="text-xs text-gray-600 mb-5 space-y-0.5">
             <p>{t('common.created')}: {new Date(todo.createdAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US')}</p>
@@ -232,7 +243,7 @@ export default function TodoDetailPage() {
               onConfirm={async () => {
                 try {
                   await api.todos.delete(todoId!);
-                  navigate(`/projects/${id}`);
+                  navigate(basePath);
                 } catch (err: any) {
                   showError(err.message || t('todos.deleteFailed'));
                 }

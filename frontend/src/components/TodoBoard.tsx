@@ -18,7 +18,10 @@ import TabToolbar from './ui/TabToolbar';
 interface Props {
   todos: Todo[];
   milestones: Milestone[];
-  projectId: string;
+  /** Project context — set this OR customerId, not both. */
+  projectId?: string;
+  /** Customer context — set this OR projectId, not both. */
+  customerId?: string;
   onUpdate: () => void;
 }
 
@@ -152,7 +155,7 @@ function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) 
   );
 }
 
-function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError }: { todo: Todo; allTodos: Todo[]; projectId: string; onUpdate: () => void; onDragStart?: (todoId: string) => void; showError: (msg: string) => void }) {
+function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError }: { todo: Todo; allTodos: Todo[]; basePath: string; onUpdate: () => void; onDragStart?: (todoId: string) => void; showError: (msg: string) => void }) {
   const { t, i18n } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [animClass, setAnimClass] = useState('');
@@ -202,7 +205,7 @@ function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError 
   }
 
   return (
-    <Link to={`/projects/${projectId}/todos/${todo._id}`}
+    <Link to={`${basePath}/todos/${todo._id}`}
       draggable
       aria-roledescription={t('todos.draggableTask')}
       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.(todo._id); }}
@@ -256,7 +259,7 @@ function TodoCard({ todo, allTodos, projectId, onUpdate, onDragStart, showError 
   );
 }
 
-function TodoListRow({ todo, projectId, onUpdate, showError }: { todo: Todo; projectId: string; onUpdate: () => void; showError: (msg: string) => void }) {
+function TodoListRow({ todo, basePath, onUpdate, showError }: { todo: Todo; basePath: string; onUpdate: () => void; showError: (msg: string) => void }) {
   const { t, i18n } = useTranslation();
   const [animClass, setAnimClass] = useState('');
   const prevStatusRef = useRef(todo.status);
@@ -298,7 +301,7 @@ function TodoListRow({ todo, projectId, onUpdate, showError }: { todo: Todo; pro
         </span>
       </td>
       <td className="py-2.5 px-3">
-        <Link to={`/projects/${projectId}/todos/${todo._id}`} className="hover:text-cyan-400 transition-colors">
+        <Link to={`${basePath}/todos/${todo._id}`} className="hover:text-cyan-400 transition-colors">
           <div className="text-sm">{todo.displayNumber && <span className="text-gray-500 mr-1.5">{todo.displayNumber}</span>}{todo.title}</div>
           {todo.description && <div className="text-xs text-gray-600 line-clamp-1 mt-0.5">{todo.description}</div>}
         </Link>
@@ -329,7 +332,8 @@ function TodoListRow({ todo, projectId, onUpdate, showError }: { todo: Todo; pro
 
 type ViewMode = 'kanban' | 'list';
 
-export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Props) {
+export default function TodoBoard({ todos, milestones, projectId, customerId, onUpdate }: Props) {
+  const basePath = projectId ? `/projects/${projectId}` : `/customers/${customerId}`;
   const { t } = useTranslation();
   const { showError } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
@@ -406,7 +410,7 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
       <TabToolbar
         className="mb-4"
         primaryAction={(
-          <ButtonLink to={`/projects/${projectId}/todos/new`} variant="primary" size="sm">
+          <ButtonLink to={`${basePath}/todos/new`} variant="primary" size="sm">
             {t('todos.newTask')}
           </ButtonLink>
         )}
@@ -540,7 +544,7 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
                 </h3>
                 <div className="space-y-2 min-h-[2rem]" role="list" aria-label={col.label()}>
                   {items.map((todo) => (
-                    <TodoCard key={todo._id} todo={todo} allTodos={todos} projectId={projectId} onUpdate={onUpdate}
+                    <TodoCard key={todo._id} todo={todo} allTodos={todos} basePath={basePath} onUpdate={onUpdate}
                       onDragStart={(id) => setDragTodoId(id || null)} showError={showError} />
                   ))}
                   {items.length === 0 && !isOver && (
@@ -570,7 +574,7 @@ export default function TodoBoard({ todos, milestones, projectId, onUpdate }: Pr
                 <tr><td colSpan={7} className="py-4 text-center text-xs text-gray-700 italic">{t('todos.noTasks')}</td></tr>
               )}
               {filtered.map((todo) => (
-                <TodoListRow key={todo._id} todo={todo} projectId={projectId} onUpdate={onUpdate} showError={showError} />
+                <TodoListRow key={todo._id} todo={todo} basePath={basePath} onUpdate={onUpdate} showError={showError} />
               ))}
             </tbody>
           </table>

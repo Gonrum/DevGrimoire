@@ -8,7 +8,10 @@ import { FormInput, FormSelect } from './ui/FormField';
 import { SpeechConsentDialog } from './ui/SpeechConsentDialog';
 
 interface TodoFormProps {
-  projectId: string;
+  /** Project context — set this OR customerId, not both. */
+  projectId?: string;
+  /** Customer context — set this OR projectId, not both. Disables milestone select and attachments. */
+  customerId?: string;
   initialMilestoneId?: string;
   milestones?: Milestone[];
   showMilestoneSelect?: boolean;
@@ -24,6 +27,7 @@ interface TodoFormProps {
 
 export default function TodoForm({
   projectId,
+  customerId,
   initialMilestoneId = '',
   milestones = [],
   showMilestoneSelect = false,
@@ -36,6 +40,9 @@ export default function TodoForm({
   onCancel,
   onMilestoneCreated,
 }: TodoFormProps) {
+  const isCustomerScope = !projectId && !!customerId;
+  const effectiveShowMilestone = showMilestoneSelect && !isCustomerScope;
+  const effectiveAllowMilestoneCreate = allowMilestoneCreate && !isCustomerScope;
   const { t } = useTranslation();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -53,13 +60,16 @@ export default function TodoForm({
   const shouldShowDictation = enableDictation && speechConsent;
 
   useEffect(() => { setMilestoneId(initialMilestoneId); }, [initialMilestoneId]);
-  useEffect(() => { api.attachments.storageStatus().then((s) => setStorageEnabled(s.enabled)).catch(() => {}); }, []);
+  useEffect(() => {
+    if (isCustomerScope) { setStorageEnabled(false); return; }
+    api.attachments.storageStatus().then((s) => setStorageEnabled(s.enabled)).catch(() => {});
+  }, [isCustomerScope]);
   useEffect(() => {
     if (enableDictation && !speechConsent) setShowConsentDialog(true);
   }, [enableDictation, speechConsent]);
 
   const handleCreateMilestone = async () => {
-    if (!allowMilestoneCreate || !newMilestoneName.trim()) return;
+    if (!effectiveAllowMilestoneCreate || !projectId || !newMilestoneName.trim()) return;
     const milestone = await api.milestones.create({ projectId, name: newMilestoneName.trim() });
     setNewMilestoneName('');
     setCreatingMilestone(false);
@@ -74,6 +84,7 @@ export default function TodoForm({
     try {
       const todo = await api.todos.create({
         projectId,
+        customerId,
         title: title.trim(),
         description: description.trim() || undefined,
         priority,
@@ -82,7 +93,7 @@ export default function TodoForm({
         milestoneId: milestoneId || undefined,
       } as Partial<Todo> & { milestoneId?: string });
 
-      if (pendingFiles.length > 0 && todo._id) {
+      if (projectId && pendingFiles.length > 0 && todo._id) {
         for (const file of pendingFiles) {
           await api.attachments.upload(projectId, file, { entityType: 'todo', entityId: todo._id }).catch(() => {});
         }
@@ -130,7 +141,7 @@ export default function TodoForm({
           <FormInput fieldClassName="flex-1 min-w-0 w-full" label={t('common.tags')} type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('todoCreate.tagsPlaceholder')} />
         </div>
 
-        {showMilestoneSelect && (
+        {effectiveShowMilestone && (
           <div className="space-y-2">
             <FormSelect fieldClassName="w-full" label={t('todoCreate.milestone')} value={milestoneId} onChange={(e) => setMilestoneId(e.target.value)}>
               <option value="">{t('todoCreate.noMilestone')}</option>
@@ -138,7 +149,7 @@ export default function TodoForm({
                 <option key={ms._id} value={ms._id}>{ms.name}</option>
               ))}
             </FormSelect>
-            {allowMilestoneCreate && (creatingMilestone ? (
+            {effectiveAllowMilestoneCreate && (creatingMilestone ? (
               <div className="flex flex-col sm:flex-row sm:items-end gap-2">
                 <FormInput fieldClassName="flex-1 min-w-0 w-full" type="text" value={newMilestoneName} onChange={(e) => setNewMilestoneName(e.target.value)}
                   placeholder={t('common.name')} autoFocus onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleCreateMilestone())} />
