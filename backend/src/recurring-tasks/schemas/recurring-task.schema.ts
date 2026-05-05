@@ -17,6 +17,9 @@ export class RecurringTask {
   @Prop({ type: Types.ObjectId, ref: 'Project', index: true })
   projectId?: Types.ObjectId;
 
+  @Prop({ type: Types.ObjectId, ref: 'Customer', index: true })
+  customerId?: Types.ObjectId;
+
   @Prop({ required: true })
   title: string;
 
@@ -68,3 +71,4 @@ export class RecurringTask {
 
 export const RecurringTaskSchema = SchemaFactory.createForClass(RecurringTask);
 RecurringTaskSchema.index({ projectId: 1, active: 1, nextRun: 1 });
+RecurringTaskSchema.index({ customerId: 1, active: 1, nextRun: 1 });

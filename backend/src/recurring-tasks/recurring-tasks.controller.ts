@@ -16,12 +16,13 @@ export class RecurringTasksController {
   @Get()
   findAll(
     @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
     @Query('active') active?: string,
     @Query('systemOnly') systemOnly?: string,
   ) {
     const activeBool = active !== undefined ? active === 'true' : undefined;
     const systemOnlyBool = systemOnly === 'true';
-    return this.recurringTasksService.findAll({ projectId, systemOnly: systemOnlyBool, active: activeBool });
+    return this.recurringTasksService.findAll({ projectId, customerId, systemOnly: systemOnlyBool, active: activeBool });
   }
 
   @Get(':id')

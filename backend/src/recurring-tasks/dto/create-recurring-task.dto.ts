@@ -6,6 +6,10 @@ export class CreateRecurringTaskDto {
   @IsMongoId()
   projectId?: string;
 
+  @IsOptional()
+  @IsMongoId()
+  customerId?: string;
+
   @IsString()
   title: string;
 

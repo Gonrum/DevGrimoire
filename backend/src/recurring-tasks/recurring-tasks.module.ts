@@ -6,6 +6,7 @@ import { RecurringTasksController } from './recurring-tasks.controller';
 import { RecurringTasksScheduler } from './recurring-tasks.scheduler';
 import { TodosModule } from '../todos/todos.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { CustomersModule } from '../customers/customers.module';
 import { Project, ProjectSchema } from '../projects/schemas/project.schema';
 
 @Module({
@@ -16,6 +17,7 @@ import { Project, ProjectSchema } from '../projects/schemas/project.schema';
     ]),
     TodosModule,
     NotificationsModule,
+    CustomersModule,
   ],
   controllers: [RecurringTasksController],
   providers: [RecurringTasksService, RecurringTasksScheduler],

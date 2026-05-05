@@ -1906,11 +1906,12 @@ const tools = [
   },
   {
     name: 'recurring_task_create',
-    description: 'Create a recurring task. With projectId: creates todos in that project. Without projectId: system-wide task that creates notifications.',
+    description: 'Create a recurring task. With projectId: creates project todos. With customerId: creates customer-scoped quests. With neither: system-wide task that creates notifications.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID (optional — omit for system-wide task)' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId; omit both for system-wide)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
         title: { type: 'string', description: 'Todo/notification title' },
         description: { type: 'string', description: 'Description' },
         priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
@@ -1929,12 +1930,13 @@ const tools = [
   },
   {
     name: 'recurring_task_list',
-    description: 'List recurring tasks. Filter by projectId, or use systemOnly=true for system-wide tasks, or omit both for all.',
+    description: 'List recurring tasks. Filter by projectId or customerId, or use systemOnly=true for system-wide tasks, or omit all for everything.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         projectId: { type: 'string', description: 'Project MongoDB ID (optional)' },
-        systemOnly: { type: 'boolean', description: 'Only system-wide tasks (no projectId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (optional)' },
+        systemOnly: { type: 'boolean', description: 'Only system-wide tasks (no projectId/customerId)' },
         active: { type: 'boolean', description: 'Filter by active/inactive' },
       },
     },
@@ -3691,6 +3693,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'recurring_task_create': {
           const rt = await recurringTasksService.create({
             projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
             title: requireString(a, 'title'),
             description: optionalString(a, 'description'),
             priority: optionalString(a, 'priority'),
@@ -3710,6 +3713,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'recurring_task_list': {
           const rts = await recurringTasksService.findAll({
             projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
             systemOnly: optionalBoolean(a, 'systemOnly'),
             active: optionalBoolean(a, 'active'),
           });

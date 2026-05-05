@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -7,6 +7,7 @@ import { CreateRecurringTaskDto } from './dto/create-recurring-task.dto';
 import { UpdateRecurringTaskDto } from './dto/update-recurring-task.dto';
 import { TodosService } from '../todos/todos.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { CustomersService } from '../customers/customers.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
 
@@ -18,10 +19,28 @@ export class RecurringTasksService {
     @InjectModel(RecurringTask.name) private recurringTaskModel: Model<RecurringTaskDocument>,
     private readonly todosService: TodosService,
     private readonly notificationsService: NotificationsService,
+    private readonly customersService: CustomersService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
+  private emit(action: 'created' | 'updated' | 'deleted', task: RecurringTaskDocument): void {
+    if (!task.projectId && !task.customerId) return;
+    this.eventEmitter.emit(PROJECT_CHANGED, {
+      projectId: task.projectId?.toString() || null,
+      entity: 'recurring-task',
+      action,
+      entityId: task._id.toString(),
+      summary: `Wiederkehrende Aufgabe "${task.title}" ${action === 'created' ? 'erstellt' : action === 'updated' ? 'aktualisiert' : 'entfernt'}`,
+    });
+  }
+
   async create(dto: CreateRecurringTaskDto): Promise<RecurringTaskDocument> {
+    if (dto.projectId && dto.customerId) {
+      throw new BadRequestException('Recurring task can have either projectId or customerId, not both');
+    }
+    if (dto.customerId) {
+      await this.customersService.findById(dto.customerId);
+    }
     const nextRun = this.computeNextRun(
       dto.frequency,
       dto.hour ?? 9,
@@ -30,28 +49,28 @@ export class RecurringTasksService {
       dto.month,
     );
     const task = await this.recurringTaskModel.create({ ...dto, nextRun });
-    if (task.projectId) {
-      this.eventEmitter.emit(PROJECT_CHANGED, {
-        projectId: task.projectId.toString(),
-        entity: 'recurring-task',
-        action: 'created',
-        entityId: task._id.toString(),
-        summary: `Wiederkehrende Aufgabe "${task.title}" erstellt`,
-      });
-    }
+    this.emit('created', task);
     return task;
   }
 
-  async findAll(filters?: { projectId?: string; systemOnly?: boolean; active?: boolean }): Promise<RecurringTaskDocument[]> {
+  async findAll(filters?: { projectId?: string; customerId?: string; systemOnly?: boolean; active?: boolean }): Promise<RecurringTaskDocument[]> {
     const query: Record<string, unknown> = {};
     if (filters?.projectId) query.projectId = projectIdFilter(filters.projectId);
-    if (filters?.systemOnly) query.projectId = { $exists: false };
+    if (filters?.customerId) query.customerId = projectIdFilter(filters.customerId);
+    if (filters?.systemOnly) {
+      query.projectId = { $exists: false };
+      query.customerId = { $exists: false };
+    }
     if (filters?.active !== undefined) query.active = filters.active;
     return this.recurringTaskModel.find(query).sort({ createdAt: -1 }).exec();
   }
 
   async findByProject(projectId: string, active?: boolean): Promise<RecurringTaskDocument[]> {
     return this.findAll({ projectId, active });
+  }
+
+  async findByCustomer(customerId: string, active?: boolean): Promise<RecurringTaskDocument[]> {
+    return this.findAll({ customerId, active });
   }
 
   async findById(id: string): Promise<RecurringTaskDocument> {
@@ -76,34 +95,22 @@ export class RecurringTasksService {
 
     const task = await this.recurringTaskModel.findByIdAndUpdate(id, updateData, { new: true }).exec();
     if (!task) throw new NotFoundException(`RecurringTask ${id} not found`);
-    if (task.projectId) {
-      this.eventEmitter.emit(PROJECT_CHANGED, {
-        projectId: task.projectId.toString(),
-        entity: 'recurring-task',
-        action: 'updated',
-        entityId: id,
-        summary: `Wiederkehrende Aufgabe "${task.title}" aktualisiert`,
-      });
-    }
+    this.emit('updated', task);
     return task;
   }
 
   async remove(id: string): Promise<void> {
     const result = await this.recurringTaskModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException(`RecurringTask ${id} not found`);
-    if (result.projectId) {
-      this.eventEmitter.emit(PROJECT_CHANGED, {
-        projectId: result.projectId.toString(),
-        entity: 'recurring-task',
-        action: 'deleted',
-        entityId: id,
-        summary: `Wiederkehrende Aufgabe "${result.title}" entfernt`,
-      });
-    }
+    this.emit('deleted', result);
   }
 
   async removeByProject(projectId: string): Promise<void> {
     await this.recurringTaskModel.deleteMany({ projectId }).exec();
+  }
+
+  async removeByCustomer(customerId: string): Promise<void> {
+    await this.recurringTaskModel.deleteMany({ customerId }).exec();
   }
 
   async trigger(id: string): Promise<RecurringTaskDocument> {
@@ -154,7 +161,7 @@ export class RecurringTasksService {
 
   private async executeTask(task: RecurringTaskDocument): Promise<void> {
     if (task.projectId) {
-      // Project-bound: create a todo
+      // Project-bound: create a project todo
       const todo = await this.todosService.create({
         projectId: task.projectId.toString(),
         title: task.title,
@@ -164,7 +171,18 @@ export class RecurringTasksService {
         milestoneId: task.milestoneId?.toString(),
         repoLabel: task.repoLabel,
       });
-
+      await this.recurringTaskModel.findByIdAndUpdate(task._id, {
+        $push: { createdTodoIds: todo._id },
+      }).exec();
+    } else if (task.customerId) {
+      // Customer-bound: create a customer-scoped quest
+      const todo = await this.todosService.create({
+        customerId: task.customerId.toString(),
+        title: task.title,
+        description: task.description,
+        priority: task.priority as any,
+        tags: [...task.tags],
+      });
       await this.recurringTaskModel.findByIdAndUpdate(task._id, {
         $push: { createdTodoIds: todo._id },
       }).exec();
