@@ -264,7 +264,8 @@ export interface EnvVariable {
 
 export interface Environment {
   _id: string;
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   name: string;
   description?: string;
   host?: string;
@@ -305,7 +306,8 @@ export type SecretType = 'variable' | 'password' | 'token' | 'ssh_key' | 'certif
 
 export interface SecretListItem {
   _id: string;
-  projectId: string;
+  projectId: string | null;
+  customerId: string | null;
   environmentId: string | null;
   key: string;
   description?: string;
@@ -882,6 +884,8 @@ export const api = {
   environments: {
     list: (projectId: string) =>
       request<Environment[]>(`/environments?projectId=${projectId}`),
+    listForCustomer: (customerId: string) =>
+      request<Environment[]>(`/environments?customerId=${customerId}`),
     get: (id: string) => request<Environment>(`/environments/${id}`),
     create: (data: Partial<Environment>) =>
       request<Environment>('/environments', { method: 'POST', body: JSON.stringify(data) }),
@@ -893,11 +897,16 @@ export const api = {
   secrets: {
     list: (projectId: string, environmentId?: string) => {
       const params = new URLSearchParams({ projectId });
-      if (environmentId) params.set('environmentId', environmentId);
+      if (environmentId !== undefined) params.set('environmentId', environmentId);
+      return request<SecretListItem[]>(`/secrets?${params}`);
+    },
+    listForCustomer: (customerId: string, environmentId?: string) => {
+      const params = new URLSearchParams({ customerId });
+      if (environmentId !== undefined) params.set('environmentId', environmentId);
       return request<SecretListItem[]>(`/secrets?${params}`);
     },
     get: (id: string) => request<SecretWithValue>(`/secrets/${id}`),
-    create: (data: { projectId: string; environmentId?: string; key: string; value: string; description?: string; type?: SecretType }) =>
+    create: (data: { projectId?: string; customerId?: string; environmentId?: string; key: string; value: string; description?: string; type?: SecretType }) =>
       request<SecretListItem>('/secrets', { method: 'POST', body: JSON.stringify(data) }),
     update: (id: string, data: { key?: string; value?: string; description?: string; type?: SecretType }) =>
       request<SecretListItem>(`/secrets/${id}`, { method: 'PUT', body: JSON.stringify(data) }),

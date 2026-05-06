@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Environment, SecretType } from '../api/client';
 import { useToast } from '../components/Toast';
@@ -8,10 +8,14 @@ import { FormInput, FormSelect } from '../components/ui/FormField';
 
 export default function SecretCreatePage() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { showError } = useToast();
   const { t } = useTranslation();
+  const isCustomer = location.pathname.startsWith('/customers/');
+  const ownerListPath = (tab: 'environments' | 'secrets') =>
+    isCustomer ? `/customers/${id}?tab=${tab}` : `/projects/${id}?tab=${tab}`;
 
   const SECRET_TYPES: { value: SecretType; label: string; description: string; icon: string }[] = [
     { value: 'variable', label: t('secretCreate.typeVariable'), description: t('secretCreate.typeVariableDesc'), icon: '{ }' },
@@ -30,8 +34,12 @@ export default function SecretCreatePage() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (id) api.environments.list(id).then(setEnvironments).catch(() => {});
-  }, [id]);
+    if (!id) return;
+    const loader = isCustomer
+      ? api.environments.listForCustomer(id)
+      : api.environments.list(id);
+    loader.then(setEnvironments).catch(() => {});
+  }, [id, isCustomer]);
 
   const isMultiline = type === 'ssh_key' || type === 'certificate' || type === 'file';
 
@@ -41,14 +49,15 @@ export default function SecretCreatePage() {
     setSaving(true);
     try {
       await api.secrets.create({
-        projectId: id,
+        projectId: isCustomer ? undefined : id,
+        customerId: isCustomer ? id : undefined,
         key: key.trim(),
         value,
         description: description.trim() || undefined,
         type,
         environmentId: environmentId || undefined,
       });
-      navigate(`/projects/${id}?tab=${environmentId ? 'environments' : 'secrets'}`);
+      navigate(ownerListPath(environmentId ? 'environments' : 'secrets'));
     } catch (err: any) {
       showError(err.message || t('secretCreate.errorCreating'));
     } finally {
@@ -58,7 +67,7 @@ export default function SecretCreatePage() {
 
   return (
     <div>
-      <Link to={`/projects/${id}?tab=${environmentId ? 'environments' : 'secrets'}`} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; {t('secretCreate.backToProject')}</Link>
+      <Link to={ownerListPath(environmentId ? 'environments' : 'secrets')} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; {t('secretCreate.backToProject')}</Link>
 
       <h1 className="text-xl font-bold mb-6">{t('secretCreate.title')}</h1>
 
@@ -118,7 +127,7 @@ export default function SecretCreatePage() {
           <Button type="submit" variant="primary" size="lg" disabled={saving || !key.trim() || !value}>
             {saving ? t('common.creating') : t('secretCreate.createSecret')}
           </Button>
-          <Button type="button" size="lg" onClick={() => navigate(`/projects/${id}?tab=secrets`)}>
+          <Button type="button" size="lg" onClick={() => navigate(ownerListPath('secrets'))}>
             {t('common.cancel')}
           </Button>
         </div>

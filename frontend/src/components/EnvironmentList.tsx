@@ -103,15 +103,21 @@ function ServerInfo({ env }: { env: Environment }) {
   );
 }
 
-function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; projectId: string; onUpdate: () => void }) {
+function EnvironmentCard({ env, owner, onUpdate }: { env: Environment; owner: { projectId?: string; customerId?: string }; onUpdate: () => void }) {
   const { t } = useTranslation();
   const { showError } = useToast();
   const [secrets, setSecrets] = useState<SecretListItem[]>([]);
   const [expanded, setExpanded] = useState(false);
   const [editingVars, setEditingVars] = useState(false);
   const [vars, setVars] = useState(env.variables);
+  const ownerBase = owner.customerId ? `/customers/${owner.customerId}` : `/projects/${owner.projectId}`;
 
-  const loadSecrets = () => { api.secrets.list(projectId, env._id).then(setSecrets).catch(() => {}); };
+  const loadSecrets = () => {
+    const loader = owner.customerId
+      ? api.secrets.listForCustomer(owner.customerId, env._id)
+      : api.secrets.list(owner.projectId!, env._id);
+    loader.then(setSecrets).catch(() => {});
+  };
   useEffect(() => { if (expanded) loadSecrets(); }, [expanded]);
 
   const handleToggleActive = async () => {
@@ -198,7 +204,7 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
                 ))}
               </div>
             ) : <p className="text-xs text-gray-600">{t('environments.noSecrets')}</p>}
-            <Link to={`/projects/${projectId}/secrets/new?environmentId=${env._id}`} className="inline-block mt-2 text-xs text-cyan-400 hover:text-cyan-300">{t('environments.addSecret')}</Link>
+            <Link to={`${ownerBase}/secrets/new?environmentId=${env._id}`} className="inline-block mt-2 text-xs text-cyan-400 hover:text-cyan-300">{t('environments.addSecret')}</Link>
           </div>
         </div>
       )}
@@ -206,17 +212,23 @@ function EnvironmentCard({ env, projectId, onUpdate }: { env: Environment; proje
   );
 }
 
-export function SecretsList({ projectId }: { projectId: string }) {
+export function SecretsList({ projectId, customerId }: { projectId?: string; customerId?: string }) {
   const { t } = useTranslation();
   const [secrets, setSecrets] = useState<SecretListItem[]>([]);
+  const ownerBase = customerId ? `/customers/${customerId}` : `/projects/${projectId}`;
 
-  const load = () => { api.secrets.list(projectId, '').then(setSecrets).catch(() => {}); };
-  useEffect(() => { load(); }, [projectId]);
+  const load = () => {
+    const loader = customerId
+      ? api.secrets.listForCustomer(customerId, '')
+      : api.secrets.list(projectId!, '');
+    loader.then(setSecrets).catch(() => {});
+  };
+  useEffect(() => { load(); }, [projectId, customerId]);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3 mb-4">
-        <Link to={`/projects/${projectId}/secrets/new`} className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors">
+        <Link to={`${ownerBase}/secrets/new`} className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors">
           {t('secretsPage.newSecret')}
         </Link>
       </div>
@@ -231,26 +243,30 @@ export function SecretsList({ projectId }: { projectId: string }) {
   );
 }
 
-export default function EnvironmentList({ projectId }: { projectId: string }) {
+export default function EnvironmentList({ projectId, customerId }: { projectId?: string; customerId?: string }) {
   const { t } = useTranslation();
   const [environments, setEnvironments] = useState<Environment[]>([]);
+  const ownerBase = customerId ? `/customers/${customerId}` : `/projects/${projectId}`;
 
   const load = () => {
-    api.environments.list(projectId).then(setEnvironments).catch(() => {});
+    const loader = customerId
+      ? api.environments.listForCustomer(customerId)
+      : api.environments.list(projectId!);
+    loader.then(setEnvironments).catch(() => {});
   };
 
-  useEffect(() => { load(); }, [projectId]);
+  useEffect(() => { load(); }, [projectId, customerId]);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3 mb-4">
-        <Link to={`/projects/${projectId}/environments/new`} className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors">
+        <Link to={`${ownerBase}/environments/new`} className="px-3 py-1.5 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors">
           {t('environments.newEnvironment')}
         </Link>
       </div>
 
       {environments.map((env) => (
-        <EnvironmentCard key={env._id} env={env} projectId={projectId} onUpdate={load} />
+        <EnvironmentCard key={env._id} env={env} owner={{ projectId, customerId }} onUpdate={load} />
       ))}
 
       {environments.length === 0 && (

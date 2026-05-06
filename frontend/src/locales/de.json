@@ -149,6 +149,8 @@
     "alsoLoreInProjects": "Lore aus den Einsätzen ({{count}})",
     "alsoManualInProjects": "Foliante aus den Einsätzen ({{count}})",
     "alsoFilesInProjects": "Pergamente aus den Einsätzen ({{count}})",
+    "alsoEnvsInProjects": "Reiche aus den Einsätzen ({{count}})",
+    "alsoSecretsInProjects": "Siegel aus den Einsätzen ({{count}})",
     "vitalStatus": "Vitalstatus",
     "noNotes": "Keine Notizen in der Kundenakte.",
     "website": "Website",

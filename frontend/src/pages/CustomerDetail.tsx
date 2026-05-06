@@ -28,6 +28,7 @@ import RecurringTaskList from '../components/RecurringTaskList';
 import KnowledgeList from '../components/KnowledgeList';
 import ManualView from '../components/ManualView';
 import FileUploadZone from '../components/FileUploadZone';
+import EnvironmentList, { SecretsList } from '../components/EnvironmentList';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { useToast } from '../components/Toast';
 
@@ -89,6 +90,8 @@ export default function CustomerDetail() {
   const [customerKnowledge, setCustomerKnowledge] = useState<Knowledge[]>([]);
   const [customerManuals, setCustomerManuals] = useState<Manual[]>([]);
   const [customerAttachments, setCustomerAttachments] = useState<Attachment[]>([]);
+  const [customerEnvironments, setCustomerEnvironments] = useState<Environment[]>([]);
+  const [customerSecrets, setCustomerSecrets] = useState<SecretListItem[]>([]);
   const [storageEnabled, setStorageEnabled] = useState<boolean>(false);
   const [aggregate, setAggregate] = useState<AggregatedData>(emptyAggregate);
   const [tab, setTab] = useState<Tab>('overview');
@@ -113,6 +116,8 @@ export default function CustomerDetail() {
       api.manuals.listForCustomer(id).catch(() => [] as Manual[]),
       api.attachments.listForCustomer(id).catch(() => [] as Attachment[]),
       api.attachments.storageStatus().catch(() => ({ enabled: false })),
+      api.environments.listForCustomer(id).catch(() => [] as Environment[]),
+      api.secrets.listForCustomer(id).catch(() => [] as SecretListItem[]),
     ])
       .then(
         ([
@@ -126,6 +131,8 @@ export default function CustomerDetail() {
           manualData,
           attachmentData,
           storageData,
+          environmentData,
+          secretData,
         ]) => {
           setCustomer(customerData);
           setLinks(linkData);
@@ -137,6 +144,8 @@ export default function CustomerDetail() {
           setCustomerManuals(manualData);
           setCustomerAttachments(attachmentData);
           setStorageEnabled(!!storageData?.enabled);
+          setCustomerEnvironments(environmentData);
+          setCustomerSecrets(secretData);
         },
       )
       .catch((err) => setError(err.message))
@@ -232,6 +241,7 @@ export default function CustomerDetail() {
   const openTodos = aggregate.todos.filter((todo) => todo.status !== 'done' && !todo.archived);
   const openCustomerTodos = customerTodos.filter((todo) => todo.status !== 'done' && !todo.archived);
   const linkedOnlyEnvironments = aggregate.environments.filter((env) => {
+    if (!env.projectId) return false;
     const linked = linkedEnvIdsByLink.get(env.projectId);
     return linked ? linked.has(env._id) : false;
   });
@@ -262,8 +272,8 @@ export default function CustomerDetail() {
     {
       label: t('sidebar.system'),
       items: [
-        { key: 'environments', label: t('customers.tab.environments'), count: linkedOnlyEnvironments.length },
-        { key: 'secrets', label: t('customers.tab.secrets'), count: linkedSecrets.length },
+        { key: 'environments', label: t('customers.tab.environments'), count: customerEnvironments.length + linkedOnlyEnvironments.length },
+        { key: 'secrets', label: t('customers.tab.secrets'), count: customerSecrets.length + linkedSecrets.length },
         { key: 'monitoring', label: t('customers.tab.monitoring') },
         { key: 'contacts', label: t('customers.tab.contacts'), count: contacts.length },
       ],
@@ -567,18 +577,20 @@ export default function CustomerDetail() {
             )}
 
             {tab === 'environments' && (
-              <AggregatedEnvironmentsTab
-                items={linkedOnlyEnvironments}
+              <CustomerEnvironmentsTab
+                customerId={id}
+                aggregated={linkedOnlyEnvironments}
                 projectsById={projectsById}
-                loading={aggLoading}
+                aggLoading={aggLoading}
               />
             )}
 
             {tab === 'secrets' && (
-              <AggregatedSecretsTab
-                items={linkedSecrets}
+              <CustomerSecretsTab
+                customerId={id}
+                aggregated={linkedSecrets}
                 projectsById={projectsById}
-                loading={aggLoading}
+                aggLoading={aggLoading}
               />
             )}
 
@@ -975,14 +987,14 @@ function AggregatedEnvironmentsTab({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
       {items.map((env) => {
-        const project = projectsById.get(env.projectId);
+        const project = env.projectId ? projectsById.get(env.projectId) : undefined;
         return (
           <div key={env._id} className="bg-gray-900 border border-gray-800 rounded-lg p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-gray-100">{env.name}</p>
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
-                  <ProjectBadge project={project} projectId={env.projectId} />
+                  {env.projectId && <ProjectBadge project={project} projectId={env.projectId} />}
                   {!env.active && <Badge color="bg-gray-800 text-gray-500">inactive</Badge>}
                 </div>
                 {env.description && <p className="text-xs text-gray-500 mt-2">{env.description}</p>}
@@ -1010,12 +1022,12 @@ function AggregatedSecretsTab({
   return (
     <div className="space-y-2">
       {items.map((secret) => {
-        const project = projectsById.get(secret.projectId);
+        const project = secret.projectId ? projectsById.get(secret.projectId) : undefined;
         return (
           <div key={secret._id} className="bg-gray-900 border border-gray-800 rounded-lg p-3 flex items-center gap-3">
             <span className="text-sm font-mono text-gray-100 truncate">{secret.key}</span>
             <Badge color="bg-gray-800 text-gray-400">{secret.type}</Badge>
-            <ProjectBadge project={project} projectId={secret.projectId} />
+            {secret.projectId && <ProjectBadge project={project} projectId={secret.projectId} />}
             {secret.description && <span className="text-xs text-gray-500 truncate">— {secret.description}</span>}
           </div>
         );
@@ -1048,6 +1060,84 @@ function AggregatedAttachmentsTab({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function CustomerEnvironmentsTab({
+  customerId,
+  aggregated,
+  projectsById,
+  aggLoading,
+}: {
+  customerId: string;
+  aggregated: Environment[];
+  projectsById: Map<string, Project>;
+  aggLoading: boolean;
+}) {
+  const { t } = useTranslation();
+  const [showAggregated, setShowAggregated] = useState(false);
+  return (
+    <div className="space-y-6">
+      <EnvironmentList customerId={customerId} />
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowAggregated((s) => !s)}
+          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          {showAggregated ? '▾' : '▸'}{' '}
+          {t('customers.alsoEnvsInProjects', { count: aggregated.length })}
+        </button>
+        {showAggregated && (
+          <div className="mt-3">
+            <AggregatedEnvironmentsTab
+              items={aggregated}
+              projectsById={projectsById}
+              loading={aggLoading}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CustomerSecretsTab({
+  customerId,
+  aggregated,
+  projectsById,
+  aggLoading,
+}: {
+  customerId: string;
+  aggregated: SecretListItem[];
+  projectsById: Map<string, Project>;
+  aggLoading: boolean;
+}) {
+  const { t } = useTranslation();
+  const [showAggregated, setShowAggregated] = useState(false);
+  return (
+    <div className="space-y-6">
+      <SecretsList customerId={customerId} />
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowAggregated((s) => !s)}
+          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          {showAggregated ? '▾' : '▸'}{' '}
+          {t('customers.alsoSecretsInProjects', { count: aggregated.length })}
+        </button>
+        {showAggregated && (
+          <div className="mt-3">
+            <AggregatedSecretsTab
+              items={aggregated}
+              projectsById={projectsById}
+              loading={aggLoading}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

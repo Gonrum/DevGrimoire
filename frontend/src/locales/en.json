@@ -149,6 +149,8 @@
     "alsoLoreInProjects": "Lore from deployments ({{count}})",
     "alsoManualInProjects": "Tomes from deployments ({{count}})",
     "alsoFilesInProjects": "Scrolls from deployments ({{count}})",
+    "alsoEnvsInProjects": "Realms from deployments ({{count}})",
+    "alsoSecretsInProjects": "Seals from deployments ({{count}})",
     "vitalStatus": "Vital Status",
     "noNotes": "No notes in the customer file.",
     "website": "Website",

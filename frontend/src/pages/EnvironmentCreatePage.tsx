@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
@@ -14,9 +14,14 @@ const ENV_PRESETS = [
 
 export default function EnvironmentCreatePage() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
   const { showError } = useToast();
   const { t } = useTranslation();
+  const isCustomer = location.pathname.startsWith('/customers/');
+  const ownerBackUrl = isCustomer
+    ? `/customers/${id}?tab=environments`
+    : `/projects/${id}?tab=environments`;
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [host, setHost] = useState('');
@@ -41,7 +46,8 @@ export default function EnvironmentCreatePage() {
     try {
       const validVars = variables.filter((v) => v.key.trim());
       await api.environments.create({
-        projectId: id,
+        projectId: isCustomer ? undefined : id,
+        customerId: isCustomer ? id : undefined,
         name: name.trim(),
         description: description.trim() || undefined,
         host: host.trim() || undefined,
@@ -50,7 +56,7 @@ export default function EnvironmentCreatePage() {
         url: url.trim() || undefined,
         variables: validVars.length > 0 ? validVars : undefined,
       });
-      navigate(`/projects/${id}?tab=environments`);
+      navigate(ownerBackUrl);
     } catch (err: any) {
       showError(err.message || t('envCreate.errorCreating'));
     } finally {
@@ -60,7 +66,7 @@ export default function EnvironmentCreatePage() {
 
   return (
     <div>
-      <Link to={`/projects/${id}?tab=environments`} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; {t('envCreate.backToProject')}</Link>
+      <Link to={ownerBackUrl} className="text-sm text-gray-500 hover:text-gray-300 mb-6 inline-block">&larr; {t('envCreate.backToProject')}</Link>
 
       <h1 className="text-xl font-bold mb-6">{t('envCreate.title')}</h1>
 
@@ -120,7 +126,7 @@ export default function EnvironmentCreatePage() {
           <Button type="submit" variant="primary" size="lg" disabled={saving || !name.trim()}>
             {saving ? t('common.creating') : t('envCreate.createEnvironment')}
           </Button>
-          <Button type="button" size="lg" onClick={() => navigate(`/projects/${id}?tab=environments`)}>
+          <Button type="button" size="lg" onClick={() => navigate(ownerBackUrl)}>
             {t('common.cancel')}
           </Button>
         </div>

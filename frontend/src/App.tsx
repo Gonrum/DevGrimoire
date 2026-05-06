@@ -315,6 +315,8 @@ function AppShell() {
           <Route path="/customers/:id/todos/:todoId" element={<TodoDetailPage />} />
           <Route path="/customers/:id/recurring-tasks/new" element={<RecurringTaskCreatePage />} />
           <Route path="/customers/:id/recurring-tasks/:recurringTaskId" element={<RecurringTaskDetailPage />} />
+          <Route path="/customers/:id/environments/new" element={<EnvironmentCreatePage />} />
+          <Route path="/customers/:id/secrets/new" element={<SecretCreatePage />} />
           <Route path="/projects/:id/todos/new" element={<TodoCreatePage />} />
           <Route path="/projects/:id/todos/:todoId" element={<TodoDetailPage />} />
           <Route path="/projects/:id/milestones/new" element={<MilestoneCreatePage />} />
