@@ -1005,29 +1005,30 @@ const tools = [
   },
   {
     name: 'manual_create',
-    description: 'Create a new manual entry for a project. Manuals are categorized documentation pages.',
+    description: 'Create a new manual entry. Belongs to either a project (projectId) or a customer (customerId) — exactly one of the two is required. Manuals are categorized documentation pages.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID for customer-scoped manual pages (mutually exclusive with projectId)' },
         title: { type: 'string', description: 'Entry title' },
         content: { type: 'string', description: 'Content in Markdown format' },
         category: { type: 'string', description: 'Category for grouping (e.g. Setup, API, Deployment)' },
         sortOrder: { type: 'number', description: 'Sort order within category (default 0)' },
       },
-      required: ['projectId', 'title'],
+      required: ['title'],
     },
   },
   {
     name: 'manual_list',
-    description: 'List manual entries for a project (compact: id, title, category, sortOrder, updatedAt). Use manual_get for full content.',
+    description: 'List manual entries (compact: id, title, category, sortOrder, updatedAt). Filter by projectId for project manuals or customerId for customer-scoped manuals. Use manual_get for full content.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
         category: { type: 'string', description: 'Filter by category' },
       },
-      required: ['projectId'],
     },
   },
   {
@@ -2079,11 +2080,12 @@ const tools = [
   // ── Attachments ──────────────────────────────────────────────
   {
     name: 'attachment_upload',
-    description: 'Upload a file attachment. Content must be base64-encoded. Can attach to a specific entity (e.g. todo) or as standalone project file.',
+    description: 'Upload a file attachment. Content must be base64-encoded. Belongs to either a project (projectId) or a customer (customerId) — exactly one of the two is required. Can attach to a specific entity (e.g. todo) or as standalone owner-scoped file.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID for customer-scoped files (mutually exclusive with projectId)' },
         fileName: { type: 'string', description: 'Original filename (e.g. "diagram.png")' },
         content: { type: 'string', description: 'Base64-encoded file content' },
         mimeType: { type: 'string', description: 'MIME type (auto-detected from extension if omitted)' },
@@ -2092,22 +2094,22 @@ const tools = [
         description: { type: 'string', description: 'Optional description' },
         tags: { type: 'string', description: 'Comma-separated tags' },
       },
-      required: ['projectId', 'fileName', 'content'],
+      required: ['fileName', 'content'],
     },
   },
   {
     name: 'attachment_list',
-    description: 'List file attachments for a project. Optionally filter by entity type/id.',
+    description: 'List file attachments. Filter by projectId for project files or customerId for customer-scoped files. Optionally filter by entity type/id.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
         entityType: { type: 'string', description: 'Filter by entity type (e.g. "todo")' },
         entityId: { type: 'string', description: 'Filter by entity MongoDB ID' },
         limit: { type: 'number', description: 'Max results (default 50)' },
         offset: { type: 'number', description: 'Skip results' },
       },
-      required: ['projectId'],
     },
   },
   {
@@ -2947,7 +2949,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'manual_create': {
           const manual = await manualsService.create({
-            projectId: requireString(a, 'projectId'),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
             title: requireString(a, 'title'),
             content: optionalString(a, 'content'),
             category: optionalString(a, 'category'),
@@ -2957,10 +2960,14 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'manual_list': {
-          const manuals = await manualsService.findByProject(
-            requireString(a, 'projectId'),
-            optionalString(a, 'category'),
-          );
+          const manualProjectId = optionalString(a, 'projectId');
+          const manualCustomerId = optionalString(a, 'customerId');
+          if (!manualProjectId && !manualCustomerId) {
+            throw new Error('manual_list requires projectId or customerId');
+          }
+          const manuals = manualCustomerId
+            ? await manualsService.findByCustomer(manualCustomerId, optionalString(a, 'category'))
+            : await manualsService.findByProject(manualProjectId!, optionalString(a, 'category'));
           result = compactList(manuals as any, ['content', '__v']);
           break;
         }
@@ -3820,7 +3827,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'attachment_upload': {
           const attachment = await attachmentsService.createFromBase64(
             {
-              projectId: requireString(a, 'projectId'),
+              projectId: optionalString(a, 'projectId'),
+              customerId: optionalString(a, 'customerId'),
               fileName: requireString(a, 'fileName'),
               mimeType: optionalString(a, 'mimeType'),
               entityType: optionalString(a, 'entityType'),
@@ -3838,11 +3846,22 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'attachment_list': {
-          const items = await attachmentsService.findByProject(
-            requireString(a, 'projectId'),
-            optionalString(a, 'entityType'),
-            optionalString(a, 'entityId'),
-          );
+          const attProjectId = optionalString(a, 'projectId');
+          const attCustomerId = optionalString(a, 'customerId');
+          if (!attProjectId && !attCustomerId) {
+            throw new Error('attachment_list requires projectId or customerId');
+          }
+          const items = attCustomerId
+            ? await attachmentsService.findByCustomer(
+                attCustomerId,
+                optionalString(a, 'entityType'),
+                optionalString(a, 'entityId'),
+              )
+            : await attachmentsService.findByProject(
+                attProjectId!,
+                optionalString(a, 'entityType'),
+                optionalString(a, 'entityId'),
+              );
           result = applyPagination(
             compactList(items as any, ['textContent', '__v']),
             optionalNumber(a, 'limit') ?? 50,

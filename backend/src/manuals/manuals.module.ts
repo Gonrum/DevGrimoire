@@ -4,12 +4,14 @@ import { Model } from 'mongoose';
 import { Manual, ManualDocument, ManualSchema } from './schemas/manual.schema';
 import { ManualsService } from './manuals.service';
 import { ManualsController } from './manuals.controller';
+import { CustomersModule } from '../customers/customers.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Manual.name, schema: ManualSchema },
     ]),
+    CustomersModule,
   ],
   controllers: [ManualsController],
   providers: [ManualsService],

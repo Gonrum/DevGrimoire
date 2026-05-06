@@ -2,7 +2,12 @@ import { IsString, IsOptional, IsMongoId, IsNumber } from 'class-validator';
 
 export class CreateManualDto {
   @IsMongoId()
-  projectId: string;
+  @IsOptional()
+  projectId?: string;
+
+  @IsMongoId()
+  @IsOptional()
+  customerId?: string;
 
   @IsString()
   title: string;

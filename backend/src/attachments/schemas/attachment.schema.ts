@@ -5,8 +5,11 @@ export type AttachmentDocument = HydratedDocument<Attachment>;
 
 @Schema({ timestamps: true })
 export class Attachment {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
-  projectId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  projectId?: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  customerId?: Types.ObjectId;
 
   @Prop({ type: String })
   entityType?: string;
@@ -41,7 +44,9 @@ export class Attachment {
 
 export const AttachmentSchema = SchemaFactory.createForClass(Attachment);
 AttachmentSchema.index({ projectId: 1 });
+AttachmentSchema.index({ customerId: 1 });
 AttachmentSchema.index({ projectId: 1, entityType: 1, entityId: 1 });
+AttachmentSchema.index({ customerId: 1, entityType: 1, entityId: 1 });
 AttachmentSchema.index(
   { originalName: 'text', description: 'text' },
   { name: 'attachment_text', language_override: 'lang' },

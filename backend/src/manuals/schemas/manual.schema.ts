@@ -5,8 +5,11 @@ export type ManualDocument = HydratedDocument<Manual>;
 
 @Schema({ timestamps: true })
 export class Manual {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
-  projectId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  projectId?: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  customerId?: Types.ObjectId;
 
   @Prop({ required: true })
   title: string;
@@ -26,5 +29,7 @@ export class Manual {
 
 export const ManualSchema = SchemaFactory.createForClass(Manual);
 ManualSchema.index({ projectId: 1 });
+ManualSchema.index({ customerId: 1 });
 ManualSchema.index({ projectId: 1, category: 1, sortOrder: 1 });
+ManualSchema.index({ customerId: 1, category: 1, sortOrder: 1 });
 ManualSchema.index({ title: 'text', content: 'text' });

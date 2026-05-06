@@ -10,12 +10,18 @@ export class ManualsController {
   @Get()
   findByProject(
     @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
     @Query('category') category?: string,
   ) {
-    if (!projectId) {
-      throw new BadRequestException('projectId query parameter is required');
+    if (!projectId && !customerId) {
+      throw new BadRequestException('projectId or customerId query parameter is required');
     }
-    return this.manualsService.findByProject(projectId, category);
+    if (projectId && customerId) {
+      throw new BadRequestException('projectId and customerId are mutually exclusive');
+    }
+    return customerId
+      ? this.manualsService.findByCustomer(customerId, category)
+      : this.manualsService.findByProject(projectId!, category);
   }
 
   @Get(':id')

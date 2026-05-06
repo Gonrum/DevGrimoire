@@ -2,7 +2,12 @@ import { IsString, IsOptional, IsArray, IsMongoId } from 'class-validator';
 
 export class CreateAttachmentDto {
   @IsMongoId()
-  projectId: string;
+  @IsOptional()
+  projectId?: string;
+
+  @IsMongoId()
+  @IsOptional()
+  customerId?: string;
 
   @IsString()
   @IsOptional()

@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
@@ -7,6 +7,7 @@ import { Readable } from 'stream';
 import { Attachment, AttachmentDocument } from './schemas/attachment.schema';
 import { UpdateAttachmentDto } from './dto/update-attachment.dto';
 import { MinioService } from '../minio/minio.service';
+import { CustomersService } from '../customers/customers.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
 
@@ -53,12 +54,14 @@ export class AttachmentsService {
     @InjectModel(Attachment.name)
     private attachmentModel: Model<AttachmentDocument>,
     private minioService: MinioService,
+    private customersService: CustomersService,
     private eventEmitter: EventEmitter2,
   ) {}
 
   async create(
     fields: {
-      projectId: string;
+      projectId?: string;
+      customerId?: string;
       entityType?: string;
       entityId?: string;
       description?: string;
@@ -66,14 +69,28 @@ export class AttachmentsService {
     },
     file: { buffer: Buffer; originalname: string; mimetype: string },
   ): Promise<AttachmentDocument> {
+    if (!fields.projectId && !fields.customerId) {
+      throw new BadRequestException('projectId or customerId is required');
+    }
+    if (fields.projectId && fields.customerId) {
+      throw new BadRequestException('projectId and customerId are mutually exclusive');
+    }
+    if (fields.customerId) {
+      await this.customersService.findById(fields.customerId);
+    }
+
     const uuid = randomUUID();
     const safeName = sanitizeFilename(file.originalname);
-    const storageKey = `${fields.projectId}/${uuid}_${safeName}`;
+    const ownerSegment = fields.projectId
+      ? fields.projectId
+      : `customers/${fields.customerId}`;
+    const storageKey = `${ownerSegment}/${uuid}_${safeName}`;
 
     await this.minioService.putObject(storageKey, file.buffer, file.mimetype);
 
     const attachment = await this.attachmentModel.create({
       projectId: fields.projectId,
+      customerId: fields.customerId,
       entityType: fields.entityType || undefined,
       entityId: fields.entityId || undefined,
       originalName: file.originalname,
@@ -86,7 +103,7 @@ export class AttachmentsService {
     });
 
     this.eventEmitter.emit(PROJECT_CHANGED, {
-      projectId: fields.projectId,
+      projectId: fields.projectId ?? null,
       entity: 'attachment',
       action: 'created',
       entityId: attachment._id.toString(),
@@ -116,6 +133,21 @@ export class AttachmentsService {
       .exec();
   }
 
+  async findByCustomer(
+    customerId: string,
+    entityType?: string,
+    entityId?: string,
+  ): Promise<AttachmentDocument[]> {
+    const filter: Record<string, unknown> = { customerId: projectIdFilter(customerId) };
+    if (entityType) filter.entityType = entityType;
+    if (entityId) filter.entityId = entityId;
+    return this.attachmentModel
+      .find(filter)
+      .select('-textContent')
+      .sort({ createdAt: -1 })
+      .exec();
+  }
+
   async findById(id: string): Promise<AttachmentDocument> {
     const attachment = await this.attachmentModel.findById(id).select('-textContent').exec();
     if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
@@ -129,7 +161,7 @@ export class AttachmentsService {
       .exec();
     if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
-      projectId: attachment.projectId.toString(),
+      projectId: attachment.projectId?.toString() ?? null,
       entity: 'attachment',
       action: 'updated',
       entityId: id,
@@ -175,7 +207,7 @@ export class AttachmentsService {
       this.logger.warn(`MinIO delete failed for ${attachment.storageKey}: ${(err as Error).message}`),
     );
     this.eventEmitter.emit(PROJECT_CHANGED, {
-      projectId: attachment.projectId.toString(),
+      projectId: attachment.projectId?.toString() ?? null,
       entity: 'attachment',
       action: 'deleted',
       entityId: id,
@@ -203,10 +235,21 @@ export class AttachmentsService {
     await this.attachmentModel.deleteMany({ projectId }).exec();
   }
 
+  async removeByCustomer(customerId: string): Promise<void> {
+    const attachments = await this.attachmentModel.find({ customerId }).exec();
+    if (attachments.length === 0) return;
+    const keys = attachments.map((a) => a.storageKey);
+    await this.minioService.removeObjects(keys).catch((err) =>
+      this.logger.warn(`MinIO batch delete failed: ${(err as Error).message}`),
+    );
+    await this.attachmentModel.deleteMany({ customerId }).exec();
+  }
+
   /** Upload from base64 content (used by MCP tools) */
   async createFromBase64(
     fields: {
-      projectId: string;
+      projectId?: string;
+      customerId?: string;
       fileName: string;
       mimeType?: string;
       entityType?: string;
@@ -221,6 +264,7 @@ export class AttachmentsService {
     return this.create(
       {
         projectId: fields.projectId,
+        customerId: fields.customerId,
         entityType: fields.entityType,
         entityId: fields.entityId,
         description: fields.description,
@@ -274,7 +318,7 @@ export class AttachmentsService {
       });
       // Re-emit so RAG picks up the text content
       this.eventEmitter.emit(PROJECT_CHANGED, {
-        projectId: attachment.projectId.toString(),
+        projectId: attachment.projectId?.toString() ?? null,
         entity: 'attachment',
         action: 'updated',
         entityId: attachment._id.toString(),

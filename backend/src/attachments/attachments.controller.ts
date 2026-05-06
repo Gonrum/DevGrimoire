@@ -49,6 +49,7 @@ export class AttachmentsController {
   async upload(
     @UploadedFile() file: { buffer: Buffer; originalname: string; mimetype: string },
     @Body('projectId') projectId?: string,
+    @Body('customerId') customerId?: string,
     @Body('entityType') entityType?: string,
     @Body('entityId') entityId?: string,
     @Body('description') description?: string,
@@ -60,8 +61,11 @@ export class AttachmentsController {
     if (!file) {
       throw new BadRequestException('No file uploaded');
     }
-    if (!projectId) {
-      throw new BadRequestException('projectId is required');
+    if (!projectId && !customerId) {
+      throw new BadRequestException('projectId or customerId is required');
+    }
+    if (projectId && customerId) {
+      throw new BadRequestException('projectId and customerId are mutually exclusive');
     }
 
     const tags = tagsRaw
@@ -69,7 +73,7 @@ export class AttachmentsController {
       : [];
 
     return this.attachmentsService.create(
-      { projectId, entityType, entityId, description, tags },
+      { projectId, customerId, entityType, entityId, description, tags },
       file,
     );
   }
@@ -77,13 +81,19 @@ export class AttachmentsController {
   @Get()
   findByProject(
     @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
     @Query('entityType') entityType?: string,
     @Query('entityId') entityId?: string,
   ) {
-    if (!projectId) {
-      throw new BadRequestException('projectId query parameter is required');
+    if (!projectId && !customerId) {
+      throw new BadRequestException('projectId or customerId query parameter is required');
     }
-    return this.attachmentsService.findByProject(projectId, entityType, entityId);
+    if (projectId && customerId) {
+      throw new BadRequestException('projectId and customerId are mutually exclusive');
+    }
+    return customerId
+      ? this.attachmentsService.findByCustomer(customerId, entityType, entityId)
+      : this.attachmentsService.findByProject(projectId!, entityType, entityId);
   }
 
   @Get(':id')

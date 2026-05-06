@@ -172,6 +172,11 @@ export class ChatController {
       } catch {
         throw new BadRequestException(`Attachment ${id} not found`);
       }
+      if (!attachment.projectId) {
+        throw new BadRequestException(
+          `Attachment ${id} is customer-scoped and cannot be used in a project chat session`,
+        );
+      }
       if (attachment.projectId.toString() !== projectId) {
         throw new BadRequestException(
           `Attachment ${id} belongs to a different project than this chat session`,

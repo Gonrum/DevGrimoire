@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
 import { Manual, ManualDocument } from './schemas/manual.schema';
 import { CreateManualDto } from './dto/create-manual.dto';
 import { UpdateManualDto } from './dto/update-manual.dto';
+import { CustomersService } from '../customers/customers.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
 
@@ -13,13 +14,23 @@ export class ManualsService {
   constructor(
     @InjectModel(Manual.name)
     private manualModel: Model<ManualDocument>,
+    private customersService: CustomersService,
     private eventEmitter: EventEmitter2,
   ) {}
 
   async create(dto: CreateManualDto): Promise<ManualDocument> {
+    if (!dto.projectId && !dto.customerId) {
+      throw new BadRequestException('projectId or customerId is required');
+    }
+    if (dto.projectId && dto.customerId) {
+      throw new BadRequestException('projectId and customerId are mutually exclusive');
+    }
+    if (dto.customerId) {
+      await this.customersService.findById(dto.customerId);
+    }
     const manual = await this.manualModel.create(dto);
     this.eventEmitter.emit(PROJECT_CHANGED, {
-      projectId: dto.projectId,
+      projectId: dto.projectId ?? null,
       entity: 'manual',
       action: 'created',
       entityId: manual._id.toString(),
@@ -30,6 +41,15 @@ export class ManualsService {
 
   async findByProject(projectId: string, category?: string): Promise<ManualDocument[]> {
     const filter: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
+    if (category) filter.category = category;
+    return this.manualModel
+      .find(filter)
+      .sort({ category: 1, sortOrder: 1, title: 1 })
+      .exec();
+  }
+
+  async findByCustomer(customerId: string, category?: string): Promise<ManualDocument[]> {
+    const filter: Record<string, unknown> = { customerId: projectIdFilter(customerId) };
     if (category) filter.category = category;
     return this.manualModel
       .find(filter)
@@ -49,7 +69,7 @@ export class ManualsService {
       .exec();
     if (!manual) throw new NotFoundException('Handbuch-Eintrag nicht gefunden');
     this.eventEmitter.emit(PROJECT_CHANGED, {
-      projectId: manual.projectId.toString(),
+      projectId: manual.projectId?.toString() ?? null,
       entity: 'manual',
       action: 'updated',
       entityId: manual._id.toString(),
@@ -62,7 +82,7 @@ export class ManualsService {
     const manual = await this.manualModel.findByIdAndDelete(id).exec();
     if (!manual) throw new NotFoundException('Handbuch-Eintrag nicht gefunden');
     this.eventEmitter.emit(PROJECT_CHANGED, {
-      projectId: manual.projectId.toString(),
+      projectId: manual.projectId?.toString() ?? null,
       entity: 'manual',
       action: 'deleted',
       entityId: manual._id.toString(),
@@ -72,5 +92,9 @@ export class ManualsService {
 
   async removeByProject(projectId: string): Promise<void> {
     await this.manualModel.deleteMany({ projectId }).exec();
+  }
+
+  async removeByCustomer(customerId: string): Promise<void> {
+    await this.manualModel.deleteMany({ customerId }).exec();
   }
 }
