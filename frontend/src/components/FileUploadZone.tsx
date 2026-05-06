@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 
 interface FileUploadZoneProps {
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   entityType?: string;
   entityId?: string;
   onUploadComplete: () => void;
@@ -11,6 +12,7 @@ interface FileUploadZoneProps {
 
 export default function FileUploadZone({
   projectId,
+  customerId,
   entityType,
   entityId,
   onUploadComplete,
@@ -30,7 +32,7 @@ export default function FileUploadZone({
       try {
         for (let i = 0; i < fileArray.length; i++) {
           setProgress(`${i + 1}/${fileArray.length}: ${fileArray[i].name}`);
-          await api.attachments.upload(projectId, fileArray[i], {
+          await api.attachments.upload({ projectId, customerId }, fileArray[i], {
             entityType,
             entityId,
           });
@@ -43,7 +45,7 @@ export default function FileUploadZone({
         setProgress('');
       }
     },
-    [projectId, entityType, entityId, onUploadComplete],
+    [projectId, customerId, entityType, entityId, onUploadComplete],
   );
 
   const handleDragEnter = (e: React.DragEvent) => {

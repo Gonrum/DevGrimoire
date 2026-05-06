@@ -131,6 +131,56 @@ export interface ChangelogEntry {
   updatedAt: string;
 }
 
+export type BackupMode = 'database' | 'full-system';
+export type BackupStatus = 'running' | 'completed' | 'failed';
+
+export interface BackupArtifact {
+  key: string;
+  size: number;
+  sha256: string;
+  contentType: string;
+}
+
+export interface BackupManifest {
+  format?: string;
+  mode?: BackupMode;
+  trigger?: 'manual' | 'scheduled';
+  startedAt?: string;
+  finishedAt?: string;
+  bucket?: string;
+  objectPrefix?: string;
+  includes?: {
+    database?: boolean;
+    attachments?: boolean;
+    plaintextSecrets?: boolean;
+  };
+  artifacts?: BackupArtifact[];
+  restore?: { note?: string };
+}
+
+export interface BackupJob {
+  _id: string;
+  mode: BackupMode;
+  status: BackupStatus;
+  trigger: 'manual' | 'scheduled';
+  bucket?: string;
+  objectPrefix?: string;
+  manifest?: BackupManifest;
+  error?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BackupSystemStatus {
+  enabled: boolean;
+  schedule: string;
+  bucket: string;
+  minioEnabled: boolean;
+  running: boolean;
+}
+
 export interface TodoComment {
   text: string;
   author: string;
@@ -229,7 +279,8 @@ export interface Environment {
 
 export interface Manual {
   _id: string;
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   title: string;
   content: string;
   category?: string;
@@ -553,7 +604,8 @@ export interface LogStats {
 
 export interface Attachment {
   _id: string;
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   entityType?: string;
   entityId?: string;
   originalName: string;
@@ -858,6 +910,11 @@ export const api = {
       if (category) params.set('category', category);
       return request<Manual[]>(`/manuals?${params}`);
     },
+    listForCustomer: (customerId: string, category?: string) => {
+      const params = new URLSearchParams({ customerId });
+      if (category) params.set('category', category);
+      return request<Manual[]>(`/manuals?${params}`);
+    },
     get: (id: string) => request<Manual>(`/manuals/${id}`),
     create: (data: Partial<Manual>) =>
       request<Manual>('/manuals', { method: 'POST', body: JSON.stringify(data) }),
@@ -892,6 +949,13 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify({ value }),
       }),
+  },
+  backups: {
+    status: () => request<BackupSystemStatus>('/backups/status'),
+    list: (limit = 25) => request<BackupJob[]>(`/backups?limit=${limit}`),
+    get: (id: string) => request<BackupJob>(`/backups/${id}`),
+    create: (data?: { mode?: BackupMode; includeAttachments?: boolean }) =>
+      request<BackupJob>('/backups', { method: 'POST', body: JSON.stringify(data ?? {}) }),
   },
   webSearch: {
     health: () =>
@@ -1196,9 +1260,15 @@ export const api = {
       if (entityId) params.set('entityId', entityId);
       return request<Attachment[]>(`/attachments?${params}`);
     },
+    listForCustomer: (customerId: string, entityType?: string, entityId?: string) => {
+      const params = new URLSearchParams({ customerId });
+      if (entityType) params.set('entityType', entityType);
+      if (entityId) params.set('entityId', entityId);
+      return request<Attachment[]>(`/attachments?${params}`);
+    },
     get: (id: string) => request<Attachment>(`/attachments/${id}`),
     upload: async (
-      projectId: string,
+      owner: { projectId?: string; customerId?: string },
       file: File,
       opts?: { entityType?: string; entityId?: string; description?: string; tags?: string },
     ) => {
@@ -1207,7 +1277,8 @@ export const api = {
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('projectId', projectId);
+      if (owner.projectId) formData.append('projectId', owner.projectId);
+      if (owner.customerId) formData.append('customerId', owner.customerId);
       if (opts?.entityType) formData.append('entityType', opts.entityType);
       if (opts?.entityId) formData.append('entityId', opts.entityId);
       if (opts?.description) formData.append('description', opts.description);

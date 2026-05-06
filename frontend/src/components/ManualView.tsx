@@ -8,8 +8,9 @@ import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
 import EmptyState from './ui/EmptyState';
 
-function ManualForm({ projectId, manual, categories, onSaved, onCancel }: {
-  projectId: string;
+function ManualForm({ projectId, customerId, manual, categories, onSaved, onCancel }: {
+  projectId?: string;
+  customerId?: string;
   manual?: Manual;
   categories: string[];
   onSaved: () => void;
@@ -37,6 +38,7 @@ function ManualForm({ projectId, manual, categories, onSaved, onCancel }: {
       } else {
         await api.manuals.create({
           projectId,
+          customerId,
           title: title.trim(),
           content,
           category: category.trim() || undefined,
@@ -135,7 +137,7 @@ function ManualArticle({ manual, onUpdate, onEdit }: {
   );
 }
 
-export default function ManualView({ projectId, entries, onUpdate }: { projectId: string; entries: Manual[]; onUpdate: () => void }) {
+export default function ManualView({ projectId, customerId, entries, onUpdate }: { projectId?: string; customerId?: string; entries: Manual[]; onUpdate: () => void }) {
   const { t } = useTranslation();
   const [showForm, setShowForm] = useState(false);
   const [editingManual, setEditingManual] = useState<Manual | undefined>(undefined);
@@ -165,6 +167,7 @@ export default function ManualView({ projectId, entries, onUpdate }: { projectId
         <h2 className="text-lg font-semibold mb-4">{editingManual ? t('manuals.editEntry') : t('manuals.newManualEntry')}</h2>
         <ManualForm
           projectId={projectId}
+          customerId={customerId}
           manual={editingManual}
           categories={allCategories}
           onSaved={() => { setShowForm(false); setEditingManual(undefined); onUpdate(); }}

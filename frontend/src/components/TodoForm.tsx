@@ -95,7 +95,7 @@ export default function TodoForm({
 
       if (projectId && pendingFiles.length > 0 && todo._id) {
         for (const file of pendingFiles) {
-          await api.attachments.upload(projectId, file, { entityType: 'todo', entityId: todo._id }).catch(() => {});
+          await api.attachments.upload({ projectId }, file, { entityType: 'todo', entityId: todo._id }).catch(() => {});
         }
       }
 

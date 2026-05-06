@@ -10,6 +10,7 @@ import {
   CustomerStatus,
   Environment,
   Knowledge,
+  Manual,
   Project,
   RecurringTask,
   SecretListItem,
@@ -18,12 +19,15 @@ import {
 } from '../api/client';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
+import ConfirmButton from '../components/ui/ConfirmButton';
 import EmptyState from '../components/ui/EmptyState';
 import Markdown from '../components/Markdown';
 import ProjectTabShell from '../components/ui/ProjectTabShell';
 import TodoBoard from '../components/TodoBoard';
 import RecurringTaskList from '../components/RecurringTaskList';
 import KnowledgeList from '../components/KnowledgeList';
+import ManualView from '../components/ManualView';
+import FileUploadZone from '../components/FileUploadZone';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { useToast } from '../components/Toast';
 
@@ -32,6 +36,7 @@ type Tab =
   | 'projects'
   | 'todos'
   | 'knowledge'
+  | 'manual'
   | 'workflows'
   | 'environments'
   | 'secrets'
@@ -82,6 +87,9 @@ export default function CustomerDetail() {
   const [customerTodos, setCustomerTodos] = useState<Todo[]>([]);
   const [customerRecurring, setCustomerRecurring] = useState<RecurringTask[]>([]);
   const [customerKnowledge, setCustomerKnowledge] = useState<Knowledge[]>([]);
+  const [customerManuals, setCustomerManuals] = useState<Manual[]>([]);
+  const [customerAttachments, setCustomerAttachments] = useState<Attachment[]>([]);
+  const [storageEnabled, setStorageEnabled] = useState<boolean>(false);
   const [aggregate, setAggregate] = useState<AggregatedData>(emptyAggregate);
   const [tab, setTab] = useState<Tab>('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -102,16 +110,35 @@ export default function CustomerDetail() {
       api.todos.list({ customerId: id }).catch(() => [] as Todo[]),
       api.recurringTasks.list({ customerId: id }).catch(() => [] as RecurringTask[]),
       api.knowledge.listForCustomer(id).catch(() => [] as Knowledge[]),
+      api.manuals.listForCustomer(id).catch(() => [] as Manual[]),
+      api.attachments.listForCustomer(id).catch(() => [] as Attachment[]),
+      api.attachments.storageStatus().catch(() => ({ enabled: false })),
     ])
-      .then(([customerData, linkData, projectData, contactData, todoData, recurringData, knowledgeData]) => {
-        setCustomer(customerData);
-        setLinks(linkData);
-        setProjects(projectData);
-        setContacts(contactData);
-        setCustomerTodos(todoData);
-        setCustomerRecurring(recurringData);
-        setCustomerKnowledge(knowledgeData);
-      })
+      .then(
+        ([
+          customerData,
+          linkData,
+          projectData,
+          contactData,
+          todoData,
+          recurringData,
+          knowledgeData,
+          manualData,
+          attachmentData,
+          storageData,
+        ]) => {
+          setCustomer(customerData);
+          setLinks(linkData);
+          setProjects(projectData);
+          setContacts(contactData);
+          setCustomerTodos(todoData);
+          setCustomerRecurring(recurringData);
+          setCustomerKnowledge(knowledgeData);
+          setCustomerManuals(manualData);
+          setCustomerAttachments(attachmentData);
+          setStorageEnabled(!!storageData?.enabled);
+        },
+      )
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   };
@@ -227,8 +254,9 @@ export default function CustomerDetail() {
       label: t('sidebar.knowledge'),
       items: [
         { key: 'knowledge', label: t('customers.tab.knowledge'), count: customerKnowledge.length },
+        { key: 'manual', label: t('customers.tab.manual'), count: customerManuals.length },
         { key: 'workflows', label: t('customers.tab.workflows'), count: customerRecurring.filter((rt) => rt.active).length },
-        { key: 'files', label: t('customers.tab.files'), count: aggregate.attachments.length },
+        { key: 'files', label: t('customers.tab.files'), count: customerAttachments.length },
       ],
     },
     {
@@ -518,6 +546,16 @@ export default function CustomerDetail() {
               />
             )}
 
+            {tab === 'manual' && (
+              <CustomerManualTab
+                customerId={id}
+                entries={customerManuals}
+                onUpdate={loadBase}
+                linkedProjectIds={linkedProjectIds}
+                projectsById={projectsById}
+              />
+            )}
+
             {tab === 'workflows' && (
               <CustomerRitualsTab
                 customerId={id}
@@ -545,10 +583,14 @@ export default function CustomerDetail() {
             )}
 
             {tab === 'files' && (
-              <AggregatedAttachmentsTab
-                items={aggregate.attachments}
+              <CustomerFilesTab
+                customerId={id}
+                items={customerAttachments}
+                aggregatedItems={aggregate.attachments}
                 projectsById={projectsById}
-                loading={aggLoading}
+                aggLoading={aggLoading}
+                storageEnabled={storageEnabled}
+                onUpdate={loadBase}
               />
             )}
 
@@ -997,15 +1039,201 @@ function AggregatedAttachmentsTab({
   return (
     <div className="space-y-2">
       {items.map((file) => {
-        const project = projectsById.get(file.projectId);
+        const project = file.projectId ? projectsById.get(file.projectId) : undefined;
         return (
           <div key={file._id} className="bg-gray-900 border border-gray-800 rounded-lg p-3 flex items-center gap-3">
             <span className="text-sm text-gray-100 truncate min-w-0">{file.originalName}</span>
             <Badge color="bg-gray-800 text-gray-400">{file.mimeType}</Badge>
-            <ProjectBadge project={project} projectId={file.projectId} />
+            {file.projectId && <ProjectBadge project={project} projectId={file.projectId} />}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function CustomerManualTab({
+  customerId,
+  entries,
+  onUpdate,
+  linkedProjectIds,
+  projectsById,
+}: {
+  customerId: string;
+  entries: Manual[];
+  onUpdate: () => void;
+  linkedProjectIds: string[];
+  projectsById: Map<string, Project>;
+}) {
+  const { t } = useTranslation();
+  const [showAggregated, setShowAggregated] = useState(false);
+  const [aggregatedEntries, setAggregatedEntries] = useState<Manual[]>([]);
+  const [aggLoading, setAggLoading] = useState(false);
+
+  useEffect(() => {
+    if (!showAggregated || linkedProjectIds.length === 0) return;
+    let cancelled = false;
+    setAggLoading(true);
+    Promise.all(linkedProjectIds.map((pid) => api.manuals.list(pid).catch(() => [] as Manual[])))
+      .then((results) => {
+        if (cancelled) return;
+        const merged = results.flat();
+        merged.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+        setAggregatedEntries(merged);
+      })
+      .finally(() => {
+        if (!cancelled) setAggLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showAggregated, linkedProjectIds.join('|')]);
+
+  return (
+    <div className="space-y-6">
+      <ManualView customerId={customerId} entries={entries} onUpdate={onUpdate} />
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowAggregated((s) => !s)}
+          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          {showAggregated ? '▾' : '▸'}{' '}
+          {t('customers.alsoManualInProjects', { count: aggregatedEntries.length })}
+        </button>
+        {showAggregated && (
+          <div className="mt-3">
+            {aggLoading && aggregatedEntries.length === 0 ? (
+              <LoadingText />
+            ) : aggregatedEntries.length === 0 ? (
+              <EmptyState message={t('customers.noLinkedManual')} />
+            ) : (
+              <div className="space-y-2">
+                {aggregatedEntries.map((m) => {
+                  const project = m.projectId ? projectsById.get(m.projectId) : undefined;
+                  return (
+                    <div key={m._id} className="bg-gray-900 border border-gray-800 rounded-lg p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-gray-100">{m.title}</p>
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            {m.projectId && <ProjectBadge project={project} projectId={m.projectId} />}
+                            {m.category && <Badge color="bg-gray-800 text-gray-400">{m.category}</Badge>}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CustomerFilesTab({
+  customerId,
+  items,
+  aggregatedItems,
+  projectsById,
+  aggLoading,
+  storageEnabled,
+  onUpdate,
+}: {
+  customerId: string;
+  items: Attachment[];
+  aggregatedItems: Attachment[];
+  projectsById: Map<string, Project>;
+  aggLoading: boolean;
+  storageEnabled: boolean;
+  onUpdate: () => void;
+}) {
+  const { t, i18n } = useTranslation();
+  const { showError } = useToast();
+  const [showAggregated, setShowAggregated] = useState(false);
+  const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
+
+  const handleDelete = async (file: Attachment) => {
+    try {
+      await api.attachments.delete(file._id);
+      onUpdate();
+    } catch (err) {
+      showError((err as Error).message || t('common.errorDeleting'));
+    }
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  };
+
+  return (
+    <div className="space-y-6">
+      {storageEnabled ? (
+        <FileUploadZone customerId={customerId} onUploadComplete={onUpdate} />
+      ) : (
+        <div className="bg-amber-900/20 border border-amber-800/40 rounded-lg p-3 text-sm text-amber-300">
+          {t('customers.filesDisabled')}
+        </div>
+      )}
+
+      {items.length === 0 ? (
+        <EmptyState message={t('customers.noCustomerFiles')} />
+      ) : (
+        <div className="space-y-2">
+          {items.map((file) => (
+            <div
+              key={file._id}
+              className="bg-gray-900 border border-gray-800 rounded-lg p-3 flex flex-wrap items-center gap-3"
+            >
+              <span className="text-sm text-gray-100 truncate min-w-0 flex-1">{file.originalName}</span>
+              <Badge color="bg-gray-800 text-gray-400">{file.mimeType}</Badge>
+              <span className="text-xs text-gray-500 whitespace-nowrap">{formatSize(file.size)}</span>
+              <span className="text-xs text-gray-600 whitespace-nowrap">
+                {new Date(file.createdAt).toLocaleDateString(dateLocale)}
+              </span>
+              <a
+                href={api.attachments.downloadUrl(file._id)}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-cyan-300 rounded transition-colors"
+              >
+                {t('customers.downloadFile')}
+              </a>
+              <ConfirmButton
+                onConfirm={() => handleDelete(file)}
+                label={t('common.delete')}
+                confirmLabel={t('common.confirmDeleteLong')}
+                size="xs"
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowAggregated((s) => !s)}
+          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          {showAggregated ? '▾' : '▸'}{' '}
+          {t('customers.alsoFilesInProjects', { count: aggregatedItems.length })}
+        </button>
+        {showAggregated && (
+          <div className="mt-3">
+            <AggregatedAttachmentsTab
+              items={aggregatedItems}
+              projectsById={projectsById}
+              loading={aggLoading}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
