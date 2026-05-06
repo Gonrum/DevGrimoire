@@ -146,6 +146,10 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
       MINIO_BUCKET: ${MINIO_BUCKET:-devgrimoire}
       MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      # Backups (daily full-system backup at 06:00 by default)
+      BACKUP_DAILY_ENABLED: ${BACKUP_DAILY_ENABLED:-true}
+      BACKUP_CRON: ${BACKUP_CRON:-0 6 * * *}
+      BACKUP_MINIO_BUCKET: ${BACKUP_MINIO_BUCKET:-devgrimoire-backups}
     volumes:
       - lancedb_data:/app/data/lancedb
     depends_on:

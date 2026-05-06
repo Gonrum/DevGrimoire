@@ -54,10 +54,49 @@ export class MinioService implements OnModuleInit {
   }
 
   async putObject(key: string, buffer: Buffer, mimetype: string): Promise<void> {
+    await this.putObjectInBucket(this.bucket, key, buffer, mimetype);
+  }
+
+  async putObjectInBucket(bucket: string, key: string, buffer: Buffer, mimetype: string): Promise<void> {
     if (!this.client) throw new Error('MinIO not available');
-    await this.client.putObject(this.bucket, key, buffer, buffer.length, {
+    await this.client.putObject(bucket, key, buffer, buffer.length, {
       'Content-Type': mimetype,
     });
+  }
+
+  async ensureBucket(bucket: string): Promise<void> {
+    if (!this.client) throw new Error('MinIO not available');
+    const exists = await this.client.bucketExists(bucket);
+    if (!exists) {
+      const region = process.env.MINIO_REGION || 'us-east-1';
+      await this.client.makeBucket(bucket, region);
+      this.logger.log(`Bucket "${bucket}" created`);
+    }
+  }
+
+  async listObjects(bucket = this.bucket, prefix = ''): Promise<string[]> {
+    if (!this.client) throw new Error('MinIO not available');
+    const keys: string[] = [];
+    const stream = this.client.listObjectsV2(bucket, prefix, true);
+    await new Promise<void>((resolve, reject) => {
+      stream.on('data', (obj) => {
+        if (obj.name) keys.push(obj.name);
+      });
+      stream.on('error', reject);
+      stream.on('end', resolve);
+    });
+    return keys;
+  }
+
+  async copyObject(sourceBucket: string, sourceKey: string, targetBucket: string, targetKey: string): Promise<void> {
+    if (!this.client) throw new Error('MinIO not available');
+    await this.client.copyObject(targetBucket, targetKey, `/${sourceBucket}/${sourceKey}`);
+  }
+
+  async statObjectInBucket(bucket: string, key: string): Promise<{ size: number; etag: string }> {
+    if (!this.client) throw new Error('MinIO not available');
+    const stat = await this.client.statObject(bucket, key);
+    return { size: stat.size, etag: stat.etag };
   }
 
   async getObject(key: string): Promise<Readable> {

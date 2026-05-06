@@ -47,6 +47,7 @@ import { WebSearchModule } from './web-search/web-search.module';
 import { WorkspacesModule } from './workspaces/workspaces.module';
 import { CustomersModule } from './customers/customers.module';
 import { ContactsModule } from './contacts/contacts.module';
+import { BackupsModule } from './backups/backups.module';
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
@@ -98,6 +99,7 @@ if (!MONGODB_URI) {
     WorkspacesModule,
     CustomersModule,
     ContactsModule,
+    BackupsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
