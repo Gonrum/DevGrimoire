@@ -4,11 +4,13 @@ import { Model } from 'mongoose';
 import { Secret, SecretDocument } from './schemas/secret.schema';
 import { CreateSecretDto } from './dto/create-secret.dto';
 import { UpdateSecretDto } from './dto/update-secret.dto';
+import { CustomersService } from '../customers/customers.service';
 import { EncryptionService } from '../common/encryption.service';
 
 export interface SecretListItem {
   _id: string;
-  projectId: string;
+  projectId: string | null;
+  customerId: string | null;
   environmentId: string | null;
   key: string;
   description?: string;
@@ -21,6 +23,7 @@ export interface SecretListItem {
 export class SecretsService {
   constructor(
     @InjectModel(Secret.name) private secretModel: Model<SecretDocument>,
+    private customersService: CustomersService,
     private encryptionService: EncryptionService,
   ) {}
 
@@ -28,17 +31,29 @@ export class SecretsService {
     if (!this.encryptionService.isEnabled()) {
       throw new BadRequestException('Secrets encryption not configured: set SECRETS_ENCRYPTION_KEY');
     }
+    if (!dto.projectId && !dto.customerId) {
+      throw new BadRequestException('projectId or customerId is required');
+    }
+    if (dto.projectId && dto.customerId) {
+      throw new BadRequestException('projectId and customerId are mutually exclusive');
+    }
+    if (dto.customerId) {
+      await this.customersService.findById(dto.customerId);
+    }
 
     const encryptedValue = this.encryptionService.encrypt(dto.value);
+    const ownerFilter = dto.projectId
+      ? { projectId: dto.projectId }
+      : { customerId: dto.customerId };
 
     const secret = await this.secretModel.findOneAndUpdate(
-      { projectId: dto.projectId, environmentId: dto.environmentId || null, key: dto.key },
+      { ...ownerFilter, environmentId: dto.environmentId || null, key: dto.key },
       {
         $set: {
           encryptedValue,
           description: dto.description,
           type: dto.type || 'variable',
-          projectId: dto.projectId,
+          ...ownerFilter,
           environmentId: dto.environmentId || null,
           key: dto.key,
         },
@@ -51,6 +66,15 @@ export class SecretsService {
 
   async findByProject(projectId: string, environmentId?: string): Promise<SecretListItem[]> {
     const filter: any = { projectId };
+    if (environmentId !== undefined) {
+      filter.environmentId = environmentId || null;
+    }
+    const secrets = await this.secretModel.find(filter).sort({ key: 1 }).exec();
+    return secrets.map((s) => this.toListItem(s));
+  }
+
+  async findByCustomer(customerId: string, environmentId?: string): Promise<SecretListItem[]> {
+    const filter: any = { customerId };
     if (environmentId !== undefined) {
       filter.environmentId = environmentId || null;
     }
@@ -93,8 +117,17 @@ export class SecretsService {
     await this.secretModel.deleteMany({ projectId }).exec();
   }
 
-  async getDecryptedForEnvironment(projectId: string, environmentId?: string): Promise<{ key: string; value: string }[]> {
-    const filter: any = { projectId };
+  async removeByCustomer(customerId: string): Promise<void> {
+    await this.secretModel.deleteMany({ customerId }).exec();
+  }
+
+  async getDecryptedForEnvironment(
+    owner: { projectId?: string; customerId?: string },
+    environmentId?: string,
+  ): Promise<{ key: string; value: string }[]> {
+    const filter: any = {};
+    if (owner.projectId) filter.projectId = owner.projectId;
+    if (owner.customerId) filter.customerId = owner.customerId;
     if (environmentId !== undefined) {
       filter.environmentId = environmentId || null;
     }
@@ -109,7 +142,8 @@ export class SecretsService {
     const obj = secret.toObject();
     return {
       _id: obj._id.toString(),
-      projectId: obj.projectId.toString(),
+      projectId: obj.projectId ? obj.projectId.toString() : null,
+      customerId: obj.customerId ? obj.customerId.toString() : null,
       environmentId: obj.environmentId,
       key: obj.key,
       description: obj.description,

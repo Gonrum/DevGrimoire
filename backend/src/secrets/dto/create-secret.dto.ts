@@ -4,7 +4,12 @@ const SECRET_TYPES = ['variable', 'password', 'token', 'ssh_key', 'certificate',
 
 export class CreateSecretDto {
   @IsMongoId()
-  projectId: string;
+  @IsOptional()
+  projectId?: string;
+
+  @IsMongoId()
+  @IsOptional()
+  customerId?: string;
 
   @IsMongoId()
   @IsOptional()

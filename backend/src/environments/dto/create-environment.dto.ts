@@ -11,7 +11,12 @@ class EnvVariableDto {
 
 export class CreateEnvironmentDto {
   @IsMongoId()
-  projectId: string;
+  @IsOptional()
+  projectId?: string;
+
+  @IsMongoId()
+  @IsOptional()
+  customerId?: string;
 
   @IsString()
   name: string;

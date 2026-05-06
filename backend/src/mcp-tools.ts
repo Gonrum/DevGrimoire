@@ -882,27 +882,28 @@ const tools = [
   },
   {
     name: 'environment_create',
-    description: 'Create a project environment (e.g. dev, staging, prod) with key-value variables',
+    description: 'Create an environment (e.g. dev, staging, prod) with key-value variables. Belongs to either a project (projectId) or a customer (customerId) — exactly one of the two is required.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID for customer-scoped environments (mutually exclusive with projectId)' },
         name: { type: 'string', description: 'Environment name (e.g. dev, staging, prod)' },
         variables: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, value: { type: 'string' } }, required: ['key', 'value'] }, description: 'Key-value pairs for environment variables' },
         active: { type: 'boolean', description: 'Whether environment is active (default true)' },
       },
-      required: ['projectId', 'name'],
+      required: ['name'],
     },
   },
   {
     name: 'environment_list',
-    description: 'List all environments for a project (compact: name, active, variableCount). Use environment_get for full variables.',
+    description: 'List environments (compact: name, active, variableCount). Filter by projectId for project envs or customerId for customer-scoped envs. Use environment_get for full variables.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
       },
-      required: ['projectId'],
     },
   },
   {
@@ -943,17 +944,18 @@ const tools = [
   },
   {
     name: 'secret_set',
-    description: 'Create or update an encrypted secret for a project. Secrets are stored with AES-256-GCM encryption. Use environmentId to scope to a specific environment, or omit for project-global secrets.',
+    description: 'Create or update an encrypted secret. AES-256-GCM. Belongs to either a project (projectId) or a customer (customerId) — exactly one is required. Use environmentId to scope to a specific environment, or omit for owner-global secrets.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
-        environmentId: { type: 'string', description: 'Environment MongoDB ID (optional, omit for project-global)' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID for customer-scoped secrets (mutually exclusive with projectId)' },
+        environmentId: { type: 'string', description: 'Environment MongoDB ID (optional, omit for owner-global)' },
         key: { type: 'string', description: 'Secret name (e.g. DB_PASSWORD, API_KEY)' },
         value: { type: 'string', description: 'Secret value (will be encrypted)' },
         description: { type: 'string', description: 'Optional description of the secret' },
       },
-      required: ['projectId', 'key', 'value'],
+      required: ['key', 'value'],
     },
   },
   {
@@ -969,14 +971,14 @@ const tools = [
   },
   {
     name: 'secret_list',
-    description: 'List secrets for a project (keys and descriptions only, NO values). Use secret_get to retrieve individual values.',
+    description: 'List secrets (keys and descriptions only, NO values). Filter by projectId for project secrets or customerId for customer-scoped secrets. Use secret_get to retrieve individual values.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
         environmentId: { type: 'string', description: 'Filter by environment ID' },
       },
-      required: ['projectId'],
     },
   },
   {
@@ -992,15 +994,16 @@ const tools = [
   },
   {
     name: 'environment_export',
-    description: 'Export all variables and decrypted secrets of an environment as key=value pairs (useful for .env file generation)',
+    description: 'Export all variables and decrypted secrets of an environment as key=value pairs (useful for .env file generation). Specify projectId or customerId to match the owner of the environment.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
         environmentId: { type: 'string', description: 'Environment MongoDB ID' },
-        includeGlobalSecrets: { type: 'boolean', description: 'Include project-global secrets (default true)' },
+        includeGlobalSecrets: { type: 'boolean', description: 'Include owner-global secrets (default true)' },
       },
-      required: ['projectId', 'environmentId'],
+      required: ['environmentId'],
     },
   },
   {
@@ -2862,7 +2865,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'environment_create': {
           const env = await environmentsService.create({
-            projectId: requireString(a, 'projectId'),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
             name: requireString(a, 'name'),
             variables: a.variables as any,
             active: optionalBoolean(a, 'active'),
@@ -2871,12 +2875,20 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'environment_list': {
-          const envs = await environmentsService.findByProject(requireString(a, 'projectId'));
+          const envProjectId = optionalString(a, 'projectId');
+          const envCustomerId = optionalString(a, 'customerId');
+          if (!envProjectId && !envCustomerId) {
+            throw new Error('environment_list requires projectId or customerId');
+          }
+          const envs = envCustomerId
+            ? await environmentsService.findByCustomer(envCustomerId)
+            : await environmentsService.findByProject(envProjectId!);
           result = (envs as any[]).map((e: any) => {
             const obj = typeof e.toJSON === 'function' ? e.toJSON() : { ...e };
             return {
               _id: obj._id,
               projectId: obj.projectId,
+              customerId: obj.customerId,
               name: obj.name,
               active: obj.active,
               variableCount: (obj.variables || []).length,
@@ -2902,7 +2914,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         case 'secret_set': {
           const secret = await secretsService.create({
-            projectId: requireString(a, 'projectId'),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
             environmentId: optionalString(a, 'environmentId'),
             key: requireString(a, 'key'),
             value: requireString(a, 'value'),
@@ -2914,24 +2927,40 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'secret_get':
           result = await secretsService.findById(requireString(a, 'id'));
           break;
-        case 'secret_list':
-          result = await secretsService.findByProject(
-            requireString(a, 'projectId'),
-            optionalString(a, 'environmentId'),
-          );
+        case 'secret_list': {
+          const secProjectId = optionalString(a, 'projectId');
+          const secCustomerId = optionalString(a, 'customerId');
+          if (!secProjectId && !secCustomerId) {
+            throw new Error('secret_list requires projectId or customerId');
+          }
+          result = secCustomerId
+            ? await secretsService.findByCustomer(secCustomerId, optionalString(a, 'environmentId'))
+            : await secretsService.findByProject(secProjectId!, optionalString(a, 'environmentId'));
           break;
+        }
         case 'secret_delete':
           await secretsService.delete(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
           break;
         case 'environment_export': {
-          const projectId = requireString(a, 'projectId');
+          const expProjectId = optionalString(a, 'projectId');
+          const expCustomerId = optionalString(a, 'customerId');
+          if (!expProjectId && !expCustomerId) {
+            throw new Error('environment_export requires projectId or customerId');
+          }
+          const owner = expCustomerId ? { customerId: expCustomerId } : { projectId: expProjectId! };
           const envId = requireString(a, 'environmentId');
           const includeGlobal = optionalBoolean(a, 'includeGlobalSecrets') !== false;
           const env = await environmentsService.findById(envId);
-          const envSecrets = await secretsService.getDecryptedForEnvironment(projectId, envId);
+          const ownerMatches = owner.customerId
+            ? (env as any).customerId?.toString() === owner.customerId
+            : (env as any).projectId?.toString() === owner.projectId;
+          if (!ownerMatches) {
+            throw new Error('Environment does not belong to the specified owner');
+          }
+          const envSecrets = await secretsService.getDecryptedForEnvironment(owner, envId);
           const globalSecrets = includeGlobal
-            ? await secretsService.getDecryptedForEnvironment(projectId, '')
+            ? await secretsService.getDecryptedForEnvironment(owner, '')
             : [];
           const lines: string[] = [];
           lines.push(`# Environment: ${env.name}`);

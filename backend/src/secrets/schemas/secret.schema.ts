@@ -5,8 +5,11 @@ export type SecretDocument = HydratedDocument<Secret>;
 
 @Schema({ timestamps: true })
 export class Secret {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
-  projectId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  projectId?: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  customerId?: Types.ObjectId;
 
   @Prop({ type: String, default: null })
   environmentId: string | null;
@@ -25,4 +28,11 @@ export class Secret {
 }
 
 export const SecretSchema = SchemaFactory.createForClass(Secret);
-SecretSchema.index({ projectId: 1, environmentId: 1, key: 1 }, { unique: true });
+SecretSchema.index(
+  { projectId: 1, environmentId: 1, key: 1 },
+  { unique: true, partialFilterExpression: { projectId: { $exists: true } } },
+);
+SecretSchema.index(
+  { customerId: 1, environmentId: 1, key: 1 },
+  { unique: true, partialFilterExpression: { customerId: { $exists: true } } },
+);

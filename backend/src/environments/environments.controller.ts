@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { EnvironmentsService } from './environments.service';
 import { CreateEnvironmentDto } from './dto/create-environment.dto';
 import { UpdateEnvironmentDto } from './dto/update-environment.dto';
@@ -14,8 +14,19 @@ export class EnvironmentsController {
   }
 
   @Get()
-  findByProject(@Query('projectId') projectId: string) {
-    return this.environmentsService.findByProject(projectId);
+  findByProject(
+    @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
+  ) {
+    if (!projectId && !customerId) {
+      throw new BadRequestException('projectId or customerId query parameter is required');
+    }
+    if (projectId && customerId) {
+      throw new BadRequestException('projectId and customerId are mutually exclusive');
+    }
+    return customerId
+      ? this.environmentsService.findByCustomer(customerId)
+      : this.environmentsService.findByProject(projectId!);
   }
 
   @Get(':id')

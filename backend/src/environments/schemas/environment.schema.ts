@@ -10,8 +10,11 @@ export type EnvironmentDocument = HydratedDocument<Environment>;
 
 @Schema({ timestamps: true })
 export class Environment {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
-  projectId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  projectId?: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  customerId?: Types.ObjectId;
 
   @Prop({ required: true })
   name: string;
@@ -39,4 +42,11 @@ export class Environment {
 }
 
 export const EnvironmentSchema = SchemaFactory.createForClass(Environment);
-EnvironmentSchema.index({ projectId: 1, name: 1 }, { unique: true });
+EnvironmentSchema.index(
+  { projectId: 1, name: 1 },
+  { unique: true, partialFilterExpression: { projectId: { $exists: true } } },
+);
+EnvironmentSchema.index(
+  { customerId: 1, name: 1 },
+  { unique: true, partialFilterExpression: { customerId: { $exists: true } } },
+);

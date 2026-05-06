@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { SecretsService } from './secrets.service';
 import { CreateSecretDto } from './dto/create-secret.dto';
 import { UpdateSecretDto } from './dto/update-secret.dto';
@@ -15,10 +15,19 @@ export class SecretsController {
 
   @Get()
   findByProject(
-    @Query('projectId') projectId: string,
+    @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
     @Query('environmentId') environmentId?: string,
   ) {
-    return this.secretsService.findByProject(projectId, environmentId);
+    if (!projectId && !customerId) {
+      throw new BadRequestException('projectId or customerId query parameter is required');
+    }
+    if (projectId && customerId) {
+      throw new BadRequestException('projectId and customerId are mutually exclusive');
+    }
+    return customerId
+      ? this.secretsService.findByCustomer(customerId, environmentId)
+      : this.secretsService.findByProject(projectId!, environmentId);
   }
 
   @Get(':id')
