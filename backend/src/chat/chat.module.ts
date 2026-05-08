@@ -30,6 +30,7 @@ import { RecurringTasksModule } from '../recurring-tasks/recurring-tasks.module'
 import { ReleasesModule } from '../releases/releases.module';
 import { SoulsModule } from '../souls/souls.module';
 import { CommitsModule } from '../commits/commits.module';
+import { CustomersModule } from '../customers/customers.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { CommitsModule } from '../commits/commits.module';
     ReleasesModule,
     SoulsModule,
     CommitsModule,
+    CustomersModule,
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatLlmService, ChatContextService, ChatToolsService, EncryptionService],

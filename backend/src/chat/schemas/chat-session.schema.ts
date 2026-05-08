@@ -90,8 +90,11 @@ export const ChatMessageSchema = SchemaFactory.createForClass(ChatMessage);
 
 @Schema({ timestamps: true })
 export class ChatSession {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
-  projectId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  projectId?: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  customerId?: Types.ObjectId;
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   userId: Types.ObjectId;
@@ -112,4 +115,6 @@ export class ChatSession {
 export const ChatSessionSchema = SchemaFactory.createForClass(ChatSession);
 ChatSessionSchema.index({ userId: 1, projectId: 1, updatedAt: -1 });
 ChatSessionSchema.index({ projectId: 1, updatedAt: -1 });
+ChatSessionSchema.index({ userId: 1, customerId: 1, updatedAt: -1 });
+ChatSessionSchema.index({ customerId: 1, updatedAt: -1 });
 ChatSessionSchema.index({ archived: 1 });

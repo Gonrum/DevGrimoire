@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ProjectsService } from '../projects/projects.service';
+import { CustomersService } from '../customers/customers.service';
 import { RagService } from '../rag/rag.service';
 import { ChatMessage, ChatContextRef } from './schemas/chat-session.schema';
 import { LlmMessage, LlmImageInput } from './chat-llm.service';
@@ -54,11 +55,12 @@ export class ChatContextService {
 
   constructor(
     private readonly projects: ProjectsService,
+    private readonly customers: CustomersService,
     private readonly rag: RagService,
   ) {}
 
   async build(
-    projectId: string,
+    owner: string | { projectId?: string; customerId?: string },
     userMessage: string,
     history: ChatMessage[],
     options: {
@@ -70,6 +72,12 @@ export class ChatContextService {
       activeWorkspace?: WorkspaceDocument | null;
     } = {},
   ): Promise<ContextBuildResult> {
+    const ownerObj = typeof owner === 'string' ? { projectId: owner } : owner;
+    const projectId = ownerObj.projectId;
+    const customerId = ownerObj.customerId;
+    if (!projectId && !customerId) {
+      throw new Error('chat context requires projectId or customerId');
+    }
     const toolsEnabled = options.toolsEnabled ?? false;
     const topK = options.topK ?? (toolsEnabled ? 3 : 6);
     const historyLimit = options.historyLimit ?? 10;
@@ -77,11 +85,28 @@ export class ChatContextService {
     const images = options.images;
     const activeWorkspace = options.activeWorkspace ?? null;
 
-    const project = await this.projects.findById(projectId);
+    let ownerName = '';
+    let techStack = '-';
+    let description = '-';
+    let instructions = '';
+    if (projectId) {
+      const project = await this.projects.findById(projectId);
+      ownerName = project.name;
+      techStack = project.techStack?.join(', ') || '-';
+      description = project.description || '-';
+      instructions =
+        project.instructions && project.instructions.trim()
+          ? `\n\n## Projektspezifische Instruktionen\n${project.instructions.trim()}`
+          : '';
+    } else if (customerId) {
+      const customer = await this.customers.findById(customerId);
+      ownerName = customer.name;
+      description = customer.description || '-';
+    }
 
     let ragResults: Awaited<ReturnType<RagService['search']>> = [];
     try {
-      ragResults = await this.rag.search(userMessage, projectId, undefined, topK);
+      ragResults = await this.rag.search(userMessage, projectId, undefined, topK, customerId);
     } catch (err) {
       this.logger.warn(`RAG search unavailable: ${(err as Error).message}`);
     }
@@ -93,19 +118,16 @@ export class ChatContextService {
             .join('\n\n')
         : '(keine relevanten Treffer im RAG-Index)';
 
-    const techStack = project.techStack?.join(', ') || '-';
-    const description = project.description || '-';
-    const instructions =
-      project.instructions && project.instructions.trim()
-        ? `\n\n## Projektspezifische Instruktionen\n${project.instructions.trim()}`
-        : '';
+    const ownerLabel = projectId ? 'Projekt' : 'Kunde';
+    const ownerIdLabel = projectId ? 'projectId' : 'customerId';
+    const ownerIdValue = projectId || customerId || '';
 
     const toolUsageHint = toolsEnabled
       ? `
 
-Du hast Tools, mit denen du Live-Daten aus dem Projekt abrufen kannst (z.B. \`todo_list\`, \`milestone_list\`, \`rag_search\`, \`knowledge_search\`).
+Du hast Tools, mit denen du Live-Daten aus dem ${ownerLabel} abrufen kannst (z.B. \`todo_list\`, \`milestone_list\`, \`rag_search\`, \`knowledge_search\`).
 Wenn der Nutzer konkrete Daten verlangt (offene Todos, Milestones, Änderungshistorie, spezifische Dokumente), **rufe die passenden Tools auf** statt aus dem unten stehenden Kontext zu raten.
-Die \`projectId\` des aktuellen Kontext-Projekts ist: ${projectId}. Du kannst diese ID verwenden oder weglassen — das System setzt sie automatisch.`
+Die \`${ownerIdLabel}\` des aktuellen Kontextes ist: ${ownerIdValue}. Du kannst diese ID verwenden oder weglassen — das System setzt sie automatisch.`
       : '';
 
     // Attachments — truncate per file and enforce a global budget so a runaway
@@ -142,17 +164,16 @@ Die \`projectId\` des aktuellen Kontext-Projekts ist: ${projectId}. Du kannst di
       ? `\n\n# Angehängte Dateien\nDer Nutzer hat ${attachmentStats.included}/${attachmentStats.total} Datei(en) angehängt. Der Inhalt steht unten. Beziehe dich bei Bedarf explizit auf den Dateinamen.\n\n${attachmentBlocks.join('\n\n')}`
       : '';
 
-    const systemPrompt = `Du bist ein technischer Assistent für das Softwareprojekt "${project.name}".
-Antworte präzise und auf Deutsch. Nutze den bereitgestellten Projektkontext als Quelle.
+    const systemPrompt = `Du bist ein technischer Assistent für ${projectId ? `das Softwareprojekt "${ownerName}"` : `den Kunden "${ownerName}"`}.
+Antworte präzise und auf Deutsch. Nutze den bereitgestellten ${projectId ? 'Projektkontext' : 'Kundenkontext'} als Quelle.
 Wenn der Kontext die Frage nicht eindeutig beantwortet, sag das klar statt zu raten.
 Verweise nach Möglichkeit auf konkrete Einträge (z.B. "laut (2) im Kontext").${toolUsageHint}
 
-# Projekt
-- Name: ${project.name}
-- Beschreibung: ${description}
-- Tech-Stack: ${techStack}${instructions}
+# ${ownerLabel}
+- Name: ${ownerName}
+- Beschreibung: ${description}${projectId ? `\n- Tech-Stack: ${techStack}` : ''}${instructions}
 
-# Relevanter Kontext aus dem Projekt
+# Relevanter Kontext
 ${contextSection}${attachmentSection}`;
 
     const historyMessages: LlmMessage[] = history

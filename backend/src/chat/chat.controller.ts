@@ -275,24 +275,32 @@ export class ChatController {
     await this.assertEnabled();
     const userId = (req as Request & { user?: { userId: string } }).user?.userId;
     if (!userId) throw new BadRequestException('Authentication required');
-    return this.chatService.createSession(dto.projectId, userId, dto.title);
+    return this.chatService.createSession(
+      { projectId: dto.projectId, customerId: dto.customerId },
+      userId,
+      dto.title,
+    );
   }
 
   @Get('sessions')
   async listSessions(
     @Req() req: Request,
     @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
     @Query('includeArchived') includeArchived?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
     await this.assertEnabled();
-    if (!projectId) {
-      throw new BadRequestException('projectId query parameter is required');
+    if (!projectId && !customerId) {
+      throw new BadRequestException('projectId or customerId query parameter is required');
+    }
+    if (projectId && customerId) {
+      throw new BadRequestException('projectId and customerId are mutually exclusive');
     }
     const userId = (req as Request & { user?: { userId: string } }).user?.userId;
     if (!userId) throw new BadRequestException('Authentication required');
-    return this.chatService.listSessions(projectId, userId, {
+    return this.chatService.listSessions({ projectId, customerId }, userId, {
       includeArchived: includeArchived === 'true',
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
@@ -363,6 +371,9 @@ export class ChatController {
 
     const userId = (req as Request & { user?: { userId: string } }).user?.userId;
     const session = await this.chatService.findById(id, userId);
+    if (!session.projectId) {
+      throw new BadRequestException('Attachments are not supported in customer-scoped chat sessions');
+    }
     const projectId = session.projectId.toString();
 
     const created = await this.attachments.create(
@@ -407,11 +418,19 @@ export class ChatController {
     }
     const userId = (req as Request & { user?: { userId: string } }).user?.userId;
     const session = await this.chatService.findById(id, userId);
-    const projectId = session.projectId.toString();
+    const projectId = session.projectId?.toString();
+    const customerId = session.customerId?.toString();
     const opts = await this.llm.getOptions();
-    const { forContext, images, refs } = await this.loadAttachmentsForContext(projectId, dto.attachmentIds);
-    const activeWorkspace = await this.resolveActiveWorkspace(dto.workspaceId, projectId);
-    const built = await this.context.build(projectId, dto.content, session.messages, {
+    const { forContext, images, refs } = projectId
+      ? await this.loadAttachmentsForContext(projectId, dto.attachmentIds)
+      : { forContext: [], images: [] as LlmImageInput[], refs: [] as ChatAttachmentRef[] };
+    if (!projectId && dto.attachmentIds && dto.attachmentIds.length > 0) {
+      throw new BadRequestException('Attachments are not supported in customer-scoped chat sessions');
+    }
+    const activeWorkspace = projectId
+      ? await this.resolveActiveWorkspace(dto.workspaceId, projectId)
+      : null;
+    const built = await this.context.build({ projectId, customerId }, dto.content, session.messages, {
       topK: opts.topK,
       historyLimit: opts.historyLimit,
       toolsEnabled: opts.toolsEnabled,
@@ -422,6 +441,7 @@ export class ChatController {
     const useTools = opts.toolsEnabled && opts.toolsAllowlist.length > 0;
     return {
       projectId,
+      customerId,
       systemPrompt: built.systemPrompt,
       messages: built.messages,
       contextRefs: built.contextRefs,
@@ -457,7 +477,10 @@ export class ChatController {
     let userAttachmentRefs: ChatAttachmentRef[] | undefined;
     if (dto.attachmentIds && dto.attachmentIds.length > 0) {
       const session = await this.chatService.findById(id, userId);
-      const projectId = session.projectId.toString();
+      const projectId = session.projectId?.toString();
+      if (!projectId) {
+        throw new BadRequestException('Attachments are not supported in customer-scoped chat sessions');
+      }
       const { refs } = await this.loadAttachmentsForContext(projectId, dto.attachmentIds);
       userAttachmentRefs = refs;
     }
@@ -501,16 +524,20 @@ export class ChatController {
     }
     const userId = (req as Request & { user?: { userId: string } }).user?.userId;
     const session = await this.chatService.findById(id, userId);
-    // T-56: projectId IMMER aus Session, nie aus DTO/args — verhindert
-    // dass ein User über seine eigene Session Tools gegen fremde Projekte
-    // dispatcht. Das DTO-Feld wird ignoriert.
-    const projectId = session.projectId.toString();
+    // T-56: owner-Id IMMER aus Session, nie aus DTO/args — verhindert
+    // dass ein User über seine eigene Session Tools gegen fremde Projekte/Kunden
+    // dispatcht. Die DTO-Felder werden ignoriert.
+    const projectId = session.projectId?.toString();
+    const customerId = session.customerId?.toString();
+    if (!projectId && !customerId) {
+      throw new BadRequestException('Chat session has neither projectId nor customerId');
+    }
     const opts = await this.llm.getOptions();
     const rawArgs = (dto.arguments && typeof dto.arguments === 'object') ? dto.arguments : {};
-    // Auch args.projectId überschreiben — der Browser-LLM darf nicht
-    // manipulierte projectIds einschmuggeln.
-    const args = { ...rawArgs, projectId };
-    const result = await this.tools.execute(dto.name, args, { projectId }, opts.toolsAllowlist);
+    // Auch args.{projectId,customerId} überschreiben — der Browser-LLM darf nicht
+    // manipulierte IDs einschmuggeln.
+    const args = { ...rawArgs, ...(projectId ? { projectId } : {}), ...(customerId ? { customerId } : {}) };
+    const result = await this.tools.execute(dto.name, args, { projectId: projectId || '' }, opts.toolsAllowlist);
     const resultJson = JSON.stringify(result.success ? result.result : { error: result.error });
     const truncated = resultJson.length > MAX_TOOL_RESULT_CHARS
       ? resultJson.slice(0, MAX_TOOL_RESULT_CHARS) + '…[truncated]'
@@ -543,10 +570,19 @@ export class ChatController {
 
     const userId = (req as Request & { user?: { userId: string } }).user?.userId;
     const session = await this.chatService.findById(id, userId);
-    const projectId = session.projectId.toString();
+    const projectId = session.projectId?.toString();
+    const customerId = session.customerId?.toString();
+    if (!projectId && !customerId) {
+      throw new BadRequestException('Chat session has neither projectId nor customerId');
+    }
 
-    const { forContext: attachmentsForContext, images: attachmentImages, refs: attachmentRefs } =
-      await this.loadAttachmentsForContext(projectId, dto.attachmentIds);
+    if (dto.attachmentIds && dto.attachmentIds.length > 0 && !projectId) {
+      throw new BadRequestException('Attachments are not supported in customer-scoped chat sessions');
+    }
+
+    const { forContext: attachmentsForContext, images: attachmentImages, refs: attachmentRefs } = projectId
+      ? await this.loadAttachmentsForContext(projectId, dto.attachmentIds)
+      : { forContext: [], images: [] as LlmImageInput[], refs: [] as ChatAttachmentRef[] };
 
     await this.chatService.appendMessage(id, {
       role: 'user',
@@ -557,8 +593,10 @@ export class ChatController {
     const afterUser = await this.chatService.findById(id, userId);
     const historyWithoutCurrent = afterUser.messages.slice(0, -1);
     const opts = await this.llm.getOptions();
-    const activeWorkspace = await this.resolveActiveWorkspace(dto.workspaceId, projectId);
-    const built = await this.context.build(projectId, dto.content, historyWithoutCurrent, {
+    const activeWorkspace = projectId
+      ? await this.resolveActiveWorkspace(dto.workspaceId, projectId)
+      : null;
+    const built = await this.context.build({ projectId, customerId }, dto.content, historyWithoutCurrent, {
       topK: opts.topK,
       historyLimit: opts.historyLimit,
       toolsEnabled: opts.toolsEnabled,
@@ -685,7 +723,7 @@ export class ChatController {
               continue;
             }
 
-            const result = await this.tools.execute(tc.name, parsedArgs, { projectId }, opts.toolsAllowlist);
+            const result = await this.tools.execute(tc.name, parsedArgs, { projectId: projectId || null }, opts.toolsAllowlist);
             const resultJson = JSON.stringify(result.success ? result.result : { error: result.error });
             const truncated = resultJson.length > MAX_TOOL_RESULT_CHARS
               ? resultJson.slice(0, MAX_TOOL_RESULT_CHARS) + '…[truncated]'

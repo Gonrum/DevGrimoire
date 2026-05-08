@@ -65,23 +65,39 @@ export class ChatService implements OnModuleInit {
     }
   }
 
-  async createSession(projectId: string, userId: string, title?: string): Promise<ChatSessionDocument> {
+  async createSession(
+    owner: { projectId?: string; customerId?: string },
+    userId: string,
+    title?: string,
+  ): Promise<ChatSessionDocument> {
+    if (!owner.projectId && !owner.customerId) {
+      throw new BadRequestException('projectId or customerId is required');
+    }
+    if (owner.projectId && owner.customerId) {
+      throw new BadRequestException('projectId and customerId are mutually exclusive');
+    }
     const session = await this.chatModel.create({
-      projectId,
+      projectId: owner.projectId,
+      customerId: owner.customerId,
       userId,
       title: title?.trim() || this.defaultTitle(),
       messages: [],
     });
-    this.emit(projectId, session._id.toString(), 'created', userId, `Chat "${session.title}" erstellt`);
+    this.emit(owner.projectId || null, session._id.toString(), 'created', userId, `Chat "${session.title}" erstellt`, owner.customerId || null);
     return session;
   }
 
   async listSessions(
-    projectId: string,
+    owner: { projectId?: string; customerId?: string },
     userId: string,
     options: { includeArchived?: boolean; limit?: number; offset?: number } = {},
   ): Promise<ChatSessionDocument[]> {
-    const filter: Record<string, unknown> = { projectId, userId };
+    if (!owner.projectId && !owner.customerId) {
+      throw new BadRequestException('projectId or customerId is required');
+    }
+    const filter: Record<string, unknown> = { userId };
+    if (owner.projectId) filter.projectId = owner.projectId;
+    if (owner.customerId) filter.customerId = owner.customerId;
     if (!options.includeArchived) filter.archived = { $ne: true };
     let query = this.chatModel.find(filter).sort({ updatedAt: -1 });
     if (options.offset) query = query.skip(options.offset);
@@ -142,7 +158,7 @@ export class ChatService implements OnModuleInit {
       .findOneAndUpdate(filter, { $push: { messages: { $each: payloads } } }, { new: true })
       .exec();
     if (!session) throw new NotFoundException(`Chat session ${id} not found`);
-    this.emit(session.projectId.toString(), id, 'updated', session.userId?.toString());
+    this.emit(session.projectId?.toString() || null, id, 'updated', session.userId?.toString(), undefined, session.customerId?.toString() || null);
     return session;
   }
 
@@ -155,7 +171,7 @@ export class ChatService implements OnModuleInit {
       .findOneAndUpdate(filter, { title: trimmed }, { new: true })
       .exec();
     if (!session) throw new NotFoundException(`Chat session ${id} not found`);
-    this.emit(session.projectId.toString(), id, 'updated', session.userId?.toString());
+    this.emit(session.projectId?.toString() || null, id, 'updated', session.userId?.toString(), undefined, session.customerId?.toString() || null);
     return session;
   }
 
@@ -164,7 +180,7 @@ export class ChatService implements OnModuleInit {
     if (userId) filter.userId = userId;
     const deleted = await this.chatModel.findOneAndDelete(filter).exec();
     if (!deleted) throw new NotFoundException(`Chat session ${id} not found`);
-    this.emit(deleted.projectId.toString(), id, 'deleted', deleted.userId?.toString());
+    this.emit(deleted.projectId?.toString() || null, id, 'deleted', deleted.userId?.toString(), undefined, deleted.customerId?.toString() || null);
   }
 
   async removeByProject(projectId: string): Promise<number> {
@@ -188,14 +204,16 @@ export class ChatService implements OnModuleInit {
   }
 
   private emit(
-    projectId: string,
+    projectId: string | null,
     entityId: string,
     action: ProjectChangeEvent['action'],
     userId?: string,
     summary?: string,
+    customerId?: string | null,
   ) {
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId,
+      customerId,
       entity: 'chat',
       action,
       entityId,

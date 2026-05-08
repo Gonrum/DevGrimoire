@@ -87,6 +87,12 @@ function getProjectIdFromPath(pathname: string): string | null {
   return typeof id === 'string' && /^[a-f0-9]{24}$/i.test(id) ? id : null;
 }
 
+function getCustomerIdFromPath(pathname: string): string | null {
+  const match = matchPath('/customers/:id/*', pathname) ?? matchPath('/customers/:id', pathname);
+  const id = match?.params?.id;
+  return typeof id === 'string' && /^[a-f0-9]{24}$/i.test(id) ? id : null;
+}
+
 export default function ChatDock() {
   const { t } = useTranslation();
   const location = useLocation();
@@ -96,6 +102,7 @@ export default function ChatDock() {
   const [featureEnabled, setFeatureEnabled] = useState<boolean>(true);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [customerId, setCustomerId] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -232,24 +239,39 @@ export default function ChatDock() {
   };
 
   const contextProjectId = useMemo(() => getProjectIdFromPath(location.pathname), [location.pathname]);
+  const contextCustomerId = useMemo(() => getCustomerIdFromPath(location.pathname), [location.pathname]);
 
-  // Auto-pick project from URL or first in list
+  // Auto-pick project/customer from URL or first project in list
   useEffect(() => {
     if (!open) return;
-    if (projectId) return;
+    if (contextCustomerId && contextCustomerId !== customerId) {
+      setCustomerId(contextCustomerId);
+      setProjectId(null);
+      return;
+    }
+    if (projectId || customerId) return;
     if (contextProjectId) {
       setProjectId(contextProjectId);
     } else if (projects.length > 0) {
       setProjectId(projects[0]._id);
     }
-  }, [open, contextProjectId, projects, projectId]);
+  }, [open, contextProjectId, contextCustomerId, projects, projectId, customerId]);
 
-  // When URL changes to a different project page, switch dock context
+  // When URL changes to a different project/customer page, switch dock context
   useEffect(() => {
+    if (contextCustomerId && contextCustomerId !== customerId) {
+      setCustomerId(contextCustomerId);
+      setProjectId(null);
+      return;
+    }
+    if (!contextCustomerId && customerId) {
+      // Left customer-detail page → fall back to project mode
+      setCustomerId(null);
+    }
     if (contextProjectId && contextProjectId !== projectId) {
       setProjectId(contextProjectId);
     }
-  }, [contextProjectId, projectId]);
+  }, [contextProjectId, contextCustomerId, projectId, customerId]);
 
   // Fetch feature-enabled flag eagerly so we can hide the floating button
   // when an admin has globally disabled chat.
@@ -275,11 +297,14 @@ export default function ChatDock() {
     }
   }, [open, projects.length]);
 
-  // Load sessions for selected project
-  const loadSessions = useCallback(async (pid: string) => {
+  // Load sessions for selected project/customer
+  const loadSessions = useCallback(async (owner: { projectId?: string | null; customerId?: string | null }) => {
     setLoadingSessions(true);
     try {
-      const list = await api.chat.listSessions(pid);
+      const list = await api.chat.listSessions({
+        projectId: owner.projectId || undefined,
+        customerId: owner.customerId || undefined,
+      });
       setSessions(list);
       return list;
     } catch (err) {
@@ -339,25 +364,28 @@ export default function ChatDock() {
     }
   }, []);
 
-  // When project changes: load sessions and restore last session
+  // When project/customer changes: load sessions and restore last session
   useEffect(() => {
-    if (!open || !projectId) return;
+    if (!open) return;
+    if (!projectId && !customerId) return;
     setSession(null);
-    loadSessions(projectId).then((list) => {
-      const lastId = localStorage.getItem(LAST_SESSION_KEY_PREFIX + projectId);
+    const ownerKey = projectId || `c:${customerId}`;
+    loadSessions({ projectId, customerId }).then((list) => {
+      const lastId = localStorage.getItem(LAST_SESSION_KEY_PREFIX + ownerKey);
       const target = list.find((s) => s._id === lastId) ?? list[0];
       if (target) {
         loadSession(target._id);
       }
     });
-  }, [open, projectId, loadSessions, loadSession]);
+  }, [open, projectId, customerId, loadSessions, loadSession]);
 
-  // Persist selected session per project
+  // Persist selected session per owner
   useEffect(() => {
-    if (projectId && session?._id) {
-      localStorage.setItem(LAST_SESSION_KEY_PREFIX + projectId, session._id);
+    const ownerKey = projectId || (customerId ? `c:${customerId}` : null);
+    if (ownerKey && session?._id) {
+      localStorage.setItem(LAST_SESSION_KEY_PREFIX + ownerKey, session._id);
     }
-  }, [projectId, session?._id]);
+  }, [projectId, customerId, session?._id]);
 
   // Auto-scroll on new content
   useEffect(() => {
@@ -384,32 +412,32 @@ export default function ChatDock() {
   }, []);
 
   const createNewSession = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId && !customerId) return;
     try {
-      const created = await api.chat.createSession(projectId);
-      const list = await loadSessions(projectId);
+      const owner = { projectId: projectId || undefined, customerId: customerId || undefined };
+      const created = await api.chat.createSession(owner);
+      const list = await loadSessions(owner);
       setSessions(list);
       await loadSession(created._id);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error creating session');
     }
-  }, [projectId, loadSessions, loadSession]);
+  }, [projectId, customerId, loadSessions, loadSession]);
 
   const deleteCurrentSession = useCallback(async () => {
     if (!session) return;
     try {
       await api.chat.deleteSession(session._id);
       setSession(null);
-      const pid = projectId;
-      if (pid) {
-        const list = await loadSessions(pid);
+      if (projectId || customerId) {
+        const list = await loadSessions({ projectId, customerId });
         if (list[0]) await loadSession(list[0]._id);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error deleting');
     }
-  }, [session, projectId, loadSessions, loadSession]);
+  }, [session, projectId, customerId, loadSessions, loadSession]);
 
   const runServerStream = useCallback(
     async (
@@ -681,8 +709,8 @@ export default function ChatDock() {
       } else {
         await runServerStream(session._id, content, outgoingAttachmentIds, abort);
       }
-      if (projectId) {
-        loadSessions(projectId).catch(() => {});
+      if (projectId || customerId) {
+        loadSessions({ projectId, customerId }).catch(() => {});
       }
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
@@ -692,7 +720,7 @@ export default function ChatDock() {
     } finally {
       if (abortRef.current === abort) abortRef.current = null;
     }
-  }, [session, draft, streaming, projectId, loadSessions, userLlm, runBrowserStream, runServerStream, pendingAttachments, t]);
+  }, [session, draft, streaming, projectId, customerId, loadSessions, userLlm, runBrowserStream, runServerStream, pendingAttachments, t]);
 
   const stopStream = useCallback(() => {
     abortRef.current?.abort();

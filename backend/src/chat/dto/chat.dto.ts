@@ -14,7 +14,12 @@ import { Type } from 'class-transformer';
 
 export class CreateChatSessionDto {
   @IsMongoId()
-  projectId: string;
+  @IsOptional()
+  projectId?: string;
+
+  @IsMongoId()
+  @IsOptional()
+  customerId?: string;
 
   @IsOptional()
   @IsString()
