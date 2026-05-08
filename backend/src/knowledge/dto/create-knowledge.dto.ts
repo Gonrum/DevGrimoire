@@ -6,6 +6,7 @@ import {
   IsIn,
   ValidateIf,
 } from 'class-validator';
+import { ALL_SENSITIVITY_LEVELS, SensitivityLevel } from '../../common/sensitivity';
 
 export class CreateKnowledgeDto {
   @IsMongoId()
@@ -34,4 +35,8 @@ export class CreateKnowledgeDto {
   @IsString()
   @IsOptional()
   category?: string;
+
+  @IsIn(ALL_SENSITIVITY_LEVELS)
+  @IsOptional()
+  sensitivity?: SensitivityLevel;
 }

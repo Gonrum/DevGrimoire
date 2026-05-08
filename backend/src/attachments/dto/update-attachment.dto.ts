@@ -1,4 +1,5 @@
-import { IsString, IsOptional, IsArray, IsMongoId } from 'class-validator';
+import { IsString, IsOptional, IsArray, IsMongoId, IsIn } from 'class-validator';
+import { ALL_SENSITIVITY_LEVELS, SensitivityLevel } from '../../common/sensitivity';
 
 export class UpdateAttachmentDto {
   @IsString()
@@ -17,4 +18,8 @@ export class UpdateAttachmentDto {
   @IsMongoId()
   @IsOptional()
   entityId?: string;
+
+  @IsIn(ALL_SENSITIVITY_LEVELS)
+  @IsOptional()
+  sensitivity?: SensitivityLevel;
 }

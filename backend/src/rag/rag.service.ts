@@ -8,6 +8,7 @@ import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { SettingsService } from '../settings/settings.service';
 import { EncryptionService } from '../common/encryption.service';
 import { RequestContext } from '../common/request-context';
+import { isExcludedFromRag, SensitivityLevel } from '../common/sensitivity';
 
 const SETTING_RAG_ENDPOINTS_V1 = 'rag_embedding_endpoints_v1';
 
@@ -587,6 +588,16 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   /** Upsert a single document into the vector store (with chunking) */
   private async upsertDocument(entity: IndexableEntity, doc: Record<string, unknown>): Promise<void> {
     if (!this.table) return;
+
+    // T-219: respect data classification. confidential/personal/secret entries
+    // never enter the index. We also remove any pre-existing chunks for this
+    // doc so a `internal → confidential` reclassification effectively redacts
+    // it from RAG.
+    const sensitivity = doc.sensitivity as SensitivityLevel | undefined;
+    if (isExcludedFromRag(sensitivity)) {
+      await this.removeDocument(String(doc._id));
+      return;
+    }
 
     const extracted = this.extractText(entity, doc);
     if (!extracted || (!extracted.title && !extracted.content)) return;

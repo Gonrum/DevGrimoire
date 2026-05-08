@@ -123,6 +123,14 @@
   "customers": {
     "overview": "Kundenübersicht",
     "newCustomer": "+ Neuer Kunde",
+    "export": "Exportieren",
+    "exportTitle": "Diese Kundenakte als JSON-Datei herunterladen",
+    "exportIncludeSecretsPrompt": "Verschlüsselte Kunden-Secrets in den Export aufnehmen? (Nur sinnvoll wenn die Zielinstanz denselben SECRETS_ENCRYPTION_KEY hat.)",
+    "importJson": "Kundenakte aus JSON importieren",
+    "importing": "Importiere…",
+    "importSuccess": "Kundenakte erfolgreich importiert",
+    "importPartial": "Import abgeschlossen mit {{count}} Warnung(en)",
+    "importFailed": "Import fehlgeschlagen",
     "dashboard": {
       "totalActive": "Aktive Kunden",
       "withOpenTodos": "Mit offenen Quests",

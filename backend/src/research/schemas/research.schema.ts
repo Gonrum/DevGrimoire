@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+import { ALL_SENSITIVITY_LEVELS, Sensitivity, SensitivityLevel } from '../../common/sensitivity';
 
 export type ResearchDocument = HydratedDocument<Research>;
 
@@ -22,6 +23,10 @@ export class Research {
 
   @Prop({ type: [String], default: [] })
   tags: string[];
+
+  // Data classification (T-219). confidential/personal/secret skip RAG.
+  @Prop({ type: String, enum: ALL_SENSITIVITY_LEVELS, default: Sensitivity.INTERNAL })
+  sensitivity: SensitivityLevel;
 }
 
 export const ResearchSchema = SchemaFactory.createForClass(Research);

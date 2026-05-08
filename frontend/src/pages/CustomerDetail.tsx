@@ -428,6 +428,21 @@ export default function CustomerDetail() {
               {t('customers.archive')}
             </button>
           )}
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const includeSecrets = window.confirm(t('customers.exportIncludeSecretsPrompt'));
+                await api.customerTransfer.export(id!, includeSecrets);
+              } catch (err) {
+                showError(err instanceof Error ? err.message : String(err));
+              }
+            }}
+            className="text-xs px-2 py-0.5 bg-violet-900/30 hover:bg-violet-800/50 text-violet-300 hover:text-violet-100 rounded-full transition-colors"
+            title={t('customers.exportTitle')}
+          >
+            {t('customers.export')}
+          </button>
         </div>
         {customer.description && (
           <div className="mb-2 text-gray-400">

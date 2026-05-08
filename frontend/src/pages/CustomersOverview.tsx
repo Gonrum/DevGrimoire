@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Customer, CustomerStatus } from '../api/client';
 import ButtonLink from '../components/ui/ButtonLink';
@@ -7,6 +7,7 @@ import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
 import Markdown from '../components/Markdown';
 import { LoadingText } from '../components/ui/LoadingSpinner';
+import { useToast } from '../components/Toast';
 
 const statusColors: Record<CustomerStatus, string> = {
   lead: 'bg-blue-900/50 text-blue-300',
@@ -37,6 +38,10 @@ export default function CustomersOverview() {
     recentlyUpdated: number;
   } | null>(null);
   const [statsByCustomer, setStatsByCustomer] = useState<Record<string, DashboardStats>>({});
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
+  const { showError, showSuccess } = useToast();
 
   const loadCustomers = () => {
     api.customers
@@ -125,6 +130,39 @@ export default function CustomersOverview() {
         <ButtonLink to="/customers/new" variant="primary" size="lg" className="mb-0 justify-center">
           {t('customers.newCustomer')}
         </ButtonLink>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={importing}
+          className="px-3 py-1.5 text-sm bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+        >
+          {importing ? t('customers.importing') : t('customers.importJson')}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          className="hidden"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            setImporting(true);
+            try {
+              const result = await api.customerTransfer.import(file);
+              if (result.warnings.length > 0) {
+                showSuccess(t('customers.importPartial', { count: result.warnings.length }));
+              } else {
+                showSuccess(t('customers.importSuccess'));
+              }
+              navigate(`/customers/${result.customerId}`);
+            } catch (err) {
+              showError(err instanceof Error ? err.message : t('customers.importFailed'));
+            } finally {
+              setImporting(false);
+              e.target.value = '';
+            }
+          }}
+        />
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value as CustomerStatus | 'all')}

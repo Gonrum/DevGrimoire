@@ -1378,6 +1378,51 @@ export const api = {
       return res.json() as Promise<{ projectId: string; projectName: string; stats: Record<string, number> }>;
     },
   },
+  customerTransfer: {
+    export: async (customerId: string, includeSecrets = false) => {
+      const params = includeSecrets ? '?includeSecretValues=true' : '';
+      const headers: Record<string, string> = {};
+      const token = getAccessToken?.();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`${BASE_URL}/customer-transfer/${customerId}/export${params}`, { headers });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: res.statusText }));
+        throw new Error(err.message || res.statusText);
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="(.+)"/);
+      const filename = match?.[1] || 'customer-export.json';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    import: async (file: File, name?: string) => {
+      const headers: Record<string, string> = {};
+      const token = getAccessToken?.();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const formData = new FormData();
+      formData.append('file', file);
+      const params = name ? `?name=${encodeURIComponent(name)}` : '';
+      const res = await fetch(`${BASE_URL}/customer-transfer/import${params}`, {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: res.statusText }));
+        throw new Error(err.message || res.statusText);
+      }
+      return res.json() as Promise<{
+        customerId: string;
+        imported: Record<string, number>;
+        warnings: string[];
+      }>;
+    },
+  },
   attachments: {
     storageStatus: () =>
       request<{ enabled: boolean; bucket?: string }>('/attachments/storage-status'),

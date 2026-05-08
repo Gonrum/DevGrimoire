@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+import { ALL_SENSITIVITY_LEVELS, Sensitivity, SensitivityLevel } from '../../common/sensitivity';
 
 export type KnowledgeDocument = HydratedDocument<Knowledge>;
 
@@ -25,6 +26,12 @@ export class Knowledge {
 
   @Prop({ type: String })
   category?: string;
+
+  // Data classification. `confidential`/`personal`/`secret` skip RAG indexing.
+  // Default `internal` keeps existing data behaving as before. See knowledge
+  // entry T-219 for the policy and isExcludedFromRag() helper for the check.
+  @Prop({ type: String, enum: ALL_SENSITIVITY_LEVELS, default: Sensitivity.INTERNAL })
+  sensitivity: SensitivityLevel;
 }
 
 export const KnowledgeSchema = SchemaFactory.createForClass(Knowledge);

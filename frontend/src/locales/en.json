@@ -123,6 +123,14 @@
   "customers": {
     "overview": "Customer Overview",
     "newCustomer": "+ New Customer",
+    "export": "Export",
+    "exportTitle": "Download this customer file as JSON",
+    "exportIncludeSecretsPrompt": "Include encrypted customer secrets in the export? (Only useful if the target instance shares the same SECRETS_ENCRYPTION_KEY.)",
+    "importJson": "Import customer from JSON",
+    "importing": "Importing…",
+    "importSuccess": "Customer imported successfully",
+    "importPartial": "Import finished with {{count}} warning(s)",
+    "importFailed": "Import failed",
     "dashboard": {
       "totalActive": "Active customers",
       "withOpenTodos": "With open quests",

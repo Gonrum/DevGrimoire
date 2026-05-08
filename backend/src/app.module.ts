@@ -31,6 +31,7 @@ import { FeaturesModule } from './features/features.module';
 import { SoulsModule } from './souls/souls.module';
 import { CommitsModule } from './commits/commits.module';
 import { ProjectTransferModule } from './project-transfer/project-transfer.module';
+import { CustomerTransferModule } from './customer-transfer/customer-transfer.module';
 import { RagModule } from './rag/rag.module';
 import { RecurringTasksModule } from './recurring-tasks/recurring-tasks.module';
 import { SnippetsModule } from './snippets/snippets.module';
@@ -85,6 +86,7 @@ if (!MONGODB_URI) {
     SoulsModule,
     CommitsModule,
     ProjectTransferModule,
+    CustomerTransferModule,
     RagModule,
     RecurringTasksModule,
     SnippetsModule,
