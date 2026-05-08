@@ -6,6 +6,7 @@ import {
   ChatAttachmentRef,
   ChatContextRef,
   ChatMessage,
+  ChatResponseMetrics,
   ChatSession,
   ChatToolCallRecord,
   Project,
@@ -37,10 +38,18 @@ interface StreamingToolCall {
   summary?: string;
 }
 
+type StreamingPhase = 'queued' | 'context' | 'thinking' | 'tool_call' | 'responding';
+
 interface StreamingState {
   content: string;
   contextRefs: ChatContextRef[];
   toolCalls: StreamingToolCall[];
+  phase: StreamingPhase;
+  activeToolName?: string;
+  metrics?: ChatResponseMetrics;
+  /** Browser-mode timestamps so we can build metrics locally on persist. */
+  browserStartMs?: number;
+  browserFirstTokenMs?: number;
 }
 
 interface PendingAttachment {
@@ -60,6 +69,16 @@ const CHAT_ATTACHMENT_ACCEPT =
 
 function isImageFile(file: File): boolean {
   return file.type.startsWith('image/');
+}
+
+function streamingStatusKey(phase: StreamingPhase): string {
+  switch (phase) {
+    case 'context': return 'chat.streamContext';
+    case 'tool_call': return 'chat.streamToolCall';
+    case 'responding': return 'chat.streamResponding';
+    case 'thinking': return 'chat.streamThinking';
+    default: return 'chat.streamQueued';
+  }
 }
 
 /**
@@ -114,6 +133,7 @@ export default function ChatDock() {
   const [loadingSession, setLoadingSession] = useState(false);
   const [userLlm, setUserLlm] = useState<UserLlmConfig | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
+  const [retryDraft, setRetryDraft] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -452,14 +472,22 @@ export default function ChatDock() {
         attachmentIds,
         {
           onContext: (refs) => {
-            setStreaming((s) => s ? { ...s, contextRefs: refs } : s);
+            setStreaming((s) => s ? { ...s, contextRefs: refs, phase: 'context' } : s);
+          },
+          onStatus: (status) => {
+            const phase = ['queued', 'context', 'thinking', 'tool_call', 'responding'].includes(status.phase)
+              ? status.phase as StreamingPhase
+              : 'thinking';
+            setStreaming((s) => s ? { ...s, phase, activeToolName: status.name } : s);
           },
           onToken: (token) => {
-            setStreaming((s) => s ? { ...s, content: s.content + token } : s);
+            setStreaming((s) => s ? { ...s, content: s.content + token, phase: 'responding', activeToolName: undefined } : s);
           },
           onToolCall: (call) => {
             setStreaming((s) => s ? {
               ...s,
+              phase: 'tool_call',
+              activeToolName: call.name,
               toolCalls: [...s.toolCalls, { id: call.id, name: call.name, arguments: call.arguments }],
             } : s);
           },
@@ -470,6 +498,9 @@ export default function ChatDock() {
                 tc.id === result.id ? { ...tc, success: result.success, summary: result.summary } : tc,
               ),
             } : s);
+          },
+          onMetrics: (metrics) => {
+            setStreaming((s) => s ? { ...s, metrics } : s);
           },
           onDone: () => {
             setStreaming((s) => {
@@ -489,6 +520,7 @@ export default function ChatDock() {
                 timestamp: new Date().toISOString(),
                 contextUsed: s.contextRefs.length > 0 ? s.contextRefs : undefined,
                 toolCalls: toolCallRecords,
+                metrics: s.metrics,
               };
               setSession((prev) => prev ? { ...prev, messages: [...prev.messages, assistantMsg] } : prev);
               return null;
@@ -496,6 +528,7 @@ export default function ChatDock() {
           },
           onError: (message) => {
             setError(message);
+            setRetryDraft(content);
             setStreaming(null);
           },
         },
@@ -517,8 +550,11 @@ export default function ChatDock() {
       if (!llm.endpoint?.trim() || !llm.model?.trim()) {
         throw new Error(t('chat.browserMissingConfig'));
       }
+      setStreaming((s) => s ? { ...s, phase: 'context' } : s);
       const prep = await api.chat.prepareMessage(sessionId, content, attachmentIds, activeWorkspaceId);
-      setStreaming((s) => s ? { ...s, contextRefs: prep.contextRefs } : s);
+      const requestStart = Date.now();
+      let firstTokenTs: number | null = null;
+      setStreaming((s) => s ? { ...s, contextRefs: prep.contextRefs, phase: 'thinking', browserStartMs: requestStart } : s);
 
       const conversation: BrowserLlmMessage[] = prep.messages.map((m) => ({
         role: m.role,
@@ -546,9 +582,16 @@ export default function ChatDock() {
         })) {
           if (abort.signal.aborted) break;
           if (event.type === 'token') {
+            if (firstTokenTs === null) firstTokenTs = Date.now();
             iterContent += event.content;
             fullResponse += event.content;
-            setStreaming((s) => s ? { ...s, content: s.content + event.content } : s);
+            setStreaming((s) => s ? {
+              ...s,
+              content: s.content + event.content,
+              phase: 'responding',
+              activeToolName: undefined,
+              browserFirstTokenMs: s.browserFirstTokenMs ?? firstTokenTs ?? undefined,
+            } : s);
           } else if (event.type === 'tool_call') {
             pendingToolCalls.push({ id: event.id, name: event.name, arguments: event.arguments });
           } else if (event.type === 'finish') {
@@ -575,6 +618,8 @@ export default function ChatDock() {
           if (abort.signal.aborted) break;
           setStreaming((s) => s ? {
             ...s,
+            phase: 'tool_call',
+            activeToolName: tc.name,
             toolCalls: [...s.toolCalls, { id: tc.id, name: tc.name, arguments: tc.arguments }],
           } : s);
 
@@ -614,6 +659,25 @@ export default function ChatDock() {
 
       if (abort.signal.aborted) return;
 
+      const endTs = Date.now();
+      const metrics: ChatResponseMetrics | undefined = fullResponse.trim()
+        ? (() => {
+            const outputTokens = Math.max(1, Math.round(fullResponse.length / 4));
+            const durationMs = Math.max(1, endTs - requestStart);
+            const firstTokenMs = firstTokenTs != null ? firstTokenTs - requestStart : undefined;
+            const generationMs = firstTokenMs != null ? Math.max(1, durationMs - firstTokenMs) : durationMs;
+            const tokensPerSecond = Math.round((outputTokens / generationMs) * 1000 * 10) / 10;
+            return {
+              outputTokens,
+              durationMs,
+              firstTokenMs,
+              tokensPerSecond,
+              totalDurationMs: persistedToolCalls.length > 0 ? durationMs : undefined,
+              estimated: true,
+            };
+          })()
+        : undefined;
+
       if (fullResponse.trim()) {
         await api.chat.persistMessage(sessionId, {
           userContent: content,
@@ -621,6 +685,9 @@ export default function ChatDock() {
           contextRefs: prep.contextRefs,
           toolCalls: persistedToolCalls.length > 0 ? persistedToolCalls : undefined,
           attachmentIds,
+          metrics,
+          browserEndpointUrl: llm.endpoint,
+          browserModel: llm.model,
         });
         setStreaming((s) => {
           if (!s) return null;
@@ -630,6 +697,7 @@ export default function ChatDock() {
             timestamp: new Date().toISOString(),
             contextUsed: s.contextRefs.length > 0 ? s.contextRefs : undefined,
             toolCalls: persistedToolCalls.length > 0 ? persistedToolCalls : undefined,
+            metrics,
           };
           setSession((prev) => prev ? { ...prev, messages: [...prev.messages, assistantMsg] } : prev);
           return null;
@@ -637,7 +705,12 @@ export default function ChatDock() {
       } else {
         // Persist the user message even if the assistant produced nothing,
         // so it stays in the session.
-        await api.chat.persistMessage(sessionId, { userContent: content, attachmentIds });
+        await api.chat.persistMessage(sessionId, {
+          userContent: content,
+          attachmentIds,
+          browserEndpointUrl: llm.endpoint,
+          browserModel: llm.model,
+        });
         setStreaming(null);
       }
     },
@@ -666,6 +739,7 @@ export default function ChatDock() {
 
     setDraft('');
     setError(null);
+    setRetryDraft(null);
     setFallbackNotice(null);
     setPendingAttachments((prev) => {
       prev.forEach((p) => p.objectUrl && URL.revokeObjectURL(p.objectUrl));
@@ -683,7 +757,7 @@ export default function ChatDock() {
 
     const abort = new AbortController();
     abortRef.current = abort;
-    setStreaming({ content: '', contextRefs: [], toolCalls: [] });
+    setStreaming({ content: '', contextRefs: [], toolCalls: [], phase: 'queued', browserStartMs: Date.now() });
 
     const useBrowserMode = userLlm?.mode === 'browser';
     const fallbackAllowed = !!userLlm?.fallbackEnabled;
@@ -703,7 +777,7 @@ export default function ChatDock() {
           // Reset streaming state and replay against the server-side LLM
           const detail = err instanceof Error ? err.message : String(err);
           setFallbackNotice(`${t('chat.browserFallbackUsed')} (${detail})`);
-          setStreaming({ content: '', contextRefs: [], toolCalls: [] });
+          setStreaming({ content: '', contextRefs: [], toolCalls: [], phase: 'queued', browserStartMs: Date.now() });
           await runServerStream(session._id, content, outgoingAttachmentIds, abort);
         }
       } else {
@@ -715,6 +789,7 @@ export default function ChatDock() {
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
         setError(err instanceof Error ? err.message : 'Stream failed');
+        setRetryDraft(content);
       }
       setStreaming(null);
     } finally {
@@ -926,9 +1001,10 @@ export default function ChatDock() {
                     {streaming.content ? (
                       <Markdown>{streaming.content}</Markdown>
                     ) : (
-                      <span className="text-gray-500 italic">{t('chat.thinking')}</span>
+                      <StreamingActivity phase={streaming.phase} activeToolName={streaming.activeToolName} />
                     )}
                   </div>
+                  {streaming.metrics && <MetricsBadge metrics={streaming.metrics} />}
                 </div>
               )}
               <div ref={messagesEndRef} />
@@ -946,7 +1022,23 @@ export default function ChatDock() {
             {error && (
               <div className="px-3 py-2 border-t border-red-900/40 bg-red-900/20 text-red-300 text-xs flex items-center justify-between gap-2">
                 <span className="truncate">{error}</span>
-                <button type="button" onClick={() => setError(null)} className="text-red-400 hover:text-red-200 shrink-0">×</button>
+                <div className="flex items-center gap-2 shrink-0">
+                  {retryDraft && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDraft(retryDraft);
+                        setError(null);
+                        setRetryDraft(null);
+                        setTimeout(() => textareaRef.current?.focus(), 0);
+                      }}
+                      className="text-red-200 hover:text-white underline underline-offset-2"
+                    >
+                      {t('chat.retry')}
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setError(null)} className="text-red-400 hover:text-red-200">×</button>
+                </div>
               </div>
             )}
 
@@ -1110,6 +1202,28 @@ export default function ChatDock() {
   );
 }
 
+function StreamingActivity({ phase, activeToolName }: { phase: StreamingPhase; activeToolName?: string }) {
+  const { t } = useTranslation();
+  const label = phase === 'tool_call' && activeToolName
+    ? t(streamingStatusKey(phase), { tool: activeToolName })
+    : t(streamingStatusKey(phase));
+
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full border border-violet-800/40 bg-gray-900/60 px-3 py-1.5 text-xs text-gray-400 shadow-[0_0_24px_rgba(124,58,237,0.08)]">
+      <span className="relative flex h-4 w-4 items-center justify-center">
+        <span className="absolute h-4 w-4 rounded-full bg-violet-500/20 animate-ping" />
+        <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,0.7)]" />
+      </span>
+      <span>{label}</span>
+      <span className="flex gap-0.5" aria-hidden="true">
+        <span className="h-1 w-1 rounded-full bg-violet-300 animate-bounce [animation-delay:-0.2s]" />
+        <span className="h-1 w-1 rounded-full bg-violet-300 animate-bounce [animation-delay:-0.1s]" />
+        <span className="h-1 w-1 rounded-full bg-violet-300 animate-bounce" />
+      </span>
+    </div>
+  );
+}
+
 function MessageBubble({ message }: { message: ChatMessage }) {
   const { t } = useTranslation();
   const isUser = message.role === 'user';
@@ -1199,6 +1313,34 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           </button>
           {expanded && <ContextRefs refs={message.contextUsed} />}
         </div>
+      )}
+      {message.metrics && <MetricsBadge metrics={message.metrics} />}
+    </div>
+  );
+}
+
+function MetricsBadge({ metrics }: { metrics: ChatResponseMetrics }) {
+  const { t } = useTranslation();
+  const tps = metrics.tokensPerSecond;
+  const totalSec = (metrics.totalDurationMs ?? metrics.durationMs) / 1000;
+  const ttfMs = metrics.firstTokenMs;
+  const prefix = metrics.estimated ? '≈ ' : '';
+  return (
+    <div
+      className="mt-2 inline-flex items-center gap-1.5 text-[10px] text-gray-500 font-mono"
+      title={t('chat.metricsTitle', {
+        outputTokens: metrics.outputTokens,
+        durationMs: metrics.durationMs,
+        firstTokenMs: ttfMs ?? '—',
+        estimated: metrics.estimated ? t('chat.metricsEstimated') : t('chat.metricsExact'),
+      })}
+    >
+      <span className="px-1.5 py-0.5 rounded border border-violet-900/40 bg-violet-950/30 text-violet-300">
+        {prefix}{tps} {t('chat.metricsTokensPerSec')}
+      </span>
+      <span className="text-gray-600">{totalSec.toFixed(1)} s</span>
+      {ttfMs != null && metrics.totalDurationMs && metrics.totalDurationMs !== metrics.durationMs && (
+        <span className="text-gray-700">· {t('chat.metricsTotal')} {(metrics.totalDurationMs / 1000).toFixed(1)} s</span>
       )}
     </div>
   );

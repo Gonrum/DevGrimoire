@@ -1689,6 +1689,8 @@ export const api = {
         onToken?: (token: string) => void;
         onToolCall?: (call: { id: string; name: string; arguments: string }) => void;
         onToolResult?: (result: { id: string; success: boolean; summary: string }) => void;
+        onStatus?: (status: { phase: string; name?: string; state?: string }) => void;
+        onMetrics?: (metrics: ChatResponseMetrics) => void;
         onDone?: (reason?: string) => void;
         onError?: (message: string) => void;
       },
@@ -1729,12 +1731,21 @@ export const api = {
                 | { type: 'token'; content: string }
                 | { type: 'tool_call'; id: string; name: string; arguments: string }
                 | { type: 'tool_result'; id: string; success: boolean; summary: string }
+                | { type: 'status'; phase: string; name?: string; state?: string }
+                | { type: 'tool_status'; phase?: string; name?: string; state?: string }
+                | ({ type: 'metrics' } & ChatResponseMetrics)
                 | { type: 'done'; reason?: string }
                 | { type: 'error'; message: string };
               if (event.type === 'context') handlers.onContext?.(event.refs);
               else if (event.type === 'token') handlers.onToken?.(event.content);
               else if (event.type === 'tool_call') handlers.onToolCall?.({ id: event.id, name: event.name, arguments: event.arguments });
               else if (event.type === 'tool_result') handlers.onToolResult?.({ id: event.id, success: event.success, summary: event.summary });
+              else if (event.type === 'status') handlers.onStatus?.({ phase: event.phase, name: event.name, state: event.state });
+              else if (event.type === 'tool_status') handlers.onStatus?.({ phase: event.phase ?? 'tool_call', name: event.name, state: event.state });
+              else if (event.type === 'metrics') {
+                const { type: _t, ...metrics } = event;
+                handlers.onMetrics?.(metrics as ChatResponseMetrics);
+              }
               else if (event.type === 'done') handlers.onDone?.(event.reason);
               else if (event.type === 'error') handlers.onError?.(event.message);
             } catch {
@@ -1749,6 +1760,34 @@ export const api = {
           /* noop */
         }
       }
+    },
+  },
+  chatActivity: {
+    list: (params: {
+      projectId?: string;
+      sessionId?: string;
+      outcome?: ChatActivityOutcome;
+      provider?: string;
+      search?: string;
+      startDate?: string;
+      endDate?: string;
+      limit?: number;
+      offset?: number;
+    } = {}) => {
+      const qs = new URLSearchParams();
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') qs.append(k, String(v));
+      });
+      const suffix = qs.toString() ? `?${qs.toString()}` : '';
+      return request<ChatActivityList>(`/chat-activity${suffix}`);
+    },
+    stats: (params: { projectId?: string; days?: number } = {}) => {
+      const qs = new URLSearchParams();
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null) qs.append(k, String(v));
+      });
+      const suffix = qs.toString() ? `?${qs.toString()}` : '';
+      return request<ChatActivityStats>(`/chat-activity/stats${suffix}`);
     },
   },
 };
@@ -1846,6 +1885,15 @@ export interface ChatAttachmentUploadResult {
   size: number;
 }
 
+export interface ChatResponseMetrics {
+  outputTokens: number;
+  durationMs: number;
+  firstTokenMs?: number;
+  tokensPerSecond: number;
+  totalDurationMs?: number;
+  estimated: boolean;
+}
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -1853,6 +1901,7 @@ export interface ChatMessage {
   contextUsed?: ChatContextRef[];
   toolCalls?: ChatToolCallRecord[];
   attachments?: ChatAttachmentRef[];
+  metrics?: ChatResponseMetrics;
 }
 
 export interface ChatSession {
@@ -1898,6 +1947,59 @@ export interface ChatPersistInput {
   contextRefs?: ChatContextRef[];
   toolCalls?: ChatToolCallRecord[];
   attachmentIds?: string[];
+  metrics?: ChatResponseMetrics;
+  browserEndpointUrl?: string;
+  browserModel?: string;
+  browserAborted?: boolean;
+}
+
+export interface ChatActivityToolUse {
+  name: string;
+  count: number;
+  errors: number;
+}
+
+export type ChatActivityOutcome = 'completed' | 'aborted' | 'failed' | 'no_endpoint';
+
+export interface ChatActivityEntry {
+  _id: string;
+  sessionId?: string;
+  userId?: string;
+  projectId?: string;
+  customerId?: string;
+  mode: 'server' | 'browser';
+  provider?: string;
+  endpointUrl?: string;
+  model?: string;
+  toolsEnabled: boolean;
+  toolsUsed?: ChatActivityToolUse[];
+  outcome: ChatActivityOutcome;
+  errorMessage?: string;
+  outputTokens?: number;
+  durationMs?: number;
+  firstTokenMs?: number;
+  tokensPerSecond?: number;
+  estimated?: boolean;
+  hadImages: boolean;
+  userMessageLength?: number;
+  createdAt: string;
+}
+
+export interface ChatActivityList {
+  items: ChatActivityEntry[];
+  total: number;
+}
+
+export interface ChatActivityStats {
+  total: number;
+  completed: number;
+  failed: number;
+  aborted: number;
+  noEndpoint: number;
+  byProvider: Array<{ provider: string; count: number; failures: number }>;
+  byTool: Array<{ name: string; count: number; errors: number }>;
+  avgTokensPerSecond: number | null;
+  avgFirstTokenMs: number | null;
 }
 
 export interface ChatExecuteToolInput {

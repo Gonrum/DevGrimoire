@@ -47,6 +47,12 @@ export interface LlmOptions {
   signal?: AbortSignal;
   /** Optional images that get attached to the LAST user message. */
   images?: LlmImageInput[];
+  /**
+   * Invoked once per actual call (after fallback resolution) with the endpoint
+   * the request was sent to. Used by chat-activity logging so we know which
+   * endpoint failed/succeeded without parsing log lines.
+   */
+  onEndpointSelected?: (endpoint: { provider: LlmProvider; url: string; model: string }) => void;
 }
 
 const SETTING_ENABLED = 'chat_enabled';
@@ -607,6 +613,7 @@ export class ChatLlmService {
         this.logger.log(
           `Chat stream (tools): ${endpoint.provider} @ ${endpoint.url} (${endpoint.model}) — ${tools.length} tools${hasImages ? ` + ${resolved.images!.length} image(s)` : ''}`,
         );
+        options.onEndpointSelected?.({ provider: endpoint.provider, url: endpoint.url, model: endpoint.model });
         yield* this.streamOpenAiWithTools(endpoint, messages, tools, resolved);
         return;
       } catch (err) {
@@ -789,6 +796,7 @@ export class ChatLlmService {
         this.logger.log(
           `Chat stream: ${endpoint.provider} @ ${endpoint.url} (${endpoint.model})${hasImages ? ` + ${resolved.images!.length} image(s)` : ''}`,
         );
+        options.onEndpointSelected?.({ provider: endpoint.provider, url: endpoint.url, model: endpoint.model });
         yield* this.streamFromEndpoint(endpoint, messages, resolved);
         return;
       } catch (err) {

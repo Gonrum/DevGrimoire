@@ -1,12 +1,15 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ChatSession, ChatSessionSchema } from './schemas/chat-session.schema';
+import { ChatActivity, ChatActivitySchema } from './schemas/chat-activity.schema';
 import { User, UserSchema } from '../auth/schemas/user.schema';
 import { ChatService } from './chat.service';
 import { ChatLlmService } from './chat-llm.service';
 import { ChatContextService } from './chat-context.service';
 import { ChatToolsService } from './chat-tools';
+import { ChatActivityService } from './chat-activity.service';
 import { ChatController } from './chat.controller';
+import { ChatActivityController } from './chat-activity.controller';
 import { EncryptionService } from '../common/encryption.service';
 import { SettingsModule } from '../settings/settings.module';
 import { RagModule } from '../rag/rag.module';
@@ -37,6 +40,7 @@ import { ContactsModule } from '../contacts/contacts.module';
   imports: [
     MongooseModule.forFeature([
       { name: ChatSession.name, schema: ChatSessionSchema },
+      { name: ChatActivity.name, schema: ChatActivitySchema },
       { name: User.name, schema: UserSchema },
     ]),
     SettingsModule,
@@ -64,8 +68,8 @@ import { ContactsModule } from '../contacts/contacts.module';
     CustomersModule,
     ContactsModule,
   ],
-  controllers: [ChatController],
-  providers: [ChatService, ChatLlmService, ChatContextService, ChatToolsService, EncryptionService],
-  exports: [ChatService, ChatLlmService, ChatContextService],
+  controllers: [ChatController, ChatActivityController],
+  providers: [ChatService, ChatLlmService, ChatContextService, ChatToolsService, ChatActivityService, EncryptionService],
+  exports: [ChatService, ChatLlmService, ChatContextService, ChatActivityService],
 })
 export class ChatModule {}

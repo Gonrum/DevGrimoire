@@ -23,7 +23,9 @@ import { ChatService } from './chat.service';
 import { ChatLlmService, LlmMessageWithTools, LlmImageInput } from './chat-llm.service';
 import { ChatContextService, AttachmentForContext } from './chat-context.service';
 import { ChatToolsService, ALL_TOOL_NAMES, TOOL_GROUPS, WRITE_TOOL_NAMES } from './chat-tools';
-import { ChatAttachmentRef, ChatToolCallRecord } from './schemas/chat-session.schema';
+import { ChatActivityService } from './chat-activity.service';
+import { ChatAttachmentRef, ChatResponseMetrics, ChatToolCallRecord } from './schemas/chat-session.schema';
+import { ChatActivityToolUse } from './schemas/chat-activity.schema';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { WorkspaceDocument } from '../workspaces/schemas/workspace.schema';
@@ -121,7 +123,57 @@ export class ChatController {
     private readonly attachments: AttachmentsService,
     private readonly minio: MinioService,
     private readonly workspaces: WorkspacesService,
+    private readonly activity: ChatActivityService,
   ) {}
+
+  /**
+   * Estimate output token count from raw text. Most providers don't expose
+   * usage in their streaming protocol, so we use a chars/4 heuristic that
+   * roughly matches BPE behaviour for English/code. Marked as `estimated:true`
+   * so the UI can render an "≈" badge instead of a hard number.
+   */
+  private estimateTokens(text: string): number {
+    if (!text) return 0;
+    return Math.max(1, Math.round(text.length / 4));
+  }
+
+  /** Build a metrics record from raw timing/token data. Returns undefined when no response was generated. */
+  private buildMetrics(args: {
+    fullResponse: string;
+    startMs: number;
+    firstTokenMs: number | null;
+    endMs: number;
+    totalDurationMs?: number;
+  }): ChatResponseMetrics | undefined {
+    if (!args.fullResponse.trim()) return undefined;
+    const outputTokens = this.estimateTokens(args.fullResponse);
+    const durationMs = Math.max(1, args.endMs - args.startMs);
+    const firstTokenMs = args.firstTokenMs != null ? args.firstTokenMs - args.startMs : undefined;
+    const generationMs = firstTokenMs != null
+      ? Math.max(1, durationMs - firstTokenMs)
+      : durationMs;
+    const tokensPerSecond = Math.round((outputTokens / generationMs) * 1000 * 10) / 10;
+    return {
+      outputTokens,
+      durationMs,
+      firstTokenMs,
+      tokensPerSecond,
+      totalDurationMs: args.totalDurationMs,
+      estimated: true,
+    };
+  }
+
+  /** Aggregate streaming tool calls into per-tool {count, errors} buckets for activity logging. */
+  private aggregateTools(records: ChatToolCallRecord[]): ChatActivityToolUse[] {
+    const map = new Map<string, ChatActivityToolUse>();
+    for (const r of records) {
+      const cur = map.get(r.name) ?? { name: r.name, count: 0, errors: 0 };
+      cur.count++;
+      if (!r.success) cur.errors++;
+      map.set(r.name, cur);
+    }
+    return Array.from(map.values());
+  }
 
   /**
    * Resolves a workspaceId from the message DTO, returning the workspace
@@ -501,9 +553,54 @@ export class ChatController {
           success: tc.success,
           error: tc.error,
         })),
+        metrics: dto.metrics
+          ? {
+              outputTokens: dto.metrics.outputTokens,
+              durationMs: dto.metrics.durationMs,
+              firstTokenMs: dto.metrics.firstTokenMs,
+              tokensPerSecond: dto.metrics.tokensPerSecond,
+              totalDurationMs: dto.metrics.totalDurationMs,
+              estimated: dto.metrics.estimated,
+            }
+          : undefined,
       });
     }
-    return this.chatService.appendMessages(id, inputs, userId);
+    const result = await this.chatService.appendMessages(id, inputs, userId);
+
+    // Browser-mode chat-activity log. Server mode logs in sendMessage.
+    const toolRecords: ChatToolCallRecord[] | undefined = dto.toolCalls?.map((tc) => ({
+      id: tc.id,
+      name: tc.name,
+      arguments: tc.arguments,
+      result: tc.result,
+      success: tc.success,
+      error: tc.error,
+    }));
+    const outcome = dto.browserAborted
+      ? 'aborted'
+      : dto.assistantContent && dto.assistantContent.trim()
+        ? 'completed'
+        : 'failed';
+    await this.activity.record({
+      sessionId: id,
+      userId,
+      projectId: result.projectId?.toString(),
+      customerId: result.customerId?.toString(),
+      mode: 'browser',
+      endpointUrl: dto.browserEndpointUrl,
+      model: dto.browserModel,
+      toolsEnabled: !!toolRecords && toolRecords.length > 0,
+      toolsUsed: toolRecords && toolRecords.length > 0 ? this.aggregateTools(toolRecords) : undefined,
+      outcome,
+      outputTokens: dto.metrics?.outputTokens,
+      durationMs: dto.metrics?.durationMs,
+      firstTokenMs: dto.metrics?.firstTokenMs,
+      tokensPerSecond: dto.metrics?.tokensPerSecond,
+      estimated: dto.metrics?.estimated,
+      userMessageLength: dto.userContent.length,
+    });
+
+    return result;
   }
 
   /**
@@ -624,24 +721,37 @@ export class ChatController {
     const onClose = () => abort.abort();
     req.on('close', onClose);
 
+    send({ type: 'status', phase: 'context' });
     send({ type: 'context', refs: built.contextRefs });
 
     const useTools = opts.toolsEnabled && opts.toolsAllowlist.length > 0;
     let fullResponse = '';
     const persistedToolCalls: ChatToolCallRecord[] = [];
     let errored = false;
+    let errorMessage: string | undefined;
+    let pendingDoneReason: string | undefined;
+    let pendingDone = false;
+    const requestStartMs = Date.now();
+    let firstTokenMs: number | null = null;
+    let selectedEndpoint: { provider: string; url: string; model: string } | undefined;
+    const onEndpointSelected = (e: { provider: string; url: string; model: string }) => {
+      selectedEndpoint = e;
+    };
 
     try {
       if (!useTools) {
+        send({ type: 'status', phase: 'thinking' });
         for await (const token of this.llm.streamChat(built.messages, {
           signal: abort.signal,
           images: built.images,
+          onEndpointSelected,
         })) {
           if (abort.signal.aborted) break;
+          if (firstTokenMs === null) firstTokenMs = Date.now();
           fullResponse += token;
           send({ type: 'token', content: token });
         }
-        if (!abort.signal.aborted) send({ type: 'done' });
+        if (!abort.signal.aborted) pendingDone = true;
       } else {
         const tools = this.tools.getToolsForLlm(opts.toolsAllowlist);
         const conversation: LlmMessageWithTools[] = built.messages.map((m) => ({
@@ -659,12 +769,15 @@ export class ChatController {
           let iterFinishReason: 'stop' | 'tool_calls' | 'length' | 'other' = 'other';
           let iterContent = '';
 
+          send({ type: 'status', phase: iter === 0 ? 'thinking' : 'responding' });
           for await (const event of this.llm.streamChatWithTools(conversation, tools, {
             signal: abort.signal,
             images: imagesForIteration,
+            onEndpointSelected,
           })) {
             if (abort.signal.aborted) break;
             if (event.type === 'content') {
+              if (firstTokenMs === null) firstTokenMs = Date.now();
               iterContent += event.delta;
               fullResponse += event.delta;
               send({ type: 'token', content: event.delta });
@@ -678,7 +791,7 @@ export class ChatController {
           if (abort.signal.aborted) break;
 
           if (iterFinishReason !== 'tool_calls' || pendingToolCalls.length === 0) {
-            send({ type: 'done' });
+            pendingDone = true;
             break;
           }
 
@@ -705,6 +818,7 @@ export class ChatController {
 
           for (const tc of pendingToolCalls) {
             if (abort.signal.aborted) break;
+            send({ type: 'tool_status', phase: 'tool_call', name: tc.name, state: 'running' });
             send({ type: 'tool_call', id: tc.id, name: tc.name, arguments: tc.arguments });
 
             let parsedArgs: Record<string, unknown> = {};
@@ -733,6 +847,7 @@ export class ChatController {
               ? this.summarizeResult(tc.name, result.result)
               : `error: ${result.error}`;
             send({ type: 'tool_result', id: tc.id, success: result.success, summary });
+            send({ type: 'status', phase: 'responding' });
 
             conversation.push({
               role: 'tool',
@@ -752,7 +867,8 @@ export class ChatController {
           }
 
           if (iter === maxIter - 1) {
-            send({ type: 'done', reason: 'max_iterations_reached' });
+            pendingDone = true;
+            pendingDoneReason = 'max_iterations_reached';
           }
           // After the first iteration the model has seen the images — further
           // tool-call rounds don't need to resend them.
@@ -761,12 +877,27 @@ export class ChatController {
       }
     } catch (err) {
       errored = true;
-      const message = (err as Error).message || 'LLM error';
-      this.logger.warn(`Chat stream failed for session ${id}: ${message}`);
-      send({ type: 'error', message });
+      errorMessage = (err as Error).message || 'LLM error';
+      this.logger.warn(`Chat stream failed for session ${id}: ${errorMessage}`);
+      send({ type: 'error', message: errorMessage });
     } finally {
       clearInterval(heartbeat);
       req.off('close', onClose);
+    }
+
+    const endMs = Date.now();
+    const metrics = this.buildMetrics({
+      fullResponse,
+      startMs: requestStartMs,
+      firstTokenMs,
+      endMs,
+      totalDurationMs: useTools && persistedToolCalls.length > 0 ? endMs - requestStartMs : undefined,
+    });
+    if (metrics && !abort.signal.aborted) {
+      send({ type: 'metrics', ...metrics });
+    }
+    if (pendingDone && !abort.signal.aborted && !errored) {
+      send({ type: 'done', ...(pendingDoneReason ? { reason: pendingDoneReason } : {}) });
     }
 
     if (!errored && fullResponse.trim()) {
@@ -776,6 +907,7 @@ export class ChatController {
           content: fullResponse,
           contextUsed: built.contextRefs,
           toolCalls: persistedToolCalls.length > 0 ? persistedToolCalls : undefined,
+          metrics,
         }, userId);
       } catch (err) {
         this.logger.warn(
@@ -783,6 +915,35 @@ export class ChatController {
         );
       }
     }
+
+    // Persist a chat-activity record for the Settings → Chat-Log view. Logs even
+    // failed/aborted runs so admins can see flaky endpoints and tool errors.
+    const outcome: 'completed' | 'aborted' | 'failed' | 'no_endpoint' = errored
+      ? (selectedEndpoint ? 'failed' : 'no_endpoint')
+      : abort.signal.aborted
+        ? 'aborted'
+        : 'completed';
+    await this.activity.record({
+      sessionId: id,
+      userId,
+      projectId,
+      customerId,
+      mode: 'server',
+      provider: selectedEndpoint?.provider,
+      endpointUrl: selectedEndpoint?.url,
+      model: selectedEndpoint?.model,
+      toolsEnabled: useTools,
+      toolsUsed: persistedToolCalls.length > 0 ? this.aggregateTools(persistedToolCalls) : undefined,
+      outcome,
+      errorMessage,
+      outputTokens: metrics?.outputTokens,
+      durationMs: metrics?.durationMs,
+      firstTokenMs: metrics?.firstTokenMs,
+      tokensPerSecond: metrics?.tokensPerSecond,
+      estimated: metrics?.estimated,
+      hadImages: (built.images?.length ?? 0) > 0,
+      userMessageLength: dto.content.length,
+    });
 
     if (!res.writableEnded) res.end();
   }

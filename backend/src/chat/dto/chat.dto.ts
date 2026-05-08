@@ -203,6 +203,33 @@ export class PersistedToolCallDto {
   error?: string;
 }
 
+export class PersistedMetricsDto {
+  @IsNumber()
+  @Min(0)
+  outputTokens: number;
+
+  @IsNumber()
+  @Min(1)
+  durationMs: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  firstTokenMs?: number;
+
+  @IsNumber()
+  @Min(0)
+  tokensPerSecond: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  totalDurationMs?: number;
+
+  @IsBoolean()
+  estimated: boolean;
+}
+
 export class PersistChatMessageDto {
   @IsString()
   userContent: string;
@@ -227,6 +254,26 @@ export class PersistChatMessageDto {
   @IsArray()
   @IsString({ each: true })
   attachmentIds?: string[];
+
+  /** Browser-mode metrics: durations + token counts measured in the browser. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PersistedMetricsDto)
+  metrics?: PersistedMetricsDto;
+
+  /** Browser-mode endpoint info — used purely for chat-activity logging. */
+  @IsOptional()
+  @IsString()
+  browserEndpointUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  browserModel?: string;
+
+  /** Aggregated tools-used summary for the chat-activity log (browser mode). */
+  @IsOptional()
+  @IsBoolean()
+  browserAborted?: boolean;
 }
 
 export class ExecuteChatToolDto {

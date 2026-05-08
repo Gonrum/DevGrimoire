@@ -7,6 +7,7 @@ import {
   ChatSessionDocument,
   ChatMessage,
   ChatContextRef,
+  ChatResponseMetrics,
   ChatToolCallRecord,
   ChatAttachmentRef,
 } from './schemas/chat-session.schema';
@@ -19,6 +20,7 @@ interface AppendMessageInput {
   contextUsed?: ChatContextRef[];
   toolCalls?: ChatToolCallRecord[];
   attachments?: ChatAttachmentRef[];
+  metrics?: ChatResponseMetrics;
 }
 
 @Injectable()
@@ -149,6 +151,9 @@ export class ChatService implements OnModuleInit {
       }
       if (input.attachments && input.attachments.length > 0) {
         payload.attachments = input.attachments;
+      }
+      if (input.metrics) {
+        payload.metrics = input.metrics;
       }
       return payload;
     });

@@ -11,6 +11,7 @@ import ApiKeyScopeEditor from '../components/ApiKeyScopeEditor';
 import NotificationsSettings from '../components/settings/NotificationsSettings';
 import BackupSettings from '../components/settings/BackupSettings';
 import RagSettings from '../components/settings/RagSettings';
+import ChatLogSettings from '../components/settings/ChatLogSettings';
 import Button from '../components/ui/Button';
 import ConfirmButton from '../components/ui/ConfirmButton';
 import { FormInput, SecretInput } from '../components/ui/FormField';
@@ -49,7 +50,7 @@ Wenn du Tasks bearbeitest, halte dich an den Status-Workflow:
 - Teste Änderungen bevor du sie als fertig markierst
 `;
 
-type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'chat' | 'rag' | 'websearch' | 'users' | 'auditlog' | 'replication' | 'backups';
+type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'chat' | 'chatlog' | 'rag' | 'websearch' | 'users' | 'auditlog' | 'replication' | 'backups';
 
 const CHAT_PROVIDER_DEFAULT_URL: Record<ChatProvider, string> = {
   lmstudio: 'http://localhost:1234',
@@ -476,6 +477,7 @@ export default function Settings() {
     { key: 'myllm', label: t('settings.tabMyLlm'), group: t('settings.groupPersonal') },
     { key: 'apikeys', label: t('settings.tabApiKeys'), group: t('settings.groupSecurity') },
     { key: 'chat', label: t('settings.tabChat'), group: t('settings.groupAdmin'), adminOnly: true },
+    { key: 'chatlog', label: t('settings.tabChatLog'), group: t('settings.groupAdmin'), adminOnly: true },
     { key: 'rag', label: t('settings.tabRag'), group: t('settings.groupAdmin'), adminOnly: true },
     { key: 'websearch', label: t('settings.tabWebSearch'), group: t('settings.groupAdmin'), adminOnly: true },
     { key: 'backups', label: t('settings.tabBackups'), group: t('settings.groupAdmin'), adminOnly: true },
@@ -1247,6 +1249,7 @@ export default function Settings() {
       {tab === 'users' && isAdmin && <UserManagement />}
       {tab === 'auditlog' && isAdmin && <AuditLog />}
       {tab === 'rag' && isAdmin && <RagSettings />}
+      {tab === 'chatlog' && isAdmin && <ChatLogSettings />}
 
       {tab === 'websearch' && isAdmin && <WebSearchSettings />}
       {tab === 'backups' && isAdmin && <BackupSettings />}
