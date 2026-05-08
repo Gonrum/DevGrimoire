@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
@@ -15,6 +21,9 @@ import {
   CreateCustomerProjectLinkDto,
   UpdateCustomerProjectLinkDto,
 } from './dto/customer-project-link.dto';
+import { RequestContext } from '../common/request-context';
+import { actorCanAccessCustomer } from '../common/permissions';
+import { buildScopeFilter } from '../common/scope';
 
 export interface CustomerListFilters {
   status?: CustomerStatus;
@@ -82,12 +91,18 @@ export class CustomersService {
       query._id = { $in: links.map((link) => link.customerId) };
     }
 
+    Object.assign(query, buildScopeFilter(RequestContext.getUser(), { axis: 'customer', field: '_id' }));
+
     return this.customerModel.find(query).sort({ updatedAt: -1 }).exec();
   }
 
   async findById(id: string): Promise<CustomerDocument> {
     const customer = await this.customerModel.findById(this.objectId(id, 'customerId')).exec();
     if (!customer) throw new NotFoundException(`Customer ${id} not found`);
+    const actor = RequestContext.getUser();
+    if (actor && !actorCanAccessCustomer(actor, id)) {
+      throw new ForbiddenException(`Customer ${id} is not in your scope`);
+    }
     return customer;
   }
 

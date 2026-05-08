@@ -24,6 +24,14 @@ export class ApiKeysController {
       userId,
       dto.name,
       expiresAt,
+      {
+        allowedTools: dto.allowedTools,
+        permissions: dto.permissions,
+        projectScopeMode: dto.projectScopeMode,
+        allowedProjectIds: dto.allowedProjectIds,
+        customerScopeMode: dto.customerScopeMode,
+        allowedCustomerIds: dto.allowedCustomerIds,
+      },
     );
     return {
       key,
@@ -32,6 +40,12 @@ export class ApiKeysController {
       prefix: apiKey.prefix,
       expiresAt: apiKey.expiresAt,
       createdAt: (apiKey as any).createdAt,
+      allowedTools: apiKey.allowedTools,
+      permissions: apiKey.permissions,
+      projectScopeMode: apiKey.projectScopeMode,
+      allowedProjectIds: apiKey.allowedProjectIds,
+      customerScopeMode: apiKey.customerScopeMode,
+      allowedCustomerIds: apiKey.allowedCustomerIds,
     };
   }
 

@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
@@ -11,6 +16,12 @@ import { CountersService } from '../counters/counters.service';
 import { CustomersService } from '../customers/customers.service';
 import { projectIdFilter } from '../common/project-id-filter';
 import { formatEntityNumber } from '../common/number-format';
+import { RequestContext } from '../common/request-context';
+import {
+  actorCanAccessCustomer,
+  actorCanAccessProject,
+} from '../common/permissions';
+import { buildDualScopeFilter } from '../common/scope';
 
 const STATUS_ORDER: TodoStatus[] = [
   TodoStatus.OPEN,
@@ -132,12 +143,23 @@ export class TodosService {
     if (filters.milestoneId) query.milestoneId = projectIdFilter(filters.milestoneId);
     if (filters.tag) query.tags = filters.tag;
     if (!filters.includeArchived) query.archived = { $ne: true };
+    Object.assign(query, buildDualScopeFilter(RequestContext.getUser()));
     return this.todoModel.find(query).sort({ priority: 1, createdAt: -1 }).exec();
   }
 
   async findById(id: string): Promise<TodoDocument> {
     const todo = await this.todoModel.findById(id).exec();
     if (!todo) throw new NotFoundException(`Todo ${id} not found`);
+    const actor = RequestContext.getUser();
+    if (actor) {
+      const projectId = todo.projectId?.toString() || null;
+      const customerId = todo.customerId?.toString() || null;
+      const projectOk = !projectId || actorCanAccessProject(actor, projectId);
+      const customerOk = !customerId || actorCanAccessCustomer(actor, customerId);
+      if (!projectOk || !customerOk) {
+        throw new ForbiddenException(`Todo ${id} is not in your scope`);
+      }
+    }
     return todo;
   }
 

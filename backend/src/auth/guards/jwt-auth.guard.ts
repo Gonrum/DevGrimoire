@@ -54,12 +54,63 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       if (!owner) {
         throw new UnauthorizedException('API key owner no longer exists');
       }
+      // Scope on the request.user combines the api-key scope with the owning
+      // user's scope so an api-key can never widen access beyond its owner.
+      // Concretely: if the user has projectScopeMode='allowlist' with 5 ids,
+      // and the key has projectScopeMode='all', the effective access is still
+      // the user's 5 ids. See knowledge entry T-210 for the rationale.
+      const keyAllowedProjectIds = (validated.allowedProjectIds || []).map((id: any) => id.toString());
+      const keyAllowedCustomerIds = (validated.allowedCustomerIds || []).map((id: any) => id.toString());
+      const ownerAllowedProjectIds = ((owner as any).allowedProjectIds || []).map((id: any) => id.toString());
+      const ownerAllowedCustomerIds = ((owner as any).allowedCustomerIds || []).map((id: any) => id.toString());
+
+      const intersect = (a: string[], b: string[]): string[] => a.filter((id) => b.includes(id));
+      const narrow = (
+        keyMode: any,
+        keyIds: string[],
+        ownerMode: any,
+        ownerIds: string[],
+      ): { mode: any; ids: string[] } => {
+        const km = keyMode || 'all';
+        const om = ownerMode || 'all';
+        if (km === 'none' || om === 'none') return { mode: 'none', ids: [] };
+        if (km === 'all' && om === 'all') return { mode: 'all', ids: [] };
+        if (km === 'all') return { mode: 'allowlist', ids: ownerIds };
+        if (om === 'all') return { mode: 'allowlist', ids: keyIds };
+        return { mode: 'allowlist', ids: intersect(keyIds, ownerIds) };
+      };
+
+      const proj = narrow(
+        validated.projectScopeMode,
+        keyAllowedProjectIds,
+        (owner as any).projectScopeMode,
+        ownerAllowedProjectIds,
+      );
+      const cust = narrow(
+        validated.customerScopeMode,
+        keyAllowedCustomerIds,
+        (owner as any).customerScopeMode,
+        ownerAllowedCustomerIds,
+      );
+      const ownerPerms: string[] = ((owner as any).permissions || []) as string[];
+      const keyPerms: string[] = (validated.permissions || []) as string[];
+      // Permissions: admin role bypasses the list. For non-admin owners, the
+      // effective permission set is the intersection of key + owner perms; an
+      // empty key.permissions falls through to the owner's set (legacy keys).
+      const effectivePerms = keyPerms.length === 0 ? ownerPerms : intersect(keyPerms, ownerPerms);
+
       request.user = {
         userId: validated.userId.toString(),
         username: owner.username,
         role: owner.role,
         apiKeyId: validated._id.toString(),
+        permissions: effectivePerms,
+        projectScopeMode: proj.mode,
+        allowedProjectIds: proj.ids,
+        customerScopeMode: cust.mode,
+        allowedCustomerIds: cust.ids,
       };
+      request.apiKey = validated;
       return true;
     }
 
@@ -68,7 +119,26 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       request.headers.authorization = `Bearer ${request.query.token}`;
     }
 
-    return super.canActivate(context) as Promise<boolean>;
+    const passportResult = await (super.canActivate(context) as Promise<boolean>);
+    if (passportResult && request.user?.userId) {
+      // Enrich request.user with scope/permission info from DB so service-layer
+      // helpers (actorCanAccessProject etc.) work for human-user requests too.
+      // The JWT itself only carries sub/username/role — scope changes after
+      // login take effect on the next request, not after token refresh.
+      const fullUser = await this.authService.findUserById(request.user.userId);
+      if (fullUser) {
+        const u = fullUser as any;
+        request.user = {
+          ...request.user,
+          permissions: (u.permissions || []) as string[],
+          projectScopeMode: u.projectScopeMode || 'all',
+          allowedProjectIds: (u.allowedProjectIds || []).map((id: any) => id.toString()),
+          customerScopeMode: u.customerScopeMode || 'all',
+          allowedCustomerIds: (u.allowedCustomerIds || []).map((id: any) => id.toString()),
+        };
+      }
+    }
+    return passportResult;
   }
 
   handleRequest(err: any, user: any) {

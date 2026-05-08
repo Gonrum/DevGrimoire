@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Secret, SecretDocument } from './schemas/secret.schema';
@@ -6,6 +11,11 @@ import { CreateSecretDto } from './dto/create-secret.dto';
 import { UpdateSecretDto } from './dto/update-secret.dto';
 import { CustomersService } from '../customers/customers.service';
 import { EncryptionService } from '../common/encryption.service';
+import { RequestContext } from '../common/request-context';
+import {
+  actorCanAccessCustomer,
+  actorCanAccessProject,
+} from '../common/permissions';
 
 export interface SecretListItem {
   _id: string;
@@ -65,6 +75,10 @@ export class SecretsService {
   }
 
   async findByProject(projectId: string, environmentId?: string): Promise<SecretListItem[]> {
+    const actor = RequestContext.getUser();
+    if (actor && !actorCanAccessProject(actor, projectId)) {
+      throw new ForbiddenException(`Project ${projectId} is not in your scope`);
+    }
     const filter: any = { projectId };
     if (environmentId !== undefined) {
       filter.environmentId = environmentId || null;
@@ -74,6 +88,10 @@ export class SecretsService {
   }
 
   async findByCustomer(customerId: string, environmentId?: string): Promise<SecretListItem[]> {
+    const actor = RequestContext.getUser();
+    if (actor && !actorCanAccessCustomer(actor, customerId)) {
+      throw new ForbiddenException(`Customer ${customerId} is not in your scope`);
+    }
     const filter: any = { customerId };
     if (environmentId !== undefined) {
       filter.environmentId = environmentId || null;
@@ -85,6 +103,17 @@ export class SecretsService {
   async findById(id: string): Promise<SecretListItem & { value: string }> {
     const secret = await this.secretModel.findById(id).exec();
     if (!secret) throw new NotFoundException('Secret not found');
+
+    const actor = RequestContext.getUser();
+    if (actor) {
+      const projectId = secret.projectId?.toString() || null;
+      const customerId = secret.customerId?.toString() || null;
+      const projectOk = !projectId || actorCanAccessProject(actor, projectId);
+      const customerOk = !customerId || actorCanAccessCustomer(actor, customerId);
+      if (!projectOk || !customerOk) {
+        throw new ForbiddenException(`Secret ${id} is not in your scope`);
+      }
+    }
 
     const value = this.encryptionService.decrypt(secret.encryptedValue);
     return { ...this.toListItem(secret), value };

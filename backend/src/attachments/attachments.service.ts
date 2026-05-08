@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
@@ -10,6 +16,11 @@ import { MinioService } from '../minio/minio.service';
 import { CustomersService } from '../customers/customers.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
+import { RequestContext } from '../common/request-context';
+import {
+  actorCanAccessCustomer,
+  actorCanAccessProject,
+} from '../common/permissions';
 
 /** Mimetypes treated as extractable text */
 const TEXT_MIMETYPES = new Set([
@@ -124,6 +135,10 @@ export class AttachmentsService {
     entityType?: string,
     entityId?: string,
   ): Promise<AttachmentDocument[]> {
+    const actor = RequestContext.getUser();
+    if (actor && !actorCanAccessProject(actor, projectId)) {
+      throw new ForbiddenException(`Project ${projectId} is not in your scope`);
+    }
     const filter: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (entityType) filter.entityType = entityType;
     if (entityId) filter.entityId = entityId;
@@ -139,6 +154,10 @@ export class AttachmentsService {
     entityType?: string,
     entityId?: string,
   ): Promise<AttachmentDocument[]> {
+    const actor = RequestContext.getUser();
+    if (actor && !actorCanAccessCustomer(actor, customerId)) {
+      throw new ForbiddenException(`Customer ${customerId} is not in your scope`);
+    }
     const filter: Record<string, unknown> = { customerId: projectIdFilter(customerId) };
     if (entityType) filter.entityType = entityType;
     if (entityId) filter.entityId = entityId;
@@ -152,6 +171,16 @@ export class AttachmentsService {
   async findById(id: string): Promise<AttachmentDocument> {
     const attachment = await this.attachmentModel.findById(id).select('-textContent').exec();
     if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
+    const actor = RequestContext.getUser();
+    if (actor) {
+      const projectId = attachment.projectId?.toString() || null;
+      const customerId = attachment.customerId?.toString() || null;
+      const projectOk = !projectId || actorCanAccessProject(actor, projectId);
+      const customerOk = !customerId || actorCanAccessCustomer(actor, customerId);
+      if (!projectOk || !customerOk) {
+        throw new ForbiddenException(`Attachment ${id} is not in your scope`);
+      }
+    }
     return attachment;
   }
 

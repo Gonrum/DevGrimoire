@@ -8,6 +8,13 @@ import { UpdateKnowledgeDto } from './dto/update-knowledge.dto';
 import { CustomersService } from '../customers/customers.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
+import { RequestContext } from '../common/request-context';
+import {
+  actorCanAccessCustomer,
+  actorCanAccessProject,
+} from '../common/permissions';
+import { buildDualScopeFilter } from '../common/scope';
+import { ForbiddenException } from '@nestjs/common';
 
 @Injectable()
 export class KnowledgeService {
@@ -67,6 +74,7 @@ export class KnowledgeService {
       // No projectId/customerId, no scope filter: return all
     }
     if (options?.category) filter.category = options.category;
+    Object.assign(filter, buildDualScopeFilter(RequestContext.getUser()));
     let query = this.knowledgeModel.find(filter).sort({ updatedAt: -1 });
     if (options?.offset) query = query.skip(options.offset);
     if (options?.limit) query = query.limit(options.limit);
@@ -97,6 +105,7 @@ export class KnowledgeService {
       // Project view: project-scoped + global hits
       filter.$or = [{ projectId: projectIdFilter(projectId) }, { scope: 'global' }];
     }
+    Object.assign(filter, buildDualScopeFilter(RequestContext.getUser()));
     return this.knowledgeModel
       .find(filter, { score: { $meta: 'textScore' } })
       .sort({ score: { $meta: 'textScore' } })
@@ -106,6 +115,16 @@ export class KnowledgeService {
   async findById(id: string): Promise<KnowledgeDocument> {
     const entry = await this.knowledgeModel.findById(id).exec();
     if (!entry) throw new NotFoundException(`Knowledge ${id} not found`);
+    const actor = RequestContext.getUser();
+    if (actor) {
+      const projectId = entry.projectId?.toString() || null;
+      const customerId = entry.customerId?.toString() || null;
+      const projectOk = !projectId || actorCanAccessProject(actor, projectId);
+      const customerOk = !customerId || actorCanAccessCustomer(actor, customerId);
+      if (!projectOk || !customerOk) {
+        throw new ForbiddenException(`Knowledge ${id} is not in your scope`);
+      }
+    }
     return entry;
   }
 

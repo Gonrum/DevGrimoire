@@ -400,6 +400,8 @@ export interface UserInfo {
   updatedAt: string;
 }
 
+export type ScopeMode = 'all' | 'allowlist' | 'none';
+
 export interface ApiKeyInfo {
   _id: string;
   prefix: string;
@@ -408,12 +410,38 @@ export interface ApiKeyInfo {
   expiresAt?: string;
   active: boolean;
   allowedTools?: string[];
+  permissions?: string[];
+  projectScopeMode?: ScopeMode;
+  allowedProjectIds?: string[];
+  customerScopeMode?: ScopeMode;
+  allowedCustomerIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
 
 export interface ApiKeyCreateResponse extends ApiKeyInfo {
   key: string;
+}
+
+export interface ApiKeyCreatePayload {
+  name: string;
+  expiresAt?: string;
+  allowedTools?: string[];
+  permissions?: string[];
+  projectScopeMode?: ScopeMode;
+  allowedProjectIds?: string[];
+  customerScopeMode?: ScopeMode;
+  allowedCustomerIds?: string[];
+}
+
+export interface ApiKeyUpdatePayload {
+  name?: string;
+  allowedTools?: string[] | null;
+  permissions?: string[];
+  projectScopeMode?: ScopeMode;
+  allowedProjectIds?: string[];
+  customerScopeMode?: ScopeMode;
+  allowedCustomerIds?: string[];
 }
 
 export interface SearchResult {
@@ -1076,9 +1104,9 @@ export const api = {
   },
   apiKeys: {
     list: () => request<ApiKeyInfo[]>('/api-keys'),
-    create: (data: { name: string; expiresAt?: string }) =>
+    create: (data: ApiKeyCreatePayload) =>
       request<ApiKeyCreateResponse>('/api-keys', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: string, data: { name?: string; allowedTools?: string[] | null }) =>
+    update: (id: string, data: ApiKeyUpdatePayload) =>
       request<ApiKeyInfo>(`/api-keys/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/api-keys/${id}`, { method: 'DELETE' }),

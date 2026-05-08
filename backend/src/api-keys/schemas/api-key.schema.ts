@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+import type { ScopeMode } from '../../common/permissions';
 
 export type ApiKeyDocument = HydratedDocument<ApiKey>;
 
@@ -30,6 +31,26 @@ export class ApiKey {
   // which would mean "no tools" for every new key. undefined = "all tools".
   @Prop({ type: [String], default: undefined })
   allowedTools?: string[];
+
+  // Fine-grained permissions (T-210). Empty array = legacy default (rely on
+  // owning user's role/permissions). See `common/permissions.ts` for catalog.
+  @Prop({ type: [String], default: [] })
+  permissions: string[];
+
+  // Project-scope (T-220). 'all' = unrestricted, 'allowlist' = only ids in
+  // allowedProjectIds, 'none' = no project access at all.
+  @Prop({ type: String, enum: ['all', 'allowlist', 'none'], default: 'all' })
+  projectScopeMode: ScopeMode;
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Project' }], default: [] })
+  allowedProjectIds: Types.ObjectId[];
+
+  // Customer-scope (T-220), independent from projectScopeMode.
+  @Prop({ type: String, enum: ['all', 'allowlist', 'none'], default: 'all' })
+  customerScopeMode: ScopeMode;
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Customer' }], default: [] })
+  allowedCustomerIds: Types.ObjectId[];
 }
 
 export const ApiKeySchema = SchemaFactory.createForClass(ApiKey);

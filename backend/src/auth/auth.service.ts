@@ -253,9 +253,60 @@ export class AuthService {
     email?: string;
     role?: UserRole;
     active?: boolean;
+    permissions?: string[];
+    projectScopeMode?: 'all' | 'allowlist' | 'none';
+    allowedProjectIds?: string[];
+    customerScopeMode?: 'all' | 'allowlist' | 'none';
+    allowedCustomerIds?: string[];
   }): Promise<UserDocument | null> {
+    const update: Record<string, unknown> = {};
+    if (data.username !== undefined) update.username = data.username;
+    if (data.email !== undefined) update.email = data.email;
+    if (data.role !== undefined) update.role = data.role;
+    if (data.active !== undefined) update.active = data.active;
+    if (data.permissions !== undefined) update.permissions = data.permissions;
+    if (data.projectScopeMode !== undefined) update.projectScopeMode = data.projectScopeMode;
+    if (data.allowedProjectIds !== undefined) update.allowedProjectIds = data.allowedProjectIds;
+    if (data.customerScopeMode !== undefined) update.customerScopeMode = data.customerScopeMode;
+    if (data.allowedCustomerIds !== undefined) update.allowedCustomerIds = data.allowedCustomerIds;
+
+    // Reject allowlist with empty list — same rationale as in api-keys.service.ts:
+    // silently locking a user out of all data on an axis is a footgun.
+    if (update.projectScopeMode === 'allowlist'
+        && Array.isArray(update.allowedProjectIds)
+        && (update.allowedProjectIds as string[]).length === 0) {
+      throw new UnauthorizedException(
+        'projectScopeMode=allowlist erfordert mindestens eine projectId.',
+      );
+    }
+    if (update.customerScopeMode === 'allowlist'
+        && Array.isArray(update.allowedCustomerIds)
+        && (update.allowedCustomerIds as string[]).length === 0) {
+      throw new UnauthorizedException(
+        'customerScopeMode=allowlist erfordert mindestens eine customerId.',
+      );
+    }
+
+    // Audit-trail (lightweight). Full audit-log module is tracked as T-214 in
+    // M-27 and will replace these logger calls once it lands. Until then we
+    // emit a structured log so role/scope changes leave a paper trail.
+    const securityFields = [
+      'role', 'active', 'permissions',
+      'projectScopeMode', 'allowedProjectIds',
+      'customerScopeMode', 'allowedCustomerIds',
+    ];
+    const securityChanges: Record<string, unknown> = {};
+    for (const f of securityFields) {
+      if (f in update) securityChanges[f] = (update as Record<string, unknown>)[f];
+    }
+    if (Object.keys(securityChanges).length > 0) {
+      this.logger.warn(
+        `[security-audit] User ${id} security fields changed: ${JSON.stringify(securityChanges)}`,
+      );
+    }
+
     return this.userModel
-      .findByIdAndUpdate(id, data, { new: true })
+      .findByIdAndUpdate(id, update, { new: true })
       .select('-passwordHash')
       .exec();
   }

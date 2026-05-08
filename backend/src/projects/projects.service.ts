@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
@@ -6,6 +6,9 @@ import { Project, ProjectDocument } from './schemas/project.schema';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { RequestContext } from '../common/request-context';
+import { actorCanAccessProject } from '../common/permissions';
+import { buildScopeFilter } from '../common/scope';
 
 @Injectable()
 export class ProjectsService {
@@ -30,12 +33,17 @@ export class ProjectsService {
     const filter: Record<string, unknown> = {};
     if (active !== undefined) filter.active = active;
     if (favorite !== undefined) filter.favorite = favorite;
+    Object.assign(filter, buildScopeFilter(RequestContext.getUser(), { axis: 'project', field: '_id' }));
     return this.projectModel.find(filter).sort({ updatedAt: -1 }).exec();
   }
 
   async findById(id: string): Promise<ProjectDocument> {
     const project = await this.projectModel.findById(id).exec();
     if (!project) throw new NotFoundException(`Project ${id} not found`);
+    const actor = RequestContext.getUser();
+    if (actor && !actorCanAccessProject(actor, id)) {
+      throw new ForbiddenException(`Project ${id} is not in your scope`);
+    }
     return project;
   }
 

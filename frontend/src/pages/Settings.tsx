@@ -6,6 +6,7 @@ import UserManagement from './UserManagement';
 import ReplicationSettings from '../components/ReplicationSettings';
 import WebSearchSettings from '../components/WebSearchSettings';
 import ApiKeyToolEditor from '../components/ApiKeyToolEditor';
+import ApiKeyScopeEditor from '../components/ApiKeyScopeEditor';
 import NotificationsSettings from '../components/settings/NotificationsSettings';
 import BackupSettings from '../components/settings/BackupSettings';
 import RagSettings from '../components/settings/RagSettings';
@@ -117,6 +118,7 @@ export default function Settings() {
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [editingApiKeyId, setEditingApiKeyId] = useState<string | null>(null);
+  const [editingApiKeyScopeId, setEditingApiKeyScopeId] = useState<string | null>(null);
 
 
   // Chat config
@@ -400,6 +402,19 @@ export default function Settings() {
     await loadApiKeys();
   };
 
+  const saveApiKeyScope = async (
+    id: string,
+    payload: {
+      projectScopeMode?: 'all' | 'allowlist' | 'none';
+      allowedProjectIds?: string[];
+      customerScopeMode?: 'all' | 'allowlist' | 'none';
+      allowedCustomerIds?: string[];
+    },
+  ) => {
+    await api.apiKeys.update(id, payload);
+    await loadApiKeys();
+  };
+
   const createApiKey = async () => {
     if (!apiKeyName.trim()) return;
     setApiKeyCreating(true);
@@ -649,6 +664,29 @@ export default function Settings() {
                                   ? t('settings.apiKeyToolsScoped', { count: key.allowedTools.length })
                                   : t('settings.apiKeyToolsAll')}
                               </Button>
+                              <Button
+                                variant={editingApiKeyScopeId === key._id ? 'primary' : 'secondary'}
+                                size="xs"
+                                onClick={() =>
+                                  setEditingApiKeyScopeId(
+                                    editingApiKeyScopeId === key._id ? null : key._id,
+                                  )
+                                }
+                                title={t('settings.apiKeyScopeButtonTitle')}
+                              >
+                                {t('settings.apiKeyScopeButton', {
+                                  proj: key.projectScopeMode === 'all'
+                                    ? '∗'
+                                    : key.projectScopeMode === 'none'
+                                      ? '∅'
+                                      : (key.allowedProjectIds?.length ?? 0),
+                                  cust: key.customerScopeMode === 'all'
+                                    ? '∗'
+                                    : key.customerScopeMode === 'none'
+                                      ? '∅'
+                                      : (key.allowedCustomerIds?.length ?? 0),
+                                })}
+                              </Button>
                               <ConfirmButton
                                 onConfirm={() => deleteApiKey(key._id)}
                                 label={t('common.delete')}
@@ -678,6 +716,23 @@ export default function Settings() {
                     apiKey={key}
                     onSave={(tools) => saveApiKeyTools(key._id, tools)}
                     onClose={() => setEditingApiKeyId(null)}
+                  />
+                </div>
+              );
+            })()}
+
+            {editingApiKeyScopeId && (() => {
+              const key = apiKeys.find((k) => k._id === editingApiKeyScopeId);
+              if (!key) return null;
+              return (
+                <div className="mt-4 rounded-lg border border-violet-700/40 bg-violet-950/20 p-1">
+                  <div className="px-3 pt-2 text-xs uppercase tracking-wide text-violet-300">
+                    {t('settings.apiKeyScopeAccessFor', { name: key.name })}
+                  </div>
+                  <ApiKeyScopeEditor
+                    apiKey={key}
+                    onSave={(payload) => saveApiKeyScope(key._id, payload)}
+                    onClose={() => setEditingApiKeyScopeId(null)}
                   />
                 </div>
               );

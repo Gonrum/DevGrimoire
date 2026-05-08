@@ -7,6 +7,7 @@ import * as path from 'path';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { SettingsService } from '../settings/settings.service';
 import { EncryptionService } from '../common/encryption.service';
+import { RequestContext } from '../common/request-context';
 
 const SETTING_RAG_ENDPOINTS_V1 = 'rag_embedding_endpoints_v1';
 
@@ -688,6 +689,17 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
     const results = await queryBuilder.toArray();
 
+    // Apply caller's scope (api-key/user) on top of explicit filter args. We
+    // filter post-hoc on the JS side because LanceDB filter expressions are
+    // limited; the cost is ~5x overfetch which is already in place above.
+    // Admin role intentionally does NOT bypass scope here — an admin's
+    // narrow-scope api-key must hold (see common/permissions.ts).
+    const actor = RequestContext.getUser();
+    const enforceProjectScope = !!actor && !!actor.projectScopeMode && actor.projectScopeMode !== 'all';
+    const enforceCustomerScope = !!actor && !!actor.customerScopeMode && actor.customerScopeMode !== 'all';
+    const allowedProjectIds = new Set((actor?.allowedProjectIds || []).map(String));
+    const allowedCustomerIds = new Set((actor?.allowedCustomerIds || []).map(String));
+
     // Filter, deduplicate by sourceId (keep best chunk per document), then limit
     const seen = new Map<string, { row: Record<string, unknown>; score: number }>();
     for (const row of results) {
@@ -695,6 +707,19 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       if (projectId && row.projectId !== projectId && row.projectId !== '') continue;
       if (customerId && row.customerId !== customerId && row.customerId !== '') continue;
       if (entity && row.entity !== entity) continue;
+
+      // Server-side scope enforcement. A row's projectId/customerId may be
+      // empty string for global entries — those always pass.
+      const rowProjectId = (row.projectId as string) || '';
+      const rowCustomerId = (row.customerId as string) || '';
+      if (enforceProjectScope && rowProjectId && !allowedProjectIds.has(rowProjectId)) {
+        if (actor!.projectScopeMode === 'none') continue;
+        continue;
+      }
+      if (enforceCustomerScope && rowCustomerId && !allowedCustomerIds.has(rowCustomerId)) {
+        if (actor!.customerScopeMode === 'none') continue;
+        continue;
+      }
 
       const sourceId = (row.sourceId as string) || (row.id as string);
       const score = row._distance != null ? 1 - (row._distance as number) : 0;
