@@ -1,5 +1,7 @@
-import { Controller, Get, Post, Query, HttpCode } from '@nestjs/common';
-import { RagService } from './rag.service';
+import { Body, Controller, Get, Put, Post, Query, HttpCode } from '@nestjs/common';
+import { RagService, EmbeddingEndpointInput } from './rag.service';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../auth/schemas/user.schema';
 
 @Controller('rag')
 export class RagController {
@@ -36,5 +38,28 @@ export class RagController {
   @Get('status')
   async status(): Promise<Record<string, unknown>> {
     return this.ragService.status() as any;
+  }
+
+  @Get('config')
+  async getConfig() {
+    const [endpoints, managedViaSettings, status] = await Promise.all([
+      this.ragService.getEndpointsPublic(),
+      this.ragService.isManagedViaSettings(),
+      this.ragService.status() as any,
+    ]);
+    return { endpoints, managedViaSettings, status };
+  }
+
+  @Put('config')
+  @Roles(UserRole.ADMIN)
+  async setConfig(@Body() dto: { endpoints: EmbeddingEndpointInput[] }) {
+    await this.ragService.setEndpoints(dto.endpoints ?? []);
+    return this.getConfig();
+  }
+
+  @Post('config/test')
+  @HttpCode(200)
+  async testConfig(@Body() dto: EmbeddingEndpointInput) {
+    return this.ragService.testEndpoint(dto);
   }
 }

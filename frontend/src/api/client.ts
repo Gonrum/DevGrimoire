@@ -1468,6 +1468,20 @@ export const api = {
         body: JSON.stringify({ oldPassword, newPassword }),
       }),
   },
+  rag: {
+    getConfig: () => request<RagConfig>('/rag/config'),
+    updateConfig: (data: Pick<RagConfig, 'endpoints'>) =>
+      request<RagConfig>('/rag/config', { method: 'PUT', body: JSON.stringify(data) }),
+    testEndpoint: (endpoint: RagEndpoint) =>
+      request<RagEndpointTestResult>('/rag/config/test', {
+        method: 'POST',
+        body: JSON.stringify(endpoint),
+      }),
+    reindex: (projectId?: string) => {
+      const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+      return request<{ indexed: number }>(`/rag/reindex${qs}`, { method: 'POST' });
+    },
+  },
   chat: {
     getConfig: () => request<ChatConfig>('/chat/config'),
     updateConfig: (data: Partial<ChatConfig>) =>
@@ -1607,6 +1621,30 @@ export type ChatProvider =
   | 'openai-compatible'
   | 'anthropic'
   | 'openai';
+
+export type RagProvider = 'ollama' | 'openai-compatible';
+
+export interface RagEndpoint {
+  provider: RagProvider;
+  url: string;
+  model: string;
+  /** Plaintext key only when writing/testing. Server responses never include it. */
+  apiKey?: string;
+  hasApiKey?: boolean;
+}
+
+export interface RagConfig {
+  endpoints: RagEndpoint[];
+  managedViaSettings: boolean;
+  status?: Record<string, unknown>;
+}
+
+export interface RagEndpointTestResult {
+  ok: boolean;
+  dimensions?: number;
+  latencyMs?: number;
+  error?: string;
+}
 
 export interface ChatEndpoint {
   provider: ChatProvider;

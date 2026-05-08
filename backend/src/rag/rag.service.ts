@@ -5,6 +5,17 @@ import { Connection } from 'mongoose';
 import * as lancedb from '@lancedb/lancedb';
 import * as path from 'path';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
+import { SettingsService } from '../settings/settings.service';
+import { EncryptionService } from '../common/encryption.service';
+
+const SETTING_RAG_ENDPOINTS_V1 = 'rag_embedding_endpoints_v1';
+
+interface StoredEndpoint {
+  provider: string;
+  url: string;
+  model: string;
+  apiKeyEnc?: string;
+}
 
 /** Entity types that contain indexable text content */
 const INDEXABLE_ENTITIES = [
@@ -48,11 +59,35 @@ interface RagDocument {
 }
 
 type EmbeddingProvider = 'ollama' | 'openai-compatible';
+const EMBEDDING_PROVIDERS: readonly EmbeddingProvider[] = ['ollama', 'openai-compatible'] as const;
 
 interface EmbeddingEndpoint {
   provider: EmbeddingProvider;
   url: string;
   model: string;
+  apiKey?: string;
+}
+
+export interface EmbeddingEndpointPublic {
+  provider: EmbeddingProvider;
+  url: string;
+  model: string;
+  hasApiKey: boolean;
+}
+
+export interface EmbeddingEndpointInput {
+  provider: EmbeddingProvider;
+  url: string;
+  model: string;
+  /** undefined → keep existing key for matching endpoint; "" → delete; otherwise → encrypt+store. */
+  apiKey?: string;
+}
+
+export interface EmbeddingEndpointTestResult {
+  ok: boolean;
+  dimensions?: number;
+  latencyMs?: number;
+  error?: string;
 }
 
 @Injectable()
@@ -68,7 +103,11 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   private ready = false;
   private initPromise: Promise<void> | null = null;
 
-  constructor(@InjectConnection() private readonly connection: Connection) {}
+  constructor(
+    @InjectConnection() private readonly connection: Connection,
+    private readonly settings: SettingsService,
+    private readonly encryption: EncryptionService,
+  ) {}
 
   async onModuleInit() {
     this.initPromise = this.initialize();
@@ -84,28 +123,34 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Build embedding endpoints from env vars.
-   *
-   * Config format (env):
-   *   RAG_ENDPOINTS=openai-compatible|http://192.168.2.229:1234|text-embedding-nomic-embed-text-v2-moe,ollama|http://localhost:11434|nomic-embed-text-v2-moe
-   *
-   * Or use individual vars (single provider, no fallback):
-   *   RAG_EMBEDDING_PROVIDER=ollama
-   *   RAG_EMBEDDING_URL=http://localhost:11434
-   *   RAG_EMBEDDING_MODEL=nomic-embed-text-v2-moe
-   *
-   * Defaults: LM Studio (GPU) primary, Ollama (CPU) fallback
+   * Resolve embedding endpoints. Priority:
+   *   1. Settings DB (`rag_embedding_endpoints_v1`) — managed via UI
+   *   2. RAG_ENDPOINTS env (CSV `provider|url|model`)
+   *   3. RAG_EMBEDDING_* + RAG_FALLBACK_* env (single + optional fallback)
+   *   4. Defaults (Ollama localhost)
    */
-  private buildEndpoints(): EmbeddingEndpoint[] {
+  private async loadEndpoints(): Promise<EmbeddingEndpoint[]> {
+    const dbRaw = await this.settings.get(SETTING_RAG_ENDPOINTS_V1);
+    if (dbRaw) {
+      const decoded = this.decodeStored(dbRaw);
+      if (decoded.length > 0) return decoded;
+      this.logger.warn(`${SETTING_RAG_ENDPOINTS_V1} stored but empty/malformed — falling back to env`);
+    }
+    return this.endpointsFromEnv();
+  }
+
+  private endpointsFromEnv(): EmbeddingEndpoint[] {
     const endpointsStr = process.env.RAG_ENDPOINTS;
     if (endpointsStr) {
-      return endpointsStr.split(',').map((entry) => {
-        const [provider, url, model] = entry.trim().split('|');
-        return { provider: provider as EmbeddingProvider, url, model };
-      });
+      return endpointsStr
+        .split(',')
+        .map((entry) => {
+          const [provider, url, model] = entry.trim().split('|');
+          return { provider: provider as EmbeddingProvider, url, model };
+        })
+        .filter((e) => this.isValidProvider(e.provider) && e.url && e.model);
     }
 
-    // Single provider mode (backwards compatible)
     const provider = (process.env.RAG_EMBEDDING_PROVIDER || 'ollama') as EmbeddingProvider;
     const model = process.env.RAG_EMBEDDING_MODEL || 'nomic-embed-text';
     const url = provider === 'openai-compatible'
@@ -113,30 +158,174 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       : (process.env.OLLAMA_URL || 'http://localhost:11434');
 
     const primary: EmbeddingEndpoint = { provider, url, model };
+    if (process.env.RAG_EMBEDDING_API_KEY) primary.apiKey = process.env.RAG_EMBEDDING_API_KEY;
     const endpoints = [primary];
 
-    // Auto-add fallback if configured via RAG_FALLBACK_* vars
     const fallbackProvider = process.env.RAG_FALLBACK_PROVIDER as EmbeddingProvider | undefined;
     const fallbackUrl = process.env.RAG_FALLBACK_URL;
     const fallbackModel = process.env.RAG_FALLBACK_MODEL;
-    if (fallbackProvider && fallbackUrl && fallbackModel) {
-      endpoints.push({ provider: fallbackProvider, url: fallbackUrl, model: fallbackModel });
+    if (fallbackProvider && fallbackUrl && fallbackModel && this.isValidProvider(fallbackProvider)) {
+      const fb: EmbeddingEndpoint = { provider: fallbackProvider, url: fallbackUrl, model: fallbackModel };
+      if (process.env.RAG_FALLBACK_API_KEY) fb.apiKey = process.env.RAG_FALLBACK_API_KEY;
+      endpoints.push(fb);
     }
 
     return endpoints;
   }
 
+  private isValidProvider(value: unknown): value is EmbeddingProvider {
+    return typeof value === 'string' && (EMBEDDING_PROVIDERS as readonly string[]).includes(value);
+  }
+
+  private decodeStored(raw: string): EmbeddingEndpoint[] {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      this.logger.warn(`Malformed ${SETTING_RAG_ENDPOINTS_V1} JSON — ignoring`);
+      return [];
+    }
+    if (!Array.isArray(parsed)) return [];
+    const out: EmbeddingEndpoint[] = [];
+    for (const entry of parsed) {
+      if (!entry || typeof entry !== 'object') continue;
+      const { provider, url, model, apiKeyEnc } = entry as Partial<StoredEndpoint>;
+      if (!this.isValidProvider(provider) || !url || !model) continue;
+      const ep: EmbeddingEndpoint = { provider, url, model };
+      if (apiKeyEnc) {
+        try {
+          ep.apiKey = this.encryption.decrypt(apiKeyEnc);
+        } catch (err) {
+          this.logger.error(
+            `Failed to decrypt API key for ${provider} @ ${url}: ${(err as Error).message}. ` +
+              'Endpoint runs without a key — reconfigure via Settings UI.',
+          );
+        }
+      }
+      out.push(ep);
+    }
+    return out;
+  }
+
+  private endpointKey(e: Pick<EmbeddingEndpoint, 'provider' | 'url' | 'model'>): string {
+    return `${e.provider}${e.url}${e.model}`;
+  }
+
+  /** Public-safe view of configured endpoints — never returns API keys. */
+  async getEndpointsPublic(): Promise<EmbeddingEndpointPublic[]> {
+    const endpoints = await this.loadEndpoints();
+    return endpoints.map((e) => ({
+      provider: e.provider,
+      url: e.url,
+      model: e.model,
+      hasApiKey: typeof e.apiKey === 'string' && e.apiKey.length > 0,
+    }));
+  }
+
+  /** Returns true if endpoints came from the Settings DB (i.e. UI-managed). */
+  async isManagedViaSettings(): Promise<boolean> {
+    return (await this.settings.get(SETTING_RAG_ENDPOINTS_V1)) != null;
+  }
+
+  /**
+   * Persist endpoints. Each incoming endpoint's `apiKey`:
+   * - undefined → keep existing key for matching provider+url+model
+   * - "" → delete key
+   * - non-empty string → encrypt and store
+   * After persisting, the embedding pipeline is re-initialized so the new
+   * config takes effect immediately. If the active model changes dimensions,
+   * a reindex is required (the UI surfaces this warning).
+   */
+  async setEndpoints(incoming: EmbeddingEndpointInput[]): Promise<void> {
+    if (incoming.length === 0) {
+      throw new Error('At least one embedding endpoint is required');
+    }
+    for (const e of incoming) {
+      if (!this.isValidProvider(e.provider)) throw new Error(`Invalid provider: ${e.provider}`);
+      if (!e.url?.trim()) throw new Error('Endpoint url is required');
+      if (!e.model?.trim()) throw new Error('Endpoint model is required');
+    }
+
+    const previous = await this.loadEndpoints();
+    const byKey = new Map(previous.map((e) => [this.endpointKey(e), e.apiKey ?? '']));
+
+    const stored: StoredEndpoint[] = incoming.map((e) => {
+      let apiKey = e.apiKey;
+      if (apiKey === undefined) {
+        apiKey = byKey.get(this.endpointKey(e)) || undefined;
+      } else if (apiKey === '') {
+        apiKey = undefined;
+      }
+      const out: StoredEndpoint = { provider: e.provider, url: e.url, model: e.model };
+      if (apiKey) {
+        if (!this.encryption.isEnabled()) {
+          throw new Error(
+            'Cannot store API key: SECRETS_ENCRYPTION_KEY is not configured.',
+          );
+        }
+        out.apiKeyEnc = this.encryption.encrypt(apiKey);
+      }
+      return out;
+    });
+
+    await this.settings.set(SETTING_RAG_ENDPOINTS_V1, JSON.stringify(stored));
+    await this.reload();
+  }
+
+  /** Probe a single endpoint without persisting. Returns dimensions + latency. */
+  async testEndpoint(endpoint: EmbeddingEndpointInput): Promise<EmbeddingEndpointTestResult> {
+    if (!this.isValidProvider(endpoint.provider)) {
+      return { ok: false, error: `Invalid provider: ${endpoint.provider}` };
+    }
+    if (!endpoint.url?.trim() || !endpoint.model?.trim()) {
+      return { ok: false, error: 'url and model are required' };
+    }
+    // If the apiKey is undefined, fall back to the stored key for the same provider+url+model.
+    let apiKey = endpoint.apiKey;
+    if (apiKey === undefined) {
+      const previous = await this.loadEndpoints();
+      const match = previous.find((e) => this.endpointKey(e) === this.endpointKey(endpoint));
+      if (match?.apiKey) apiKey = match.apiKey;
+    } else if (apiKey === '') {
+      apiKey = undefined;
+    }
+    const probe: EmbeddingEndpoint = { provider: endpoint.provider, url: endpoint.url, model: endpoint.model };
+    if (apiKey) probe.apiKey = apiKey;
+    const start = Date.now();
+    try {
+      const vec = await this.embedWithEndpoint(probe, 'health-check');
+      return { ok: true, dimensions: vec.length, latencyMs: Date.now() - start };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message, latencyMs: Date.now() - start };
+    }
+  }
+
+  /**
+   * Reload endpoints + re-init embedding session. Drops `ready` until a working
+   * endpoint is found. Vector store table stays untouched — caller is responsible
+   * for triggering reindex if dimensions or model semantics changed.
+   */
+  async reload(): Promise<void> {
+    this.ready = false;
+    this.initPromise = this.initialize().catch((err) => {
+      this.logger.warn(`RAG re-initialization failed: ${err.message}.`);
+    });
+    await this.initPromise;
+  }
+
   private async initialize() {
-    this.endpoints = this.buildEndpoints();
+    this.endpoints = await this.loadEndpoints();
+    if (this.endpoints.length === 0) {
+      throw new Error('No embedding endpoints configured (Settings UI or RAG_* env vars)');
+    }
 
     // Try endpoints in order until one works
     let testEmbedding: number[] | null = null;
+    let activeEndpoint: EmbeddingEndpoint | null = null;
     for (const endpoint of this.endpoints) {
       try {
-        this.embeddingProvider = endpoint.provider;
-        this.embeddingUrl = endpoint.url;
-        this.embeddingModel = endpoint.model;
-        testEmbedding = await this.callEmbeddingApi('test');
+        testEmbedding = await this.embedWithEndpoint(endpoint, 'test');
+        activeEndpoint = endpoint;
         this.logger.log(`Embedding connected: provider=${endpoint.provider}, model=${endpoint.model}, url=${endpoint.url}`);
         break;
       } catch (err) {
@@ -144,10 +333,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    if (!testEmbedding) {
-      throw new Error('No embedding endpoint available (tried LM Studio + Ollama)');
+    if (!testEmbedding || !activeEndpoint) {
+      throw new Error('No embedding endpoint available');
     }
 
+    this.embeddingProvider = activeEndpoint.provider;
+    this.embeddingUrl = activeEndpoint.url;
+    this.embeddingModel = activeEndpoint.model;
     this.dimensions = testEmbedding.length;
     this.logger.log(`Embedding dimensions: ${this.dimensions}`);
 
@@ -196,14 +388,17 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return false;
   }
 
-  /** Low-level embedding call for a specific provider */
-  private async callEmbeddingApi(text: string): Promise<number[]> {
+  /** Low-level embedding call against an explicit endpoint (with optional API key). */
+  private async embedWithEndpoint(endpoint: EmbeddingEndpoint, text: string): Promise<number[]> {
     const timeoutMs = parseInt(process.env.RAG_TIMEOUT_MS || '5000', 10);
-    if (this.embeddingProvider === 'openai-compatible') {
-      const res = await fetch(`${this.embeddingUrl}/v1/embeddings`, {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (endpoint.apiKey) headers['Authorization'] = `Bearer ${endpoint.apiKey}`;
+
+    if (endpoint.provider === 'openai-compatible') {
+      const res = await fetch(`${endpoint.url}/v1/embeddings`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: this.embeddingModel, input: text }),
+        headers,
+        body: JSON.stringify({ model: endpoint.model, input: text }),
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (!res.ok) {
@@ -212,10 +407,10 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       const data = (await res.json()) as { data: Array<{ embedding: number[] }> };
       return data.data[0].embedding;
     } else {
-      const res = await fetch(`${this.embeddingUrl}/api/embed`, {
+      const res = await fetch(`${endpoint.url}/api/embed`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: this.embeddingModel, input: text }),
+        headers,
+        body: JSON.stringify({ model: endpoint.model, input: text }),
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (!res.ok) {
@@ -224,6 +419,17 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       const data = (await res.json()) as { embeddings: number[][] };
       return data.embeddings[0];
     }
+  }
+
+  private activeEndpoint(): EmbeddingEndpoint | null {
+    return (
+      this.endpoints.find(
+        (e) =>
+          e.provider === this.embeddingProvider &&
+          e.url === this.embeddingUrl &&
+          e.model === this.embeddingModel,
+      ) || null
+    );
   }
 
   /** Split text into overlapping chunks, preferring natural boundaries */
@@ -277,28 +483,26 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`Embedding: "${preview}${text.length > 80 ? '…' : ''}" (${text.length} chars)`);
     const start = Date.now();
 
+    const active = this.activeEndpoint() ?? this.endpoints[0];
     try {
-      const vector = await this.callEmbeddingApi(text);
-      this.logger.log(`Embedded in ${Date.now() - start}ms (${vector.length} dims, ${this.embeddingProvider})`);
+      const vector = await this.embedWithEndpoint(active, text);
+      this.logger.log(`Embedded in ${Date.now() - start}ms (${vector.length} dims, ${active.provider})`);
       return vector;
     } catch (err) {
       // Try fallback to next endpoint
-      const currentIdx = this.endpoints.findIndex(
-        (e) => e.provider === this.embeddingProvider && e.url === this.embeddingUrl,
-      );
+      const currentIdx = this.endpoints.indexOf(active);
       for (let i = 0; i < this.endpoints.length; i++) {
         if (i === currentIdx) continue;
         const fallback = this.endpoints[i];
         try {
           this.logger.warn(`Primary embedding failed, trying fallback: ${fallback.provider} @ ${fallback.url}`);
+          const vector = await this.embedWithEndpoint(fallback, text);
           this.embeddingProvider = fallback.provider;
           this.embeddingUrl = fallback.url;
           this.embeddingModel = fallback.model;
-          const vector = await this.callEmbeddingApi(text);
           this.logger.log(`Fallback succeeded: ${fallback.provider} in ${Date.now() - start}ms`);
           return vector;
         } catch {
-          // Restore original and continue trying
           this.logger.warn(`Fallback ${fallback.provider} also failed`);
         }
       }
