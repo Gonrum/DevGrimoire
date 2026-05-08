@@ -13,7 +13,10 @@ import {
   Manual,
   Project,
   RecurringTask,
+  ResearchEntry,
   SecretListItem,
+  Snippet,
+  Soul,
   Todo,
   api,
 } from '../api/client';
@@ -29,6 +32,9 @@ import KnowledgeList from '../components/KnowledgeList';
 import ManualView from '../components/ManualView';
 import FileUploadZone from '../components/FileUploadZone';
 import EnvironmentList, { SecretsList } from '../components/EnvironmentList';
+import SoulView from '../components/SoulView';
+import SnippetList from '../components/SnippetList';
+import ResearchList from '../components/ResearchList';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { useToast } from '../components/Toast';
 
@@ -44,7 +50,10 @@ type Tab =
   | 'files'
   | 'monitoring'
   | 'contacts'
-  | 'activity';
+  | 'activity'
+  | 'soul'
+  | 'snippets'
+  | 'research';
 
 const statusColors: Record<CustomerStatus, string> = {
   lead: 'bg-blue-900/50 text-blue-300',
@@ -92,6 +101,10 @@ export default function CustomerDetail() {
   const [customerAttachments, setCustomerAttachments] = useState<Attachment[]>([]);
   const [customerEnvironments, setCustomerEnvironments] = useState<Environment[]>([]);
   const [customerSecrets, setCustomerSecrets] = useState<SecretListItem[]>([]);
+  const [customerSoul, setCustomerSoul] = useState<Soul | null>(null);
+  const [customerActivity, setCustomerActivity] = useState<Activity[]>([]);
+  const [customerSnippets, setCustomerSnippets] = useState<Snippet[]>([]);
+  const [customerResearch, setCustomerResearch] = useState<ResearchEntry[]>([]);
   const [storageEnabled, setStorageEnabled] = useState<boolean>(false);
   const [aggregate, setAggregate] = useState<AggregatedData>(emptyAggregate);
   const [tab, setTab] = useState<Tab>('overview');
@@ -118,6 +131,10 @@ export default function CustomerDetail() {
       api.attachments.storageStatus().catch(() => ({ enabled: false })),
       api.environments.listForCustomer(id).catch(() => [] as Environment[]),
       api.secrets.listForCustomer(id).catch(() => [] as SecretListItem[]),
+      api.souls.getForCustomer(id).catch(() => null),
+      api.activities.listForCustomer(id, 100).catch(() => [] as Activity[]),
+      api.snippets.listForCustomer(id).catch(() => [] as Snippet[]),
+      api.research.listForCustomer(id).catch(() => [] as ResearchEntry[]),
     ])
       .then(
         ([
@@ -133,6 +150,10 @@ export default function CustomerDetail() {
           storageData,
           environmentData,
           secretData,
+          soulData,
+          activityData,
+          snippetData,
+          researchData,
         ]) => {
           setCustomer(customerData);
           setLinks(linkData);
@@ -146,6 +167,10 @@ export default function CustomerDetail() {
           setStorageEnabled(!!storageData?.enabled);
           setCustomerEnvironments(environmentData);
           setCustomerSecrets(secretData);
+          setCustomerSoul(soulData && (soulData as Soul)._id ? (soulData as Soul) : null);
+          setCustomerActivity(activityData);
+          setCustomerSnippets(snippetData);
+          setCustomerResearch(researchData);
         },
       )
       .catch((err) => setError(err.message))
@@ -257,7 +282,7 @@ export default function CustomerDetail() {
         { key: 'overview', label: t('customers.tab.overview') },
         { key: 'projects', label: t('customers.tab.projects'), count: links.length },
         { key: 'todos', label: t('customers.tab.todos'), count: openCustomerTodos.length },
-        { key: 'activity', label: t('customers.tab.activity'), count: aggregate.activity.length },
+        { key: 'activity', label: t('customers.tab.activity'), count: customerActivity.length + aggregate.activity.length },
       ],
     },
     {
@@ -267,6 +292,9 @@ export default function CustomerDetail() {
         { key: 'manual', label: t('customers.tab.manual'), count: customerManuals.length },
         { key: 'workflows', label: t('customers.tab.workflows'), count: customerRecurring.filter((rt) => rt.active).length },
         { key: 'files', label: t('customers.tab.files'), count: customerAttachments.length },
+        { key: 'soul', label: t('customers.tab.soul'), count: (['vision', 'principles', 'conventions', 'communication', 'boundaries', 'workflow', 'quality'] as const).filter((k) => customerSoul?.[k]?.trim()).length },
+        { key: 'snippets', label: t('customers.tab.snippets'), count: customerSnippets.length },
+        { key: 'research', label: t('customers.tab.research'), count: customerResearch.length },
       ],
     },
     {
@@ -621,9 +649,33 @@ export default function CustomerDetail() {
 
             {tab === 'activity' && (
               <AggregatedActivityTab
-                items={aggregate.activity}
+                items={[...customerActivity, ...aggregate.activity].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))}
                 projectsById={projectsById}
                 loading={aggLoading}
+              />
+            )}
+
+            {tab === 'soul' && (
+              <SoulView
+                customerId={id}
+                soul={customerSoul}
+                onUpdate={() => api.souls.getForCustomer(id).then((s) => setCustomerSoul(s && (s as Soul)._id ? (s as Soul) : null))}
+              />
+            )}
+
+            {tab === 'snippets' && (
+              <SnippetList
+                entries={customerSnippets}
+                customerId={id}
+                onUpdate={loadBase}
+              />
+            )}
+
+            {tab === 'research' && (
+              <ResearchList
+                entries={customerResearch}
+                customerId={id}
+                onUpdate={loadBase}
               />
             )}
           </ProjectTabShell>
@@ -705,13 +757,16 @@ function ProjectsTab({
   );
 }
 
-function ProjectBadge({ project, projectId }: { project?: Project; projectId: string }) {
+function ProjectBadge({ project, projectId }: { project?: Project; projectId?: string }) {
   if (project) {
     return (
       <Link to={`/projects/${project._id}`} className="text-xs px-1.5 py-0.5 rounded bg-violet-900/40 text-cyan-300 hover:bg-violet-900/70">
         {project.name}
       </Link>
     );
+  }
+  if (!projectId) {
+    return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-300">customer</span>;
   }
   return <span className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-500">{projectId}</span>;
 }
@@ -1343,7 +1398,7 @@ function AggregatedActivityTab({
   return (
     <div className="space-y-1.5">
       {items.slice(0, 100).map((act) => {
-        const project = projectsById.get(act.projectId);
+        const project = act.projectId ? projectsById.get(act.projectId) : undefined;
         return (
           <div key={act._id} className="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
             <span className="text-gray-600 font-mono whitespace-nowrap">
