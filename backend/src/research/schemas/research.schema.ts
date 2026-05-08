@@ -5,8 +5,11 @@ export type ResearchDocument = HydratedDocument<Research>;
 
 @Schema({ timestamps: true })
 export class Research {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
-  projectId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  projectId?: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  customerId?: Types.ObjectId;
 
   @Prop({ required: true })
   title: string;
@@ -23,4 +26,5 @@ export class Research {
 
 export const ResearchSchema = SchemaFactory.createForClass(Research);
 ResearchSchema.index({ projectId: 1 });
+ResearchSchema.index({ customerId: 1 });
 ResearchSchema.index({ title: 'text', content: 'text', tags: 'text' });

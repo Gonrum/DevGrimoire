@@ -2,7 +2,12 @@ import { IsString, IsOptional, IsArray, IsMongoId } from 'class-validator';
 
 export class CreateResearchDto {
   @IsMongoId()
-  projectId: string;
+  @IsOptional()
+  projectId?: string;
+
+  @IsMongoId()
+  @IsOptional()
+  customerId?: string;
 
   @IsString()
   title: string;

@@ -41,12 +41,14 @@ function SnippetForm({
   initial,
   editId,
   projectId,
+  customerId,
   onDone,
   onCancel,
 }: {
   initial: SnippetFormData;
   editId?: string;
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -66,6 +68,7 @@ function SnippetForm({
       const tags = form.tags.split(',').map((t) => t.trim()).filter(Boolean);
       const data = {
         projectId,
+        customerId,
         title: form.title.trim(),
         language: form.language.trim().toLowerCase(),
         code: form.code,
@@ -161,7 +164,7 @@ function SnippetForm({
   );
 }
 
-export default function SnippetList({ entries, projectId }: { entries: Snippet[]; projectId: string }) {
+export default function SnippetList({ entries, projectId, customerId, onUpdate }: { entries: Snippet[]; projectId?: string; customerId?: string; onUpdate?: () => void }) {
   const { t, i18n } = useTranslation();
   const { showSuccess, showError } = useToast();
   const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
@@ -196,6 +199,7 @@ export default function SnippetList({ entries, projectId }: { entries: Snippet[]
     try {
       await api.snippets.delete(snippet._id);
       showSuccess(t('snippets.snippetDeleted', { title: snippet.title }));
+      onUpdate?.();
     } catch (err: any) {
       showError(err.message || t('common.errorDeleting'));
     }
@@ -214,6 +218,7 @@ export default function SnippetList({ entries, projectId }: { entries: Snippet[]
   const handleFormDone = () => {
     setShowForm(false);
     setEditingSnippet(null);
+    onUpdate?.();
   };
 
   if (showForm) {
@@ -222,6 +227,7 @@ export default function SnippetList({ entries, projectId }: { entries: Snippet[]
         initial={editingSnippet ? fromSnippet(editingSnippet) : emptyForm()}
         editId={editingSnippet?._id}
         projectId={projectId}
+        customerId={customerId}
         onDone={handleFormDone}
         onCancel={handleFormDone}
       />

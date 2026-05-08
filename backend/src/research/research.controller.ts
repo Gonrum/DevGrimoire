@@ -15,19 +15,31 @@ export class ResearchController {
   }
 
   @Get()
-  findByProject(@Query('projectId') projectId?: string) {
-    if (!projectId) {
-      throw new BadRequestException('projectId query parameter is required');
+  findByOwner(
+    @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
+  ) {
+    if (!projectId && !customerId) {
+      throw new BadRequestException('projectId or customerId query parameter is required');
     }
-    return this.researchService.findByProject(projectId);
+    if (projectId && customerId) {
+      throw new BadRequestException('projectId and customerId are mutually exclusive');
+    }
+    return projectId
+      ? this.researchService.findByProject(projectId)
+      : this.researchService.findByCustomer(customerId!);
   }
 
   @Get('search')
-  search(@Query('q') query?: string, @Query('projectId') projectId?: string) {
+  search(
+    @Query('q') query?: string,
+    @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
+  ) {
     if (!query) {
       throw new BadRequestException('q query parameter is required');
     }
-    return this.researchService.search(query, projectId);
+    return this.researchService.search(query, projectId, customerId);
   }
 
   @Get(':id')

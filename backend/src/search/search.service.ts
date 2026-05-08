@@ -119,7 +119,7 @@ export class SearchService {
       results.push({
         type: 'research',
         id: r._id.toString(),
-        projectId: r.projectId.toString(),
+        projectId: r.projectId?.toString() || '',
         title: r.title,
         snippet: makeSnippet(r.content),
       });

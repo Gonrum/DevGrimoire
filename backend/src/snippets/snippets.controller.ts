@@ -26,24 +26,34 @@ export class SnippetsController {
   }
 
   @Get()
-  findByProject(
+  findByOwner(
     @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
     @Query('language') language?: string,
     @Query('category') category?: string,
     @Query('tag') tag?: string,
   ) {
-    if (!projectId) {
-      throw new BadRequestException('projectId query parameter is required');
+    if (!projectId && !customerId) {
+      throw new BadRequestException('projectId or customerId query parameter is required');
     }
-    return this.snippetsService.findByProject(projectId, language, category, tag);
+    if (projectId && customerId) {
+      throw new BadRequestException('projectId and customerId are mutually exclusive');
+    }
+    return projectId
+      ? this.snippetsService.findByProject(projectId, language, category, tag)
+      : this.snippetsService.findByCustomer(customerId!, language, category, tag);
   }
 
   @Get('search')
-  search(@Query('q') query?: string, @Query('projectId') projectId?: string) {
+  search(
+    @Query('q') query?: string,
+    @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
+  ) {
     if (!query) {
       throw new BadRequestException('q query parameter is required');
     }
-    return this.snippetsService.search(query, projectId);
+    return this.snippetsService.search(query, projectId, customerId);
   }
 
   @Get(':id')

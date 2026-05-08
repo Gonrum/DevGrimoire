@@ -5,8 +5,11 @@ export type SnippetDocument = HydratedDocument<Snippet>;
 
 @Schema({ timestamps: true })
 export class Snippet {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
-  projectId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  projectId?: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  customerId?: Types.ObjectId;
 
   @Prop({ required: true })
   title: string;
@@ -32,6 +35,7 @@ export class Snippet {
 
 export const SnippetSchema = SchemaFactory.createForClass(Snippet);
 SnippetSchema.index({ projectId: 1 });
+SnippetSchema.index({ customerId: 1 });
 SnippetSchema.index(
   { title: 'text', code: 'text', description: 'text', tags: 'text' },
   { language_override: 'textSearchLanguage' },

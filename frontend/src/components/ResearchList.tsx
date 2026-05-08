@@ -38,12 +38,14 @@ function ResearchForm({
   initial,
   editId,
   projectId,
+  customerId,
   onDone,
   onCancel,
 }: {
   initial: FormData;
   editId?: string;
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -76,7 +78,7 @@ function ResearchForm({
         await api.research.update(editId, payload);
         showSuccess(t('research.updated'));
       } else {
-        await api.research.create({ ...payload, projectId });
+        await api.research.create({ ...payload, projectId, customerId });
         showSuccess(t('research.created'));
       }
       onDone();
@@ -160,10 +162,12 @@ function ResearchForm({
 export default function ResearchList({
   entries,
   projectId,
+  customerId,
   onUpdate,
 }: {
   entries: ResearchEntry[];
   projectId?: string;
+  customerId?: string;
   onUpdate?: () => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -171,7 +175,7 @@ export default function ResearchList({
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<ResearchEntry | null>(null);
 
-  const editable = !!(projectId && onUpdate);
+  const editable = !!((projectId || customerId) && onUpdate);
 
   const handleDelete = async (entry: ResearchEntry) => {
     try {
@@ -188,7 +192,8 @@ export default function ResearchList({
       <ResearchForm
         initial={editing ? fromEntry(editing) : emptyForm()}
         editId={editing?._id}
-        projectId={projectId!}
+        projectId={projectId}
+        customerId={customerId}
         onDone={() => { setShowForm(false); setEditing(null); onUpdate!(); }}
         onCancel={() => { setShowForm(false); setEditing(null); }}
       />
