@@ -8,6 +8,7 @@ import { RefreshToken, RefreshTokenDocument } from './schemas/refresh-token.sche
 import { User, UserDocument, UserRole, UserLlmConfig } from './schemas/user.schema';
 import { LlmConfigDto } from './dto/update-profile.dto';
 import { EncryptionService } from '../common/encryption.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 const API_KEY_MASK = '***';
 // AES-GCM encrypted values use the format `<ivHex>:<tagHex>:<cipherHex>` —
@@ -35,6 +36,7 @@ export class AuthService {
     @InjectModel(RefreshToken.name) private refreshTokenModel: Model<RefreshTokenDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private readonly encryptionService: EncryptionService,
+    private readonly auditLog: AuditLogService,
   ) {
     this.seedAdminUser();
     // Clean up old refresh tokens from pre-migration (had username field instead of userId)
@@ -243,6 +245,12 @@ export class AuthService {
       role: data.role || UserRole.USER,
       active: true,
     });
+    await this.auditLog.record({
+      action: 'user.created',
+      entityType: 'user',
+      entityId: user._id.toString(),
+      meta: { username: data.username, role: data.role || UserRole.USER },
+    });
     const result = user.toObject();
     delete (result as any).passwordHash;
     return result as UserDocument;
@@ -287,9 +295,7 @@ export class AuthService {
       );
     }
 
-    // Audit-trail (lightweight). Full audit-log module is tracked as T-214 in
-    // M-27 and will replace these logger calls once it lands. Until then we
-    // emit a structured log so role/scope changes leave a paper trail.
+    // Persistent audit trail (T-214 — replaces previous Logger.warn placeholder).
     const securityFields = [
       'role', 'active', 'permissions',
       'projectScopeMode', 'allowedProjectIds',
@@ -299,16 +305,22 @@ export class AuthService {
     for (const f of securityFields) {
       if (f in update) securityChanges[f] = (update as Record<string, unknown>)[f];
     }
-    if (Object.keys(securityChanges).length > 0) {
-      this.logger.warn(
-        `[security-audit] User ${id} security fields changed: ${JSON.stringify(securityChanges)}`,
-      );
-    }
 
-    return this.userModel
+    const result = await this.userModel
       .findByIdAndUpdate(id, update, { new: true })
       .select('-passwordHash')
       .exec();
+
+    if (Object.keys(securityChanges).length > 0) {
+      await this.auditLog.record({
+        action: 'user.scope_changed',
+        entityType: 'user',
+        entityId: id,
+        meta: { changes: securityChanges },
+      });
+    }
+
+    return result;
   }
 
   async deleteUser(id: string): Promise<boolean> {
@@ -316,6 +328,12 @@ export class AuthService {
     if (result) {
       // Delete all refresh tokens for this user
       await this.refreshTokenModel.deleteMany({ userId: id }).exec();
+      await this.auditLog.record({
+        action: 'user.deleted',
+        entityType: 'user',
+        entityId: id,
+        meta: { username: result.username, role: result.role },
+      });
     }
     return !!result;
   }

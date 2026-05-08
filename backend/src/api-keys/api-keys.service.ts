@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { randomBytes, createHash } from 'crypto';
 import { ApiKey, ApiKeyDocument } from './schemas/api-key.schema';
 import type { ScopeMode } from '../common/permissions';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 interface ScopeFields {
   permissions?: string[];
@@ -19,6 +20,7 @@ export class ApiKeysService {
 
   constructor(
     @InjectModel(ApiKey.name) private apiKeyModel: Model<ApiKeyDocument>,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   private hashKey(plainKey: string): string {
@@ -113,6 +115,25 @@ export class ApiKeysService {
       ...scopePatch,
     });
 
+    await this.auditLog.record({
+      action: 'apikey.created',
+      entityType: 'apikey',
+      entityId: apiKey._id.toString(),
+      meta: {
+        name,
+        ownerUserId: userId,
+        expiresAt,
+        scope: {
+          permissions: scope?.permissions ?? [],
+          projectScopeMode: scope?.projectScopeMode ?? 'all',
+          allowedProjectIds: scope?.allowedProjectIds ?? [],
+          customerScopeMode: scope?.customerScopeMode ?? 'all',
+          allowedCustomerIds: scope?.allowedCustomerIds ?? [],
+          allowedTools: scope?.allowedTools,
+        },
+      },
+    });
+
     return { key: plainKey, apiKey };
   }
 
@@ -174,8 +195,7 @@ export class ApiKeysService {
       .exec();
     if (!apiKey) throw new NotFoundException(`API Key ${id} not found`);
 
-    // Lightweight audit-trail: log scope/permission changes until full
-    // audit-log module (T-214) lands.
+    // Persistent audit trail (T-214 — replaces previous Logger.warn placeholder).
     const securityFields = [
       'allowedTools', 'permissions',
       'projectScopeMode', 'allowedProjectIds',
@@ -187,9 +207,12 @@ export class ApiKeysService {
       if (f in unset) securityChanges[`${f}_unset`] = true;
     }
     if (Object.keys(securityChanges).length > 0) {
-      this.logger.warn(
-        `[security-audit] ApiKey ${id} (owner ${userId}) scope changed: ${JSON.stringify(securityChanges)}`,
-      );
+      await this.auditLog.record({
+        action: 'apikey.scope_changed',
+        entityType: 'apikey',
+        entityId: id,
+        meta: { ownerUserId: userId, changes: securityChanges },
+      });
     }
 
     return apiKey;
@@ -201,5 +224,11 @@ export class ApiKeysService {
       userId,
     }).exec();
     if (!result) throw new NotFoundException(`API Key ${keyId} not found`);
+    await this.auditLog.record({
+      action: 'apikey.revoked',
+      entityType: 'apikey',
+      entityId: keyId,
+      meta: { ownerUserId: userId, name: result.name, prefix: result.prefix },
+    });
   }
 }

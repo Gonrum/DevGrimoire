@@ -396,6 +396,11 @@ export interface UserInfo {
   role: 'admin' | 'user';
   active: boolean;
   llmConfig?: UserLlmConfig;
+  permissions?: string[];
+  projectScopeMode?: 'all' | 'allowlist' | 'none';
+  allowedProjectIds?: string[];
+  customerScopeMode?: 'all' | 'allowlist' | 'none';
+  allowedCustomerIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -1377,6 +1382,47 @@ export const api = {
       }
       return res.json() as Promise<{ projectId: string; projectName: string; stats: Record<string, number> }>;
     },
+  },
+  auditLog: {
+    list: (filters?: {
+      action?: string;
+      actorUserId?: string;
+      entityType?: string;
+      entityId?: string;
+      since?: string;
+      until?: string;
+      limit?: number;
+      offset?: number;
+    }) => {
+      const params = new URLSearchParams();
+      if (filters?.action) params.set('action', filters.action);
+      if (filters?.actorUserId) params.set('actorUserId', filters.actorUserId);
+      if (filters?.entityType) params.set('entityType', filters.entityType);
+      if (filters?.entityId) params.set('entityId', filters.entityId);
+      if (filters?.since) params.set('since', filters.since);
+      if (filters?.until) params.set('until', filters.until);
+      if (filters?.limit) params.set('limit', String(filters.limit));
+      if (filters?.offset) params.set('offset', String(filters.offset));
+      const qs = params.toString();
+      return request<{
+        items: Array<{
+          _id: string;
+          action: string;
+          actorUserId?: string;
+          actorUsername?: string;
+          actorRole?: string;
+          actorApiKeyId?: string;
+          entityType?: string;
+          entityId?: string;
+          meta?: Record<string, unknown>;
+          ipAddress?: string;
+          userAgent?: string;
+          timestamp: string;
+        }>;
+        total: number;
+      }>(`/audit-log${qs ? `?${qs}` : ''}`);
+    },
+    actions: () => request<string[]>('/audit-log/actions'),
   },
   customerTransfer: {
     export: async (customerId: string, includeSecrets = false) => {

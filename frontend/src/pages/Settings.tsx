@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { api, ApiKeyInfo, ChatConfig, ChatEndpoint, ChatProvider, UserLlmConfig, LlmMode } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import UserManagement from './UserManagement';
+import AuditLog from './AuditLog';
 import ReplicationSettings from '../components/ReplicationSettings';
 import WebSearchSettings from '../components/WebSearchSettings';
 import ApiKeyToolEditor from '../components/ApiKeyToolEditor';
@@ -48,7 +49,7 @@ Wenn du Tasks bearbeitest, halte dich an den Status-Workflow:
 - Teste Änderungen bevor du sie als fertig markierst
 `;
 
-type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'chat' | 'rag' | 'websearch' | 'users' | 'replication' | 'backups';
+type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'chat' | 'rag' | 'websearch' | 'users' | 'auditlog' | 'replication' | 'backups';
 
 const CHAT_PROVIDER_DEFAULT_URL: Record<ChatProvider, string> = {
   lmstudio: 'http://localhost:1234',
@@ -479,6 +480,7 @@ export default function Settings() {
     { key: 'websearch', label: t('settings.tabWebSearch'), group: t('settings.groupAdmin'), adminOnly: true },
     { key: 'backups', label: t('settings.tabBackups'), group: t('settings.groupAdmin'), adminOnly: true },
     { key: 'users', label: t('settings.tabUsers'), group: t('settings.groupAdmin'), adminOnly: true },
+    { key: 'auditlog', label: t('settings.tabAuditLog'), group: t('settings.groupAdmin'), adminOnly: true },
     { key: 'replication', label: t('settings.tabReplication'), group: t('settings.groupAdmin'), adminOnly: true },
   ];
 
@@ -1243,6 +1245,7 @@ export default function Settings() {
       )}
 
       {tab === 'users' && isAdmin && <UserManagement />}
+      {tab === 'auditlog' && isAdmin && <AuditLog />}
       {tab === 'rag' && isAdmin && <RagSettings />}
 
       {tab === 'websearch' && isAdmin && <WebSearchSettings />}

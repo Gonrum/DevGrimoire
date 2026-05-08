@@ -6,6 +6,7 @@ import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import ConfirmButton from '../components/ui/ConfirmButton';
+import UserScopeEditor from '../components/UserScopeEditor';
 
 function CreateUserForm({ onCreated }: { onCreated: () => void }) {
   const { t } = useTranslation();
@@ -102,7 +103,29 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<Partial<UserInfo>>({});
+  const [scopeEditingId, setScopeEditingId] = useState<string | null>(null);
   const { showError, showSuccess } = useToast();
+
+  const saveScope = async (
+    userId: string,
+    payload: {
+      projectScopeMode?: 'all' | 'allowlist' | 'none';
+      allowedProjectIds?: string[];
+      customerScopeMode?: 'all' | 'allowlist' | 'none';
+      allowedCustomerIds?: string[];
+    },
+  ) => {
+    await api.users.update(userId, payload as Partial<UserInfo>);
+    await loadUsers();
+  };
+
+  const formatScopeBadge = (user: UserInfo) => {
+    const proj = user.projectScopeMode ?? 'all';
+    const cust = user.customerScopeMode ?? 'all';
+    const fmt = (mode: string, count: number) =>
+      mode === 'all' ? '∗' : mode === 'none' ? '∅' : String(count);
+    return `P:${fmt(proj, user.allowedProjectIds?.length ?? 0)} K:${fmt(cust, user.allowedCustomerIds?.length ?? 0)}`;
+  };
 
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
@@ -166,8 +189,8 @@ export default function UserManagement() {
 
       <div className="space-y-2">
         {users.map((user) => (
+          <div key={user._id}>
           <Card
-            key={user._id}
             padding="none"
             className="px-4 py-3 flex items-center gap-4"
           >
@@ -228,6 +251,17 @@ export default function UserManagement() {
                   <Button
                     type="button"
                     size="xs"
+                    onClick={() => setScopeEditingId(scopeEditingId === user._id ? null : user._id)}
+                    className={scopeEditingId === user._id
+                      ? 'bg-violet-900 text-violet-100'
+                      : 'bg-violet-900/40 hover:bg-violet-900 text-violet-300'}
+                    title={t('userScope.buttonTitle')}
+                  >
+                    {t('userScope.button')} {formatScopeBadge(user)}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="xs"
                     onClick={() => handleToggleActive(user)}
                     className={user.active
                       ? 'bg-yellow-900/40 hover:bg-yellow-900 text-yellow-300'
@@ -240,6 +274,14 @@ export default function UserManagement() {
               </>
             )}
           </Card>
+          {scopeEditingId === user._id && (
+            <UserScopeEditor
+              user={user}
+              onSave={(payload) => saveScope(user._id, payload)}
+              onClose={() => setScopeEditingId(null)}
+            />
+          )}
+          </div>
         ))}
       </div>
     </div>
