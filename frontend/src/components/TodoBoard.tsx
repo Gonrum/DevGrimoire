@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Todo, Milestone, api } from '../api/client';
+import { Todo, Milestone, QuestionsByTodoSummary, api } from '../api/client';
 import i18n from '../i18n';
 import Markdown from './Markdown';
 import MarkdownEditor from './MarkdownEditor';
@@ -155,7 +155,7 @@ function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) 
   );
 }
 
-function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError }: { todo: Todo; allTodos: Todo[]; basePath: string; onUpdate: () => void; onDragStart?: (todoId: string) => void; showError: (msg: string) => void }) {
+function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError, questionSummary }: { todo: Todo; allTodos: Todo[]; basePath: string; onUpdate: () => void; onDragStart?: (todoId: string) => void; showError: (msg: string) => void; questionSummary?: QuestionsByTodoSummary }) {
   const { t, i18n } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [animClass, setAnimClass] = useState('');
@@ -204,13 +204,18 @@ function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError }
     );
   }
 
+  const hasOpenQuestion = !!questionSummary && questionSummary.total > 0;
+  const cardBorder = hasOpenQuestion
+    ? 'border-violet-600/70 shadow-[0_0_18px_rgba(124,58,237,0.18)] hover:border-violet-400'
+    : 'border-gray-800 hover:border-gray-700';
+
   return (
     <Link to={`${basePath}/todos/${todo._id}`}
       draggable
       aria-roledescription={t('todos.draggableTask')}
       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.(todo._id); }}
       onDragEnd={() => onDragStart?.('')}
-      className={`block bg-gray-900 border border-gray-800 rounded-lg p-3 group hover:border-gray-700 transition-colors cursor-grab active:cursor-grabbing ${animClass}`}>
+      className={`block bg-gray-900 border rounded-lg p-3 group transition-colors cursor-grab active:cursor-grabbing ${cardBorder} ${animClass}`}>
       <div className="flex items-start justify-between gap-2">
         <h4 className="text-sm font-medium">
           {hasBlockers && <span className="text-red-400 mr-1" title={t('todos.blocked')}>&#x26D4;</span>}
@@ -221,6 +226,7 @@ function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError }
           {PRIORITY_LABELS[todo.priority]()}
         </span>
       </div>
+      {hasOpenQuestion && <QuestionFlag summary={questionSummary!} className="mt-1.5" />}
       {todo.description && (
         <div className="mt-1 max-h-20 overflow-hidden text-gray-500">
           <Markdown>{todo.description}</Markdown>
@@ -259,7 +265,7 @@ function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError }
   );
 }
 
-function TodoListRow({ todo, basePath, onUpdate, showError }: { todo: Todo; basePath: string; onUpdate: () => void; showError: (msg: string) => void }) {
+function TodoListRow({ todo, basePath, onUpdate, showError, questionSummary }: { todo: Todo; basePath: string; onUpdate: () => void; showError: (msg: string) => void; questionSummary?: QuestionsByTodoSummary }) {
   const { t, i18n } = useTranslation();
   const [animClass, setAnimClass] = useState('');
   const prevStatusRef = useRef(todo.status);
@@ -288,8 +294,10 @@ function TodoListRow({ todo, basePath, onUpdate, showError }: { todo: Todo; base
 
   const comments = todo.comments || [];
 
+  const hasOpenQuestion = !!questionSummary && questionSummary.total > 0;
+
   return (
-    <tr className={`border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors ${animClass}`}>
+    <tr className={`border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors ${hasOpenQuestion ? 'bg-violet-950/15' : ''} ${animClass}`}>
       <td className="py-2.5 px-3">
         <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[todo.status]}`}>
           {STATUS_LABELS[todo.status]()}
@@ -302,7 +310,11 @@ function TodoListRow({ todo, basePath, onUpdate, showError }: { todo: Todo; base
       </td>
       <td className="py-2.5 px-3">
         <Link to={`${basePath}/todos/${todo._id}`} className="hover:text-cyan-400 transition-colors">
-          <div className="text-sm">{todo.displayNumber && <span className="text-gray-500 mr-1.5">{todo.displayNumber}</span>}{todo.title}</div>
+          <div className="text-sm flex items-center gap-2">
+            {todo.displayNumber && <span className="text-gray-500 mr-1">{todo.displayNumber}</span>}
+            <span>{todo.title}</span>
+            {hasOpenQuestion && <QuestionFlag summary={questionSummary!} compact />}
+          </div>
           {todo.description && <div className="text-xs text-gray-600 line-clamp-1 mt-0.5">{todo.description}</div>}
         </Link>
       </td>
@@ -348,6 +360,23 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
   const [confirmArchiveAll, setConfirmArchiveAll] = useState(false);
   const [dragTodoId, setDragTodoId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
+  const [questionMap, setQuestionMap] = useState<Record<string, QuestionsByTodoSummary>>({});
+
+  // Fetch open-question counts for all currently-loaded todos. Used to render
+  // the violet "Rückfrage offen" accent on todo cards/rows (M-30 / T-245).
+  useEffect(() => {
+    const ids = todos.map((todo) => todo._id);
+    if (ids.length === 0) {
+      setQuestionMap({});
+      return;
+    }
+    let cancelled = false;
+    api.questions
+      .byTodos(ids)
+      .then((map) => { if (!cancelled) setQuestionMap(map); })
+      .catch(() => { if (!cancelled) setQuestionMap({}); });
+    return () => { cancelled = true; };
+  }, [todos]);
 
   const now = Date.now();
   const isArchived = (t: Todo) =>
@@ -545,7 +574,8 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
                 <div className="space-y-2 min-h-[2rem]" role="list" aria-label={col.label()}>
                   {items.map((todo) => (
                     <TodoCard key={todo._id} todo={todo} allTodos={todos} basePath={basePath} onUpdate={onUpdate}
-                      onDragStart={(id) => setDragTodoId(id || null)} showError={showError} />
+                      onDragStart={(id) => setDragTodoId(id || null)} showError={showError}
+                      questionSummary={questionMap[todo._id]} />
                   ))}
                   {items.length === 0 && !isOver && (
                     <p className="text-xs text-gray-700 italic">{t('todos.noEntries')}</p>
@@ -574,12 +604,33 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
                 <tr><td colSpan={7} className="py-4 text-center text-xs text-gray-700 italic">{t('todos.noTasks')}</td></tr>
               )}
               {filtered.map((todo) => (
-                <TodoListRow key={todo._id} todo={todo} basePath={basePath} onUpdate={onUpdate} showError={showError} />
+                <TodoListRow key={todo._id} todo={todo} basePath={basePath} onUpdate={onUpdate} showError={showError}
+                  questionSummary={questionMap[todo._id]} />
               ))}
             </tbody>
           </table>
         </div>
       )}
     </div>
+  );
+}
+
+function QuestionFlag({ summary, compact, className }: { summary: QuestionsByTodoSummary; compact?: boolean; className?: string }) {
+  const { t } = useTranslation();
+  const parts: string[] = [];
+  if (summary.pendingAgentToUser > 0) parts.push(t('questions.flagPendingAgent', { count: summary.pendingAgentToUser }));
+  if (summary.expiredAgentToUser > 0) parts.push(t('questions.flagExpiredAgent', { count: summary.expiredAgentToUser }));
+  if (summary.pendingUserToAgent > 0) parts.push(t('questions.flagPendingUser', { count: summary.pendingUserToAgent }));
+  const label = parts.join(' · ');
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border border-violet-700/60 bg-violet-950/40 text-violet-200 ${compact ? 'px-1.5 py-0 text-[10px]' : 'px-2 py-0.5 text-[11px]'} ${className ?? ''}`}
+      title={label}
+      onClick={(e) => e.preventDefault()}
+    >
+      <span aria-hidden="true">&#x2753;</span>
+      {!compact && <span>{label}</span>}
+      {compact && <span>{summary.total}</span>}
+    </span>
   );
 }

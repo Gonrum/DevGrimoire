@@ -3,6 +3,7 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature, Manual, Soul, RecurringTask, Snippet, Attachment, LogStats, Release, Workspace } from '../api/client';
 import TodoBoard from '../components/TodoBoard';
+import PendingQuestionsWidget from '../components/dashboard/PendingQuestionsWidget';
 import SessionList from '../components/SessionList';
 import KnowledgeList from '../components/KnowledgeList';
 import ChangelogList from '../components/ChangelogList';
@@ -413,12 +414,15 @@ export default function ProjectDetail() {
         <div className="flex-1 min-w-0">
           <ProjectTabShell title={currentTabLabel} description={currentTabDescription} count={currentTabCount}>
             {tab === 'todos' && (
-              <TodoBoard
-                todos={todos}
-                milestones={milestones}
-                projectId={id!}
-                onUpdate={() => api.todos.list({ projectId: id }).then(setTodos)}
-              />
+              <>
+                <PendingQuestionsWidget projectId={id!} className="mb-4" />
+                <TodoBoard
+                  todos={todos}
+                  milestones={milestones}
+                  projectId={id!}
+                  onUpdate={() => api.todos.list({ projectId: id }).then(setTodos)}
+                />
+              </>
             )}
             {tab === 'soul' && <SoulView projectId={id!} soul={soul} onUpdate={() => api.souls.get(id!).then(setSoul)} />}
             {tab === 'milestones' && (

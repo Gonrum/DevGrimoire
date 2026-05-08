@@ -6,6 +6,7 @@ import {
   IsNumber,
   Min,
   Max,
+  IsIn,
 } from 'class-validator';
 
 export class CreateQuestionDto {
@@ -38,4 +39,21 @@ export class CreateQuestionDto {
   @Max(600)
   @IsOptional()
   timeoutSeconds?: number;
+
+  /**
+   * Direction of the question. Defaults to 'agent_to_user' (the classic ask_user
+   * flow). 'user_to_agent' is a user-initiated follow-up to be answered by an
+   * agent (T-247), no timeout, no broadcast notification.
+   */
+  @IsOptional()
+  @IsIn(['agent_to_user', 'user_to_agent'])
+  direction?: 'agent_to_user' | 'user_to_agent';
+
+  @IsOptional()
+  @IsString()
+  agentRunId?: string;
+
+  @IsOptional()
+  @IsString()
+  agentName?: string;
 }

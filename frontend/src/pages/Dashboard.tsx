@@ -7,6 +7,7 @@ import { useToast } from '../components/Toast';
 import { STATUS_LABELS, STATUS_COLORS, PRIORITY_COLORS, PRIORITY_LABELS } from '../components/todo-utils';
 import Badge from '../components/ui/Badge';
 import Markdown from '../components/Markdown';
+import PendingQuestionsWidget from '../components/dashboard/PendingQuestionsWidget';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
 export default function Dashboard() {
@@ -137,6 +138,9 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Offene Rückfragen */}
+      <PendingQuestionsWidget className="mb-8" />
 
       {/* Aktive Tasks */}
       <div>

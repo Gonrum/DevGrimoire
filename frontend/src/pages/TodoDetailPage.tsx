@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api, Todo, Milestone } from '../api/client';
+import { api, Todo, Milestone, Question } from '../api/client';
 import {
   PRIORITY_COLORS, PRIORITY_LABELS,
   STATUS_COLORS, STATUS_LABELS, STATUS_TRANSITIONS, TRANSITION_BUTTON_VARIANT,
@@ -17,6 +17,7 @@ import { FormInput, FormSelect } from '../components/ui/FormField';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { WorkflowPageShell } from '../components/ui/WorkflowShell';
 import TodoDependenciesSection from '../components/todo/TodoDependenciesSection';
+import TodoQuestionsSection from '../components/todo/TodoQuestionsSection';
 import AttachmentList from '../components/AttachmentList';
 
 function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => void; onCancel: () => void }) {
@@ -90,6 +91,7 @@ export default function TodoDetailPage() {
   const [commentText, setCommentText] = useState('');
   const [savingComment, setSavingComment] = useState(false);
   const [storageEnabled, setStorageEnabled] = useState(false);
+  const [questions, setQuestions] = useState<Question[]>([]);
   const loadTodo = () => {
     if (!todoId) return;
     api.todos.get(todoId)
@@ -98,7 +100,14 @@ export default function TodoDetailPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadTodo(); }, [todoId]);
+  const loadQuestions = () => {
+    if (!todoId) return;
+    api.questions.byTodo(todoId, true)
+      .then(setQuestions)
+      .catch(() => setQuestions([]));
+  };
+
+  useEffect(() => { loadTodo(); loadQuestions(); }, [todoId]);
   useEffect(() => {
     if (!id) return;
     if (isCustomerScope) {
@@ -253,6 +262,14 @@ export default function TodoDetailPage() {
             />
             </div>
           </DetailSection>
+
+          <TodoQuestionsSection
+            todoId={todoId!}
+            projectId={todo.projectId}
+            questions={questions}
+            onChanged={() => { loadQuestions(); loadTodo(); }}
+            onError={showError}
+          />
 
           <DetailSection title={t('todoDetail.comments')} meta={comments.length > 0 ? `(${comments.length})` : undefined}>
             <div className="space-y-2 mb-3">

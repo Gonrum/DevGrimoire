@@ -1058,6 +1058,45 @@ export const api = {
     deleteAll: () =>
       request<{ deleted: number }>('/notifications/all', { method: 'DELETE' }),
   },
+  questions: {
+    pending: (direction?: QuestionDirection) => {
+      const qs = direction ? `?direction=${direction}` : '';
+      return request<Question[]>(`/questions/pending${qs}`);
+    },
+    open: (params: { projectId?: string; direction?: QuestionDirection; limit?: number; offset?: number } = {}) => {
+      const qs = new URLSearchParams();
+      if (params.projectId) qs.set('projectId', params.projectId);
+      if (params.direction) qs.set('direction', params.direction);
+      if (params.limit !== undefined) qs.set('limit', String(params.limit));
+      if (params.offset !== undefined) qs.set('offset', String(params.offset));
+      const suffix = qs.toString() ? `?${qs.toString()}` : '';
+      return request<{ items: Question[]; total: number }>(`/questions/open${suffix}`);
+    },
+    byTodo: (todoId: string, includeAnswered = true) =>
+      request<Question[]>(`/questions/by-todo/${todoId}?includeAnswered=${includeAnswered}`),
+    byTodos: (todoIds: string[]) => {
+      if (todoIds.length === 0) return Promise.resolve({} as Record<string, QuestionsByTodoSummary>);
+      return request<Record<string, QuestionsByTodoSummary>>(
+        `/questions/by-todos?ids=${encodeURIComponent(todoIds.join(','))}`,
+      );
+    },
+    answer: (id: string, answer: string) =>
+      request<Question>(`/questions/${id}/answer`, {
+        method: 'POST',
+        body: JSON.stringify({ answer }),
+      }),
+    createUserToAgent: (data: {
+      question: string;
+      todoId?: string;
+      projectId?: string;
+      context?: string;
+      options?: string[];
+    }) =>
+      request<Question>(`/questions/user-to-agent`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  },
   settings: {
     get: (key: string) =>
       request<{ key: string; value: string | null }>(`/settings/${key}`),
@@ -2016,4 +2055,39 @@ export interface ChatToolExecutionResult {
   content: string;
   /** Short human-readable summary for UI */
   summary: string;
+}
+
+export type QuestionDirection = 'agent_to_user' | 'user_to_agent';
+export type QuestionStatus = 'pending' | 'answered' | 'expired';
+
+export interface Question {
+  _id: string;
+  question: string;
+  options: string[];
+  context?: string;
+  todoId?: string;
+  projectId?: string;
+  targetUserId?: string;
+  createdByUserId?: string;
+  direction: QuestionDirection;
+  status: QuestionStatus;
+  answer?: string;
+  answeredByUserId?: string;
+  answeredByAgent?: boolean;
+  answeredAt?: string;
+  agentRunId?: string;
+  agentName?: string;
+  timeoutMs: number;
+  expiresAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface QuestionsByTodoSummary {
+  todoId: string;
+  pendingAgentToUser: number;
+  expiredAgentToUser: number;
+  pendingUserToAgent: number;
+  total: number;
+  lastUpdatedAt: string;
 }

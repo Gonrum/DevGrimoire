@@ -26,6 +26,7 @@ import { SoulsService } from '../souls/souls.service';
 import { CommitsService } from '../commits/commits.service';
 import { CustomersService } from '../customers/customers.service';
 import { ContactsService } from '../contacts/contacts.service';
+import { QuestionsService } from '../questions/questions.service';
 
 /**
  * Tools split by read/write so the Settings UI can surface write tools with a
@@ -50,12 +51,14 @@ export const TOOL_GROUPS: Record<
     'todo_list', 'todo_get', 'milestone_list', 'milestone_get',
     'changelog_list', 'changelog_get',
     'recurring_task_list', 'recurring_task_get',
+    'question_list', 'question_get',
   ],
   tasks_write: [
     'todo_create', 'todo_update', 'todo_comment',
     'milestone_create', 'milestone_update',
     'changelog_add',
     'recurring_task_create', 'recurring_task_update',
+    'question_answer',
   ],
   knowledge_read: [
     'rag_search',
@@ -240,6 +243,41 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
       type: 'object',
       properties: { id: { type: 'string' } },
       required: ['id'],
+    },
+  },
+  question_list: {
+    name: 'question_list',
+    description: 'Listet offene Rückfragen (Agent→User oder User→Agent) — gefiltert nach Todo, Projekt, Richtung. Nutze dies, um vor dem Weiterarbeiten an einem Todo zu prüfen, ob der User noch offene Folgefragen hinterlegt hat.',
+    parameters: {
+      type: 'object',
+      properties: {
+        todoId: { type: 'string', description: 'Filter: ein einzelnes Todo' },
+        projectId: PROJECT_ID_PROP,
+        direction: { type: 'string', enum: ['agent_to_user', 'user_to_agent'], description: 'Richtungsfilter — meist user_to_agent, um User-Folgefragen zu finden' },
+        includeAnswered: { type: 'boolean', description: 'Auch beantwortete einbeziehen (default false)' },
+        limit: { type: 'number', description: 'Default 50' },
+      },
+    },
+  },
+  question_get: {
+    name: 'question_get',
+    description: 'Lädt eine einzelne Rückfrage inkl. Antwort (falls vorhanden).',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  question_answer: {
+    name: 'question_answer',
+    description: 'Beantwortet eine User→Agent Folgefrage auf einem Todo. Verwende dies, wenn der User über die Todo-Detailansicht eine Frage hinterlegt hat. Antwort wird als Kommentar am Todo dokumentiert.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Question MongoDB ID' },
+        answer: { type: 'string', description: 'Antworttext (Markdown unterstützt)' },
+      },
+      required: ['id', 'answer'],
     },
   },
   rag_search: {
@@ -1133,6 +1171,7 @@ export class ChatToolsService {
     private readonly commits: CommitsService,
     private readonly customers: CustomersService,
     private readonly contacts: ContactsService,
+    private readonly questions: QuestionsService,
   ) {}
 
   /** Fire-and-forget audit log for a write-tool call. Never throws. */
@@ -1286,6 +1325,99 @@ export class ChatToolsService {
         case 'changelog_get': {
           const c = await this.changelog.findById(args.id as string);
           return { success: true, result: c.toObject() };
+        }
+        case 'question_list': {
+          const direction = args.direction as 'agent_to_user' | 'user_to_agent' | undefined;
+          const todoId = args.todoId as string | undefined;
+          const includeAnswered = (args.includeAnswered as boolean | undefined) ?? false;
+          if (todoId) {
+            const list = await this.questions.findByTodo(todoId, includeAnswered);
+            const filtered = direction ? list.filter((q) => q.direction === direction) : list;
+            return {
+              success: true,
+              result: {
+                count: filtered.length,
+                items: filtered.map((q) => ({
+                  id: q._id.toString(),
+                  direction: q.direction,
+                  status: q.status,
+                  question: q.question,
+                  options: q.options,
+                  context: q.context,
+                  answer: q.answer,
+                  todoId: q.todoId?.toString(),
+                  projectId: q.projectId?.toString(),
+                  createdAt: (q as unknown as { createdAt?: Date }).createdAt,
+                  answeredAt: q.answeredAt,
+                })),
+              },
+            };
+          }
+          const limit = typeof args.limit === 'number' ? args.limit : 50;
+          const open = await this.questions.findOpen({
+            projectId,
+            direction,
+            limit,
+          });
+          return {
+            success: true,
+            result: {
+              count: open.total,
+              items: open.items.map((q) => ({
+                id: q._id.toString(),
+                direction: q.direction,
+                status: q.status,
+                question: q.question,
+                options: q.options,
+                todoId: q.todoId?.toString(),
+                projectId: q.projectId?.toString(),
+                createdAt: (q as unknown as { createdAt?: Date }).createdAt,
+              })),
+            },
+          };
+        }
+        case 'question_get': {
+          const qId = args.id as string | undefined;
+          if (!qId) return { success: false, error: 'id required' };
+          const q = await this.questions.findById(qId);
+          return {
+            success: true,
+            result: {
+              id: q._id.toString(),
+              direction: q.direction,
+              status: q.status,
+              question: q.question,
+              options: q.options,
+              context: q.context,
+              answer: q.answer,
+              todoId: q.todoId?.toString(),
+              projectId: q.projectId?.toString(),
+              answeredByUserId: q.answeredByUserId?.toString(),
+              answeredByAgent: q.answeredByAgent,
+              answeredAt: q.answeredAt,
+              expiresAt: q.expiresAt,
+              createdAt: (q as unknown as { createdAt?: Date }).createdAt,
+            },
+          };
+        }
+        case 'question_answer': {
+          const qId = args.id as string | undefined;
+          const ans = args.answer as string | undefined;
+          if (!qId || !ans) return { success: false, error: 'id and answer required' };
+          const updated = await this.questions.answer(
+            qId,
+            ans,
+            { byAgent: true },
+          );
+          return {
+            success: true,
+            result: {
+              id: updated._id.toString(),
+              status: updated.status,
+              answer: updated.answer,
+              answeredAt: updated.answeredAt,
+            },
+          };
         }
         case 'rag_search': {
           const limit = typeof args.limit === 'number' ? args.limit : 10;

@@ -123,6 +123,38 @@ function textResult(data: unknown) {
 }
 
 /**
+ * Compact JSON view of a Question doc for MCP. Strips Mongoose internals and
+ * keeps only the fields an agent needs to decide what to do.
+ */
+function serializeQuestion(q: unknown): Record<string, unknown> {
+  const candidate = q as { toJSON?: () => unknown } & Record<string, unknown>;
+  const obj = typeof candidate.toJSON === 'function'
+    ? (candidate.toJSON() as Record<string, unknown>)
+    : ({ ...(candidate as Record<string, unknown>) });
+  return {
+    _id: obj._id,
+    direction: obj.direction,
+    status: obj.status,
+    question: obj.question,
+    options: obj.options,
+    context: obj.context,
+    answer: obj.answer,
+    todoId: obj.todoId,
+    projectId: obj.projectId,
+    targetUserId: obj.targetUserId,
+    createdByUserId: obj.createdByUserId,
+    answeredByUserId: obj.answeredByUserId,
+    answeredByAgent: obj.answeredByAgent,
+    answeredAt: obj.answeredAt,
+    expiresAt: obj.expiresAt,
+    agentRunId: obj.agentRunId,
+    agentName: obj.agentName,
+    createdAt: obj.createdAt,
+    updatedAt: obj.updatedAt,
+  };
+}
+
+/**
  * Resolve the userId for per-user scoped tools (chat_*).
  * - HTTP MCP transport: derived from the API key during auth middleware via RequestContext
  * - stdio MCP: falls back to MCP_STDIO_USER_ID env (set at bootstrap from first admin)
@@ -878,6 +910,43 @@ const tools = [
         timeoutSeconds: { type: 'number', description: 'How long to wait for an answer (default: 300, max: 600)' },
       },
       required: ['question'],
+    },
+  },
+  {
+    name: 'question_list',
+    description: 'List open or answered questions linked to a todo or project. Supports both directions: agent_to_user (classic ask_user — pending or expired-but-still-answerable) and user_to_agent (user-initiated follow-ups, including on completed todos). Use this to check for pending follow-ups before continuing work on a todo.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        todoId: { type: 'string', description: 'Filter by Todo MongoDB ID (single todo). Use this to find user follow-ups before resuming work on a task.' },
+        projectId: { type: 'string', description: 'Filter by Project MongoDB ID' },
+        direction: { type: 'string', enum: ['agent_to_user', 'user_to_agent'], description: 'Direction filter. Defaults to all directions.' },
+        includeAnswered: { type: 'boolean', description: 'Include already-answered questions (default false — only open ones)' },
+        limit: { type: 'number', description: 'Max items (default 50, max 200)' },
+      },
+    },
+  },
+  {
+    name: 'question_get',
+    description: 'Get a single question by ID, including its current answer if any.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Question MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'question_answer',
+    description: 'Answer a user-to-agent follow-up question on a todo (T-247). Use this when responding to a user-initiated follow-up question discovered via question_list with direction=user_to_agent. Marks the question answered, posts the answer as a comment on the linked todo, and emits a question.answered event.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Question MongoDB ID' },
+        answer: { type: 'string', description: 'The answer text — markdown supported.' },
+      },
+      required: ['id', 'answer'],
     },
   },
   {
@@ -2884,7 +2953,47 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             timeoutSeconds: optionalNumber(a, 'timeoutSeconds'),
           }, userId);
           const timeoutMs = questionEntry.timeoutMs;
-          result = await questionsService.waitForAnswer(questionEntry._id.toString(), timeoutMs);
+          const waitResult = await questionsService.waitForAnswer(questionEntry._id.toString(), timeoutMs);
+          // Surface the questionId so an agent that later wants to check or
+          // answer a still-open question can find it back. M-30: a timed-out
+          // question stays answerable by the user via the todo detail view.
+          result = { ...waitResult, questionId: questionEntry._id.toString() };
+          break;
+        }
+        case 'question_list': {
+          const direction = optionalString(a, 'direction') as 'agent_to_user' | 'user_to_agent' | undefined;
+          if (direction && direction !== 'agent_to_user' && direction !== 'user_to_agent') {
+            throw new Error(`Invalid direction: ${direction}`);
+          }
+          const todoId = optionalString(a, 'todoId');
+          const includeAnswered = optionalBoolean(a, 'includeAnswered') ?? false;
+          if (todoId) {
+            const list = await questionsService.findByTodo(todoId, includeAnswered);
+            const filtered = direction ? list.filter((q) => q.direction === direction) : list;
+            result = { items: filtered.map(serializeQuestion), total: filtered.length };
+          } else {
+            const limit = optionalNumber(a, 'limit') ?? 50;
+            const open = await questionsService.findOpen({
+              projectId: optionalString(a, 'projectId'),
+              direction,
+              limit,
+            });
+            result = { items: open.items.map(serializeQuestion), total: open.total };
+          }
+          break;
+        }
+        case 'question_get': {
+          const q = await questionsService.findById(requireString(a, 'id'));
+          result = serializeQuestion(q);
+          break;
+        }
+        case 'question_answer': {
+          const updated = await questionsService.answer(
+            requireString(a, 'id'),
+            requireString(a, 'answer'),
+            { byAgent: true },
+          );
+          result = serializeQuestion(updated);
           break;
         }
         case 'environment_create': {

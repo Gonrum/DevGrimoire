@@ -1,13 +1,19 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
-  GoneException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Model, Types } from 'mongoose';
-import { Question, QuestionDocument } from './schemas/question.schema';
+import { FilterQuery, Model, Types } from 'mongoose';
+import {
+  Question,
+  QuestionDirection,
+  QuestionDocument,
+  QuestionStatus,
+} from './schemas/question.schema';
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { TodosService } from '../todos/todos.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -15,8 +21,19 @@ import { NotificationsService } from '../notifications/notifications.service';
 export const QUESTION_CREATED = 'question.created';
 export const QUESTION_ANSWERED = 'question.answered';
 
+export interface QuestionsByTodoSummary {
+  todoId: string;
+  pendingAgentToUser: number;
+  expiredAgentToUser: number;
+  pendingUserToAgent: number;
+  total: number;
+  lastUpdatedAt: Date;
+}
+
 @Injectable()
-export class QuestionsService {
+export class QuestionsService implements OnModuleInit {
+  private readonly logger = new Logger(QuestionsService.name);
+
   constructor(
     @InjectModel(Question.name)
     private questionModel: Model<QuestionDocument>,
@@ -25,19 +42,49 @@ export class QuestionsService {
     private notificationsService: NotificationsService,
   ) {}
 
+  /**
+   * Drop the legacy TTL index on `expiresAt` (M-30): with TTL, expired
+   * questions get auto-removed and the user can never respond after timeout.
+   * Recreated as a regular index further down via the schema definition.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      const indexes = await this.questionModel.collection.indexes();
+      let droppedTtl = false;
+      for (const idx of indexes) {
+        if ((idx as { expireAfterSeconds?: number }).expireAfterSeconds !== undefined) {
+          await this.questionModel.collection.dropIndex(idx.name as string);
+          this.logger.log(`Dropped legacy TTL index on questions: ${idx.name}`);
+          droppedTtl = true;
+        }
+      }
+      // After dropping the TTL index, force a re-sync so the new compound
+      // index ({ status: 1, expiresAt: 1 }) actually gets created — Mongoose's
+      // initial autoIndex run may have skipped it because the TTL index on
+      // the same field already existed.
+      if (droppedTtl) {
+        await this.questionModel.ensureIndexes();
+      }
+    } catch (err) {
+      this.logger.warn(`Could not normalise question indexes: ${(err as Error).message}`);
+    }
+  }
+
   async create(
     dto: CreateQuestionDto,
     userId?: string,
   ): Promise<QuestionDocument> {
-    const timeoutMs = (dto.timeoutSeconds || 300) * 1000;
-    const expiresAt = new Date(Date.now() + timeoutMs);
+    const direction: QuestionDirection = dto.direction ?? 'agent_to_user';
 
-    // If todoId is set, derive projectId from the todo
     let projectId = dto.projectId;
     if (dto.todoId && !projectId) {
       const todo = await this.todosService.findById(dto.todoId);
       projectId = todo.projectId?.toString();
     }
+
+    const isAgentAsking = direction === 'agent_to_user';
+    const timeoutMs = isAgentAsking ? (dto.timeoutSeconds || 300) * 1000 : 0;
+    const expiresAt = isAgentAsking ? new Date(Date.now() + timeoutMs) : undefined;
 
     const entry = await this.questionModel.create({
       question: dto.question,
@@ -47,44 +94,53 @@ export class QuestionsService {
       projectId: projectId ? new Types.ObjectId(projectId) : undefined,
       targetUserId: dto.targetUserId ? new Types.ObjectId(dto.targetUserId) : undefined,
       createdByUserId: userId ? new Types.ObjectId(userId) : undefined,
+      direction,
+      agentRunId: dto.agentRunId,
+      agentName: dto.agentName,
       timeoutMs,
       expiresAt,
     });
 
     this.eventEmitter.emit(QUESTION_CREATED, {
       questionId: entry._id.toString(),
+      direction,
       question: entry.question,
       options: entry.options,
       context: entry.context,
       todoId: entry.todoId?.toString() || null,
       projectId: entry.projectId?.toString() || null,
       targetUserId: entry.targetUserId?.toString() || null,
-      expiresAt: entry.expiresAt.toISOString(),
+      expiresAt: entry.expiresAt?.toISOString() ?? null,
     });
 
-    // Send push notification
-    const title = 'Agent hat eine Frage';
-    const body =
-      entry.question.length > 100
-        ? entry.question.slice(0, 97) + '...'
-        : entry.question;
-    const url = entry.todoId
-      ? `/projects/${projectId}/todos/${entry.todoId}`
-      : undefined;
-
-    await this.notificationsService
-      .create(title, body, url, 'question')
-      .catch(() => {
-        // Push not available — ignore
-      });
+    if (isAgentAsking) {
+      const title = 'Agent hat eine Frage';
+      const body =
+        entry.question.length > 100
+          ? entry.question.slice(0, 97) + '...'
+          : entry.question;
+      const url = entry.todoId
+        ? `/projects/${projectId}/todos/${entry.todoId}`
+        : undefined;
+      await this.notificationsService
+        .create(title, body, url, 'question')
+        .catch(() => {
+          /* push not available — ignore */
+        });
+    }
 
     return entry;
   }
 
+  /**
+   * Answer a question. Allowed even on `expired` ones (M-30): timeouts only
+   * stop the agent from blocking, but the user retains the right to respond
+   * later from the todo detail view.
+   */
   async answer(
     id: string,
     answer: string,
-    userId?: string,
+    options: { userId?: string; byAgent?: boolean } = {},
   ): Promise<QuestionDocument> {
     const entry = await this.questionModel.findById(id).exec();
     if (!entry) throw new NotFoundException(`Question ${id} not found`);
@@ -92,11 +148,14 @@ export class QuestionsService {
     if (entry.status === 'answered') {
       throw new BadRequestException('Question already answered');
     }
-    if (entry.status === 'expired' || entry.expiresAt < new Date()) {
-      throw new GoneException('Question has expired');
+
+    if (options.byAgent && entry.direction !== 'user_to_agent') {
+      // Agents may only answer follow-up questions the user asked them.
+      // The reverse direction (agent_to_user) is reserved for human responses
+      // and must not be marked as "agent-answered" in the audit trail.
+      throw new BadRequestException('Agents may only answer user_to_agent questions');
     }
 
-    // Validate answer against options if set
     if (entry.options.length > 0 && !entry.options.includes(answer)) {
       throw new BadRequestException(
         `Answer must be one of: ${entry.options.join(', ')}`,
@@ -106,25 +165,33 @@ export class QuestionsService {
     entry.answer = answer;
     entry.status = 'answered';
     entry.answeredAt = new Date();
-    if (userId) {
-      entry.answeredByUserId = new Types.ObjectId(userId);
+    entry.answeredByAgent = options.byAgent === true;
+    if (options.userId) {
+      entry.answeredByUserId = new Types.ObjectId(options.userId);
     }
     await entry.save();
 
-    // Document question + answer as comment on todo
     if (entry.todoId) {
-      const commentText = `**Agent-Rückfrage:** ${entry.question}\n**Antwort:** ${answer}`;
+      const heading = entry.direction === 'user_to_agent'
+        ? '**User-Folgefrage:**'
+        : '**Agent-Rückfrage:**';
+      const author = options.byAgent ? 'agent' : 'user';
+      const commentText = `${heading} ${entry.question}\n**Antwort:** ${answer}`;
       await this.todosService
-        .addComment(entry.todoId.toString(), commentText, 'user')
+        .addComment(entry.todoId.toString(), commentText, author)
         .catch(() => {
-          // Todo might have been deleted — ignore
+          /* todo might have been deleted — ignore */
         });
     }
 
     this.eventEmitter.emit(QUESTION_ANSWERED, {
       questionId: id,
       answer,
-      answeredByUserId: userId || null,
+      direction: entry.direction,
+      todoId: entry.todoId?.toString() || null,
+      projectId: entry.projectId?.toString() || null,
+      answeredByUserId: options.userId || null,
+      byAgent: options.byAgent === true,
     });
 
     return entry;
@@ -136,19 +203,107 @@ export class QuestionsService {
     return entry;
   }
 
-  async findPending(userId?: string): Promise<QuestionDocument[]> {
-    const now = new Date();
-    const filter: Record<string, unknown> = {
-      status: 'pending',
-      expiresAt: { $gt: now },
-    };
+  /** Pending (not yet expired) questions — used by SSE / agent-side UI. */
+  async findPending(userId?: string, direction?: QuestionDirection): Promise<QuestionDocument[]> {
+    const filter: FilterQuery<QuestionDocument> = { status: 'pending' };
+    if (direction) filter.direction = direction;
     if (userId) {
-      // Show questions targeted at this user + broadcast questions (no targetUserId)
       filter.$or = [
         { targetUserId: new Types.ObjectId(userId) },
         { targetUserId: { $exists: false } },
         { targetUserId: null },
       ];
+    }
+    const now = new Date();
+    filter.$and = [
+      ...(Array.isArray(filter.$and) ? filter.$and : []),
+      { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: now } }] },
+    ];
+    return this.questionModel.find(filter).sort({ createdAt: -1 }).exec();
+  }
+
+  /**
+   * "Open" questions = not yet answered. Includes `pending` and
+   * `expired`-but-still-answerable rows. Used by the dashboard widget and the
+   * todo lila-marking aggregate.
+   */
+  async findOpen(filter: {
+    projectId?: string;
+    direction?: QuestionDirection;
+    todoId?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<{ items: QuestionDocument[]; total: number }> {
+    const q: FilterQuery<QuestionDocument> = {
+      status: { $in: ['pending', 'expired'] },
+    };
+    if (filter.projectId) q.projectId = new Types.ObjectId(filter.projectId);
+    if (filter.direction) q.direction = filter.direction;
+    if (filter.todoId) q.todoId = new Types.ObjectId(filter.todoId);
+
+    const limit = Math.max(1, Math.min(filter.limit ?? 100, 500));
+    const offset = Math.max(0, filter.offset ?? 0);
+
+    const [items, total] = await Promise.all([
+      this.questionModel.find(q).sort({ createdAt: -1 }).skip(offset).limit(limit).exec(),
+      this.questionModel.countDocuments(q).exec(),
+    ]);
+    return { items, total };
+  }
+
+  /**
+   * Aggregate map of open-question counts per todo. Used by the frontend to
+   * paint todos with pending questions in violet without N+1 queries.
+   */
+  async findOpenForTodos(todoIds: string[]): Promise<Record<string, QuestionsByTodoSummary>> {
+    if (todoIds.length === 0) return {};
+    const objectIds = todoIds
+      .filter((id) => Types.ObjectId.isValid(id))
+      .map((id) => new Types.ObjectId(id));
+    if (objectIds.length === 0) return {};
+
+    const docs = await this.questionModel
+      .find({ todoId: { $in: objectIds }, status: { $in: ['pending', 'expired'] } })
+      .lean()
+      .exec();
+
+    const map: Record<string, QuestionsByTodoSummary> = {};
+    for (const d of docs) {
+      const key = d.todoId!.toString();
+      const updatedAt = (d as unknown as { updatedAt?: Date }).updatedAt ?? new Date();
+      const cur = map[key] ?? {
+        todoId: key,
+        pendingAgentToUser: 0,
+        expiredAgentToUser: 0,
+        pendingUserToAgent: 0,
+        total: 0,
+        lastUpdatedAt: updatedAt,
+      };
+      if (d.direction === 'user_to_agent') {
+        cur.pendingUserToAgent++;
+      } else if (d.status === 'pending') {
+        cur.pendingAgentToUser++;
+      } else {
+        cur.expiredAgentToUser++;
+      }
+      cur.total++;
+      if (updatedAt && (!cur.lastUpdatedAt || updatedAt > cur.lastUpdatedAt)) {
+        cur.lastUpdatedAt = updatedAt;
+      }
+      map[key] = cur;
+    }
+    return map;
+  }
+
+  /**
+   * Full question history for one todo (open + answered). Used by the todo
+   * detail page to render question log + answer form.
+   */
+  async findByTodo(todoId: string, includeAnswered = true): Promise<QuestionDocument[]> {
+    if (!Types.ObjectId.isValid(todoId)) return [];
+    const filter: FilterQuery<QuestionDocument> = { todoId: new Types.ObjectId(todoId) };
+    if (!includeAnswered) {
+      filter.status = { $in: ['pending', 'expired'] };
     }
     return this.questionModel.find(filter).sort({ createdAt: -1 }).exec();
   }
@@ -156,32 +311,34 @@ export class QuestionsService {
   async waitForAnswer(
     id: string,
     timeoutMs: number,
-  ): Promise<{ answered: boolean; answer?: string; answeredBy?: string }> {
+  ): Promise<{ answered: boolean; answer?: string; answeredBy?: string; questionId: string }> {
     const pollInterval = 2000;
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
       const entry = await this.questionModel.findById(id).exec();
       if (!entry) {
-        return { answered: false };
+        return { answered: false, questionId: id };
       }
       if (entry.status === 'answered' && entry.answer != null) {
         return {
           answered: true,
           answer: entry.answer,
           answeredBy: entry.answeredByUserId?.toString(),
+          questionId: id,
         };
       }
-      if (entry.status === 'expired' || entry.expiresAt < new Date()) {
-        return { answered: false };
+      if (entry.status === 'expired' || (entry.expiresAt && entry.expiresAt < new Date())) {
+        return { answered: false, questionId: id };
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
 
-    // Mark as expired
+    // Soft-flag as expired but DO NOT delete (M-30: user must still be able
+    // to answer post-hoc from the todo detail view).
     await this.questionModel
-      .findByIdAndUpdate(id, { status: 'expired' })
+      .findByIdAndUpdate(id, { status: 'expired' as QuestionStatus })
       .exec();
-    return { answered: false };
+    return { answered: false, questionId: id };
   }
 }
