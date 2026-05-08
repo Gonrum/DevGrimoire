@@ -10,6 +10,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
 import { ProjectsService } from '../projects/projects.service';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { Todo, TodoDocument, TodoStatus } from '../todos/schemas/todo.schema';
 import { Customer, CustomerDocument, CustomerStatus } from './schemas/customer.schema';
 import {
   CustomerProjectLink,
@@ -33,12 +34,32 @@ export interface CustomerListFilters {
   projectId?: string;
 }
 
+export interface CustomerDashboardEntry {
+  customerId: string;
+  name: string;
+  status: CustomerStatus;
+  openTodoCount: number;
+  projectCount: number;
+  lastActivityAt: Date;
+}
+
+export interface CustomerDashboard {
+  summary: {
+    totalActive: number;
+    withOpenTodos: number;
+    withoutProjects: number;
+    recentlyUpdated: number;
+  };
+  customers: CustomerDashboardEntry[];
+}
+
 @Injectable()
 export class CustomersService {
   constructor(
     @InjectModel(Customer.name) private customerModel: Model<CustomerDocument>,
     @InjectModel(CustomerProjectLink.name)
     private customerProjectLinkModel: Model<CustomerProjectLinkDocument>,
+    @InjectModel(Todo.name) private todoModel: Model<TodoDocument>,
     private readonly projectsService: ProjectsService,
     private eventEmitter: EventEmitter2,
   ) {}
@@ -94,6 +115,71 @@ export class CustomersService {
     Object.assign(query, buildScopeFilter(RequestContext.getUser(), { axis: 'customer', field: '_id' }));
 
     return this.customerModel.find(query).sort({ updatedAt: -1 }).exec();
+  }
+
+  async getDashboard(): Promise<CustomerDashboard> {
+    // Active set: everything that's not archived. Operations dashboard cares
+    // about lifecycle states up to and including offboarding/cancelled.
+    const customers = await this.customerModel
+      .find(
+        {
+          ...{ status: { $ne: CustomerStatus.ARCHIVED } },
+          ...buildScopeFilter(RequestContext.getUser(), { axis: 'customer', field: '_id' }),
+        },
+      )
+      .sort({ updatedAt: -1 })
+      .exec();
+
+    if (customers.length === 0) {
+      return {
+        summary: { totalActive: 0, withOpenTodos: 0, withoutProjects: 0, recentlyUpdated: 0 },
+        customers: [],
+      };
+    }
+
+    const ids = customers.map((c) => c._id);
+    const openStatuses = [TodoStatus.OPEN, TodoStatus.IN_PROGRESS, TodoStatus.REVIEW];
+
+    // Two aggregations beat N+1 counts: one for todos, one for project links.
+    const [todoCounts, linkCounts] = await Promise.all([
+      this.todoModel.aggregate([
+        { $match: { customerId: { $in: ids }, status: { $in: openStatuses }, archived: { $ne: true } } },
+        { $group: { _id: '$customerId', count: { $sum: 1 } } },
+      ]),
+      this.customerProjectLinkModel.aggregate([
+        { $match: { customerId: { $in: ids } } },
+        { $group: { _id: '$customerId', count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const todoMap = new Map<string, number>(
+      todoCounts.map((row: { _id: Types.ObjectId; count: number }) => [row._id.toString(), row.count]),
+    );
+    const linkMap = new Map<string, number>(
+      linkCounts.map((row: { _id: Types.ObjectId; count: number }) => [row._id.toString(), row.count]),
+    );
+
+    const entries: CustomerDashboardEntry[] = customers.map((c) => ({
+      customerId: c._id.toString(),
+      name: c.name,
+      status: c.status,
+      openTodoCount: todoMap.get(c._id.toString()) ?? 0,
+      projectCount: linkMap.get(c._id.toString()) ?? 0,
+      lastActivityAt: (c as unknown as { updatedAt: Date }).updatedAt,
+    }));
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    return {
+      summary: {
+        totalActive: entries.length,
+        withOpenTodos: entries.filter((e) => e.openTodoCount > 0).length,
+        withoutProjects: entries.filter((e) => e.projectCount === 0).length,
+        recentlyUpdated: entries.filter((e) => e.lastActivityAt && e.lastActivityAt >= thirtyDaysAgo).length,
+      },
+      customers: entries,
+    };
   }
 
   async findById(id: string): Promise<CustomerDocument> {

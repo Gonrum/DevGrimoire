@@ -18,6 +18,11 @@ const statusColors: Record<CustomerStatus, string> = {
   archived: 'bg-gray-800 text-gray-500',
 };
 
+interface DashboardStats {
+  openTodoCount: number;
+  projectCount: number;
+}
+
 export default function CustomersOverview() {
   const { t, i18n } = useTranslation();
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -25,6 +30,13 @@ export default function CustomersOverview() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<CustomerStatus | 'all'>('all');
+  const [summary, setSummary] = useState<{
+    totalActive: number;
+    withOpenTodos: number;
+    withoutProjects: number;
+    recentlyUpdated: number;
+  } | null>(null);
+  const [statsByCustomer, setStatsByCustomer] = useState<Record<string, DashboardStats>>({});
 
   const loadCustomers = () => {
     api.customers
@@ -34,9 +46,34 @@ export default function CustomersOverview() {
       .finally(() => setLoading(false));
   };
 
+  const loadDashboard = () => {
+    api.customers
+      .dashboard()
+      .then((res) => {
+        setSummary(res.summary);
+        const map: Record<string, DashboardStats> = {};
+        for (const entry of res.customers) {
+          map[entry.customerId] = {
+            openTodoCount: entry.openTodoCount,
+            projectCount: entry.projectCount,
+          };
+        }
+        setStatsByCustomer(map);
+      })
+      .catch(() => {
+        // Dashboard ist non-critical: bei Fehler lädt der Rest weiterhin.
+        setSummary(null);
+        setStatsByCustomer({});
+      });
+  };
+
   useEffect(() => {
     loadCustomers();
   }, [status]);
+
+  useEffect(() => {
+    loadDashboard();
+  }, []);
 
   const filteredCustomers = customers.filter((customer) => {
     if (!search.trim()) return true;
@@ -62,6 +99,28 @@ export default function CustomersOverview() {
   return (
     <div>
       <h1 className="text-xl sm:text-2xl font-bold mb-6 font-grimoire">{t('customers.overview')}</h1>
+
+      {summary && summary.totalActive > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <KpiTile label={t('customers.dashboard.totalActive')} value={summary.totalActive} tone="default" />
+          <KpiTile
+            label={t('customers.dashboard.withOpenTodos')}
+            value={summary.withOpenTodos}
+            tone={summary.withOpenTodos > 0 ? 'amber' : 'default'}
+          />
+          <KpiTile
+            label={t('customers.dashboard.withoutProjects')}
+            value={summary.withoutProjects}
+            tone={summary.withoutProjects > 0 ? 'rose' : 'default'}
+          />
+          <KpiTile
+            label={t('customers.dashboard.recentlyUpdated')}
+            value={summary.recentlyUpdated}
+            tone="default"
+          />
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
         <ButtonLink to="/customers/new" variant="primary" size="lg" className="mb-0 justify-center">
           {t('customers.newCustomer')}
@@ -120,6 +179,32 @@ export default function CustomersOverview() {
                   ))}
                 </div>
               )}
+              {(() => {
+                const stats = statsByCustomer[customer._id];
+                if (!stats) return null;
+                return (
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    <Badge
+                      color={
+                        stats.openTodoCount > 0
+                          ? 'bg-amber-900/40 text-amber-300 border border-amber-800/50'
+                          : 'bg-gray-800 text-gray-500'
+                      }
+                    >
+                      {t('customers.dashboard.openTodos', { count: stats.openTodoCount })}
+                    </Badge>
+                    <Badge
+                      color={
+                        stats.projectCount > 0
+                          ? 'bg-violet-900/40 text-violet-300 border border-violet-800/50'
+                          : 'bg-rose-900/40 text-rose-300 border border-rose-800/50'
+                      }
+                    >
+                      {t('customers.dashboard.projects', { count: stats.projectCount })}
+                    </Badge>
+                  </div>
+                );
+              })()}
               <p className="text-xs text-gray-600 mt-3">
                 {t('common.created')}: {new Date(customer.createdAt).toLocaleDateString(dateLocale)}
                 {' · '}
@@ -129,6 +214,29 @@ export default function CustomersOverview() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+interface KpiTileProps {
+  label: string;
+  value: number;
+  tone: 'default' | 'amber' | 'rose';
+}
+
+function KpiTile({ label, value, tone }: KpiTileProps) {
+  const toneClass =
+    tone === 'amber'
+      ? 'border-amber-800/40 bg-amber-950/20'
+      : tone === 'rose'
+        ? 'border-rose-800/40 bg-rose-950/20'
+        : 'border-gray-800 bg-gray-900';
+  const valueColor =
+    tone === 'amber' ? 'text-amber-300' : tone === 'rose' ? 'text-rose-300' : 'text-gray-100';
+  return (
+    <div className={`border rounded-lg p-3 ${toneClass}`}>
+      <div className={`text-2xl font-semibold ${valueColor}`}>{value}</div>
+      <div className="text-xs text-gray-400 mt-0.5">{label}</div>
     </div>
   );
 }

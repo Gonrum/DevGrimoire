@@ -777,10 +777,11 @@ export interface Release {
 
 export const api = {
   projects: {
-    list: (filters?: { active?: boolean; favorite?: boolean }) => {
+    list: (filters?: { active?: boolean; favorite?: boolean; customerId?: string }) => {
       const params = new URLSearchParams();
       if (filters?.active !== undefined) params.set('active', String(filters.active));
       if (filters?.favorite !== undefined) params.set('favorite', String(filters.favorite));
+      if (filters?.customerId) params.set('customerId', filters.customerId);
       const qs = params.toString();
       return request<Project[]>(`/projects${qs ? `?${qs}` : ''}`);
     },
@@ -793,6 +794,23 @@ export const api = {
       request<void>(`/projects/${id}`, { method: 'DELETE' }),
   },
   customers: {
+    dashboard: () =>
+      request<{
+        summary: {
+          totalActive: number;
+          withOpenTodos: number;
+          withoutProjects: number;
+          recentlyUpdated: number;
+        };
+        customers: Array<{
+          customerId: string;
+          name: string;
+          status: string;
+          openTodoCount: number;
+          projectCount: number;
+          lastActivityAt: string;
+        }>;
+      }>('/customers/dashboard'),
     list: (filters?: {
       status?: CustomerStatus;
       tag?: string;

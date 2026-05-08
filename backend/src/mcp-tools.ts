@@ -2277,7 +2277,7 @@ function isToolAllowed(toolName: string): boolean {
   return apiKey.allowedTools.includes(toolName);
 }
 
-export function toolGroup(name: string): 'Task-Management' | 'Wissen & Suche' | 'External-Read' | 'Projekt-Daten' {
+export function toolGroup(name: string): 'Task-Management' | 'Wissen & Suche' | 'External-Read' | 'Kundenverwaltung' | 'Projekt-Daten' {
   if (
     name.startsWith('todo_') ||
     name.startsWith('milestone_') ||
@@ -2299,6 +2299,13 @@ export function toolGroup(name: string): 'Task-Management' | 'Wissen & Suche' | 
   }
   if (name.startsWith('web_')) {
     return 'External-Read';
+  }
+  if (
+    name.startsWith('customer_') ||
+    name.startsWith('contact_') ||
+    name === 'project_customer_links'
+  ) {
+    return 'Kundenverwaltung';
   }
   return 'Projekt-Daten';
 }

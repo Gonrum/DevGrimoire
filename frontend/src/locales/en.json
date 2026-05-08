@@ -107,6 +107,8 @@
     "repositoryOptional": "Repository URL (optional)",
     "techStackHint": "Tech Stack (comma-separated, e.g. React, Node.js)",
     "searchProjects": "Search chapters...",
+    "filterByCustomerAll": "All customers",
+    "filterByCustomerTitle": "Filter by customer",
     "importJson": "Import JSON",
     "importing": "Importing...",
     "importFailed": "Import failed",
@@ -121,6 +123,16 @@
   "customers": {
     "overview": "Customer Overview",
     "newCustomer": "+ New Customer",
+    "dashboard": {
+      "totalActive": "Active customers",
+      "withOpenTodos": "With open quests",
+      "withoutProjects": "Without deployment",
+      "recentlyUpdated": "Recently active (30d)",
+      "openTodos_one": "{{count}} open quest",
+      "openTodos_other": "{{count}} open quests",
+      "projects_one": "{{count}} deployment",
+      "projects_other": "{{count}} deployments"
+    },
     "createCustomer": "Create customer file",
     "createCustomerAction": "Create customer file",
     "createFailed": "Could not create customer file",

@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Project, ProjectDocument } from './schemas/project.schema';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
@@ -9,11 +9,17 @@ import { PROJECT_CHANGED } from '../events/project-event';
 import { RequestContext } from '../common/request-context';
 import { actorCanAccessProject } from '../common/permissions';
 import { buildScopeFilter } from '../common/scope';
+import {
+  CustomerProjectLink,
+  CustomerProjectLinkDocument,
+} from '../customers/schemas/customer-project-link.schema';
 
 @Injectable()
 export class ProjectsService {
   constructor(
     @InjectModel(Project.name) private projectModel: Model<ProjectDocument>,
+    @InjectModel(CustomerProjectLink.name)
+    private customerProjectLinkModel: Model<CustomerProjectLinkDocument>,
     private eventEmitter: EventEmitter2,
   ) {}
 
@@ -29,10 +35,24 @@ export class ProjectsService {
     return project;
   }
 
-  async findAll(active?: boolean, favorite?: boolean): Promise<ProjectDocument[]> {
+  async findAll(
+    active?: boolean,
+    favorite?: boolean,
+    customerId?: string,
+  ): Promise<ProjectDocument[]> {
     const filter: Record<string, unknown> = {};
     if (active !== undefined) filter.active = active;
     if (favorite !== undefined) filter.favorite = favorite;
+
+    if (customerId && Types.ObjectId.isValid(customerId)) {
+      const links = await this.customerProjectLinkModel
+        .find({ customerId: new Types.ObjectId(customerId) })
+        .select('projectId')
+        .lean()
+        .exec();
+      filter._id = { $in: links.map((l) => l.projectId) };
+    }
+
     Object.assign(filter, buildScopeFilter(RequestContext.getUser(), { axis: 'project', field: '_id' }));
     return this.projectModel.find(filter).sort({ updatedAt: -1 }).exec();
   }

@@ -60,12 +60,25 @@ const SETTING_TOOLS_ENABLED = 'chat_llm_tools_enabled';
 const SETTING_TOOLS_ALLOWLIST = 'chat_llm_tools_allowlist';
 const SETTING_TOOLS_MAX_ITERATIONS = 'chat_llm_tools_max_iterations';
 
+// Default chat tool allowlist. Read-only across customer + project + task
+// domains so the assistant can answer typical questions without write power.
+// Customer-specific writes (customer_update, contact_create, secret_set, ...)
+// stay off by default and require explicit admin opt-in.
 const DEFAULT_TOOLS_ALLOWLIST = [
+  // Knowledge & search
   'rag_search',
   'knowledge_search',
   'knowledge_get',
+  // Task management (read)
   'todo_list',
   'milestone_list',
+  // Customer context (read-only)
+  'customer_list',
+  'customer_get',
+  'contact_list',
+  'contact_get',
+  'customer_project_list',
+  'project_customer_links',
 ];
 
 /** Providers where tool-calling via OpenAI function-call protocol works today. */

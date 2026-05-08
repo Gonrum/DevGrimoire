@@ -24,6 +24,8 @@ import { RecurringTasksService } from '../recurring-tasks/recurring-tasks.servic
 import { ReleasesService } from '../releases/releases.service';
 import { SoulsService } from '../souls/souls.service';
 import { CommitsService } from '../commits/commits.service';
+import { CustomersService } from '../customers/customers.service';
+import { ContactsService } from '../contacts/contacts.service';
 
 /**
  * Tools split by read/write so the Settings UI can surface write tools with a
@@ -37,6 +39,8 @@ export const TOOL_GROUPS: Record<
   | 'knowledge_write'
   | 'project_read'
   | 'project_write'
+  | 'customer_read'
+  | 'customer_write'
   | 'workspace_read'
   | 'workspace_write'
   | 'external_read',
@@ -85,6 +89,16 @@ export const TOOL_GROUPS: Record<
     'attachment_upload',
     'release_create', 'release_update', 'release_sync_gitlab',
   ],
+  customer_read: [
+    'customer_list', 'customer_get',
+    'customer_project_list', 'project_customer_links',
+    'contact_list', 'contact_get',
+  ],
+  customer_write: [
+    'customer_create', 'customer_update', 'customer_archive',
+    'customer_project_link', 'customer_project_update', 'customer_project_unlink',
+    'contact_create', 'contact_update', 'contact_delete',
+  ],
   workspace_read: [
     'workspace_list', 'workspace_get',
     'workspace_tree', 'workspace_read', 'workspace_search', 'workspace_status',
@@ -103,6 +117,7 @@ export const WRITE_TOOL_NAMES: Set<string> = new Set([
   ...TOOL_GROUPS.tasks_write,
   ...TOOL_GROUPS.knowledge_write,
   ...TOOL_GROUPS.project_write,
+  ...TOOL_GROUPS.customer_write,
   ...TOOL_GROUPS.workspace_write,
 ]);
 
@@ -1116,6 +1131,8 @@ export class ChatToolsService {
     private readonly releases: ReleasesService,
     private readonly souls: SoulsService,
     private readonly commits: CommitsService,
+    private readonly customers: CustomersService,
+    private readonly contacts: ContactsService,
   ) {}
 
   /** Fire-and-forget audit log for a write-tool call. Never throws. */
@@ -2218,6 +2235,99 @@ export class ChatToolsService {
               attachmentId: attachment._id.toString(),
               fileName,
               sizeBytes: file.size,
+            },
+          };
+        }
+
+        case 'customer_list': {
+          const items = await this.customers.findAll({
+            status: args.status as never,
+            tag: args.tag as string | undefined,
+            q: args.q as string | undefined,
+            includeArchived: args.includeArchived as boolean | undefined,
+            projectId: args.projectId as string | undefined,
+          });
+          const limit = typeof args.limit === 'number' ? args.limit : 50;
+          return {
+            success: true,
+            result: items.slice(0, limit).map((c) => ({
+              id: c._id.toString(),
+              name: c.name,
+              status: c.status,
+              tags: c.tags,
+            })),
+          };
+        }
+        case 'customer_get': {
+          const c = await this.customers.findById(args.id as string);
+          return {
+            success: true,
+            result: {
+              id: c._id.toString(),
+              name: c.name,
+              description: c.description,
+              status: c.status,
+              tags: c.tags,
+              primaryContactName: c.primaryContactName,
+              primaryContactEmail: c.primaryContactEmail,
+              website: c.website,
+            },
+          };
+        }
+        case 'customer_project_list': {
+          const links = await this.customers.findProjectLinks(args.customerId as string);
+          return {
+            success: true,
+            result: links.map((l) => ({
+              id: l._id.toString(),
+              customerId: l.customerId.toString(),
+              projectId: l.projectId.toString(),
+              status: l.status,
+              role: l.role,
+            })),
+          };
+        }
+        case 'project_customer_links': {
+          const pid = (args.projectId as string | undefined) || projectId;
+          if (!pid) return { success: false, error: 'projectId required' };
+          const links = await this.customers.findLinksByProject(pid);
+          return {
+            success: true,
+            result: links.map((l) => ({
+              id: l._id.toString(),
+              customerId: l.customerId.toString(),
+              status: l.status,
+              role: l.role,
+            })),
+          };
+        }
+        case 'contact_list': {
+          const items = await this.contacts.findByCustomer(args.customerId as string);
+          return {
+            success: true,
+            result: items.map((c: any) => ({
+              id: c._id.toString(),
+              customerId: c.customerId.toString(),
+              name: c.name,
+              role: c.role,
+              email: c.email,
+              isPrimary: c.isPrimary,
+            })),
+          };
+        }
+        case 'contact_get': {
+          const c = await this.contacts.findById(args.id as string);
+          return {
+            success: true,
+            result: {
+              id: (c as any)._id.toString(),
+              customerId: (c as any).customerId?.toString(),
+              name: (c as any).name,
+              role: (c as any).role,
+              email: (c as any).email,
+              phone: (c as any).phone,
+              notes: (c as any).notes,
+              isPrimary: (c as any).isPrimary,
             },
           };
         }

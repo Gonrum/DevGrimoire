@@ -31,6 +31,7 @@ import { ReleasesModule } from '../releases/releases.module';
 import { SoulsModule } from '../souls/souls.module';
 import { CommitsModule } from '../commits/commits.module';
 import { CustomersModule } from '../customers/customers.module';
+import { ContactsModule } from '../contacts/contacts.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { CustomersModule } from '../customers/customers.module';
     SoulsModule,
     CommitsModule,
     CustomersModule,
+    ContactsModule,
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatLlmService, ChatContextService, ChatToolsService, EncryptionService],

@@ -107,6 +107,8 @@
     "repositoryOptional": "Repository URL (optional)",
     "techStackHint": "Tech Stack (kommagetrennt, z.B. React, Node.js)",
     "searchProjects": "Kapitel suchen...",
+    "filterByCustomerAll": "Alle Kunden",
+    "filterByCustomerTitle": "Nach Kunde filtern",
     "importJson": "JSON importieren",
     "importing": "Importieren...",
     "importFailed": "Import fehlgeschlagen",
@@ -121,6 +123,16 @@
   "customers": {
     "overview": "Kundenübersicht",
     "newCustomer": "+ Neuer Kunde",
+    "dashboard": {
+      "totalActive": "Aktive Kunden",
+      "withOpenTodos": "Mit offenen Quests",
+      "withoutProjects": "Ohne Einsatz",
+      "recentlyUpdated": "Zuletzt aktiv (30 T.)",
+      "openTodos_one": "{{count}} offene Quest",
+      "openTodos_other": "{{count}} offene Quests",
+      "projects_one": "{{count}} Einsatz",
+      "projects_other": "{{count}} Einsätze"
+    },
     "createCustomer": "Neue Kundenakte anlegen",
     "createCustomerAction": "Kundenakte anlegen",
     "createFailed": "Kundenakte konnte nicht angelegt werden",

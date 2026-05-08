@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api, Project } from '../api/client';
+import { api, Project, Customer } from '../api/client';
 import { useDashboardEvents } from '../hooks/useProjectEvents';
 import { useToast } from '../components/Toast';
 import ButtonLink from '../components/ui/ButtonLink';
@@ -13,6 +13,8 @@ import { LoadingText } from '../components/ui/LoadingSpinner';
 export default function ProjectsOverview() {
   const { t, i18n } = useTranslation();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customerFilter, setCustomerFilter] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -21,12 +23,22 @@ export default function ProjectsOverview() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const loadProjects = () => {
+  const loadProjects = (filterCustomerId?: string) => {
     api.projects
-      .list()
+      .list(filterCustomerId ? { customerId: filterCustomerId } : undefined)
       .then(setProjects)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
+  };
+
+  const loadCustomers = () => {
+    api.customers
+      .list({ includeArchived: false })
+      .then(setCustomers)
+      .catch(() => {
+        // Customer-Liste ist nur Filter-Hilfsmittel; bei Fehler stumm bleiben,
+        // damit die Projektliste auch ohne Customers-Modul funktioniert.
+      });
   };
 
   const toggleFavorite = async (e: React.MouseEvent, project: Project) => {
@@ -56,10 +68,14 @@ export default function ProjectsOverview() {
     });
 
   useEffect(() => {
-    loadProjects();
+    loadProjects(customerFilter || undefined);
+  }, [customerFilter]);
+
+  useEffect(() => {
+    loadCustomers();
   }, []);
 
-  useDashboardEvents(() => loadProjects());
+  useDashboardEvents(() => loadProjects(customerFilter || undefined));
 
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
@@ -115,6 +131,21 @@ export default function ProjectsOverview() {
           onChange={(e) => setSearch(e.target.value)}
           className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 w-full sm:w-64"
         />
+        {customers.length > 0 && (
+          <select
+            value={customerFilter}
+            onChange={(e) => setCustomerFilter(e.target.value)}
+            className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500 w-full sm:w-56"
+            title={t('projects.filterByCustomerTitle')}
+          >
+            <option value="">{t('projects.filterByCustomerAll')}</option>
+            {customers.map((c) => (
+              <option key={c._id} value={c._id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       {projects.length === 0 ? (
         <EmptyState message={t('projects.noProjects')} />

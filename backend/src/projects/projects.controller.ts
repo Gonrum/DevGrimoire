@@ -27,12 +27,13 @@ export class ProjectsController {
   findAll(
     @Query('active') active?: string,
     @Query('favorite') favorite?: string,
+    @Query('customerId') customerId?: string,
   ) {
     const activeFilter =
       active !== undefined ? active === 'true' : undefined;
     const favoriteFilter =
       favorite !== undefined ? favorite === 'true' : undefined;
-    return this.projectsService.findAll(activeFilter, favoriteFilter);
+    return this.projectsService.findAll(activeFilter, favoriteFilter, customerId);
   }
 
   @Get(':id')

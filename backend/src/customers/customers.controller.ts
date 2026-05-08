@@ -50,6 +50,11 @@ export class CustomersController {
     return this.customersService.findLinksByProject(projectId);
   }
 
+  @Get('dashboard')
+  getDashboard() {
+    return this.customersService.getDashboard();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.customersService.findById(id);
