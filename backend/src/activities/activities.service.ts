@@ -17,7 +17,8 @@ export class ActivitiesService {
   async handleProjectChange(event: ProjectChangeEvent) {
     const user = RequestContext.getUser();
     await this.activityModel.create({
-      projectId: event.projectId,
+      projectId: event.projectId || undefined,
+      customerId: event.customerId || undefined,
       entity: event.entity,
       action: event.action,
       entityId: event.entityId,
@@ -36,7 +37,20 @@ export class ActivitiesService {
       .exec();
   }
 
+  async findByCustomer(customerId: string, limit = 50): Promise<Activity[]> {
+    return this.activityModel
+      .find({ customerId: projectIdFilter(customerId) })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean()
+      .exec();
+  }
+
   async removeByProject(projectId: string): Promise<void> {
     await this.activityModel.deleteMany({ projectId }).exec();
+  }
+
+  async removeByCustomer(customerId: string): Promise<void> {
+    await this.activityModel.deleteMany({ customerId }).exec();
   }
 }

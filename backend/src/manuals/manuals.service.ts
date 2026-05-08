@@ -31,6 +31,7 @@ export class ManualsService {
     const manual = await this.manualModel.create(dto);
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: dto.projectId ?? null,
+      customerId: dto.customerId ?? null,
       entity: 'manual',
       action: 'created',
       entityId: manual._id.toString(),
@@ -70,6 +71,7 @@ export class ManualsService {
     if (!manual) throw new NotFoundException('Handbuch-Eintrag nicht gefunden');
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: manual.projectId?.toString() ?? null,
+      customerId: manual.customerId?.toString() ?? null,
       entity: 'manual',
       action: 'updated',
       entityId: manual._id.toString(),
@@ -83,6 +85,7 @@ export class ManualsService {
     if (!manual) throw new NotFoundException('Handbuch-Eintrag nicht gefunden');
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: manual.projectId?.toString() ?? null,
+      customerId: manual.customerId?.toString() ?? null,
       entity: 'manual',
       action: 'deleted',
       entityId: manual._id.toString(),

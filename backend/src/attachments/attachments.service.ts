@@ -104,6 +104,7 @@ export class AttachmentsService {
 
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: fields.projectId ?? null,
+      customerId: fields.customerId ?? null,
       entity: 'attachment',
       action: 'created',
       entityId: attachment._id.toString(),
@@ -162,6 +163,7 @@ export class AttachmentsService {
     if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: attachment.projectId?.toString() ?? null,
+      customerId: attachment.customerId?.toString() ?? null,
       entity: 'attachment',
       action: 'updated',
       entityId: id,
@@ -208,6 +210,7 @@ export class AttachmentsService {
     );
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: attachment.projectId?.toString() ?? null,
+      customerId: attachment.customerId?.toString() ?? null,
       entity: 'attachment',
       action: 'deleted',
       entityId: id,
@@ -319,6 +322,7 @@ export class AttachmentsService {
       // Re-emit so RAG picks up the text content
       this.eventEmitter.emit(PROJECT_CHANGED, {
         projectId: attachment.projectId?.toString() ?? null,
+        customerId: attachment.customerId?.toString() ?? null,
         entity: 'attachment',
         action: 'updated',
         entityId: attachment._id.toString(),

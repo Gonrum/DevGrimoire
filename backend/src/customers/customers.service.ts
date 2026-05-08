@@ -43,7 +43,16 @@ export class CustomersService {
 
   async create(dto: CreateCustomerDto): Promise<CustomerDocument> {
     try {
-      return await this.customerModel.create(dto);
+      const customer = await this.customerModel.create(dto);
+      this.eventEmitter.emit(PROJECT_CHANGED, {
+        projectId: null,
+        customerId: customer._id.toString(),
+        entity: 'customer',
+        action: 'created',
+        entityId: customer._id.toString(),
+        summary: `Kunde "${customer.name}" angelegt`,
+      });
+      return customer;
     } catch (err: any) {
       if (err?.code === 11000) {
         throw new ConflictException(`Customer "${dto.name}" already exists`);
@@ -88,6 +97,14 @@ export class CustomersService {
         .findByIdAndUpdate(this.objectId(id, 'customerId'), dto, { new: true })
         .exec();
       if (!customer) throw new NotFoundException(`Customer ${id} not found`);
+      this.eventEmitter.emit(PROJECT_CHANGED, {
+        projectId: null,
+        customerId: customer._id.toString(),
+        entity: 'customer',
+        action: 'updated',
+        entityId: customer._id.toString(),
+        summary: `Kunde "${customer.name}" aktualisiert`,
+      });
       return customer;
     } catch (err: any) {
       if (err?.code === 11000) {
@@ -106,6 +123,14 @@ export class CustomersService {
       )
       .exec();
     if (!customer) throw new NotFoundException(`Customer ${id} not found`);
+    this.eventEmitter.emit(PROJECT_CHANGED, {
+      projectId: null,
+      customerId: customer._id.toString(),
+      entity: 'customer',
+      action: 'updated',
+      entityId: customer._id.toString(),
+      summary: `Kunde "${customer.name}" archiviert`,
+    });
     return customer;
   }
 

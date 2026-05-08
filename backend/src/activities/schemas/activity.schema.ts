@@ -5,8 +5,11 @@ export type ActivityDocument = HydratedDocument<Activity>;
 
 @Schema({ timestamps: true })
 export class Activity {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
-  projectId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  projectId?: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  customerId?: Types.ObjectId;
 
   @Prop({ required: true })
   entity: string;
@@ -29,3 +32,4 @@ export class Activity {
 
 export const ActivitySchema = SchemaFactory.createForClass(Activity);
 ActivitySchema.index({ projectId: 1, createdAt: -1 });
+ActivitySchema.index({ customerId: 1, createdAt: -1 });

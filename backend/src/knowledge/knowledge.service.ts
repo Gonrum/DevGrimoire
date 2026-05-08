@@ -32,6 +32,7 @@ export class KnowledgeService {
     const entry = await this.knowledgeModel.create({ ...dto, scope });
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: entry.projectId?.toString() || null,
+      customerId: entry.customerId?.toString() || null,
       entity: 'knowledge',
       action: 'created',
       entityId: entry._id.toString(),
@@ -118,6 +119,7 @@ export class KnowledgeService {
     if (!entry) throw new NotFoundException(`Knowledge ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: entry.projectId?.toString() || null,
+      customerId: entry.customerId?.toString() || null,
       entity: 'knowledge',
       action: 'updated',
       entityId: id,
@@ -131,6 +133,7 @@ export class KnowledgeService {
     if (!result) throw new NotFoundException(`Knowledge ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: result.projectId?.toString() || null,
+      customerId: result.customerId?.toString() || null,
       entity: 'knowledge',
       action: 'deleted',
       entityId: id,

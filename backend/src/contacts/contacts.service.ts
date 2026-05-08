@@ -26,6 +26,7 @@ export class ContactsService {
   private emit(action: 'created' | 'updated' | 'deleted', contact: ContactDocument): void {
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: null,
+      customerId: contact.customerId?.toString() || null,
       entity: 'contact',
       action,
       entityId: contact._id.toString(),

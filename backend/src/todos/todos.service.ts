@@ -104,6 +104,7 @@ export class TodosService {
     const todo = await this.todoModel.create({ ...dto, number: seq, displayNumber });
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: todo.projectId?.toString() || null,
+      customerId: todo.customerId?.toString() || null,
       entity: 'todo',
       action: 'created',
       entityId: todo._id.toString(),
@@ -157,6 +158,7 @@ export class TodosService {
     if (dto.title) changes.push(`Titel geändert`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: todo.projectId?.toString() || null,
+      customerId: todo.customerId?.toString() || null,
       entity: 'todo',
       action: 'updated',
       entityId: id,
@@ -170,6 +172,7 @@ export class TodosService {
     if (!result) throw new NotFoundException(`Todo ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: result.projectId?.toString() || null,
+      customerId: result.customerId?.toString() || null,
       entity: 'todo',
       action: 'deleted',
       entityId: id,
@@ -188,6 +191,7 @@ export class TodosService {
     if (!todo) throw new NotFoundException(`Todo ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: todo.projectId?.toString() || null,
+      customerId: todo.customerId?.toString() || null,
       entity: 'todo',
       action: 'updated',
       entityId: id,

@@ -27,6 +27,7 @@ export class RecurringTasksService {
     if (!task.projectId && !task.customerId) return;
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: task.projectId?.toString() || null,
+      customerId: task.customerId?.toString() || null,
       entity: 'recurring-task',
       action,
       entityId: task._id.toString(),
