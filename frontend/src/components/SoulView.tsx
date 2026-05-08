@@ -18,12 +18,13 @@ const SECTIONS = [
 type SectionKey = (typeof SECTIONS)[number]['key'];
 
 interface Props {
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   soul: Soul | null;
   onUpdate: () => void;
 }
 
-export default function SoulView({ projectId, soul, onUpdate }: Props) {
+export default function SoulView({ projectId, customerId, soul, onUpdate }: Props) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState<SectionKey | null>(null);
   const [draft, setDraft] = useState('');
@@ -40,7 +41,7 @@ export default function SoulView({ projectId, soul, onUpdate }: Props) {
     if (!editing) return;
     setSaving(true);
     try {
-      await api.souls.upsert({ projectId, [editing]: draft });
+      await api.souls.upsert({ projectId, customerId, [editing]: draft });
       onUpdate();
       setEditing(null);
       setDraft('');

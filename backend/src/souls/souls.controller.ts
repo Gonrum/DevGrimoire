@@ -7,17 +7,23 @@ export class SoulsController {
   constructor(private readonly soulsService: SoulsService) {}
 
   @Get()
-  async findByProject(@Query('projectId') projectId?: string) {
-    if (!projectId) {
-      throw new BadRequestException('projectId query parameter is required');
+  async findByOwner(
+    @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
+  ) {
+    if (!projectId && !customerId) {
+      throw new BadRequestException('projectId or customerId query parameter is required');
     }
-    const soul = await this.soulsService.findByProject(projectId);
+    if (projectId && customerId) {
+      throw new BadRequestException('projectId and customerId are mutually exclusive');
+    }
+    const soul = await this.soulsService.findByOwner({ projectId, customerId });
     return soul || {};
   }
 
   @Put()
   upsert(@Body() dto: CreateSoulDto) {
-    const { projectId, ...fields } = dto;
-    return this.soulsService.upsert(projectId, fields);
+    const { projectId, customerId, ...fields } = dto;
+    return this.soulsService.upsert({ projectId, customerId }, fields);
   }
 }

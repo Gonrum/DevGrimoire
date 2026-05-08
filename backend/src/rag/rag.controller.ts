@@ -9,6 +9,7 @@ export class RagController {
   async search(
     @Query('query') query: string,
     @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
     @Query('entity') entity?: string,
     @Query('limit') limit?: string,
   ) {
@@ -18,14 +19,18 @@ export class RagController {
       projectId || undefined,
       entity || undefined,
       limit ? parseInt(limit, 10) : 10,
+      customerId || undefined,
     );
     return results;
   }
 
   @Post('reindex')
   @HttpCode(200)
-  async reindex(@Query('projectId') projectId?: string) {
-    return this.ragService.reindex(projectId || undefined);
+  async reindex(
+    @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
+  ) {
+    return this.ragService.reindex(projectId || undefined, customerId || undefined);
   }
 
   @Get('status')

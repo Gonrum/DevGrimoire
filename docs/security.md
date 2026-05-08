@@ -51,6 +51,20 @@ For legacy SSE clients that cannot send headers:
 
 The local stdio MCP server remains local-process only and does not use HTTP auth.
 
+## MCP Discovery
+
+`GET /.well-known/mcp` and `GET /.well-known/mcp.json` are public discovery endpoints. They are designed for MCP clients, registries, and crawlers that need to detect DevGrimoire capabilities without opening an authenticated MCP session.
+
+The discovery payload is intentionally non-sensitive:
+
+- server name/version and description
+- supported MCP transports (`/mcp`, `/sse`, `/messages`)
+- auth hints, including whether auth is enabled
+- aggregate capability counts and tool groups
+- links to the authenticated tool catalog and docs
+
+It must not include API keys, JWTs, user records, project/customer IDs, secret values, or per-key tool allowlists. `/api/mcp/tools`, REST data endpoints, and MCP tool calls remain protected by the normal auth guards when authentication is enabled.
+
 ## Secrets
 
 `SECRETS_ENCRYPTION_KEY` must be a 64-character hex string generated with:

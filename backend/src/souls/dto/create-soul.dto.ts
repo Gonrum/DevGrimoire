@@ -2,7 +2,12 @@ import { IsString, IsOptional, IsMongoId } from 'class-validator';
 
 export class CreateSoulDto {
   @IsMongoId()
-  projectId: string;
+  @IsOptional()
+  projectId?: string;
+
+  @IsMongoId()
+  @IsOptional()
+  customerId?: string;
 
   @IsString()
   @IsOptional()

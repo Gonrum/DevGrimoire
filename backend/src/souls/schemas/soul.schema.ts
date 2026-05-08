@@ -5,8 +5,11 @@ export type SoulDocument = HydratedDocument<Soul>;
 
 @Schema({ timestamps: true })
 export class Soul {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
-  projectId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  projectId?: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  customerId?: Types.ObjectId;
 
   @Prop({ default: '' })
   vision: string;
@@ -31,4 +34,11 @@ export class Soul {
 }
 
 export const SoulSchema = SchemaFactory.createForClass(Soul);
-SoulSchema.index({ projectId: 1 }, { unique: true });
+SoulSchema.index(
+  { projectId: 1 },
+  { unique: true, partialFilterExpression: { projectId: { $exists: true } } },
+);
+SoulSchema.index(
+  { customerId: 1 },
+  { unique: true, partialFilterExpression: { customerId: { $exists: true } } },
+);

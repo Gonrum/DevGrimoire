@@ -41,6 +41,7 @@ This document complements the root `README.md` with the details needed to run a 
 | REST API | `http://localhost:3200/api` |
 | Legacy MCP SSE | `http://localhost:3200/sse` |
 | Streamable MCP HTTP | `http://localhost:3200/mcp` |
+| MCP Discovery | `http://localhost:3200/.well-known/mcp` |
 
 ## Docker Host URLs
 

@@ -7,6 +7,7 @@ import ReplicationSettings from '../components/ReplicationSettings';
 import WebSearchSettings from '../components/WebSearchSettings';
 import ApiKeyToolEditor from '../components/ApiKeyToolEditor';
 import NotificationsSettings from '../components/settings/NotificationsSettings';
+import BackupSettings from '../components/settings/BackupSettings';
 import Button from '../components/ui/Button';
 import ConfirmButton from '../components/ui/ConfirmButton';
 import { FormInput, SecretInput } from '../components/ui/FormField';
@@ -45,7 +46,7 @@ Wenn du Tasks bearbeitest, halte dich an den Status-Workflow:
 - Teste Änderungen bevor du sie als fertig markierst
 `;
 
-type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'chat' | 'websearch' | 'users' | 'replication';
+type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'chat' | 'websearch' | 'users' | 'replication' | 'backups';
 
 const CHAT_PROVIDER_DEFAULT_URL: Record<ChatProvider, string> = {
   lmstudio: 'http://localhost:1234',
@@ -459,6 +460,7 @@ export default function Settings() {
     { key: 'apikeys', label: t('settings.tabApiKeys'), group: t('settings.groupSecurity') },
     { key: 'chat', label: t('settings.tabChat'), group: t('settings.groupAdmin'), adminOnly: true },
     { key: 'websearch', label: t('settings.tabWebSearch'), group: t('settings.groupAdmin'), adminOnly: true },
+    { key: 'backups', label: t('settings.tabBackups'), group: t('settings.groupAdmin'), adminOnly: true },
     { key: 'users', label: t('settings.tabUsers'), group: t('settings.groupAdmin'), adminOnly: true },
     { key: 'replication', label: t('settings.tabReplication'), group: t('settings.groupAdmin'), adminOnly: true },
   ];
@@ -1185,6 +1187,7 @@ export default function Settings() {
 
       {tab === 'users' && isAdmin && <UserManagement />}
       {tab === 'websearch' && isAdmin && <WebSearchSettings />}
+      {tab === 'backups' && isAdmin && <BackupSettings />}
 
       {tab === 'replication' && isAdmin && <ReplicationSettings />}
     </SettingsShell>

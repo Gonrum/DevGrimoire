@@ -3,7 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model } from 'mongoose';
 import { createHash } from 'crypto';
-import { gzipSync } from 'zlib';
+import { gzipSync, gunzipSync } from 'zlib';
 import { BackupJob, BackupJobDocument, BackupMode, BackupStatus } from './schemas/backup-job.schema';
 import { CreateBackupDto } from './dto/create-backup.dto';
 import { MinioService } from '../minio/minio.service';
@@ -14,6 +14,27 @@ interface BackupArtifact {
   sha256: string;
   contentType: string;
 }
+
+interface BackupManifest {
+  format?: string;
+  jobId?: string;
+  bucket?: string;
+  objectPrefix?: string;
+  artifacts?: BackupArtifact[];
+  includes?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface RetentionCandidate {
+  jobId: string;
+  createdAt?: Date;
+  bucket: string;
+  objectPrefix?: string;
+  artifactKeys: string[];
+  status: BackupStatus;
+}
+
+const RETENTION_CONFIRMATION = 'DELETE_EXPIRED_BACKUPS';
 
 @Injectable()
 export class BackupsService {
@@ -62,6 +83,69 @@ export class BackupsService {
       bucket: this.getBackupBucket(),
       minioEnabled: this.minioService.isEnabled(),
       running: this.running,
+      retention: this.getRetentionPolicy(),
+    };
+  }
+
+  async previewRetention(): Promise<Record<string, unknown>> {
+    const policy = this.getRetentionPolicy();
+    const candidates = await this.getRetentionCandidates(policy.keepLast, policy.keepDays);
+    return this.buildRetentionReport(policy, candidates, true, 'Preview only. No backup jobs or objects were deleted.');
+  }
+
+  async applyRetention(confirm: string): Promise<Record<string, unknown>> {
+    if (confirm !== RETENTION_CONFIRMATION) {
+      throw new BadRequestException(`Retention cleanup requires confirm=\"${RETENTION_CONFIRMATION}\"`);
+    }
+    if (!this.minioService.isEnabled()) throw new BadRequestException('MinIO is not configured; retention cleanup needs backup storage');
+
+    const policy = this.getRetentionPolicy();
+    const candidates = await this.getRetentionCandidates(policy.keepLast, policy.keepDays);
+    const deletedObjects: string[] = [];
+    const errors: Array<{ jobId: string; message: string }> = [];
+
+    for (const candidate of candidates) {
+      try {
+        await this.minioService.removeObjectsInBucket(candidate.bucket, candidate.artifactKeys);
+        deletedObjects.push(...candidate.artifactKeys);
+        await this.backupJobModel.findByIdAndDelete(candidate.jobId).exec();
+      } catch (err) {
+        errors.push({ jobId: candidate.jobId, message: (err as Error).message });
+      }
+    }
+
+    return {
+      ...this.buildRetentionReport(policy, candidates, false, 'Expired backup jobs and listed objects were removed.'),
+      deletedObjectCount: deletedObjects.length,
+      errors,
+      ok: errors.length === 0,
+    };
+  }
+
+  async previewRestore(id: string): Promise<Record<string, unknown>> {
+    if (!this.minioService.isEnabled()) throw new BadRequestException('MinIO is not configured; restore preview needs backup storage');
+    const job = await this.findById(id);
+    if (job.status !== BackupStatus.COMPLETED) {
+      throw new BadRequestException(`Backup job ${id} is not completed`);
+    }
+
+    const manifestKey = `${job.objectPrefix}/manifest.json`;
+    const manifest = await this.readJsonObject<BackupManifest>(job.bucket, manifestKey);
+    const artifacts = Array.isArray(manifest.artifacts) ? manifest.artifacts : [];
+    const checks = await Promise.all(artifacts.map(async (artifact) => this.verifyArtifact(job.bucket, artifact)));
+
+    return {
+      jobId: job._id.toString(),
+      status: job.status,
+      bucket: job.bucket,
+      objectPrefix: job.objectPrefix,
+      manifestKey,
+      manifestFormat: manifest.format || null,
+      includes: manifest.includes || {},
+      artifactCount: artifacts.length,
+      checks,
+      ok: checks.every((check) => check.exists && check.sizeMatches && check.sha256Matches),
+      note: 'Restore preview only. No database or attachment data was modified.',
     };
   }
 
@@ -224,6 +308,99 @@ export class BackupsService {
   private async writeLatestPointer(bucket: string, objectPrefix: string, manifest: Record<string, unknown>): Promise<void> {
     const payload = Buffer.from(JSON.stringify({ objectPrefix, manifestKey: `${objectPrefix}/manifest.json`, manifest }, null, 2), 'utf-8');
     await this.minioService.putObjectInBucket(bucket, 'backups/devgrimoire/latest.json', payload, 'application/json');
+  }
+
+  private getRetentionPolicy(): { keepLast: number; keepDays: number } {
+    const keepLast = Number(process.env.BACKUP_RETENTION_KEEP_LAST || 14);
+    const keepDays = Number(process.env.BACKUP_RETENTION_KEEP_DAYS || 30);
+    return {
+      keepLast: Number.isFinite(keepLast) && keepLast > 0 ? Math.floor(keepLast) : 14,
+      keepDays: Number.isFinite(keepDays) && keepDays > 0 ? Math.floor(keepDays) : 30,
+    };
+  }
+
+  private async getRetentionCandidates(keepLast: number, keepDays: number): Promise<RetentionCandidate[]> {
+    const cutoff = new Date(Date.now() - keepDays * 24 * 60 * 60 * 1000);
+    const jobs = await this.backupJobModel.find({ status: BackupStatus.COMPLETED }).sort({ createdAt: -1 }).exec();
+    return jobs
+      .slice(keepLast)
+      .filter((job) => {
+        const createdAt = (job as BackupJobDocument & { createdAt?: Date }).createdAt;
+        return createdAt && createdAt < cutoff;
+      })
+      .map((job) => {
+        const createdAt = (job as BackupJobDocument & { createdAt?: Date }).createdAt;
+        const artifacts = Array.isArray(job.manifest?.artifacts) ? job.manifest.artifacts as BackupArtifact[] : [];
+        const artifactKeys = artifacts.map((artifact) => artifact.key).filter(Boolean);
+        if (job.objectPrefix && !artifactKeys.includes(`${job.objectPrefix}/manifest.json`)) {
+          artifactKeys.push(`${job.objectPrefix}/manifest.json`);
+        }
+        return {
+          jobId: job._id.toString(),
+          createdAt,
+          bucket: job.bucket,
+          objectPrefix: job.objectPrefix,
+          artifactKeys,
+          status: job.status,
+        };
+      });
+  }
+
+  private buildRetentionReport(
+    policy: { keepLast: number; keepDays: number },
+    candidates: RetentionCandidate[],
+    dryRun: boolean,
+    note: string,
+  ): Record<string, unknown> {
+    return {
+      dryRun,
+      policy,
+      deleteJobCount: candidates.length,
+      deleteObjectCount: candidates.reduce((sum, candidate) => sum + candidate.artifactKeys.length, 0),
+      candidates,
+      note,
+    };
+  }
+
+  private async verifyArtifact(bucket: string, artifact: BackupArtifact): Promise<Record<string, unknown>> {
+    try {
+      const payload = await this.readObjectBuffer(bucket, artifact.key);
+      const sha256 = createHash('sha256').update(payload).digest('hex');
+      const sizeMatches = payload.length === artifact.size;
+      const sha256Matches = sha256 === artifact.sha256;
+      return {
+        key: artifact.key,
+        exists: true,
+        size: payload.length,
+        expectedSize: artifact.size,
+        sizeMatches,
+        sha256Matches,
+        contentType: artifact.contentType,
+      };
+    } catch (err) {
+      return {
+        key: artifact.key,
+        exists: false,
+        sizeMatches: false,
+        sha256Matches: false,
+        error: (err as Error).message,
+      };
+    }
+  }
+
+  private async readJsonObject<T>(bucket: string, key: string): Promise<T> {
+    const payload = await this.readObjectBuffer(bucket, key);
+    const body = key.endsWith('.gz') ? gunzipSync(payload).toString('utf-8') : payload.toString('utf-8');
+    return JSON.parse(body) as T;
+  }
+
+  private async readObjectBuffer(bucket: string, key: string): Promise<Buffer> {
+    const stream = await this.minioService.getObjectInBucket(bucket, key);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
   }
 
   private getBackupBucket(): string {

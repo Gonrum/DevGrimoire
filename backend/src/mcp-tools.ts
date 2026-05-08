@@ -889,6 +889,11 @@ const tools = [
         projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
         customerId: { type: 'string', description: 'Customer MongoDB ID for customer-scoped environments (mutually exclusive with projectId)' },
         name: { type: 'string', description: 'Environment name (e.g. dev, staging, prod)' },
+        description: { type: 'string', description: 'Optional environment description' },
+        host: { type: 'string', description: 'Optional host name or IP address' },
+        port: { type: 'number', description: 'Optional port number' },
+        user: { type: 'string', description: 'Optional login/deploy user' },
+        url: { type: 'string', description: 'Optional public/admin URL' },
         variables: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, value: { type: 'string' } }, required: ['key', 'value'] }, description: 'Key-value pairs for environment variables' },
         active: { type: 'boolean', description: 'Whether environment is active (default true)' },
       },
@@ -919,12 +924,17 @@ const tools = [
   },
   {
     name: 'environment_update',
-    description: 'Update an environment (name, variables, active status)',
+    description: 'Update an environment (name, description, server details, variables, active status)',
     inputSchema: {
       type: 'object' as const,
       properties: {
         id: { type: 'string', description: 'Environment MongoDB ID' },
         name: { type: 'string' },
+        description: { type: 'string' },
+        host: { type: 'string' },
+        port: { type: 'number' },
+        user: { type: 'string' },
+        url: { type: 'string' },
         variables: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, value: { type: 'string' } }, required: ['key', 'value'] } },
         active: { type: 'boolean' },
       },
@@ -954,6 +964,7 @@ const tools = [
         key: { type: 'string', description: 'Secret name (e.g. DB_PASSWORD, API_KEY)' },
         value: { type: 'string', description: 'Secret value (will be encrypted)' },
         description: { type: 'string', description: 'Optional description of the secret' },
+        type: { type: 'string', enum: ['variable', 'password', 'token', 'ssh_key', 'certificate', 'file'], description: 'Secret type/category (default: variable)' },
       },
       required: ['key', 'value'],
     },
@@ -1073,17 +1084,18 @@ const tools = [
   },
   {
     name: 'research_save',
-    description: 'Save a research entry (findings, analysis, comparisons) for a project',
+    description: 'Save a research entry (findings, analysis, comparisons). Scoped to either a project or a customer.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
         title: { type: 'string', description: 'Research title' },
         content: { type: 'string', description: 'Research content/findings' },
         sources: { type: 'array', items: { type: 'string' }, description: 'Source URLs or references' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' },
       },
-      required: ['projectId', 'title', 'content'],
+      required: ['title', 'content'],
     },
   },
   {
@@ -1094,6 +1106,7 @@ const tools = [
       properties: {
         query: { type: 'string', description: 'Search query' },
         projectId: { type: 'string', description: 'Scope search to a specific project' },
+        customerId: { type: 'string', description: 'Scope search to a specific customer' },
         limit: { type: 'number', description: 'Max items to return' },
       },
       required: ['query'],
@@ -1105,11 +1118,11 @@ const tools = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
         limit: { type: 'number', description: 'Max items to return' },
         offset: { type: 'number', description: 'Skip first N items' },
       },
-      required: ['projectId'],
     },
   },
   {
@@ -1579,23 +1592,24 @@ const tools = [
   },
   {
     name: 'soul_get',
-    description: 'Get the project soul (identity, principles, conventions, boundaries). The soul defines how the agent should work with this project. Returns null if no soul is defined yet.',
+    description: 'Get a soul (identity, principles, conventions, boundaries) scoped to either a project or a customer. The soul defines how the agent should work with this owner. Returns an empty object if no soul is defined yet.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
       },
-      required: ['projectId'],
     },
   },
   {
     name: 'soul_update',
-    description: 'Update (or create) the project soul. Supports partial updates — only provided sections are changed. Use this to define how the agent should work with this project. Sections: vision, principles, conventions, communication, boundaries, workflow, quality.',
+    description: 'Update (or create) a soul scoped to either a project or a customer. Supports partial updates — only provided sections are changed. Sections: vision, principles, conventions, communication, boundaries, workflow, quality.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
-        vision: { type: 'string', description: 'Project vision, purpose, target audience' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
+        vision: { type: 'string', description: 'Vision, purpose, target audience' },
         principles: { type: 'string', description: 'Technical principles, architecture decisions' },
         conventions: { type: 'string', description: 'Coding style, naming, formatting, test requirements' },
         communication: { type: 'string', description: 'How the agent should communicate (verbose/concise, language, tone)' },
@@ -1603,7 +1617,6 @@ const tools = [
         workflow: { type: 'string', description: 'How work should be done (plan first, review process, etc.)' },
         quality: { type: 'string', description: 'Quality standards, security requirements' },
       },
-      required: ['projectId'],
     },
   },
   // ─── Commits ───
@@ -1653,13 +1666,14 @@ const tools = [
   },
   {
     name: 'rag_search',
-    description: 'Semantic search across all project knowledge (knowledge, research, manuals, changelogs, todos, sessions). Uses vector embeddings for meaning-based search instead of keyword matching. Requires Ollama running locally.',
+    description: 'Semantic search across all indexed content (knowledge, research, manuals, changelogs, todos, sessions, snippets, attachments, schemas). Uses vector embeddings for meaning-based search. Filter by project or customer scope.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         query: { type: 'string', description: 'Natural language search query' },
-        projectId: { type: 'string', description: 'Filter by project ID' },
-        entity: { type: 'string', description: 'Filter by entity type: knowledge, research, manual, changelog, todo, session' },
+        projectId: { type: 'string', description: 'Filter by project ID (project-scoped + global hits)' },
+        customerId: { type: 'string', description: 'Filter by customer ID (customer-scoped + global hits)' },
+        entity: { type: 'string', description: 'Filter by entity type: knowledge, research, manual, changelog, todo, session, snippet, attachment, schema' },
         limit: { type: 'number', description: 'Max results (default 10)' },
       },
       required: ['query'],
@@ -1667,11 +1681,12 @@ const tools = [
   },
   {
     name: 'rag_reindex',
-    description: 'Rebuild the RAG vector index. Run this after initial setup or to fix sync issues. Can reindex all projects or a specific one.',
+    description: 'Rebuild the RAG vector index. Run after initial setup or to fix sync issues. Can reindex all data, a specific project, or a specific customer.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Reindex only this project (omit for full reindex)' },
+        projectId: { type: 'string', description: 'Reindex only this project (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Reindex only this customer (mutually exclusive with projectId)' },
       },
     },
   },
@@ -1996,11 +2011,12 @@ const tools = [
   },
   {
     name: 'snippet_save',
-    description: 'Save a code snippet for a project',
+    description: 'Save a code snippet. Scoped to either a project or a customer.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
         title: { type: 'string', description: 'Snippet title' },
         language: { type: 'string', description: 'Programming language (e.g. typescript, python, bash, sql)' },
         code: { type: 'string', description: 'The code snippet content' },
@@ -2009,7 +2025,7 @@ const tools = [
         category: { type: 'string', description: 'Category (e.g. Utils, Config, Patterns, Queries)' },
         fileName: { type: 'string', description: 'Optional source file name' },
       },
-      required: ['projectId', 'title', 'language', 'code'],
+      required: ['title', 'language', 'code'],
     },
   },
   {
@@ -2018,14 +2034,14 @@ const tools = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
         language: { type: 'string', description: 'Filter by programming language' },
         category: { type: 'string', description: 'Filter by category' },
         tag: { type: 'string', description: 'Filter by tag (exact match)' },
         limit: { type: 'number', description: 'Max items to return' },
         offset: { type: 'number', description: 'Skip first N items' },
       },
-      required: ['projectId'],
     },
   },
   {
@@ -2076,6 +2092,7 @@ const tools = [
       properties: {
         q: { type: 'string', description: 'Search query' },
         projectId: { type: 'string', description: 'Optional: limit to project' },
+        customerId: { type: 'string', description: 'Optional: limit to customer' },
       },
       required: ['q'],
     },
@@ -2193,28 +2210,28 @@ const tools = [
   },
   {
     name: 'chat_create',
-    description: 'Create a new chat session for a project. Returns the session id which is needed for chat_send and chat_get.',
+    description: 'Create a new chat session scoped to either a project or a customer. Returns the session id which is needed for chat_send and chat_get.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
         title: { type: 'string', description: 'Optional session title (default: timestamp)' },
       },
-      required: ['projectId'],
     },
   },
   {
     name: 'chat_list',
-    description: 'List chat sessions of a project (compact: id, title, message count, updatedAt). Use chat_get for full messages. Archived sessions are excluded by default.',
+    description: 'List chat sessions of a project or customer (compact: id, title, message count, updatedAt). Use chat_get for full messages. Archived sessions are excluded by default.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
         includeArchived: { type: 'boolean', description: 'Include archived sessions (default false)' },
         limit: { type: 'number', description: 'Max items to return' },
         offset: { type: 'number', description: 'Skip first N items' },
       },
-      required: ['projectId'],
     },
   },
   {
@@ -2868,6 +2885,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             projectId: optionalString(a, 'projectId'),
             customerId: optionalString(a, 'customerId'),
             name: requireString(a, 'name'),
+            description: optionalString(a, 'description'),
+            host: optionalString(a, 'host'),
+            port: optionalNumber(a, 'port'),
+            user: optionalString(a, 'user'),
+            url: optionalString(a, 'url'),
             variables: a.variables as any,
             active: optionalBoolean(a, 'active'),
           });
@@ -2904,6 +2926,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'environment_update':
           result = compactUpdateResult(await environmentsService.update(requireString(a, 'id'), {
             name: optionalString(a, 'name'),
+            description: optionalString(a, 'description'),
+            host: optionalString(a, 'host'),
+            port: optionalNumber(a, 'port'),
+            user: optionalString(a, 'user'),
+            url: optionalString(a, 'url'),
             variables: a.variables as any,
             active: optionalBoolean(a, 'active'),
           }));
@@ -2920,6 +2947,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             key: requireString(a, 'key'),
             value: requireString(a, 'value'),
             description: optionalString(a, 'description'),
+            type: optionalString(a, 'type'),
           });
           result = compactCreateResult(secret, { key: (secret as any).key });
           break;
@@ -3021,7 +3049,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'research_save': {
           const rEntry = await researchService.create({
-            projectId: requireString(a, 'projectId'),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
             title: requireString(a, 'title'),
             content: requireString(a, 'content'),
             sources: optionalStringArray(a, 'sources'),
@@ -3032,14 +3061,16 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'research_search': {
           const rProjectId = optionalString(a, 'projectId');
+          const rCustomerId = optionalString(a, 'customerId');
           const rSearchResults = await researchService.search(
             requireString(a, 'query'),
             rProjectId,
+            rCustomerId,
           );
           const rLimited = rSearchResults.slice(0, optionalNumber(a, 'limit') || 10);
           result = rLimited.map((item: any) => {
             const obj = typeof item.toJSON === 'function' ? item.toJSON() : { ...item };
-            if (rProjectId) {
+            if (rProjectId || rCustomerId) {
               obj.content = snippet(obj.content);
             } else {
               delete obj.content;
@@ -3052,7 +3083,14 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'research_list': {
-          const rEntries = await researchService.findByProject(requireString(a, 'projectId'));
+          const rProjectId = optionalString(a, 'projectId');
+          const rCustomerId = optionalString(a, 'customerId');
+          if (!rProjectId && !rCustomerId) {
+            throw new Error('research_list requires projectId or customerId');
+          }
+          const rEntries = rProjectId
+            ? await researchService.findByProject(rProjectId)
+            : await researchService.findByCustomer(rCustomerId!);
           const compactResearch = rEntries.map((item: any) => {
             const obj = typeof item.toJSON === 'function' ? item.toJSON() : { ...item };
             delete obj.content;
@@ -3337,8 +3375,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'soul_get': {
-          const soul = await soulsService.findByProject(requireString(a, 'projectId'));
-          result = soul || { message: 'No project soul defined yet. Use soul_update to create one.' };
+          const soul = await soulsService.findByOwner({
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
+          });
+          result = soul || { message: 'No soul defined yet for this owner. Use soul_update to create one.' };
           break;
         }
         case 'soul_update': {
@@ -3347,7 +3388,13 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             const val = optionalString(a, key);
             if (val !== undefined) soulFields[key] = val;
           }
-          const soul = await soulsService.upsert(requireString(a, 'projectId'), soulFields);
+          const soul = await soulsService.upsert(
+            {
+              projectId: optionalString(a, 'projectId'),
+              customerId: optionalString(a, 'customerId'),
+            },
+            soulFields,
+          );
           const soulObj = soul.toObject() as unknown as Record<string, unknown>;
           const defined = ['vision', 'principles', 'conventions', 'communication', 'boundaries', 'workflow', 'quality']
             .filter((k) => soulObj[k]).length;
@@ -3404,9 +3451,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           if (process.env.MCP_STDIO === 'true') {
             const params = new URLSearchParams({ query: requireString(a, 'query') });
             const pid = optionalString(a, 'projectId');
+            const cid = optionalString(a, 'customerId');
             const ent = optionalString(a, 'entity');
             const lim = optionalNumber(a, 'limit');
             if (pid) params.set('projectId', pid);
+            if (cid) params.set('customerId', cid);
             if (ent) params.set('entity', ent);
             if (lim) params.set('limit', String(lim));
             const ragResults = await ragHttpGet(`/api/rag/search?${params}`);
@@ -3421,6 +3470,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               optionalString(a, 'projectId'),
               optionalString(a, 'entity'),
               optionalNumber(a, 'limit') || 10,
+              optionalString(a, 'customerId'),
             );
             result = ragResults.map((r) => ({
               ...r,
@@ -3433,10 +3483,14 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'rag_reindex': {
           if (process.env.MCP_STDIO === 'true') {
             const pid = optionalString(a, 'projectId');
-            const params = pid ? `?projectId=${pid}` : '';
-            result = await ragHttpPost(`/api/rag/reindex${params}`);
+            const cid = optionalString(a, 'customerId');
+            const params = new URLSearchParams();
+            if (pid) params.set('projectId', pid);
+            if (cid) params.set('customerId', cid);
+            const qs = params.toString();
+            result = await ragHttpPost(`/api/rag/reindex${qs ? `?${qs}` : ''}`);
           } else {
-            result = await ragService.reindex(optionalString(a, 'projectId'));
+            result = await ragService.reindex(optionalString(a, 'projectId'), optionalString(a, 'customerId'));
           }
           break;
         }
@@ -3794,7 +3848,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'snippet_save': {
           const snip = await snippetsService.create({
-            projectId: requireString(a, 'projectId'),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
             title: requireString(a, 'title'),
             language: requireString(a, 'language'),
             code: requireString(a, 'code'),
@@ -3807,12 +3862,24 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'snippet_list': {
-          const snippets = await snippetsService.findByProject(
-            requireString(a, 'projectId'),
-            optionalString(a, 'language'),
-            optionalString(a, 'category'),
-            optionalString(a, 'tag'),
-          );
+          const sProjectId = optionalString(a, 'projectId');
+          const sCustomerId = optionalString(a, 'customerId');
+          if (!sProjectId && !sCustomerId) {
+            throw new Error('snippet_list requires projectId or customerId');
+          }
+          const snippets = sProjectId
+            ? await snippetsService.findByProject(
+                sProjectId,
+                optionalString(a, 'language'),
+                optionalString(a, 'category'),
+                optionalString(a, 'tag'),
+              )
+            : await snippetsService.findByCustomer(
+                sCustomerId!,
+                optionalString(a, 'language'),
+                optionalString(a, 'category'),
+                optionalString(a, 'tag'),
+              );
           result = applyPagination(
             compactList(snippets as any, ['code', 'description', '__v']),
             optionalNumber(a, 'limit'),
@@ -3842,6 +3909,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const searchResults = await snippetsService.search(
             requireString(a, 'q'),
             optionalString(a, 'projectId'),
+            optionalString(a, 'customerId'),
           );
           result = searchResults.map((s: any) => {
             const obj = typeof s.toJSON === 'function' ? s.toJSON() : { ...s };
@@ -3982,7 +4050,10 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'chat_create': {
           const created = await chatService.createSession(
-            requireString(a, 'projectId'),
+            {
+              projectId: optionalString(a, 'projectId'),
+              customerId: optionalString(a, 'customerId'),
+            },
             requireUserId(),
             optionalString(a, 'title'),
           );
@@ -3991,7 +4062,10 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'chat_list': {
           const sessions = await chatService.listSessions(
-            requireString(a, 'projectId'),
+            {
+              projectId: optionalString(a, 'projectId'),
+              customerId: optionalString(a, 'customerId'),
+            },
             requireUserId(),
             {
               includeArchived: optionalBoolean(a, 'includeArchived'),
@@ -4080,10 +4154,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
       // notify_user already creates its own notification in the switch case
       if (name !== 'notify_user' && name !== 'ask_user') {
         const toolPrefix = name.split('_')[0];
+        const derivedUrl = deriveNotificationUrl(name, a, result);
         notificationsService.create(
           `MCP: ${name}`,
           formatToolSummary(name, a),
-          undefined,
+          derivedUrl,
           `mcp_${toolPrefix}`,
         ).catch(() => {});
       }
@@ -4094,6 +4169,60 @@ export function registerMcpTools(server: Server, services: McpServices): void {
       return errorResult(`Error: ${message}`);
     }
   });
+}
+
+function deriveNotificationUrl(toolName: string, args: Record<string, unknown>, result: unknown): string | undefined {
+  const r = result as Record<string, unknown> | null | undefined;
+  const argProjectId = typeof args.projectId === 'string' ? args.projectId : undefined;
+  const resultProjectId = typeof r?.projectId === 'string' ? r.projectId : argProjectId;
+  const resultId = typeof r?._id === 'string' ? r._id : undefined;
+
+  switch (toolName) {
+    case 'todo_create':
+    case 'todo_update':
+    case 'todo_comment':
+      if (resultProjectId && resultId) return `/projects/${resultProjectId}/todos/${resultId}`;
+      break;
+    case 'milestone_create':
+    case 'milestone_update':
+      if (resultProjectId && resultId) return `/projects/${resultProjectId}/milestones/${resultId}`;
+      break;
+    case 'project_create':
+    case 'project_update':
+      if (resultId) return `/projects/${resultId}`;
+      break;
+    case 'knowledge_save':
+    case 'knowledge_update':
+      if (resultProjectId) return `/projects/${resultProjectId}?tab=knowledge`;
+      break;
+    case 'changelog_add':
+    case 'changelog_update':
+      if (resultProjectId) return `/projects/${resultProjectId}?tab=changelog`;
+      break;
+    case 'research_save':
+    case 'research_update':
+      if (resultProjectId) return `/projects/${resultProjectId}?tab=research`;
+      break;
+    case 'session_save':
+      if (resultProjectId) return `/projects/${resultProjectId}?tab=sessions`;
+      break;
+    case 'schema_create':
+    case 'schema_update':
+      if (resultProjectId) return `/projects/${resultProjectId}?tab=schemas`;
+      break;
+    case 'feature_create':
+    case 'feature_update':
+      if (resultProjectId) return `/projects/${resultProjectId}?tab=features`;
+      break;
+    case 'release_create':
+    case 'release_update':
+      if (resultProjectId) return `/projects/${resultProjectId}?tab=releases`;
+      break;
+    default:
+      break;
+  }
+
+  return undefined;
 }
 
 function formatToolSummary(toolName: string, args: Record<string, unknown>): string {

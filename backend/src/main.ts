@@ -47,7 +47,7 @@ import { WorkspaceGitTokensService } from './workspaces/workspace-git-tokens.ser
 import { WorkspaceCliTokenService } from './workspaces/workspace-cli-token.service';
 import { CustomersService } from './customers/customers.service';
 import { ContactsService } from './contacts/contacts.service';
-import { registerMcpTools, McpServices } from './mcp-tools';
+import { getToolCatalog, registerMcpTools, McpServices } from './mcp-tools';
 import { ApiKeysService } from './api-keys/api-keys.service';
 import { AuthService } from './auth/auth.service';
 import { JwtService } from '@nestjs/jwt';
@@ -124,6 +124,61 @@ async function bootstrap() {
   // API Key auth middleware for MCP endpoints
   const apiKeysService = app.get(ApiKeysService);
   const authService = app.get(AuthService);
+
+  const mcpDiscoveryHandler = (_req: any, res: any) => {
+    const toolCatalog = getToolCatalog();
+    const toolsByGroup = toolCatalog.reduce<Record<string, number>>((acc, tool) => {
+      acc[tool.group] = (acc[tool.group] || 0) + 1;
+      return acc;
+    }, {});
+
+    res.json({
+      schemaVersion: 'devgrimoire.mcp.discovery.v1',
+      name: 'DevGrimoire',
+      version: process.env.npm_package_version || '1.0.0',
+      description: 'Persistent project memory and tool server for DevGrimoire via MCP.',
+      transports: [
+        {
+          type: 'streamable-http',
+          protocolVersion: '2025-11-25',
+          endpoint: '/mcp',
+          methods: ['POST', 'GET', 'DELETE'],
+        },
+        {
+          type: 'sse',
+          protocolVersion: '2024-11-05',
+          endpoint: '/sse',
+          messageEndpoint: '/messages',
+        },
+      ],
+      auth: {
+        required: authService.isAuthEnabled(),
+        schemes: ['devgrimoire-api-key'],
+        header: 'Authorization: Bearer cv_...',
+        queryParameter: 'apiKey',
+      },
+      capabilities: {
+        tools: true,
+        toolCount: toolCatalog.length,
+        writeToolCount: toolCatalog.filter((tool) => tool.isWrite).length,
+        groups: toolsByGroup,
+      },
+      links: {
+        toolCatalog: '/api/mcp/tools',
+        streamableHttp: '/mcp',
+        sse: '/sse',
+        documentation: '/docs',
+      },
+      privacy: {
+        public: true,
+        containsSecrets: false,
+        note: 'Discovery exposes only static server metadata. Tool invocation, project data, user data, and secret values remain behind MCP/API authentication when auth is enabled.',
+      },
+    });
+  };
+
+  expressApp.get('/.well-known/mcp', mcpDiscoveryHandler);
+  expressApp.get('/.well-known/mcp.json', mcpDiscoveryHandler);
 
   const mcpAuthMiddleware = async (req: any, res: any, next: any) => {
     // Skip auth if auth is not enabled — still set a default user so per-user

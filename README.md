@@ -120,6 +120,7 @@ Once running, the following services are available:
 | Backend (REST API) | http://localhost:3200/api |
 | MCP SSE Endpoint | http://localhost:3200/sse |
 | MCP Streamable HTTP | http://localhost:3200/mcp |
+| MCP Discovery | http://localhost:3200/.well-known/mcp |
 
 ### ARM/Standalone Mode
 
@@ -195,9 +196,13 @@ In `~/.claude.json` (Claude Code) or `claude_desktop_config.json` (Claude Deskto
 
 | Endpoint | Description |
 |----------|-------------|
+| `GET /.well-known/mcp` | Public MCP discovery metadata (no secrets, no project/user data) |
+| `GET /.well-known/mcp.json` | Same discovery payload for clients that prefer a JSON suffix |
 | `GET /sse` | Legacy SSE (Claude Code, Claude Desktop) |
 | `POST /messages` | Legacy SSE message endpoint |
 | `POST\|GET\|DELETE /mcp` | Streamable HTTP (newer clients) |
+
+Discovery intentionally exposes only server metadata: supported transports, auth hints, capability counts, and a link to `/api/mcp/tools`. The tool catalog and all project/customer data remain protected by normal API/MCP authentication when auth is enabled.
 
 ### Local Connection (stdio)
 
@@ -252,13 +257,13 @@ Secrets are stored AES-256-GCM encrypted in MongoDB:
 
 ## RAG (Semantic Search)
 
-DevGrimoire includes a built-in RAG (Retrieval-Augmented Generation) system for semantic search across all project data. Unlike keyword search, RAG understands meaning -- searching for "how do I deploy" also finds entries about "Docker Compose setup" or "CI/CD pipeline".
+DevGrimoire includes a built-in RAG (Retrieval-Augmented Generation) system for semantic search across indexed content entities in a project. Unlike keyword search, RAG understands meaning -- searching for "how do I deploy" also finds entries about "Docker Compose setup" or "CI/CD pipeline".
 
 ### How it works
 
 - **LanceDB** (embedded, no extra service) stores vector embeddings on disk
 - **Ollama** or any **OpenAI-compatible API** (LM Studio, vLLM, etc.) generates embeddings
-- **Indexed entities**: Knowledge, Research, Manuals, Changelogs, Todos, Sessions, Snippets
+- **Indexed entities**: Knowledge, Research, Manuals, Changelogs, Todos, Sessions, Snippets, Attachments, Schemas
 - **Auto-sync**: New/updated/deleted documents are automatically indexed via Change Streams
 
 ### Setup
@@ -299,7 +304,7 @@ DevGrimoire includes a built-in RAG (Retrieval-Augmented Generation) system for 
 
 | Tool | Description |
 |------|-------------|
-| `rag_search` | Semantic search with optional filters (projectId, entity type, limit) |
+| `rag_search` | Semantic search with optional filters (projectId, entity type including `schema`, limit) |
 | `rag_reindex` | Rebuild the full vector index (all projects or a specific one) |
 | `rag_status` | Index statistics, active endpoint, fallback configuration |
 

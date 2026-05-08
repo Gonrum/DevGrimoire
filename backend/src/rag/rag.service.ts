@@ -16,6 +16,7 @@ const INDEXABLE_ENTITIES = [
   'session',
   'snippet',
   'attachment',
+  'schema',
 ] as const;
 
 type IndexableEntity = (typeof INDEXABLE_ENTITIES)[number];
@@ -30,6 +31,7 @@ const ENTITY_COLLECTION_MAP: Record<IndexableEntity, string> = {
   session: 'sessions',
   snippet: 'snippets',
   attachment: 'attachments',
+  schema: 'dbschemas',
 };
 
 interface RagDocument {
@@ -38,6 +40,7 @@ interface RagDocument {
   sourceId: string;
   chunkIndex: number;
   projectId: string;
+  customerId: string;
   entity: string;
   title: string;
   content: string;
@@ -165,6 +168,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
           sourceId: '__init__',
           chunkIndex: 0,
           projectId: '__init__',
+          customerId: '',
           entity: '__init__',
           title: '__init__',
           content: '__init__',
@@ -302,6 +306,53 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Serialize a schema document into stable RAG text. */
+  private serializeSchema(doc: Record<string, unknown>): string {
+    const parts: string[] = [];
+    const add = (label: string, value: unknown) => {
+      if (value === undefined || value === null || value === '') return;
+      parts.push(`${label}: ${String(value)}`);
+    };
+
+    add('Schema name', doc.name);
+    add('Database type', doc.dbType);
+    add('Database', doc.database);
+    add('Description', doc.description);
+    if (Array.isArray(doc.tags) && doc.tags.length > 0) {
+      parts.push(`Tags: ${doc.tags.map(String).join(', ')}`);
+    }
+
+    if (Array.isArray(doc.fields) && doc.fields.length > 0) {
+      parts.push('Fields:');
+      for (const field of doc.fields as Array<Record<string, unknown>>) {
+        const attrs: string[] = [];
+        if (field.type) attrs.push(`type=${field.type}`);
+        if (field.nullable !== undefined) attrs.push(`nullable=${field.nullable}`);
+        if (field.defaultValue !== undefined && field.defaultValue !== '') attrs.push(`default=${field.defaultValue}`);
+        if (field.isPrimaryKey) attrs.push('primaryKey');
+        if (field.isIndexed) attrs.push('indexed');
+        if (field.reference) attrs.push(`reference=${field.reference}`);
+        const suffix = attrs.length > 0 ? ` (${attrs.join(', ')})` : '';
+        const description = field.description ? ` — ${field.description}` : '';
+        parts.push(`- ${String(field.name || 'unnamed')}${suffix}${description}`);
+      }
+    }
+
+    if (Array.isArray(doc.indexes) && doc.indexes.length > 0) {
+      parts.push('Indexes:');
+      for (const index of doc.indexes as Array<Record<string, unknown>>) {
+        const attrs: string[] = [];
+        if (Array.isArray(index.fields) && index.fields.length > 0) attrs.push(`fields=${index.fields.map(String).join(',')}`);
+        if (index.unique) attrs.push('unique');
+        if (index.type) attrs.push(`type=${index.type}`);
+        const suffix = attrs.length > 0 ? ` (${attrs.join(', ')})` : '';
+        parts.push(`- ${String(index.name || 'unnamed')}${suffix}`);
+      }
+    }
+
+    return parts.join('\n');
+  }
+
   /** Extract indexable text from a MongoDB document */
   private extractText(entity: IndexableEntity, doc: Record<string, unknown>): { title: string; content: string } | null {
     switch (entity) {
@@ -321,6 +372,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         return { title: String(doc.title || ''), content: `[${String(doc.language || '')}] ${String(doc.code || '')}` };
       case 'attachment':
         return { title: String(doc.originalName || ''), content: String(doc.textContent || '') };
+      case 'schema':
+        return { title: String(doc.name || ''), content: this.serializeSchema(doc) };
       default:
         return null;
     }
@@ -335,6 +388,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
     const docId = String(doc._id);
     const projectId = String(doc.projectId || '');
+    const customerId = String(doc.customerId || '');
     const combinedText = `${extracted.title}\n${extracted.content}`.trim();
 
     // Delete all existing chunks for this document
@@ -355,6 +409,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         sourceId: docId,
         chunkIndex: i,
         projectId,
+        customerId,
         entity,
         title: extracted.title,
         content: chunks[i].slice(0, 2000),
@@ -417,7 +472,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     projectId?: string,
     entity?: string,
     limit = 10,
-  ): Promise<Array<{ id: string; projectId: string; entity: string; title: string; content: string; score: number }>> {
+    customerId?: string,
+  ): Promise<Array<{ id: string; projectId: string; customerId: string; entity: string; title: string; content: string; score: number }>> {
     if (!(await this.ensureReady())) {
       throw new Error('RAG not available. Is the embedding server running?');
     }
@@ -432,8 +488,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     const seen = new Map<string, { row: Record<string, unknown>; score: number }>();
     for (const row of results) {
       if (row.id === '__init__') continue;
-      // Show project-specific + global entries (global = empty projectId)
       if (projectId && row.projectId !== projectId && row.projectId !== '') continue;
+      if (customerId && row.customerId !== customerId && row.customerId !== '') continue;
       if (entity && row.entity !== entity) continue;
 
       const sourceId = (row.sourceId as string) || (row.id as string);
@@ -451,6 +507,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       .map(({ row, score }) => ({
         id: ((row.sourceId as string) || (row.id as string)),
         projectId: row.projectId as string,
+        customerId: (row.customerId as string) || '',
         entity: row.entity as string,
         title: row.title as string,
         content: row.content as string,
@@ -458,8 +515,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       }));
   }
 
-  /** Full reindex of all indexable entities */
-  async reindex(projectId?: string): Promise<{ indexed: number; entities: Record<string, number> }> {
+  /** Full reindex of all indexable entities (optionally scoped to a project or customer) */
+  async reindex(projectId?: string, customerId?: string): Promise<{ indexed: number; entities: Record<string, number> }> {
     if (!(await this.ensureReady())) {
       throw new Error('RAG not available. Is the embedding server running?');
     }
@@ -470,12 +527,14 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     // Clear existing data for the scope
     if (projectId) {
       await this.table!.delete(`projectId = "${projectId}"`);
+    } else if (customerId) {
+      await this.table!.delete(`customerId = "${customerId}"`);
     } else {
       // Full reindex: drop and recreate table
       await this.db!.dropTable('documents');
       const zeroVector = new Array(this.dimensions).fill(0);
       this.table = await this.db!.createTable('documents', [
-        { id: '__init__', sourceId: '__init__', chunkIndex: 0, projectId: '__init__', entity: '__init__', title: '__init__', content: '__init__', vector: zeroVector },
+        { id: '__init__', sourceId: '__init__', chunkIndex: 0, projectId: '__init__', customerId: '', entity: '__init__', title: '__init__', content: '__init__', vector: zeroVector },
       ]);
       await this.table.delete('id = "__init__"');
     }
@@ -487,14 +546,16 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`Reindexing ${entity}...`);
       const collection = ENTITY_COLLECTION_MAP[entity];
       const filter: Record<string, unknown> = {};
+      const { ObjectId } = await import('mongodb');
       if (projectId) {
-        const { ObjectId } = await import('mongodb');
         // Include project-specific + global entries (no projectId)
         filter.$or = [
           { projectId: new ObjectId(projectId) },
           { projectId: { $exists: false } },
           { projectId: null },
         ];
+      } else if (customerId) {
+        filter.customerId = new ObjectId(customerId);
       }
 
       const cursor = db.collection(collection).find(filter);
@@ -507,7 +568,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         if (!extracted || (!extracted.title && !extracted.content)) continue;
 
         const docId = String(doc._id);
-        const projectId = String(doc.projectId || '');
+        const docProjectId = String(doc.projectId || '');
+        const docCustomerId = String(doc.customerId || '');
         const combinedText = `${extracted.title}\n${extracted.content}`.trim();
         const chunks = this.chunkText(combinedText);
 
@@ -518,7 +580,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
             id,
             sourceId: docId,
             chunkIndex: i,
-            projectId,
+            projectId: docProjectId,
+            customerId: docCustomerId,
             entity,
             title: extracted.title,
             content: chunks[i].slice(0, 2000),

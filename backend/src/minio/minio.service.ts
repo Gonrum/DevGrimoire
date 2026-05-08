@@ -104,6 +104,11 @@ export class MinioService implements OnModuleInit {
     return this.client.getObject(this.bucket, key);
   }
 
+  async getObjectInBucket(bucket: string, key: string): Promise<Readable> {
+    if (!this.client) throw new Error('MinIO not available');
+    return this.client.getObject(bucket, key);
+  }
+
   async removeObject(key: string): Promise<void> {
     if (!this.client) throw new Error('MinIO not available');
     await this.client.removeObject(this.bucket, key);
@@ -112,6 +117,11 @@ export class MinioService implements OnModuleInit {
   async removeObjects(keys: string[]): Promise<void> {
     if (!this.client || keys.length === 0) return;
     await this.client.removeObjects(this.bucket, keys);
+  }
+
+  async removeObjectsInBucket(bucket: string, keys: string[]): Promise<void> {
+    if (!this.client || keys.length === 0) return;
+    await this.client.removeObjects(bucket, keys);
   }
 
   async statObject(key: string): Promise<{ size: number; etag: string }> {

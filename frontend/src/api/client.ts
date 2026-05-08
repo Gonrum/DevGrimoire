@@ -173,12 +173,60 @@ export interface BackupJob {
   updatedAt: string;
 }
 
+export interface BackupRetentionPolicy {
+  keepLast: number;
+  keepDays: number;
+}
+
+export interface BackupRetentionPreview {
+  dryRun: boolean;
+  policy: BackupRetentionPolicy;
+  deleteJobCount: number;
+  deleteObjectCount: number;
+  deletedObjectCount?: number;
+  candidates: Array<{
+    jobId: string;
+    createdAt?: string;
+    bucket: string;
+    objectPrefix?: string;
+    artifactKeys: string[];
+    status: BackupStatus;
+  }>;
+  errors?: Array<{ jobId: string; message: string }>;
+  ok?: boolean;
+  note: string;
+}
+
+export interface BackupRestorePreview {
+  jobId: string;
+  status: BackupStatus;
+  bucket: string;
+  objectPrefix: string;
+  manifestKey: string;
+  manifestFormat?: string | null;
+  includes: BackupManifest['includes'];
+  artifactCount: number;
+  checks: Array<{
+    key: string;
+    exists: boolean;
+    size?: number;
+    expectedSize?: number;
+    sizeMatches: boolean;
+    sha256Matches: boolean;
+    contentType?: string;
+    error?: string;
+  }>;
+  ok: boolean;
+  note: string;
+}
+
 export interface BackupSystemStatus {
   enabled: boolean;
   schedule: string;
   bucket: string;
   minioEnabled: boolean;
   running: boolean;
+  retention?: BackupRetentionPolicy;
 }
 
 export interface TodoComment {
@@ -247,7 +295,8 @@ export interface Knowledge {
 
 export interface Activity {
   _id: string;
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   entity: string;
   action: string;
   entityId?: string;
@@ -293,7 +342,8 @@ export interface Manual {
 
 export interface ResearchEntry {
   _id: string;
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   title: string;
   content: string;
   sources: string[];
@@ -439,7 +489,8 @@ export interface Dependency {
 
 export interface Soul {
   _id: string;
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   vision: string;
   principles: string;
   conventions: string;
@@ -508,7 +559,8 @@ export interface Workspace {
 
 export interface Snippet {
   _id: string;
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   title: string;
   language: string;
   code: string;
@@ -866,6 +918,11 @@ export const api = {
       if (limit) params.set('limit', String(limit));
       return request<Activity[]>(`/activities?${params}`);
     },
+    listForCustomer: (customerId: string, limit?: number) => {
+      const params = new URLSearchParams({ customerId });
+      if (limit) params.set('limit', String(limit));
+      return request<Activity[]>(`/activities?${params}`);
+    },
   },
   milestones: {
     list: (projectId: string, status?: string) => {
@@ -963,6 +1020,10 @@ export const api = {
     status: () => request<BackupSystemStatus>('/backups/status'),
     list: (limit = 25) => request<BackupJob[]>(`/backups?limit=${limit}`),
     get: (id: string) => request<BackupJob>(`/backups/${id}`),
+    retentionPreview: () => request<BackupRetentionPreview>('/backups/retention/preview'),
+    applyRetention: (confirm: string) =>
+      request<BackupRetentionPreview>('/backups/retention/apply', { method: 'POST', body: JSON.stringify({ confirm }) }),
+    restorePreview: (id: string) => request<BackupRestorePreview>(`/backups/${id}/restore-preview`),
     create: (data?: { mode?: BackupMode; includeAttachments?: boolean }) =>
       request<BackupJob>('/backups', { method: 'POST', body: JSON.stringify(data ?? {}) }),
   },
@@ -985,6 +1046,8 @@ export const api = {
   research: {
     list: (projectId: string) =>
       request<ResearchEntry[]>(`/research?projectId=${projectId}`),
+    listForCustomer: (customerId: string) =>
+      request<ResearchEntry[]>(`/research?customerId=${customerId}`),
     get: (id: string) => request<ResearchEntry>(`/research/${id}`),
     create: (data: Partial<ResearchEntry>) =>
       request<ResearchEntry>('/research', { method: 'POST', body: JSON.stringify(data) }),
@@ -1181,9 +1244,17 @@ export const api = {
       if (filters?.tag) params.set('tag', filters.tag);
       return request<Snippet[]>(`/snippets?${params}`);
     },
-    search: (query: string, projectId?: string) => {
+    listForCustomer: (customerId: string, filters?: { language?: string; category?: string; tag?: string }) => {
+      const params = new URLSearchParams({ customerId });
+      if (filters?.language) params.set('language', filters.language);
+      if (filters?.category) params.set('category', filters.category);
+      if (filters?.tag) params.set('tag', filters.tag);
+      return request<Snippet[]>(`/snippets?${params}`);
+    },
+    search: (query: string, projectId?: string, customerId?: string) => {
       const params = new URLSearchParams({ q: query });
       if (projectId) params.set('projectId', projectId);
+      if (customerId) params.set('customerId', customerId);
       return request<Snippet[]>(`/snippets/search?${params}`);
     },
     get: (id: string) => request<Snippet>(`/snippets/${id}`),
@@ -1196,7 +1267,8 @@ export const api = {
   },
   souls: {
     get: (projectId: string) => request<Soul | null>(`/souls?projectId=${projectId}`),
-    upsert: (data: Partial<Soul> & { projectId: string }) =>
+    getForCustomer: (customerId: string) => request<Soul | null>(`/souls?customerId=${customerId}`),
+    upsert: (data: Partial<Soul> & { projectId?: string; customerId?: string }) =>
       request<Soul>('/souls', { method: 'PUT', body: JSON.stringify(data) }),
   },
   recurringTasks: {
@@ -1405,16 +1477,18 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(endpoint),
       }),
-    listSessions: (projectId: string, includeArchived = false) => {
-      const params = new URLSearchParams({ projectId });
+    listSessions: (owner: { projectId?: string; customerId?: string }, includeArchived = false) => {
+      const params = new URLSearchParams();
+      if (owner.projectId) params.set('projectId', owner.projectId);
+      if (owner.customerId) params.set('customerId', owner.customerId);
       if (includeArchived) params.set('includeArchived', 'true');
       return request<ChatSession[]>(`/chat/sessions?${params}`);
     },
     getSession: (id: string) => request<ChatSession>(`/chat/sessions/${id}`),
-    createSession: (projectId: string, title?: string) =>
+    createSession: (owner: { projectId?: string; customerId?: string }, title?: string) =>
       request<ChatSession>('/chat/sessions', {
         method: 'POST',
-        body: JSON.stringify({ projectId, title }),
+        body: JSON.stringify({ ...owner, title }),
       }),
     updateSession: (id: string, title: string) =>
       request<ChatSession>(`/chat/sessions/${id}`, {
@@ -1608,7 +1682,8 @@ export interface ChatMessage {
 
 export interface ChatSession {
   _id: string;
-  projectId: string;
+  projectId?: string;
+  customerId?: string;
   title: string;
   messages: ChatMessage[];
   archived: boolean;

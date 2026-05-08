@@ -229,13 +229,13 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
   },
   rag_search: {
     name: 'rag_search',
-    description: 'Semantische Suche über alle indizierten Einträge (Knowledge, Research, Manual, Changelog, Todo, Session, Snippet, Attachment).',
+    description: 'Semantische Suche über alle indizierten Einträge (Knowledge, Research, Manual, Changelog, Todo, Session, Snippet, Attachment, Schema).',
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Suchanfrage in natürlicher Sprache' },
         projectId: PROJECT_ID_PROP,
-        entity: { type: 'string', enum: ['knowledge', 'research', 'manual', 'changelog', 'todo', 'session', 'snippet', 'attachment'] },
+        entity: { type: 'string', enum: ['knowledge', 'research', 'manual', 'changelog', 'todo', 'session', 'snippet', 'attachment', 'schema'] },
         limit: { type: 'number', description: 'Default 10' },
       },
       required: ['query'],
@@ -1818,7 +1818,7 @@ export class ChatToolsService {
         }
         case 'soul_update': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const s = await this.souls.upsert(projectId, {
+          const s = await this.souls.upsert({ projectId }, {
             vision: args.vision as string | undefined,
             principles: args.principles as string | undefined,
             conventions: args.conventions as string | undefined,

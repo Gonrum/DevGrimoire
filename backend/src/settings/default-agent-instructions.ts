@@ -316,11 +316,11 @@ Rufe **immer** \`system_instructions_get\` am Anfang jeder Session auf, um die a
 
 ## 16. RAG — Semantische Suche (\`rag_*\`)
 
-**Workflow**: Bedeutungsbasierte Suche über **alle** Entity-Typen (Knowledge, Research, Manual, Changelog, Todo, Session) via Vektor-Embeddings.
+**Workflow**: Bedeutungsbasierte Suche über **alle** Entity-Typen (Knowledge, Research, Manual, Changelog, Todo, Session, Snippet, Attachment, Schema) via Vektor-Embeddings.
 
 | Tool | Wann verwenden |
 |------|----------------|
-| \`rag_search\` | Semantische Suche. Pflicht: \`query\`. Optional: \`projectId\`, \`entity\` (knowledge/research/manual/changelog/todo/session), \`limit\` |
+| \`rag_search\` | Semantische Suche. Pflicht: \`query\`. Optional: \`projectId\`, \`entity\` (knowledge/research/manual/changelog/todo/session/snippet/attachment/schema), \`limit\` |
 | \`rag_reindex\` | Vektoren-Index komplett neu aufbauen. Optional: \`projectId\` für einzelnes Projekt |
 | \`rag_status\` | Index-Statistiken, aktiver Embedding-Endpoint, Fallback-Konfiguration |
 

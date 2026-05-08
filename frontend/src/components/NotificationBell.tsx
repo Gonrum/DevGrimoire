@@ -197,7 +197,7 @@ export default function NotificationBell() {
                 <div
                   key={n._id}
                   onClick={() => handleClick(n)}
-                  className={`w-full text-left px-4 py-3 border-b border-gray-800 hover:bg-gray-800/50 transition-colors flex gap-3 cursor-pointer group ${
+                  className={`w-full text-left px-4 py-3 border-b border-gray-800 hover:bg-gray-800/50 transition-colors flex gap-3 group ${n.url ? 'cursor-pointer' : 'cursor-default'} ${
                     n.read ? 'opacity-60' : ''
                   }`}
                 >

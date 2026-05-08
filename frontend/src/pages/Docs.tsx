@@ -1310,8 +1310,8 @@ function RagSection() {
       <Section title={isDE ? 'Überblick' : 'Overview'}>
         <p className="text-sm text-gray-400 leading-relaxed">
           {isDE
-            ? 'DevGrimoire enthält ein integriertes RAG-System (Retrieval-Augmented Generation) für semantische Suche über alle Projektdaten. Anders als Keyword-Suche versteht RAG Bedeutung — eine Suche nach "wie deploye ich das" findet auch Einträge über "Docker Compose Setup" oder "CI/CD Pipeline".'
-            : 'DevGrimoire includes a built-in RAG system (Retrieval-Augmented Generation) for semantic search across all project data. Unlike keyword search, RAG understands meaning — searching for "how do I deploy" also finds entries about "Docker Compose setup" or "CI/CD pipeline".'}
+            ? 'DevGrimoire enthält ein integriertes RAG-System (Retrieval-Augmented Generation) für semantische Suche über indexierte Content-Entitäten eines Projekts. Anders als Keyword-Suche versteht RAG Bedeutung — eine Suche nach "wie deploye ich das" findet auch Einträge über "Docker Compose Setup" oder "CI/CD Pipeline".'
+            : 'DevGrimoire includes a built-in RAG system (Retrieval-Augmented Generation) for semantic search across indexed content entities in a project. Unlike keyword search, RAG understands meaning — searching for "how do I deploy" also finds entries about "Docker Compose setup" or "CI/CD pipeline".'}
         </p>
       </Section>
 
@@ -1319,7 +1319,7 @@ function RagSection() {
         <div className="space-y-2 text-sm text-gray-400">
           <InfoRow label="Vector DB" value={isDE ? 'LanceDB (embedded, kein extra Service nötig)' : 'LanceDB (embedded, no extra service needed)'} />
           <InfoRow label="Embeddings" value={isDE ? 'Ollama (CPU) oder OpenAI-kompatible API wie LM Studio (GPU)' : 'Ollama (CPU) or OpenAI-compatible API like LM Studio (GPU)'} />
-          <InfoRow label={isDE ? 'Indizierte Entitäten' : 'Indexed Entities'} value="Knowledge, Research, Manuals, Changelogs, Todos, Sessions, Snippets, Attachments" />
+          <InfoRow label={isDE ? 'Indizierte Entitäten' : 'Indexed Entities'} value="Knowledge, Research, Manuals, Changelogs, Todos, Sessions, Snippets, Attachments, Schemas" />
           <InfoRow label="Auto-Sync" value={isDE ? 'Neue/geänderte/gelöschte Dokumente werden automatisch via Change Streams indexiert' : 'New/updated/deleted documents are automatically indexed via Change Streams'} />
           <InfoRow label="Fallback" value={isDE ? 'Automatischer Fallback von Primary (GPU) auf Secondary (CPU) wenn nicht erreichbar' : 'Automatic fallback from primary (GPU) to secondary (CPU) when unavailable'} />
         </div>
@@ -1360,7 +1360,7 @@ RAG_FALLBACK_MODEL=nomic-embed-text-v2-moe`}</Code>
 
       <Section title="MCP Tools">
         <ToolGroup title="RAG" tools={[
-          { name: 'rag_search', desc: isDE ? 'Semantische Suche (query, projectId?, entity?, limit?)' : 'Semantic search (query, projectId?, entity?, limit?)' },
+          { name: 'rag_search', desc: isDE ? 'Semantische Suche (query, projectId?, entity?, limit?; entity enthält schema)' : 'Semantic search (query, projectId?, entity?, limit?; entity includes schema)' },
           { name: 'rag_reindex', desc: isDE ? 'Vollen Index neu aufbauen (projectId? für einzelnes Projekt)' : 'Rebuild full index (projectId? for single project)' },
           { name: 'rag_status', desc: isDE ? 'Index-Statistiken, aktiver Endpoint, Fallback-Konfiguration' : 'Index statistics, active endpoint, fallback config' },
         ]} />
@@ -1383,7 +1383,7 @@ RAG_FALLBACK_MODEL=nomic-embed-text-v2-moe`}</Code>
             </tr>
             <tr className="border-b border-gray-800/50">
               <td className="py-2 pr-4 text-gray-300">{isDE ? 'Entitäten' : 'Entities'}</td>
-              <td className="py-2 pr-4">{isDE ? 'Alle (Knowledge, Research, Manual, Changelog, Todo, Session)' : 'All (Knowledge, Research, Manual, Changelog, Todo, Session)'}</td>
+              <td className="py-2 pr-4">{isDE ? 'Indexierte Content-Entitäten (Knowledge, Research, Manual, Changelog, Todo, Session, Snippet, Attachment, Schema)' : 'Indexed content entities (Knowledge, Research, Manual, Changelog, Todo, Session, Snippet, Attachment, Schema)'}</td>
               <td className="py-2">{isDE ? 'Nur Knowledge' : 'Knowledge only'}</td>
             </tr>
             <tr className="border-b border-gray-800/50">

@@ -26,6 +26,21 @@ export class BackupsController {
     return this.backupsService.getStatus();
   }
 
+  @Get('retention/preview')
+  previewRetention() {
+    return this.backupsService.previewRetention();
+  }
+
+  @Post('retention/apply')
+  applyRetention(@Body('confirm') confirm?: string) {
+    return this.backupsService.applyRetention(confirm || '');
+  }
+
+  @Get(':id/restore-preview')
+  previewRestore(@Param('id') id: string) {
+    return this.backupsService.previewRestore(id);
+  }
+
   @Get(':id')
   findById(@Param('id') id: string) {
     return this.backupsService.findById(id);
