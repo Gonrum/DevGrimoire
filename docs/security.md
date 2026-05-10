@@ -55,7 +55,9 @@ The local stdio MCP server remains local-process only and does not use HTTP auth
 
 `GET /.well-known/mcp` and `GET /.well-known/mcp.json` are public discovery endpoints. They are designed for MCP clients, registries, and crawlers that need to detect DevGrimoire capabilities without opening an authenticated MCP session.
 
-The discovery payload is intentionally non-sensitive:
+`GET /server.json` and `GET /.well-known/mcp-server.json` expose a registry-style MCP server manifest for private/client discovery. This is a compatibility/export artifact, not an automatic opt-in to the public MCP Registry. The manifest uses a local namespace (`local.devgrimoire/devgrimoire`) and explicitly marks public registry publishing as unsupported for private instances.
+
+The discovery and manifest payloads are intentionally non-sensitive:
 
 - server name/version and description
 - supported MCP transports (`/mcp`, `/sse`, `/messages`)
@@ -63,7 +65,9 @@ The discovery payload is intentionally non-sensitive:
 - aggregate capability counts and tool groups
 - links to the authenticated tool catalog and docs
 
-It must not include API keys, JWTs, user records, project/customer IDs, secret values, or per-key tool allowlists. `/api/mcp/tools`, REST data endpoints, and MCP tool calls remain protected by the normal auth guards when authentication is enabled.
+They must not include API keys, JWTs, user records, project/customer IDs, secret values, or per-key tool allowlists. `/api/mcp/tools`, REST data endpoints, and MCP tool calls remain protected by the normal auth guards when authentication is enabled.
+
+Run `npm run check:mcp-registry` from `backend/` against a running instance to catch schema/security drift. Set `DEVGRIMOIRE_BASE_URL=https://your-host` when checking a non-local deployment.
 
 ## Secrets
 

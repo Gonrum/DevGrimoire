@@ -74,11 +74,11 @@ const CHAT_PROVIDER_KEY_REQUIRED: Record<ChatProvider, 'none' | 'optional' | 're
   openai: 'required',
 };
 
-/** Which providers support tool-calling today (see backend OPENAI_COMPATIBLE_PROVIDERS). */
+/** Which providers support tool-calling today (see backend TOOL_CAPABLE_PROVIDERS). */
 const CHAT_PROVIDER_TOOLS_SUPPORTED: Record<ChatProvider, boolean> = {
   lmstudio: true,
   'openai-compatible': true,
-  anthropic: false,
+  anthropic: true,
   openai: true,
 };
 

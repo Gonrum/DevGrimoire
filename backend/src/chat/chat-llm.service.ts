@@ -94,6 +94,14 @@ const OPENAI_COMPATIBLE_PROVIDERS: ReadonlySet<LlmProvider> = new Set([
   'openai',
 ]);
 
+/** Providers with native tool-calling support, including Anthropic's content-block protocol. */
+const TOOL_CAPABLE_PROVIDERS: ReadonlySet<LlmProvider> = new Set<LlmProvider>([
+  'openai-compatible',
+  'lmstudio',
+  'openai',
+  'anthropic',
+]);
+
 const ANTHROPIC_VERSION = '2023-06-01';
 
 export interface OpenAiToolDef {
@@ -597,9 +605,9 @@ export class ChatLlmService {
 
     let lastErr: Error | null = null;
     for (const endpoint of endpoints) {
-      if (!OPENAI_COMPATIBLE_PROVIDERS.has(endpoint.provider)) {
+      if (!TOOL_CAPABLE_PROVIDERS.has(endpoint.provider)) {
         this.logger.warn(
-          `Skipping ${endpoint.provider} endpoint for tool-call request — tools currently only work with openai-protocol providers`,
+          `Skipping ${endpoint.provider} endpoint for tool-call request — provider has no tool-call adapter`,
         );
         continue;
       }
@@ -614,7 +622,11 @@ export class ChatLlmService {
           `Chat stream (tools): ${endpoint.provider} @ ${endpoint.url} (${endpoint.model}) — ${tools.length} tools${hasImages ? ` + ${resolved.images!.length} image(s)` : ''}`,
         );
         options.onEndpointSelected?.({ provider: endpoint.provider, url: endpoint.url, model: endpoint.model });
-        yield* this.streamOpenAiWithTools(endpoint, messages, tools, resolved);
+        if (endpoint.provider === 'anthropic') {
+          yield* this.streamAnthropicWithTools(endpoint, messages, tools, resolved);
+        } else {
+          yield* this.streamOpenAiWithTools(endpoint, messages, tools, resolved);
+        }
         return;
       } catch (err) {
         lastErr = err as Error;
@@ -762,6 +774,262 @@ export class ChatLlmService {
     }
 
     yield { type: 'finish', reason: finishReason ?? 'other' };
+  }
+
+  /**
+   * Anthropic Messages API with tool-calling. Differences from OpenAI:
+   * - Tool defs use `input_schema` (not `parameters`) and live at the top level (no `function` wrapper).
+   * - Tool calls arrive as `content_block` of `type: "tool_use"` with id/name + input streamed via
+   *   `input_json_delta`'s `partial_json`, not in a separate `tool_calls` array.
+   * - Tool results go back as a USER message with `content: [{ type: "tool_result", tool_use_id, content }]`,
+   *   not as `role: "tool"`. We translate the OpenAI-style conversation in here so callers
+   *   stay provider-agnostic.
+   */
+  private async *streamAnthropicWithTools(
+    endpoint: LlmEndpoint,
+    messages: LlmMessageWithTools[],
+    tools: OpenAiToolDef[],
+    opts: { temperature: number; maxTokens: number; signal?: AbortSignal; images?: LlmImageInput[] },
+  ): AsyncIterable<ChatStreamEvent> {
+    if (!endpoint.apiKey) throw new Error('Anthropic-Provider benötigt einen API-Key');
+
+    type AnthropicTextBlock = { type: 'text'; text: string };
+    type AnthropicImageBlock = {
+      type: 'image';
+      source: { type: 'base64'; media_type: string; data: string };
+    };
+    type AnthropicToolUseBlock = {
+      type: 'tool_use';
+      id: string;
+      name: string;
+      input: Record<string, unknown>;
+    };
+    type AnthropicToolResultBlock = {
+      type: 'tool_result';
+      tool_use_id: string;
+      content: string;
+      is_error?: boolean;
+    };
+    type AnthropicContentBlock =
+      | AnthropicTextBlock
+      | AnthropicImageBlock
+      | AnthropicToolUseBlock
+      | AnthropicToolResultBlock;
+    type AnthropicMessage = {
+      role: 'user' | 'assistant';
+      content: string | AnthropicContentBlock[];
+    };
+
+    // Translate the provider-agnostic (OpenAI-style) conversation to Anthropic's
+    // message shape. System messages get hoisted to the top-level `system` field.
+    // Consecutive `role: 'tool'` results get merged into a single user turn so
+    // Anthropic's strict alternating-role requirement is met.
+    const systemParts: string[] = [];
+    const body: AnthropicMessage[] = [];
+
+    const flushBufferedToolResults = (buf: AnthropicToolResultBlock[]): void => {
+      if (buf.length === 0) return;
+      body.push({ role: 'user', content: [...buf] });
+      buf.length = 0;
+    };
+
+    let toolResultBuffer: AnthropicToolResultBlock[] = [];
+
+    for (const m of messages) {
+      if (m.role === 'system') {
+        flushBufferedToolResults(toolResultBuffer);
+        if (m.content) systemParts.push(m.content);
+        continue;
+      }
+      if (m.role === 'tool') {
+        // Group consecutive tool results into one user message.
+        if (!m.tool_call_id) continue;
+        toolResultBuffer.push({
+          type: 'tool_result',
+          tool_use_id: m.tool_call_id,
+          content: m.content || '',
+        });
+        continue;
+      }
+      flushBufferedToolResults(toolResultBuffer);
+
+      if (m.role === 'assistant') {
+        const blocks: AnthropicContentBlock[] = [];
+        if (m.content && m.content.length > 0) {
+          blocks.push({ type: 'text', text: m.content });
+        }
+        if (m.tool_calls?.length) {
+          for (const tc of m.tool_calls) {
+            let parsedInput: Record<string, unknown> = {};
+            try {
+              parsedInput = tc.function.arguments ? JSON.parse(tc.function.arguments) : {};
+            } catch {
+              parsedInput = {};
+            }
+            blocks.push({
+              type: 'tool_use',
+              id: tc.id,
+              name: tc.function.name,
+              input: parsedInput,
+            });
+          }
+        }
+        // Anthropic requires non-empty content. If the assistant turn has neither
+        // text nor tool_calls (shouldn't happen in our pipeline), emit empty text.
+        if (blocks.length === 0) blocks.push({ type: 'text', text: '' });
+        body.push({ role: 'assistant', content: blocks });
+        continue;
+      }
+
+      // Plain user message — string content stays string for token efficiency.
+      body.push({ role: 'user', content: m.content || '' });
+    }
+    flushBufferedToolResults(toolResultBuffer);
+
+    // Attach images to the last user message, preserving any tool_result blocks
+    // that may already be there.
+    if (opts.images && opts.images.length > 0) {
+      for (let i = body.length - 1; i >= 0; i--) {
+        if (body[i].role === 'user') {
+          const original = body[i].content;
+          const existing: AnthropicContentBlock[] = typeof original === 'string'
+            ? (original ? [{ type: 'text', text: original }] : [])
+            : original;
+          const imageBlocks: AnthropicContentBlock[] = opts.images.map((img) => ({
+            type: 'image' as const,
+            source: { type: 'base64' as const, media_type: img.mediaType, data: img.data },
+          }));
+          body[i] = { role: 'user', content: [...existing, ...imageBlocks] };
+          break;
+        }
+      }
+    }
+
+    if (body.length === 0) body.push({ role: 'user', content: '' });
+    if (body[0].role !== 'user') body.unshift({ role: 'user', content: '' });
+
+    // Translate OpenAI tool defs → Anthropic shape.
+    const anthropicTools = tools.map((t) => ({
+      name: t.function.name,
+      description: t.function.description,
+      input_schema: t.function.parameters,
+    }));
+
+    const res = await fetch(`${endpoint.url}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': endpoint.apiKey,
+        'anthropic-version': ANTHROPIC_VERSION,
+      },
+      body: JSON.stringify({
+        model: endpoint.model,
+        system: systemParts.length > 0 ? systemParts.join('\n\n') : undefined,
+        messages: body,
+        tools: anthropicTools.length > 0 ? anthropicTools : undefined,
+        max_tokens: opts.maxTokens,
+        temperature: opts.temperature,
+        stream: true,
+      }),
+      signal: opts.signal,
+    });
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Anthropic API failed (${res.status}): ${text.slice(0, 200)}`);
+    }
+
+    // Streaming protocol: per index, content_block_start declares the block type
+    // (text or tool_use), then content_block_delta supplies either text_delta or
+    // input_json_delta partials. We accumulate tool_use input_json fragments per
+    // index and emit a single tool_call event when stop_reason === 'tool_use'.
+    const toolBlocks = new Map<number, { id: string; name: string; argsJson: string }>();
+    let stopReason: 'stop' | 'tool_calls' | 'length' | 'other' | null = null;
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const data = trimmed.slice(5).trim();
+          if (!data) continue;
+          try {
+            const parsed = JSON.parse(data) as {
+              type?: string;
+              index?: number;
+              content_block?: { type?: string; id?: string; name?: string; input?: unknown };
+              delta?: {
+                type?: string;
+                text?: string;
+                partial_json?: string;
+                stop_reason?: string;
+              };
+            };
+            switch (parsed.type) {
+              case 'content_block_start': {
+                if (typeof parsed.index === 'number' && parsed.content_block?.type === 'tool_use') {
+                  toolBlocks.set(parsed.index, {
+                    id: parsed.content_block.id || '',
+                    name: parsed.content_block.name || '',
+                    argsJson: '',
+                  });
+                }
+                break;
+              }
+              case 'content_block_delta': {
+                if (parsed.delta?.type === 'text_delta' && parsed.delta.text) {
+                  yield { type: 'content', delta: parsed.delta.text };
+                } else if (
+                  parsed.delta?.type === 'input_json_delta' &&
+                  typeof parsed.index === 'number' &&
+                  typeof parsed.delta.partial_json === 'string'
+                ) {
+                  const existing = toolBlocks.get(parsed.index);
+                  if (existing) existing.argsJson += parsed.delta.partial_json;
+                }
+                break;
+              }
+              case 'message_delta': {
+                const r = parsed.delta?.stop_reason;
+                if (r === 'end_turn') stopReason = 'stop';
+                else if (r === 'tool_use') stopReason = 'tool_calls';
+                else if (r === 'max_tokens') stopReason = 'length';
+                else if (r) stopReason = 'other';
+                break;
+              }
+              default:
+                /* message_start, message_stop, ping, content_block_stop — ignored */
+                break;
+            }
+          } catch {
+            /* malformed chunk */
+          }
+        }
+      }
+    } finally {
+      try { reader.releaseLock(); } catch { /* noop */ }
+    }
+
+    // Emit tool_calls in index order with normalized JSON arguments.
+    const indices = Array.from(toolBlocks.keys()).sort((a, b) => a - b);
+    for (const idx of indices) {
+      const tc = toolBlocks.get(idx);
+      if (tc && tc.id && tc.name) {
+        // Anthropic streams plain JSON fragments, but normalizing handles edge cases
+        // (empty input → "{}", malformed concat) the same way OpenAI does.
+        const normalized = normalizeToolCallArgs(tc.argsJson || '{}');
+        yield { type: 'tool_call', id: tc.id, name: tc.name, arguments: normalized };
+      }
+    }
+
+    yield { type: 'finish', reason: stopReason ?? 'other' };
   }
 
   /** Stream chat completion tokens, falling back across configured endpoints */

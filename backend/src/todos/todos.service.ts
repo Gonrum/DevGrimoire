@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Model } from 'mongoose';
+import { isValidObjectId, Model } from 'mongoose';
 import { Todo, TodoDocument, TodoStatus } from './schemas/todo.schema';
 import { Project, ProjectDocument } from '../projects/schemas/project.schema';
 import { CreateTodoDto } from './dto/create-todo.dto';
@@ -75,13 +75,16 @@ export class TodosService {
   }
 
   async resolveId(args: { id?: string; projectId?: string; number?: string }): Promise<string> {
-    if (args.id) return args.id;
-    if (!args.number || !args.projectId) {
-      throw new BadRequestException('Either id or number+projectId must be provided');
+    if (args.id && isValidObjectId(args.id)) return args.id;
+
+    const numberOrDisplay = args.number || args.id;
+    if (!numberOrDisplay || !args.projectId) {
+      throw new BadRequestException('Either MongoDB id or number/displayNumber+projectId must be provided');
     }
-    const num = parseInt(args.number, 10);
+
+    const num = parseInt(numberOrDisplay, 10);
     const todo = isNaN(num)
-      ? await this.findByDisplayNumber(args.projectId, args.number)
+      ? await this.findByDisplayNumber(args.projectId, numberOrDisplay)
       : await this.findByNumber(args.projectId, num);
     return todo._id.toString();
   }

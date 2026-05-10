@@ -24,6 +24,7 @@ import { ChatLlmService, LlmMessageWithTools, LlmImageInput } from './chat-llm.s
 import { ChatContextService, AttachmentForContext } from './chat-context.service';
 import { ChatToolsService, ALL_TOOL_NAMES, TOOL_GROUPS, WRITE_TOOL_NAMES } from './chat-tools';
 import { ChatActivityService } from './chat-activity.service';
+import { AgentRolesService } from '../agent-roles/agent-roles.service';
 import { ChatAttachmentRef, ChatResponseMetrics, ChatToolCallRecord } from './schemas/chat-session.schema';
 import { ChatActivityToolUse } from './schemas/chat-activity.schema';
 import { AttachmentsService } from '../attachments/attachments.service';
@@ -124,6 +125,7 @@ export class ChatController {
     private readonly minio: MinioService,
     private readonly workspaces: WorkspacesService,
     private readonly activity: ChatActivityService,
+    private readonly agentRoles: AgentRolesService,
   ) {}
 
   /**
@@ -700,7 +702,14 @@ export class ChatController {
       attachments: attachmentsForContext,
       images: attachmentImages,
       activeWorkspace,
+      agentRoleId: dto.agentRoleId,
     });
+
+    // Agent-Rollen schneiden die globale Tool-Allowlist (T-264) — eine Rolle
+    // kann nichts freischalten, was der globale Setting nicht ohnehin erlaubt.
+    const effectiveAllowlist = dto.agentRoleId
+      ? this.agentRoles.intersectAllowedTools(dto.agentRoleId, opts.toolsAllowlist)
+      : opts.toolsAllowlist;
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -724,7 +733,7 @@ export class ChatController {
     send({ type: 'status', phase: 'context' });
     send({ type: 'context', refs: built.contextRefs });
 
-    const useTools = opts.toolsEnabled && opts.toolsAllowlist.length > 0;
+    const useTools = opts.toolsEnabled && effectiveAllowlist.length > 0;
     let fullResponse = '';
     const persistedToolCalls: ChatToolCallRecord[] = [];
     let errored = false;
@@ -753,7 +762,7 @@ export class ChatController {
         }
         if (!abort.signal.aborted) pendingDone = true;
       } else {
-        const tools = this.tools.getToolsForLlm(opts.toolsAllowlist);
+        const tools = this.tools.getToolsForLlm(effectiveAllowlist);
         const conversation: LlmMessageWithTools[] = built.messages.map((m) => ({
           role: m.role,
           content: m.content,

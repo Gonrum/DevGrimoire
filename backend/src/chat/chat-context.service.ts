@@ -5,6 +5,7 @@ import { RagService } from '../rag/rag.service';
 import { ChatMessage, ChatContextRef } from './schemas/chat-session.schema';
 import { LlmMessage, LlmImageInput } from './chat-llm.service';
 import { WorkspaceDocument } from '../workspaces/schemas/workspace.schema';
+import { AgentRolesService } from '../agent-roles/agent-roles.service';
 
 function shortenRepo(url?: string): string {
   if (!url) return '';
@@ -57,6 +58,7 @@ export class ChatContextService {
     private readonly projects: ProjectsService,
     private readonly customers: CustomersService,
     private readonly rag: RagService,
+    private readonly agentRoles: AgentRolesService,
   ) {}
 
   async build(
@@ -70,6 +72,8 @@ export class ChatContextService {
       attachments?: AttachmentForContext[];
       images?: LlmImageInput[];
       activeWorkspace?: WorkspaceDocument | null;
+      /** Optional agent-role id (T-264). Prepends role-prompt block + intersects allowlist downstream. */
+      agentRoleId?: string;
     } = {},
   ): Promise<ContextBuildResult> {
     const ownerObj = typeof owner === 'string' ? { projectId: owner } : owner;
@@ -164,7 +168,9 @@ Die \`${ownerIdLabel}\` des aktuellen Kontextes ist: ${ownerIdValue}. Du kannst 
       ? `\n\n# Angehängte Dateien\nDer Nutzer hat ${attachmentStats.included}/${attachmentStats.total} Datei(en) angehängt. Der Inhalt steht unten. Beziehe dich bei Bedarf explizit auf den Dateinamen.\n\n${attachmentBlocks.join('\n\n')}`
       : '';
 
-    const systemPrompt = `Du bist ein technischer Assistent für ${projectId ? `das Softwareprojekt "${ownerName}"` : `den Kunden "${ownerName}"`}.
+    const rolePromptBlock = this.agentRoles.buildRolePromptBlock(options.agentRoleId);
+
+    const systemPrompt = `${rolePromptBlock}Du bist ein technischer Assistent für ${projectId ? `das Softwareprojekt "${ownerName}"` : `den Kunden "${ownerName}"`}.
 Antworte präzise und auf Deutsch. Nutze den bereitgestellten ${projectId ? 'Projektkontext' : 'Kundenkontext'} als Quelle.
 Wenn der Kontext die Frage nicht eindeutig beantwortet, sag das klar statt zu raten.
 Verweise nach Möglichkeit auf konkrete Einträge (z.B. "laut (2) im Kontext").${toolUsageHint}

@@ -5,12 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
 import { Secret, SecretDocument } from './schemas/secret.schema';
 import { CreateSecretDto } from './dto/create-secret.dto';
 import { UpdateSecretDto } from './dto/update-secret.dto';
 import { CustomersService } from '../customers/customers.service';
 import { EncryptionService } from '../common/encryption.service';
+import { PROJECT_CHANGED } from '../events/project-event';
 import { RequestContext } from '../common/request-context';
 import {
   actorCanAccessCustomer,
@@ -35,6 +37,7 @@ export class SecretsService {
     @InjectModel(Secret.name) private secretModel: Model<SecretDocument>,
     private customersService: CustomersService,
     private encryptionService: EncryptionService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   async create(dto: CreateSecretDto): Promise<SecretListItem> {
@@ -140,6 +143,14 @@ export class SecretsService {
   async delete(id: string): Promise<void> {
     const result = await this.secretModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException('Secret not found');
+    this.eventEmitter.emit(PROJECT_CHANGED, {
+      projectId: result.projectId?.toString() || null,
+      customerId: result.customerId?.toString() || null,
+      entity: 'secret',
+      action: 'deleted',
+      entityId: result._id.toString(),
+      summary: `Siegel "${result.key}" gelöscht`,
+    });
   }
 
   async removeByProject(projectId: string): Promise<void> {

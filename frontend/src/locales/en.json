@@ -1518,5 +1518,49 @@
     "entity_milestone": "Artifact",
     "entity_research": "Study",
     "entity_snippet": "Rune"
+  },
+  "monitoring": {
+    "title": "Observatory",
+    "newCheck": "New Healthcheck",
+    "editCheck": "Edit Healthcheck",
+    "empty": "No healthchecks yet. Add one to automatically monitor servers, portals, projects or environments.",
+    "runNow": "Run now",
+    "runSuccess": "Run finished — status: {{status}}",
+    "deleted": "Healthcheck removed",
+    "showHistory": "History",
+    "hideHistory": "Hide history",
+    "noHistory": "No run history yet.",
+    "inactive": "paused",
+    "headers": "Headers",
+    "noHeaders": "No headers set.",
+    "secretHeaders": "Headers from Sigils",
+    "noSecretsAvailable": "No sigils available for this customer — create secrets to securely bind sensitive headers.",
+    "secretHeadersHelp": "Sensitive headers (e.g. Authorization) are resolved from the referenced sigil at runtime and never stored in plaintext.",
+    "expectedStatusHelp": "Comma-separated HTTP codes. Empty = any 2xx is treated as success.",
+    "field": {
+      "name": "Name",
+      "url": "URL",
+      "method": "Method",
+      "project": "Project",
+      "intervalMinutes": "Interval (minutes)",
+      "interval": "Interval",
+      "timeoutMs": "Timeout (ms)",
+      "failureThreshold": "Failure threshold",
+      "expectedStatus": "Expected status codes",
+      "expectedContent": "Expected content",
+      "description": "Description",
+      "contentType": "Content-Type",
+      "body": "Body",
+      "active": "Active (run via scheduler)",
+      "lastRun": "Last run",
+      "failures": "consecutive failures"
+    },
+    "status": {
+      "healthy": "Healthy",
+      "degraded": "Degraded",
+      "unhealthy": "Unreachable",
+      "paused": "Paused",
+      "unknown": "Unknown"
+    }
   }
 }

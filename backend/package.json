@@ -10,7 +10,8 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "start:mcp": "node dist/mcp-server",
-    "check:rag-schema": "node scripts/rag-schema-regression-check.cjs"
+    "check:rag-schema": "node scripts/rag-schema-regression-check.cjs",
+    "check:mcp-registry": "node scripts/mcp-registry-readiness-check.cjs"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.0",

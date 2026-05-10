@@ -42,6 +42,7 @@ import { WorkspaceCliTokenService } from './workspaces/workspace-cli-token.servi
 import { AuthService } from './auth/auth.service';
 import { CustomersService } from './customers/customers.service';
 import { ContactsService } from './contacts/contacts.service';
+import { MonitoringService } from './monitoring/monitoring.service';
 import { UserRole } from './auth/schemas/user.schema';
 import { registerMcpTools } from './mcp-tools';
 
@@ -122,6 +123,7 @@ async function bootstrap() {
     authService: app.get(AuthService),
     customersService: app.get(CustomersService),
     contactsService: app.get(ContactsService),
+    monitoringService: app.get(MonitoringService),
     logsService: app.get(LogsService),
     releasesService: app.get(ReleasesService),
     chatService: app.get(ChatService),

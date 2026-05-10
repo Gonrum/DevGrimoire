@@ -36,6 +36,7 @@ import { CommitsModule } from '../commits/commits.module';
 import { CustomersModule } from '../customers/customers.module';
 import { ContactsModule } from '../contacts/contacts.module';
 import { QuestionsModule } from '../questions/questions.module';
+import { AgentRolesModule } from '../agent-roles/agent-roles.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { QuestionsModule } from '../questions/questions.module';
     CustomersModule,
     ContactsModule,
     QuestionsModule,
+    AgentRolesModule,
   ],
   controllers: [ChatController, ChatActivityController],
   providers: [ChatService, ChatLlmService, ChatContextService, ChatToolsService, ChatActivityService, EncryptionService],

@@ -1518,5 +1518,49 @@
     "entity_milestone": "Artefakt",
     "entity_research": "Studie",
     "entity_snippet": "Rune"
+  },
+  "monitoring": {
+    "title": "Observatorium",
+    "newCheck": "Neuer Healthcheck",
+    "editCheck": "Healthcheck bearbeiten",
+    "empty": "Noch keine Healthchecks angelegt. Lege einen an, um Server, Portale, Projekte oder Umgebungen automatisch zu überwachen.",
+    "runNow": "Jetzt prüfen",
+    "runSuccess": "Lauf abgeschlossen — Status: {{status}}",
+    "deleted": "Healthcheck entfernt",
+    "showHistory": "Verlauf",
+    "hideHistory": "Verlauf ausblenden",
+    "noHistory": "Keine Lauf-Historie vorhanden.",
+    "inactive": "pausiert",
+    "headers": "Header",
+    "noHeaders": "Keine Header gesetzt.",
+    "secretHeaders": "Header aus Siegeln",
+    "noSecretsAvailable": "Keine Siegel für diesen Kunden verfügbar — lege Secrets an, um sensitive Header sicher zu binden.",
+    "secretHeadersHelp": "Sensible Header (z.B. Authorization) werden zur Laufzeit aus dem referenzierten Siegel aufgelöst und nie im Klartext gespeichert.",
+    "expectedStatusHelp": "Komma-getrennte HTTP-Codes. Leer = jeder 2xx-Code zählt als Erfolg.",
+    "field": {
+      "name": "Name",
+      "url": "URL",
+      "method": "Methode",
+      "project": "Projekt",
+      "intervalMinutes": "Intervall (Minuten)",
+      "interval": "Intervall",
+      "timeoutMs": "Timeout (ms)",
+      "failureThreshold": "Fehler-Schwellwert",
+      "expectedStatus": "Erwartete Status-Codes",
+      "expectedContent": "Erwarteter Inhalt",
+      "description": "Beschreibung",
+      "contentType": "Content-Type",
+      "body": "Body",
+      "active": "Aktiv (vom Scheduler ausführen)",
+      "lastRun": "Letzter Lauf",
+      "failures": "Fehler in Folge"
+    },
+    "status": {
+      "healthy": "Gesund",
+      "degraded": "Beeinträchtigt",
+      "unhealthy": "Nicht erreichbar",
+      "paused": "Pausiert",
+      "unknown": "Unbekannt"
+    }
   }
 }

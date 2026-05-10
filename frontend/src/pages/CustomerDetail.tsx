@@ -32,6 +32,7 @@ import KnowledgeList from '../components/KnowledgeList';
 import ManualView from '../components/ManualView';
 import FileUploadZone from '../components/FileUploadZone';
 import EnvironmentList, { SecretsList } from '../components/EnvironmentList';
+import MonitoringTab from '../components/MonitoringTab';
 import SoulView from '../components/SoulView';
 import SnippetList from '../components/SnippetList';
 import ResearchList from '../components/ResearchList';
@@ -650,7 +651,11 @@ export default function CustomerDetail() {
             )}
 
             {tab === 'monitoring' && (
-              <EmptyState message={t('customers.monitoringPlanned')} />
+              <MonitoringTab
+                customerId={id}
+                projectsById={projectsById}
+                linkedProjectIds={linkedProjectIds}
+              />
             )}
 
             {tab === 'contacts' && (

@@ -49,6 +49,15 @@ export class SendChatMessageDto {
   @IsOptional()
   @IsMongoId()
   workspaceId?: string;
+
+  /**
+   * Optional Agent-Rolle (T-264). Wenn gesetzt: Rollen-Prompt-Block wird vor
+   * den Standard-System-Prompt gehängt und die Tool-Allowlist mit der
+   * Rollen-Allowlist geschnitten.
+   */
+  @IsOptional()
+  @IsString()
+  agentRoleId?: string;
 }
 
 export const CHAT_PROVIDERS = [

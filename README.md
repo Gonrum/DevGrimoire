@@ -198,11 +198,19 @@ In `~/.claude.json` (Claude Code) or `claude_desktop_config.json` (Claude Deskto
 |----------|-------------|
 | `GET /.well-known/mcp` | Public MCP discovery metadata (no secrets, no project/user data) |
 | `GET /.well-known/mcp.json` | Same discovery payload for clients that prefer a JSON suffix |
+| `GET /server.json` | Registry-style MCP server manifest for private/client discovery |
+| `GET /.well-known/mcp-server.json` | Same manifest under a well-known path |
 | `GET /sse` | Legacy SSE (Claude Code, Claude Desktop) |
 | `POST /messages` | Legacy SSE message endpoint |
 | `POST\|GET\|DELETE /mcp` | Streamable HTTP (newer clients) |
 
-Discovery intentionally exposes only server metadata: supported transports, auth hints, capability counts, and a link to `/api/mcp/tools`. The tool catalog and all project/customer data remain protected by normal API/MCP authentication when auth is enabled.
+Discovery and manifest endpoints intentionally expose only server metadata: supported transports, auth hints, capability counts, registry-style remote URLs, and a link to `/api/mcp/tools`. The generated `server.json` uses the local namespace `local.devgrimoire/devgrimoire`, explicitly does not opt into public Registry publishing, and contains no project/customer/user data or secrets. The tool catalog and all project/customer data remain protected by normal API/MCP authentication when auth is enabled.
+
+To smoke-test registry-readiness and catch accidental metadata leaks, run from `backend/`:
+
+```bash
+DEVGRIMOIRE_BASE_URL=http://localhost:3200 npm run check:mcp-registry
+```
 
 ### Local Connection (stdio)
 

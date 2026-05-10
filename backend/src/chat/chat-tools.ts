@@ -197,10 +197,10 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
   },
   todo_get: {
     name: 'todo_get',
-    description: 'Lädt vollständigen Todo mit Beschreibung und Kommentaren.',
+    description: 'Lädt vollständigen Todo mit Beschreibung und Kommentaren. Akzeptiert MongoDB-ID oder im Projektkontext eine Todo-Nummer wie T-223.',
     parameters: {
       type: 'object',
-      properties: { id: { type: 'string', description: 'Todo MongoDB ID' } },
+      properties: { id: { type: 'string', description: 'Todo MongoDB ID oder Display-Nummer (z.B. T-223)' } },
       required: ['id'],
     },
   },
@@ -1269,7 +1269,8 @@ export class ChatToolsService {
           return { success: true, result: { count: todos.length, items: trimmed } };
         }
         case 'todo_get': {
-          const t = await this.todos.findById(args.id as string);
+          const id = await this.todos.resolveId({ id: args.id as string, projectId: projectId || undefined });
+          const t = await this.todos.findById(id);
           return {
             success: true,
             result: {

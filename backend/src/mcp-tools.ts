@@ -45,6 +45,7 @@ import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/d
 import { AuthService } from './auth/auth.service';
 import { CustomersService } from './customers/customers.service';
 import { ContactsService } from './contacts/contacts.service';
+import { MonitoringService } from './monitoring/monitoring.service';
 
 const RAG_BACKEND_URL = process.env.RAG_BACKEND_URL || 'http://localhost:3200';
 
@@ -231,6 +232,7 @@ export interface McpServices {
   authService: AuthService;
   customersService: CustomersService;
   contactsService: ContactsService;
+  monitoringService: MonitoringService;
   logsService: LogsService;
   releasesService: ReleasesService;
   chatService: ChatService;
@@ -2337,6 +2339,145 @@ const tools = [
       required: ['id'],
     },
   },
+  // ---- Monitoring / Healthchecks --------------------------------------------
+  {
+    name: 'monitor_create',
+    description: 'Create a healthcheck for a customer. Periodically pings an HTTP endpoint and tracks reachability. Sensitive header values must be supplied via secretHeaders (referencing existing Secret IDs), never as plain header values.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        customerId: { type: 'string', description: 'Owning customer MongoDB ID' },
+        projectId: { type: 'string', description: 'Optional linked project' },
+        customerProjectId: { type: 'string', description: 'Optional CustomerProjectLink ID' },
+        environmentId: { type: 'string', description: 'Optional Environment ID this check belongs to' },
+        name: { type: 'string', description: 'Display name (unique per customer)' },
+        description: { type: 'string', description: 'Free text description' },
+        method: { type: 'string', enum: ['GET', 'POST', 'HEAD', 'PUT', 'PATCH', 'DELETE'] },
+        url: { type: 'string', description: 'Target URL incl. protocol' },
+        headers: {
+          type: 'array',
+          description: 'Plain HTTP headers (no secret values).',
+          items: { type: 'object', properties: { name: { type: 'string' }, value: { type: 'string' } }, required: ['name'] },
+        },
+        secretHeaders: {
+          type: 'array',
+          description: 'Headers whose value is resolved from a Secret at execution time.',
+          items: { type: 'object', properties: { name: { type: 'string' }, secretId: { type: 'string' } }, required: ['name', 'secretId'] },
+        },
+        body: { type: 'string', description: 'Optional request body (used for POST/PUT/PATCH)' },
+        contentType: { type: 'string', description: 'Content-Type header for the body (default application/json)' },
+        intervalSeconds: { type: 'number', description: 'Interval between runs in seconds (min 60)' },
+        timeoutMs: { type: 'number', description: 'Request timeout in ms (default 10000)' },
+        expectedStatus: { type: 'array', items: { type: 'number' }, description: 'Allowed HTTP status codes; empty = any 2xx' },
+        expectedContent: { type: 'string', description: 'Optional substring required in response body' },
+        failureThreshold: { type: 'number', description: 'Consecutive failures required before flipping to UNHEALTHY (default 2)' },
+        active: { type: 'boolean', description: 'Whether the scheduler runs this check (default true)' },
+      },
+      required: ['customerId', 'name', 'url'],
+    },
+  },
+  {
+    name: 'monitor_list',
+    description: 'List healthchecks for a customer with current status, last run, latency and error.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        customerId: { type: 'string', description: 'Customer MongoDB ID' },
+      },
+      required: ['customerId'],
+    },
+  },
+  {
+    name: 'monitor_get',
+    description: 'Get a healthcheck with full configuration and current state.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Healthcheck MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'monitor_update',
+    description: 'Update a healthcheck. Pausing it (active=false) clears nextRunAt; reactivating triggers an immediate run.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Healthcheck MongoDB ID' },
+        projectId: { type: 'string' },
+        customerProjectId: { type: 'string' },
+        environmentId: { type: 'string' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        method: { type: 'string', enum: ['GET', 'POST', 'HEAD', 'PUT', 'PATCH', 'DELETE'] },
+        url: { type: 'string' },
+        headers: {
+          type: 'array',
+          items: { type: 'object', properties: { name: { type: 'string' }, value: { type: 'string' } }, required: ['name'] },
+        },
+        secretHeaders: {
+          type: 'array',
+          items: { type: 'object', properties: { name: { type: 'string' }, secretId: { type: 'string' } }, required: ['name', 'secretId'] },
+        },
+        body: { type: 'string' },
+        contentType: { type: 'string' },
+        intervalSeconds: { type: 'number' },
+        timeoutMs: { type: 'number' },
+        expectedStatus: { type: 'array', items: { type: 'number' } },
+        expectedContent: { type: 'string' },
+        failureThreshold: { type: 'number' },
+        active: { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'monitor_delete',
+    description: 'Delete a healthcheck and its history.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Healthcheck MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'monitor_run',
+    description: 'Run a healthcheck immediately and return the updated state. Performs an outbound HTTP request — treat as a write tool.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Healthcheck MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'monitor_history',
+    description: 'List recent run results for a healthcheck (status, statusCode, latency, error). History is auto-pruned after 30 days.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Healthcheck MongoDB ID' },
+        limit: { type: 'number', description: 'Max items (default 50, max 500)' },
+        offset: { type: 'number', description: 'Skip first N items' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'monitor_summary',
+    description: 'Aggregated status across all healthchecks of a customer (counts by status + worst overall status).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        customerId: { type: 'string', description: 'Customer MongoDB ID' },
+      },
+      required: ['customerId'],
+    },
+  },
 ];
 
 function isToolAllowed(toolName: string): boolean {
@@ -2372,6 +2513,7 @@ export function toolGroup(name: string): 'Task-Management' | 'Wissen & Suche' | 
   if (
     name.startsWith('customer_') ||
     name.startsWith('contact_') ||
+    name.startsWith('monitor_') ||
     name === 'project_customer_links'
   ) {
     return 'Kundenverwaltung';
@@ -2396,6 +2538,7 @@ const SENSITIVE_READ_TOOLS = new Set<string>([
 const EXPLICIT_WRITE_TOOLS = new Set<string>([
   'release_sync_gitlab',
   'workspace_attachment_save',
+  'monitor_run',
 ]);
 
 export function isWriteTool(name: string): boolean {
@@ -2420,7 +2563,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -4262,6 +4405,91 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           };
           break;
         }
+        case 'monitor_create': {
+          const headers = Array.isArray(a.headers) ? (a.headers as Array<{ name: string; value?: string }>) : undefined;
+          const secretHeaders = Array.isArray(a.secretHeaders)
+            ? (a.secretHeaders as Array<{ name: string; secretId: string }>)
+            : undefined;
+          const expectedStatus = Array.isArray(a.expectedStatus)
+            ? (a.expectedStatus as number[]).filter((v) => typeof v === 'number')
+            : undefined;
+          const check = await monitoringService.create({
+            customerId: requireString(a, 'customerId'),
+            projectId: optionalString(a, 'projectId'),
+            customerProjectId: optionalString(a, 'customerProjectId'),
+            environmentId: optionalString(a, 'environmentId'),
+            name: requireString(a, 'name'),
+            description: optionalString(a, 'description'),
+            method: optionalString(a, 'method') as any,
+            url: requireString(a, 'url'),
+            headers: headers?.map((h) => ({ name: h.name, value: h.value ?? '' })),
+            secretHeaders,
+            body: optionalString(a, 'body'),
+            contentType: optionalString(a, 'contentType'),
+            intervalSeconds: optionalNumber(a, 'intervalSeconds'),
+            timeoutMs: optionalNumber(a, 'timeoutMs'),
+            expectedStatus,
+            expectedContent: optionalString(a, 'expectedContent'),
+            failureThreshold: optionalNumber(a, 'failureThreshold'),
+            active: optionalBoolean(a, 'active'),
+          });
+          result = compactCreateResult(check, { name: (check as any).name, customerId: (check as any).customerId });
+          break;
+        }
+        case 'monitor_list': {
+          const checks = await monitoringService.findByCustomer(requireString(a, 'customerId'));
+          result = compactList(checks as any, ['__v', 'headers', 'secretHeaders', 'body']);
+          break;
+        }
+        case 'monitor_get':
+          result = await monitoringService.findById(requireString(a, 'id'));
+          break;
+        case 'monitor_update': {
+          const headers = Array.isArray(a.headers) ? (a.headers as Array<{ name: string; value?: string }>) : undefined;
+          const secretHeaders = Array.isArray(a.secretHeaders)
+            ? (a.secretHeaders as Array<{ name: string; secretId: string }>)
+            : undefined;
+          const expectedStatus = Array.isArray(a.expectedStatus)
+            ? (a.expectedStatus as number[]).filter((v) => typeof v === 'number')
+            : undefined;
+          result = compactUpdateResult(await monitoringService.update(requireString(a, 'id'), {
+            projectId: optionalString(a, 'projectId'),
+            customerProjectId: optionalString(a, 'customerProjectId'),
+            environmentId: optionalString(a, 'environmentId'),
+            name: optionalString(a, 'name'),
+            description: optionalString(a, 'description'),
+            method: optionalString(a, 'method') as any,
+            url: optionalString(a, 'url'),
+            headers: headers?.map((h) => ({ name: h.name, value: h.value ?? '' })),
+            secretHeaders,
+            body: optionalString(a, 'body'),
+            contentType: optionalString(a, 'contentType'),
+            intervalSeconds: optionalNumber(a, 'intervalSeconds'),
+            timeoutMs: optionalNumber(a, 'timeoutMs'),
+            expectedStatus,
+            expectedContent: optionalString(a, 'expectedContent'),
+            failureThreshold: optionalNumber(a, 'failureThreshold'),
+            active: optionalBoolean(a, 'active'),
+          }));
+          break;
+        }
+        case 'monitor_delete':
+          await monitoringService.remove(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
+          break;
+        case 'monitor_run':
+          result = await monitoringService.runOnce(requireString(a, 'id'));
+          break;
+        case 'monitor_history':
+          result = await monitoringService.listHistory(
+            requireString(a, 'id'),
+            optionalNumber(a, 'limit'),
+            optionalNumber(a, 'offset'),
+          );
+          break;
+        case 'monitor_summary':
+          result = await monitoringService.getCustomerSummary(requireString(a, 'customerId'));
+          break;
         default:
           return errorResult(`Unknown tool: ${name}`);
       }

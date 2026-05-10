@@ -119,6 +119,74 @@ export interface Contact {
   updatedAt: string;
 }
 
+export type HealthcheckMethod = 'GET' | 'POST' | 'HEAD' | 'PUT' | 'PATCH' | 'DELETE';
+export type HealthcheckStatus = 'unknown' | 'healthy' | 'degraded' | 'unhealthy' | 'paused';
+
+export interface HealthcheckHeader {
+  name: string;
+  value: string;
+}
+
+export interface HealthcheckSecretHeader {
+  name: string;
+  secretId: string;
+}
+
+export interface Healthcheck {
+  _id: string;
+  customerId: string;
+  projectId?: string;
+  customerProjectId?: string;
+  environmentId?: string;
+  name: string;
+  description?: string;
+  method: HealthcheckMethod;
+  url: string;
+  headers: HealthcheckHeader[];
+  secretHeaders: HealthcheckSecretHeader[];
+  body?: string;
+  contentType?: string;
+  intervalSeconds: number;
+  timeoutMs: number;
+  expectedStatus: number[];
+  expectedContent?: string;
+  failureThreshold: number;
+  active: boolean;
+  lastStatus: HealthcheckStatus;
+  lastRunAt?: string;
+  lastLatencyMs?: number;
+  lastStatusCode?: number;
+  lastError?: string;
+  consecutiveFailures: number;
+  consecutiveSuccesses: number;
+  nextRunAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HealthcheckHistoryEntry {
+  _id: string;
+  healthcheckId: string;
+  customerId: string;
+  runAt: string;
+  status: HealthcheckStatus;
+  statusCode?: number;
+  latencyMs?: number;
+  error?: string;
+  createdAt: string;
+}
+
+export interface CustomerHealthSummary {
+  customerId: string;
+  total: number;
+  healthy: number;
+  degraded: number;
+  unhealthy: number;
+  paused: number;
+  unknown: number;
+  worstStatus: HealthcheckStatus;
+}
+
 export interface ChangelogEntry {
   _id: string;
   projectId: string;
@@ -863,6 +931,31 @@ export const api = {
       request<void>(`/customers/${customerId}/project-links/${linkId}`, {
         method: 'DELETE',
       }),
+  },
+  monitoring: {
+    list: (customerId: string) =>
+      request<Healthcheck[]>(`/customers/${customerId}/healthchecks`),
+    summary: (customerId: string) =>
+      request<CustomerHealthSummary>(`/customers/${customerId}/healthchecks/summary`),
+    create: (customerId: string, data: Partial<Healthcheck>) =>
+      request<Healthcheck>(`/customers/${customerId}/healthchecks`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    get: (id: string) => request<Healthcheck>(`/healthchecks/${id}`),
+    update: (id: string, data: Partial<Healthcheck>) =>
+      request<Healthcheck>(`/healthchecks/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    remove: (id: string) =>
+      request<void>(`/healthchecks/${id}`, { method: 'DELETE' }),
+    run: (id: string) =>
+      request<Healthcheck>(`/healthchecks/${id}/run`, { method: 'POST' }),
+    history: (id: string, limit = 50, offset = 0) =>
+      request<HealthcheckHistoryEntry[]>(
+        `/healthchecks/${id}/history?limit=${limit}&offset=${offset}`,
+      ),
   },
   contacts: {
     list: (customerId: string) =>

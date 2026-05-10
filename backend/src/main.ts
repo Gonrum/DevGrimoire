@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { randomUUID } from 'node:crypto';
 import helmet from 'helmet';
@@ -47,7 +47,9 @@ import { WorkspaceGitTokensService } from './workspaces/workspace-git-tokens.ser
 import { WorkspaceCliTokenService } from './workspaces/workspace-cli-token.service';
 import { CustomersService } from './customers/customers.service';
 import { ContactsService } from './contacts/contacts.service';
+import { MonitoringService } from './monitoring/monitoring.service';
 import { getToolCatalog, registerMcpTools, McpServices } from './mcp-tools';
+import { ApiKey } from './api-keys/schemas/api-key.schema';
 import { ApiKeysService } from './api-keys/api-keys.service';
 import { AuthService } from './auth/auth.service';
 import { JwtService } from '@nestjs/jwt';
@@ -104,6 +106,7 @@ async function bootstrap() {
     authService: app.get(AuthService),
     customersService: app.get(CustomersService),
     contactsService: app.get(ContactsService),
+    monitoringService: app.get(MonitoringService),
     logsService: app.get(LogsService),
     releasesService: app.get(ReleasesService),
     chatService: app.get(ChatService),
@@ -118,21 +121,29 @@ async function bootstrap() {
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};
-  // Track authenticated SSE sessions and the user that owns them.
-  const authenticatedSessions = new Map<string, RequestUser>();
+  // Cache the user AND api-key for SSE sessions — /messages must restore both
+  // to the RequestContext so apiKey.allowedTools is honored on tool calls.
+  const authenticatedSessions = new Map<string, { user: RequestUser; apiKey?: ApiKey }>();
+  const mcpLogger = new Logger('McpTransport');
 
   // API Key auth middleware for MCP endpoints
   const apiKeysService = app.get(ApiKeysService);
   const authService = app.get(AuthService);
 
-  const mcpDiscoveryHandler = (_req: any, res: any) => {
+  const getPublicOrigin = (req: any) => {
+    const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+    const proto = forwardedProto || req.protocol || 'http';
+    return `${proto}://${req.get('host')}`;
+  };
+
+  const getMcpDiscoveryPayload = () => {
     const toolCatalog = getToolCatalog();
     const toolsByGroup = toolCatalog.reduce<Record<string, number>>((acc, tool) => {
       acc[tool.group] = (acc[tool.group] || 0) + 1;
       return acc;
     }, {});
 
-    res.json({
+    return {
       schemaVersion: 'devgrimoire.mcp.discovery.v1',
       name: 'DevGrimoire',
       version: process.env.npm_package_version || '1.0.0',
@@ -167,6 +178,7 @@ async function bootstrap() {
         toolCatalog: '/api/mcp/tools',
         streamableHttp: '/mcp',
         sse: '/sse',
+        registryManifest: '/server.json',
         documentation: '/docs',
       },
       privacy: {
@@ -174,11 +186,49 @@ async function bootstrap() {
         containsSecrets: false,
         note: 'Discovery exposes only static server metadata. Tool invocation, project data, user data, and secret values remain behind MCP/API authentication when auth is enabled.',
       },
+    };
+  };
+
+  const mcpDiscoveryHandler = (_req: any, res: any) => {
+    res.json(getMcpDiscoveryPayload());
+  };
+
+  const mcpRegistryManifestHandler = (req: any, res: any) => {
+    const discovery = getMcpDiscoveryPayload();
+    const origin = getPublicOrigin(req);
+
+    res.json({
+      $schema: 'https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json',
+      name: 'local.devgrimoire/devgrimoire',
+      title: 'DevGrimoire',
+      description: discovery.description,
+      websiteUrl: origin,
+      version: discovery.version,
+      remotes: [
+        {
+          type: 'streamable-http',
+          url: `${origin}/mcp`,
+        },
+        {
+          type: 'sse',
+          url: `${origin}/sse`,
+        },
+      ],
+      _meta: {
+        'io.modelcontextprotocol.registry/publisher-provided': {
+          publication: 'private-instance-manifest',
+          publicRegistryPublishing: false,
+          security: 'No API keys, project IDs, user data, tool allowlists, or secret values are included. Authentication is still required for MCP calls when enabled.',
+          toolCatalog: `${origin}/api/mcp/tools`,
+        },
+      },
     });
   };
 
   expressApp.get('/.well-known/mcp', mcpDiscoveryHandler);
   expressApp.get('/.well-known/mcp.json', mcpDiscoveryHandler);
+  expressApp.get('/.well-known/mcp-server.json', mcpRegistryManifestHandler);
+  expressApp.get('/server.json', mcpRegistryManifestHandler);
 
   const mcpAuthMiddleware = async (req: any, res: any, next: any) => {
     // Skip auth if auth is not enabled — still set a default user so per-user
@@ -244,11 +294,13 @@ async function bootstrap() {
       req.user = { userId: 'system', username: 'system', role: 'admin' } satisfies RequestUser;
       return next();
     }
-    // /messages requests belong to an SSE session that was already authenticated on /sse
+    // /messages requests belong to an SSE session authenticated on /sse — restore
+    // both user AND apiKey so per-key tool allowlists keep being enforced.
     const sessionId = req.query?.sessionId as string | undefined;
-    const cachedUser = sessionId ? authenticatedSessions.get(sessionId) : undefined;
-    if (cachedUser) {
-      req.user = cachedUser;
+    const cached = sessionId ? authenticatedSessions.get(sessionId) : undefined;
+    if (cached) {
+      req.user = cached.user;
+      req.apiKey = cached.apiKey;
       return next();
     }
     // Fallback: check API key directly
@@ -278,11 +330,15 @@ async function bootstrap() {
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (sid) => {
             transports[sid] = transport;
+            mcpLogger.log(`streamable-http session opened (${sid.slice(0, 8)}…, total=${Object.keys(transports).length})`);
           },
         });
         transport.onclose = () => {
           const sid = transport.sessionId;
-          if (sid) delete transports[sid];
+          if (sid) {
+            delete transports[sid];
+            mcpLogger.log(`streamable-http session closed (${sid.slice(0, 8)}…, total=${Object.keys(transports).length})`);
+          }
         };
         const server = createMcpServer(services);
         await server.connect(transport);
@@ -312,11 +368,16 @@ async function bootstrap() {
     const transport = new SSEServerTransport('/messages', res);
     transports[transport.sessionId] = transport;
     if (req.user) {
-      authenticatedSessions.set(transport.sessionId, req.user as RequestUser);
+      authenticatedSessions.set(transport.sessionId, {
+        user: req.user as RequestUser,
+        apiKey: req.apiKey as ApiKey | undefined,
+      });
     }
+    mcpLogger.log(`sse session opened (${transport.sessionId.slice(0, 8)}…, total=${Object.keys(transports).length})`);
     res.on('close', () => {
       delete transports[transport.sessionId];
       authenticatedSessions.delete(transport.sessionId);
+      mcpLogger.log(`sse session closed (${transport.sessionId.slice(0, 8)}…, total=${Object.keys(transports).length})`);
     });
     const server = createMcpServer(services);
     await server.connect(transport);
@@ -326,7 +387,7 @@ async function bootstrap() {
     const sessionId = req.query.sessionId as string;
     const transport = transports[sessionId];
     if (transport instanceof SSEServerTransport) {
-      await RequestContext.run(req.user, undefined, () => transport.handlePostMessage(req, res, req.body));
+      await RequestContext.run(req.user, req.apiKey, () => transport.handlePostMessage(req, res, req.body));
     } else {
       res.status(400).json({
         jsonrpc: '2.0',
