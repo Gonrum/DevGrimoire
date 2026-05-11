@@ -1,17 +1,22 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Query } from '@nestjs/common';
 import { WorkflowsService } from './workflows.service';
+import { WorkflowEngineService } from './engine/workflow-engine.service';
 import {
   CancelWorkflowRunDto,
   CreateWorkflowDefinitionDto,
   ListWorkflowDefinitionsDto,
   ListWorkflowRunsDto,
+  RetryWorkflowRunDto,
   StartWorkflowRunDto,
   UpdateWorkflowDefinitionDto,
 } from './dto/workflow.dto';
 
 @Controller('workflows')
 export class WorkflowsController {
-  constructor(private readonly workflows: WorkflowsService) {}
+  constructor(
+    private readonly workflows: WorkflowsService,
+    private readonly engine: WorkflowEngineService,
+  ) {}
 
   @Post()
   @HttpCode(201)
@@ -59,6 +64,12 @@ export class WorkflowsController {
   @Post('runs/:id/cancel')
   cancelRun(@Param('id') id: string, @Body() dto: CancelWorkflowRunDto) {
     return this.workflows.cancelRun(id, dto);
+  }
+
+  @Post('runs/:id/retry')
+  async retryRun(@Param('id') id: string, @Body() body: RetryWorkflowRunDto = {}): Promise<{ ok: true }> {
+    await this.engine.retryRun(id, body.fromNodeId);
+    return { ok: true };
   }
 
   @Get('runs/:id/node-runs')
