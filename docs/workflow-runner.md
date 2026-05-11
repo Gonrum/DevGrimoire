@@ -244,28 +244,37 @@ WORKFLOW_NODE_LOG_CAP=200
 
 ## Test-Strategie
 
-### Unit (Jest, `backend/src/workflows/**/*.spec.ts`)
-- `graph-walker.spec.ts`: branch-Filterung (success/failure/always/custom), conditions, fan-out, fan-in
-- `node-registry.spec.ts`: register/get, unknown-type wirft
-- `workflow-scheduler.spec.ts`: `computeMissedSlots` (cron + interval), `maxCatchUp` Cap, `computeNext` mit Jest fake timers
-- `workflow-engine.spec.ts`: Lifecycle (queued→running→succeeded), Retry-Backoff (fake timers), Definition-Lock (Serialisierung zweier Runs derselben Definition), Recovery markiert stale `RUNNING` als `INTERRUPTED`
-- Pro Mini-Node ein Executor-Test
+Das Backend hat keine Jest-Infrastruktur. Verifikation folgt der existierenden Konvention von `check:rag-schema`, `check:mcp-registry`, `check:workspace-roots-guard` — standalone `.cjs`-Scripts, die einen NestJS-Application-Context booten oder Pure-Functions importieren und mit `assert` prüfen. Bei Failure non-zero Exit.
 
-### E2E (`backend/test/workflows-runner.e2e-spec.ts`)
-- Setup: Compose-MongoDB, NestJS-TestingModule, `WORKFLOW_SCHEDULER_DISABLED=true`, `WORKFLOW_WORKER_CONCURRENCY=1`
-- Workflow `manual-trigger → todo-create → notify → log` anlegen, publizieren
-- `startRun()`, poll auf `status=SUCCEEDED` (max 10s)
+### Pure-Logic-Checks (kein Mongo)
+`backend/scripts/workflow-runner-units-check.cjs`:
+- `graph-walker`: branch-Filterung (success/failure/always/custom), conditions, fan-out (mehrere ausgehende Edges), fan-in (mehrere Vorgänger zum gleichen Node)
+- `node-registry`: register/get, unknown-type wirft
+- `workflow-scheduler` Pure-Funktionen: `computeMissedSlots` (cron + interval), `maxCatchUp` Cap, `computeNext` (mit injizierter `now`)
+
+Diese Funktionen werden bewusst als pure exportierte Helpers gebaut (ohne DI), damit sie direkt aus dem `.cjs` per `require('../dist/workflows/engine/...')` aufrufbar sind.
+
+### Engine-Integration-Check (HTTP gegen laufendes Backend)
+`backend/scripts/workflow-engine-check.cjs` — folgt dem `mcp-registry-readiness-check.cjs`-Pattern (HTTP statt NestJS-Context, kein Konkurrenz-Connect auf MongoDB):
+- Liest `DEVGRIMOIRE_BASE_URL` (Default `http://localhost:3200`) und `DEVGRIMOIRE_API_KEY`
+- Legt Workflow `manual-trigger → action.log → action.todo-create → action.notify` per `POST /api/workflows` an, setzt `status=ACTIVE` per `PATCH /api/workflows/:id`
+- Startet Run per `POST /api/workflows/runs`
+- Pollt `GET /api/workflows/runs/:id` alle 250ms bis `status` terminal (Timeout 10s)
 - Assertions:
-  - Alle vier NodeRuns `succeeded`
-  - Todo existiert in DB (`todosService.get(output.todoId)`)
-  - Notification-Event emittiert (EventEmitter-Spy)
-  - Letzter NodeRun hat Log-Eintrag mit erwarteter Message
+  - Run-`status=succeeded`, `startedAt` und `finishedAt` gesetzt
+  - `GET /api/workflows/runs/:id/node-runs` liefert 4 Einträge, alle `succeeded`
+  - todo-create-NodeRun-Output enthält `todoId`; `GET /api/todos/:id` liefert HTTP 200
+  - notify-NodeRun-Output enthält `notificationId`
+  - log-NodeRun hat mindestens einen `logs[]`-Eintrag
+- Cleanup: Workflow per DELETE entfernen (kaskadiert Runs/NodeRuns), Todo per DELETE entfernen
+
+Aufruf-Skript: `npm run check:workflow-engine` (registriert in `backend/package.json`). Voraussetzung: Backend läuft (`docker compose up -d backend`).
 
 ### Lint + manuelle Verifikation
 - `cd backend && npm run lint` muss grün sein
+- `npm run check:workflow-runner-units && npm run check:workflow-engine` müssen grün sein
 - Rebuild: `docker compose up -d --build backend`
-- Smoke via MCP: `workflow_create` (manual-trigger → log), `workflow_run_start`, `workflow_run_get` → status `succeeded`
-- Scheduler-Smoke: Workflow mit `intervalMinutes: 1` anlegen, 2 Minuten warten, `workflow_run_list` zeigt 2 Runs
+- Scheduler-Smoke (manuell, da Cron-Timing): Workflow mit `intervalMinutes: 1` und einer log-Action anlegen, 2 Minuten warten, `workflow_run_list` zeigt ≥2 Runs
 
 ## Akzeptanzkriterien (aus T-250) — Verifikations-Mapping
 
