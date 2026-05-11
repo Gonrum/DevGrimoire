@@ -226,6 +226,70 @@ export interface BackupManifest {
   restore?: { note?: string };
 }
 
+export type CustomerTemplateType =
+  | 'onboarding'
+  | 'todo_list'
+  | 'monitoring'
+  | 'environment'
+  | 'workflow'
+  | 'contact_type';
+
+export type CustomerTemplateItemKind =
+  | 'todo'
+  | 'monitoring_check'
+  | 'environment'
+  | 'workflow'
+  | 'contact_type'
+  | 'note';
+
+export interface CustomerTemplateItem {
+  kind: CustomerTemplateItemKind;
+  title: string;
+  description?: string;
+  payload: Record<string, unknown>;
+  requiredSecretKeys?: string[];
+  placeholders?: Record<string, string>;
+}
+
+export interface CustomerTemplate {
+  _id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  type: CustomerTemplateType;
+  active: boolean;
+  version: number;
+  tags: string[];
+  items: CustomerTemplateItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerTemplatePreview {
+  template: { id: string; name: string; type: string; version: number };
+  items: Array<{
+    kind: CustomerTemplateItemKind;
+    title: string;
+    description?: string;
+    payload: Record<string, unknown>;
+  }>;
+  requiredSecretKeys: string[];
+}
+
+export interface CustomerTemplateApplyResult {
+  templateId: string;
+  templateVersion: number;
+  customerId: string;
+  appliedAt: string;
+  created: Array<{
+    kind: CustomerTemplateItemKind;
+    id?: string;
+    title: string;
+    note?: string;
+  }>;
+  missingSecretKeys: string[];
+}
+
 export interface BackupJob {
   _id: string;
   mode: BackupMode;
@@ -1453,6 +1517,33 @@ export const api = {
     getForCustomer: (customerId: string) => request<Soul | null>(`/souls?customerId=${customerId}`),
     upsert: (data: Partial<Soul> & { projectId?: string; customerId?: string }) =>
       request<Soul>('/souls', { method: 'PUT', body: JSON.stringify(data) }),
+  },
+  customerTemplates: {
+    list: (filters?: { type?: string; active?: boolean; tag?: string }) => {
+      const params = new URLSearchParams();
+      if (filters?.type) params.set('type', filters.type);
+      if (filters?.active !== undefined) params.set('active', String(filters.active));
+      if (filters?.tag) params.set('tag', filters.tag);
+      const qs = params.toString();
+      return request<CustomerTemplate[]>(`/customer-templates${qs ? `?${qs}` : ''}`);
+    },
+    get: (id: string) => request<CustomerTemplate>(`/customer-templates/${id}`),
+    create: (data: Partial<CustomerTemplate>) =>
+      request<CustomerTemplate>('/customer-templates', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<CustomerTemplate>) =>
+      request<CustomerTemplate>(`/customer-templates/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    remove: (id: string) =>
+      request<void>(`/customer-templates/${id}`, { method: 'DELETE' }),
+    preview: (id: string, customerId: string) =>
+      request<CustomerTemplatePreview>(`/customer-templates/${id}/preview`, {
+        method: 'POST',
+        body: JSON.stringify({ customerId }),
+      }),
+    apply: (id: string, customerId: string) =>
+      request<CustomerTemplateApplyResult>(`/customer-templates/${id}/apply`, {
+        method: 'POST',
+        body: JSON.stringify({ customerId }),
+      }),
   },
   recurringTasks: {
     list: (filters?: { projectId?: string; customerId?: string; systemOnly?: boolean; active?: boolean }) => {

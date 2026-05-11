@@ -26,6 +26,10 @@ import { RagService } from './rag/rag.service';
 import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
 import { WorkflowsService } from './workflows/workflows.service';
 import { WorkflowScope, WorkflowStatus } from './workflows/schemas/workflow-definition.schema';
+import { CustomerTemplatesService } from './customer-templates/customer-templates.service';
+import { CustomerTemplateType } from './customer-templates/schemas/customer-template.schema';
+import { ValidationReportsService } from './validation-reports/validation-reports.service';
+import { ValidationReportStatus } from './validation-reports/schemas/validation-report.schema';
 import { SnippetsService } from './snippets/snippets.service';
 import { WorkspacesService } from './workspaces/workspaces.service';
 import { WorkspaceStatus } from './workspaces/schemas/workspace.schema';
@@ -241,6 +245,8 @@ export interface McpServices {
   ragService: RagService;
   recurringTasksService: RecurringTasksService;
   workflowsService: WorkflowsService;
+  customerTemplatesService: CustomerTemplatesService;
+  validationReportsService: ValidationReportsService;
   snippetsService: SnippetsService;
   attachmentsService: AttachmentsService;
   questionsService: QuestionsService;
@@ -2096,6 +2102,55 @@ const tools = [
     },
   },
   {
+    name: 'validation_report_add',
+    description: 'Store a structured validation/test/build/lint result. Logs are masked and truncated server-side before persistence.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string' },
+        todoId: { type: 'string' },
+        commitId: { type: 'string' },
+        workflowRunId: { type: 'string' },
+        name: { type: 'string', description: 'Short label, e.g. npm run build' },
+        command: { type: 'string' },
+        status: { type: 'string', enum: ['passed', 'failed', 'error', 'skipped'] },
+        exitCode: { type: 'number' },
+        durationMs: { type: 'number' },
+        summary: { type: 'string' },
+        outputSnippet: { type: 'string', description: 'Compact stdout/stderr excerpt; secrets are masked server-side' },
+        tags: { type: 'array', items: { type: 'string' } },
+        metadata: { type: 'object' },
+      },
+      required: ['projectId', 'name', 'status'],
+    },
+  },
+  {
+    name: 'validation_report_list',
+    description: 'List recent validation reports by project, todo, commit, workflowRun, or status.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string' },
+        todoId: { type: 'string' },
+        commitId: { type: 'string' },
+        workflowRunId: { type: 'string' },
+        status: { type: 'string', enum: ['passed', 'failed', 'error', 'skipped'] },
+        limit: { type: 'number', description: 'Default 50, max 200' },
+      },
+    },
+  },
+  {
+    name: 'validation_report_get',
+    description: 'Get one validation report by ID.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' },
+      },
+      required: ['id'],
+    },
+  },
+  {
     name: 'workflow_create',
     description: 'Create a workflow definition (graph of triggers, nodes and edges). Scope controls visibility: system (admin-only), project (requires projectId), customer (requires customerId).',
     inputSchema: {
@@ -2242,6 +2297,95 @@ const tools = [
       type: 'object' as const,
       properties: { runId: { type: 'string' } },
       required: ['runId'],
+    },
+  },
+  {
+    name: 'customer_template_create',
+    description: 'Create a customer setup template. Templates contain repeatable, NON-SECRET blueprints (todos, environments, monitoring checks, contacts, workflows). Secret values are rejected — use requiredSecretKeys for placeholders.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string' },
+        slug: { type: 'string', description: 'lowercase + hyphens, unique' },
+        description: { type: 'string' },
+        type: { type: 'string', enum: ['onboarding', 'todo_list', 'monitoring', 'environment', 'workflow', 'contact_type'] },
+        active: { type: 'boolean' },
+        tags: { type: 'array', items: { type: 'string' } },
+        items: { type: 'array', description: 'Array of CustomerTemplateItem (kind, title, description?, payload, requiredSecretKeys?, placeholders?)' },
+      },
+      required: ['name', 'slug', 'type'],
+    },
+  },
+  {
+    name: 'customer_template_list',
+    description: 'List customer templates (compact). Filter by type, active, tag.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        type: { type: 'string', enum: ['onboarding', 'todo_list', 'monitoring', 'environment', 'workflow', 'contact_type'] },
+        active: { type: 'boolean' },
+        tag: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'customer_template_get',
+    description: 'Get a customer template with all items',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'customer_template_update',
+    description: 'Update a customer template. Editing items or type auto-bumps version.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        type: { type: 'string', enum: ['onboarding', 'todo_list', 'monitoring', 'environment', 'workflow', 'contact_type'] },
+        active: { type: 'boolean' },
+        tags: { type: 'array', items: { type: 'string' } },
+        items: { type: 'array' },
+        publish: { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'customer_template_delete',
+    description: 'Delete a customer template (does NOT touch any entities created from past applies)',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'customer_template_preview',
+    description: 'Dry-run: returns what would be created for the customer without persisting.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Template id' },
+        customerId: { type: 'string' },
+      },
+      required: ['id', 'customerId'],
+    },
+  },
+  {
+    name: 'customer_template_apply',
+    description: 'Apply a template to a customer. Creates todos / environments / contacts / monitoring checks / customer-scoped workflows from items. Failed items are reported per-item, the apply does not fail the whole operation. Returns the created entities and any required-but-missing secret keys.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Template id' },
+        customerId: { type: 'string' },
+      },
+      required: ['id', 'customerId'],
     },
   },
   {
@@ -2656,6 +2800,7 @@ export function toolGroup(name: string): 'Task-Management' | 'Wissen & Suche' | 
     name.startsWith('todo_') ||
     name.startsWith('milestone_') ||
     name.startsWith('recurring_task_') ||
+    name.startsWith('validation_report_') ||
     name.startsWith('workflow_')
   ) {
     return 'Task-Management';
@@ -2706,6 +2851,7 @@ const EXPLICIT_WRITE_TOOLS = new Set<string>([
   'monitor_run',
   'workflow_run_start',
   'workflow_run_cancel',
+  'customer_template_apply',
 ]);
 
 export function isWriteTool(name: string): boolean {
@@ -2730,7 +2876,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, customerTemplatesService, validationReportsService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -2820,6 +2966,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             snippetsService.removeByProject(id),
             attachmentsService.removeByProject(id),
             releasesService.removeByProject(id),
+            validationReportsService.removeByProject(id),
             workspacesService.removeByProject(id),
           ]);
           result = { deleted: true, id };
@@ -4282,6 +4429,41 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = { deleted: true, id: a.id };
           break;
         }
+        case 'validation_report_add': {
+          const report = await validationReportsService.create({
+            projectId: requireString(a, 'projectId'),
+            todoId: optionalString(a, 'todoId'),
+            commitId: optionalString(a, 'commitId'),
+            workflowRunId: optionalString(a, 'workflowRunId'),
+            name: requireString(a, 'name'),
+            command: optionalString(a, 'command'),
+            status: requireString(a, 'status') as ValidationReportStatus,
+            exitCode: optionalNumber(a, 'exitCode'),
+            durationMs: optionalNumber(a, 'durationMs'),
+            summary: optionalString(a, 'summary'),
+            outputSnippet: optionalString(a, 'outputSnippet'),
+            tags: optionalStringArray(a, 'tags'),
+            metadata: a.metadata as any,
+          });
+          result = compactCreateResult(report, { status: (report as any).status });
+          break;
+        }
+        case 'validation_report_list': {
+          const reports = await validationReportsService.list({
+            projectId: optionalString(a, 'projectId'),
+            todoId: optionalString(a, 'todoId'),
+            commitId: optionalString(a, 'commitId'),
+            workflowRunId: optionalString(a, 'workflowRunId'),
+            status: optionalString(a, 'status') as ValidationReportStatus | undefined,
+            limit: optionalNumber(a, 'limit'),
+          });
+          result = compactList(reports as any[], ['outputSnippet', 'metadata', '__v']);
+          break;
+        }
+        case 'validation_report_get': {
+          result = await validationReportsService.findById(requireString(a, 'id'));
+          break;
+        }
         case 'workflow_create': {
           const wf = await workflowsService.createDefinition({
             scope: requireString(a, 'scope') as WorkflowScope,
@@ -4429,6 +4611,74 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             finishedAt: nr.finishedAt,
             durationMs: nr.durationMs,
           }));
+          break;
+        }
+        case 'customer_template_create': {
+          const tpl = await customerTemplatesService.create({
+            name: requireString(a, 'name'),
+            slug: requireString(a, 'slug'),
+            description: optionalString(a, 'description'),
+            type: requireString(a, 'type') as CustomerTemplateType,
+            active: typeof a.active === 'boolean' ? a.active : undefined,
+            tags: Array.isArray(a.tags) ? (a.tags as string[]) : undefined,
+            items: Array.isArray(a.items) ? (a.items as never) : undefined,
+          });
+          result = { id: tpl._id.toString(), slug: tpl.slug, version: tpl.version };
+          break;
+        }
+        case 'customer_template_list': {
+          const list = await customerTemplatesService.list({
+            type: optionalString(a, 'type') as CustomerTemplateType | undefined,
+            active: typeof a.active === 'boolean' ? a.active : undefined,
+            tag: optionalString(a, 'tag'),
+          });
+          result = list.map((t) => ({
+            id: t._id.toString(),
+            name: t.name,
+            slug: t.slug,
+            type: t.type,
+            active: t.active,
+            version: t.version,
+            tags: t.tags,
+            itemCount: t.items.length,
+            updatedAt: t.updatedAt,
+          }));
+          break;
+        }
+        case 'customer_template_get': {
+          const tpl = await customerTemplatesService.findById(requireString(a, 'id'));
+          result = tpl.toObject();
+          break;
+        }
+        case 'customer_template_update': {
+          const updated = await customerTemplatesService.update(requireString(a, 'id'), {
+            name: optionalString(a, 'name'),
+            description: optionalString(a, 'description'),
+            type: optionalString(a, 'type') as CustomerTemplateType | undefined,
+            active: typeof a.active === 'boolean' ? a.active : undefined,
+            tags: Array.isArray(a.tags) ? (a.tags as string[]) : undefined,
+            items: Array.isArray(a.items) ? (a.items as never) : undefined,
+            publish: typeof a.publish === 'boolean' ? a.publish : undefined,
+          });
+          result = { id: updated._id.toString(), version: updated.version };
+          break;
+        }
+        case 'customer_template_delete': {
+          await customerTemplatesService.remove(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
+          break;
+        }
+        case 'customer_template_preview': {
+          result = await customerTemplatesService.preview(
+            requireString(a, 'id'),
+            requireString(a, 'customerId'),
+          );
+          break;
+        }
+        case 'customer_template_apply': {
+          result = await customerTemplatesService.apply(requireString(a, 'id'), {
+            customerId: requireString(a, 'customerId'),
+          });
           break;
         }
         case 'snippet_save': {

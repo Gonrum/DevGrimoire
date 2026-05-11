@@ -26,6 +26,8 @@ import { CommitsService } from './commits/commits.service';
 import { RagService } from './rag/rag.service';
 import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
 import { WorkflowsService } from './workflows/workflows.service';
+import { CustomerTemplatesService } from './customer-templates/customer-templates.service';
+import { ValidationReportsService } from './validation-reports/validation-reports.service';
 import { SnippetsService } from './snippets/snippets.service';
 import { AttachmentsService } from './attachments/attachments.service';
 import { QuestionsService } from './questions/questions.service';
@@ -119,6 +121,8 @@ async function bootstrap() {
     ragService: app.get(RagService),
     recurringTasksService: app.get(RecurringTasksService),
     workflowsService: app.get(WorkflowsService),
+    customerTemplatesService: app.get(CustomerTemplatesService),
+    validationReportsService: app.get(ValidationReportsService),
     snippetsService: app.get(SnippetsService),
     attachmentsService: app.get(AttachmentsService),
     questionsService: app.get(QuestionsService),

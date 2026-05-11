@@ -10,6 +10,7 @@ import ApiKeyToolEditor from '../components/ApiKeyToolEditor';
 import ApiKeyScopeEditor from '../components/ApiKeyScopeEditor';
 import NotificationsSettings from '../components/settings/NotificationsSettings';
 import BackupSettings from '../components/settings/BackupSettings';
+import CustomerTemplatesSettings from '../components/settings/CustomerTemplatesSettings';
 import RagSettings from '../components/settings/RagSettings';
 import ChatLogSettings from '../components/settings/ChatLogSettings';
 import Button from '../components/ui/Button';
@@ -50,7 +51,7 @@ Wenn du Tasks bearbeitest, halte dich an den Status-Workflow:
 - Teste Änderungen bevor du sie als fertig markierst
 `;
 
-type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'chat' | 'chatlog' | 'rag' | 'websearch' | 'users' | 'auditlog' | 'replication' | 'backups';
+type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'chat' | 'chatlog' | 'rag' | 'websearch' | 'users' | 'auditlog' | 'replication' | 'backups' | 'customerTemplates';
 
 const CHAT_PROVIDER_DEFAULT_URL: Record<ChatProvider, string> = {
   lmstudio: 'http://localhost:1234',
@@ -481,6 +482,7 @@ export default function Settings() {
     { key: 'rag', label: t('settings.tabRag'), group: t('settings.groupAdmin'), adminOnly: true },
     { key: 'websearch', label: t('settings.tabWebSearch'), group: t('settings.groupAdmin'), adminOnly: true },
     { key: 'backups', label: t('settings.tabBackups'), group: t('settings.groupAdmin'), adminOnly: true },
+    { key: 'customerTemplates', label: t('settings.tabCustomerTemplates'), group: t('settings.groupAdmin'), adminOnly: true },
     { key: 'users', label: t('settings.tabUsers'), group: t('settings.groupAdmin'), adminOnly: true },
     { key: 'auditlog', label: t('settings.tabAuditLog'), group: t('settings.groupAdmin'), adminOnly: true },
     { key: 'replication', label: t('settings.tabReplication'), group: t('settings.groupAdmin'), adminOnly: true },
@@ -1253,6 +1255,7 @@ export default function Settings() {
 
       {tab === 'websearch' && isAdmin && <WebSearchSettings />}
       {tab === 'backups' && isAdmin && <BackupSettings />}
+      {tab === 'customerTemplates' && isAdmin && <CustomerTemplatesSettings />}
 
       {tab === 'replication' && isAdmin && <ReplicationSettings />}
     </SettingsShell>

@@ -195,3 +195,15 @@ The workflow node `Run validation` should:
 5. Add bug-todo proposal endpoint.
 6. Add MCP tools and workflow node integration.
 7. Add specialized parsers for npm/vitest/jest, pytest, tsc, eslint, and docker compose health.
+
+## Implementation slice — persistence API and MCP tools
+
+The first implementation slice adds a `ValidationReport` backend module with REST and MCP access:
+
+- `POST /api/validation-reports` creates a report.
+- `GET /api/validation-reports?projectId=&todoId=&status=&limit=` lists recent reports.
+- `GET /api/validation-reports/todo/:todoId/latest` returns the latest Todo-linked report.
+- `GET /api/validation-reports/:id` returns a full report.
+- `validation_report_add`, `validation_report_list`, and `validation_report_get` expose the same core flow to MCP agents.
+
+Stored `summary` and `outputSnippet` fields are masked and truncated server-side. This keeps the initial feature safe for cron jobs, agents, and future workflow validation nodes while UI badges, bug-todo proposals, and parser-specific enrichment remain follow-up work.

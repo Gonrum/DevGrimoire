@@ -1074,6 +1074,7 @@
     "myLlmSaved": "Saved",
     "myLlmMixedContentWarning": "⚠ DevGrimoire is served over HTTPS. Some browsers block requests to http:// addresses (mixed content). Chrome/Edge allow http://localhost; for other addresses you may need to switch the endpoint to HTTPS or allow an exception in your browser settings.",
     "tabBackups": "Backups",
+    "tabCustomerTemplates": "Customer Templates",
     "backups": {
       "description": "Check the backup target, start manual backups, and inspect backup manifests including artifacts and restore guidance.",
       "loadFailed": "Failed to load backups",
@@ -1563,5 +1564,30 @@
       "paused": "Paused",
       "unknown": "Unknown"
     }
+  },
+  "customerTemplates": {
+    "tabDescription": "Reusable customer setup blueprints — onboarding checklists, monitoring checks, environments, workflows. Templates contain NO real secret values, only required-key placeholders.",
+    "listTitle": "Templates",
+    "newTemplate": "New template",
+    "newTitle": "New template",
+    "editTitle": "Edit template",
+    "count": "{{count}} templates",
+    "itemsCount": "{{count}} items",
+    "empty": "No templates yet.",
+    "type": "Type",
+    "tagsCsv": "Tags (comma-separated)",
+    "active": "Active",
+    "itemsJson": "Items (JSON array)",
+    "itemsJsonHint": "Array of { kind, title, description?, payload, requiredSecretKeys? }. Kinds: todo, monitoring_check, environment, workflow, contact_type, note.",
+    "apply": "Apply",
+    "applyTitle": "Apply template — {{name}}",
+    "applyNow": "Apply now",
+    "targetCustomer": "Target customer",
+    "loadPreview": "Load preview",
+    "previewTitle": "Will create:",
+    "appliedSummary": "Applied successfully — {{count}} items created",
+    "requiredSecretKeys": "Required secret keys",
+    "saved": "Template saved",
+    "confirmDelete": "Really delete this template? Customer entities already created remain untouched."
   }
 }

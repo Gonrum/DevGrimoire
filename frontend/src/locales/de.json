@@ -1074,6 +1074,7 @@
     "myLlmSaved": "Gespeichert",
     "myLlmMixedContentWarning": "⚠ DevGrimoire läuft über HTTPS. Manche Browser blockieren Calls an http://-Adressen (Mixed Content). Chrome/Edge erlauben http://localhost; für andere Adressen musst du ggf. den Endpunkt auf HTTPS umstellen oder in den Browser-Einstellungen eine Ausnahme erlauben.",
     "tabBackups": "Backups",
+    "tabCustomerTemplates": "Kunden-Vorlagen",
     "backups": {
       "description": "Backup-Ziel prüfen, manuelle Backups starten und vorhandene Backup-Manifeste inklusive Artefakten und Restore-Hinweis einsehen.",
       "loadFailed": "Backups konnten nicht geladen werden",
@@ -1563,5 +1564,30 @@
       "paused": "Pausiert",
       "unknown": "Unbekannt"
     }
+  },
+  "customerTemplates": {
+    "tabDescription": "Wiederverwendbare Setup-Vorlagen für Kunden — Onboarding-Checklisten, Monitoring-Checks, Umgebungen, Workflows. Vorlagen enthalten KEINE echten Secret-Werte, nur benötigte Schlüssel-Platzhalter.",
+    "listTitle": "Vorlagen",
+    "newTemplate": "Neue Vorlage",
+    "newTitle": "Neue Vorlage",
+    "editTitle": "Vorlage bearbeiten",
+    "count": "{{count}} Vorlagen",
+    "itemsCount": "{{count}} Einträge",
+    "empty": "Noch keine Vorlagen angelegt.",
+    "type": "Typ",
+    "tagsCsv": "Tags (kommagetrennt)",
+    "active": "Aktiv",
+    "itemsJson": "Items (JSON-Array)",
+    "itemsJsonHint": "Array aus { kind, title, description?, payload, requiredSecretKeys? }. Kinds: todo, monitoring_check, environment, workflow, contact_type, note.",
+    "apply": "Anwenden",
+    "applyTitle": "Vorlage anwenden — {{name}}",
+    "applyNow": "Jetzt anwenden",
+    "targetCustomer": "Zielkunde",
+    "loadPreview": "Vorschau laden",
+    "previewTitle": "Wird angelegt:",
+    "appliedSummary": "Erfolgreich angewendet — {{count}} Einträge erzeugt",
+    "requiredSecretKeys": "Benötigte Secret-Keys",
+    "saved": "Vorlage gespeichert",
+    "confirmDelete": "Diese Vorlage wirklich löschen? Bereits angelegte Kunden-Entities bleiben erhalten."
   }
 }
