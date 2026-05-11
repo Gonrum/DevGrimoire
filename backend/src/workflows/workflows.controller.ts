@@ -1,6 +1,8 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Query } from '@nestjs/common';
 import { WorkflowsService } from './workflows.service';
 import { WorkflowEngineService } from './engine/workflow-engine.service';
+import { NodeRegistry } from './engine/node-registry';
+import { toPublicMetadata, NodeMetadataPublic } from './engine/node-metadata';
 import {
   CancelWorkflowRunDto,
   CreateWorkflowDefinitionDto,
@@ -16,6 +18,7 @@ export class WorkflowsController {
   constructor(
     private readonly workflows: WorkflowsService,
     private readonly engine: WorkflowEngineService,
+    private readonly registry: NodeRegistry,
   ) {}
 
   @Post()
@@ -27,6 +30,11 @@ export class WorkflowsController {
   @Get()
   listDefinitions(@Query() query: ListWorkflowDefinitionsDto) {
     return this.workflows.listDefinitions(query);
+  }
+
+  @Get('node-types')
+  listNodeTypes(): NodeMetadataPublic[] {
+    return this.registry.listMetadata().map(toPublicMetadata);
   }
 
   @Get(':id')
@@ -54,6 +62,11 @@ export class WorkflowsController {
   @Get('runs/list')
   listRuns(@Query() query: ListWorkflowRunsDto) {
     return this.workflows.listRuns(query);
+  }
+
+  @Get('runs/:id/inspection')
+  inspectRun(@Param('id') id: string) {
+    return this.workflows.inspectRun(id);
   }
 
   @Get('runs/:id')

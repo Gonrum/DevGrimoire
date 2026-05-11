@@ -109,6 +109,16 @@ interface WorkflowNodeError {
 
 `SafeJsonPreview` is a truncated/masked JSON value with metadata such as `truncated: true` and `maskedPaths`.
 
+## Implemented API slice
+
+The backend exposes a compact inspection endpoint for UI and agent debugging:
+
+- `GET /api/workflows/runs/:id/inspection`
+
+It returns the run identity/status, node-run status counts, failed/waiting node ids, and per-node timing/error/input/output/log previews. Previews are truncated and mask common secret-bearing keys and bearer/token-like strings before returning data, so the inspector can be useful without defaulting to raw node-run payloads.
+
+Raw run and node-run endpoints remain available for existing tooling, but UI surfaces should prefer the inspection endpoint for the first observability view.
+
 ## Graph run view
 
 Each node in the graph should show:

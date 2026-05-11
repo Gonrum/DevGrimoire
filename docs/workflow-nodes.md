@@ -34,7 +34,8 @@ backend/src/workflows/
 │   ├── workflow-event-listener.service.ts
 │   ├── workflow-delay-scheduler.ts
 │   └── (T-250 files unverändert)
-├── workflow-node-types.controller.ts # GET /api/workflows/node-types
+├── workflow-node-types.controller.ts # compatibility alias: GET /api/workflow-node-types
+├── workflows.controller.ts           # canonical GET /api/workflows/node-types
 ├── workflow-agent.service.ts         # eigener LLM-Endpoint + Tool-Loop
 ├── workflow-agent.controller.ts      # GET/PUT /api/workflows/agent-config
 └── nodes/
@@ -77,7 +78,7 @@ export interface NodeMetadata {
 
 `NodeExecutor` Interface erweitert um `readonly metadata: NodeMetadata`. `NodeRegistry` exponiert `getMetadata(type)` und `listMetadata()`.
 
-**Endpoint** `GET /api/workflows/node-types`:
+**Endpoint** `GET /api/workflows/node-types` (canonical; `GET /api/workflow-node-types` remains as a compatibility alias):
 ```json
 [
   {

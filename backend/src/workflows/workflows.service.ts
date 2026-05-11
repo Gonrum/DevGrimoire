@@ -274,6 +274,58 @@ export class WorkflowsService {
     return run;
   }
 
+  async inspectRun(id: string): Promise<Record<string, unknown>> {
+    const run = await this.getRun(id);
+    const nodeRuns = await this.listNodeRuns(id);
+    const counts = nodeRuns.reduce<Record<string, number>>((acc, nr) => {
+      acc[nr.status] = (acc[nr.status] ?? 0) + 1;
+      return acc;
+    }, {});
+    const startedAt = run.startedAt ? new Date(run.startedAt).getTime() : undefined;
+    const finishedAt = run.finishedAt ? new Date(run.finishedAt).getTime() : undefined;
+
+    return {
+      run: {
+        id: run._id.toString(),
+        definitionId: run.definitionId?.toString(),
+        definitionVersion: run.definitionVersion,
+        scope: run.scope,
+        projectId: run.projectId?.toString(),
+        customerId: run.customerId?.toString(),
+        status: run.status,
+        trigger: this.safePreview(run.trigger),
+        startedAt: run.startedAt,
+        finishedAt: run.finishedAt,
+        durationMs: startedAt && finishedAt ? finishedAt - startedAt : undefined,
+        currentNodeIds: run.currentNodeIds ?? [],
+        error: this.safePreview(run.error),
+      },
+      summary: {
+        totalNodeRuns: nodeRuns.length,
+        statusCounts: counts,
+        failedNodeIds: nodeRuns.filter((nr) => nr.status === 'failed').map((nr) => nr.nodeId),
+        waitingNodeIds: nodeRuns.filter((nr) => nr.status === 'waiting').map((nr) => nr.nodeId),
+      },
+      nodeRuns: nodeRuns.map((nr) => ({
+        id: nr._id.toString(),
+        nodeId: nr.nodeId,
+        nodeType: nr.nodeType,
+        status: nr.status,
+        attempt: nr.attempt,
+        startedAt: nr.startedAt,
+        finishedAt: nr.finishedAt,
+        durationMs: nr.durationMs,
+        waitingFor: this.safePreview(nr.waitingFor),
+        inputPreview: this.safePreview(nr.inputSnapshot),
+        outputPreview: this.safePreview(nr.outputSnapshot),
+        logPreview: this.safePreview(nr.logs),
+        error: this.safePreview(nr.error),
+        createdAt: (nr as unknown as { createdAt?: Date }).createdAt,
+        updatedAt: (nr as unknown as { updatedAt?: Date }).updatedAt,
+      })),
+    };
+  }
+
   async cancelRun(id: string, dto: CancelWorkflowRunDto = {}): Promise<WorkflowRunDocument> {
     const run = await this.getRun(id);
     if (
@@ -363,5 +415,60 @@ export class WorkflowsService {
     const nr = await this.nodeRunModel.findById(id).exec();
     if (!nr) throw new NotFoundException(`Node run ${id} not found`);
     return nr;
+  }
+
+  private safePreview(value: unknown, maxChars = 2000): { value: unknown; truncated: boolean; maskedPaths: string[] } {
+    const maskedPaths: string[] = [];
+    const seen = new WeakSet<object>();
+    let truncated = false;
+    const sensitiveKey = /(authorization|api[-_]?key|secret|token|password|passwd|credential|private[-_]?key|cookie)/i;
+    const redactString = (input: string): string =>
+      input
+        .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [MASKED]')
+        .replace(/(api[-_]?key|secret|token|password|passwd)\s*[:=]\s*[^\s,;]+/gi, '$1=[MASKED]');
+    const visit = (current: unknown, path: string, depth: number): unknown => {
+      if (current === null || current === undefined) return current;
+      if (typeof current === 'string') {
+        const redacted = redactString(current);
+        if (redacted !== current) maskedPaths.push(path || '$');
+        if (redacted.length > 500) {
+          truncated = true;
+          return `${redacted.slice(0, 500)}…`;
+        }
+        return redacted;
+      }
+      if (typeof current !== 'object') return current;
+      if (seen.has(current)) return '[Circular]';
+      seen.add(current);
+      if (depth >= 6) {
+        truncated = true;
+        return '[Truncated: max depth]';
+      }
+      if (Array.isArray(current)) {
+        if (current.length > 25) truncated = true;
+        return current.slice(0, 25).map((item, idx) => visit(item, `${path}[${idx}]`, depth + 1));
+      }
+      const out: Record<string, unknown> = {};
+      const entries = Object.entries(current as Record<string, unknown>);
+      if (entries.length > 50) truncated = true;
+      for (const [key, child] of entries.slice(0, 50)) {
+        const childPath = path ? `${path}.${key}` : key;
+        if (sensitiveKey.test(key)) {
+          out[key] = '[MASKED]';
+          maskedPaths.push(childPath);
+          continue;
+        }
+        out[key] = visit(child, childPath, depth + 1);
+      }
+      return out;
+    };
+
+    const preview = visit(value, '', 0);
+    const json = JSON.stringify(preview);
+    if (json && json.length > maxChars) {
+      truncated = true;
+      return { value: `${json.slice(0, maxChars)}…`, truncated, maskedPaths };
+    }
+    return { value: preview, truncated, maskedPaths };
   }
 }
