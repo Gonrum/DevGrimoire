@@ -145,7 +145,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     nodeRun.startedAt = new Date();
     await nodeRun.save();
 
-    const timeoutMs = Number((node.config as Record<string, unknown>).timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const timeoutMs = Number(((node.config ?? {}) as Record<string, unknown>).timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const ctx = this.buildContext(run, nodeRun, node);
     let result: NodeResult;
     try {
@@ -250,7 +250,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     }
 
     // failed
-    const retry = (node.config as { retry?: RetryConfig }).retry;
+    const retry = ((node.config ?? {}) as { retry?: RetryConfig }).retry;
     const max = retry?.maxAttempts ?? 0;
     if (nodeRun.attempt < max + 1) {
       const base = retry?.backoffMs ?? 1000;
