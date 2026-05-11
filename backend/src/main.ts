@@ -130,7 +130,50 @@ async function bootstrap() {
   // Cache the user AND api-key for SSE sessions — /messages must restore both
   // to the RequestContext so apiKey.allowedTools is honored on tool calls.
   const authenticatedSessions = new Map<string, { user: RequestUser; apiKey?: ApiKey }>();
+  // Track sessions that closed recently so /messages can tell "never heard of
+  // this id" from "this session lived but was just torn down" — useful both
+  // for diagnostics on the transient 400 path and for a short grace window
+  // when a POST raced the close handler.
+  const recentlyClosedSessions = new Map<string, number>();
+  const RECENT_CLOSED_TTL_MS = 60_000;
+  // Idempotency guard against rapid duplicate retries: if the same
+  // (sessionId, jsonrpc.id) lands twice in a short window, refuse to dispatch
+  // the second time so we don't double-create write-side effects (e.g.
+  // double manual_create when a client retried after a transient 400).
+  const inFlightRequests = new Map<string, number>();
+  const IN_FLIGHT_TTL_MS = 30_000;
   const mcpLogger = new Logger('McpTransport');
+
+  const pruneRecentlyClosed = () => {
+    const cutoff = Date.now() - RECENT_CLOSED_TTL_MS;
+    for (const [sid, ts] of recentlyClosedSessions) {
+      if (ts < cutoff) recentlyClosedSessions.delete(sid);
+    }
+  };
+  const pruneInFlight = () => {
+    const cutoff = Date.now() - IN_FLIGHT_TTL_MS;
+    for (const [key, ts] of inFlightRequests) {
+      if (ts < cutoff) inFlightRequests.delete(key);
+    }
+  };
+
+  // Wait briefly (up to ~1500ms) for a session to appear/recover. Covers the
+  // race where a /messages POST hits between res.on('close') firing and the
+  // client's reconnect (the reconnect creates a NEW sessionId, so we can't
+  // resurrect the old one — but we *can* avoid the false 400 if the close
+  // handler is still completing the delete).
+  const waitForTransport = async (
+    sessionId: string,
+  ): Promise<SSEServerTransport | StreamableHTTPServerTransport | undefined> => {
+    const direct = transports[sessionId];
+    if (direct) return direct;
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 150));
+      const t = transports[sessionId];
+      if (t) return t;
+    }
+    return undefined;
+  };
 
   // API Key auth middleware for MCP endpoints
   const apiKeysService = app.get(ApiKeysService);
@@ -383,6 +426,8 @@ async function bootstrap() {
     res.on('close', () => {
       delete transports[transport.sessionId];
       authenticatedSessions.delete(transport.sessionId);
+      recentlyClosedSessions.set(transport.sessionId, Date.now());
+      pruneRecentlyClosed();
       mcpLogger.log(`sse session closed (${transport.sessionId.slice(0, 8)}…, total=${Object.keys(transports).length})`);
     });
     const server = createMcpServer(services);
@@ -391,14 +436,67 @@ async function bootstrap() {
 
   expressApp.post('/messages', async (req: any, res: any) => {
     const sessionId = req.query.sessionId as string;
-    const transport = transports[sessionId];
+    const requestId = req.body?.id;
+
+    // Idempotency: refuse to redispatch the same (session, jsonrpc.id) within
+    // the in-flight window. Prevents double writes when a client retries after
+    // a transient error (T-270).
+    if (sessionId && requestId !== undefined && requestId !== null) {
+      pruneInFlight();
+      const key = `${sessionId}:${requestId}`;
+      if (inFlightRequests.has(key)) {
+        mcpLogger.warn(
+          `duplicate request rejected (session=${sessionId.slice(0, 8)}…, id=${requestId})`,
+        );
+        res.status(409).json({
+          jsonrpc: '2.0',
+          error: { code: -32002, message: 'Duplicate request — original is still in flight' },
+          id: requestId,
+        });
+        return;
+      }
+      inFlightRequests.set(key, Date.now());
+    }
+
+    let transport: SSEServerTransport | StreamableHTTPServerTransport | undefined =
+      transports[sessionId];
+    // Grace window: cover the race where a POST hits while the close handler
+    // hasn't finished deleting the transport yet.
+    if (!transport) {
+      transport = await waitForTransport(sessionId);
+    }
+
     if (transport instanceof SSEServerTransport) {
-      await RequestContext.run(req.user, req.apiKey, () => transport.handlePostMessage(req, res, req.body));
+      try {
+        await RequestContext.run(req.user, req.apiKey, () => transport.handlePostMessage(req, res, req.body));
+      } finally {
+        if (sessionId && requestId !== undefined && requestId !== null) {
+          inFlightRequests.delete(`${sessionId}:${requestId}`);
+        }
+      }
     } else {
+      // Diagnostics so we can tell "unknown session" from "session was torn
+      // down moments ago" the next time the transient bug surfaces.
+      pruneRecentlyClosed();
+      const closedAt = recentlyClosedSessions.get(sessionId);
+      const ageSec = closedAt ? Math.round((Date.now() - closedAt) / 1000) : null;
+      mcpLogger.warn(
+        `/messages rejected (sessionId=${sessionId ? sessionId.slice(0, 8) + '…' : 'missing'}, ` +
+          `activeSessions=${Object.keys(transports).length}, ` +
+          `recentlyClosed=${closedAt ? `${ageSec}s ago` : 'no'})`,
+      );
+      if (sessionId && requestId !== undefined && requestId !== null) {
+        inFlightRequests.delete(`${sessionId}:${requestId}`);
+      }
       res.status(400).json({
         jsonrpc: '2.0',
-        error: { code: -32000, message: 'No valid SSE session found' },
-        id: null,
+        error: {
+          code: -32000,
+          message: closedAt
+            ? 'SSE session closed — open a new /sse stream and retry'
+            : 'No valid SSE session found',
+        },
+        id: requestId ?? null,
       });
     }
   });
