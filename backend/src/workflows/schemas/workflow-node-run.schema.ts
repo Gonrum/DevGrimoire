@@ -56,7 +56,9 @@ export class WorkflowNodeRun {
   finishedAt?: Date;
 
   @Prop({ type: Object })
-  waitingFor?: { type: 'question'; refId: Types.ObjectId };
+  waitingFor?:
+    | { type: 'question'; refId: Types.ObjectId }
+    | { type: 'delay'; resumeAt: Date };
 
   @Prop()
   durationMs?: number;
@@ -67,3 +69,4 @@ export const WorkflowNodeRunSchema = SchemaFactory.createForClass(WorkflowNodeRu
 WorkflowNodeRunSchema.index({ runId: 1, nodeId: 1, attempt: 1 });
 WorkflowNodeRunSchema.index({ definitionId: 1, nodeType: 1, createdAt: -1 });
 WorkflowNodeRunSchema.index({ status: 1, updatedAt: 1 });
+WorkflowNodeRunSchema.index({ 'waitingFor.type': 1, 'waitingFor.resumeAt': 1, status: 1 });

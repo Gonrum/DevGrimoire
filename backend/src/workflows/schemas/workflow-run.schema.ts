@@ -8,6 +8,7 @@ export enum WorkflowRunStatus {
   QUEUED = 'queued',
   RUNNING = 'running',
   WAITING_FOR_USER = 'waiting_for_user',
+  WAITING_FOR_TIMER = 'waiting_for_timer',
   SUCCEEDED = 'succeeded',
   FAILED = 'failed',
   CANCELLED = 'cancelled',
