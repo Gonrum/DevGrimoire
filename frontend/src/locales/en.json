@@ -1329,6 +1329,7 @@
     "navSetup": "Setup",
     "navAuth": "Auth & Users",
     "navMcp": "MCP Tools",
+    "navWorkflows": "Workflows",
     "navApi": "REST API",
     "navArchitecture": "Architecture",
     "navReplication": "Replication"

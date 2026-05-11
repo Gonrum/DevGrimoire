@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import i18n from '../i18n';
 
-type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'ui' | 'rag' | 'chat' | 'replication' | 'api' | 'logs' | 'git' | 'architecture';
+type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'ui' | 'rag' | 'chat' | 'workflows' | 'replication' | 'api' | 'logs' | 'git' | 'architecture';
 
 export default function Docs() {
   const [active, setActive] = useState<DocsSection>('overview');
@@ -17,6 +17,7 @@ export default function Docs() {
     { key: 'ui', label: 'UI' },
     { key: 'rag', label: 'RAG' },
     { key: 'chat', label: 'Chat' },
+    { key: 'workflows', label: t('docs.navWorkflows', { defaultValue: 'Workflows' }) },
     { key: 'replication', label: t('docs.navReplication') },
     { key: 'api', label: t('docs.navApi') },
     { key: 'logs', label: 'Logs' },
@@ -76,6 +77,7 @@ export default function Docs() {
         {active === 'ui' && <UiSection />}
         {active === 'rag' && <RagSection />}
         {active === 'chat' && <ChatSection />}
+        {active === 'workflows' && <WorkflowDocsSection />}
         {active === 'replication' && <ReplicationDocsSection />}
         {active === 'api' && <ApiSection />}
         {active === 'logs' && <LogsSection />}
@@ -1670,6 +1672,57 @@ function ReplicationDocsSection() {
             ? 'Anwendungsfall: arbeite zu Hause weiter, wenn Firmen-Server-Verbindung tot ist — Edits werden lokal angewendet und gequeued, bei nächster Verbindung gepusht. Wenn die Firma in der Zwischenzeit auch was am gleichen Doc geändert hat, gewinnt der jüngere updatedAt.'
             : 'Use case: keep working at home when the office server connection is down — edits apply locally and queue, get pushed on next connection. If the office also changed the same doc meanwhile, the newer updatedAt wins.'}
         </p>
+      </Section>
+    </>
+  );
+}
+
+function WorkflowDocsSection() {
+  const isDE = i18n.language === 'de';
+  return (
+    <>
+      <Section title={isDE ? 'Workflows im MVP' : 'Workflow MVP'}>
+        <p className="text-sm text-gray-400 leading-relaxed mb-3">
+          {isDE
+            ? 'Workflows sind versionierte, sichtbare Automationen für wiederholbare Mehrschritt-Arbeit. Sie ergänzen Todos, Recurring Tasks und Chat: einfache Aufgaben bleiben Todos, einfache Zeitpläne bleiben Recurring Tasks, interaktive Einzelfragen bleiben Chat.'
+            : 'Workflows are versioned, inspectable automations for repeatable multi-step work. They complement todos, recurring tasks, and chat: simple work stays a todo, simple schedules stay recurring tasks, and one-off interactive questions stay in chat.'}
+        </p>
+        <div className="grid md:grid-cols-2 gap-3">
+          <FeatureCard
+            title={isDE ? 'Definition, Trigger, Nodes, Runs' : 'Definitions, triggers, nodes, runs'}
+            desc={isDE ? 'Die Kernbegriffe und MVP-Grenzen stehen in docs/workflows.md.' : 'Core concepts and MVP boundaries live in docs/workflows.md.'}
+          />
+          <FeatureCard
+            title={isDE ? 'Sicherheit zuerst' : 'Security first'}
+            desc={isDE ? 'Secrets bleiben Referenzen, Logs werden maskiert, Schreib-/Run-Tools sind allowlist-pflichtig.' : 'Secrets stay as references, logs are masked, and write/run tools require explicit allowlists.'}
+          />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Beispiel-Workflows' : 'Example workflows'}>
+        <div className="space-y-3 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Projekt-Triage' : 'Project triage'} value={isDE ? 'Wöchentlich offene Todos, Blocker und Risiken zusammenfassen.' : 'Summarize open todos, blockers, and risks weekly.'} />
+          <InfoRow label={isDE ? 'Customer-Monatscheck' : 'Monthly customer check'} value={isDE ? 'Monitoring, offene Kundentodos und notwendige Rückfragen bündeln.' : 'Collect monitoring, open customer todos, and required follow-up questions.'} />
+          <InfoRow label={isDE ? 'Release-Checkliste' : 'Release checklist'} value={isDE ? 'Validierung, Changelog, Docs-Hinweise und Freigabe-Schritte koordinieren.' : 'Coordinate validation, changelog, documentation hints, and approval steps.'} />
+        </div>
+        <p className="text-xs text-gray-500 mt-3">
+          {isDE
+            ? 'Details, Template-Katalog und Agent-Hinweise: docs/workflow-examples.md und docs/workflow-template-wizard.md.'
+            : 'Details, template catalog, and agent guidance: docs/workflow-examples.md and docs/workflow-template-wizard.md.'}
+        </p>
+      </Section>
+
+      <Section title={isDE ? 'Agent- und Run-Debugging' : 'Agent and run debugging'}>
+        <ul className="list-disc list-inside space-y-2 text-sm text-gray-400">
+          <li>{isDE ? 'Agents lesen Workflow-Definition und Run-Historie, bevor sie Runs fortsetzen oder replayen.' : 'Agents read workflow definitions and run history before continuing or replaying runs.'}</li>
+          <li>{isDE ? 'Node-Inputs, Outputs und Logs werden nur als maskierte, gekürzte Previews angezeigt.' : 'Node inputs, outputs, and logs are shown only as masked, truncated previews.'}</li>
+          <li>{isDE ? 'Replay/Retry erzeugt eigene Child-Runs statt bestehende Historie zu überschreiben.' : 'Replay/retry creates linked child runs instead of overwriting existing history.'}</li>
+        </ul>
+        <Hint>
+          {isDE
+            ? 'n8n ist Inspiration für schnelle Iteration und sichtbare Node-Outputs; DevGrimoire bleibt aber projekt-, kunden- und agenten-scope-bewusst.'
+            : 'n8n inspires fast iteration and visible node outputs, but DevGrimoire stays project-, customer-, and agent-scope aware.'}
+        </Hint>
       </Section>
     </>
   );
