@@ -168,6 +168,20 @@ Blocked until separately designed and approved:
 - cross-scope data copy nodes
 - agent nodes with unrestricted write tools
 
+## Implemented MVP enforcement
+
+The backend now includes a workflow node policy registry (`backend/src/workflows/workflow-security.policy.ts`) that classifies known node types by risk and allowed scope.
+
+Current enforcement points (post T-250):
+
+- `WorkflowsService.validateGraph` reports purely structural issues — duplicate ids, self-loops, dangling edges, scope/owner consistency. It does NOT include policy enforcement.
+- `workflowSecurityIssues` (the policy check) reports unknown node types, blocked MVP risk classes, invalid scope/type combinations, and unexpected `secretRefs` on non-secret-aware nodes. It is enforced ONLY at the activation gate (`updateDefinition` when transitioning to `status=active`).
+- `startRun` does not re-validate; it trusts the activation gate and only requires the workflow to be in `status=active`. Runs operate on the immutable `definitionSnapshot` written at run creation.
+
+The bootstrap policy registry (`backend/src/workflows/workflow-security.policy.ts`) was first introduced by T-250 to unblock activation; T-256 will own and extend it (permission model, secret-refs handling, agent-runtime gating).
+
+MVP allowed node families include manual/schedule/project/customer triggers, Todo safe writes, Knowledge/Manual/Changelog writes, User Question, Condition/Switch, Delay, Notification/Log, and scoped RAG search. Agent, secret, HTTP, workspace/git, and destructive nodes remain blocked until their approval/runtime models are implemented.
+
 ## Runner enforcement checklist
 
 Before each node execution:
