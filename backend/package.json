@@ -47,7 +47,8 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "web-push": "^3.6.7",
-    "ws": "^8.20.0"
+    "ws": "^8.20.0",
+    "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
