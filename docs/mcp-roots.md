@@ -33,3 +33,11 @@ A request outside the declared roots fails before any sidecar call with a generi
 MCP roots support is still uneven across clients. DevGrimoire therefore requests roots opportunistically and treats missing/unsupported roots as "no extra boundary" rather than a hard failure.
 
 Future work can add roots change-notification caching and richer audit entries for blocked root violations once client support is more consistent.
+
+## Regression check
+
+`backend/scripts/workspace-roots-guard-check.cjs` exercises the guard's helper invariants, the main `assertWorkspaceWithinClientRoots` contract (allow/block paths, repoUrl prefixes, relative-path joins, the no-roots no-op) and asserts that the error message does not echo workspace paths. Run after a backend build:
+
+```bash
+cd backend && npm run build && npm run check:workspace-roots-guard
+```
