@@ -15,7 +15,8 @@
     "check:workspace-roots-guard": "node scripts/workspace-roots-guard-check.cjs",
     "check:workflow-runner-units": "node scripts/workflow-runner-units-check.cjs",
     "check:workflow-nodes-units": "node scripts/workflow-nodes-units-check.cjs",
-    "check:workflow-engine": "node scripts/workflow-engine-check.cjs"
+    "check:workflow-engine": "node scripts/workflow-engine-check.cjs",
+    "check:workflow-nodes-engine": "node scripts/workflow-nodes-engine-check.cjs"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.0",

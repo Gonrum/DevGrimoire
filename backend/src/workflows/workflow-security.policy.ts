@@ -44,10 +44,19 @@ export const WORKFLOW_NODE_POLICIES: Record<string, WorkflowNodePolicy> = {
   'workspace.exec': { type: 'workspace.exec', risk: 'workspace-git', allowedScopes: [WorkflowScope.PROJECT], mvpAllowed: false },
   'git.action': { type: 'git.action', risk: 'workspace-git', allowedScopes: [WorkflowScope.PROJECT], mvpAllowed: false },
   'entity.delete': { type: 'entity.delete', risk: 'destructive', allowedScopes: ALL_SCOPES, mvpAllowed: false },
-  // action.* aliases — executor-side naming used by the node implementations
+  // action.* / control.* aliases — executor-side naming used by the node implementations
   'action.log': { type: 'action.log', risk: 'safe-write', allowedScopes: ALL_SCOPES, mvpAllowed: true },
   'action.todo-create': { type: 'action.todo-create', risk: 'safe-write', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: true },
+  'action.todo-update': { type: 'action.todo-update', risk: 'safe-write', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: true },
+  'action.todo-comment': { type: 'action.todo-comment', risk: 'safe-write', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: true },
+  'action.todo-link-milestone': { type: 'action.todo-link-milestone', risk: 'safe-write', allowedScopes: [WorkflowScope.PROJECT], mvpAllowed: true },
+  'action.knowledge-create': { type: 'action.knowledge-create', risk: 'safe-write', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: true },
+  'action.manual-create': { type: 'action.manual-create', risk: 'safe-write', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: true },
+  'action.changelog-add': { type: 'action.changelog-add', risk: 'safe-write', allowedScopes: [WorkflowScope.PROJECT], mvpAllowed: true },
   'action.notify': { type: 'action.notify', risk: 'safe-write', allowedScopes: ALL_SCOPES, mvpAllowed: true },
+  'action.user-question': { type: 'action.user-question', risk: 'human-wait', allowedScopes: ALL_SCOPES, mvpAllowed: true },
+  'control.condition': { type: 'control.condition', risk: 'safe-read', allowedScopes: ALL_SCOPES, mvpAllowed: true },
+  'control.delay': { type: 'control.delay', risk: 'safe-read', allowedScopes: ALL_SCOPES, mvpAllowed: true },
 };
 
 const LEGACY_TYPE_ALIASES: Record<string, string> = {

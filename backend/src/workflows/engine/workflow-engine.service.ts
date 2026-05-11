@@ -227,6 +227,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       ctx.nodes = ctx.nodes ?? {};
       ctx.nodes[node.id] = result.output ?? {};
       run.context = ctx;
+      run.markModified('context');
       await run.save();
 
       const snapshot = run.definitionSnapshot as { nodes: WorkflowNode[]; edges: unknown[] };
