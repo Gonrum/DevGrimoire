@@ -26,6 +26,7 @@ import {
   UpdateWorkflowDefinitionDto,
 } from './dto/workflow.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { workflowSecurityIssues } from './workflow-security.policy';
 
 const RUNTIME_FIELDS: Array<keyof UpdateWorkflowDefinitionDto> = ['nodes', 'edges', 'trigger'];
 
@@ -154,6 +155,19 @@ export class WorkflowsService {
     if (dto.edges !== undefined) existing.edges = dto.edges as never;
     if (dto.ui !== undefined) existing.ui = dto.ui;
 
+    if (existing.status === WorkflowStatus.ACTIVE) {
+      const validation = this.validateGraph({
+        scope: existing.scope,
+        projectId: existing.projectId?.toString(),
+        customerId: existing.customerId?.toString(),
+        nodes: existing.nodes as never,
+        edges: existing.edges as never,
+      });
+      if (!validation.valid) {
+        throw new BadRequestException(`Workflow cannot be activated: ${validation.issues.join('; ')}`);
+      }
+    }
+
     if (willBump) existing.version += 1;
 
     const saved = await existing.save();
@@ -173,6 +187,19 @@ export class WorkflowsService {
     const def = await this.getDefinition(dto.definitionId);
     if (def.status === WorkflowStatus.ARCHIVED) {
       throw new BadRequestException('Cannot start a run for an archived workflow');
+    }
+    if (def.status !== WorkflowStatus.ACTIVE) {
+      throw new BadRequestException(`Cannot start a run for workflow in status ${def.status}; activate it after validation first`);
+    }
+    const validation = this.validateGraph({
+      scope: def.scope,
+      projectId: def.projectId?.toString(),
+      customerId: def.customerId?.toString(),
+      nodes: def.nodes as never,
+      edges: def.edges as never,
+    });
+    if (!validation.valid) {
+      throw new BadRequestException(`Workflow cannot run: ${validation.issues.join('; ')}`);
     }
 
     const snapshot = {
@@ -195,9 +222,20 @@ export class WorkflowsService {
       status: WorkflowRunStatus.QUEUED,
       currentNodeIds: [],
       createdByUserId: userId && isValidObjectId(userId) ? new Types.ObjectId(userId) : undefined,
+      triggeredBy: dto.triggeredBy
+        ? {
+            type: dto.triggeredBy.type,
+            scheduleSlotAt: dto.triggeredBy.scheduleSlotAt
+              ? new Date(dto.triggeredBy.scheduleSlotAt)
+              : undefined,
+            userId: dto.triggeredBy.userId,
+          }
+        : { type: 'manual' as const, userId },
+      context: { nodes: {} },
     });
 
     this.emitRun('created', run, `Workflow-Run für "${def.name}" v${def.version} eingereiht`);
+    this.eventEmitter.emit('workflow.run.queued', { runId: (run._id as { toString(): string }).toString() });
     return run;
   }
 
@@ -250,7 +288,7 @@ export class WorkflowsService {
     scope?: WorkflowScope;
     projectId?: string;
     customerId?: string;
-    nodes?: Array<{ id: string; type?: string }>;
+    nodes?: Array<{ id: string; type?: string; secretRefs?: string[] }>;
     edges?: Array<{ id: string; source: string; target: string }>;
   }): { valid: boolean; issues: string[] } {
     const issues: string[] = [];
@@ -279,6 +317,8 @@ export class WorkflowsService {
     }
 
     const edgeIds = new Set<string>();
+    issues.push(...workflowSecurityIssues(def));
+
     for (const edge of def.edges ?? []) {
       if (!edge.id) {
         issues.push('edge without id');

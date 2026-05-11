@@ -206,6 +206,19 @@ export class ListWorkflowDefinitionsDto {
   offset?: number;
 }
 
+export class TriggeredByDto {
+  @IsEnum(['manual', 'schedule', 'event'])
+  type: 'manual' | 'schedule' | 'event';
+
+  @IsOptional()
+  @IsString()
+  scheduleSlotAt?: string;
+
+  @IsOptional()
+  @IsString()
+  userId?: string;
+}
+
 export class StartWorkflowRunDto {
   @IsMongoId()
   definitionId: string;
@@ -217,6 +230,11 @@ export class StartWorkflowRunDto {
   @IsOptional()
   @IsObject()
   input?: Record<string, unknown>;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TriggeredByDto)
+  triggeredBy?: TriggeredByDto;
 }
 
 export class ListWorkflowRunsDto {
@@ -253,4 +271,10 @@ export class CancelWorkflowRunDto {
   @IsOptional()
   @IsString()
   reason?: string;
+}
+
+export class RetryWorkflowRunDto {
+  @IsOptional()
+  @IsString()
+  fromNodeId?: string;
 }
