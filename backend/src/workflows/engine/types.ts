@@ -29,7 +29,9 @@ export interface NodeResult {
   output?: Record<string, unknown>;
   error?: { code: string; message: string; details?: unknown };
   branch?: 'success' | 'failure' | 'custom';
-  waitingFor?: { type: 'question'; refId: Types.ObjectId };
+  waitingFor?:
+    | { type: 'question'; refId: Types.ObjectId }
+    | { type: 'delay'; resumeAt: Date };
 }
 
 export interface NodeLogger {
