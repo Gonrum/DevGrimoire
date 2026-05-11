@@ -8,7 +8,7 @@ export function computeNext(trigger: ScheduleTriggerConfig, after: Date): Date {
   if (trigger.cron) {
     const it = parseExpression(trigger.cron, {
       currentDate: after,
-      tz: trigger.timezone,
+      ...(trigger.timezone ? { tz: trigger.timezone } : { utc: true }),
     });
     return it.next().toDate();
   }
