@@ -24,6 +24,8 @@ import { SoulsService } from './souls/souls.service';
 import { CommitsService } from './commits/commits.service';
 import { RagService } from './rag/rag.service';
 import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
+import { WorkflowsService } from './workflows/workflows.service';
+import { WorkflowScope, WorkflowStatus } from './workflows/schemas/workflow-definition.schema';
 import { SnippetsService } from './snippets/snippets.service';
 import { WorkspacesService } from './workspaces/workspaces.service';
 import { WorkspaceStatus } from './workspaces/schemas/workspace.schema';
@@ -238,6 +240,7 @@ export interface McpServices {
   commitsService: CommitsService;
   ragService: RagService;
   recurringTasksService: RecurringTasksService;
+  workflowsService: WorkflowsService;
   snippetsService: SnippetsService;
   attachmentsService: AttachmentsService;
   questionsService: QuestionsService;
@@ -2093,6 +2096,155 @@ const tools = [
     },
   },
   {
+    name: 'workflow_create',
+    description: 'Create a workflow definition (graph of triggers, nodes and edges). Scope controls visibility: system (admin-only), project (requires projectId), customer (requires customerId).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        scope: { type: 'string', enum: ['system', 'project', 'customer'] },
+        projectId: { type: 'string', description: 'Required for project scope' },
+        customerId: { type: 'string', description: 'Required for customer scope' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+        trigger: { type: 'object', description: 'Trigger config; default { type: "manual" }' },
+        nodes: { type: 'array', description: 'WorkflowNode[] (id, type, position, config, secretRefs, ...)' },
+        edges: { type: 'array', description: 'WorkflowEdge[] (id, source, target, branch, condition, ...)' },
+        ui: { type: 'object', description: 'Canvas viewport/style metadata (non-runtime)' },
+      },
+      required: ['scope', 'name'],
+    },
+  },
+  {
+    name: 'workflow_list',
+    description: 'List workflow definitions (compact: id, name, scope, status, version, tags, updatedAt). Archived definitions are excluded by default.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        scope: { type: 'string', enum: ['system', 'project', 'customer'] },
+        projectId: { type: 'string' },
+        customerId: { type: 'string' },
+        status: { type: 'string', enum: ['draft', 'active', 'paused', 'archived'] },
+        tag: { type: 'string' },
+        includeArchived: { type: 'boolean' },
+        limit: { type: 'number', description: 'Default 50' },
+        offset: { type: 'number' },
+      },
+    },
+  },
+  {
+    name: 'workflow_get',
+    description: 'Get a workflow definition with full nodes/edges',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'workflow_update',
+    description: 'Update a workflow. Editing nodes/edges/trigger on a non-draft workflow auto-increments version. Set publish=true to force a version bump.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        status: { type: 'string', enum: ['draft', 'active', 'paused', 'archived'] },
+        tags: { type: 'array', items: { type: 'string' } },
+        trigger: { type: 'object' },
+        nodes: { type: 'array' },
+        edges: { type: 'array' },
+        ui: { type: 'object' },
+        publish: { type: 'boolean', description: 'Force a version bump on this update' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'workflow_delete',
+    description: 'Delete a workflow definition and all its runs/node-runs',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'workflow_validate',
+    description: 'Statically validate a workflow graph (scope consistency, orphan/dangling edges, duplicate ids, self-loops). Does NOT enforce node-type-specific config correctness. Pass either an existing workflow id OR a draft graph payload.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Workflow id to validate (loads from DB)' },
+        scope: { type: 'string', enum: ['system', 'project', 'customer'] },
+        projectId: { type: 'string' },
+        customerId: { type: 'string' },
+        nodes: { type: 'array' },
+        edges: { type: 'array' },
+      },
+    },
+  },
+  {
+    name: 'workflow_run_start',
+    description: 'Start a new run for a workflow definition. Run is created in `queued` status with a frozen snapshot of the current version. Execution engine (separate task) will pick up queued runs.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        definitionId: { type: 'string' },
+        trigger: { type: 'object', description: 'Trigger event payload (defaults to { type: "manual" })' },
+        input: { type: 'object', description: 'Initial input payload (folded into trigger)' },
+      },
+      required: ['definitionId'],
+    },
+  },
+  {
+    name: 'workflow_run_list',
+    description: 'List workflow runs (compact). Filter by definitionId, scope/ownership, or status.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        definitionId: { type: 'string' },
+        scope: { type: 'string', enum: ['system', 'project', 'customer'] },
+        projectId: { type: 'string' },
+        customerId: { type: 'string' },
+        status: { type: 'string', enum: ['queued', 'running', 'waiting_for_user', 'succeeded', 'failed', 'cancelled'] },
+        limit: { type: 'number', description: 'Default 50' },
+        offset: { type: 'number' },
+      },
+    },
+  },
+  {
+    name: 'workflow_run_get',
+    description: 'Get a workflow run with its frozen definition snapshot, status and current node ids',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'workflow_run_cancel',
+    description: 'Cancel a non-terminal workflow run. Sets status=cancelled with an error code and finishedAt.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' },
+        reason: { type: 'string' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'workflow_node_run_list',
+    description: 'List the node runs for a workflow run, sorted by createdAt.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { runId: { type: 'string' } },
+      required: ['runId'],
+    },
+  },
+  {
     name: 'snippet_save',
     description: 'Save a code snippet. Scoped to either a project or a customer.',
     inputSchema: {
@@ -2503,7 +2655,8 @@ export function toolGroup(name: string): 'Task-Management' | 'Wissen & Suche' | 
   if (
     name.startsWith('todo_') ||
     name.startsWith('milestone_') ||
-    name.startsWith('recurring_task_')
+    name.startsWith('recurring_task_') ||
+    name.startsWith('workflow_')
   ) {
     return 'Task-Management';
   }
@@ -2551,6 +2704,8 @@ const EXPLICIT_WRITE_TOOLS = new Set<string>([
   'release_sync_gitlab',
   'workspace_attachment_save',
   'monitor_run',
+  'workflow_run_start',
+  'workflow_run_cancel',
 ]);
 
 export function isWriteTool(name: string): boolean {
@@ -2575,7 +2730,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -4125,6 +4280,155 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'recurring_task_delete': {
           await recurringTasksService.remove(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
+          break;
+        }
+        case 'workflow_create': {
+          const wf = await workflowsService.createDefinition({
+            scope: requireString(a, 'scope') as WorkflowScope,
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
+            name: requireString(a, 'name'),
+            description: optionalString(a, 'description'),
+            tags: Array.isArray(a.tags) ? (a.tags as string[]) : undefined,
+            trigger: (a.trigger as Record<string, unknown>) || undefined,
+            nodes: Array.isArray(a.nodes) ? (a.nodes as never) : undefined,
+            edges: Array.isArray(a.edges) ? (a.edges as never) : undefined,
+            ui: (a.ui as Record<string, unknown>) || undefined,
+          });
+          result = { id: wf._id.toString(), version: wf.version, status: wf.status };
+          break;
+        }
+        case 'workflow_list': {
+          const list = await workflowsService.listDefinitions({
+            scope: optionalString(a, 'scope') as WorkflowScope | undefined,
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
+            status: optionalString(a, 'status') as WorkflowStatus | undefined,
+            tag: optionalString(a, 'tag'),
+            includeArchived: typeof a.includeArchived === 'boolean' ? a.includeArchived : undefined,
+            limit: optionalNumber(a, 'limit'),
+            offset: optionalNumber(a, 'offset'),
+          });
+          result = list.map((w) => ({
+            id: w._id.toString(),
+            name: w.name,
+            scope: w.scope,
+            status: w.status,
+            version: w.version,
+            tags: w.tags,
+            projectId: w.projectId?.toString(),
+            customerId: w.customerId?.toString(),
+            updatedAt: w.updatedAt,
+          }));
+          break;
+        }
+        case 'workflow_get': {
+          const wf = await workflowsService.getDefinition(requireString(a, 'id'));
+          result = wf.toObject();
+          break;
+        }
+        case 'workflow_update': {
+          const updated = await workflowsService.updateDefinition(requireString(a, 'id'), {
+            name: optionalString(a, 'name'),
+            description: optionalString(a, 'description'),
+            status: optionalString(a, 'status') as WorkflowStatus | undefined,
+            tags: Array.isArray(a.tags) ? (a.tags as string[]) : undefined,
+            trigger: (a.trigger as Record<string, unknown>) || undefined,
+            nodes: Array.isArray(a.nodes) ? (a.nodes as never) : undefined,
+            edges: Array.isArray(a.edges) ? (a.edges as never) : undefined,
+            ui: (a.ui as Record<string, unknown>) || undefined,
+            publish: typeof a.publish === 'boolean' ? a.publish : undefined,
+          });
+          result = { id: updated._id.toString(), version: updated.version, status: updated.status };
+          break;
+        }
+        case 'workflow_delete': {
+          await workflowsService.deleteDefinition(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
+          break;
+        }
+        case 'workflow_validate': {
+          const id = optionalString(a, 'id');
+          if (id) {
+            const def = await workflowsService.getDefinition(id);
+            result = workflowsService.validateGraph({
+              scope: def.scope,
+              projectId: def.projectId?.toString(),
+              customerId: def.customerId?.toString(),
+              nodes: def.nodes as never,
+              edges: def.edges as never,
+            });
+          } else {
+            result = workflowsService.validateGraph({
+              scope: optionalString(a, 'scope') as WorkflowScope | undefined,
+              projectId: optionalString(a, 'projectId'),
+              customerId: optionalString(a, 'customerId'),
+              nodes: Array.isArray(a.nodes) ? (a.nodes as never) : undefined,
+              edges: Array.isArray(a.edges) ? (a.edges as never) : undefined,
+            });
+          }
+          break;
+        }
+        case 'workflow_run_start': {
+          const run = await workflowsService.startRun({
+            definitionId: requireString(a, 'definitionId'),
+            trigger: (a.trigger as Record<string, unknown>) || undefined,
+            input: (a.input as Record<string, unknown>) || undefined,
+          });
+          result = {
+            id: run._id.toString(),
+            definitionId: run.definitionId.toString(),
+            definitionVersion: run.definitionVersion,
+            status: run.status,
+          };
+          break;
+        }
+        case 'workflow_run_list': {
+          const runs = await workflowsService.listRuns({
+            definitionId: optionalString(a, 'definitionId'),
+            scope: optionalString(a, 'scope') as WorkflowScope | undefined,
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
+            status: optionalString(a, 'status'),
+            limit: optionalNumber(a, 'limit'),
+            offset: optionalNumber(a, 'offset'),
+          });
+          result = runs.map((r) => ({
+            id: r._id.toString(),
+            definitionId: r.definitionId.toString(),
+            definitionVersion: r.definitionVersion,
+            status: r.status,
+            scope: r.scope,
+            startedAt: r.startedAt,
+            finishedAt: r.finishedAt,
+            createdAt: r.createdAt,
+          }));
+          break;
+        }
+        case 'workflow_run_get': {
+          const run = await workflowsService.getRun(requireString(a, 'id'));
+          result = run.toObject();
+          break;
+        }
+        case 'workflow_run_cancel': {
+          const run = await workflowsService.cancelRun(requireString(a, 'id'), {
+            reason: optionalString(a, 'reason'),
+          });
+          result = { id: run._id.toString(), status: run.status, finishedAt: run.finishedAt };
+          break;
+        }
+        case 'workflow_node_run_list': {
+          const nodeRuns = await workflowsService.listNodeRuns(requireString(a, 'runId'));
+          result = nodeRuns.map((nr) => ({
+            id: nr._id.toString(),
+            nodeId: nr.nodeId,
+            nodeType: nr.nodeType,
+            status: nr.status,
+            attempt: nr.attempt,
+            startedAt: nr.startedAt,
+            finishedAt: nr.finishedAt,
+            durationMs: nr.durationMs,
+          }));
           break;
         }
         case 'snippet_save': {
