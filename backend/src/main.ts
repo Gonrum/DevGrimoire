@@ -33,6 +33,7 @@ import { RagService } from './rag/rag.service';
 import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
 import { WorkflowsService } from './workflows/workflows.service';
 import { WorkflowEngineService } from './workflows/engine/workflow-engine.service';
+import { NodeRegistry } from './workflows/engine/node-registry';
 import { CustomerTemplatesService } from './customer-templates/customer-templates.service';
 import { ValidationReportsService } from './validation-reports/validation-reports.service';
 import { SnippetsService } from './snippets/snippets.service';
@@ -106,6 +107,7 @@ async function bootstrap() {
     recurringTasksService: app.get(RecurringTasksService),
     workflowsService: app.get(WorkflowsService),
     workflowEngineService: app.get(WorkflowEngineService),
+    nodeRegistry: app.get(NodeRegistry),
     customerTemplatesService: app.get(CustomerTemplatesService),
     validationReportsService: app.get(ValidationReportsService),
     snippetsService: app.get(SnippetsService),

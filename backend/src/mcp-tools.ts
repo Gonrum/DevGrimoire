@@ -26,6 +26,7 @@ import { RagService } from './rag/rag.service';
 import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
 import { WorkflowsService } from './workflows/workflows.service';
 import { WorkflowEngineService } from './workflows/engine/workflow-engine.service';
+import { NodeRegistry } from './workflows/engine/node-registry';
 import { WorkflowScope, WorkflowStatus } from './workflows/schemas/workflow-definition.schema';
 import { CustomerTemplatesService } from './customer-templates/customer-templates.service';
 import { CustomerTemplateType } from './customer-templates/schemas/customer-template.schema';
@@ -253,6 +254,7 @@ export interface McpServices {
   recurringTasksService: RecurringTasksService;
   workflowsService: WorkflowsService;
   workflowEngineService: WorkflowEngineService;
+  nodeRegistry: NodeRegistry;
   customerTemplatesService: CustomerTemplatesService;
   validationReportsService: ValidationReportsService;
   snippetsService: SnippetsService;
@@ -2917,7 +2919,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, customerTemplatesService, validationReportsService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -4676,13 +4678,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'workflow_node_types_list': {
-          const registry = (services as unknown as { nodeRegistry?: { listMetadata: () => unknown[] } }).nodeRegistry;
-          if (!registry) {
-            result = [];
-          } else {
-            const { toPublicMetadata } = await import('./workflows/engine/node-metadata');
-            result = (registry.listMetadata() as never[]).map((m) => toPublicMetadata(m as never));
-          }
+          const { toPublicMetadata } = await import('./workflows/engine/node-metadata');
+          result = nodeRegistry.listMetadata().map(toPublicMetadata);
           break;
         }
         case 'customer_template_create': {

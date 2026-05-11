@@ -74,6 +74,6 @@ import { AgentRolesModule } from '../agent-roles/agent-roles.module';
   ],
   controllers: [ChatController, ChatActivityController],
   providers: [ChatService, ChatLlmService, ChatContextService, ChatToolsService, ChatActivityService, EncryptionService],
-  exports: [ChatService, ChatLlmService, ChatContextService, ChatActivityService],
+  exports: [ChatService, ChatLlmService, ChatContextService, ChatActivityService, ChatToolsService],
 })
 export class ChatModule {}
