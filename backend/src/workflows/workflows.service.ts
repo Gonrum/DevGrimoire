@@ -27,6 +27,7 @@ import {
 } from './dto/workflow.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { workflowSecurityIssues } from './workflow-security.policy';
+import { NodeRegistry } from './engine/node-registry';
 
 const RUNTIME_FIELDS: Array<keyof UpdateWorkflowDefinitionDto> = ['nodes', 'edges', 'trigger'];
 
@@ -42,6 +43,7 @@ export class WorkflowsService {
     @InjectModel(WorkflowNodeRun.name)
     private readonly nodeRunModel: Model<WorkflowNodeRunDocument>,
     private readonly eventEmitter: EventEmitter2,
+    private readonly nodeRegistry: NodeRegistry,
   ) {}
 
   private emitDefinition(
@@ -172,6 +174,20 @@ export class WorkflowsService {
       });
       if (secIssues.length > 0) {
         throw new BadRequestException(`Workflow cannot be activated: ${secIssues.join('; ')}`);
+      }
+      const schemaIssues: string[] = [];
+      for (const node of existing.nodes) {
+        if (!this.nodeRegistry.has(node.type)) continue;
+        const schema = this.nodeRegistry.getMetadata(node.type).configSchema;
+        const parsed = schema.safeParse(node.config ?? {});
+        if (!parsed.success) {
+          for (const issue of parsed.error.issues) {
+            schemaIssues.push(`node "${node.id}" (${node.type}) config.${issue.path.join('.')}: ${issue.message}`);
+          }
+        }
+      }
+      if (schemaIssues.length > 0) {
+        throw new BadRequestException(`Workflow cannot be activated: ${schemaIssues.join('; ')}`);
       }
     }
 
