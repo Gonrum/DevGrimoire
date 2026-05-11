@@ -14,6 +14,7 @@
     "check:mcp-registry": "node scripts/mcp-registry-readiness-check.cjs",
     "check:workspace-roots-guard": "node scripts/workspace-roots-guard-check.cjs",
     "check:workflow-runner-units": "node scripts/workflow-runner-units-check.cjs",
+    "check:workflow-nodes-units": "node scripts/workflow-nodes-units-check.cjs",
     "check:workflow-engine": "node scripts/workflow-engine-check.cjs"
   },
   "dependencies": {
