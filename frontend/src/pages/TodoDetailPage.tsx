@@ -18,6 +18,7 @@ import { LoadingText } from '../components/ui/LoadingSpinner';
 import { WorkflowPageShell } from '../components/ui/WorkflowShell';
 import TodoDependenciesSection from '../components/todo/TodoDependenciesSection';
 import TodoQuestionsSection from '../components/todo/TodoQuestionsSection';
+import TodoValidationSection from '../components/todo/TodoValidationSection';
 import AttachmentList from '../components/AttachmentList';
 
 function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => void; onCancel: () => void }) {
@@ -262,6 +263,13 @@ export default function TodoDetailPage() {
             />
             </div>
           </DetailSection>
+
+          <TodoValidationSection
+            todoId={todoId!}
+            projectId={todo.projectId}
+            basePath={basePath}
+            onError={showError}
+          />
 
           <TodoQuestionsSection
             todoId={todoId!}

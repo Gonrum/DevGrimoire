@@ -1,10 +1,16 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CreateValidationReportDto, ListValidationReportsDto } from './dto/validation-report.dto';
-import { ValidationReport, ValidationReportDocument } from './schemas/validation-report.schema';
+import {
+  ValidationReport,
+  ValidationReportDocument,
+  ValidationReportStatus,
+} from './schemas/validation-report.schema';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { TodosService } from '../todos/todos.service';
+import { TodoPriority, TodoStatus, TodoDocument } from '../todos/schemas/todo.schema';
 
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/(Authorization:\s*Bearer\s+)[^\s]+/gi, '$1***'],
@@ -29,6 +35,7 @@ export class ValidationReportsService {
     @InjectModel(ValidationReport.name)
     private readonly reportModel: Model<ValidationReportDocument>,
     private readonly eventEmitter: EventEmitter2,
+    private readonly todosService: TodosService,
   ) {}
 
   async create(dto: CreateValidationReportDto): Promise<ValidationReportDocument> {
@@ -80,5 +87,58 @@ export class ValidationReportsService {
 
   async removeByProject(projectId: string): Promise<void> {
     await this.reportModel.deleteMany({ projectId: new Types.ObjectId(projectId) }).exec();
+  }
+
+  async proposeBugTodo(
+    reportId: string,
+    overrides?: { title?: string; priority?: TodoPriority; milestoneId?: string; tags?: string[] },
+  ): Promise<{ report: ValidationReportDocument; todo: TodoDocument; reused: boolean }> {
+    const report = await this.findById(reportId);
+    if (report.status !== ValidationReportStatus.FAILED && report.status !== ValidationReportStatus.ERROR) {
+      throw new BadRequestException(
+        `Cannot propose bug todo for report with status "${report.status}" — only failed/error allowed`,
+      );
+    }
+
+    const existingId = (report.metadata as Record<string, unknown> | undefined)?.bugTodoId;
+    if (typeof existingId === 'string' && Types.ObjectId.isValid(existingId)) {
+      try {
+        const existing = await this.todosService.findById(existingId);
+        return { report, todo: existing, reused: true };
+      } catch {
+        // existing todo gone — fall through and create a new one
+      }
+    }
+
+    const title = (overrides?.title ?? `Bug: ${report.name}`).slice(0, 200);
+    const reportLabel = report._id.toString();
+    const command = report.command ? `\n\n**Command:** \`${report.command}\`` : '';
+    const exit = typeof report.exitCode === 'number' ? `\n**Exit code:** ${report.exitCode}` : '';
+    const summary = report.summary ? `\n\n**Summary:**\n\n${report.summary}` : '';
+    const snippet = report.outputSnippet
+      ? `\n\n**Log excerpt** (masked, truncated):\n\n\`\`\`\n${report.outputSnippet}\n\`\`\``
+      : '';
+    const truncatedNote = report.truncated ? '\n\n_Note: output was truncated server-side._' : '';
+    const description =
+      `Auto-generated from failed validation report \`${reportLabel}\` (${report.status}).${command}${exit}${summary}${snippet}${truncatedNote}`;
+
+    const todo = await this.todosService.create({
+      projectId: report.projectId.toString(),
+      title,
+      description,
+      status: TodoStatus.OPEN,
+      priority: overrides?.priority ?? TodoPriority.HIGH,
+      tags: overrides?.tags ?? ['bug', 'validation'],
+      milestoneId: overrides?.milestoneId,
+    });
+
+    await this.reportModel
+      .updateOne(
+        { _id: report._id },
+        { $set: { 'metadata.bugTodoId': todo._id.toString(), 'metadata.bugTodoCreatedAt': new Date().toISOString() } },
+      )
+      .exec();
+    const refreshed = await this.findById(reportId);
+    return { report: refreshed, todo, reused: false };
   }
 }

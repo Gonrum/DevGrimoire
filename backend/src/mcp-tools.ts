@@ -30,6 +30,7 @@ import { CustomerTemplatesService } from './customer-templates/customer-template
 import { CustomerTemplateType } from './customer-templates/schemas/customer-template.schema';
 import { ValidationReportsService } from './validation-reports/validation-reports.service';
 import { ValidationReportStatus } from './validation-reports/schemas/validation-report.schema';
+import { TodoPriority } from './todos/schemas/todo.schema';
 import { SnippetsService } from './snippets/snippets.service';
 import { WorkspacesService } from './workspaces/workspaces.service';
 import { WorkspaceStatus } from './workspaces/schemas/workspace.schema';
@@ -2151,6 +2152,21 @@ const tools = [
       type: 'object' as const,
       properties: {
         id: { type: 'string' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'validation_report_propose_bug_todo',
+    description: 'Create a reviewable bug-todo proposal from a failed/error validation report. Idempotent: returns the existing todo if one was already created for this report. Status open, priority defaults to high. Report metadata is updated with the new todo id.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'ValidationReport ID' },
+        title: { type: 'string', description: 'Override todo title (defaults to "Bug: <report name>")' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Default high' },
+        milestoneId: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Default ["bug", "validation"]' },
       },
       required: ['id'],
     },
@@ -4467,6 +4483,21 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'validation_report_get': {
           result = await validationReportsService.findById(requireString(a, 'id'));
+          break;
+        }
+        case 'validation_report_propose_bug_todo': {
+          const outcome = await validationReportsService.proposeBugTodo(requireString(a, 'id'), {
+            title: optionalString(a, 'title'),
+            priority: optionalString(a, 'priority') as TodoPriority | undefined,
+            milestoneId: optionalString(a, 'milestoneId'),
+            tags: optionalStringArray(a, 'tags'),
+          });
+          result = {
+            todoId: outcome.todo._id.toString(),
+            displayNumber: outcome.todo.displayNumber,
+            reused: outcome.reused,
+            reportId: outcome.report._id.toString(),
+          };
           break;
         }
         case 'workflow_create': {

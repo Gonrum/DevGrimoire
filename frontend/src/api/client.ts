@@ -387,6 +387,28 @@ export interface Todo {
   updatedAt: string;
 }
 
+export type ValidationReportStatus = 'passed' | 'failed' | 'error' | 'skipped';
+
+export interface ValidationReport {
+  _id: string;
+  projectId: string;
+  todoId?: string;
+  commitId?: string;
+  workflowRunId?: string;
+  name: string;
+  command?: string;
+  status: ValidationReportStatus;
+  exitCode?: number;
+  durationMs?: number;
+  truncated: boolean;
+  summary?: string;
+  outputSnippet?: string;
+  tags: string[];
+  metadata?: Record<string, unknown> & { bugTodoId?: string; bugTodoCreatedAt?: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Milestone {
   _id: string;
   projectId: string;
@@ -2012,6 +2034,28 @@ export const api = {
       const suffix = qs.toString() ? `?${qs.toString()}` : '';
       return request<ChatActivityStats>(`/chat-activity/stats${suffix}`);
     },
+  },
+  validationReports: {
+    list: (filters: { projectId?: string; todoId?: string; status?: ValidationReportStatus; limit?: number } = {}) => {
+      const params = new URLSearchParams();
+      if (filters.projectId) params.set('projectId', filters.projectId);
+      if (filters.todoId) params.set('todoId', filters.todoId);
+      if (filters.status) params.set('status', filters.status);
+      if (filters.limit) params.set('limit', String(filters.limit));
+      const qs = params.toString();
+      return request<ValidationReport[]>(`/validation-reports${qs ? `?${qs}` : ''}`);
+    },
+    latestForTodo: (todoId: string) =>
+      request<ValidationReport | null>(`/validation-reports/todo/${todoId}/latest`),
+    get: (id: string) => request<ValidationReport>(`/validation-reports/${id}`),
+    proposeBugTodo: (
+      id: string,
+      body: { title?: string; priority?: 'low' | 'medium' | 'high' | 'critical'; milestoneId?: string; tags?: string[] } = {},
+    ) =>
+      request<{ report: ValidationReport; todo: Todo; reused: boolean }>(
+        `/validation-reports/${id}/propose-bug-todo`,
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
   },
 };
 

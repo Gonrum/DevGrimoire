@@ -207,3 +207,13 @@ The first implementation slice adds a `ValidationReport` backend module with RES
 - `validation_report_add`, `validation_report_list`, and `validation_report_get` expose the same core flow to MCP agents.
 
 Stored `summary` and `outputSnippet` fields are masked and truncated server-side. This keeps the initial feature safe for cron jobs, agents, and future workflow validation nodes while UI badges, bug-todo proposals, and parser-specific enrichment remain follow-up work.
+
+## Implementation slice — todo UI + bug-todo proposal
+
+The second slice closes the acceptance gap on T-262:
+
+- `POST /api/validation-reports/:id/propose-bug-todo` creates (or reuses) a draft bug todo from a failed/error report. Body: optional `title`, `priority`, `milestoneId`, `tags`. The report's `metadata.bugTodoId` and `metadata.bugTodoCreatedAt` are set so subsequent calls are idempotent.
+- MCP tool `validation_report_propose_bug_todo` exposes the same flow to agents and returns `{ todoId, displayNumber, reused, reportId }`.
+- Todo detail UI gains a `Validation` section (`frontend/src/components/todo/TodoValidationSection.tsx`) that loads the latest report via the existing `latest-by-todo` endpoint and shows status badge, exit code/duration, command, summary, masked log excerpt, and (for failures) the "Create bug todo" action with link to the resulting todo.
+- The bug todo defaults to status `open`, priority `high`, tags `["bug", "validation"]`, and references the source report id, command, summary, masked log excerpt, and truncation note in its description.
+- Parser-specific enrichment (npm/vitest/jest, pytest, tsc, eslint, docker compose health) remains follow-up work.

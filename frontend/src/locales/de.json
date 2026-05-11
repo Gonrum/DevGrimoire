@@ -427,6 +427,32 @@
     "noComments": "Noch keine Kommentare",
     "commentPlaceholder": "Kommentar schreiben..."
   },
+  "validation": {
+    "sectionTitle": "Validierung",
+    "noReports": "Noch keine Validierungsläufe.",
+    "latest": "Letzter Lauf",
+    "status": {
+      "passed": "Bestanden",
+      "failed": "Fehlgeschlagen",
+      "error": "Fehler",
+      "skipped": "Übersprungen"
+    },
+    "exitCode": "Exit-Code",
+    "duration": "Dauer",
+    "command": "Befehl",
+    "summary": "Zusammenfassung",
+    "logExcerpt": "Log-Auszug (maskiert)",
+    "truncated": "Output wurde serverseitig gekürzt.",
+    "proposeBugTodo": "Bug-Quest aus Fehlschlag erzeugen",
+    "proposingBugTodo": "Erzeuge...",
+    "bugTodoCreated": "Bug-Quest {{displayNumber}} angelegt",
+    "bugTodoReused": "Bug-Quest {{displayNumber}} bereits angelegt",
+    "openBugTodo": "Bug-Quest öffnen",
+    "history": "Historie",
+    "showHistory": "Historie zeigen",
+    "hideHistory": "Historie verbergen",
+    "proposeFailed": "Bug-Quest-Erzeugung fehlgeschlagen"
+  },
   "questions": {
     "sectionTitle": "Rückfragen",
     "openShort": "offen",

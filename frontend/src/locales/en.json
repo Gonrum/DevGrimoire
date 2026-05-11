@@ -427,6 +427,32 @@
     "noComments": "No comments yet",
     "commentPlaceholder": "Write a comment..."
   },
+  "validation": {
+    "sectionTitle": "Validation",
+    "noReports": "No validation runs yet.",
+    "latest": "Latest run",
+    "status": {
+      "passed": "Passed",
+      "failed": "Failed",
+      "error": "Error",
+      "skipped": "Skipped"
+    },
+    "exitCode": "Exit code",
+    "duration": "Duration",
+    "command": "Command",
+    "summary": "Summary",
+    "logExcerpt": "Log excerpt (masked)",
+    "truncated": "Output was truncated server-side.",
+    "proposeBugTodo": "Create bug todo from failure",
+    "proposingBugTodo": "Creating...",
+    "bugTodoCreated": "Bug todo {{displayNumber}} created",
+    "bugTodoReused": "Bug todo {{displayNumber}} already exists",
+    "openBugTodo": "Open bug todo",
+    "history": "History",
+    "showHistory": "Show history",
+    "hideHistory": "Hide history",
+    "proposeFailed": "Failed to create bug todo"
+  },
   "questions": {
     "sectionTitle": "Questions",
     "openShort": "open",
