@@ -244,7 +244,8 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       nodeRun.status = WorkflowNodeRunStatus.WAITING;
       nodeRun.waitingFor = result.waitingFor;
       await nodeRun.save();
-      run.status = WorkflowRunStatus.WAITING_FOR_USER;
+      const isTimer = result.waitingFor?.type === 'delay';
+      run.status = isTimer ? WorkflowRunStatus.WAITING_FOR_TIMER : WorkflowRunStatus.WAITING_FOR_USER;
       await run.save();
       return;
     }
@@ -333,6 +334,32 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       status: 'success',
       output: { answer: payload.answer, optionIndex: optionIndex >= 0 ? optionIndex : null },
       branch,
+    });
+  }
+
+  async resumeDelayedNode(nodeRunId: string | Types.ObjectId): Promise<void> {
+    const nodeRun = await this.nodeRunModel.findById(nodeRunId).exec();
+    if (!nodeRun) return;
+    if (nodeRun.status !== WorkflowNodeRunStatus.WAITING) return;
+    const wf = nodeRun.waitingFor as { type?: string; resumeAt?: Date } | undefined;
+    if (wf?.type !== 'delay') return;
+
+    const run = await this.runModel.findById(nodeRun.runId).exec();
+    if (!run) return;
+    const snapshot = run.definitionSnapshot as { nodes: WorkflowNode[]; edges: unknown[] };
+    const node = snapshot.nodes.find((n) => n.id === nodeRun.nodeId);
+    if (!node) return;
+
+    const waitedMs = nodeRun.startedAt
+      ? Date.now() - nodeRun.startedAt.getTime()
+      : 0;
+
+    nodeRun.set('waitingFor', undefined);
+    run.status = WorkflowRunStatus.RUNNING;
+    await run.save();
+    await this.applyResult(run, nodeRun, node, {
+      status: 'success',
+      output: { resumedAt: new Date().toISOString(), waitedMs },
     });
   }
 
