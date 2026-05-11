@@ -228,7 +228,7 @@ export class WorkflowsService {
             userId: dto.triggeredBy.userId,
           }
         : { type: 'manual' as const, userId },
-      context: { nodes: {} },
+      context: { nodes: {}, input: dto.input ?? {} },
     });
 
     this.emitRun('created', run, `Workflow-Run für "${def.name}" v${def.version} eingereiht`);
