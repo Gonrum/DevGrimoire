@@ -15,6 +15,7 @@ import { TriggerScheduleExecutor } from './nodes/trigger-schedule.executor';
 import { ActionLogExecutor } from './nodes/action-log.executor';
 import { ActionTodoCreateExecutor } from './nodes/action-todo-create.executor';
 import { ActionNotifyExecutor } from './nodes/action-notify.executor';
+import { ActionUserQuestionExecutor } from './nodes/action-user-question.executor';
 import { TodosModule } from '../todos/todos.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { QuestionsModule } from '../questions/questions.module';
@@ -43,6 +44,7 @@ import { QuestionsModule } from '../questions/questions.module';
     ActionLogExecutor,
     ActionTodoCreateExecutor,
     ActionNotifyExecutor,
+    ActionUserQuestionExecutor,
   ],
   exports: [WorkflowsService, WorkflowEngineService],
 })
@@ -54,6 +56,7 @@ export class WorkflowsModule implements OnModuleInit {
     private readonly actionLog: ActionLogExecutor,
     private readonly actionTodo: ActionTodoCreateExecutor,
     private readonly actionNotify: ActionNotifyExecutor,
+    private readonly actionUserQuestion: ActionUserQuestionExecutor,
   ) {}
 
   onModuleInit(): void {
@@ -62,5 +65,6 @@ export class WorkflowsModule implements OnModuleInit {
     this.registry.register(this.actionLog);
     this.registry.register(this.actionTodo);
     this.registry.register(this.actionNotify);
+    this.registry.register(this.actionUserQuestion);
   }
 }

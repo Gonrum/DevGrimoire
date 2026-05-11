@@ -323,9 +323,16 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     nodeRun.set('waitingFor', undefined);
     run.status = WorkflowRunStatus.RUNNING;
     await run.save();
+    const cfg = (node.config ?? {}) as {
+      branchMap?: Record<string, 'success' | 'failure' | 'custom'>;
+      options?: string[];
+    };
+    const branch = cfg.branchMap?.[payload.answer];
+    const optionIndex = cfg.options ? cfg.options.indexOf(payload.answer) : -1;
     await this.applyResult(run, nodeRun, node, {
       status: 'success',
-      output: { answer: payload.answer },
+      output: { answer: payload.answer, optionIndex: optionIndex >= 0 ? optionIndex : null },
+      branch,
     });
   }
 
