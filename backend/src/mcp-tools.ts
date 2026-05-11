@@ -30,6 +30,7 @@ import { WorkspaceStatus } from './workspaces/schemas/workspace.schema';
 import { WorkspaceClient } from './workspaces/workspace-client.service';
 import { WorkspaceGitTokensService } from './workspaces/workspace-git-tokens.service';
 import { WorkspaceCliTokenService } from './workspaces/workspace-cli-token.service';
+import { assertWorkspaceWithinClientRoots, McpRootLike } from './workspaces/workspace-roots.guard';
 import { AttachmentsService } from './attachments/attachments.service';
 import { QuestionsService } from './questions/questions.service';
 import { LogsService } from './logs/logs.service';
@@ -202,6 +203,17 @@ function compactUpdateResult(doc: any): Record<string, unknown> {
 function compactCreateResult(doc: any, extra?: Record<string, unknown>): Record<string, unknown> {
   const obj = typeof doc.toJSON === 'function' ? doc.toJSON() : { ...doc };
   return { created: true, _id: obj._id, createdAt: obj.createdAt, ...extra };
+}
+
+async function getClientRoots(server: Server): Promise<McpRootLike[] | undefined> {
+  try {
+    const result = await server.listRoots(undefined, { timeout: 2_000 });
+    return result.roots.map((root) => ({ uri: root.uri, name: root.name }));
+  } catch {
+    // Older clients and some transports do not support MCP roots yet. Roots are
+    // an extra narrowing boundary, not a requirement for existing workspaces.
+    return undefined;
+  }
 }
 
 export interface McpServices {
@@ -3891,6 +3903,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'workspace_clone': {
           const id = requireString(a, 'id');
           const ws = await workspacesService.findById(id);
+          assertWorkspaceWithinClientRoots(ws, await getClientRoots(server));
           // Auto-embed the matching git token in the clone URL so private repos
           // work without manual `oauth2:$TOKEN@host` gymnastics. No-op if URL
           // is already authenticated or no token matches.
@@ -3918,6 +3931,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'workspace_pull': {
           const id = requireString(a, 'id');
           const ws = await workspacesService.findById(id);
+          assertWorkspaceWithinClientRoots(ws, await getClientRoots(server));
           const sidecar = await workspaceClient.pull(ws._id.toString());
           await workspacesService.touch(id);
           result = { pulled: true, id, sidecar };
@@ -3926,9 +3940,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'workspace_tree': {
           const id = requireString(a, 'id');
           const ws = await workspacesService.findById(id);
+          const path = optionalString(a, 'path');
+          assertWorkspaceWithinClientRoots(ws, await getClientRoots(server), { relativePath: path });
           const tree = await workspaceClient.tree(
             ws._id.toString(),
-            optionalString(a, 'path'),
+            path,
             optionalNumber(a, 'depth'),
           );
           await workspacesService.touch(id);
@@ -3938,7 +3954,9 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'workspace_read': {
           const id = requireString(a, 'id');
           const ws = await workspacesService.findById(id);
-          const file = await workspaceClient.read(ws._id.toString(), requireString(a, 'path'));
+          const path = requireString(a, 'path');
+          assertWorkspaceWithinClientRoots(ws, await getClientRoots(server), { relativePath: path });
+          const file = await workspaceClient.read(ws._id.toString(), path);
           await workspacesService.touch(id);
           result = file;
           break;
@@ -3946,6 +3964,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'workspace_search': {
           const id = requireString(a, 'id');
           const ws = await workspacesService.findById(id);
+          assertWorkspaceWithinClientRoots(ws, await getClientRoots(server));
           const search = await workspaceClient.search(
             ws._id.toString(),
             requireString(a, 'query'),
@@ -3959,6 +3978,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'workspace_status': {
           const id = requireString(a, 'id');
           const ws = await workspacesService.findById(id);
+          assertWorkspaceWithinClientRoots(ws, await getClientRoots(server));
           const status = await workspaceClient.status(ws._id.toString());
           await workspacesService.touch(id);
           result = status;
@@ -3972,6 +3992,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             ? (a.env as Record<string, string>)
             : undefined;
           const ws = await workspacesService.findById(id);
+          assertWorkspaceWithinClientRoots(ws, await getClientRoots(server));
           // Auto-inject GH_TOKEN/GITLAB_TOKEN/GITLAB_HOST from project.gitRepositories
           // so `gh`/`glab` work inside the sidecar without manual auth. Caller env wins.
           const gitEnv = await workspaceGitTokens.resolveForWorkspace(ws);
@@ -4015,6 +4036,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const id = requireString(a, 'id');
           const path = requireString(a, 'path');
           const ws = await workspacesService.findById(id);
+          assertWorkspaceWithinClientRoots(ws, await getClientRoots(server), { relativePath: path });
 
           // Binary-safe read so non-text artefacts (zip/png/apk) round-trip
           // through MinIO without UTF-8 mangling.
