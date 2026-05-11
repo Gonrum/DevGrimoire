@@ -214,7 +214,9 @@ async function bootstrap() {
       auth: {
         required: authService.isAuthEnabled(),
         schemes: ['devgrimoire-api-key'],
-        header: 'Authorization: Bearer cv_...',
+        headerName: 'Authorization',
+        headerScheme: 'Bearer',
+        apiKeyPrefix: 'cv_',
         queryParameter: 'apiKey',
       },
       capabilities: {
