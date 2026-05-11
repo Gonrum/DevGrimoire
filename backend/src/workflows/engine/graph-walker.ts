@@ -5,10 +5,16 @@ interface GraphSnapshot {
   edges: WorkflowEdge[];
 }
 
-/** All trigger nodes (type starts with "trigger.") in deterministic id order. */
+const LEGACY_TRIGGER_TYPES = new Set(['manual', 'schedule', 'project_event', 'customer_event']);
+
+function isTriggerType(type: string): boolean {
+  return type.startsWith('trigger.') || LEGACY_TRIGGER_TYPES.has(type);
+}
+
+/** All trigger nodes (type starts with "trigger." or is a legacy bare trigger name) in deterministic id order. */
 export function findTriggerNodes(def: GraphSnapshot): WorkflowNode[] {
   return def.nodes
-    .filter((n) => n.type.startsWith('trigger.'))
+    .filter((n) => isTriggerType(n.type))
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 

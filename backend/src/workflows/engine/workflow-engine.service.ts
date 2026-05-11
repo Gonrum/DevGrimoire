@@ -354,12 +354,15 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     }
     if (!nodeToStart) nodeToStart = findTriggerNodes({ nodes: snapshot.nodes, edges: snapshot.edges as never })[0];
 
-    run.status = WorkflowRunStatus.QUEUED;
+    // We immediately re-enqueue the specific node; the run goes straight to RUNNING
+    // without going through the workflow.run.queued event (which would re-trigger
+    // the trigger-fan-out from handleRunQueued and duplicate execution).
+    run.status = WorkflowRunStatus.RUNNING;
     run.error = undefined;
     run.finishedAt = undefined;
+    run.startedAt ??= new Date();
     await run.save();
     if (nodeToStart) await this.enqueueNode(run, nodeToStart, 1);
-    this.eventEmitter.emit('workflow.run.queued', { runId: (run._id as Types.ObjectId).toString() });
   }
 
   private async recoverInterruptedRuns(): Promise<void> {

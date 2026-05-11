@@ -166,6 +166,13 @@ export class WorkflowsService {
       if (!validation.valid) {
         throw new BadRequestException(`Workflow cannot be activated: ${validation.issues.join('; ')}`);
       }
+      const secIssues = workflowSecurityIssues({
+        scope: existing.scope,
+        nodes: existing.nodes as never,
+      });
+      if (secIssues.length > 0) {
+        throw new BadRequestException(`Workflow cannot be activated: ${secIssues.join('; ')}`);
+      }
     }
 
     if (willBump) existing.version += 1;
@@ -190,16 +197,6 @@ export class WorkflowsService {
     }
     if (def.status !== WorkflowStatus.ACTIVE) {
       throw new BadRequestException(`Cannot start a run for workflow in status ${def.status}; activate it after validation first`);
-    }
-    const validation = this.validateGraph({
-      scope: def.scope,
-      projectId: def.projectId?.toString(),
-      customerId: def.customerId?.toString(),
-      nodes: def.nodes as never,
-      edges: def.edges as never,
-    });
-    if (!validation.valid) {
-      throw new BadRequestException(`Workflow cannot run: ${validation.issues.join('; ')}`);
     }
 
     const snapshot = {
@@ -317,7 +314,6 @@ export class WorkflowsService {
     }
 
     const edgeIds = new Set<string>();
-    issues.push(...workflowSecurityIssues(def));
 
     for (const edge of def.edges ?? []) {
       if (!edge.id) {
