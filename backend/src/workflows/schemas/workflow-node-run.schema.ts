@@ -11,6 +11,7 @@ export enum WorkflowNodeRunStatus {
   FAILED = 'failed',
   SKIPPED = 'skipped',
   RETRYING = 'retrying',
+  INTERRUPTED = 'interrupted',
 }
 
 @Schema({ timestamps: true })
@@ -53,6 +54,9 @@ export class WorkflowNodeRun {
 
   @Prop()
   finishedAt?: Date;
+
+  @Prop({ type: Object })
+  waitingFor?: { type: 'question'; refId: Types.ObjectId };
 
   @Prop()
   durationMs?: number;

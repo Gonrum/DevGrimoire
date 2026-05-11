@@ -54,6 +54,16 @@ export class WorkflowRun {
   @Prop({ type: Object })
   error?: Record<string, unknown>;
 
+  @Prop({ type: Object, default: () => ({ nodes: {} }) })
+  context: Record<string, unknown>;
+
+  @Prop({ type: Object })
+  triggeredBy?: {
+    type: 'manual' | 'schedule' | 'event';
+    scheduleSlotAt?: Date;
+    userId?: string;
+  };
+
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -63,3 +73,7 @@ export const WorkflowRunSchema = SchemaFactory.createForClass(WorkflowRun);
 WorkflowRunSchema.index({ definitionId: 1, createdAt: -1 });
 WorkflowRunSchema.index({ scope: 1, projectId: 1, customerId: 1, status: 1, createdAt: -1 });
 WorkflowRunSchema.index({ status: 1, updatedAt: 1 });
+WorkflowRunSchema.index(
+  { definitionId: 1, 'triggeredBy.scheduleSlotAt': 1 },
+  { unique: true, sparse: true, name: 'uniq_run_per_schedule_slot' },
+);

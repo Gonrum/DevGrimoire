@@ -129,6 +129,12 @@ export class WorkflowDefinition {
   @Prop({ type: Types.ObjectId, ref: 'User' })
   updatedByUserId?: Types.ObjectId;
 
+  @Prop()
+  nextRunAt?: Date;
+
+  @Prop()
+  lastRunAt?: Date;
+
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -138,3 +144,4 @@ export const WorkflowDefinitionSchema = SchemaFactory.createForClass(WorkflowDef
 WorkflowDefinitionSchema.index({ scope: 1, projectId: 1, customerId: 1, status: 1, updatedAt: -1 });
 WorkflowDefinitionSchema.index({ tags: 1 });
 WorkflowDefinitionSchema.index({ name: 'text', description: 'text' });
+WorkflowDefinitionSchema.index({ 'trigger.type': 1, status: 1, nextRunAt: 1 });
