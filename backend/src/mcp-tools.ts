@@ -122,8 +122,13 @@ function optionalBoolean(args: Record<string, unknown>, field: string): boolean 
 function optionalNumber(args: Record<string, unknown>, field: string): number | undefined {
   const val = args[field];
   if (val === undefined || val === null) return undefined;
-  if (typeof val !== 'number') throw new Error(`${field} must be a number`);
-  return val;
+  if (typeof val === 'number') return val;
+  // Some LLM clients stringify numbers despite the JSON-schema declaring `number`.
+  // Accept a numeric string here so tool calls with `"limit": "5"` don't fail.
+  if (typeof val === 'string' && val.trim() !== '' && !Number.isNaN(Number(val))) {
+    return Number(val);
+  }
+  throw new Error(`${field} must be a number`);
 }
 
 function textResult(data: unknown) {
