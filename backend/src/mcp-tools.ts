@@ -2335,6 +2335,11 @@ const tools = [
     },
   },
   {
+    name: 'workflow_node_types_list',
+    description: 'Returns the catalog of registered workflow node types with their JSON-Schema configs, outputs, scopes and branches. Read-only — used by UI and agents constructing workflows.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
     name: 'customer_template_create',
     description: 'Create a customer setup template. Templates contain repeatable, NON-SECRET blueprints (todos, environments, monitoring checks, contacts, workflows). Secret values are rejected — use requiredSecretKeys for placeholders.',
     inputSchema: {
@@ -4668,6 +4673,16 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             finishedAt: nr.finishedAt,
             durationMs: nr.durationMs,
           }));
+          break;
+        }
+        case 'workflow_node_types_list': {
+          const registry = (services as unknown as { nodeRegistry?: { listMetadata: () => unknown[] } }).nodeRegistry;
+          if (!registry) {
+            result = [];
+          } else {
+            const { toPublicMetadata } = await import('./workflows/engine/node-metadata');
+            result = (registry.listMetadata() as never[]).map((m) => toPublicMetadata(m as never));
+          }
           break;
         }
         case 'customer_template_create': {
