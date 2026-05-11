@@ -2,7 +2,7 @@ import { Body, Controller, Get, Put } from '@nestjs/common';
 import { WorkflowAgentService } from './workflow-agent.service';
 import { UpdateWorkflowAgentConfigDto, WorkflowAgentConfigPublic } from './dto/workflow-agent.dto';
 
-@Controller('workflows/agent-config')
+@Controller('workflow-agent/config')
 export class WorkflowAgentController {
   constructor(private readonly agent: WorkflowAgentService) {}
 
