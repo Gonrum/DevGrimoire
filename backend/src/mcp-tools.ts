@@ -25,6 +25,7 @@ import { CommitsService } from './commits/commits.service';
 import { RagService } from './rag/rag.service';
 import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
 import { WorkflowsService } from './workflows/workflows.service';
+import { WorkflowEngineService } from './workflows/engine/workflow-engine.service';
 import { WorkflowScope, WorkflowStatus } from './workflows/schemas/workflow-definition.schema';
 import { CustomerTemplatesService } from './customer-templates/customer-templates.service';
 import { CustomerTemplateType } from './customer-templates/schemas/customer-template.schema';
@@ -251,6 +252,7 @@ export interface McpServices {
   ragService: RagService;
   recurringTasksService: RecurringTasksService;
   workflowsService: WorkflowsService;
+  workflowEngineService: WorkflowEngineService;
   customerTemplatesService: CustomerTemplatesService;
   validationReportsService: ValidationReportsService;
   snippetsService: SnippetsService;
@@ -2312,6 +2314,18 @@ const tools = [
     },
   },
   {
+    name: 'workflow_run_retry',
+    description: 'Retry a failed or cancelled workflow run. Optionally starts from a specific node id; otherwise resumes at the first failed node, or the trigger if none.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' },
+        fromNodeId: { type: 'string' },
+      },
+      required: ['id'],
+    },
+  },
+  {
     name: 'workflow_node_run_list',
     description: 'List the node runs for a workflow run, sorted by createdAt.',
     inputSchema: {
@@ -2872,6 +2886,7 @@ const EXPLICIT_WRITE_TOOLS = new Set<string>([
   'monitor_run',
   'workflow_run_start',
   'workflow_run_cancel',
+  'workflow_run_retry',
   'customer_template_apply',
 ]);
 
@@ -2897,7 +2912,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, customerTemplatesService, validationReportsService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, customerTemplatesService, validationReportsService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -4633,6 +4648,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             reason: optionalString(a, 'reason'),
           });
           result = { id: run._id.toString(), status: run.status, finishedAt: run.finishedAt };
+          break;
+        }
+        case 'workflow_run_retry': {
+          const id = requireString(a, 'id');
+          await workflowEngineService.retryRun(id, optionalString(a, 'fromNodeId'));
+          result = { ok: true, id };
           break;
         }
         case 'workflow_node_run_list': {
