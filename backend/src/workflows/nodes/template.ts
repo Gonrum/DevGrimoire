@@ -5,14 +5,14 @@
  */
 export function expandTemplate(input: string, context: Record<string, unknown>): string {
   return input.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (match, expr: string) => {
-    const value = lookup(expr.trim(), context);
+    const value = lookupPath(expr.trim(), context);
     if (value === undefined) return match;
     if (typeof value === 'string') return value;
     return JSON.stringify(value);
   });
 }
 
-function lookup(path: string, root: Record<string, unknown>): unknown {
+export function lookupPath(path: string, root: Record<string, unknown>): unknown {
   // Allow optional leading "context." prefix
   const cleaned = path.replace(/^context\./, '');
   const parts = cleaned.split('.');
