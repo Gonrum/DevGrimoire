@@ -1,14 +1,36 @@
 import { Injectable } from '@nestjs/common';
+import { z } from 'zod';
 import { Types } from 'mongoose';
 import { TodosService } from '../../todos/todos.service';
 import { TodoPriority } from '../../todos/schemas/todo.schema';
 import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types';
+import { NodeMetadata } from '../engine/node-metadata';
+import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { expandConfig } from './template';
 
 @Injectable()
 export class ActionTodoCreateExecutor implements NodeExecutor {
   readonly type = 'action.todo-create';
   constructor(private readonly todosService: TodosService) {}
+
+  readonly metadata: NodeMetadata = {
+    type: 'action.todo-create',
+    category: 'action',
+    label: 'Todo anlegen',
+    description: 'Erzeugt ein neues Todo im Run-Scope. ProjectId/CustomerId werden aus dem Run inferiert.',
+    allowedScopes: [WorkflowScope.PROJECT, WorkflowScope.CUSTOMER],
+    configSchema: z.object({
+      title: z.string().min(1),
+      description: z.string().optional(),
+      priority: z.enum(['low', 'medium', 'high', 'critical']).optional(),
+      tags: z.array(z.string()).optional(),
+      milestoneId: z.string().optional(),
+      projectId: z.string().optional(),
+      customerId: z.string().optional(),
+    }),
+    outputs: { todoId: 'string', todoNumber: 'string|null' },
+    branches: ['success', 'failure'],
+  };
 
   async execute(ctx: NodeExecutionContext): Promise<NodeResult> {
     const expanded = expandConfig(ctx.config, ctx.runContext);

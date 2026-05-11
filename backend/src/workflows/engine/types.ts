@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import { WorkflowNode } from '../schemas/workflow-definition.schema';
 import { WorkflowRun } from '../schemas/workflow-run.schema';
 import { WorkflowNodeRun } from '../schemas/workflow-node-run.schema';
+import { NodeMetadata } from './node-metadata';
 
 export interface RetryConfig {
   maxAttempts: number;
@@ -52,6 +53,7 @@ export interface NodeExecutionContext {
 
 export interface NodeExecutor {
   readonly type: string;
+  readonly metadata: NodeMetadata;
   execute(ctx: NodeExecutionContext): Promise<NodeResult>;
 }
 

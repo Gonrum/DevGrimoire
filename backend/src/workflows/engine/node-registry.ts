@@ -28,4 +28,12 @@ export class NodeRegistry {
   list(): string[] {
     return [...this.executors.keys()].sort();
   }
+
+  getMetadata(type: string) {
+    return this.get(type).metadata;
+  }
+
+  listMetadata() {
+    return [...this.executors.values()].map((e) => e.metadata);
+  }
 }
