@@ -61,6 +61,20 @@ function expectBlocked(ws, roots, options) {
   assert(threw, 'expected guard to throw, but it allowed access');
 }
 
+function expectEscapeBlocked(ws, roots, options) {
+  let threw = false;
+  try {
+    assertWorkspaceWithinClientRoots(ws, roots, options);
+  } catch (err) {
+    threw = true;
+    assert(
+      /escapes workspace base/i.test(err.message),
+      `expected escape-block error, got: ${err.message}`,
+    );
+  }
+  assert(threw, 'expected guard to throw, but it allowed access');
+}
+
 const wsFactory = (overrides = {}) => ({
   _id: { toString: () => overrides.id || 'ws-1' },
   path: overrides.path,
@@ -122,17 +136,44 @@ check('workspace path within file:// root is allowed', () => {
   );
 });
 
-check('workspace path outside every file:// root is blocked', () => {
-  expectBlocked(
+check('server-managed workspace allowed when client roots only declare unrelated client-side paths (T-285)', () => {
+  // The classic Claude-Code scenario: client lives on its own filesystem
+  // (e.g. file:///D:/Projects/foo) and never speaks about the server's
+  // /workspaces/* namespace. Disjoint roots must not deny by default.
+  expectAllowed(
+    wsFactory({ path: '/workspaces/abc' }),
+    [{ uri: 'file:///D:/Projects/csharp/repos/foo' }],
+  );
+  expectAllowed(
     wsFactory({ path: '/etc' }),
     [{ uri: 'file:///srv/work' }, { uri: 'file:///home/dev' }],
   );
 });
 
-check('sibling-prefix paths (/srv/worker vs /srv/work) are blocked', () => {
-  expectBlocked(
+check('sibling-prefix paths (/srv/worker vs /srv/work) are allowed (disjoint namespaces — T-285)', () => {
+  // Siblings share no hierarchical relationship — the client root is not
+  // narrowing this workspace at all, so the guard should not deny.
+  expectAllowed(
     wsFactory({ path: '/srv/worker' }),
     [{ uri: 'file:///srv/work' }],
+  );
+});
+
+check('overlapping file root narrows access: parent workspace, sub-folder root → workspace base is blocked', () => {
+  // Client narrows access to /srv/work/sub; targeting the wider workspace
+  // base /srv/work must still be blocked. This preserves the narrowing
+  // semantics within a shared namespace.
+  expectBlocked(
+    wsFactory({ path: '/srv/work' }),
+    [{ uri: 'file:///srv/work/sub' }],
+  );
+});
+
+check('overlapping file root narrows access: relativePath into the allowed sub-folder is allowed', () => {
+  expectAllowed(
+    wsFactory({ path: '/srv/work' }),
+    [{ uri: 'file:///srv/work/sub' }],
+    { relativePath: 'sub/app.ts' },
   );
 });
 
@@ -162,11 +203,34 @@ check('relativePath inside a root is allowed', () => {
   );
 });
 
-check('relativePath that escapes via ../ falls outside root and is blocked', () => {
-  expectBlocked(
+check('relativePath that escapes via ../ is blocked even when a client root would otherwise allow', () => {
+  expectEscapeBlocked(
     wsFactory({ path: '/srv/work' }),
     [{ uri: 'file:///srv/work' }],
     { relativePath: '../escape' },
+  );
+});
+
+check('relativePath ../ is blocked even with no client roots at all (server-side invariant — T-285)', () => {
+  // Path-traversal protection must not depend on the client having
+  // declared roots — otherwise old/stdio clients lose the safety net.
+  expectEscapeBlocked(
+    wsFactory({ path: '/workspaces/abc' }),
+    undefined,
+    { relativePath: '../../etc/passwd' },
+  );
+  expectEscapeBlocked(
+    wsFactory({ path: '/workspaces/abc' }),
+    [],
+    { relativePath: '../other' },
+  );
+});
+
+check('relativePath ../ is blocked even when client roots are disjoint from workspace', () => {
+  expectEscapeBlocked(
+    wsFactory({ path: '/workspaces/abc' }),
+    [{ uri: 'file:///D:/Projects/foo' }],
+    { relativePath: '../../etc' },
   );
 });
 
@@ -177,12 +241,33 @@ check('multiple roots: any match allows', () => {
   );
 });
 
-check('error message does not leak workspace path', () => {
+check('error message does not leak workspace path (roots-block)', () => {
+  // Use a narrowing root that overlaps with the workspace base, so the
+  // roots-block path actually triggers (T-285 changed the disjoint case
+  // to be allowed).
   let captured;
   try {
     assertWorkspaceWithinClientRoots(
       wsFactory({ path: '/srv/private-customer-data' }),
-      [{ uri: 'file:///home/dev' }],
+      [{ uri: 'file:///srv/private-customer-data/public-subdir' }],
+    );
+  } catch (err) {
+    captured = err.message;
+  }
+  assert(captured, 'guard should throw');
+  assert(
+    !captured.includes('/srv/private-customer-data'),
+    `error must not include workspace path: ${captured}`,
+  );
+});
+
+check('error message does not leak workspace path (escape-block)', () => {
+  let captured;
+  try {
+    assertWorkspaceWithinClientRoots(
+      wsFactory({ path: '/srv/private-customer-data' }),
+      undefined,
+      { relativePath: '../escape' },
     );
   } catch (err) {
     captured = err.message;
