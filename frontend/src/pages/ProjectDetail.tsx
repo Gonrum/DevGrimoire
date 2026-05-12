@@ -24,6 +24,7 @@ import AttachmentList from '../components/AttachmentList';
 import LogList from '../components/LogList';
 import ReleaseList from '../components/ReleaseList';
 import DocsHealthList from '../components/DocsHealthList';
+import KnowledgeGraphView from '../components/knowledge-graph/KnowledgeGraphView';
 import GitRepoWidget from '../components/GitRepoWidget';
 import ProjectCustomerLinks from '../components/ProjectCustomerLinks';
 import Markdown from '../components/Markdown';
@@ -33,7 +34,7 @@ import { LoadingText } from '../components/ui/LoadingSpinner';
 import ProjectTabShell from '../components/ui/ProjectTabShell';
 import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
 
-type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces' | 'workflows' | 'docs-health';
+type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces' | 'workflows' | 'docs-health' | 'graph';
 
 export default function ProjectDetail() {
   const { t, i18n } = useTranslation();
@@ -235,6 +236,7 @@ export default function ProjectDetail() {
       label: t('sidebar.catalog'),
       items: [
         { key: 'features', label: t('projectDetail.tab.features'), count: features.length },
+        { key: 'graph', label: t('projectDetail.tab.graph'), count: 0 },
         { key: 'schemas', label: t('projectDetail.tab.schemas'), count: schemas.length },
         { key: 'dependencies', label: t('projectDetail.tab.dependencies'), count: dependencies.length },
         { key: 'releases', label: t('projectDetail.tab.releases'), count: releases.length },
@@ -282,6 +284,7 @@ export default function ProjectDetail() {
     activity: t('projectDetail.tabDesc.activity'),
     manual: t('projectDetail.tabDesc.manual'),
     'docs-health': t('projectDetail.tabDesc.docsHealth'),
+    graph: t('projectDetail.tabDesc.graph'),
     soul: t('projectDetail.tabDesc.soul'),
   };
   const currentTabDescription = TAB_DESCRIPTIONS[tab];
@@ -447,6 +450,7 @@ export default function ProjectDetail() {
             {tab === 'changelog' && <ChangelogList entries={changelog} projectId={id!} project={project} onUpdate={() => api.changelog.list(id!).then(setChangelog)} />}
             {tab === 'manual' && <ManualView projectId={id!} entries={manuals} onUpdate={() => api.manuals.list(id!).then(setManuals)} />}
             {tab === 'docs-health' && <DocsHealthList projectId={id!} basePath={`/projects/${id!}`} />}
+            {tab === 'graph' && <KnowledgeGraphView projectId={id!} basePath={`/projects/${id!}`} />}
             {tab === 'features' && <FeatureList entries={features} projectId={id!} />}
             {tab === 'schemas' && <SchemaList entries={schemas} projectId={id!} />}
             {tab === 'dependencies' && <DependencyList entries={dependencies} projectId={id!} />}

@@ -660,6 +660,7 @@
       "changelog": "Chronicles",
       "manual": "Tome",
       "docsHealth": "Lore Health",
+      "graph": "Knowledge Graph",
       "research": "Studies",
       "snippets": "Runes",
       "files": "Scrolls",
@@ -697,7 +698,29 @@
       "activity": "Traces — chronological tool activity.",
       "manual": "Handbook entries — categorised documentation.",
       "docsHealth": "Lore Health — proposals for stale manuals and knowledge entries.",
+      "graph": "Knowledge graph — relationships between todos, manuals, knowledge, validations, commits and more.",
       "soul": "Vision, principles and conventions of this project."
+    }
+  },
+  "knowledgeGraph": {
+    "totalEdges": "Total edges",
+    "visible": "Visible",
+    "onlyConfirmed": "Only confirmed",
+    "rebuild": "Rebuild",
+    "discovering": "Scanning …",
+    "discovered": "Knowledge graph updated: {{discovered}} edges, {{inserted}} new, {{pruned}} removed",
+    "empty": "No edges in the knowledge graph yet.",
+    "emptyHint": "Click \"Rebuild\" to derive relationships from todos, milestones, manuals, knowledge, validation reports, doc proposals and commits.",
+    "directNeighbors": "Direct neighbors",
+    "impactDepth2": "Impact (depth 2)",
+    "reachable": "reachable entities",
+    "openEntity": "Open entity",
+    "confirmEdge": "Confirm",
+    "deleteEdge": "Delete edge",
+    "edgeDeleted": "Edge deleted",
+    "filter": {
+      "entityTypes": "Filter entity types",
+      "relations": "Filter relations"
     }
   },
   "docsHealth": {

@@ -660,6 +660,7 @@
       "changelog": "Chroniken",
       "manual": "Foliant",
       "docsHealth": "Lore-Gesundheit",
+      "graph": "Wissensgraph",
       "research": "Studien",
       "snippets": "Runen",
       "files": "Pergamente",
@@ -697,7 +698,29 @@
       "activity": "Spuren — chronologische Tool-Aktivitäten.",
       "manual": "Handbuch-Einträge — kategorisierte Dokumentation.",
       "docsHealth": "Lore-Gesundheit — Vorschläge für veraltete Manuals und Knowledge-Einträge.",
+      "graph": "Wissensgraph — Beziehungen zwischen Todos, Manuals, Knowledge, Validierungen, Commits und mehr.",
       "soul": "Vision, Prinzipien und Konventionen dieses Projekts."
+    }
+  },
+  "knowledgeGraph": {
+    "totalEdges": "Kanten gesamt",
+    "visible": "Sichtbar",
+    "onlyConfirmed": "Nur bestätigte",
+    "rebuild": "Neu scannen",
+    "discovering": "Scanne …",
+    "discovered": "Wissensgraph aktualisiert: {{discovered}} Kanten, {{inserted}} neu, {{pruned}} entfernt",
+    "empty": "Noch keine Kanten im Wissensgraphen.",
+    "emptyHint": "Klicke \"Neu scannen\", um Beziehungen aus Todos, Milestones, Manuals, Knowledge, Validation-Reports, Doc-Vorschlägen und Commits abzuleiten.",
+    "directNeighbors": "Direkte Nachbarn",
+    "impactDepth2": "Impact (Tiefe 2)",
+    "reachable": "erreichbare Entities",
+    "openEntity": "Entity öffnen",
+    "confirmEdge": "Bestätigen",
+    "deleteEdge": "Kante löschen",
+    "edgeDeleted": "Kante gelöscht",
+    "filter": {
+      "entityTypes": "Entity-Typen filtern",
+      "relations": "Relationen filtern"
     }
   },
   "docsHealth": {

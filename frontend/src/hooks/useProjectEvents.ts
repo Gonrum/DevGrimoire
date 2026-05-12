@@ -3,7 +3,7 @@ import { useAuth } from './useAuth';
 
 export interface ProjectChangeEvent {
   projectId: string;
-  entity: 'project' | 'todo' | 'session' | 'knowledge' | 'changelog' | 'milestone' | 'manual' | 'research' | 'notification' | 'environment' | 'secret' | 'schema' | 'dependency' | 'feature' | 'soul' | 'commit' | 'recurring-task' | 'snippet' | 'doc-update-proposal';
+  entity: 'project' | 'todo' | 'session' | 'knowledge' | 'changelog' | 'milestone' | 'manual' | 'research' | 'notification' | 'environment' | 'secret' | 'schema' | 'dependency' | 'feature' | 'soul' | 'commit' | 'recurring-task' | 'snippet' | 'doc-update-proposal' | 'knowledge-graph';
   action: 'created' | 'updated' | 'deleted';
   entityId?: string;
 }

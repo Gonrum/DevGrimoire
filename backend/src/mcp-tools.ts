@@ -34,6 +34,8 @@ import { ValidationReportsService } from './validation-reports/validation-report
 import { ValidationReportStatus } from './validation-reports/schemas/validation-report.schema';
 import { DocUpdateProposalsService } from './doc-update-proposals/doc-update-proposals.service';
 import { DocProposalStatus } from './doc-update-proposals/schemas/doc-update-proposal.schema';
+import { KnowledgeGraphService } from './knowledge-graph/knowledge-graph.service';
+import { KgEntityType, KgRelation, KG_ENTITY_TYPES, KG_RELATIONS } from './knowledge-graph/schemas/knowledge-graph-edge.schema';
 import { TodoPriority } from './todos/schemas/todo.schema';
 import { SnippetsService } from './snippets/snippets.service';
 import { WorkspacesService } from './workspaces/workspaces.service';
@@ -281,6 +283,7 @@ export interface McpServices {
   customerTemplatesService: CustomerTemplatesService;
   validationReportsService: ValidationReportsService;
   docUpdateProposalsService: DocUpdateProposalsService;
+  knowledgeGraphService: KnowledgeGraphService;
   snippetsService: SnippetsService;
   attachmentsService: AttachmentsService;
   questionsService: QuestionsService;
@@ -2300,6 +2303,91 @@ const tools = [
     },
   },
   {
+    name: 'knowledge_graph_neighbors',
+    description: 'List direct neighbors of an entity in the project knowledge graph. Returns edges where the entity appears as source or target.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string' },
+        entityType: { type: 'string', enum: [...KG_ENTITY_TYPES] },
+        entityId: { type: 'string' },
+      },
+      required: ['projectId', 'entityType', 'entityId'],
+    },
+  },
+  {
+    name: 'knowledge_graph_impact',
+    description: 'Breadth-first traversal from a focal entity up to a given depth (1-5, default 2). Returns reachable entities with their depth plus the edges visited. Useful for "what could break if X changes?".',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string' },
+        entityType: { type: 'string', enum: [...KG_ENTITY_TYPES] },
+        entityId: { type: 'string' },
+        depth: { type: 'number', minimum: 1, maximum: 5 },
+      },
+      required: ['projectId', 'entityType', 'entityId'],
+    },
+  },
+  {
+    name: 'knowledge_graph_link',
+    description: 'Create a user/agent-authored edge in the knowledge graph. Returns existing edge if a duplicate would be created.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string' },
+        source: {
+          type: 'object',
+          properties: {
+            entityType: { type: 'string', enum: [...KG_ENTITY_TYPES] },
+            entityId: { type: 'string' },
+            label: { type: 'string' },
+          },
+          required: ['entityType', 'entityId'],
+        },
+        target: {
+          type: 'object',
+          properties: {
+            entityType: { type: 'string', enum: [...KG_ENTITY_TYPES] },
+            entityId: { type: 'string' },
+            label: { type: 'string' },
+          },
+          required: ['entityType', 'entityId'],
+        },
+        relation: { type: 'string', enum: [...KG_RELATIONS] },
+        weight: { type: 'number', minimum: 0, maximum: 10 },
+        confidence: { type: 'number', minimum: 0, maximum: 1 },
+        direction: { type: 'string', enum: ['directed', 'undirected'] },
+        createdBy: { type: 'string', enum: ['system', 'agent', 'user'] },
+        metadata: { type: 'object' },
+      },
+      required: ['projectId', 'source', 'target', 'relation'],
+    },
+  },
+  {
+    name: 'knowledge_graph_discover',
+    description: 'Re-scan all entities of a project and (re)build deterministic edges. Returns counts of discovered, inserted and pruned edges. Edges marked userConfirmed=true are preserved.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { projectId: { type: 'string' } },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'knowledge_graph_list',
+    description: 'List edges in the project knowledge graph. Filter by entity (returns edges touching it) and/or relation.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string' },
+        entityType: { type: 'string', enum: [...KG_ENTITY_TYPES] },
+        entityId: { type: 'string' },
+        relation: { type: 'string', enum: [...KG_RELATIONS] },
+        limit: { type: 'number', description: 'Default 500, max 5000' },
+      },
+    },
+  },
+  {
     name: 'workflow_create',
     description: 'Create a workflow definition (graph of triggers, nodes and edges). Scope controls visibility: system (admin-only), project (requires projectId), customer (requires customerId).',
     inputSchema: {
@@ -3002,6 +3090,7 @@ export function toolGroup(name: string): 'Task-Management' | 'Wissen & Suche' | 
     name.startsWith('recurring_task_') ||
     name.startsWith('validation_report_') ||
     name.startsWith('doc_update_proposal_') ||
+    name.startsWith('knowledge_graph_') ||
     name.startsWith('workflow_')
   ) {
     return 'Task-Management';
@@ -3078,7 +3167,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -3170,6 +3259,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             releasesService.removeByProject(id),
             validationReportsService.removeByProject(id),
             docUpdateProposalsService.removeByProject(id),
+            knowledgeGraphService.removeByProject(id),
             workspacesService.removeByProject(id),
           ]);
           result = { deleted: true, id };
@@ -4735,6 +4825,54 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             reused: outcome.reused,
             proposalId: outcome.proposal._id.toString(),
           };
+          break;
+        }
+        case 'knowledge_graph_neighbors': {
+          const edges = await knowledgeGraphService.neighbors(
+            requireString(a, 'projectId'),
+            requireString(a, 'entityType') as KgEntityType,
+            requireString(a, 'entityId'),
+          );
+          result = edges.map((e) => e.toObject());
+          break;
+        }
+        case 'knowledge_graph_impact': {
+          result = await knowledgeGraphService.impact(
+            requireString(a, 'projectId'),
+            requireString(a, 'entityType') as KgEntityType,
+            requireString(a, 'entityId'),
+            optionalNumber(a, 'depth'),
+          );
+          break;
+        }
+        case 'knowledge_graph_link': {
+          const edge = await knowledgeGraphService.create({
+            projectId: requireString(a, 'projectId'),
+            source: requireObject(a, 'source') as never,
+            target: requireObject(a, 'target') as never,
+            relation: requireString(a, 'relation') as KgRelation,
+            weight: optionalNumber(a, 'weight'),
+            confidence: optionalNumber(a, 'confidence'),
+            direction: optionalString(a, 'direction') as 'directed' | 'undirected' | undefined,
+            createdBy: optionalString(a, 'createdBy') as 'system' | 'agent' | 'user' | undefined,
+            metadata: optionalObject(a, 'metadata'),
+          });
+          result = compactCreateResult(edge, { relation: edge.relation });
+          break;
+        }
+        case 'knowledge_graph_discover': {
+          result = await knowledgeGraphService.discoverForProject(requireString(a, 'projectId'));
+          break;
+        }
+        case 'knowledge_graph_list': {
+          const edges = await knowledgeGraphService.list({
+            projectId: optionalString(a, 'projectId'),
+            entityType: optionalString(a, 'entityType') as KgEntityType | undefined,
+            entityId: optionalString(a, 'entityId'),
+            relation: optionalString(a, 'relation') as KgRelation | undefined,
+            limit: optionalNumber(a, 'limit'),
+          });
+          result = compactList(edges as any[], ['metadata', '__v']);
           break;
         }
         case 'workflow_create': {

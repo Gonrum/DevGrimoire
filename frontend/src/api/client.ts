@@ -458,6 +458,65 @@ export interface DocUpdateProposal {
   updatedAt: string;
 }
 
+export type KgEntityType =
+  | 'todo'
+  | 'milestone'
+  | 'knowledge'
+  | 'manual'
+  | 'research'
+  | 'schema'
+  | 'feature'
+  | 'dependency'
+  | 'changelog'
+  | 'workflow'
+  | 'release'
+  | 'snippet'
+  | 'commit'
+  | 'validation_report'
+  | 'doc_update_proposal'
+  | 'session';
+
+export type KgRelation =
+  | 'belongs_to'
+  | 'completed_by'
+  | 'blocked_by'
+  | 'tagged_overlap'
+  | 'category_match'
+  | 'validates'
+  | 'documents'
+  | 'depends_on'
+  | 'mentions'
+  | 'proposes_update'
+  | 'references';
+
+export interface KgEndpoint {
+  entityType: KgEntityType;
+  entityId: string;
+  label?: string;
+}
+
+export interface KnowledgeGraphEdge {
+  _id: string;
+  projectId: string;
+  source: KgEndpoint;
+  target: KgEndpoint;
+  relation: KgRelation;
+  weight: number;
+  confidence: number;
+  direction: 'directed' | 'undirected';
+  createdBy: 'system' | 'agent' | 'user';
+  userConfirmed: boolean;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeGraphImpact {
+  focal: { entityType: KgEntityType; entityId: string };
+  reachable: Array<{ entityType: KgEntityType; entityId: string; label?: string; depth: number }>;
+  edges: KnowledgeGraphEdge[];
+}
+
 export interface Milestone {
   _id: string;
   projectId: string;
@@ -2143,6 +2202,50 @@ export const api = {
       ),
     detectForTodo: (todoId: string) =>
       request<DocUpdateProposal[]>(`/doc-update-proposals/detect/todo/${todoId}`, { method: 'POST' }),
+  },
+  knowledgeGraph: {
+    listEdges: (filters: {
+      projectId?: string;
+      entityType?: KgEntityType;
+      entityId?: string;
+      relation?: KgRelation;
+      limit?: number;
+    } = {}) => {
+      const params = new URLSearchParams();
+      if (filters.projectId) params.set('projectId', filters.projectId);
+      if (filters.entityType) params.set('entityType', filters.entityType);
+      if (filters.entityId) params.set('entityId', filters.entityId);
+      if (filters.relation) params.set('relation', filters.relation);
+      if (filters.limit) params.set('limit', String(filters.limit));
+      const qs = params.toString();
+      return request<KnowledgeGraphEdge[]>(`/knowledge-graph/edges${qs ? `?${qs}` : ''}`);
+    },
+    getEdge: (id: string) => request<KnowledgeGraphEdge>(`/knowledge-graph/edges/${id}`),
+    createEdge: (body: Omit<KnowledgeGraphEdge, '_id' | 'createdAt' | 'updatedAt' | 'userConfirmed'> & { createdBy?: 'system' | 'agent' | 'user' }) =>
+      request<KnowledgeGraphEdge>('/knowledge-graph/edges', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    deleteEdge: (id: string) =>
+      request<{ deleted: boolean; id: string }>(`/knowledge-graph/edges/${id}`, { method: 'DELETE' }),
+    confirmEdge: (id: string, confirmed = true) =>
+      request<KnowledgeGraphEdge>(`/knowledge-graph/edges/${id}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify({ confirmed }),
+      }),
+    neighbors: (projectId: string, entityType: KgEntityType, entityId: string) => {
+      const qs = new URLSearchParams({ projectId, entityType, entityId }).toString();
+      return request<KnowledgeGraphEdge[]>(`/knowledge-graph/neighbors?${qs}`);
+    },
+    impact: (projectId: string, entityType: KgEntityType, entityId: string, depth = 2) => {
+      const qs = new URLSearchParams({ projectId, entityType, entityId, depth: String(depth) }).toString();
+      return request<KnowledgeGraphImpact>(`/knowledge-graph/impact?${qs}`);
+    },
+    discover: (projectId: string) =>
+      request<{ discovered: number; inserted: number; pruned: number }>(
+        `/knowledge-graph/discover/${projectId}`,
+        { method: 'POST' },
+      ),
   },
   workflowAgent: {
     getConfig: () => request<WorkflowAgentConfig | null>('/workflow-agent/config'),

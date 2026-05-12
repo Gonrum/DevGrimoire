@@ -4,7 +4,7 @@ export interface ProjectChangeEvent {
   projectId: string | null;
   /** Customer owner when the changed entity is customer-scoped (no project). Both can be null for global entities. */
   customerId?: string | null;
-  entity: 'project' | 'todo' | 'session' | 'knowledge' | 'changelog' | 'milestone' | 'manual' | 'research' | 'notification' | 'environment' | 'secret' | 'schema' | 'dependency' | 'feature' | 'soul' | 'commit' | 'recurring-task' | 'snippet' | 'attachment' | 'log' | 'release' | 'chat' | 'workspace' | 'customer-project' | 'contact' | 'customer' | 'healthcheck' | 'doc-update-proposal';
+  entity: 'project' | 'todo' | 'session' | 'knowledge' | 'changelog' | 'milestone' | 'manual' | 'research' | 'notification' | 'environment' | 'secret' | 'schema' | 'dependency' | 'feature' | 'soul' | 'commit' | 'recurring-task' | 'snippet' | 'attachment' | 'log' | 'release' | 'chat' | 'workspace' | 'customer-project' | 'contact' | 'customer' | 'healthcheck' | 'doc-update-proposal' | 'knowledge-graph';
   action: 'created' | 'updated' | 'deleted';
   entityId?: string;
   summary?: string;
