@@ -659,6 +659,7 @@
       "knowledge": "Knowledge",
       "changelog": "Chronicles",
       "manual": "Tome",
+      "docsHealth": "Lore Health",
       "research": "Studies",
       "snippets": "Runes",
       "files": "Scrolls",
@@ -695,7 +696,40 @@
       "logs": "Incoming application logs and statistics.",
       "activity": "Traces — chronological tool activity.",
       "manual": "Handbook entries — categorised documentation.",
+      "docsHealth": "Lore Health — proposals for stale manuals and knowledge entries.",
       "soul": "Vision, principles and conventions of this project."
+    }
+  },
+  "docsHealth": {
+    "openCount": "Open proposals",
+    "confidence": "Confidence",
+    "from": "from",
+    "suggested": "Suggested",
+    "instructions": "Instructions",
+    "accept": "Accept",
+    "convertToTodo": "Convert to todo",
+    "dismiss": "Dismiss",
+    "openTodo": "Open todo",
+    "convertedTo": "Converted to todo",
+    "todoCreated": "Todo {{displayNumber}} created",
+    "empty": "No documentation update proposals",
+    "emptyHint": "Proposals appear automatically when todos transition to review or done and may affect manuals or knowledge entries.",
+    "filter": {
+      "allStatus": "All status",
+      "allSources": "All sources",
+      "allTargets": "All targets"
+    },
+    "status": {
+      "open": "Open",
+      "accepted": "Accepted",
+      "edited": "Edited",
+      "converted_to_todo": "As todo",
+      "dismissed": "Dismissed",
+      "superseded": "Superseded"
+    },
+    "banner": {
+      "title": "{{count}} doc-update proposal(s) for this todo",
+      "openSection": "Open Lore Health →"
     }
   },
   "workspaces": {

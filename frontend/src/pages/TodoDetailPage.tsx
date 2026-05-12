@@ -19,6 +19,7 @@ import { WorkflowPageShell } from '../components/ui/WorkflowShell';
 import TodoDependenciesSection from '../components/todo/TodoDependenciesSection';
 import TodoQuestionsSection from '../components/todo/TodoQuestionsSection';
 import TodoValidationSection from '../components/todo/TodoValidationSection';
+import TodoDocProposalsBanner from '../components/todo/TodoDocProposalsBanner';
 import AttachmentList from '../components/AttachmentList';
 
 function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => void; onCancel: () => void }) {
@@ -269,6 +270,12 @@ export default function TodoDetailPage() {
             projectId={todo.projectId}
             basePath={basePath}
             onError={showError}
+          />
+
+          <TodoDocProposalsBanner
+            todoId={todoId!}
+            todoStatus={todo.status}
+            basePath={basePath}
           />
 
           <TodoQuestionsSection

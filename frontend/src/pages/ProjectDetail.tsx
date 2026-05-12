@@ -23,6 +23,7 @@ import WorkspaceList from '../components/WorkspaceList';
 import AttachmentList from '../components/AttachmentList';
 import LogList from '../components/LogList';
 import ReleaseList from '../components/ReleaseList';
+import DocsHealthList from '../components/DocsHealthList';
 import GitRepoWidget from '../components/GitRepoWidget';
 import ProjectCustomerLinks from '../components/ProjectCustomerLinks';
 import Markdown from '../components/Markdown';
@@ -32,7 +33,7 @@ import { LoadingText } from '../components/ui/LoadingSpinner';
 import ProjectTabShell from '../components/ui/ProjectTabShell';
 import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
 
-type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces' | 'workflows';
+type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces' | 'workflows' | 'docs-health';
 
 export default function ProjectDetail() {
   const { t, i18n } = useTranslation();
@@ -61,6 +62,7 @@ export default function ProjectDetail() {
   const [releases, setReleases] = useState<Release[]>([]);
   const [workspaceCount, setWorkspaceCount] = useState(0);
   const [logStats, setLogStats] = useState<LogStats | null>(null);
+  const [openDocProposalsCount, setOpenDocProposalsCount] = useState(0);
   const [logsKey, setLogsKey] = useState(0);
   const [envKey, setEnvKey] = useState(0);
   const [commitsKey, setCommitsKey] = useState(0);
@@ -107,8 +109,9 @@ export default function ProjectDetail() {
       api.logs.stats(id),
       api.releases.list(id),
       api.workspaces.list(id, 'active').catch(() => [] as Workspace[]),
+      api.docUpdateProposals.list({ projectId: id, status: 'open', limit: 200 }).catch(() => []),
     ])
-      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man, sl, cc, rts, snip, storage, ls, rels, wss]) => {
+      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man, sl, cc, rts, snip, storage, ls, rels, wss, dprops]) => {
         if (controller.signal.aborted) return;
         setProject(p);
         setTodos(t);
@@ -132,6 +135,7 @@ export default function ProjectDetail() {
         setLogStats(ls);
         setReleases(rels);
         setWorkspaceCount(wss.length);
+        setOpenDocProposalsCount(dprops.length);
         if (storage.enabled) {
           api.attachments.list(id).then(setAttachments).catch(() => {});
         }
@@ -172,6 +176,7 @@ export default function ProjectDetail() {
         log: () => { api.logs.stats(id).then(setLogStats); setLogsKey((k) => k + 1); },
         commit: () => { api.commits.count(id).then((c) => setCommitCount(c.count)); setCommitsKey((k) => k + 1); },
         workspace: () => api.workspaces.list(id, 'active').then((wss) => setWorkspaceCount(wss.length)).catch(() => undefined),
+        'doc-update-proposal': () => api.docUpdateProposals.list({ projectId: id, status: 'open', limit: 200 }).then((d) => setOpenDocProposalsCount(d.length)).catch(() => undefined),
       };
       refetchers[event.entity]?.();
       // Cross-dependencies: todo changes affect milestone progress and vice versa
@@ -220,6 +225,7 @@ export default function ProjectDetail() {
         { key: 'knowledge', label: t('projectDetail.tab.knowledge'), count: knowledge.length },
         { key: 'changelog', label: t('projectDetail.tab.changelog'), count: changelog.length },
         { key: 'manual', label: t('projectDetail.tab.manual'), count: manuals.length },
+        { key: 'docs-health', label: t('projectDetail.tab.docsHealth'), count: openDocProposalsCount },
         { key: 'research', label: t('projectDetail.tab.research'), count: research.length },
         { key: 'snippets', label: t('projectDetail.tab.snippets'), count: snippets.length },
         ...(storageEnabled ? [{ key: 'files' as Tab, label: t('projectDetail.tab.files'), count: attachments.length }] : []),
@@ -275,6 +281,7 @@ export default function ProjectDetail() {
     logs: t('projectDetail.tabDesc.logs'),
     activity: t('projectDetail.tabDesc.activity'),
     manual: t('projectDetail.tabDesc.manual'),
+    'docs-health': t('projectDetail.tabDesc.docsHealth'),
     soul: t('projectDetail.tabDesc.soul'),
   };
   const currentTabDescription = TAB_DESCRIPTIONS[tab];
@@ -439,6 +446,7 @@ export default function ProjectDetail() {
             {tab === 'knowledge' && <KnowledgeList entries={knowledge} projectId={id!} onUpdate={() => api.knowledge.list(id!).then(setKnowledge)} />}
             {tab === 'changelog' && <ChangelogList entries={changelog} projectId={id!} project={project} onUpdate={() => api.changelog.list(id!).then(setChangelog)} />}
             {tab === 'manual' && <ManualView projectId={id!} entries={manuals} onUpdate={() => api.manuals.list(id!).then(setManuals)} />}
+            {tab === 'docs-health' && <DocsHealthList projectId={id!} basePath={`/projects/${id!}`} />}
             {tab === 'features' && <FeatureList entries={features} projectId={id!} />}
             {tab === 'schemas' && <SchemaList entries={schemas} projectId={id!} />}
             {tab === 'dependencies' && <DependencyList entries={dependencies} projectId={id!} />}

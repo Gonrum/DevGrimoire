@@ -409,6 +409,55 @@ export interface ValidationReport {
   updatedAt: string;
 }
 
+export type DocProposalStatus =
+  | 'open'
+  | 'accepted'
+  | 'edited'
+  | 'converted_to_todo'
+  | 'dismissed'
+  | 'superseded';
+
+export type DocProposalSourceType = 'todo' | 'commit' | 'release' | 'workflow_run' | 'manual';
+export type DocProposalTargetType = 'doc_file' | 'knowledge' | 'manual';
+export type DocProposalChangeMode = 'patch' | 'instructions' | 'new_section' | 'review_only';
+
+export interface DocUpdateProposal {
+  _id: string;
+  projectId: string;
+  status: DocProposalStatus;
+  source: {
+    type: DocProposalSourceType;
+    id: string;
+    title?: string;
+    summary: string;
+    changedFiles?: string[];
+    tags?: string[];
+  };
+  target: {
+    type: DocProposalTargetType;
+    id?: string;
+    path?: string;
+    title: string;
+  };
+  reason: string;
+  confidence: number;
+  suggestedChange: {
+    mode: DocProposalChangeMode;
+    summary: string;
+    diff?: string;
+    instructions?: string;
+  };
+  safety: {
+    containsSecretValues: boolean;
+    requiresHumanReview: boolean;
+    destructive: boolean;
+  };
+  createdBy: 'system' | 'agent' | 'user';
+  metadata?: Record<string, unknown> & { todoId?: string; todoCreatedAt?: string; statusNote?: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Milestone {
   _id: string;
   projectId: string;
@@ -2056,6 +2105,44 @@ export const api = {
         `/validation-reports/${id}/propose-bug-todo`,
         { method: 'POST', body: JSON.stringify(body) },
       ),
+  },
+  docUpdateProposals: {
+    list: (filters: {
+      projectId?: string;
+      status?: DocProposalStatus;
+      sourceType?: DocProposalSourceType;
+      sourceId?: string;
+      targetType?: DocProposalTargetType;
+      targetId?: string;
+      limit?: number;
+    } = {}) => {
+      const params = new URLSearchParams();
+      if (filters.projectId) params.set('projectId', filters.projectId);
+      if (filters.status) params.set('status', filters.status);
+      if (filters.sourceType) params.set('sourceType', filters.sourceType);
+      if (filters.sourceId) params.set('sourceId', filters.sourceId);
+      if (filters.targetType) params.set('targetType', filters.targetType);
+      if (filters.targetId) params.set('targetId', filters.targetId);
+      if (filters.limit) params.set('limit', String(filters.limit));
+      const qs = params.toString();
+      return request<DocUpdateProposal[]>(`/doc-update-proposals${qs ? `?${qs}` : ''}`);
+    },
+    get: (id: string) => request<DocUpdateProposal>(`/doc-update-proposals/${id}`),
+    updateStatus: (id: string, body: { status: DocProposalStatus; note?: string }) =>
+      request<DocUpdateProposal>(`/doc-update-proposals/${id}/status`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    convertToTodo: (
+      id: string,
+      body: { title?: string; priority?: 'low' | 'medium' | 'high' | 'critical'; milestoneId?: string; tags?: string[] } = {},
+    ) =>
+      request<{ proposal: DocUpdateProposal; todo: Todo; reused: boolean }>(
+        `/doc-update-proposals/${id}/convert-to-todo`,
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
+    detectForTodo: (todoId: string) =>
+      request<DocUpdateProposal[]>(`/doc-update-proposals/detect/todo/${todoId}`, { method: 'POST' }),
   },
   workflowAgent: {
     getConfig: () => request<WorkflowAgentConfig | null>('/workflow-agent/config'),

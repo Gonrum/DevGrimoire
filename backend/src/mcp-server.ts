@@ -30,6 +30,7 @@ import { WorkflowEngineService } from './workflows/engine/workflow-engine.servic
 import { NodeRegistry } from './workflows/engine/node-registry';
 import { CustomerTemplatesService } from './customer-templates/customer-templates.service';
 import { ValidationReportsService } from './validation-reports/validation-reports.service';
+import { DocUpdateProposalsService } from './doc-update-proposals/doc-update-proposals.service';
 import { SnippetsService } from './snippets/snippets.service';
 import { AttachmentsService } from './attachments/attachments.service';
 import { QuestionsService } from './questions/questions.service';
@@ -127,6 +128,7 @@ async function bootstrap() {
     nodeRegistry: app.get(NodeRegistry),
     customerTemplatesService: app.get(CustomerTemplatesService),
     validationReportsService: app.get(ValidationReportsService),
+    docUpdateProposalsService: app.get(DocUpdateProposalsService),
     snippetsService: app.get(SnippetsService),
     attachmentsService: app.get(AttachmentsService),
     questionsService: app.get(QuestionsService),

@@ -54,6 +54,7 @@ import { MonitoringModule } from './monitoring/monitoring.module';
 import { AgentRolesModule } from './agent-roles/agent-roles.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { ValidationReportsModule } from './validation-reports/validation-reports.module';
+import { DocUpdateProposalsModule } from './doc-update-proposals/doc-update-proposals.module';
 import { CustomerTemplatesModule } from './customer-templates/customer-templates.module';
 
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -98,6 +99,7 @@ if (!MONGODB_URI) {
     RecurringTasksModule,
     WorkflowsModule,
     ValidationReportsModule,
+    DocUpdateProposalsModule,
     CustomerTemplatesModule,
     SnippetsModule,
     MinioModule,

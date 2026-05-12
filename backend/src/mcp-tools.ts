@@ -32,6 +32,8 @@ import { CustomerTemplatesService } from './customer-templates/customer-template
 import { CustomerTemplateType } from './customer-templates/schemas/customer-template.schema';
 import { ValidationReportsService } from './validation-reports/validation-reports.service';
 import { ValidationReportStatus } from './validation-reports/schemas/validation-report.schema';
+import { DocUpdateProposalsService } from './doc-update-proposals/doc-update-proposals.service';
+import { DocProposalStatus } from './doc-update-proposals/schemas/doc-update-proposal.schema';
 import { TodoPriority } from './todos/schemas/todo.schema';
 import { SnippetsService } from './snippets/snippets.service';
 import { WorkspacesService } from './workspaces/workspaces.service';
@@ -147,6 +149,12 @@ function optionalNumber(args: Record<string, unknown>, field: string): number | 
     return Number(val);
   }
   throw new Error(`${field} must be a number`);
+}
+
+function requireNumber(args: Record<string, unknown>, field: string): number {
+  const val = optionalNumber(args, field);
+  if (val === undefined) throw new Error(`Missing required number field: ${field}`);
+  return val;
 }
 
 function textResult(data: unknown) {
@@ -272,6 +280,7 @@ export interface McpServices {
   nodeRegistry: NodeRegistry;
   customerTemplatesService: CustomerTemplatesService;
   validationReportsService: ValidationReportsService;
+  docUpdateProposalsService: DocUpdateProposalsService;
   snippetsService: SnippetsService;
   attachmentsService: AttachmentsService;
   questionsService: QuestionsService;
@@ -2191,6 +2200,106 @@ const tools = [
     },
   },
   {
+    name: 'doc_update_proposal_list',
+    description: 'List reviewable documentation update proposals (Living Documentation). Filter by project, status, source, or target.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string' },
+        status: { type: 'string', enum: ['open', 'accepted', 'edited', 'converted_to_todo', 'dismissed', 'superseded'] },
+        sourceType: { type: 'string', enum: ['todo', 'commit', 'release', 'workflow_run', 'manual'] },
+        sourceId: { type: 'string' },
+        targetType: { type: 'string', enum: ['doc_file', 'knowledge', 'manual'] },
+        targetId: { type: 'string' },
+        limit: { type: 'number', description: 'Default 50, max 200' },
+      },
+    },
+  },
+  {
+    name: 'doc_update_proposal_get',
+    description: 'Get one documentation update proposal by ID.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'doc_update_proposal_create',
+    description: 'Create a documentation update proposal manually. Detection normally runs on todo review/done transitions; use this for agent-authored proposals. Duplicate open proposals for the same source+target are returned instead of recreated.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string' },
+        source: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', enum: ['todo', 'commit', 'release', 'workflow_run', 'manual'] },
+            id: { type: 'string' },
+            title: { type: 'string' },
+            summary: { type: 'string' },
+            changedFiles: { type: 'array', items: { type: 'string' } },
+            tags: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['type', 'id', 'summary'],
+        },
+        target: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', enum: ['doc_file', 'knowledge', 'manual'] },
+            id: { type: 'string', description: 'Mongo ObjectId for knowledge/manual targets' },
+            path: { type: 'string', description: 'File path for doc_file targets' },
+            title: { type: 'string' },
+          },
+          required: ['type', 'title'],
+        },
+        reason: { type: 'string' },
+        confidence: { type: 'number', minimum: 0, maximum: 10 },
+        suggestedChange: {
+          type: 'object',
+          properties: {
+            mode: { type: 'string', enum: ['patch', 'instructions', 'new_section', 'review_only'] },
+            summary: { type: 'string' },
+            diff: { type: 'string' },
+            instructions: { type: 'string' },
+          },
+          required: ['mode', 'summary'],
+        },
+        createdBy: { type: 'string', enum: ['system', 'agent', 'user'] },
+        metadata: { type: 'object' },
+      },
+      required: ['projectId', 'source', 'target', 'reason', 'confidence', 'suggestedChange'],
+    },
+  },
+  {
+    name: 'doc_update_proposal_update_status',
+    description: 'Transition a proposal status: open → accepted/edited/converted_to_todo/dismissed; accepted ↔ edited; dismissed → open. Other transitions are rejected.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' },
+        status: { type: 'string', enum: ['open', 'accepted', 'edited', 'converted_to_todo', 'dismissed', 'superseded'] },
+        note: { type: 'string' },
+      },
+      required: ['id', 'status'],
+    },
+  },
+  {
+    name: 'doc_update_proposal_convert_to_todo',
+    description: 'Convert an open proposal into a follow-up todo and mark it converted. Idempotent: returns the existing todo if one was already created.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' },
+        title: { type: 'string' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+        milestoneId: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['id'],
+    },
+  },
+  {
     name: 'workflow_create',
     description: 'Create a workflow definition (graph of triggers, nodes and edges). Scope controls visibility: system (admin-only), project (requires projectId), customer (requires customerId).',
     inputSchema: {
@@ -2892,6 +3001,7 @@ export function toolGroup(name: string): 'Task-Management' | 'Wissen & Suche' | 
     name.startsWith('milestone_') ||
     name.startsWith('recurring_task_') ||
     name.startsWith('validation_report_') ||
+    name.startsWith('doc_update_proposal_') ||
     name.startsWith('workflow_')
   ) {
     return 'Task-Management';
@@ -2968,7 +3078,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -3059,6 +3169,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             attachmentsService.removeByProject(id),
             releasesService.removeByProject(id),
             validationReportsService.removeByProject(id),
+            docUpdateProposalsService.removeByProject(id),
             workspacesService.removeByProject(id),
           ]);
           result = { deleted: true, id };
@@ -4568,6 +4679,61 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             displayNumber: outcome.todo.displayNumber,
             reused: outcome.reused,
             reportId: outcome.report._id.toString(),
+          };
+          break;
+        }
+        case 'doc_update_proposal_list': {
+          const proposals = await docUpdateProposalsService.list({
+            projectId: optionalString(a, 'projectId'),
+            status: optionalString(a, 'status') as DocProposalStatus | undefined,
+            sourceType: optionalString(a, 'sourceType') as never,
+            sourceId: optionalString(a, 'sourceId'),
+            targetType: optionalString(a, 'targetType') as never,
+            targetId: optionalString(a, 'targetId'),
+            limit: optionalNumber(a, 'limit'),
+          });
+          result = compactList(proposals as any[], ['metadata', '__v', 'suggestedChange']);
+          break;
+        }
+        case 'doc_update_proposal_get': {
+          result = await docUpdateProposalsService.findById(requireString(a, 'id'));
+          break;
+        }
+        case 'doc_update_proposal_create': {
+          const proposal = await docUpdateProposalsService.create({
+            projectId: requireString(a, 'projectId'),
+            source: requireObject(a, 'source') as never,
+            target: requireObject(a, 'target') as never,
+            reason: requireString(a, 'reason'),
+            confidence: requireNumber(a, 'confidence'),
+            suggestedChange: requireObject(a, 'suggestedChange') as never,
+            createdBy: optionalString(a, 'createdBy') as 'system' | 'agent' | 'user' | undefined,
+            metadata: optionalObject(a, 'metadata'),
+          });
+          result = compactCreateResult(proposal, { status: proposal.status });
+          break;
+        }
+        case 'doc_update_proposal_update_status': {
+          const updated = await docUpdateProposalsService.updateStatus(
+            requireString(a, 'id'),
+            requireString(a, 'status') as DocProposalStatus,
+            optionalString(a, 'note'),
+          );
+          result = { id: updated._id.toString(), status: updated.status };
+          break;
+        }
+        case 'doc_update_proposal_convert_to_todo': {
+          const outcome = await docUpdateProposalsService.convertToTodo(requireString(a, 'id'), {
+            title: optionalString(a, 'title'),
+            priority: optionalString(a, 'priority') as never,
+            milestoneId: optionalString(a, 'milestoneId'),
+            tags: optionalStringArray(a, 'tags'),
+          });
+          result = {
+            todoId: outcome.todo._id.toString(),
+            displayNumber: outcome.todo.displayNumber,
+            reused: outcome.reused,
+            proposalId: outcome.proposal._id.toString(),
           };
           break;
         }

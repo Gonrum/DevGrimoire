@@ -659,6 +659,7 @@
       "knowledge": "Wissen",
       "changelog": "Chroniken",
       "manual": "Foliant",
+      "docsHealth": "Lore-Gesundheit",
       "research": "Studien",
       "snippets": "Runen",
       "files": "Pergamente",
@@ -695,7 +696,40 @@
       "logs": "Eingehende Application-Logs und Statistik.",
       "activity": "Spuren — chronologische Tool-Aktivitäten.",
       "manual": "Handbuch-Einträge — kategorisierte Dokumentation.",
+      "docsHealth": "Lore-Gesundheit — Vorschläge für veraltete Manuals und Knowledge-Einträge.",
       "soul": "Vision, Prinzipien und Konventionen dieses Projekts."
+    }
+  },
+  "docsHealth": {
+    "openCount": "Offene Vorschläge",
+    "confidence": "Confidence",
+    "from": "aus",
+    "suggested": "Vorschlag",
+    "instructions": "Anleitung",
+    "accept": "Übernehmen",
+    "convertToTodo": "Als Todo anlegen",
+    "dismiss": "Verwerfen",
+    "openTodo": "Todo öffnen",
+    "convertedTo": "Konvertiert zu Todo",
+    "todoCreated": "Todo {{displayNumber}} erstellt",
+    "empty": "Keine Doc-Update-Vorschläge",
+    "emptyHint": "Vorschläge erscheinen automatisch, wenn Todos in Review oder Done wechseln und Manuals/Knowledge-Einträge betreffen könnten.",
+    "filter": {
+      "allStatus": "Alle Status",
+      "allSources": "Alle Quellen",
+      "allTargets": "Alle Ziele"
+    },
+    "status": {
+      "open": "Offen",
+      "accepted": "Übernommen",
+      "edited": "Bearbeitet",
+      "converted_to_todo": "Als Todo",
+      "dismissed": "Verworfen",
+      "superseded": "Ersetzt"
+    },
+    "banner": {
+      "title": "{{count}} Doc-Update-Vorschlag/Vorschläge zu diesem Todo",
+      "openSection": "Lore-Gesundheit öffnen →"
     }
   },
   "workspaces": {

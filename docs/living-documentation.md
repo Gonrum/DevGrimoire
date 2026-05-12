@@ -188,3 +188,37 @@ Create proposals for candidates with score >= 5. Use `review_only` mode for scor
 4. Add Docs Health UI list and proposal detail actions.
 5. Add workflow node and read-only MCP tools.
 6. Add optional RAG/knowledge graph enrichment once the semantic graph is available.
+
+## Implemented slice (T-263 Slice A)
+
+Vertikaler MVP-Schnitt — alle vier Akzeptanzkriterien erfüllt, Follow-ups bewusst ausgeklammert.
+
+### Backend
+
+- `DocUpdateProposal` Mongoose-Schema mit nested source/target/suggestedChange/safety. Indexe für `(projectId, status, createdAt)`, `(projectId, source.type, source.id)`, `(projectId, target.type, target.id)`.
+- `DocUpdateProposalsService` mit:
+  - `create(dto)` mit Duplikat-Suppression: gibt bestehenden offenen Proposal mit gleichem source+target zurück statt neuen anzulegen.
+  - `list/findById/updateStatus/convertToTodo/removeByProject`.
+  - `updateStatus` validiert erlaubte Transitionen: `open → accepted/edited/converted_to_todo/dismissed/superseded`, `accepted ↔ edited`, `dismissed → open`.
+  - `convertToTodo` idempotent über `metadata.todoId`, fällt zurück auf Neuanlage wenn Ziel-Todo gelöscht.
+  - `@OnEvent(PROJECT_CHANGED)`-Listener: triggert `detectForTodo` bei Todo-Status-Übergängen nach `review` oder `done` und räumt bei Project-Delete auf.
+- `detectForTodo`: deterministisches Scoring gegen Manuals und Knowledge im selben Projekt:
+  - Manuals: +3 Titel-Keyword-Overlap, +2 Kategorie matcht Todo-Tag. Threshold ≥ 3.
+  - Knowledge: +3 Tag-Overlap, +2 Titel-Keyword-Overlap, +1 Kategorie matcht Todo-Tag. Threshold ≥ 3.
+  - Stopwords + Mindestlänge 4 für Token-Overlap; Top-5-Kandidaten werden persistiert; `mode` ist `instructions` ab Score ≥ 7, sonst `review_only`.
+- REST: `POST/GET /api/doc-update-proposals`, `POST /api/doc-update-proposals/:id/status`, `POST /api/doc-update-proposals/:id/convert-to-todo`, `POST /api/doc-update-proposals/detect/todo/:todoId`.
+- MCP-Tools (Task-Management-Gruppe): `doc_update_proposal_list/get/create/update_status/convert_to_todo`.
+
+### Frontend
+
+- `DocsHealthList` in ProjectDetail-Tab `docs-health` (neuer Tab in Knowledge-Gruppe mit Open-Count-Badge). Filter nach Status/Source/Target, Buttons für Accept/Convert/Dismiss.
+- `TodoDocProposalsBanner` in TodoDetail bei Status `review`/`done`: zeigt offene Doc-Update-Vorschläge zu diesem Todo mit Link auf den Docs-Health-Tab.
+- SSE-Events `doc-update-proposal` updaten den Count im Nav-Item live.
+
+### Bewusst ausgeklammert (Follow-ups)
+
+- Commit-Ingest-Trigger und File-Path-Mapping → erfordert Commit-Modul-Integration.
+- RAG-/Wissensgraph-Enrichment → wartet auf T-261.
+- Workflow-Node `Suggest documentation updates` → kann ergänzt werden sobald der Detection-Service stabil ist.
+- Apply-Diff-Aktion mit Versions-Check → derzeit nur `accept`-Status, kein automatisches Schreiben.
+- Doc-File-Ziele (`target.type === 'doc_file'`) sind im Schema vorhanden, werden aber vom Detector nicht erzeugt — nur Manuals und Knowledge.
