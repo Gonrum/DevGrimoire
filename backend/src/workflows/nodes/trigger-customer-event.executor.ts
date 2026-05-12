@@ -20,7 +20,7 @@ export class TriggerCustomerEventExecutor implements NodeExecutor {
     type: 'trigger.customer_event',
     category: 'trigger',
     label: 'Kunden-Event-Trigger',
-    description: 'Workflow startet, wenn ein Customer-Event (Entity-Mutation) matched.',
+    description: 'Workflow startet, wenn ein Customer-Event (Entity-Mutation) matched. Hinweis: filter.tag/status/milestoneId werden zur Trigger-Zeit NICHT angewendet — sie sind reservierte Felder; präzise Filterung erfolgt im nachgelagerten control.condition-Node basierend auf {{input.event.*}}.',
     allowedScopes: [WorkflowScope.CUSTOMER],
     configSchema: z.object({
       entity: entityEnum,

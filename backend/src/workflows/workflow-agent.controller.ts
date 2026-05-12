@@ -12,8 +12,8 @@ export class WorkflowAgentController {
   }
 
   @Put()
-  async set(@Body() dto: UpdateWorkflowAgentConfigDto): Promise<{ ok: true }> {
+  async set(@Body() dto: UpdateWorkflowAgentConfigDto): Promise<WorkflowAgentConfigPublic | null> {
     await this.agent.setConfig(dto);
-    return { ok: true };
+    return this.agent.getConfig();
   }
 }

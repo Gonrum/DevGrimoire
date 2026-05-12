@@ -2060,7 +2060,7 @@ export const api = {
   workflowAgent: {
     getConfig: () => request<WorkflowAgentConfig | null>('/workflow-agent/config'),
     updateConfig: (data: WorkflowAgentConfigUpdate) =>
-      request<WorkflowAgentConfig>('/workflow-agent/config', {
+      request<WorkflowAgentConfig | null>('/workflow-agent/config', {
         method: 'PUT',
         body: JSON.stringify(data),
       }),

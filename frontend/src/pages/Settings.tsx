@@ -419,7 +419,7 @@ export default function Settings() {
       }
       // else: don't include apiKey → keep stored
       const updated = await api.workflowAgent.updateConfig(payload);
-      setWaConfig({ ...updated });
+      if (updated) setWaConfig({ ...updated });
       setWaApiKeyInput('');
       setWaApiKeyClearFlag(false);
       setWaSavedMsg(true);

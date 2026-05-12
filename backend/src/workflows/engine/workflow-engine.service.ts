@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   OnModuleInit,
@@ -29,6 +30,8 @@ import { NodeRegistry } from './node-registry';
 import { NodeJob, NodeResult, RetryConfig } from './types';
 import { findTriggerNodes, nextNodes } from './graph-walker';
 import { QuestionsService, QUESTION_ANSWERED } from '../../questions/questions.service';
+import { TestWorkflowNodeDto } from '../dto/workflow.dto';
+import { WorkflowScope } from '../schemas/workflow-definition.schema';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const NODE_LOG_CAP = Number(process.env.WORKFLOW_NODE_LOG_CAP ?? 200);
@@ -181,6 +184,135 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     }
   }
 
+  async testNode(dto: TestWorkflowNodeDto): Promise<Record<string, unknown>> {
+    const node = dto.node;
+    if (!node?.type) throw new BadRequestException('node.type is required');
+
+    const executor = this.registry.get(node.type);
+    const metadata = executor.metadata;
+    const scope = dto.scope ?? WorkflowScope.PROJECT;
+    if (!metadata.allowedScopes.includes(scope)) {
+      return {
+        ok: false,
+        executable: false,
+        issues: [`node type ${node.type} is not allowed in ${scope} scope`],
+      };
+    }
+
+    const parsed = metadata.configSchema.safeParse(node.config ?? {});
+    if (!parsed.success) {
+      return {
+        ok: false,
+        executable: false,
+        issues: parsed.error.issues.map(
+          (issue) => `config.${issue.path.join('.')}: ${issue.message}`,
+        ),
+      };
+    }
+
+    // Node test mode must never perform writes or external/agent side effects.
+    // For the MVP we execute only trigger/control nodes; action and agent nodes
+    // still get full config validation plus an explicit safety explanation.
+    if (metadata.category === 'action' || metadata.category === 'agent') {
+      return {
+        ok: true,
+        executable: false,
+        mode: 'validation_only',
+        reason: `node category ${metadata.category} may have side effects and is not executed in test mode`,
+        outputSchema: metadata.outputs,
+        branches: metadata.branches ?? ['success', 'failure'],
+      };
+    }
+
+    const logs: Array<Record<string, unknown>> = [];
+    const now = new Date();
+    const runId = new Types.ObjectId();
+    const nodeRunId = new Types.ObjectId();
+    const input = dto.input ?? {};
+    const runContext = dto.runContext ?? { nodes: {}, input };
+    const result = await this.withTimeout(
+      executor.execute({
+        run: {
+          _id: runId,
+          definitionId: new Types.ObjectId(),
+          definitionVersion: 0,
+          definitionSnapshot: { nodes: [node], edges: [] },
+          scope,
+          trigger: { type: 'manual', input },
+          status: WorkflowRunStatus.RUNNING,
+          currentNodeIds: [node.id],
+          triggeredBy: { type: 'manual' },
+          context: runContext,
+          createdAt: now,
+          updatedAt: now,
+        } as never,
+        nodeRun: {
+          _id: nodeRunId,
+          runId,
+          definitionId: new Types.ObjectId(),
+          definitionVersion: 0,
+          nodeId: node.id,
+          nodeType: node.type,
+          attempt: 1,
+          status: WorkflowNodeRunStatus.RUNNING,
+          startedAt: now,
+          logs,
+        } as never,
+        node: node as never,
+        config: parsed.data as Record<string, unknown>,
+        secretRefs: node.secretRefs ?? [],
+        runContext,
+        logger: {
+          info: (msg: string, data?: Record<string, unknown>) => logs.push({ level: 'info', msg, ...(data ?? {}) }),
+          warn: (msg: string, data?: Record<string, unknown>) => logs.push({ level: 'warn', msg, ...(data ?? {}) }),
+          error: (msg: string, data?: Record<string, unknown>) => logs.push({ level: 'error', msg, ...(data ?? {}) }),
+        },
+        askUser: async () => {
+          throw new Error('askUser is disabled in node test mode');
+        },
+      }),
+      Number((parsed.data as Record<string, unknown>).timeoutMs ?? DEFAULT_TIMEOUT_MS),
+    );
+
+    return {
+      ok: result.status !== 'failed',
+      executable: true,
+      mode: 'safe_execute',
+      nodeType: node.type,
+      status: result.status,
+      branch: result.branch,
+      outputPreview: this.safeTestPreview(result.output),
+      waitingForPreview: this.safeTestPreview(result.waitingFor),
+      errorPreview: this.safeTestPreview(result.error),
+      logPreview: this.safeTestPreview(logs),
+    };
+  }
+
+  private safeTestPreview(value: unknown): unknown {
+    const sensitiveKey = /(authorization|api[-_]?key|secret|token|password|passwd|credential|private[-_]?key|cookie)/i;
+    const seen = new WeakSet<object>();
+    const visit = (current: unknown, depth: number): unknown => {
+      if (current === null || current === undefined) return current;
+      if (typeof current === 'string') {
+        const redacted = current
+          .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [MASKED]')
+          .replace(/(api[-_]?key|secret|token|password|passwd)\s*[:=]\s*[^\s,;]+/gi, '$1=[MASKED]');
+        return redacted.length > 500 ? `${redacted.slice(0, 500)}…` : redacted;
+      }
+      if (typeof current !== 'object') return current;
+      if (seen.has(current)) return '[Circular]';
+      seen.add(current);
+      if (depth >= 5) return '[Truncated: max depth]';
+      if (Array.isArray(current)) return current.slice(0, 25).map((item) => visit(item, depth + 1));
+      return Object.fromEntries(
+        Object.entries(current as Record<string, unknown>)
+          .slice(0, 50)
+          .map(([key, child]) => [key, sensitiveKey.test(key) ? '[MASKED]' : visit(child, depth + 1)]),
+      );
+    };
+    return visit(value, 0);
+  }
+
   private buildContext(run: WorkflowRunDocument, nodeRun: WorkflowNodeRunDocument, node: WorkflowNode) {
     const logs: Array<Record<string, unknown>> = nodeRun.logs;
     const append = (level: 'info' | 'warn' | 'error', msg: string, data?: Record<string, unknown>) => {
@@ -290,6 +422,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       .exec();
     if (openCount > 0) return;
     if (run.status === WorkflowRunStatus.WAITING_FOR_USER) return;
+    if (run.status === WorkflowRunStatus.WAITING_FOR_TIMER) return;
     run.status = WorkflowRunStatus.SUCCEEDED;
     run.finishedAt = new Date();
     await run.save();
@@ -323,6 +456,8 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     if (!node) return;
 
     nodeRun.set('waitingFor', undefined);
+    nodeRun.status = WorkflowNodeRunStatus.RUNNING;
+    await nodeRun.save();
     run.status = WorkflowRunStatus.RUNNING;
     await run.save();
     const cfg = (node.config ?? {}) as {
@@ -356,6 +491,8 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       : 0;
 
     nodeRun.set('waitingFor', undefined);
+    nodeRun.status = WorkflowNodeRunStatus.RUNNING;
+    await nodeRun.save();
     run.status = WorkflowRunStatus.RUNNING;
     await run.save();
     await this.applyResult(run, nodeRun, node, {
