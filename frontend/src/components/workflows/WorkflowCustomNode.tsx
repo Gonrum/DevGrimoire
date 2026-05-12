@@ -74,15 +74,15 @@ function WorkflowCustomNodeImpl(props: NodeProps) {
         <div className="border-t border-gray-800 px-3 py-1 text-[10px] uppercase tracking-wide text-gray-500">
           branches
         </div>
-        <div className="flex flex-col gap-1 px-3 pb-2">
+        <div className="flex flex-col px-3 pb-2">
           {branches.map((branch) => (
-            <div key={branch} className="relative flex items-center justify-between text-xs">
+            <div key={branch} className="relative flex items-center justify-end text-xs py-1 pr-2">
               <span className={branchPillClass(branch)}>{branch}</span>
               <Handle
                 type="source"
                 position={Position.Right}
                 id={branch}
-                className="!relative !right-0 !top-auto !translate-x-0 !translate-y-0 !h-2 !w-2 !bg-gray-500 ml-2"
+                className="!h-2 !w-2 !bg-gray-500"
               />
             </div>
           ))}
