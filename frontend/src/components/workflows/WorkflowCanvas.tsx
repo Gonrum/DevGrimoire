@@ -62,6 +62,7 @@ function CanvasInner(p: Props) {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={defaultEdgeOptions}
+        connectionRadius={60}
         fitView
         proOptions={{ hideAttribution: true }}
         className="bg-gray-950"
