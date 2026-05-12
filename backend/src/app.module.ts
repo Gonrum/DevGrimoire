@@ -56,6 +56,7 @@ import { WorkflowsModule } from './workflows/workflows.module';
 import { ValidationReportsModule } from './validation-reports/validation-reports.module';
 import { DocUpdateProposalsModule } from './doc-update-proposals/doc-update-proposals.module';
 import { KnowledgeGraphModule } from './knowledge-graph/knowledge-graph.module';
+import { OracleModule } from './oracle/oracle.module';
 import { CustomerTemplatesModule } from './customer-templates/customer-templates.module';
 
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -102,6 +103,7 @@ if (!MONGODB_URI) {
     ValidationReportsModule,
     DocUpdateProposalsModule,
     KnowledgeGraphModule,
+    OracleModule,
     CustomerTemplatesModule,
     SnippetsModule,
     MinioModule,

@@ -661,6 +661,7 @@
       "manual": "Foliant",
       "docsHealth": "Lore-Gesundheit",
       "graph": "Wissensgraph",
+      "oracle": "Orakel",
       "research": "Studien",
       "snippets": "Runen",
       "files": "Pergamente",
@@ -699,7 +700,46 @@
       "manual": "Handbuch-Einträge — kategorisierte Dokumentation.",
       "docsHealth": "Lore-Gesundheit — Vorschläge für veraltete Manuals und Knowledge-Einträge.",
       "graph": "Wissensgraph — Beziehungen zwischen Todos, Manuals, Knowledge, Validierungen, Commits und mehr.",
+      "oracle": "Orakel — prädiktive Risiken aus Stagnation, Deadline-Druck, Bug-Hotspots und Blocker-Ketten.",
       "soul": "Vision, Prinzipien und Konventionen dieses Projekts."
+    }
+  },
+  "oracle": {
+    "openCount": "Offene Risiken",
+    "analyze": "Analyse starten",
+    "analyzing": "Analysiere …",
+    "analyzed": "Oracle-Analyse: {{discovered}} Risiken erkannt, {{inserted}} neu, {{resolved}} behoben",
+    "recommendedAction": "Empfohlene Aktion",
+    "affectedEntities": "Betroffene Entitäten",
+    "convertedTo": "Konvertiert zu",
+    "openTodo": "Todo öffnen",
+    "convertToTodo": "Als Quest anlegen",
+    "commentOnTodo": "Als Kommentar anhängen",
+    "dismiss": "Verwerfen",
+    "delete": "Löschen",
+    "commented": "Kommentar an betroffenen Todo angehängt",
+    "todoCreated": "Quest {{displayNumber}} erstellt",
+    "empty": "Keine Risiken erkannt.",
+    "emptyHint": "Klicke „Analyse starten“, um Stagnation, Deadline-Druck, Bug-Hotspots und Blocker-Ketten zu prüfen.",
+    "filter": {
+      "allStatus": "Alle Status"
+    },
+    "severity": {
+      "critical": "Kritisch",
+      "warn": "Warnung",
+      "info": "Info"
+    },
+    "status": {
+      "open": "Offen",
+      "dismissed": "Verworfen",
+      "converted_to_todo": "Als Todo",
+      "addressed": "Behoben"
+    },
+    "type": {
+      "stagnation": "Stagnation",
+      "deadline_pressure": "Deadline-Druck",
+      "bug_hotspot": "Bug-Hotspot",
+      "blocker_chain": "Blocker-Kette"
     }
   },
   "knowledgeGraph": {

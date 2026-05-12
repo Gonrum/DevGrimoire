@@ -25,6 +25,7 @@ import LogList from '../components/LogList';
 import ReleaseList from '../components/ReleaseList';
 import DocsHealthList from '../components/DocsHealthList';
 import KnowledgeGraphView from '../components/knowledge-graph/KnowledgeGraphView';
+import OracleView from '../components/OracleView';
 import GitRepoWidget from '../components/GitRepoWidget';
 import ProjectCustomerLinks from '../components/ProjectCustomerLinks';
 import Markdown from '../components/Markdown';
@@ -34,7 +35,7 @@ import { LoadingText } from '../components/ui/LoadingSpinner';
 import ProjectTabShell from '../components/ui/ProjectTabShell';
 import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
 
-type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces' | 'workflows' | 'docs-health' | 'graph';
+type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces' | 'workflows' | 'docs-health' | 'graph' | 'oracle';
 
 export default function ProjectDetail() {
   const { t, i18n } = useTranslation();
@@ -64,6 +65,7 @@ export default function ProjectDetail() {
   const [workspaceCount, setWorkspaceCount] = useState(0);
   const [logStats, setLogStats] = useState<LogStats | null>(null);
   const [openDocProposalsCount, setOpenDocProposalsCount] = useState(0);
+  const [openOracleCount, setOpenOracleCount] = useState(0);
   const [logsKey, setLogsKey] = useState(0);
   const [envKey, setEnvKey] = useState(0);
   const [commitsKey, setCommitsKey] = useState(0);
@@ -111,8 +113,9 @@ export default function ProjectDetail() {
       api.releases.list(id),
       api.workspaces.list(id, 'active').catch(() => [] as Workspace[]),
       api.docUpdateProposals.list({ projectId: id, status: 'open', limit: 200 }).catch(() => []),
+      api.oracle.list({ projectId: id, status: 'open', limit: 500 }).catch(() => []),
     ])
-      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man, sl, cc, rts, snip, storage, ls, rels, wss, dprops]) => {
+      .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man, sl, cc, rts, snip, storage, ls, rels, wss, dprops, oracleOpen]) => {
         if (controller.signal.aborted) return;
         setProject(p);
         setTodos(t);
@@ -137,6 +140,7 @@ export default function ProjectDetail() {
         setReleases(rels);
         setWorkspaceCount(wss.length);
         setOpenDocProposalsCount(dprops.length);
+        setOpenOracleCount(oracleOpen.length);
         if (storage.enabled) {
           api.attachments.list(id).then(setAttachments).catch(() => {});
         }
@@ -178,6 +182,7 @@ export default function ProjectDetail() {
         commit: () => { api.commits.count(id).then((c) => setCommitCount(c.count)); setCommitsKey((k) => k + 1); },
         workspace: () => api.workspaces.list(id, 'active').then((wss) => setWorkspaceCount(wss.length)).catch(() => undefined),
         'doc-update-proposal': () => api.docUpdateProposals.list({ projectId: id, status: 'open', limit: 200 }).then((d) => setOpenDocProposalsCount(d.length)).catch(() => undefined),
+        oracle: () => api.oracle.list({ projectId: id, status: 'open', limit: 500 }).then((d) => setOpenOracleCount(d.length)).catch(() => undefined),
       };
       refetchers[event.entity]?.();
       // Cross-dependencies: todo changes affect milestone progress and vice versa
@@ -237,6 +242,7 @@ export default function ProjectDetail() {
       items: [
         { key: 'features', label: t('projectDetail.tab.features'), count: features.length },
         { key: 'graph', label: t('projectDetail.tab.graph'), count: 0 },
+        { key: 'oracle', label: t('projectDetail.tab.oracle'), count: openOracleCount },
         { key: 'schemas', label: t('projectDetail.tab.schemas'), count: schemas.length },
         { key: 'dependencies', label: t('projectDetail.tab.dependencies'), count: dependencies.length },
         { key: 'releases', label: t('projectDetail.tab.releases'), count: releases.length },
@@ -285,6 +291,7 @@ export default function ProjectDetail() {
     manual: t('projectDetail.tabDesc.manual'),
     'docs-health': t('projectDetail.tabDesc.docsHealth'),
     graph: t('projectDetail.tabDesc.graph'),
+    oracle: t('projectDetail.tabDesc.oracle'),
     soul: t('projectDetail.tabDesc.soul'),
   };
   const currentTabDescription = TAB_DESCRIPTIONS[tab];
@@ -451,6 +458,7 @@ export default function ProjectDetail() {
             {tab === 'manual' && <ManualView projectId={id!} entries={manuals} onUpdate={() => api.manuals.list(id!).then(setManuals)} />}
             {tab === 'docs-health' && <DocsHealthList projectId={id!} basePath={`/projects/${id!}`} />}
             {tab === 'graph' && <KnowledgeGraphView projectId={id!} basePath={`/projects/${id!}`} />}
+            {tab === 'oracle' && <OracleView projectId={id!} basePath={`/projects/${id!}`} />}
             {tab === 'features' && <FeatureList entries={features} projectId={id!} />}
             {tab === 'schemas' && <SchemaList entries={schemas} projectId={id!} />}
             {tab === 'dependencies' && <DependencyList entries={dependencies} projectId={id!} />}

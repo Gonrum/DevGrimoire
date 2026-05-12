@@ -36,6 +36,8 @@ import { DocUpdateProposalsService } from './doc-update-proposals/doc-update-pro
 import { DocProposalStatus } from './doc-update-proposals/schemas/doc-update-proposal.schema';
 import { KnowledgeGraphService } from './knowledge-graph/knowledge-graph.service';
 import { KgEntityType, KgRelation, KG_ENTITY_TYPES, KG_RELATIONS } from './knowledge-graph/schemas/knowledge-graph-edge.schema';
+import { OracleService } from './oracle/oracle.service';
+import { OracleRiskType, OracleSeverity, OracleSuggestionStatus } from './oracle/schemas/oracle-suggestion.schema';
 import { TodoPriority } from './todos/schemas/todo.schema';
 import { SnippetsService } from './snippets/snippets.service';
 import { WorkspacesService } from './workspaces/workspaces.service';
@@ -284,6 +286,7 @@ export interface McpServices {
   validationReportsService: ValidationReportsService;
   docUpdateProposalsService: DocUpdateProposalsService;
   knowledgeGraphService: KnowledgeGraphService;
+  oracleService: OracleService;
   snippetsService: SnippetsService;
   attachmentsService: AttachmentsService;
   questionsService: QuestionsService;
@@ -2388,6 +2391,79 @@ const tools = [
     },
   },
   {
+    name: 'oracle_analyze',
+    description: 'Run the Oracle risk-analysis pipeline against a project. Detects stagnant todos, milestone deadline pressure, validation-failure hotspots and long blocker chains. Suggestions are persisted and deduped by fingerprint; previously-open ones that are no longer detected get marked as "addressed".',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { projectId: { type: 'string' } },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'oracle_list',
+    description: 'List Oracle risk suggestions, sorted by severity (critical → warn → info) and recency. Filter by project, status, severity, or risk type.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string' },
+        status: { type: 'string', enum: ['open', 'dismissed', 'converted_to_todo', 'addressed'] },
+        severity: { type: 'string', enum: ['info', 'warn', 'critical'] },
+        type: { type: 'string', enum: ['stagnation', 'deadline_pressure', 'bug_hotspot', 'blocker_chain'] },
+        limit: { type: 'number', description: 'Default 100, max 1000' },
+      },
+    },
+  },
+  {
+    name: 'oracle_get',
+    description: 'Get one Oracle suggestion by ID.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'oracle_update_status',
+    description: 'Transition an Oracle suggestion: open → dismissed/converted_to_todo/addressed. Use to mark a risk as resolved by the user.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' },
+        status: { type: 'string', enum: ['open', 'dismissed', 'converted_to_todo', 'addressed'] },
+        note: { type: 'string' },
+      },
+      required: ['id', 'status'],
+    },
+  },
+  {
+    name: 'oracle_convert_to_todo',
+    description: 'Convert an open Oracle suggestion into a follow-up todo and mark it converted. Idempotent: returns the existing todo if one was already created. Priority defaults to high for critical suggestions, medium otherwise.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' },
+        title: { type: 'string' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+        milestoneId: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'oracle_comment_on_todo',
+    description: 'Write an Oracle suggestion as a comment on an affected todo, or on an explicit todoId, then mark the suggestion addressed.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' },
+        todoId: { type: 'string', description: 'Optional explicit target todo. Defaults to first affected todo.' },
+        note: { type: 'string' },
+      },
+      required: ['id'],
+    },
+  },
+  {
     name: 'workflow_create',
     description: 'Create a workflow definition (graph of triggers, nodes and edges). Scope controls visibility: system (admin-only), project (requires projectId), customer (requires customerId).',
     inputSchema: {
@@ -3091,6 +3167,7 @@ export function toolGroup(name: string): 'Task-Management' | 'Wissen & Suche' | 
     name.startsWith('validation_report_') ||
     name.startsWith('doc_update_proposal_') ||
     name.startsWith('knowledge_graph_') ||
+    name.startsWith('oracle_') ||
     name.startsWith('workflow_')
   ) {
     return 'Task-Management';
@@ -3142,6 +3219,7 @@ const EXPLICIT_WRITE_TOOLS = new Set<string>([
   'workflow_run_start',
   'workflow_run_cancel',
   'workflow_run_retry',
+  'oracle_comment_on_todo',
   'customer_template_apply',
 ]);
 
@@ -3167,7 +3245,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -3260,6 +3338,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             validationReportsService.removeByProject(id),
             docUpdateProposalsService.removeByProject(id),
             knowledgeGraphService.removeByProject(id),
+            oracleService.removeByProject(id),
             workspacesService.removeByProject(id),
           ]);
           result = { deleted: true, id };
@@ -4873,6 +4952,62 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             limit: optionalNumber(a, 'limit'),
           });
           result = compactList(edges as any[], ['metadata', '__v']);
+          break;
+        }
+        case 'oracle_analyze': {
+          result = await oracleService.analyze(requireString(a, 'projectId'));
+          break;
+        }
+        case 'oracle_list': {
+          const suggestions = await oracleService.list({
+            projectId: optionalString(a, 'projectId'),
+            status: optionalString(a, 'status') as OracleSuggestionStatus | undefined,
+            severity: optionalString(a, 'severity') as OracleSeverity | undefined,
+            type: optionalString(a, 'type') as OracleRiskType | undefined,
+            limit: optionalNumber(a, 'limit'),
+          });
+          result = compactList(suggestions as any[], ['metadata', '__v']);
+          break;
+        }
+        case 'oracle_get': {
+          result = await oracleService.findById(requireString(a, 'id'));
+          break;
+        }
+        case 'oracle_update_status': {
+          const updated = await oracleService.updateStatus(
+            requireString(a, 'id'),
+            requireString(a, 'status') as OracleSuggestionStatus,
+            optionalString(a, 'note'),
+          );
+          result = { id: updated._id.toString(), status: updated.status };
+          break;
+        }
+        case 'oracle_convert_to_todo': {
+          const outcome = await oracleService.convertToTodo(requireString(a, 'id'), {
+            title: optionalString(a, 'title'),
+            priority: optionalString(a, 'priority') as never,
+            milestoneId: optionalString(a, 'milestoneId'),
+            tags: optionalStringArray(a, 'tags'),
+          });
+          result = {
+            todoId: outcome.todo._id.toString(),
+            displayNumber: outcome.todo.displayNumber,
+            reused: outcome.reused,
+            suggestionId: outcome.suggestion._id.toString(),
+          };
+          break;
+        }
+        case 'oracle_comment_on_todo': {
+          const outcome = await oracleService.commentOnTodo(requireString(a, 'id'), {
+            todoId: optionalString(a, 'todoId'),
+            note: optionalString(a, 'note'),
+          });
+          result = {
+            suggestionId: outcome.suggestion._id.toString(),
+            todoId: outcome.todoId,
+            commented: outcome.commented,
+            status: outcome.suggestion.status,
+          };
           break;
         }
         case 'workflow_create': {

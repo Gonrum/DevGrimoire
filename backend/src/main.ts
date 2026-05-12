@@ -38,6 +38,7 @@ import { CustomerTemplatesService } from './customer-templates/customer-template
 import { ValidationReportsService } from './validation-reports/validation-reports.service';
 import { DocUpdateProposalsService } from './doc-update-proposals/doc-update-proposals.service';
 import { KnowledgeGraphService } from './knowledge-graph/knowledge-graph.service';
+import { OracleService } from './oracle/oracle.service';
 import { SnippetsService } from './snippets/snippets.service';
 import { AttachmentsService } from './attachments/attachments.service';
 import { QuestionsService } from './questions/questions.service';
@@ -114,6 +115,7 @@ async function bootstrap() {
     validationReportsService: app.get(ValidationReportsService),
     docUpdateProposalsService: app.get(DocUpdateProposalsService),
     knowledgeGraphService: app.get(KnowledgeGraphService),
+    oracleService: app.get(OracleService),
     snippetsService: app.get(SnippetsService),
     attachmentsService: app.get(AttachmentsService),
     questionsService: app.get(QuestionsService),

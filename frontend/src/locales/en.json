@@ -661,6 +661,7 @@
       "manual": "Tome",
       "docsHealth": "Lore Health",
       "graph": "Knowledge Graph",
+      "oracle": "Oracle",
       "research": "Studies",
       "snippets": "Runes",
       "files": "Scrolls",
@@ -699,7 +700,46 @@
       "manual": "Handbook entries — categorised documentation.",
       "docsHealth": "Lore Health — proposals for stale manuals and knowledge entries.",
       "graph": "Knowledge graph — relationships between todos, manuals, knowledge, validations, commits and more.",
+      "oracle": "Oracle — predictive risks from stagnation, deadline pressure, bug hotspots and blocker chains.",
       "soul": "Vision, principles and conventions of this project."
+    }
+  },
+  "oracle": {
+    "openCount": "Open risks",
+    "analyze": "Run analysis",
+    "analyzing": "Analysing …",
+    "analyzed": "Oracle analysis: {{discovered}} risks detected, {{inserted}} new, {{resolved}} resolved",
+    "recommendedAction": "Recommended action",
+    "affectedEntities": "Affected entities",
+    "convertedTo": "Converted to",
+    "openTodo": "Open todo",
+    "convertToTodo": "Create quest",
+    "commentOnTodo": "Comment on todo",
+    "dismiss": "Dismiss",
+    "delete": "Delete",
+    "commented": "Comment added to affected todo",
+    "todoCreated": "Quest {{displayNumber}} created",
+    "empty": "No risks detected.",
+    "emptyHint": "Click \"Run analysis\" to check for stagnation, deadline pressure, bug hotspots and blocker chains.",
+    "filter": {
+      "allStatus": "All status"
+    },
+    "severity": {
+      "critical": "Critical",
+      "warn": "Warning",
+      "info": "Info"
+    },
+    "status": {
+      "open": "Open",
+      "dismissed": "Dismissed",
+      "converted_to_todo": "As todo",
+      "addressed": "Addressed"
+    },
+    "type": {
+      "stagnation": "Stagnation",
+      "deadline_pressure": "Deadline pressure",
+      "bug_hotspot": "Bug hotspot",
+      "blocker_chain": "Blocker chain"
     }
   },
   "knowledgeGraph": {

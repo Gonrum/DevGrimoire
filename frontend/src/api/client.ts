@@ -517,6 +517,40 @@ export interface KnowledgeGraphImpact {
   edges: KnowledgeGraphEdge[];
 }
 
+export type OracleRiskType = 'stagnation' | 'deadline_pressure' | 'bug_hotspot' | 'blocker_chain';
+export type OracleSeverity = 'info' | 'warn' | 'critical';
+export type OracleSuggestionStatus = 'open' | 'dismissed' | 'converted_to_todo' | 'addressed';
+
+export interface OracleAffectedEntity {
+  entityType: KgEntityType;
+  entityId: string;
+  label?: string;
+}
+
+export interface OracleSuggestion {
+  _id: string;
+  projectId: string;
+  type: OracleRiskType;
+  severity: OracleSeverity;
+  status: OracleSuggestionStatus;
+  title: string;
+  reason: string;
+  recommendedAction?: string;
+  affectedEntities: OracleAffectedEntity[];
+  fingerprint: string;
+  expiresAt?: string;
+  metadata?: Record<string, unknown> & { todoId?: string; todoCreatedAt?: string; statusNote?: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OracleAnalyzeResult {
+  discovered: number;
+  inserted: number;
+  refreshed: number;
+  resolved: number;
+}
+
 export interface Milestone {
   _id: string;
   projectId: string;
@@ -2246,6 +2280,47 @@ export const api = {
         `/knowledge-graph/discover/${projectId}`,
         { method: 'POST' },
       ),
+  },
+  oracle: {
+    analyze: (projectId: string) =>
+      request<OracleAnalyzeResult>(`/oracle/analyze/${projectId}`, { method: 'POST' }),
+    list: (filters: {
+      projectId?: string;
+      status?: OracleSuggestionStatus;
+      severity?: OracleSeverity;
+      type?: OracleRiskType;
+      limit?: number;
+    } = {}) => {
+      const params = new URLSearchParams();
+      if (filters.projectId) params.set('projectId', filters.projectId);
+      if (filters.status) params.set('status', filters.status);
+      if (filters.severity) params.set('severity', filters.severity);
+      if (filters.type) params.set('type', filters.type);
+      if (filters.limit) params.set('limit', String(filters.limit));
+      const qs = params.toString();
+      return request<OracleSuggestion[]>(`/oracle/suggestions${qs ? `?${qs}` : ''}`);
+    },
+    get: (id: string) => request<OracleSuggestion>(`/oracle/suggestions/${id}`),
+    updateStatus: (id: string, body: { status: OracleSuggestionStatus; note?: string }) =>
+      request<OracleSuggestion>(`/oracle/suggestions/${id}/status`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    convertToTodo: (
+      id: string,
+      body: { title?: string; priority?: 'low' | 'medium' | 'high' | 'critical'; milestoneId?: string; tags?: string[] } = {},
+    ) =>
+      request<{ suggestion: OracleSuggestion; todo: Todo; reused: boolean }>(
+        `/oracle/suggestions/${id}/convert-to-todo`,
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
+    commentOnTodo: (id: string, body: { todoId?: string; note?: string } = {}) =>
+      request<{ suggestion: OracleSuggestion; todoId: string; commented: true }>(
+        `/oracle/suggestions/${id}/comment-on-todo`,
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
+    remove: (id: string) =>
+      request<{ deleted: boolean; id: string }>(`/oracle/suggestions/${id}`, { method: 'DELETE' }),
   },
   workflowAgent: {
     getConfig: () => request<WorkflowAgentConfig | null>('/workflow-agent/config'),
