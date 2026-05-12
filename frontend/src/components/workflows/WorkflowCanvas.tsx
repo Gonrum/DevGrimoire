@@ -47,6 +47,46 @@ function CanvasInner(p: Props) {
     p.onDrop(event, position);
   }, [screenToFlowPosition, p]);
 
+  // When the user releases the connection drag on a node's body (not directly
+  // on a handle), find the node under the cursor and snap to its default input.
+  // ReactFlow only auto-connects when the drop lands within connectionRadius
+  // of a handle — this extends the snap zone to "anywhere on the target node".
+  const onConnectEnd = useCallback((
+    event: MouseEvent | TouchEvent,
+    connectionState: { isValid?: boolean | null; fromHandle?: { nodeId?: string; id?: string | null; type?: 'source' | 'target' } | null; toHandle?: unknown },
+  ) => {
+    // If ReactFlow already accepted the connection via onConnect, nothing more to do.
+    if (connectionState.isValid && connectionState.toHandle) return;
+
+    const fromHandle = connectionState.fromHandle;
+    if (!fromHandle || fromHandle.type !== 'source') return;
+    const sourceId = fromHandle.nodeId;
+    if (!sourceId) return;
+
+    // Locate the node DOM element under the cursor
+    const clientX = 'clientX' in event ? event.clientX : (event as TouchEvent).changedTouches?.[0]?.clientX;
+    const clientY = 'clientY' in event ? event.clientY : (event as TouchEvent).changedTouches?.[0]?.clientY;
+    if (clientX === undefined || clientY === undefined) return;
+
+    const el = document.elementFromPoint(clientX, clientY);
+    const nodeEl = el?.closest('.react-flow__node') as HTMLElement | null;
+    if (!nodeEl) return;
+    const targetId = nodeEl.getAttribute('data-id');
+    if (!targetId || targetId === sourceId) return;
+
+    // Only auto-connect to nodes that have an input handle (i.e. not triggers)
+    const targetNode = p.nodes.find((n) => n.id === targetId);
+    const targetType = (targetNode?.data as { type?: string })?.type;
+    if (targetType?.startsWith('trigger.')) return;
+
+    p.onConnect({
+      source: sourceId,
+      target: targetId,
+      sourceHandle: fromHandle.id ?? null,
+      targetHandle: null,
+    });
+  }, [p]);
+
   const defaultEdgeOptions = useMemo(() => ({ type: 'workflowEdge' }), []);
 
   return (
@@ -57,6 +97,7 @@ function CanvasInner(p: Props) {
         onNodesChange={p.onNodesChange}
         onEdgesChange={p.onEdgesChange}
         onConnect={p.onConnect}
+        onConnectEnd={onConnectEnd}
         isValidConnection={isValidConnection}
         onSelectionChange={p.onSelectionChange}
         nodeTypes={nodeTypes}
