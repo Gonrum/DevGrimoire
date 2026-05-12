@@ -11,15 +11,17 @@ interface Props {
   required?: boolean;
   fieldKey?: string;
   templateOptions?: TemplateOption[];
+  /** Skip the outer label — used when an enclosing accordion section already shows the field name */
+  hideLabel?: boolean;
 }
 
 const TEXTAREA_KEYS = new Set([
   'prompt', 'systemPrompt', 'description', 'content', 'message', 'body', 'title', 'text', 'summary',
 ]);
 
-export function SchemaField({ schema, path, value, onChange, required, fieldKey, templateOptions = [] }: Props) {
+export function SchemaField({ schema, path, value, onChange, required, fieldKey, templateOptions = [], hideLabel = false }: Props) {
   const label = fieldKey ?? path[path.length - 1] ?? '';
-  const labelText = String(label);
+  const labelText = hideLabel ? '' : String(label);
 
   if (schema.type === 'string' && Array.isArray(schema.enum)) {
     return (
@@ -239,6 +241,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
 }
 
 function Labeled({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+  if (!label) return <>{children}</>;
   return (
     <div>
       <label className="mb-1 block text-xs uppercase tracking-wide text-gray-500">

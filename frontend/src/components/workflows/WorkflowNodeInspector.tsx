@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Trash2, Copy } from 'lucide-react';
 import { WorkflowNodeMetadata, WorkflowEdge as WfEdge } from '../../api/workflows';
 import { SchemaField } from './SchemaField';
+import { SchemaObjectAccordion } from './SchemaObjectAccordion';
 import { TemplateOption } from './TemplatePicker';
 import { nodeCategoryStyles } from './nodeCategoryStyles';
 
@@ -91,13 +92,22 @@ function NodeInspector(p: Props) {
         <section>
           <h3 className="mb-2 text-xs uppercase tracking-wide text-gray-500">Konfiguration</h3>
           {meta ? (
-            <SchemaField
-              schema={meta.configJsonSchema}
-              path={['config']}
-              value={node.config}
-              onChange={(v) => p.onChangeConfig(v as Record<string, unknown>)}
-              templateOptions={templateOptions}
-            />
+            (meta.configJsonSchema as { type?: string }).type === 'object' ? (
+              <SchemaObjectAccordion
+                schema={meta.configJsonSchema}
+                value={node.config ?? {}}
+                onChange={(v) => p.onChangeConfig(v)}
+                templateOptions={templateOptions}
+              />
+            ) : (
+              <SchemaField
+                schema={meta.configJsonSchema}
+                path={['config']}
+                value={node.config}
+                onChange={(v) => p.onChangeConfig(v as Record<string, unknown>)}
+                templateOptions={templateOptions}
+              />
+            )
           ) : (
             <div className="text-xs text-amber-400">Unbekannter Node-Type — kein Schema verfügbar.</div>
           )}
