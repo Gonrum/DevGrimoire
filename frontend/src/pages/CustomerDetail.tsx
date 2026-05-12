@@ -38,6 +38,7 @@ import SnippetList from '../components/SnippetList';
 import ResearchList from '../components/ResearchList';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { useToast } from '../components/Toast';
+import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
 
 type Tab =
   | 'overview'
@@ -54,7 +55,8 @@ type Tab =
   | 'activity'
   | 'soul'
   | 'snippets'
-  | 'research';
+  | 'research'
+  | 'automation';
 
 const statusColors: Record<CustomerStatus, string> = {
   lead: 'bg-blue-900/50 text-blue-300',
@@ -304,6 +306,7 @@ export default function CustomerDetail() {
         { key: 'environments', label: t('customers.tab.environments'), count: customerEnvironments.length + linkedOnlyEnvironments.length },
         { key: 'secrets', label: t('customers.tab.secrets'), count: customerSecrets.length + linkedSecrets.length },
         { key: 'monitoring', label: t('customers.tab.monitoring') },
+        { key: 'automation', label: t('nav.workflows') },
         { key: 'contacts', label: t('customers.tab.contacts'), count: contacts.length },
       ],
     },
@@ -656,6 +659,10 @@ export default function CustomerDetail() {
                 projectsById={projectsById}
                 linkedProjectIds={linkedProjectIds}
               />
+            )}
+
+            {tab === 'automation' && (
+              <WorkflowProjectTab scope="customer" customerId={id} />
             )}
 
             {tab === 'contacts' && (

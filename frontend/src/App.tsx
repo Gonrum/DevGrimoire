@@ -23,6 +23,8 @@ import SecretCreatePage from './pages/SecretCreatePage';
 import RecurringTaskCreatePage from './pages/RecurringTaskCreatePage';
 import RecurringTaskDetailPage from './pages/RecurringTaskDetailPage';
 import RecurringTasksPage from './pages/RecurringTasksPage';
+import WorkflowsListPage from './pages/WorkflowsListPage';
+import WorkflowEditorPage from './pages/WorkflowEditorPage';
 import Docs from './pages/Docs';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
@@ -209,6 +211,14 @@ function AppShell() {
               {t('nav.recurringTasks')}
             </NavLink>
             <NavLink
+              to="/workflows"
+              className={({ isActive }) =>
+                isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'
+              }
+            >
+              {t('nav.workflows')}
+            </NavLink>
+            <NavLink
               to="/docs"
               className={({ isActive }) =>
                 isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'
@@ -277,6 +287,15 @@ function AppShell() {
               {t('nav.recurringTasks')}
             </NavLink>
             <NavLink
+              to="/workflows"
+              onClick={() => setMobileMenuOpen(false)}
+              className={({ isActive }) =>
+                `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
+              }
+            >
+              {t('nav.workflows')}
+            </NavLink>
+            <NavLink
               to="/docs"
               onClick={() => setMobileMenuOpen(false)}
               className={({ isActive }) =>
@@ -328,6 +347,8 @@ function AppShell() {
           <Route path="/recurring-tasks" element={<RecurringTasksPage />} />
           <Route path="/recurring-tasks/new" element={<RecurringTaskCreatePage />} />
           <Route path="/recurring-tasks/:recurringTaskId" element={<RecurringTaskDetailPage />} />
+          <Route path="/workflows" element={<WorkflowsListPage />} />
+          <Route path="/workflows/:id" element={<WorkflowEditorPage />} />
           <Route path="/projects/:id/settings" element={<ProjectSettings />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/docs" element={<Docs />} />

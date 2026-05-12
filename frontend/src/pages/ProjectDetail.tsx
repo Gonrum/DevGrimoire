@@ -30,8 +30,9 @@ import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents'
 import Badge from '../components/ui/Badge';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import ProjectTabShell from '../components/ui/ProjectTabShell';
+import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
 
-type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces';
+type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces' | 'workflows';
 
 export default function ProjectDetail() {
   const { t, i18n } = useTranslation();
@@ -241,6 +242,7 @@ export default function ProjectDetail() {
         { key: 'environments', label: t('projectDetail.tab.environments'), count: environments.length },
         { key: 'secrets', label: t('projectDetail.tab.secrets'), count: secrets.length },
         { key: 'recurring-tasks', label: t('projectDetail.tab.recurringTasks'), count: recurringTasks.filter((rt) => rt.active).length },
+        { key: 'workflows', label: t('nav.workflows'), count: 0 },
         { key: 'commits', label: t('projectDetail.tab.commits'), count: commitCount },
         { key: 'logs', label: t('projectDetail.tab.logs'), count: logStats?.total || 0 },
       ],
@@ -446,6 +448,9 @@ export default function ProjectDetail() {
             {tab === 'environments' && <EnvironmentList key={envKey} projectId={id!} />}
             {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id!} />}
             {tab === 'recurring-tasks' && <RecurringTaskList entries={recurringTasks} projectId={id!} />}
+            {tab === 'workflows' && (
+              <WorkflowProjectTab scope="project" projectId={id!} />
+            )}
             {tab === 'commits' && <CommitList key={commitsKey} projectId={id!} gitRepositories={project.gitRepositories} />}
             {tab === 'files' && <AttachmentList projectId={id!} showUpload />}
             {tab === 'releases' && <ReleaseList entries={releases} projectId={id!} />}
