@@ -10,6 +10,7 @@ import {
   ListWorkflowRunsDto,
   RetryWorkflowRunDto,
   StartWorkflowRunDto,
+  TestWorkflowNodeDto,
   UpdateWorkflowDefinitionDto,
 } from './dto/workflow.dto';
 
@@ -57,6 +58,11 @@ export class WorkflowsController {
   @HttpCode(201)
   startRun(@Body() dto: StartWorkflowRunDto) {
     return this.workflows.startRun(dto);
+  }
+
+  @Post('nodes/test')
+  testNode(@Body() dto: TestWorkflowNodeDto) {
+    return this.engine.testNode(dto);
   }
 
   @Get('runs/list')

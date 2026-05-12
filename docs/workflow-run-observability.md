@@ -111,13 +111,18 @@ interface WorkflowNodeError {
 
 ## Implemented API slice
 
-The backend exposes a compact inspection endpoint for UI and agent debugging:
+The backend exposes compact inspection and safe node-test endpoints for UI and agent debugging:
 
 - `GET /api/workflows/runs/:id/inspection`
+- MCP tool `workflow_run_inspect`
+- `POST /api/workflows/nodes/test`
+- MCP tool `workflow_node_test`
 
-It returns the run identity/status, node-run status counts, failed/waiting node ids, and per-node timing/error/input/output/log previews. Previews are truncated and mask common secret-bearing keys and bearer/token-like strings before returning data, so the inspector can be useful without defaulting to raw node-run payloads.
+Inspection returns the run identity/status, node-run status counts, failed/waiting node ids, and per-node timing/error/input/output/log previews. Previews are truncated and mask common secret-bearing keys and bearer/token-like strings before returning data, so the inspector can be useful without defaulting to raw node-run payloads.
 
-Raw run and node-run endpoints remain available for existing tooling, but UI surfaces should prefer the inspection endpoint for the first observability view.
+Node test mode currently performs schema/scope validation for every node type, executes only safe trigger/control nodes against an isolated in-memory context, and returns masked output/waiting/error/log previews. The same behavior is available to agents through `workflow_node_test`. Action and agent nodes stay validation-only until dry-run adapters or sandbox targets exist.
+
+Raw run and node-run endpoints remain available for existing tooling, but UI and agent-debugging surfaces should prefer the inspection endpoint/tool and node-test endpoint for the first observability view.
 
 ## Graph run view
 

@@ -278,3 +278,21 @@ export class RetryWorkflowRunDto {
   @IsString()
   fromNodeId?: string;
 }
+
+export class TestWorkflowNodeDto {
+  @ValidateNested()
+  @Type(() => WorkflowNodeDto)
+  node: WorkflowNodeDto;
+
+  @IsOptional()
+  @IsEnum(WorkflowScope)
+  scope?: WorkflowScope;
+
+  @IsOptional()
+  @IsObject()
+  input?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
+  runContext?: Record<string, unknown>;
+}

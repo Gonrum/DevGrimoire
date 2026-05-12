@@ -115,6 +115,21 @@ function optionalStringArray(args: Record<string, unknown>, field: string): stri
   return val;
 }
 
+function requireObject(args: Record<string, unknown>, field: string): Record<string, unknown> {
+  const val = args[field];
+  if (!val || typeof val !== 'object' || Array.isArray(val)) {
+    throw new Error(`Missing required object field: ${field}`);
+  }
+  return val as Record<string, unknown>;
+}
+
+function optionalObject(args: Record<string, unknown>, field: string): Record<string, unknown> | undefined {
+  const val = args[field];
+  if (val === undefined || val === null) return undefined;
+  if (typeof val !== 'object' || Array.isArray(val)) throw new Error(`${field} must be an object`);
+  return val as Record<string, unknown>;
+}
+
 function optionalBoolean(args: Record<string, unknown>, field: string): boolean | undefined {
   const val = args[field];
   if (val === undefined || val === null) return undefined;
@@ -2304,6 +2319,15 @@ const tools = [
     },
   },
   {
+    name: 'workflow_run_inspect',
+    description: 'Inspect a workflow run for debugging. Returns run summary, node-run status counts, failed/waiting node ids, and masked/truncated per-node previews.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
     name: 'workflow_run_cancel',
     description: 'Cancel a non-terminal workflow run. Sets status=cancelled with an error code and finishedAt.',
     inputSchema: {
@@ -2325,6 +2349,31 @@ const tools = [
         fromNodeId: { type: 'string' },
       },
       required: ['id'],
+    },
+  },
+  {
+    name: 'workflow_node_test',
+    description: 'Safely test a single workflow node with sample input. Executes only side-effect-free trigger/control nodes; action and agent nodes are validation-only.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        node: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            type: { type: 'string' },
+            label: { type: 'string' },
+            position: { type: 'object' },
+            config: { type: 'object' },
+            secretRefs: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['id', 'type', 'position'],
+        },
+        scope: { type: 'string', enum: ['system', 'project', 'customer'] },
+        input: { type: 'object' },
+        runContext: { type: 'object' },
+      },
+      required: ['node'],
     },
   },
   {
@@ -4650,6 +4699,10 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = run.toObject();
           break;
         }
+        case 'workflow_run_inspect': {
+          result = await workflowsService.inspectRun(requireString(a, 'id'));
+          break;
+        }
         case 'workflow_run_cancel': {
           const run = await workflowsService.cancelRun(requireString(a, 'id'), {
             reason: optionalString(a, 'reason'),
@@ -4661,6 +4714,15 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const id = requireString(a, 'id');
           await workflowEngineService.retryRun(id, optionalString(a, 'fromNodeId'));
           result = { ok: true, id };
+          break;
+        }
+        case 'workflow_node_test': {
+          result = await workflowEngineService.testNode({
+            node: requireObject(a, 'node') as never,
+            scope: optionalString(a, 'scope') as WorkflowScope | undefined,
+            input: optionalObject(a, 'input') as Record<string, unknown> | undefined,
+            runContext: optionalObject(a, 'runContext') as Record<string, unknown> | undefined,
+          });
           break;
         }
         case 'workflow_node_run_list': {
