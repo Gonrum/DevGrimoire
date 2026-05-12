@@ -72,6 +72,7 @@
     "customers": "Customers",
     "docs": "Docs",
     "recurringTasks": "Recurring",
+    "workflows": "Workflows",
     "settings": "Settings",
     "profile": "Profile",
     "logout": "Logout"
@@ -1632,5 +1633,11 @@
     "requiredSecretKeys": "Required secret keys",
     "saved": "Template saved",
     "confirmDelete": "Really delete this template? Customer entities already created remain untouched."
+  },
+  "workflows": {
+    "title": "Workflows",
+    "new": "New workflow",
+    "empty": "No workflows yet",
+    "mobileFallback": "Editor requires at least 768px width. Read-only mode active."
   }
 }

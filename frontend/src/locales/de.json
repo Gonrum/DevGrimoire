@@ -72,6 +72,7 @@
     "customers": "Kunden",
     "docs": "Docs",
     "recurringTasks": "Wiederkehrend",
+    "workflows": "Workflows",
     "settings": "Einstellungen",
     "profile": "Profil",
     "logout": "Abmelden"
@@ -1632,5 +1633,11 @@
     "requiredSecretKeys": "Benötigte Secret-Keys",
     "saved": "Vorlage gespeichert",
     "confirmDelete": "Diese Vorlage wirklich löschen? Bereits angelegte Kunden-Entities bleiben erhalten."
+  },
+  "workflows": {
+    "title": "Workflows",
+    "new": "Neuer Workflow",
+    "empty": "Noch keine Workflows",
+    "mobileFallback": "Editor benötigt mindestens 768px Breite. Lesemodus aktiv."
   }
 }
