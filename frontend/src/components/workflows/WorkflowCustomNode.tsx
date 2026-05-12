@@ -51,7 +51,7 @@ function WorkflowCustomNodeImpl(props: NodeProps) {
       <div
         className={`min-w-[220px] rounded-lg border-2 bg-gray-900 shadow-md ${style.border} ${status.ring} ${props.selected ? 'ring-offset-2 ring-offset-gray-950' : ''}`}
       >
-        {!isTrigger && <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-gray-500" />}
+        {!isTrigger && <Handle type="target" position={Position.Left} className="!h-2 !w-2 !bg-gray-500" />}
 
         <div className={`flex items-center justify-between rounded-t px-3 py-2 ${style.headerBg}`}>
           <div className="flex items-center gap-2">
