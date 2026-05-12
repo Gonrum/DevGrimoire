@@ -2057,7 +2057,35 @@ export const api = {
         { method: 'POST', body: JSON.stringify(body) },
       ),
   },
+  workflowAgent: {
+    getConfig: () => request<WorkflowAgentConfig | null>('/workflow-agent/config'),
+    updateConfig: (data: WorkflowAgentConfigUpdate) =>
+      request<WorkflowAgentConfig>('/workflow-agent/config', {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+  },
 };
+
+export type WorkflowAgentProvider = 'lmstudio' | 'openai-compatible' | 'openai' | 'anthropic';
+
+export interface WorkflowAgentConfig {
+  provider: WorkflowAgentProvider;
+  url: string;
+  model: string;
+  hasApiKey: boolean;
+  toolsEnabled: boolean;
+  maxToolIterations: number;
+}
+
+export interface WorkflowAgentConfigUpdate {
+  provider: WorkflowAgentProvider;
+  url: string;
+  model: string;
+  apiKey?: string;
+  toolsEnabled: boolean;
+  maxToolIterations: number;
+}
 
 export type ChatProvider =
   | 'lmstudio'
