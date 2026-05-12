@@ -177,7 +177,7 @@ function EditorInner() {
     status?: WorkflowStatus;
   };
 
-  const handleSave = useCallback(async (extra: Partial<UpdateDto> = {}): Promise<boolean> => {
+  const handleSave = useCallback(async (extra: Partial<UpdateDto> = {}, silent = false): Promise<boolean> => {
     if (!workflow) return false;
     setSaving(true);
     try {
@@ -203,7 +203,7 @@ function EditorInner() {
       setWorkflow(updated);
       setRemoteIssues([]);
       setDirty(false);
-      toast.showSuccess('Workflow gespeichert');
+      if (!silent) toast.showSuccess('Workflow gespeichert');
       return true;
     } catch (err) {
       const msg = (err as Error).message;
@@ -216,6 +216,20 @@ function EditorInner() {
       setSaving(false);
     }
   }, [workflow, nodes, edges, id, toast]);
+
+  // Auto-save: when dirty is set (typically from drag/drop/connect),
+  // wait 800ms of idle and then silently persist the current state.
+  // Manual changes via the Save button or Activate stay explicit and toast-confirmed.
+  const handleSaveRef = useRef(handleSave);
+  useEffect(() => { handleSaveRef.current = handleSave; }, [handleSave]);
+
+  useEffect(() => {
+    if (!dirty || saving) return;
+    const timer = setTimeout(() => {
+      void handleSaveRef.current({}, true);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [dirty, saving]);
 
   const handleActivate = async () => {
     const saved = await handleSave({ status: 'active' });
@@ -381,9 +395,24 @@ function EditorInner() {
             edges={edges}
             onNodesChange={(changes) => {
               onNodesChange(changes);
-              if (changes.some((c) => c.type === 'position' && c.dragging === false)) setDirty(true);
+              // Mark dirty for finished position changes (drag-end) AND structural changes
+              // (remove, dimensions etc). xyflow v12 sometimes leaves dragging undefined
+              // at drag-end, so we treat anything-but-true as "settled".
+              if (changes.some((c) =>
+                (c.type === 'position' && c.dragging !== true) ||
+                c.type === 'remove' ||
+                c.type === 'add' ||
+                c.type === 'replace'
+              )) {
+                setDirty(true);
+              }
             }}
-            onEdgesChange={(changes) => { onEdgesChange(changes); setDirty(true); }}
+            onEdgesChange={(changes) => {
+              onEdgesChange(changes);
+              if (changes.some((c) => c.type === 'remove' || c.type === 'add' || c.type === 'replace')) {
+                setDirty(true);
+              }
+            }}
             onConnect={onConnect}
             onSelectionChange={(sel) => {
               setSelectedNodeId(sel.nodes[0]?.id ?? null);
