@@ -19,7 +19,7 @@ export function getCurrentAccessToken(): string | null {
   return getAccessToken?.() ?? null;
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = getAccessToken?.();
   if (token) headers['Authorization'] = `Bearer ${token}`;
