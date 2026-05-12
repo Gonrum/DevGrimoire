@@ -204,19 +204,24 @@ export default function Settings() {
 
   const loadWorkflowAgentConfig = useCallback(async () => {
     setWaLoading(true);
+    const defaults = {
+      provider: 'lmstudio' as WorkflowAgentProvider,
+      url: '',
+      model: '',
+      hasApiKey: false,
+      toolsEnabled: false,
+      maxToolIterations: 5,
+    };
     try {
       const cfg = await api.workflowAgent.getConfig();
-      setWaConfig(cfg ? { ...cfg } : {
-        provider: 'lmstudio' as WorkflowAgentProvider,
-        url: '',
-        model: '',
-        hasApiKey: false,
-        toolsEnabled: false,
-        maxToolIterations: 5,
-      });
-      setWaApiKeyInput('');
-      setWaApiKeyClearFlag(false);
-    } catch { /* ignore */ }
+      setWaConfig(cfg ? { ...cfg } : defaults);
+    } catch {
+      // Fall back to defaults so the user can still enter a config even if the
+      // load failed (e.g. transient network error). Save still hits the same endpoint.
+      setWaConfig(defaults);
+    }
+    setWaApiKeyInput('');
+    setWaApiKeyClearFlag(false);
     setWaLoading(false);
   }, []);
 

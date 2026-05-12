@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { workflowsApi, WorkflowScope } from '../../api/workflows';
+import { api } from '../../api/client';
 import { useToast } from '../Toast';
 
 interface Props {
@@ -11,6 +12,9 @@ interface Props {
   onClose: () => void;
 }
 
+interface ProjectOption { _id: string; name: string }
+interface CustomerOption { _id: string; name: string }
+
 export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, defaultCustomerId, onClose }: Props) {
   const [name, setName] = useState('');
   const [scope, setScope] = useState<WorkflowScope>(defaultScope ?? 'project');
@@ -18,13 +22,53 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
   const [customerId, setCustomerId] = useState(defaultCustomerId ?? '');
   const [triggerType, setTriggerType] = useState<'manual' | 'schedule'>('manual');
   const [submitting, setSubmitting] = useState(false);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
   const navigate = useNavigate();
   const toast = useToast();
 
+  // Reset scope/project/customer when dialog re-opens with new defaults
+  useEffect(() => {
+    if (!open) return;
+    setScope(defaultScope ?? 'project');
+    setProjectId(defaultProjectId ?? '');
+    setCustomerId(defaultCustomerId ?? '');
+    setName('');
+    setTriggerType('manual');
+  }, [open, defaultScope, defaultProjectId, defaultCustomerId]);
+
+  // Fetch projects when scope=project and no defaultProjectId is pre-filled
+  useEffect(() => {
+    if (!open || scope !== 'project') return;
+    setLoadingProjects(true);
+    api.projects.list({ active: true })
+      .then((list) => setProjects(list.map((p) => ({ _id: p._id, name: p.name }))))
+      .catch(() => setProjects([]))
+      .finally(() => setLoadingProjects(false));
+  }, [open, scope]);
+
+  // Fetch customers when scope=customer
+  useEffect(() => {
+    if (!open || scope !== 'customer') return;
+    setLoadingCustomers(true);
+    api.customers.list()
+      .then((list) => setCustomers(list.map((c) => ({ _id: c._id, name: c.name }))))
+      .catch(() => setCustomers([]))
+      .finally(() => setLoadingCustomers(false));
+  }, [open, scope]);
+
   if (!open) return null;
 
+  const canSubmit =
+    !!name.trim() &&
+    (scope === 'system' ||
+      (scope === 'project' && !!projectId) ||
+      (scope === 'customer' && !!customerId));
+
   const handleCreate = async () => {
-    if (!name.trim()) return;
+    if (!canSubmit) return;
     setSubmitting(true);
     try {
       const wf = await workflowsApi.create({
@@ -66,13 +110,33 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
             </select>
           </Labeled>
           {scope === 'project' && (
-            <Labeled label="Project ID">
-              <input type="text" value={projectId} onChange={(e) => setProjectId(e.target.value)} className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 font-mono" />
+            <Labeled label="Projekt">
+              <select
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+                disabled={loadingProjects}
+                className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 disabled:opacity-50"
+              >
+                <option value="">{loadingProjects ? 'Lade Projekte…' : '— Projekt wählen —'}</option>
+                {projects.map((p) => (
+                  <option key={p._id} value={p._id}>{p.name}</option>
+                ))}
+              </select>
             </Labeled>
           )}
           {scope === 'customer' && (
-            <Labeled label="Customer ID">
-              <input type="text" value={customerId} onChange={(e) => setCustomerId(e.target.value)} className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 font-mono" />
+            <Labeled label="Kunde">
+              <select
+                value={customerId}
+                onChange={(e) => setCustomerId(e.target.value)}
+                disabled={loadingCustomers}
+                className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 disabled:opacity-50"
+              >
+                <option value="">{loadingCustomers ? 'Lade Kunden…' : '— Kunde wählen —'}</option>
+                {customers.map((c) => (
+                  <option key={c._id} value={c._id}>{c.name}</option>
+                ))}
+              </select>
             </Labeled>
           )}
           <Labeled label="Trigger">
@@ -84,7 +148,7 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
         </div>
         <div className="flex justify-end gap-2 border-t border-gray-800 px-5 py-3">
           <button onClick={onClose} className="rounded bg-gray-800 px-3 py-1 text-sm text-gray-200 hover:bg-gray-700">Abbrechen</button>
-          <button onClick={handleCreate} disabled={submitting || !name.trim()} className="rounded bg-cyan-600 px-3 py-1 text-sm text-white hover:bg-cyan-500 disabled:opacity-50">Erstellen</button>
+          <button onClick={handleCreate} disabled={submitting || !canSubmit} className="rounded bg-cyan-600 px-3 py-1 text-sm text-white hover:bg-cyan-500 disabled:opacity-50">Erstellen</button>
         </div>
       </div>
     </div>
