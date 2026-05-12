@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { workflowsApi, WorkflowNodeMetadata } from '../api/workflows';
 
 interface CachedCatalog {
@@ -61,12 +61,15 @@ export function useNodeTypesCatalog(): NodeTypesCatalog {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const byType: Record<string, WorkflowNodeMetadata> = {};
-  const byCategory: Record<string, WorkflowNodeMetadata[]> = {};
-  for (const m of catalog) {
-    byType[m.type] = m;
-    (byCategory[m.category] ||= []).push(m);
-  }
+  const { byType, byCategory } = useMemo(() => {
+    const bt: Record<string, WorkflowNodeMetadata> = {};
+    const bc: Record<string, WorkflowNodeMetadata[]> = {};
+    for (const m of catalog) {
+      bt[m.type] = m;
+      (bc[m.category] ||= []).push(m);
+    }
+    return { byType: bt, byCategory: bc };
+  }, [catalog]);
 
   return { catalog, byType, byCategory, isLoading, error, refresh: load };
 }

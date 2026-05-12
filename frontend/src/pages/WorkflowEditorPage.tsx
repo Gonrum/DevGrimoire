@@ -89,9 +89,9 @@ function EditorInner() {
   const handleDeleteNode = useCallback((nid: string) => {
     setNodes((ns) => ns.filter((n) => n.id !== nid));
     setEdges((es) => es.filter((e) => e.source !== nid && e.target !== nid));
-    if (selectedNodeId === nid) setSelectedNodeId(null);
+    setSelectedNodeId((cur) => (cur === nid ? null : cur));
     setDirty(true);
-  }, [setNodes, setEdges, selectedNodeId]);
+  }, [setNodes, setEdges]);
 
   const handleDuplicateNode = useCallback((nid: string) => {
     setNodes((ns) => {
@@ -112,9 +112,9 @@ function EditorInner() {
 
   const handleDeleteEdge = useCallback((eid: string) => {
     setEdges((es) => es.filter((e) => e.id !== eid));
-    if (selectedEdgeId === eid) setSelectedEdgeId(null);
+    setSelectedEdgeId((cur) => (cur === eid ? null : cur));
     setDirty(true);
-  }, [setEdges, selectedEdgeId]);
+  }, [setEdges]);
 
   // Inject handlers into node/edge data after handlers are stable
   useEffect(() => {
