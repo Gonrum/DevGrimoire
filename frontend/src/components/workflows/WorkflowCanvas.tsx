@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef } from 'react';
 import {
   ReactFlow, ReactFlowProvider, Background, BackgroundVariant, Controls,
   MiniMap, Connection, Edge, Node, useReactFlow, OnNodesChange, OnEdgesChange,
-  ConnectionMode, IsValidConnection,
+  IsValidConnection,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { WorkflowCustomNode } from './WorkflowCustomNode';
@@ -62,7 +62,6 @@ function CanvasInner(p: Props) {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={defaultEdgeOptions}
-        connectionMode={ConnectionMode.Loose}
         fitView
         proOptions={{ hideAttribution: true }}
         className="bg-gray-950"
