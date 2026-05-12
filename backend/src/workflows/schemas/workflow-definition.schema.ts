@@ -85,6 +85,36 @@ export class WorkflowEdge {
 
 export const WorkflowEdgeSchema = SchemaFactory.createForClass(WorkflowEdge);
 
+@Schema({ _id: false })
+export class WorkflowApproval {
+  @Prop({ required: true, min: 1 })
+  version: number;
+
+  @Prop({ required: true })
+  approvedAt: Date;
+
+  @Prop({ type: Types.ObjectId, ref: 'User' })
+  approvedByUserId?: Types.ObjectId;
+
+  @Prop()
+  approvedByUsername?: string;
+
+  @Prop()
+  approvedByRole?: string;
+
+  @Prop({ type: Object })
+  riskSummary?: {
+    byRisk: Record<string, number>;
+    allowedNodeTypes: string[];
+    nodeCount: number;
+  };
+
+  @Prop()
+  note?: string;
+}
+
+export const WorkflowApprovalSchema = SchemaFactory.createForClass(WorkflowApproval);
+
 @Schema({ timestamps: true })
 export class WorkflowDefinition {
   @Prop({ required: true, enum: WorkflowScope, index: true })
@@ -134,6 +164,9 @@ export class WorkflowDefinition {
 
   @Prop()
   lastRunAt?: Date;
+
+  @Prop({ type: [WorkflowApprovalSchema], default: [] })
+  approvals: WorkflowApproval[];
 
   createdAt?: Date;
   updatedAt?: Date;

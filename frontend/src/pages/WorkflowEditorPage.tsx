@@ -477,7 +477,7 @@ function EditorInner() {
         onDismiss={() => setRemoteIssues([])}
       />
 
-      {runId && <WorkflowRunInspector runId={runId} onClose={() => setRunId(null)} />}
+      {runId && <WorkflowRunInspector runId={runId} onClose={() => setRunId(null)} onNavigate={setRunId} />}
     </div>
   );
 }

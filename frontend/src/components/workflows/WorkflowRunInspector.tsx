@@ -5,11 +5,12 @@ import { runStatusStyles } from './runStatusStyles';
 interface Props {
   runId: string;
   onClose: () => void;
+  onNavigate?: (runId: string) => void;
 }
 
 const TERMINAL: WorkflowRunStatus[] = ['succeeded', 'failed', 'cancelled'];
 
-export function WorkflowRunInspector({ runId, onClose }: Props) {
+export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [nodeRuns, setNodeRuns] = useState<WorkflowNodeRun[]>([]);
   const [selected, setSelected] = useState<WorkflowNodeRun | null>(null);
@@ -45,7 +46,10 @@ export function WorkflowRunInspector({ runId, onClose }: Props) {
   };
   const onRetry = async () => {
     try {
-      await workflowsApi.retryRun(runId);
+      const result = await workflowsApi.retryRun(runId);
+      // Retry now spawns a new run — navigate to it so the user sees the live
+      // re-execution rather than the unchanged parent.
+      if (onNavigate && result.runId) onNavigate(result.runId);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -71,6 +75,24 @@ export function WorkflowRunInspector({ runId, onClose }: Props) {
               <span className="ml-3 text-gray-500">started: {run.startedAt ?? '—'}</span>
               <span className="ml-3 text-gray-500">finished: {run.finishedAt ?? '—'}</span>
               <span className="ml-3 text-gray-500">trigger: {run.triggeredBy?.type ?? '—'}</span>
+              {run.parentRunId && (
+                <div className="mt-2 flex items-center gap-2 text-violet-300">
+                  <span>Retry von</span>
+                  {onNavigate ? (
+                    <button
+                      onClick={() => onNavigate(run.parentRunId!)}
+                      className="font-mono text-cyan-300 hover:underline"
+                    >
+                      {run.parentRunId.slice(-8)}
+                    </button>
+                  ) : (
+                    <span className="font-mono">{run.parentRunId.slice(-8)}</span>
+                  )}
+                  {run.retryFromNodeId && (
+                    <span className="text-gray-500">· ab Node <code className="text-cyan-300">{run.retryFromNodeId}</code></span>
+                  )}
+                </div>
+              )}
               {run.error && <div className="mt-2 text-red-300">Fehler: {run.error.code} — {run.error.message}</div>}
             </div>
 

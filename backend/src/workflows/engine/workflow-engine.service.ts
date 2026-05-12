@@ -32,8 +32,15 @@ import { findTriggerNodes, nextNodes } from './graph-walker';
 import { QuestionsService, QUESTION_ANSWERED } from '../../questions/questions.service';
 import { TestWorkflowNodeDto } from '../dto/workflow.dto';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
+import { AuditLogService } from '../../audit-log/audit-log.service';
+import { redact, redactLogs, redactValue } from '../workflow-redaction';
+import {
+  checkRunBudget,
+  checkRuntimeNode,
+  WORKFLOW_RUNTIME_LIMITS,
+} from '../workflow-security.runtime';
 
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = WORKFLOW_RUNTIME_LIMITS.defaultNodeTimeoutMs;
 const NODE_LOG_CAP = Number(process.env.WORKFLOW_NODE_LOG_CAP ?? 200);
 const RECOVERY_AGE_MS = Number(process.env.WORKFLOW_RUN_RECOVERY_AGE_MS ?? 5 * 60_000);
 const WORKER_CONCURRENCY = Number(process.env.WORKFLOW_WORKER_CONCURRENCY ?? 4);
@@ -55,7 +62,18 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     private readonly eventEmitter: EventEmitter2,
     private readonly questionsService: QuestionsService,
     private readonly moduleRef: ModuleRef,
+    private readonly auditLog: AuditLogService,
   ) {}
+
+  private audit(action: string, meta: Record<string, unknown> & { runId?: string }): void {
+    // Fire-and-forget; AuditLogService.record never throws.
+    void this.auditLog.record({
+      action,
+      entityType: 'workflow-run',
+      entityId: meta.runId,
+      meta,
+    });
+  }
 
   onModuleInit(): void {
     this.workerPool.setRunner((job) => this.runJob(job));
@@ -74,6 +92,14 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     run.status = WorkflowRunStatus.RUNNING;
     run.startedAt ??= new Date();
     await run.save();
+    this.audit('workflow.run.started', {
+      runId: (run._id as Types.ObjectId).toString(),
+      definitionId: run.definitionId.toString(),
+      definitionVersion: run.definitionVersion,
+      scope: run.scope,
+      projectId: run.projectId?.toString(),
+      customerId: run.customerId?.toString(),
+    });
 
     const snapshot = run.definitionSnapshot as { nodes: WorkflowNode[]; edges: unknown[] };
     const triggers = findTriggerNodes({
@@ -132,6 +158,60 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       return;
     }
 
+    // Defense-in-depth runtime policy check on the snapshot's node. The
+    // activation gate already enforced this, but policy could have changed
+    // since the snapshot was taken — fail closed if so.
+    const policyCheck = checkRuntimeNode({
+      scope: run.scope,
+      type: node.type,
+      secretRefs: node.secretRefs,
+    });
+    if (!policyCheck.ok) {
+      this.audit('workflow.permission.denied', {
+        runId: (run._id as Types.ObjectId).toString(),
+        nodeId: node.id,
+        nodeType: node.type,
+        code: policyCheck.code,
+        message: policyCheck.message,
+      });
+      await this.completeNodeRun(nodeRun, {
+        status: 'failed',
+        error: {
+          code: policyCheck.code ?? 'policy_blocked',
+          message: policyCheck.message ?? 'node blocked by policy',
+        },
+      });
+      await this.failRun(run, {
+        code: policyCheck.code ?? 'policy_blocked',
+        message: policyCheck.message ?? 'node blocked by policy',
+      });
+      return;
+    }
+
+    // Run budget — hard cap on executed node count + total wall-clock time.
+    const budget = checkRunBudget({
+      startedAt: run.startedAt,
+      executedNodeCount: run.executedNodeCount,
+    });
+    if (!budget.ok) {
+      this.audit('workflow.run.budget_exceeded', {
+        runId: (run._id as Types.ObjectId).toString(),
+        nodeId: node.id,
+        code: budget.code,
+        message: budget.message,
+        executedNodeCount: run.executedNodeCount,
+      });
+      await this.completeNodeRun(nodeRun, {
+        status: 'failed',
+        error: { code: budget.code ?? 'budget_exceeded', message: budget.message ?? 'run budget exceeded' },
+      });
+      await this.failRun(run, {
+        code: budget.code ?? 'budget_exceeded',
+        message: budget.message ?? 'run budget exceeded',
+      });
+      return;
+    }
+
     let executor;
     try {
       executor = this.registry.get(node.type);
@@ -147,6 +227,19 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     nodeRun.status = WorkflowNodeRunStatus.RUNNING;
     nodeRun.startedAt = new Date();
     await nodeRun.save();
+    // Count this execution atomically — multiple workers may run jobs for the
+    // same run in parallel, so a read-modify-write on the document would race
+    // and let the budget cap leak.
+    const incremented = await this.runModel
+      .findByIdAndUpdate(run._id, { $inc: { executedNodeCount: 1 } }, { new: true })
+      .exec();
+    if (incremented) run.executedNodeCount = incremented.executedNodeCount;
+    this.audit('workflow.node.started', {
+      runId: (run._id as Types.ObjectId).toString(),
+      nodeId: node.id,
+      nodeType: node.type,
+      attempt: nodeRun.attempt,
+    });
 
     const timeoutMs = Number(((node.config ?? {}) as Record<string, unknown>).timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const ctx = this.buildContext(run, nodeRun, node);
@@ -289,34 +382,19 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
   }
 
   private safeTestPreview(value: unknown): unknown {
-    const sensitiveKey = /(authorization|api[-_]?key|secret|token|password|passwd|credential|private[-_]?key|cookie)/i;
-    const seen = new WeakSet<object>();
-    const visit = (current: unknown, depth: number): unknown => {
-      if (current === null || current === undefined) return current;
-      if (typeof current === 'string') {
-        const redacted = current
-          .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [MASKED]')
-          .replace(/(api[-_]?key|secret|token|password|passwd)\s*[:=]\s*[^\s,;]+/gi, '$1=[MASKED]');
-        return redacted.length > 500 ? `${redacted.slice(0, 500)}…` : redacted;
-      }
-      if (typeof current !== 'object') return current;
-      if (seen.has(current)) return '[Circular]';
-      seen.add(current);
-      if (depth >= 5) return '[Truncated: max depth]';
-      if (Array.isArray(current)) return current.slice(0, 25).map((item) => visit(item, depth + 1));
-      return Object.fromEntries(
-        Object.entries(current as Record<string, unknown>)
-          .slice(0, 50)
-          .map(([key, child]) => [key, sensitiveKey.test(key) ? '[MASKED]' : visit(child, depth + 1)]),
-      );
-    };
-    return visit(value, 0);
+    return redact(value, { maxDepth: 5, maxStringLength: 500 }).value;
   }
 
   private buildContext(run: WorkflowRunDocument, nodeRun: WorkflowNodeRunDocument, node: WorkflowNode) {
     const logs: Array<Record<string, unknown>> = nodeRun.logs;
     const append = (level: 'info' | 'warn' | 'error', msg: string, data?: Record<string, unknown>) => {
-      logs.push({ at: new Date().toISOString(), level, msg, ...(data ?? {}) });
+      // Redact per-entry on push so a crash mid-execute can't leave a raw
+      // secret in the unsaved buffer either.
+      const entry = redactValue(
+        { at: new Date().toISOString(), level, msg, ...(data ?? {}) },
+        { maxStringLength: 1024 },
+      ) as Record<string, unknown>;
+      logs.push(entry);
       while (logs.length > NODE_LOG_CAP) logs.shift();
     };
     return {
@@ -357,7 +435,9 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       await this.completeNodeRun(nodeRun, result);
       const ctx = (run.context as { nodes: Record<string, unknown> }) ?? { nodes: {} };
       ctx.nodes = ctx.nodes ?? {};
-      ctx.nodes[node.id] = result.output ?? {};
+      // Persist redacted output to run.context so downstream nodes can read
+      // upstream output without re-leaking secrets via the context object.
+      ctx.nodes[node.id] = redactValue(result.output ?? {});
       run.context = ctx;
       run.markModified('context');
       await run.save();
@@ -405,12 +485,36 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
         : result.status === 'waiting'
           ? WorkflowNodeRunStatus.WAITING
           : WorkflowNodeRunStatus.FAILED;
-    nodeRun.outputSnapshot = result.output;
-    if (result.error) nodeRun.error = result.error;
+    // Redact at WRITE time, not just on read: anyone reading the raw mongo
+    // document (replication peer, db dump, RAG indexer) must never see secrets.
+    if (result.output !== undefined) {
+      nodeRun.outputSnapshot = redactValue(result.output) as Record<string, unknown>;
+    }
+    if (result.error) {
+      nodeRun.error = redactValue(result.error) as Record<string, unknown>;
+    }
+    if (nodeRun.logs?.length) {
+      nodeRun.logs = redactLogs(nodeRun.logs);
+      nodeRun.markModified('logs');
+    }
     nodeRun.finishedAt = new Date();
     if (nodeRun.startedAt)
       nodeRun.durationMs = nodeRun.finishedAt.getTime() - nodeRun.startedAt.getTime();
     await nodeRun.save();
+    const auditAction =
+      result.status === 'success'
+        ? 'workflow.node.succeeded'
+        : result.status === 'waiting'
+          ? 'workflow.node.waiting'
+          : 'workflow.node.failed';
+    this.audit(auditAction, {
+      runId: nodeRun.runId.toString(),
+      nodeId: nodeRun.nodeId,
+      nodeType: nodeRun.nodeType,
+      attempt: nodeRun.attempt,
+      durationMs: nodeRun.durationMs,
+      ...(result.error ? { errorCode: result.error.code } : {}),
+    });
   }
 
   private async maybeFinishRun(run: WorkflowRunDocument): Promise<void> {
@@ -427,15 +531,30 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     run.finishedAt = new Date();
     await run.save();
     this.eventEmitter.emit('workflow.run.finished', { runId: (run._id as Types.ObjectId).toString(), status: run.status });
+    this.audit('workflow.run.succeeded', {
+      runId: (run._id as Types.ObjectId).toString(),
+      definitionId: run.definitionId?.toString(),
+      executedNodeCount: run.executedNodeCount,
+      durationMs:
+        run.startedAt && run.finishedAt
+          ? run.finishedAt.getTime() - run.startedAt.getTime()
+          : undefined,
+    });
   }
 
   private async failRun(run: WorkflowRunDocument, error: { code: string; message: string }): Promise<void> {
     this.queue.removeRun((run._id as Types.ObjectId).toString());
     run.status = WorkflowRunStatus.FAILED;
-    run.error = error;
+    run.error = redactValue(error) as { code: string; message: string };
     run.finishedAt = new Date();
     await run.save();
     this.eventEmitter.emit('workflow.run.finished', { runId: (run._id as Types.ObjectId).toString(), status: run.status });
+    this.audit('workflow.run.failed', {
+      runId: (run._id as Types.ObjectId).toString(),
+      definitionId: run.definitionId?.toString(),
+      errorCode: run.error?.code,
+      executedNodeCount: run.executedNodeCount,
+    });
   }
 
   @OnEvent(QUESTION_ANSWERED)
@@ -501,40 +620,83 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     });
   }
 
-  async retryRun(runId: string, fromNodeId?: string): Promise<void> {
-    const run = await this.runModel.findById(runId).exec();
-    if (!run) throw new Error(`run ${runId} not found`);
-    if (run.status !== WorkflowRunStatus.FAILED && run.status !== WorkflowRunStatus.CANCELLED) {
-      throw new Error(`retryRun only allowed on failed/cancelled (got ${run.status})`);
+  /**
+   * Spawn a NEW run (`parentRunId` = original) instead of mutating the original.
+   * The parent stays in its terminal FAILED/CANCELLED state — its log/output is
+   * preserved. The child gets its own snapshot copy, its own audit trail, and
+   * starts executing from `fromNodeId` (or the first failed node, or the
+   * trigger if none).
+   */
+  async retryRun(runId: string, fromNodeId?: string): Promise<WorkflowRunDocument> {
+    // Atomic guard: only allow ONE retry to win for a given parent run. We
+    // briefly stamp a marker on the parent (re-set status to itself) so that
+    // a second concurrent retryRun call returns null and bails out. Using
+    // findOneAndUpdate with the status filter ensures the read-then-act is
+    // a single round-trip.
+    const claim = await this.runModel.findOneAndUpdate(
+      {
+        _id: new Types.ObjectId(runId),
+        status: { $in: [WorkflowRunStatus.FAILED, WorkflowRunStatus.CANCELLED] },
+        // Once a retry has been spawned we mark the parent (see end of method);
+        // a second concurrent caller will fail the `retryClaimedAt: null` filter.
+        $or: [{ retryClaimedAt: { $exists: false } }, { retryClaimedAt: null }],
+      },
+      { $set: { retryClaimedAt: new Date() } },
+      { new: true },
+    ).exec();
+    if (!claim) {
+      throw new Error(`retryRun: run ${runId} is not in failed/cancelled state or a retry is already in flight`);
     }
-    await this.nodeRunModel
-      .deleteMany({
-        runId: run._id,
-        status: { $in: [WorkflowNodeRunStatus.QUEUED, WorkflowNodeRunStatus.RUNNING] },
-      })
-      .exec();
+    const parent = claim;
 
-    const snapshot = run.definitionSnapshot as { nodes: WorkflowNode[]; edges: unknown[] };
+    const snapshot = parent.definitionSnapshot as { nodes: WorkflowNode[]; edges: unknown[] };
     let nodeToStart: WorkflowNode | undefined;
+    let resolvedFromNodeId = fromNodeId;
     if (fromNodeId) nodeToStart = snapshot.nodes.find((n) => n.id === fromNodeId);
     if (!nodeToStart) {
       const failed = await this.nodeRunModel
-        .findOne({ runId: run._id, status: WorkflowNodeRunStatus.FAILED })
+        .findOne({ runId: parent._id, status: WorkflowNodeRunStatus.FAILED })
         .sort({ createdAt: 1 })
         .exec();
-      if (failed) nodeToStart = snapshot.nodes.find((n) => n.id === failed.nodeId);
+      if (failed) {
+        nodeToStart = snapshot.nodes.find((n) => n.id === failed.nodeId);
+        resolvedFromNodeId = failed.nodeId;
+      }
     }
-    if (!nodeToStart) nodeToStart = findTriggerNodes({ nodes: snapshot.nodes, edges: snapshot.edges as never })[0];
+    if (!nodeToStart) {
+      nodeToStart = findTriggerNodes({ nodes: snapshot.nodes, edges: snapshot.edges as never })[0];
+      resolvedFromNodeId = nodeToStart?.id;
+    }
 
-    // We immediately re-enqueue the specific node; the run goes straight to RUNNING
-    // without going through the workflow.run.queued event (which would re-trigger
-    // the trigger-fan-out from handleRunQueued and duplicate execution).
-    run.status = WorkflowRunStatus.RUNNING;
-    run.error = undefined;
-    run.finishedAt = undefined;
-    run.startedAt ??= new Date();
-    await run.save();
-    if (nodeToStart) await this.enqueueNode(run, nodeToStart, 1);
+    const child = await this.runModel.create({
+      definitionId: parent.definitionId,
+      definitionVersion: parent.definitionVersion,
+      definitionSnapshot: parent.definitionSnapshot,
+      scope: parent.scope,
+      projectId: parent.projectId,
+      customerId: parent.customerId,
+      trigger: { type: 'retry', input: { parentRunId: (parent._id as Types.ObjectId).toString() } },
+      status: WorkflowRunStatus.RUNNING,
+      currentNodeIds: [],
+      startedAt: new Date(),
+      // Fresh context — do NOT inherit upstream node outputs, since the user is
+      // explicitly asking for a re-execution from a chosen point.
+      context: { nodes: {}, input: {} },
+      triggeredBy: { type: 'manual' },
+      parentRunId: parent._id,
+      retryFromNodeId: resolvedFromNodeId,
+      executedNodeCount: 0,
+    });
+
+    this.audit('workflow.run.retry_started', {
+      runId: (child._id as Types.ObjectId).toString(),
+      parentRunId: (parent._id as Types.ObjectId).toString(),
+      fromNodeId: resolvedFromNodeId,
+      definitionId: parent.definitionId.toString(),
+    });
+
+    if (nodeToStart) await this.enqueueNode(child, nodeToStart, 1);
+    return child;
   }
 
   private async recoverInterruptedRuns(): Promise<void> {

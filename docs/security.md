@@ -51,6 +51,10 @@ For legacy SSE clients that cannot send headers:
 
 The local stdio MCP server remains local-process only and does not use HTTP auth.
 
+### GitHub Copilot Cloud Agent
+
+For GitHub Copilot Cloud Agent, configure a dedicated API key and an explicit MCP `tools` allowlist. GitHub documents that the cloud agent can call configured MCP tools autonomously, so do not provide wildcard `*` or an unrestricted production key. Use `COPILOT_MCP_...` GitHub secrets/variables for the DevGrimoire URL and API key, and start with a read-only preset. See [GitHub Copilot Cloud Agent MCP Preset](copilot-cloud-agent-mcp.md).
+
 ## MCP Discovery
 
 `GET /.well-known/mcp` and `GET /.well-known/mcp.json` are public discovery endpoints. They are designed for MCP clients, registries, and crawlers that need to detect DevGrimoire capabilities without opening an authenticated MCP session.

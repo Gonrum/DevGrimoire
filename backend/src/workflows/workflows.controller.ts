@@ -6,6 +6,7 @@ import { toPublicMetadata, NodeMetadataPublic } from './engine/node-metadata';
 import {
   CancelWorkflowRunDto,
   CreateWorkflowDefinitionDto,
+  InstantiateWorkflowTemplateDto,
   ListWorkflowDefinitionsDto,
   ListWorkflowRunsDto,
   RetryWorkflowRunDto,
@@ -36,6 +37,23 @@ export class WorkflowsController {
   @Get('node-types')
   listNodeTypes(): NodeMetadataPublic[] {
     return this.registry.listMetadata().map(toPublicMetadata);
+  }
+
+  @Get('templates')
+  listTemplates() {
+    return this.workflows.listTemplates();
+  }
+
+  @Post('templates/instantiate')
+  @HttpCode(201)
+  instantiateTemplate(@Body() dto: InstantiateWorkflowTemplateDto) {
+    return this.workflows.instantiateTemplate({
+      templateId: dto.templateId,
+      name: dto.name,
+      scope: dto.scope,
+      projectId: dto.projectId,
+      customerId: dto.customerId,
+    });
   }
 
   @Get(':id')
@@ -86,9 +104,16 @@ export class WorkflowsController {
   }
 
   @Post('runs/:id/retry')
-  async retryRun(@Param('id') id: string, @Body() body: RetryWorkflowRunDto = {}): Promise<{ ok: true }> {
-    await this.engine.retryRun(id, body.fromNodeId);
-    return { ok: true };
+  async retryRun(
+    @Param('id') id: string,
+    @Body() body: RetryWorkflowRunDto = {},
+  ): Promise<{ ok: true; runId: string; parentRunId: string }> {
+    const child = await this.engine.retryRun(id, body.fromNodeId);
+    return {
+      ok: true,
+      runId: child._id.toString(),
+      parentRunId: id,
+    };
   }
 
   @Get('runs/:id/node-runs')

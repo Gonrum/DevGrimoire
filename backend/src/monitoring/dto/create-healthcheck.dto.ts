@@ -36,8 +36,11 @@ export class HealthcheckSecretHeaderDto {
 }
 
 export class CreateHealthcheckDto {
+  // Usually supplied by the route parameter in POST /customers/:customerId/healthchecks.
+  // Keep accepting it in the body for MCP/template/internal callers.
+  @IsOptional()
   @IsMongoId()
-  customerId: string;
+  customerId?: string;
 
   @IsOptional()
   @IsMongoId()

@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { api, RecurringFrequency, Project } from '../api/client';
+import { api, RecurringAction, RecurringFrequency, Project } from '../api/client';
 import MarkdownEditor from '../components/MarkdownEditor';
 import Button from '../components/ui/Button';
 import { FormInput, FormSelect } from '../components/ui/FormField';
 import { WorkflowPageShell } from '../components/ui/WorkflowShell';
 
 const FREQUENCIES: RecurringFrequency[] = ['daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'];
+const ACTIONS: RecurringAction[] = ['todo', 'chat'];
 
 export default function RecurringTaskCreatePage() {
   const { id } = useParams<{ id: string }>();
@@ -30,6 +31,12 @@ export default function RecurringTaskCreatePage() {
   const [saving, setSaving] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState(id || '');
   const [projects, setProjects] = useState<Project[]>([]);
+  const [action, setAction] = useState<RecurringAction>('todo');
+  const [chatPrompt, setChatPrompt] = useState('');
+  const [chatSystemPrompt, setChatSystemPrompt] = useState('');
+  const [chatAllowedTools, setChatAllowedTools] = useState('');
+  const [chatSessionStrategy, setChatSessionStrategy] = useState<'new' | 'reuse'>('new');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isGlobal) {
@@ -43,12 +50,21 @@ export default function RecurringTaskCreatePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     if (!title.trim()) return;
+    const targetProjectId = isCustomerScope
+      ? undefined
+      : isGlobal ? (selectedProjectId || undefined) : projectId;
+    if (action === 'chat' && !targetProjectId && !customerId) {
+      setError(t('recurringTasks.chatRequiresScope'));
+      return;
+    }
+    if (action === 'chat' && !chatPrompt.trim()) {
+      setError(t('recurringTasks.chatRequiresPrompt'));
+      return;
+    }
     setSaving(true);
     try {
-      const targetProjectId = isCustomerScope
-        ? undefined
-        : isGlobal ? (selectedProjectId || undefined) : projectId;
       await api.recurringTasks.create({
         projectId: targetProjectId,
         customerId,
@@ -61,6 +77,13 @@ export default function RecurringTaskCreatePage() {
         dayOfMonth: showDayOfMonth ? dayOfMonth : undefined,
         month: showMonth ? month : undefined,
         hour,
+        action,
+        chat: action === 'chat' ? {
+          prompt: chatPrompt.trim(),
+          systemPrompt: chatSystemPrompt.trim() || undefined,
+          allowedTools: chatAllowedTools.split(',').map((t) => t.trim()).filter(Boolean),
+          sessionStrategy: chatSessionStrategy,
+        } : undefined,
       });
       if (isCustomerScope) {
         navigate(`/customers/${id}?tab=workflows`);
@@ -69,6 +92,8 @@ export default function RecurringTaskCreatePage() {
       } else {
         navigate(`/projects/${id}?tab=recurring-tasks`);
       }
+    } catch (err) {
+      setError((err as Error).message ?? 'create failed');
     } finally {
       setSaving(false);
     }
@@ -84,7 +109,23 @@ export default function RecurringTaskCreatePage() {
   return (
     <WorkflowPageShell backTo={backLink} backLabel={backLabel} title={t('recurringTasks.createTitle')}>
       <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <div className="rounded border border-red-800 bg-red-900/30 px-3 py-2 text-sm text-red-200">{error}</div>
+        )}
+
         <FormInput fieldClassName="w-full" label={t('common.title')} required type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('common.title')} autoFocus />
+
+        <FormSelect
+          fieldClassName="w-full"
+          label={t('recurringTasks.actionLabel')}
+          value={action}
+          onChange={(e) => setAction(e.target.value as RecurringAction)}
+        >
+          {ACTIONS.map((a) => (
+            <option key={a} value={a}>{t(`recurringTasks.action_${a}`)}</option>
+          ))}
+        </FormSelect>
+        <p className="-mt-2 text-xs text-gray-500">{t(`recurringTasks.actionHint_${action}`)}</p>
 
         {isGlobal && !isCustomerScope && (
           <FormSelect
@@ -164,6 +205,57 @@ export default function RecurringTaskCreatePage() {
             </FormSelect>
           </div>
         </div>
+
+        {action === 'chat' && (
+          <div className="border-t border-gray-800 pt-4">
+            <h2 className="mb-3 text-sm font-semibold text-gray-300">{t('recurringTasks.chatSection')}</h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">{t('recurringTasks.chatPrompt')}<span className="text-red-400 ml-1">*</span></label>
+                <textarea
+                  value={chatPrompt}
+                  onChange={(e) => setChatPrompt(e.target.value)}
+                  rows={4}
+                  required={action === 'chat'}
+                  className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-none"
+                  placeholder={t('recurringTasks.chatPromptPlaceholder')}
+                />
+                <p className="mt-1 text-xs text-gray-600">{t('recurringTasks.chatPromptHint')}</p>
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">{t('recurringTasks.chatSystemPrompt')}</label>
+                <textarea
+                  value={chatSystemPrompt}
+                  onChange={(e) => setChatSystemPrompt(e.target.value)}
+                  rows={2}
+                  className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-none"
+                  placeholder={t('recurringTasks.chatSystemPromptPlaceholder')}
+                />
+              </div>
+
+              <FormInput
+                fieldClassName="w-full"
+                label={t('recurringTasks.chatAllowedTools')}
+                type="text"
+                value={chatAllowedTools}
+                onChange={(e) => setChatAllowedTools(e.target.value)}
+                placeholder="todo_list, knowledge_search, rag_search"
+              />
+              <p className="-mt-2 text-xs text-gray-600">{t('recurringTasks.chatAllowedToolsHint')}</p>
+
+              <FormSelect
+                fieldClassName="w-full sm:w-64"
+                label={t('recurringTasks.chatSessionStrategy')}
+                value={chatSessionStrategy}
+                onChange={(e) => setChatSessionStrategy(e.target.value as 'new' | 'reuse')}
+              >
+                <option value="new">{t('recurringTasks.chatSessionNew')}</option>
+                <option value="reuse">{t('recurringTasks.chatSessionReuse')}</option>
+              </FormSelect>
+            </div>
+          </div>
+        )}
 
         <div className="flex gap-2 pt-2">
           <Button type="submit" variant="primary" size="lg" disabled={saving || !title.trim()}>

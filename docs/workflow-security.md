@@ -170,17 +170,40 @@ Blocked until separately designed and approved:
 
 ## Implemented MVP enforcement
 
-The backend now includes a workflow node policy registry (`backend/src/workflows/workflow-security.policy.ts`) that classifies known node types by risk and allowed scope.
+The backend includes a workflow node policy registry (`backend/src/workflows/workflow-security.policy.ts`) classifying known node types by risk and allowed scope, plus a runtime helper (`backend/src/workflows/workflow-security.runtime.ts`) that owns budgets and per-node re-checks.
 
-Current enforcement points (post T-250):
+Current enforcement points:
 
-- `WorkflowsService.validateGraph` reports purely structural issues — duplicate ids, self-loops, dangling edges, scope/owner consistency. It does NOT include policy enforcement.
-- `workflowSecurityIssues` (the policy check) reports unknown node types, blocked MVP risk classes, invalid scope/type combinations, and unexpected `secretRefs` on non-secret-aware nodes. It is enforced ONLY at the activation gate (`updateDefinition` when transitioning to `status=active`).
-- `startRun` does not re-validate; it trusts the activation gate and only requires the workflow to be in `status=active`. Runs operate on the immutable `definitionSnapshot` written at run creation.
+**Static / activation gate** (`WorkflowsService.updateDefinition`):
+- Structural validation: duplicate ids, self-loops, dangling edges, scope/owner consistency (`validateGraph`).
+- Policy validation: unknown types, blocked MVP risk classes, scope/type mismatches, `secretRefs` on non-secret-aware nodes (`workflowSecurityIssues`).
+- Per-node Zod schema validation against the executor's `configSchema`.
+- Definition size cap (`WORKFLOW_MAX_NODES_PER_DEFINITION`, default 100).
 
-The bootstrap policy registry (`backend/src/workflows/workflow-security.policy.ts`) was first introduced by T-250 to unblock activation; T-256 will own and extend it (permission model, secret-refs handling, agent-runtime gating).
+**Activation approval** (`workflow-definition.schema.ts` → `approvals[]`):
+- Every transition into `ACTIVE` (and every runtime-affecting republish) appends an approval entry with `version`, `approvedAt`, `approvedByUserId/Username/Role` (from `RequestContext`), and a `riskSummary` (count per risk class + allowed node types).
+- Approvals are append-only; the activation audit event references the latest entry.
 
-MVP allowed node families include manual/schedule/project/customer triggers, Todo safe writes, Knowledge/Manual/Changelog writes, User Question, Condition/Switch, Delay, Notification/Log, and scoped RAG search. Agent, secret, HTTP, workspace/git, and destructive nodes remain blocked until their approval/runtime models are implemented.
+**Runtime engine** (`WorkflowEngineService.runJob`):
+- Defense-in-depth re-check of the snapshot's node against the current policy (`checkRuntimeNode`). Snapshots that were valid at activation but whose policy was later tightened fail closed.
+- Run budget guard (`checkRunBudget`) on every job: caps `executedNodeCount` per run (`WORKFLOW_MAX_NODES_PER_RUN`, default 100) and total wall-clock duration (`WORKFLOW_MAX_RUN_DURATION_MS`, default 30 min). Exceeded budgets mark the node failed and fail the run with a stable error code (`node_count_exceeded` / `duration_exceeded`).
+- `WorkflowRun.executedNodeCount` is incremented per job start and persisted so workers across the pool see a consistent count.
+
+**Redaction at write time** (`backend/src/workflows/workflow-redaction.ts`):
+- All persisted run data passes through `redact`/`redactValue`/`redactLogs` before being saved: `WorkflowNodeRun.outputSnapshot`, `WorkflowNodeRun.error`, `WorkflowNodeRun.logs`, `WorkflowRun.error`, and the downstream `WorkflowRun.context.nodes[*]` copy that subsequent nodes read.
+- Per-line log redaction is also applied at append time inside the executor logger, so a crash between append and save cannot leak.
+- The redactor masks sensitive keys (`authorization`, `apiKey`, `secret`, `token`, `password`, `passwd`, `credential`, `private-key`, `cookie`), Bearer tokens, `key=value` credentials, and (when secret resolution is added) known token literals registered for the run.
+
+**Audit trail** (`AuditLogService`):
+- `workflow.definition.created`, `workflow.definition.updated`, `workflow.definition.<status>` (active/paused/archived/draft), `workflow.definition.deleted`
+- `workflow.activation.approved`, `workflow.activation.denied`, `workflow.validation.failed`
+- `workflow.run.queued`, `workflow.run.started`, `workflow.run.succeeded`, `workflow.run.failed`, `workflow.run.cancelled`, `workflow.run.budget_exceeded`
+- `workflow.node.started`, `workflow.node.succeeded`, `workflow.node.failed`, `workflow.node.waiting`
+- `workflow.permission.denied` (runtime policy block)
+
+Each audit entry carries `runId`/`definitionId`/`version`/`scope`/`projectId`/`customerId` in `meta`. Definition-level entries also resolve the actor via `RequestContext` (user/api-key trail handled by `AuditLogService` itself).
+
+MVP allowed node families include manual/schedule/project/customer triggers, Todo safe writes, Knowledge/Manual/Changelog writes, User Question, Condition/Switch, Delay, Notification/Log, and scoped RAG search. Agent, secret, HTTP, workspace/git, and destructive nodes remain blocked.
 
 ## Runner enforcement checklist
 

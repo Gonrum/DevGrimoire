@@ -78,6 +78,9 @@ export class MonitoringService {
   }
 
   async create(dto: CreateHealthcheckDto): Promise<HealthcheckDocument> {
+    if (!dto.customerId) {
+      throw new BadRequestException('customerId is required');
+    }
     await this.customersService.findById(dto.customerId);
 
     try {

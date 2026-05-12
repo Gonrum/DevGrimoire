@@ -279,6 +279,25 @@ export class RetryWorkflowRunDto {
   fromNodeId?: string;
 }
 
+export class InstantiateWorkflowTemplateDto {
+  @IsString()
+  templateId: string;
+
+  @IsString()
+  name: string;
+
+  @IsEnum(WorkflowScope)
+  scope: WorkflowScope;
+
+  @IsOptional()
+  @IsMongoId()
+  projectId?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  customerId?: string;
+}
+
 export class TestWorkflowNodeDto {
   @ValidateNested()
   @Type(() => WorkflowNodeDto)

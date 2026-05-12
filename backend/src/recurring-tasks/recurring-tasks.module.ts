@@ -7,6 +7,8 @@ import { RecurringTasksScheduler } from './recurring-tasks.scheduler';
 import { TodosModule } from '../todos/todos.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { CustomersModule } from '../customers/customers.module';
+import { ChatModule } from '../chat/chat.module';
+import { WorkflowsModule } from '../workflows/workflows.module';
 import { Project, ProjectSchema } from '../projects/schemas/project.schema';
 
 @Module({
@@ -18,6 +20,8 @@ import { Project, ProjectSchema } from '../projects/schemas/project.schema';
     TodosModule,
     NotificationsModule,
     CustomersModule,
+    ChatModule,
+    WorkflowsModule,
   ],
   controllers: [RecurringTasksController],
   providers: [RecurringTasksService, RecurringTasksScheduler],

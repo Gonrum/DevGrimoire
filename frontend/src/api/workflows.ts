@@ -68,6 +68,9 @@ export interface WorkflowRun {
   error?: { code: string; message: string };
   context?: { nodes?: Record<string, unknown>; input?: Record<string, unknown> };
   triggeredBy?: { type: string; scheduleSlotAt?: string; userId?: string };
+  parentRunId?: string;
+  retryFromNodeId?: string;
+  executedNodeCount?: number;
   createdAt: string;
 }
 
@@ -179,9 +182,24 @@ export const workflowsApi = {
       body: JSON.stringify({ reason }),
     }),
   retryRun: (id: string, fromNodeId?: string) =>
-    request<{ ok: true; id: string }>(`/workflows/runs/${id}/retry`, {
+    request<{ ok: true; runId: string; parentRunId: string }>(`/workflows/runs/${id}/retry`, {
       method: 'POST',
       body: JSON.stringify({ fromNodeId }),
+    }),
+  listTemplates: () =>
+    request<Array<{
+      id: string;
+      name: string;
+      description: string;
+      category: string;
+      supportedScopes: WorkflowScope[];
+      triggerType: 'manual' | 'schedule';
+      nodeCount: number;
+    }>>('/workflows/templates'),
+  instantiateTemplate: (input: { templateId: string; name: string; scope: WorkflowScope; projectId?: string; customerId?: string }) =>
+    request<WorkflowDefinition>('/workflows/templates/instantiate', {
+      method: 'POST',
+      body: JSON.stringify(input),
     }),
   listNodeRuns: (runId: string) =>
     request<WorkflowNodeRun[]>(`/workflows/runs/${runId}/node-runs`),

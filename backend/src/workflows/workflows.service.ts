@@ -28,6 +28,11 @@ import {
 import { PROJECT_CHANGED } from '../events/project-event';
 import { workflowSecurityIssues } from './workflow-security.policy';
 import { NodeRegistry } from './engine/node-registry';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { RequestContext } from '../common/request-context';
+import { redact } from './workflow-redaction';
+import { summarizeRisk, WORKFLOW_RUNTIME_LIMITS } from './workflow-security.runtime';
+import { getTemplate, listTemplatesPublic, WorkflowTemplate } from './workflow-templates';
 
 const RUNTIME_FIELDS: Array<keyof UpdateWorkflowDefinitionDto> = ['nodes', 'edges', 'trigger'];
 
@@ -44,7 +49,39 @@ export class WorkflowsService {
     private readonly nodeRunModel: Model<WorkflowNodeRunDocument>,
     private readonly eventEmitter: EventEmitter2,
     private readonly nodeRegistry: NodeRegistry,
+    private readonly auditLog: AuditLogService,
   ) {}
+
+  private async audit(
+    action: string,
+    def?: WorkflowDefinitionDocument,
+    run?: WorkflowRunDocument,
+    extra?: Record<string, unknown>,
+  ): Promise<void> {
+    const target = run ?? def;
+    if (!target) return;
+    await this.auditLog.record({
+      action,
+      entityType: run ? 'workflow-run' : 'workflow-definition',
+      entityId: target._id.toString(),
+      meta: {
+        ...(def ? { definitionId: def._id.toString(), version: def.version, scope: def.scope, status: def.status } : {}),
+        ...(run
+          ? {
+              definitionId: run.definitionId?.toString(),
+              definitionVersion: run.definitionVersion,
+              scope: run.scope,
+              status: run.status,
+            }
+          : {}),
+        ...(def?.projectId ? { projectId: def.projectId.toString() } : {}),
+        ...(def?.customerId ? { customerId: def.customerId.toString() } : {}),
+        ...(run?.projectId ? { projectId: run.projectId.toString() } : {}),
+        ...(run?.customerId ? { customerId: run.customerId.toString() } : {}),
+        ...(extra ?? {}),
+      },
+    });
+  }
 
   private emitDefinition(
     action: 'created' | 'updated' | 'deleted',
@@ -96,6 +133,11 @@ export class WorkflowsService {
 
   async createDefinition(dto: CreateWorkflowDefinitionDto): Promise<WorkflowDefinitionDocument> {
     this.assertScope(dto);
+    if ((dto.nodes?.length ?? 0) > WORKFLOW_RUNTIME_LIMITS.maxNodesPerDefinition) {
+      throw new BadRequestException(
+        `Workflow exceeds ${WORKFLOW_RUNTIME_LIMITS.maxNodesPerDefinition} nodes`,
+      );
+    }
     const created = await this.definitionModel.create({
       scope: dto.scope,
       projectId: dto.projectId ? new Types.ObjectId(dto.projectId) : undefined,
@@ -111,6 +153,7 @@ export class WorkflowsService {
       status: WorkflowStatus.DRAFT,
     });
     this.emitDefinition('created', created);
+    await this.audit('workflow.definition.created', created);
     return created;
   }
 
@@ -144,6 +187,7 @@ export class WorkflowsService {
     dto: UpdateWorkflowDefinitionDto,
   ): Promise<WorkflowDefinitionDocument> {
     const existing = await this.getDefinition(id);
+    const previousStatus = existing.status;
 
     const touchesRuntime = RUNTIME_FIELDS.some((field) => dto[field] !== undefined);
     const willBump = dto.publish === true || (touchesRuntime && existing.status !== WorkflowStatus.DRAFT);
@@ -157,6 +201,12 @@ export class WorkflowsService {
     if (dto.edges !== undefined) existing.edges = dto.edges as never;
     if (dto.ui !== undefined) existing.ui = dto.ui;
 
+    if ((existing.nodes?.length ?? 0) > WORKFLOW_RUNTIME_LIMITS.maxNodesPerDefinition) {
+      throw new BadRequestException(
+        `Workflow exceeds ${WORKFLOW_RUNTIME_LIMITS.maxNodesPerDefinition} nodes`,
+      );
+    }
+
     if (existing.status === WorkflowStatus.ACTIVE) {
       const validation = this.validateGraph({
         scope: existing.scope,
@@ -166,6 +216,9 @@ export class WorkflowsService {
         edges: existing.edges as never,
       });
       if (!validation.valid) {
+        await this.audit('workflow.validation.failed', existing, undefined, {
+          issues: validation.issues,
+        });
         throw new BadRequestException(`Workflow cannot be activated: ${validation.issues.join('; ')}`);
       }
       const secIssues = workflowSecurityIssues({
@@ -173,6 +226,9 @@ export class WorkflowsService {
         nodes: existing.nodes as never,
       });
       if (secIssues.length > 0) {
+        await this.audit('workflow.activation.denied', existing, undefined, {
+          issues: secIssues,
+        });
         throw new BadRequestException(`Workflow cannot be activated: ${secIssues.join('; ')}`);
       }
       const schemaIssues: string[] = [];
@@ -187,14 +243,54 @@ export class WorkflowsService {
         }
       }
       if (schemaIssues.length > 0) {
+        await this.audit('workflow.validation.failed', existing, undefined, {
+          issues: schemaIssues,
+        });
         throw new BadRequestException(`Workflow cannot be activated: ${schemaIssues.join('; ')}`);
       }
     }
 
     if (willBump) existing.version += 1;
 
+    // Append an approval entry on every activation event (DRAFT/PAUSED → ACTIVE,
+    // or version bump while ACTIVE), so re-publishes leave an audit trail too.
+    const becameActive =
+      existing.status === WorkflowStatus.ACTIVE &&
+      (previousStatus !== WorkflowStatus.ACTIVE || willBump);
+    if (becameActive) {
+      const actor = RequestContext.getUser();
+      const risk = summarizeRisk(existing.nodes as never);
+      existing.approvals = [
+        ...(existing.approvals ?? []),
+        {
+          version: existing.version,
+          approvedAt: new Date(),
+          approvedByUserId:
+            actor?.userId && isValidObjectId(actor.userId) ? new Types.ObjectId(actor.userId) : undefined,
+          approvedByUsername: actor?.username,
+          approvedByRole: actor?.role,
+          riskSummary: risk,
+        } as never,
+      ];
+    }
+
     const saved = await existing.save();
     this.emitDefinition('updated', saved);
+
+    const lifecycleAction =
+      previousStatus !== saved.status
+        ? `workflow.definition.${saved.status}`
+        : 'workflow.definition.updated';
+    await this.audit(lifecycleAction, saved, undefined, {
+      previousStatus,
+      versionBumped: willBump,
+    });
+    if (becameActive) {
+      await this.audit('workflow.activation.approved', saved, undefined, {
+        version: saved.version,
+        risk: saved.approvals[saved.approvals.length - 1]?.riskSummary,
+      });
+    }
     return saved;
   }
 
@@ -204,6 +300,7 @@ export class WorkflowsService {
     await this.nodeRunModel.deleteMany({ definitionId: def._id }).exec();
     await def.deleteOne();
     this.emitDefinition('deleted', def);
+    await this.audit('workflow.definition.deleted', def);
   }
 
   async startRun(dto: StartWorkflowRunDto, userId?: string): Promise<WorkflowRunDocument> {
@@ -249,6 +346,9 @@ export class WorkflowsService {
 
     this.emitRun('created', run, `Workflow-Run für "${def.name}" v${def.version} eingereiht`);
     this.eventEmitter.emit('workflow.run.queued', { runId: (run._id as { toString(): string }).toString() });
+    await this.audit('workflow.run.queued', def, run, {
+      trigger: run.trigger?.type,
+    });
     return run;
   }
 
@@ -284,6 +384,13 @@ export class WorkflowsService {
     const startedAt = run.startedAt ? new Date(run.startedAt).getTime() : undefined;
     const finishedAt = run.finishedAt ? new Date(run.finishedAt).getTime() : undefined;
 
+    const childRuns = await this.runModel
+      .find({ parentRunId: run._id })
+      .select('_id status createdAt retryFromNodeId')
+      .sort({ createdAt: 1 })
+      .lean()
+      .exec();
+
     return {
       run: {
         id: run._id.toString(),
@@ -299,6 +406,14 @@ export class WorkflowsService {
         durationMs: startedAt && finishedAt ? finishedAt - startedAt : undefined,
         currentNodeIds: run.currentNodeIds ?? [],
         error: this.safePreview(run.error),
+        parentRunId: run.parentRunId?.toString(),
+        retryFromNodeId: run.retryFromNodeId,
+        retries: childRuns.map((c) => ({
+          id: (c._id as Types.ObjectId).toString(),
+          status: c.status,
+          createdAt: c.createdAt,
+          retryFromNodeId: (c as { retryFromNodeId?: string }).retryFromNodeId,
+        })),
       },
       summary: {
         totalNodeRuns: nodeRuns.length,
@@ -340,6 +455,7 @@ export class WorkflowsService {
     run.error = { code: 'cancelled', message: dto.reason ?? 'Cancelled by user' };
     const saved = await run.save();
     this.emitRun('updated', saved, `Workflow-Run abgebrochen (${dto.reason ?? 'kein Grund'})`);
+    await this.audit('workflow.run.cancelled', undefined, saved, { reason: dto.reason });
     return saved;
   }
 
@@ -418,57 +534,66 @@ export class WorkflowsService {
   }
 
   private safePreview(value: unknown, maxChars = 2000): { value: unknown; truncated: boolean; maskedPaths: string[] } {
-    const maskedPaths: string[] = [];
-    const seen = new WeakSet<object>();
-    let truncated = false;
-    const sensitiveKey = /(authorization|api[-_]?key|secret|token|password|passwd|credential|private[-_]?key|cookie)/i;
-    const redactString = (input: string): string =>
-      input
-        .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [MASKED]')
-        .replace(/(api[-_]?key|secret|token|password|passwd)\s*[:=]\s*[^\s,;]+/gi, '$1=[MASKED]');
-    const visit = (current: unknown, path: string, depth: number): unknown => {
-      if (current === null || current === undefined) return current;
-      if (typeof current === 'string') {
-        const redacted = redactString(current);
-        if (redacted !== current) maskedPaths.push(path || '$');
-        if (redacted.length > 500) {
-          truncated = true;
-          return `${redacted.slice(0, 500)}…`;
-        }
-        return redacted;
-      }
-      if (typeof current !== 'object') return current;
-      if (seen.has(current)) return '[Circular]';
-      seen.add(current);
-      if (depth >= 6) {
-        truncated = true;
-        return '[Truncated: max depth]';
-      }
-      if (Array.isArray(current)) {
-        if (current.length > 25) truncated = true;
-        return current.slice(0, 25).map((item, idx) => visit(item, `${path}[${idx}]`, depth + 1));
-      }
-      const out: Record<string, unknown> = {};
-      const entries = Object.entries(current as Record<string, unknown>);
-      if (entries.length > 50) truncated = true;
-      for (const [key, child] of entries.slice(0, 50)) {
-        const childPath = path ? `${path}.${key}` : key;
-        if (sensitiveKey.test(key)) {
-          out[key] = '[MASKED]';
-          maskedPaths.push(childPath);
-          continue;
-        }
-        out[key] = visit(child, childPath, depth + 1);
-      }
-      return out;
-    };
+    return redact(value, { maxChars });
+  }
 
-    const preview = visit(value, '', 0);
-    const json = JSON.stringify(preview);
-    if (json && json.length > maxChars) {
-      truncated = true;
-      return { value: `${json.slice(0, maxChars)}…`, truncated, maskedPaths };
+  listTemplates() {
+    return listTemplatesPublic();
+  }
+
+  /**
+   * Materialize a template into a fresh draft WorkflowDefinition. The user
+   * supplies scope + name + owner; nodes/edges/trigger are copied from the
+   * template registry. Returns the new definition (status=DRAFT) so the user
+   * can immediately open it in the editor and tweak prompts/cron.
+   */
+  async instantiateTemplate(input: {
+    templateId: string;
+    name: string;
+    scope: WorkflowScope;
+    projectId?: string;
+    customerId?: string;
+  }): Promise<WorkflowDefinitionDocument> {
+    const template = getTemplate(input.templateId);
+    if (!template) throw new BadRequestException(`Unknown template "${input.templateId}"`);
+    if (!template.supportedScopes.includes(input.scope)) {
+      throw new BadRequestException(
+        `Template "${template.id}" does not support ${input.scope} scope (allowed: ${template.supportedScopes.join(', ')})`,
+      );
     }
-    return { value: preview, truncated, maskedPaths };
+    return this.createDefinition({
+      scope: input.scope,
+      projectId: input.projectId,
+      customerId: input.customerId,
+      name: input.name,
+      description: template.description,
+      tags: ['template', template.category],
+      trigger: this.materializeTrigger(template),
+      nodes: template.nodes.map((n) => ({
+        id: n.id,
+        type: n.type,
+        label: n.label,
+        position: n.position,
+        config: n.config ?? {},
+        secretRefs: n.secretRefs ?? [],
+      })) as never,
+      edges: template.edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        branch: e.branch ?? 'success',
+      })) as never,
+    });
+  }
+
+  private materializeTrigger(template: WorkflowTemplate): Record<string, unknown> {
+    if (template.trigger.type === 'schedule') {
+      return {
+        type: 'schedule',
+        cron: template.trigger.cron,
+        intervalMinutes: template.trigger.intervalMinutes,
+      };
+    }
+    return { type: 'manual' };
   }
 }

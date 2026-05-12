@@ -58,7 +58,7 @@ export function WorkflowProjectTab({ scope, projectId, customerId }: Props) {
         defaultCustomerId={customerId}
         onClose={() => { setCreateOpen(false); void load(); }}
       />
-      {runId && <WorkflowRunInspector runId={runId} onClose={() => setRunId(null)} />}
+      {runId && <WorkflowRunInspector runId={runId} onClose={() => setRunId(null)} onNavigate={setRunId} />}
     </div>
   );
 }

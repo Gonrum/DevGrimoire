@@ -240,6 +240,8 @@ In `~/.claude.json`:
 
 > **Note:** When authentication is enabled, the HTTP MCP transports require a DevGrimoire API key (`Authorization: Bearer cv_...` or `?apiKey=cv_...`). When authentication is disabled, all endpoints including MCP are open and must be restricted via firewall or VPN.
 
+For GitHub Copilot Cloud Agent, use a dedicated scoped API key and explicit `tools` allowlist. See [GitHub Copilot Cloud Agent MCP Preset](docs/copilot-cloud-agent-mcp.md).
+
 ## Authentication
 
 DevGrimoire supports multi-user authentication with roles:

@@ -903,6 +903,19 @@ export interface Snippet {
 
 export type RecurringFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly';
 
+export type RecurringAction = 'todo' | 'chat';
+export type RecurringRunStatus = 'pending' | 'succeeded' | 'failed';
+
+export interface RecurringChatConfig {
+  prompt: string;
+  systemPrompt?: string;
+  allowedTools?: string[];
+  agentRoleId?: string;
+  timeoutMs?: number;
+  maxToolIterations?: number;
+  sessionStrategy?: 'new' | 'reuse';
+}
+
 export interface RecurringTask {
   _id: string;
   projectId?: string;
@@ -923,6 +936,12 @@ export interface RecurringTask {
   nextRun: string;
   createdTodoIds: string[];
   maxCatchUp: number;
+  action?: RecurringAction;
+  chat?: RecurringChatConfig;
+  createdByUserId?: string;
+  chatSessionIds?: string[];
+  lastRunStatus?: RecurringRunStatus;
+  lastRunError?: string;
   createdAt: string;
   updatedAt: string;
 }

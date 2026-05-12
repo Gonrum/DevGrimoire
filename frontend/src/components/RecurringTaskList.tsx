@@ -64,6 +64,9 @@ export default function RecurringTaskList({ entries, projectId, customerId, proj
                   <div className="flex items-center gap-2 min-w-0">
                     <span className={`w-2 h-2 rounded-full shrink-0 ${rt.active ? 'bg-green-400' : 'bg-gray-600'}`} />
                     <span className="text-sm text-gray-200 truncate">{rt.title}</span>
+                    {rt.action === 'chat' && (
+                      <Badge color="bg-fuchsia-900/30 text-fuchsia-300">{t('recurringTasks.actionChatBadge')}</Badge>
+                    )}
                     {isGlobal && !rt.projectId && (
                       <Badge color="bg-cyan-900/30 text-cyan-300">{t('recurringTasks.systemWide')}</Badge>
                     )}
@@ -87,7 +90,16 @@ export default function RecurringTaskList({ entries, projectId, customerId, proj
                       {t('recurringTasks.lastRun')}: {new Date(rt.lastRun).toLocaleDateString(dateFmtLocale, { day: '2-digit', month: '2-digit', year: 'numeric' })}
                     </span>
                   )}
-                  <span>{rt.createdTodoIds.length} {t('recurringTasks.createdTodos')}</span>
+                  {rt.action === 'chat' ? (
+                    <span>{(rt.chatSessionIds?.length ?? 0)} {t('recurringTasks.chatSessions')}</span>
+                  ) : (
+                    <span>{rt.createdTodoIds.length} {t('recurringTasks.createdTodos')}</span>
+                  )}
+                  {rt.lastRunStatus === 'failed' && (
+                    <span className="text-red-400" title={rt.lastRunError ?? ''}>
+                      {t('recurringTasks.lastRunFailed')}
+                    </span>
+                  )}
                 </div>
               </Link>
             );

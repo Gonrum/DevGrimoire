@@ -1,5 +1,7 @@
-import { IsString, IsOptional, IsEnum, IsArray, IsMongoId, IsNumber, IsBoolean, Min, Max } from 'class-validator';
-import { RecurringFrequency } from '../schemas/recurring-task.schema';
+import { IsString, IsOptional, IsEnum, IsArray, IsMongoId, IsNumber, IsBoolean, Min, Max, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { RecurringAction, RecurringFrequency } from '../schemas/recurring-task.schema';
+import { RecurringChatConfigDto } from './create-recurring-task.dto';
 
 export class UpdateRecurringTaskDto {
   @IsOptional()
@@ -64,4 +66,13 @@ export class UpdateRecurringTaskDto {
   @Min(1)
   @Max(10)
   maxCatchUp?: number;
+
+  @IsOptional()
+  @IsEnum(RecurringAction)
+  action?: RecurringAction;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RecurringChatConfigDto)
+  chat?: RecurringChatConfigDto;
 }

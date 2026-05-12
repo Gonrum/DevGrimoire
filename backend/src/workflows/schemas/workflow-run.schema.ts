@@ -65,6 +65,30 @@ export class WorkflowRun {
     userId?: string;
   };
 
+  /** Number of node executions performed by this run. Capped per security policy. */
+  @Prop({ default: 0, min: 0 })
+  executedNodeCount: number;
+
+  /**
+   * If this run is a retry, the originating run that produced it. The two
+   * runs share `definitionId` and `definitionSnapshot`. The retry's status is
+   * independent — the parent stays in its terminal status (FAILED/CANCELLED).
+   */
+  @Prop({ type: Types.ObjectId, ref: 'WorkflowRun', index: true })
+  parentRunId?: Types.ObjectId;
+
+  /** Optional: node id the retry started from (vs. resuming from the failed node). */
+  @Prop()
+  retryFromNodeId?: string;
+
+  /**
+   * Stamped atomically when a retry is initiated for this run. Used to prevent
+   * a second concurrent retry-call from spawning a duplicate child run.
+   * The field is set on the PARENT, not on the child.
+   */
+  @Prop({ type: Date })
+  retryClaimedAt?: Date;
+
   createdAt?: Date;
   updatedAt?: Date;
 }

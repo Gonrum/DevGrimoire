@@ -1,5 +1,41 @@
-import { IsString, IsOptional, IsEnum, IsArray, IsMongoId, IsNumber, IsBoolean, Min, Max } from 'class-validator';
-import { RecurringFrequency } from '../schemas/recurring-task.schema';
+import { IsString, IsOptional, IsEnum, IsArray, IsMongoId, IsNumber, IsBoolean, MinLength, Min, Max, ValidateNested, IsObject } from 'class-validator';
+import { Type } from 'class-transformer';
+import { RecurringAction, RecurringFrequency } from '../schemas/recurring-task.schema';
+
+export class RecurringChatConfigDto {
+  @IsString()
+  @MinLength(1)
+  prompt: string;
+
+  @IsOptional()
+  @IsString()
+  systemPrompt?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  allowedTools?: string[];
+
+  @IsOptional()
+  @IsString()
+  agentRoleId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(5_000)
+  @Max(600_000)
+  timeoutMs?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(20)
+  maxToolIterations?: number;
+
+  @IsOptional()
+  @IsEnum(['new', 'reuse'])
+  sessionStrategy?: 'new' | 'reuse';
+}
 
 export class CreateRecurringTaskDto {
   @IsOptional()
@@ -70,4 +106,17 @@ export class CreateRecurringTaskDto {
   @Min(1)
   @Max(10)
   maxCatchUp?: number;
+
+  @IsOptional()
+  @IsEnum(RecurringAction)
+  action?: RecurringAction;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RecurringChatConfigDto)
+  chat?: RecurringChatConfigDto;
+
+  @IsOptional()
+  @IsMongoId()
+  createdByUserId?: string;
 }

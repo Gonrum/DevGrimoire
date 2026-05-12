@@ -74,7 +74,7 @@ export default function WorkflowsListPage() {
       {!loading && !error && <WorkflowCardGrid workflows={workflows} onRun={onRun} />}
 
       <CreateWorkflowDialog open={createOpen} onClose={() => { setCreateOpen(false); void load(); }} />
-      {runId && <WorkflowRunInspector runId={runId} onClose={() => setRunId(null)} />}
+      {runId && <WorkflowRunInspector runId={runId} onClose={() => setRunId(null)} onNavigate={setRunId} />}
     </div>
   );
 }
