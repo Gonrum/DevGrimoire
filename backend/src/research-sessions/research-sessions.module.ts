@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import {
   ResearchSession,
@@ -11,6 +11,8 @@ import {
 import { ResearchSessionsService } from './research-sessions.service';
 import { ResearchSessionsController } from './research-sessions.controller';
 import { CountersModule } from '../counters/counters.module';
+import { ChatModule } from '../chat/chat.module';
+import { ResearchModule } from '../research/research.module';
 
 @Module({
   imports: [
@@ -19,6 +21,10 @@ import { CountersModule } from '../counters/counters.module';
       { name: ResearchStep.name, schema: ResearchStepSchema },
     ]),
     CountersModule,
+    ResearchModule,
+    // forwardRef gegen mögliche zukünftige Cycles (ChatModule hat bereits
+    // einen forwardRef-Cycle mit RecurringTasks/Workflows).
+    forwardRef(() => ChatModule),
   ],
   controllers: [ResearchSessionsController],
   providers: [ResearchSessionsService],

@@ -215,4 +215,125 @@ ${contextSection}${attachmentSection}`;
       images: images && images.length > 0 ? images : undefined,
     };
   }
+
+  /**
+   * Multi-project research-mode context builder. RAG-searches per project in
+   * parallel, dedupes by sourceId, and assembles a system prompt that frames
+   * the assistant as a researcher across the listed projects.
+   *
+   * No customer scoping (research is project-centric). Attachments not used —
+   * research sessions don't accept file uploads yet (YAGNI). Tools allowed.
+   */
+  async buildResearch(
+    projectIds: string[],
+    userMessage: string,
+    history: ChatMessage[],
+    options: {
+      topK?: number;
+      historyLimit?: number;
+      toolsEnabled?: boolean;
+      agentRoleId?: string;
+    } = {},
+  ): Promise<ContextBuildResult> {
+    if (projectIds.length === 0) {
+      throw new Error('research context requires at least one projectId');
+    }
+    const toolsEnabled = options.toolsEnabled ?? false;
+    const topK = options.topK ?? (toolsEnabled ? 3 : 6);
+    const historyLimit = options.historyLimit ?? 10;
+
+    // Fetch project metadata in parallel.
+    const projects = await Promise.all(
+      projectIds.map((pid) => this.projects.findById(pid).catch(() => null)),
+    );
+    const validProjects = projects.filter((p): p is NonNullable<typeof p> => p !== null);
+    if (validProjects.length === 0) {
+      throw new Error('none of the projectIds resolved to an accessible project');
+    }
+
+    // RAG search per project, parallel, then merge by sourceId keeping highest score.
+    const perProjectResults = await Promise.all(
+      validProjects.map((p) =>
+        this.rag
+          .search(userMessage, p._id.toString(), undefined, topK)
+          .catch((err) => {
+            this.logger.warn(`RAG unavailable for ${p.name}: ${(err as Error).message}`);
+            return [] as Awaited<ReturnType<RagService['search']>>;
+          }),
+      ),
+    );
+
+    const dedupBySource = new Map<string, { hit: Awaited<ReturnType<RagService['search']>>[number]; projectName: string }>();
+    perProjectResults.forEach((results, idx) => {
+      const projectName = validProjects[idx].name;
+      for (const hit of results) {
+        const existing = dedupBySource.get(hit.id);
+        if (!existing || hit.score > existing.hit.score) {
+          dedupBySource.set(hit.id, { hit, projectName });
+        }
+      }
+    });
+
+    const mergedHits = [...dedupBySource.values()]
+      .sort((a, b) => b.hit.score - a.hit.score)
+      .slice(0, topK);
+
+    const contextSection =
+      mergedHits.length > 0
+        ? mergedHits
+            .map(
+              ({ hit, projectName }, i) =>
+                `(${i + 1}) [${hit.entity} · ${projectName}] ${hit.title}\n${hit.content.slice(0, 400)}`,
+            )
+            .join('\n\n')
+        : '(keine relevanten Treffer im RAG-Index über die ausgewählten Projekte)';
+
+    const projectList = validProjects
+      .map((p) => `- ${p.name}${p.techStack?.length ? ` (${p.techStack.join(', ')})` : ''}`)
+      .join('\n');
+
+    const toolUsageHint = toolsEnabled
+      ? `
+
+Du hast Tools, mit denen du Live-Daten aus den Projekten abrufen kannst (z.B. \`todo_list\`, \`rag_search\`, \`knowledge_search\`).
+Setze \`projectId\` bei Tool-Aufrufen auf eines der Projekt-IDs: ${validProjects.map((p) => p._id.toString()).join(', ')}.`
+      : '';
+
+    const rolePromptBlock = this.agentRoles.buildRolePromptBlock(options.agentRoleId);
+
+    const systemPrompt = `${rolePromptBlock}Du bist ein technischer Recherche-Assistent für eine projektübergreifende Untersuchung.
+Antworte präzise und auf Deutsch. Nutze den bereitgestellten Kontext aus den unten gelisteten Projekten als Quelle.
+Wenn der Kontext die Frage nicht eindeutig beantwortet, sag das klar statt zu raten.
+Verweise nach Möglichkeit auf konkrete Einträge (z.B. "laut (2) im Kontext, Projekt X").${toolUsageHint}
+
+# Projekte im Scope
+${projectList}
+
+# Relevanter Kontext
+${contextSection}`;
+
+    const historyMessages: LlmMessage[] = history
+      .slice(-historyLimit)
+      .filter((m) => m.role !== 'system')
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    const messages: LlmMessage[] = [
+      { role: 'system', content: systemPrompt },
+      ...historyMessages,
+      { role: 'user', content: userMessage },
+    ];
+
+    const contextRefs: ChatContextRef[] = mergedHits.map(({ hit }) => ({
+      entity: hit.entity,
+      entityId: hit.id,
+      title: hit.title,
+      score: hit.score,
+    }));
+
+    return {
+      systemPrompt,
+      messages,
+      contextRefs,
+    };
+  }
 }

@@ -25,6 +25,11 @@ import { CountersService } from '../counters/counters.service';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { OnEvent } from '@nestjs/event-emitter';
 import { RequestContext } from '../common/request-context';
+import { ChatContextService } from '../chat/chat-context.service';
+import { ChatLlmService, LlmMessage } from '../chat/chat-llm.service';
+import { ChatContextRef } from '../chat/schemas/chat-session.schema';
+import { ResearchService } from '../research/research.service';
+import { Logger } from '@nestjs/common';
 
 const STATUS_ORDER: Record<ResearchSessionStatus, number> = {
   [ResearchSessionStatus.OPEN]: 0,
@@ -47,6 +52,8 @@ function validateTransition(
 
 @Injectable()
 export class ResearchSessionsService {
+  private readonly logger = new Logger(ResearchSessionsService.name);
+
   constructor(
     @InjectModel(ResearchSession.name)
     private readonly sessionModel: Model<ResearchSessionDocument>,
@@ -54,6 +61,9 @@ export class ResearchSessionsService {
     private readonly stepModel: Model<ResearchStepDocument>,
     private readonly counters: CountersService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly chatContext: ChatContextService,
+    private readonly chatLlm: ChatLlmService,
+    private readonly research: ResearchService,
   ) {}
 
   private actorVisibleProjectIds(): Set<string> | null {
@@ -196,21 +206,236 @@ export class ResearchSessionsService {
   async updateStep(id: string, dto: UpdateResearchStepDto): Promise<ResearchStepDocument> {
     const step = await this.getStep(id);
 
+    const transitionedToDone =
+      dto.status === ResearchStepStatus.DONE && step.status !== ResearchStepStatus.DONE;
+
     if (dto.status && dto.status !== step.status) {
       validateTransition(step.status, dto.status);
       step.status = dto.status;
-      // Auto-save trigger for `→ done` happens in Phase 4 via a separate hook in
-      // this method. For now we just allow the transition.
     }
     if (dto.title !== undefined) step.title = dto.title;
     if (dto.order !== undefined) step.order = dto.order;
     await step.save();
+
+    // Auto-convert to research_* entry on transition → done.
+    if (transitionedToDone && step.messages.length > 0 && !step.researchEntryId) {
+      try {
+        await this.autoSaveResearchEntry(step);
+      } catch (err) {
+        // Roll back status so user can retry.
+        this.logger.warn(`Auto-save failed for step ${id}: ${(err as Error).message}`);
+        step.status = ResearchStepStatus.IN_PROGRESS;
+        await step.save();
+        throw new BadRequestException(
+          `Auto-Summary fehlgeschlagen: ${(err as Error).message}. Step bleibt auf in_progress.`,
+        );
+      }
+    }
     return step;
+  }
+
+  /** Manual save without status transition. */
+  async saveStepAsResearch(stepId: string): Promise<{ researchEntryId: string }> {
+    const step = await this.getStep(stepId);
+    if (step.messages.length === 0) {
+      throw new BadRequestException('Step has no messages to summarize');
+    }
+    await this.autoSaveResearchEntry(step);
+    if (!step.researchEntryId) {
+      throw new Error('Save completed but researchEntryId missing');
+    }
+    return { researchEntryId: step.researchEntryId.toString() };
+  }
+
+  private async autoSaveResearchEntry(step: ResearchStepDocument): Promise<void> {
+    const session = await this.getSession(step.sessionId.toString());
+    if (session.projectIds.length === 0) {
+      throw new Error('Session has no projectIds — cannot save research entry');
+    }
+
+    // Collect all RAG context refs that ever flowed into this step (from
+    // assistant messages persisted with contextUsed).
+    const sourceIds = new Set<string>();
+    for (const msg of step.messages) {
+      if (msg.contextUsed) {
+        for (const ref of msg.contextUsed) {
+          if (ref.entityId) sourceIds.add(`${ref.entity}:${ref.entityId}`);
+        }
+      }
+    }
+
+    const conversationText = step.messages
+      .map((m) => `**${m.role.toUpperCase()}**\n${m.content}`)
+      .join('\n\n');
+
+    const prompt: LlmMessage[] = [
+      {
+        role: 'system',
+        content: `Du bist ein Recherche-Assistent. Fasse die folgende Q&A-Konversation als strukturierten Research-Eintrag zusammen.
+
+Antwort-Format (ausschließlich Markdown, keine zusätzlichen Erklärungen):
+
+# {Step-Titel als Überschrift}
+
+## Antwort
+{Klare, zusammenfassende Antwort auf die ursprüngliche Frage, 2-6 Sätze}
+
+## Wichtigste Quellen
+- {Quelle 1 mit kurzer Begründung}
+- {Quelle 2 mit kurzer Begründung}
+- ...
+
+## Tags
+{3-5 relevante Tags als kommagetrennte Liste}`,
+      },
+      {
+        role: 'user',
+        content: `# Step-Titel\n${step.title}\n\n# Konversation\n${conversationText}\n\n# Verwendete Quellen-IDs\n${[...sourceIds].join(', ') || '(keine)'}`,
+      },
+    ];
+
+    let summary = '';
+    for await (const token of this.chatLlm.streamChat(prompt, {})) {
+      summary += token;
+    }
+
+    // Parse tags from the "## Tags" section heuristically.
+    const tagsMatch = summary.match(/##\s*Tags\s*\n([^\n]+)/i);
+    const tags = tagsMatch
+      ? tagsMatch[1]
+          .split(',')
+          .map((t) => t.trim().replace(/^#/, ''))
+          .filter(Boolean)
+          .slice(0, 8)
+      : [];
+
+    const entry = await this.research.create({
+      projectId: session.projectIds[0].toString(),
+      title: step.title,
+      content: summary,
+      sources: [...sourceIds],
+      tags,
+    });
+
+    step.researchEntryId = entry._id as Types.ObjectId;
+    await step.save();
   }
 
   async deleteStep(id: string): Promise<void> {
     const step = await this.getStep(id);
     await this.stepModel.deleteOne({ _id: step._id });
+  }
+
+  /**
+   * Append a user message to the step, build research context (multi-project
+   * RAG), stream the LLM response token-by-token via callbacks, persist the
+   * assistant reply when done. The callback shape matches the SSE event names
+   * used in the chat controller (context, token, done, error).
+   */
+  async streamStepAnswer(
+    stepId: string,
+    content: string,
+    callbacks: {
+      onContext: (refs: ChatContextRef[]) => void;
+      onToken: (delta: string) => void;
+      onDone: (full: string) => void;
+      onError: (message: string) => void;
+      signal?: AbortSignal;
+    },
+  ): Promise<void> {
+    const step = await this.getStep(stepId);
+    if (step.status === ResearchStepStatus.DONE) {
+      throw new BadRequestException('Cannot send messages to a finished step');
+    }
+    const session = await this.getSession(step.sessionId.toString());
+    const projectIds = session.projectIds.map((p) => p.toString());
+    if (projectIds.length === 0) {
+      throw new BadRequestException('Research session has no projects in scope');
+    }
+
+    // Append the user message immediately so the next history-read sees it.
+    step.messages.push({
+      role: 'user',
+      content,
+      timestamp: new Date(),
+    } as never);
+    await step.save();
+
+    // Auto-advance status open → in_progress on first message.
+    if (session.status === ResearchSessionStatus.OPEN) {
+      session.status = ResearchSessionStatus.IN_PROGRESS;
+      await session.save();
+    }
+    if (step.status === ResearchStepStatus.OPEN) {
+      step.status = ResearchStepStatus.IN_PROGRESS;
+      await step.save();
+    }
+
+    let built;
+    try {
+      built = await this.chatContext.buildResearch(projectIds, content, step.messages.slice(0, -1));
+    } catch (err) {
+      callbacks.onError((err as Error).message || 'context build failed');
+      return;
+    }
+
+    callbacks.onContext(built.contextRefs);
+
+    let full = '';
+    try {
+      for await (const token of this.chatLlm.streamChat(built.messages, {
+        signal: callbacks.signal,
+      })) {
+        if (callbacks.signal?.aborted) break;
+        full += token;
+        callbacks.onToken(token);
+      }
+    } catch (err) {
+      callbacks.onError((err as Error).message || 'LLM stream failed');
+      return;
+    }
+
+    if (callbacks.signal?.aborted) return;
+
+    // Persist assistant message with contextRefs for the kontext-pane.
+    step.messages.push({
+      role: 'assistant',
+      content: full,
+      timestamp: new Date(),
+      contextUsed: built.contextRefs,
+    } as never);
+    await step.save();
+
+    callbacks.onDone(full);
+  }
+
+  /**
+   * Synchronous variant of streamStepAnswer for MCP/agent use. Collects the
+   * stream internally and returns the final answer + sources.
+   */
+  async askStep(stepId: string, question: string): Promise<{
+    answer: string;
+    sources: ChatContextRef[];
+  }> {
+    let answer = '';
+    let sources: ChatContextRef[] = [];
+    let error: string | null = null;
+    await this.streamStepAnswer(stepId, question, {
+      onContext: (refs) => {
+        sources = refs;
+      },
+      onToken: (delta) => {
+        answer += delta;
+      },
+      onDone: () => {
+        /* nothing */
+      },
+      onError: (msg) => {
+        error = msg;
+      },
+    });
+    if (error) throw new Error(error);
+    return { answer, sources };
   }
 
   /**

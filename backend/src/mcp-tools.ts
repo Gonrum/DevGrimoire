@@ -1439,6 +1439,18 @@ const tools = [
     },
   },
   {
+    name: 'research_step_ask',
+    description: 'Send a question to a research step and get the assistant answer + sources (blocking, no streaming). Persists both messages in the step conversation. Use this for programmatic agent workflows; the UI uses the SSE endpoint instead.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        stepId: { type: 'string', description: 'ResearchStep MongoDB ID' },
+        question: { type: 'string', description: 'The question to ask' },
+      },
+      required: ['stepId', 'question'],
+    },
+  },
+  {
     name: 'system_instructions_get',
     description: 'IMPORTANT: Call this tool at the start of every session to learn how to work with DevGrimoire correctly. Returns global agent instructions and optionally project-specific instructions.',
     inputSchema: {
@@ -4268,6 +4280,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'research_step_delete':
           await researchSessionsService.deleteStep(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
+          break;
+        case 'research_step_ask':
+          result = await researchSessionsService.askStep(
+            requireString(a, 'stepId'),
+            requireString(a, 'question'),
+          );
           break;
         case 'system_instructions_get': {
           const instructions = await settingsService.getOrDefault(
