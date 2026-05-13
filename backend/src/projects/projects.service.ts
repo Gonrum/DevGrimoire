@@ -85,6 +85,45 @@ export class ProjectsService {
     return rows.map((r) => ({ name: r._id, usageCount: r.usageCount }));
   }
 
+  async listCustomerLinks(): Promise<Array<{
+    projectId: string;
+    customerId: string;
+    customerName: string;
+    status: string;
+    createdAt: string;
+  }>> {
+    const scopeFilter = buildScopeFilter(RequestContext.getUser(), {
+      axis: 'project',
+      field: 'projectId',
+    });
+    const rows = await this.customerProjectLinkModel.aggregate<{
+      projectId: Types.ObjectId;
+      customerId: Types.ObjectId;
+      status: string;
+      createdAt: Date;
+      customer: { name: string };
+    }>([
+      { $match: scopeFilter },
+      {
+        $lookup: {
+          from: 'customers',
+          localField: 'customerId',
+          foreignField: '_id',
+          as: 'customer',
+        },
+      },
+      { $unwind: '$customer' },
+      { $sort: { projectId: 1, createdAt: 1 } },
+    ]);
+    return rows.map((r) => ({
+      projectId: r.projectId.toString(),
+      customerId: r.customerId.toString(),
+      customerName: r.customer.name,
+      status: r.status,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  }
+
   /**
    * Set or clear the per-project replication opt-in flag. Used by the
    * replication controller's project-config endpoint. Returns the updated

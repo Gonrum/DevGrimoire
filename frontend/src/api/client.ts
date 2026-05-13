@@ -1119,6 +1119,10 @@ export const api = {
     delete: (id: string) =>
       request<void>(`/projects/${id}`, { method: 'DELETE' }),
     listTags: () => request<ProjectTag[]>('/projects/tags'),
+    listCustomerLinks: () =>
+      request<Array<{ projectId: string; customerId: string; customerName: string; status: string; createdAt: string }>>(
+        '/projects/customer-links',
+      ),
   },
   customers: {
     dashboard: () =>

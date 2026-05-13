@@ -121,6 +121,16 @@
     "repo": "Repo",
     "tagsLabel": "Tags",
     "tagsPlaceholder": "Type a tag, press Enter to add…",
+    "sectionNoTag": "Untagged",
+    "sectionNoCustomer": "No customer",
+    "groupMode": {
+      "flat": "Flat",
+      "flatTitle": "All chapters in one view",
+      "tag": "By tag",
+      "tagTitle": "Grouped by primary tag",
+      "customer": "By customer",
+      "customerTitle": "Grouped by primary customer"
+    },
     "notFound": "Chapter not found."
   },
   "tagInput": {

@@ -41,6 +41,11 @@ export class ProjectsController {
     return this.projectsService.listTags();
   }
 
+  @Get('customer-links')
+  listCustomerLinks() {
+    return this.projectsService.listCustomerLinks();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.projectsService.findById(id);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Project, Customer } from '../api/client';
@@ -10,11 +10,54 @@ import EmptyState from '../components/ui/EmptyState';
 import Markdown from '../components/Markdown';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
+type GroupMode = 'flat' | 'tag' | 'customer';
+
+interface CustomerLink {
+  projectId: string;
+  customerId: string;
+  customerName: string;
+  status: string;
+  createdAt: string;
+}
+
+interface Section {
+  id: string;
+  label: string;
+  projects: Project[];
+}
+
+const GROUP_MODE_KEY = 'projectsOverview.groupMode';
+const COLLAPSED_KEY = 'projectsOverview.collapsedSections';
+const SECTION_UNGROUPED = '__ungrouped__';
+
+const readStoredMode = (): GroupMode => {
+  if (typeof window === 'undefined') return 'flat';
+  const v = window.localStorage.getItem(GROUP_MODE_KEY);
+  return v === 'tag' || v === 'customer' ? v : 'flat';
+};
+
+const readStoredCollapsed = (): string[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(COLLAPSED_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
 export default function ProjectsOverview() {
   const { t, i18n } = useTranslation();
   const [projects, setProjects] = useState<Project[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customerLinks, setCustomerLinks] = useState<CustomerLink[]>([]);
   const [customerFilter, setCustomerFilter] = useState<string>('');
+  const [groupMode, setGroupMode] = useState<GroupMode>(readStoredMode);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
+    () => new Set(readStoredCollapsed()),
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -36,9 +79,15 @@ export default function ProjectsOverview() {
       .list({ includeArchived: false })
       .then(setCustomers)
       .catch(() => {
-        // Customer-Liste ist nur Filter-Hilfsmittel; bei Fehler stumm bleiben,
-        // damit die Projektliste auch ohne Customers-Modul funktioniert.
+        // Filter-Hilfsmittel; bei Fehler stumm bleiben.
       });
+  };
+
+  const loadCustomerLinks = () => {
+    api.projects
+      .listCustomerLinks()
+      .then(setCustomerLinks)
+      .catch(() => setCustomerLinks([]));
   };
 
   const toggleFavorite = async (e: React.MouseEvent, project: Project) => {
@@ -46,26 +95,11 @@ export default function ProjectsOverview() {
     e.stopPropagation();
     try {
       await api.projects.update(project._id, { favorite: !project.favorite });
-      loadProjects();
+      loadProjects(customerFilter || undefined);
     } catch (err: any) {
       showError(err.message || t('dashboard.favoriteError'));
     }
   };
-
-  const filteredProjects = [...projects]
-    .filter((p) => {
-      if (!search.trim()) return true;
-      const q = search.toLowerCase();
-      return (
-        p.name.toLowerCase().includes(q) ||
-        p.description?.toLowerCase().includes(q) ||
-        p.techStack.some((s) => s.toLowerCase().includes(q))
-      );
-    })
-    .sort((a, b) => {
-      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
-      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-    });
 
   useEffect(() => {
     loadProjects(customerFilter || undefined);
@@ -73,9 +107,93 @@ export default function ProjectsOverview() {
 
   useEffect(() => {
     loadCustomers();
+    loadCustomerLinks();
   }, []);
 
-  useDashboardEvents(() => loadProjects(customerFilter || undefined));
+  useDashboardEvents(() => {
+    loadProjects(customerFilter || undefined);
+    loadCustomerLinks();
+  });
+
+  useEffect(() => {
+    window.localStorage.setItem(GROUP_MODE_KEY, groupMode);
+  }, [groupMode]);
+
+  useEffect(() => {
+    window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsedSections]));
+  }, [collapsedSections]);
+
+  const primaryCustomerByProject = useMemo(() => {
+    const map = new Map<string, CustomerLink>();
+    for (const link of customerLinks) {
+      const existing = map.get(link.projectId);
+      if (!existing || new Date(link.createdAt) < new Date(existing.createdAt)) {
+        map.set(link.projectId, link);
+      }
+    }
+    return map;
+  }, [customerLinks]);
+
+  const filteredProjects = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return [...projects]
+      .filter((p) => {
+        if (!q) return true;
+        return (
+          p.name.toLowerCase().includes(q) ||
+          p.description?.toLowerCase().includes(q) ||
+          p.techStack.some((s) => s.toLowerCase().includes(q)) ||
+          (p.tags ?? []).some((s) => s.toLowerCase().includes(q))
+        );
+      })
+      .sort((a, b) => {
+        if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+  }, [projects, search]);
+
+  const sections = useMemo<Section[]>(() => {
+    if (groupMode === 'flat') return [];
+
+    const byKey = new Map<string, { label: string; projects: Project[] }>();
+
+    const ungroupedKey = `${groupMode}:${SECTION_UNGROUPED}`;
+
+    if (groupMode === 'tag') {
+      for (const p of filteredProjects) {
+        const primary = p.tags && p.tags.length > 0 ? p.tags[0] : null;
+        const key = primary ? `tag:${primary}` : ungroupedKey;
+        const label = primary ?? t('projects.sectionNoTag');
+        if (!byKey.has(key)) byKey.set(key, { label, projects: [] });
+        byKey.get(key)!.projects.push(p);
+      }
+    } else {
+      for (const p of filteredProjects) {
+        const link = primaryCustomerByProject.get(p._id);
+        const key = link ? `customer:${link.customerId}` : ungroupedKey;
+        const label = link ? link.customerName : t('projects.sectionNoCustomer');
+        if (!byKey.has(key)) byKey.set(key, { label, projects: [] });
+        byKey.get(key)!.projects.push(p);
+      }
+    }
+
+    const entries = [...byKey.entries()].sort((a, b) => {
+      if (a[0] === ungroupedKey) return 1;
+      if (b[0] === ungroupedKey) return -1;
+      return a[1].label.localeCompare(b[1].label, undefined, { sensitivity: 'base' });
+    });
+
+    return entries.map(([id, v]) => ({ id, label: v.label, projects: v.projects }));
+  }, [groupMode, filteredProjects, primaryCustomerByProject, t]);
+
+  const toggleCollapsed = (id: string) => {
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
@@ -88,10 +206,74 @@ export default function ProjectsOverview() {
     );
   }
 
+  const renderCard = (p: Project, hidePrimaryTag = false) => {
+    const tagsToShow = hidePrimaryTag ? (p.tags ?? []).slice(1) : p.tags ?? [];
+    return (
+      <Link
+        key={p._id}
+        to={`/projects/${p._id}`}
+        className="block bg-gray-900 border border-gray-800 rounded-lg p-5 hover:border-violet-500 transition-colors"
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={(e) => toggleFavorite(e, p)}
+              className={`text-lg leading-none transition-colors ${
+                p.favorite
+                  ? 'text-yellow-400 hover:text-yellow-300'
+                  : 'text-gray-700 hover:text-yellow-400'
+              }`}
+              title={p.favorite ? t('projects.removeFavorite') : t('projects.addFavorite')}
+              aria-label={p.favorite ? t('projects.removeFavorite') : t('projects.addFavorite')}
+            >
+              {p.favorite ? '★' : '☆'}
+            </button>
+            <h2 className="text-lg font-semibold">{p.name}</h2>
+          </div>
+          <Badge color={p.active ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500'} rounded="full">
+            {p.active ? t('common.active') : t('common.inactive')}
+          </Badge>
+        </div>
+        {p.description && (
+          <div className="mb-3 max-h-12 overflow-hidden text-gray-400">
+            <Markdown>{p.description}</Markdown>
+          </div>
+        )}
+        {p.techStack.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-1.5">
+            {p.techStack.map((tech) => (
+              <Badge key={tech} color="bg-gray-800 text-gray-300">
+                {tech}
+              </Badge>
+            ))}
+          </div>
+        )}
+        {tagsToShow.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {tagsToShow.map((tag) => (
+              <Badge key={tag} color="bg-violet-900/40 text-violet-300">
+                #{tag}
+              </Badge>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-gray-600 mt-3">
+          {t('common.created')}: {new Date(p.createdAt).toLocaleDateString(dateLocale)}
+          {' · '}
+          {t('common.updated')}: {new Date(p.updatedAt).toLocaleDateString(dateLocale)}
+        </p>
+      </Link>
+    );
+  };
+
+  const showEmpty = projects.length === 0;
+  const showNoMatch = !showEmpty && filteredProjects.length === 0;
+
   return (
     <div>
       <h1 className="text-xl sm:text-2xl font-bold mb-6 font-grimoire">{t('projects.overview')}</h1>
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:flex-wrap gap-3 mb-6">
         <ButtonLink to="/projects/new" variant="primary" size="lg" className="justify-center">
           {t('projects.newProject')}
         </ButtonLink>
@@ -146,61 +328,62 @@ export default function ProjectsOverview() {
             ))}
           </select>
         )}
-      </div>
-      {projects.length === 0 ? (
-        <EmptyState message={t('projects.noProjects')} />
-      ) : filteredProjects.length === 0 ? (
-        <EmptyState message={t('projects.noProjectsFound', { search })} />
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredProjects.map((p) => (
-            <Link
-              key={p._id}
-              to={`/projects/${p._id}`}
-              className="block bg-gray-900 border border-gray-800 rounded-lg p-5 hover:border-violet-500 transition-colors"
+        <div className="sm:ml-auto inline-flex rounded-lg overflow-hidden border border-gray-700 bg-gray-800 text-sm">
+          {(['flat', 'tag', 'customer'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setGroupMode(m)}
+              className={`px-3 py-1.5 transition-colors ${
+                groupMode === m
+                  ? 'bg-violet-900/60 text-violet-100 ring-1 ring-inset ring-violet-500/50'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+              title={t(`projects.groupMode.${m}Title`)}
             >
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={(e) => toggleFavorite(e, p)}
-                    className={`text-lg leading-none transition-colors ${
-                      p.favorite
-                        ? 'text-yellow-400 hover:text-yellow-300'
-                        : 'text-gray-700 hover:text-yellow-400'
-                    }`}
-                    title={p.favorite ? t('projects.removeFavorite') : t('projects.addFavorite')}
-                    aria-label={p.favorite ? t('projects.removeFavorite') : t('projects.addFavorite')}
-                  >
-                    {p.favorite ? '\u2605' : '\u2606'}
-                  </button>
-                  <h2 className="text-lg font-semibold">{p.name}</h2>
-                </div>
-                <Badge color={p.active ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500'} rounded="full">
-                  {p.active ? t('common.active') : t('common.inactive')}
-                </Badge>
-              </div>
-              {p.description && (
-                <div className="mb-3 max-h-12 overflow-hidden text-gray-400">
-                  <Markdown>{p.description}</Markdown>
-                </div>
-              )}
-              {p.techStack.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {p.techStack.map((tech) => (
-                    <Badge key={tech} color="bg-gray-800 text-gray-300">
-                      {tech}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-              <p className="text-xs text-gray-600 mt-3">
-                {t('common.created')}: {new Date(p.createdAt).toLocaleDateString(dateLocale)}
-                {' · '}
-                {t('common.updated')}: {new Date(p.updatedAt).toLocaleDateString(dateLocale)}
-              </p>
-            </Link>
+              {t(`projects.groupMode.${m}`)}
+            </button>
           ))}
+        </div>
+      </div>
+
+      {showEmpty ? (
+        <EmptyState message={t('projects.noProjects')} />
+      ) : showNoMatch ? (
+        <EmptyState message={t('projects.noProjectsFound', { search })} />
+      ) : groupMode === 'flat' ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredProjects.map((p) => renderCard(p))}
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {sections.map((sec) => {
+            const collapsed = collapsedSections.has(sec.id);
+            return (
+              <section key={sec.id}>
+                <button
+                  type="button"
+                  onClick={() => toggleCollapsed(sec.id)}
+                  className="w-full flex items-center gap-2 text-left mb-3 group"
+                >
+                  <span className={`text-gray-500 transition-transform ${collapsed ? '' : 'rotate-90'}`}>
+                    ▶
+                  </span>
+                  <h2 className="text-base font-semibold text-gray-200 group-hover:text-violet-300 transition-colors">
+                    {sec.label}
+                  </h2>
+                  <Badge color="bg-gray-800 text-gray-400" rounded="full">
+                    {sec.projects.length}
+                  </Badge>
+                </button>
+                {!collapsed && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {sec.projects.map((p) => renderCard(p, groupMode === 'tag'))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
         </div>
       )}
     </div>

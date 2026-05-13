@@ -121,6 +121,16 @@
     "repo": "Repo",
     "tagsLabel": "Tags",
     "tagsPlaceholder": "Tag eingeben, Enter zum Hinzufügen…",
+    "sectionNoTag": "Ohne Tag",
+    "sectionNoCustomer": "Ohne Kunde",
+    "groupMode": {
+      "flat": "Flach",
+      "flatTitle": "Alle Kapitel in einer Ansicht",
+      "tag": "Nach Tag",
+      "tagTitle": "Gruppiert nach primärem Tag",
+      "customer": "Nach Kunde",
+      "customerTitle": "Gruppiert nach primärem Kunden"
+    },
     "notFound": "Kapitel nicht gefunden."
   },
   "tagInput": {
