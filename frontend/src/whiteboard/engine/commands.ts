@@ -7,6 +7,16 @@ export interface WhiteboardCommand {
   revert(doc: WhiteboardDoc): WhiteboardDoc;
 }
 
+export interface CommandHistory {
+  undoStack: WhiteboardCommand[];
+  redoStack: WhiteboardCommand[];
+  limit: number;
+}
+
+export function createCommandHistory(limit = 50): CommandHistory {
+  return { undoStack: [], redoStack: [], limit };
+}
+
 export function createNodeCommand(node: WhiteboardNode, label = `Create ${node.type}`): WhiteboardCommand {
   return {
     id: `create-node:${node.id}`,
@@ -83,6 +93,107 @@ export function deleteSelectionCommand(doc: WhiteboardDoc, selection: SelectionS
   };
 }
 
+export function duplicateSelectionCommand(
+  doc: WhiteboardDoc,
+  selection: SelectionState,
+  createId: (prefix: string) => string,
+  offset: Point = { x: 24, y: 24 },
+): WhiteboardCommand | null {
+  const selectedNodes = selection.nodeIds.flatMap((id) => doc.nodes[id] ? [doc.nodes[id]] : []);
+  if (selectedNodes.length === 0) return null;
+
+  const idMap = new Map(selectedNodes.map((node) => [node.id, createId(node.type)]));
+  const duplicatedNodes = Object.fromEntries(
+    selectedNodes.map((node) => {
+      const id = idMap.get(node.id)!;
+      return [id, duplicateNode(node, id, offset)];
+    }),
+  );
+  const duplicatedEdges = Object.fromEntries(
+    Object.values(doc.edges)
+      .filter((edge) => idMap.has(edge.fromNodeId) && idMap.has(edge.toNodeId))
+      .map((edge) => {
+        const id = createId('edge');
+        return [id, { ...edge, id, fromNodeId: idMap.get(edge.fromNodeId)!, toNodeId: idMap.get(edge.toNodeId)! }];
+      }),
+  );
+
+  return {
+    id: `duplicate-selection:${selection.nodeIds.join(',')}`,
+    label: `Duplicate ${selectedNodes.length} node${selectedNodes.length === 1 ? '' : 's'}`,
+    apply: (current) => ({
+      ...current,
+      nodes: { ...current.nodes, ...duplicatedNodes },
+      edges: { ...current.edges, ...duplicatedEdges },
+    }),
+    revert: (current) => {
+      const duplicateNodeIds = new Set(Object.keys(duplicatedNodes));
+      const duplicateEdgeIds = new Set(Object.keys(duplicatedEdges));
+      return {
+        ...current,
+        nodes: Object.fromEntries(Object.entries(current.nodes).filter(([id]) => !duplicateNodeIds.has(id))),
+        edges: Object.fromEntries(Object.entries(current.edges).filter(([id]) => !duplicateEdgeIds.has(id))),
+      };
+    },
+  };
+}
+
+
+function duplicateNode(node: WhiteboardNode, id: string, offset: Point): WhiteboardNode {
+  const shifted = { ...node, id, x: node.x + offset.x, y: node.y + offset.y };
+  if (node.type === 'freehand') {
+    return {
+      ...shifted,
+      type: 'freehand',
+      points: node.points.map((point) => ({ ...point, x: point.x + offset.x, y: point.y + offset.y })),
+    };
+  }
+  if (node.type === 'arrow') {
+    const shiftEndpoint = (value: typeof node.from) => ('nodeId' in value ? value : { x: value.x + offset.x, y: value.y + offset.y });
+    return {
+      ...shifted,
+      type: 'arrow',
+      from: shiftEndpoint(node.from),
+      to: shiftEndpoint(node.to),
+    };
+  }
+  return shifted;
+}
+
 export function applyCommand(doc: WhiteboardDoc, command: WhiteboardCommand): WhiteboardDoc {
   return command.apply(doc);
+}
+
+export function pushCommand(history: CommandHistory, command: WhiteboardCommand): CommandHistory {
+  return {
+    ...history,
+    undoStack: [...history.undoStack, command].slice(-history.limit),
+    redoStack: [],
+  };
+}
+
+export function undoCommand(doc: WhiteboardDoc, history: CommandHistory): { doc: WhiteboardDoc; history: CommandHistory } {
+  const command = history.undoStack[history.undoStack.length - 1];
+  if (!command) return { doc, history };
+  return {
+    doc: command.revert(doc),
+    history: {
+      ...history,
+      undoStack: history.undoStack.slice(0, -1),
+      redoStack: [...history.redoStack, command].slice(-history.limit),
+    },
+  };
+}
+
+export function redoCommand(doc: WhiteboardDoc, history: CommandHistory): { doc: WhiteboardDoc; history: CommandHistory } {
+  const command = history.redoStack[history.redoStack.length - 1];
+  if (!command) return { doc, history };
+  return {
+    doc: command.apply(doc),
+    history: {
+      ...history,
+      undoStack: [...history.undoStack, command].slice(-history.limit),
+      redoStack: history.redoStack.slice(0, -1),
+    },
+  };
 }

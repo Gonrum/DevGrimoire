@@ -1,6 +1,6 @@
 import type { Point, RectNode, SelectionState, TextNode, WhiteboardDoc, WhiteboardNode } from '../types';
 import { findNodeAt } from '../engine/hitTest';
-import { createNodeCommand, moveNodesCommand, type WhiteboardCommand } from '../engine/commands';
+import { createNodeCommand, deleteSelectionCommand, duplicateSelectionCommand, moveNodesCommand, type WhiteboardCommand } from '../engine/commands';
 import { panViewport } from '../engine/Viewport';
 
 export type WhiteboardTool = 'select' | 'pan' | 'rect' | 'text' | 'arrow';
@@ -28,6 +28,12 @@ export interface PointerModifiers {
 export interface PointerResult {
   state: WhiteboardInteractionState;
   command?: WhiteboardCommand;
+}
+
+export interface KeyboardModifiers {
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  shiftKey?: boolean;
 }
 
 export type CreateId = (prefix: string) => string;
@@ -69,6 +75,57 @@ export function cancelToolAction(state: WhiteboardInteractionState): WhiteboardI
     ...state,
     toolState: { tool: state.toolState.tool, mode: 'idle' },
   };
+}
+
+
+export function handleKeyboardShortcut(
+  state: WhiteboardInteractionState,
+  key: string,
+  modifiers: KeyboardModifiers = {},
+  createId: CreateId = defaultCreateId,
+): PointerResult {
+  const normalizedKey = key.toLowerCase();
+  const commandModifier = Boolean(modifiers.ctrlKey || modifiers.metaKey);
+
+  if (key === 'Escape') return { state: cancelToolAction(state) };
+
+  if ((key === 'Delete' || key === 'Backspace') && state.selection.nodeIds.length + state.selection.edgeIds.length > 0) {
+    const command = deleteSelectionCommand(state.doc, state.selection);
+    if (!command) return { state };
+    return {
+      state: { ...state, doc: command.apply(state.doc), selection: { nodeIds: [], edgeIds: [] } },
+      command,
+    };
+  }
+
+  if (commandModifier && normalizedKey === 'a') {
+    return {
+      state: {
+        ...state,
+        selection: { nodeIds: Object.keys(state.doc.nodes), edgeIds: Object.keys(state.doc.edges) },
+        toolState: { tool: 'select', mode: 'idle' },
+      },
+    };
+  }
+
+  if (commandModifier && normalizedKey === 'd') {
+    const command = duplicateSelectionCommand(state.doc, state.selection, createId);
+    if (!command) return { state };
+    const nextDoc = command.apply(state.doc);
+    const duplicatedNodeIds = Object.keys(nextDoc.nodes).filter((id) => !state.doc.nodes[id]);
+    const duplicatedEdgeIds = Object.keys(nextDoc.edges).filter((id) => !state.doc.edges[id]);
+    return {
+      state: { ...state, doc: nextDoc, selection: { nodeIds: duplicatedNodeIds, edgeIds: duplicatedEdgeIds } },
+      command,
+    };
+  }
+
+  if (!commandModifier) {
+    const tool = toolFromShortcut(key);
+    if (tool) return { state: setTool(state, tool) };
+  }
+
+  return { state };
 }
 
 export function handlePointerDown(state: WhiteboardInteractionState, point: Point, modifiers: PointerModifiers = {}): WhiteboardInteractionState {

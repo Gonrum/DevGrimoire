@@ -2,6 +2,8 @@
 
 DevGrimoire currently registers 126 MCP tools in `backend/src/mcp-tools.ts`.
 
+For future interactive MCP Apps/UI resources, follow the [MCP Apps Security and Audit Model](mcp-apps-security.md) before exposing any `ui://` resource or tool `_meta.ui` linkage.
+
 The README and in-app Docs should be treated as summaries. When changing tools, update or regenerate all three places together:
 
 - `backend/src/mcp-tools.ts`

@@ -53,6 +53,8 @@ The README is the quick-start entry point. Detailed operational and integration 
 
 - [Setup](docs/setup.md) -- installation, required environment variables, Docker profiles, ports
 - [Security](docs/security.md) -- auth modes, API keys, MCP transport auth, secrets
+- [GitHub Copilot Cloud Agent MCP Preset](docs/copilot-cloud-agent-mcp.md) -- scoped MCP config with `COPILOT_MCP_...` secrets and safe tool allowlists
+- [MCP Apps Security and Audit Model](docs/mcp-apps-security.md) -- sandbox, CSP, scope, fallback, and audit rules for future `ui://` resources
 - [MCP Tools](docs/mcp-tools.md) -- current tool groups and maintenance notes
 - [UI Guidelines](docs/ui.md) -- frontend component usage and layout conventions
 - [Workspaces](docs/workspaces.md) -- workspace sidecar, network model, `workspace_*` tools
@@ -249,9 +251,9 @@ DevGrimoire supports multi-user authentication with roles:
 - **Roles** -- `admin` (full access + user management), `user` (read/write access)
 - **Access Token** -- JWT, valid for 15 minutes, held in memory
 - **Refresh Token** -- Opaque, valid for 7 days, stored in MongoDB with TTL index, rotated on use
-- **API Keys** -- For programmatic access (e.g., CI/CD), restrictable to roles
-- **SSE** -- Auth via `?token=...` query parameter (EventSource does not support headers)
-- **MCP Server** -- Not protected (stdio = local only, HTTP/SSE = use firewall/VPN as needed)
+- **API Keys** -- For programmatic access (e.g., CI/CD), restrictable by user role, explicit MCP `allowedTools`, and project/customer scopes
+- **SSE** -- Auth via `?token=...` query parameter for UI event streams (EventSource does not support headers)
+- **MCP Server** -- stdio is local-process only; HTTP/SSE transports require a DevGrimoire API key when authentication is enabled
 
 On first startup, an admin account is created from `AUTH_USERNAME`/`AUTH_PASSWORD`. Additional users can be created in the dashboard under user management.
 

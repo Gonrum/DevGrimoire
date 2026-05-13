@@ -55,6 +55,10 @@ The local stdio MCP server remains local-process only and does not use HTTP auth
 
 For GitHub Copilot Cloud Agent, configure a dedicated API key and an explicit MCP `tools` allowlist. GitHub documents that the cloud agent can call configured MCP tools autonomously, so do not provide wildcard `*` or an unrestricted production key. Use `COPILOT_MCP_...` GitHub secrets/variables for the DevGrimoire URL and API key, and start with a read-only preset. See [GitHub Copilot Cloud Agent MCP Preset](copilot-cloud-agent-mcp.md).
 
+### MCP Apps / interactive UI resources
+
+MCP Apps (`io.modelcontextprotocol/ui`) is treated as an optional, negotiated extension. DevGrimoire must not expose `ui://` HTML resources until the sandbox, CSP, scope, fallback, and audit rules in [MCP Apps Security and Audit Model](mcp-apps-security.md) are implemented. The default posture is read-only UI, no secrets in HTML, no direct iframe network access, server-side project/customer scope enforcement, and structured audit events for both UI-resource reads and UI-initiated tool actions.
+
 ## MCP Discovery
 
 `GET /.well-known/mcp` and `GET /.well-known/mcp.json` are public discovery endpoints. They are designed for MCP clients, registries, and crawlers that need to detect DevGrimoire capabilities without opening an authenticated MCP session.
@@ -69,7 +73,7 @@ The discovery and manifest payloads are intentionally non-sensitive:
 - aggregate capability counts and tool groups
 - links to the authenticated tool catalog and docs
 
-They must not include API keys, JWTs, user records, project/customer IDs, secret values, or per-key tool allowlists. `/api/mcp/tools`, REST data endpoints, and MCP tool calls remain protected by the normal auth guards when authentication is enabled.
+They must not include API keys, JWTs, user records, project/customer IDs, secret values, per-key tool allowlists, or private `ui://` resource URIs. `/api/mcp/tools`, REST data endpoints, MCP tool calls, and any future MCP Apps UI resources remain protected by the normal auth guards and server-side scope checks when authentication is enabled.
 
 Run `npm run check:mcp-registry` from `backend/` against a running instance to catch schema/security drift. Set `DEVGRIMOIRE_BASE_URL=https://your-host` when checking a non-local deployment.
 
