@@ -7,6 +7,7 @@ import {
 } from '../customers/schemas/customer-project-link.schema';
 import { ProjectsService } from './projects.service';
 import { ProjectsController } from './projects.controller';
+import { RagModule } from '../rag/rag.module';
 
 @Global()
 @Module({
@@ -19,6 +20,7 @@ import { ProjectsController } from './projects.controller';
       // eigene Service-Logik — das ist OK, MongooseModule.forFeature ist idempotent.
       { name: CustomerProjectLink.name, schema: CustomerProjectLinkSchema },
     ]),
+    RagModule,
   ],
   controllers: [ProjectsController],
   providers: [ProjectsService],

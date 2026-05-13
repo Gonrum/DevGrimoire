@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
@@ -13,6 +13,29 @@ import {
   CustomerProjectLink,
   CustomerProjectLinkDocument,
 } from '../customers/schemas/customer-project-link.schema';
+import { RagService } from '../rag/rag.service';
+
+export interface SemanticSearchResult {
+  projects: Array<{
+    _id: string;
+    name: string;
+    description?: string;
+    techStack: string[];
+    tags: string[];
+    active: boolean;
+    favorite: boolean;
+    score: number;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  relatedHits: Array<{
+    entity: string;
+    id: string;
+    title: string;
+    projectId: string;
+    score: number;
+  }>;
+}
 
 @Injectable()
 export class ProjectsService {
@@ -21,6 +44,7 @@ export class ProjectsService {
     @InjectModel(CustomerProjectLink.name)
     private customerProjectLinkModel: Model<CustomerProjectLinkDocument>,
     private eventEmitter: EventEmitter2,
+    private ragService: RagService,
   ) {}
 
   async create(dto: CreateProjectDto): Promise<ProjectDocument> {
@@ -177,6 +201,81 @@ export class ProjectsService {
       .exec();
     if (!project) throw new NotFoundException(`Project ${id} not found`);
     return project;
+  }
+
+  async searchSemantic(
+    query: string,
+    customerId?: string,
+    limit = 20,
+  ): Promise<SemanticSearchResult> {
+    if (!query.trim()) {
+      return { projects: [], relatedHits: [] };
+    }
+
+    let projectHits: Awaited<ReturnType<RagService['search']>>;
+    let relatedHits: Awaited<ReturnType<RagService['search']>>;
+    try {
+      [projectHits, relatedHits] = await Promise.all([
+        this.ragService.search(query, undefined, 'project', limit, customerId),
+        this.ragService.search(query, undefined, undefined, limit, customerId),
+      ]);
+    } catch (err) {
+      throw new ServiceUnavailableException({
+        message: (err as Error).message || 'RAG search unavailable',
+        fallback: 'substring',
+      });
+    }
+
+    // Hydrate project hits with full project documents (respecting scope).
+    const projectIds = projectHits.map((h) => h.id).filter((id) => Types.ObjectId.isValid(id));
+    const scopeFilter = buildScopeFilter(RequestContext.getUser(), {
+      axis: 'project',
+      field: '_id',
+    });
+    const docs = await this.projectModel
+      .find({ _id: { $in: projectIds }, ...scopeFilter })
+      .lean()
+      .exec();
+    const docById = new Map(docs.map((d) => [String(d._id), d]));
+
+    const projects = projectHits
+      .map((hit) => {
+        const doc = docById.get(hit.id) as
+          | (Record<string, unknown> & { _id: unknown; name: string })
+          | undefined;
+        if (!doc) return null;
+        const createdAt = doc.createdAt as Date | string | undefined;
+        const updatedAt = doc.updatedAt as Date | string | undefined;
+        return {
+          _id: String(doc._id),
+          name: doc.name,
+          description: doc.description as string | undefined,
+          techStack: (doc.techStack as string[] | undefined) ?? [],
+          tags: (doc.tags as string[] | undefined) ?? [],
+          active: doc.active as boolean,
+          favorite: doc.favorite as boolean,
+          score: hit.score,
+          createdAt: createdAt ? new Date(createdAt).toISOString() : '',
+          updatedAt: updatedAt ? new Date(updatedAt).toISOString() : '',
+        };
+      })
+      .filter((p): p is NonNullable<typeof p> => p !== null);
+
+    // Cross-entity hits: exclude project entries (already in `projects`) and
+    // entries with no projectId (we wouldn't know where to navigate).
+    const projectIdSet = new Set(projects.map((p) => p._id));
+    const related = relatedHits
+      .filter((h) => h.entity !== 'project')
+      .filter((h) => h.projectId && !projectIdSet.has(h.projectId))
+      .map((h) => ({
+        entity: h.entity,
+        id: h.id,
+        title: h.title,
+        projectId: h.projectId,
+        score: h.score,
+      }));
+
+    return { projects, relatedHits: related };
   }
 
   async remove(id: string): Promise<void> {

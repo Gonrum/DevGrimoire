@@ -80,6 +80,32 @@ export interface ProjectTag {
   usageCount: number;
 }
 
+export interface ProjectSemanticHit {
+  _id: string;
+  name: string;
+  description?: string;
+  techStack: string[];
+  tags: string[];
+  active: boolean;
+  favorite: boolean;
+  score: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectRelatedHit {
+  entity: string;
+  id: string;
+  title: string;
+  projectId: string;
+  score: number;
+}
+
+export interface ProjectSemanticSearchResult {
+  projects: ProjectSemanticHit[];
+  relatedHits: ProjectRelatedHit[];
+}
+
 export type CustomerStatus = 'lead' | 'onboarding' | 'active' | 'paused' | 'offboarding' | 'cancelled' | 'archived';
 
 export interface Customer {
@@ -1123,6 +1149,11 @@ export const api = {
       request<Array<{ projectId: string; customerId: string; customerName: string; status: string; createdAt: string }>>(
         '/projects/customer-links',
       ),
+    searchSemantic: (q: string, customerId?: string, limit = 20) => {
+      const params = new URLSearchParams({ q, limit: String(limit) });
+      if (customerId) params.set('customerId', customerId);
+      return request<ProjectSemanticSearchResult>(`/projects/search?${params.toString()}`);
+    },
   },
   customers: {
     dashboard: () =>

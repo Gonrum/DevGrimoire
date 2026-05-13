@@ -131,6 +131,27 @@
       "customer": "By customer",
       "customerTitle": "Grouped by primary customer"
     },
+    "searchMode": {
+      "substring": "Fast",
+      "substringTitle": "Substring search over name, description, tags, tech",
+      "substringPlaceholder": "Search chapters…",
+      "semantic": "Semantic",
+      "semanticTitle": "Semantic (RAG) search across all content",
+      "semanticPlaceholder": "Search semantically…"
+    },
+    "semanticSearchFailed": "Semantic search failed",
+    "relatedHits": "Related content ({{count}})",
+    "entityLabel": {
+      "knowledge": "Knowledge",
+      "todo": "Tasks",
+      "manual": "Manual",
+      "changelog": "Changelog",
+      "session": "Sessions",
+      "snippet": "Snippets",
+      "research": "Research",
+      "attachment": "Attachments",
+      "schema": "Schemas"
+    },
     "notFound": "Chapter not found."
   },
   "tagInput": {

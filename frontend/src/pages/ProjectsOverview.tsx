@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api, Project, Customer } from '../api/client';
+import { api, Project, Customer, ProjectRelatedHit } from '../api/client';
 import { useDashboardEvents } from '../hooks/useProjectEvents';
 import { useToast } from '../components/Toast';
 import ButtonLink from '../components/ui/ButtonLink';
@@ -11,6 +11,7 @@ import Markdown from '../components/Markdown';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
 type GroupMode = 'flat' | 'tag' | 'customer';
+type SearchMode = 'substring' | 'semantic';
 
 interface CustomerLink {
   projectId: string;
@@ -28,6 +29,7 @@ interface Section {
 
 const GROUP_MODE_KEY = 'projectsOverview.groupMode';
 const COLLAPSED_KEY = 'projectsOverview.collapsedSections';
+const SEARCH_MODE_KEY = 'projectsOverview.searchMode';
 const SECTION_UNGROUPED = '__ungrouped__';
 
 const readStoredMode = (): GroupMode => {
@@ -48,6 +50,28 @@ const readStoredCollapsed = (): string[] => {
   }
 };
 
+const readStoredSearchMode = (): SearchMode => {
+  if (typeof window === 'undefined') return 'substring';
+  return window.localStorage.getItem(SEARCH_MODE_KEY) === 'semantic' ? 'semantic' : 'substring';
+};
+
+const ENTITY_ROUTES: Record<string, (projectId: string, id: string) => string> = {
+  todo: (_p, id) => `/todos/${id}`,
+  knowledge: (p) => `/projects/${p}?tab=knowledge`,
+  manual: (p) => `/projects/${p}?tab=manuals`,
+  changelog: (p) => `/projects/${p}?tab=changelog`,
+  session: (p) => `/projects/${p}?tab=sessions`,
+  snippet: (p) => `/projects/${p}?tab=snippets`,
+  research: (p) => `/projects/${p}?tab=research`,
+  attachment: (p) => `/projects/${p}?tab=attachments`,
+  schema: (p) => `/projects/${p}?tab=schemas`,
+};
+
+const routeForRelated = (hit: ProjectRelatedHit): string => {
+  const fn = ENTITY_ROUTES[hit.entity];
+  return fn ? fn(hit.projectId, hit.id) : `/projects/${hit.projectId}`;
+};
+
 export default function ProjectsOverview() {
   const { t, i18n } = useTranslation();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -58,6 +82,12 @@ export default function ProjectsOverview() {
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
     () => new Set(readStoredCollapsed()),
   );
+  const [searchMode, setSearchMode] = useState<SearchMode>(readStoredSearchMode);
+  const [semanticHits, setSemanticHits] = useState<Set<string> | null>(null);
+  const [relatedHits, setRelatedHits] = useState<ProjectRelatedHit[]>([]);
+  const [semanticLoading, setSemanticLoading] = useState(false);
+  const [relatedExpanded, setRelatedExpanded] = useState(false);
+  const [searchModeOpen, setSearchModeOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -123,6 +153,54 @@ export default function ProjectsOverview() {
     window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsedSections]));
   }, [collapsedSections]);
 
+  useEffect(() => {
+    window.localStorage.setItem(SEARCH_MODE_KEY, searchMode);
+  }, [searchMode]);
+
+  // Semantic search: debounced + cancellable.
+  useEffect(() => {
+    if (searchMode !== 'semantic' || !search.trim()) {
+      setSemanticHits(null);
+      setRelatedHits([]);
+      setSemanticLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSemanticLoading(true);
+    const handle = window.setTimeout(async () => {
+      try {
+        const result = await api.projects.searchSemantic(
+          search.trim(),
+          customerFilter || undefined,
+          30,
+        );
+        if (cancelled) return;
+        if (result.projects.length === 0) {
+          // Fallback to substring for this query so the user isn't left empty.
+          setSemanticHits(null);
+          setRelatedHits(result.relatedHits);
+        } else {
+          setSemanticHits(new Set(result.projects.map((p) => p._id)));
+          setRelatedHits(result.relatedHits);
+        }
+      } catch (err: unknown) {
+        if (cancelled) return;
+        // 503 with fallback: silent substring fallback. Other errors: toast.
+        const msg = err instanceof Error ? err.message : String(err);
+        const isFallback = /fallback/i.test(msg) || /unavailable/i.test(msg) || /503/.test(msg);
+        if (!isFallback) showError(msg || t('projects.semanticSearchFailed'));
+        setSemanticHits(null);
+        setRelatedHits([]);
+      } finally {
+        if (!cancelled) setSemanticLoading(false);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [search, searchMode, customerFilter, showError, t]);
+
   const primaryCustomerByProject = useMemo(() => {
     const map = new Map<string, CustomerLink>();
     for (const link of customerLinks) {
@@ -136,6 +214,14 @@ export default function ProjectsOverview() {
 
   const filteredProjects = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const useSemantic = searchMode === 'semantic' && q && semanticHits !== null;
+
+    if (useSemantic) {
+      // Keep RAG ordering by mapping over Set insertion order, then look up projects.
+      const byId = new Map(projects.map((p) => [p._id, p]));
+      return [...semanticHits!].map((id) => byId.get(id)).filter((p): p is Project => !!p);
+    }
+
     return [...projects]
       .filter((p) => {
         if (!q) return true;
@@ -150,7 +236,7 @@ export default function ProjectsOverview() {
         if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
         return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
       });
-  }, [projects, search]);
+  }, [projects, search, searchMode, semanticHits]);
 
   const sections = useMemo<Section[]>(() => {
     if (groupMode === 'flat') return [];
@@ -306,13 +392,53 @@ export default function ProjectsOverview() {
             }
           }}
         />
-        <input
-          type="text"
-          placeholder={t('projects.searchProjects')}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 w-full sm:w-64"
-        />
+        <div className="relative flex items-center w-full sm:w-72">
+          <button
+            type="button"
+            onClick={() => setSearchModeOpen((v) => !v)}
+            onBlur={() => setTimeout(() => setSearchModeOpen(false), 120)}
+            className={`absolute left-2 px-1.5 py-0.5 rounded text-sm transition-colors ${
+              searchMode === 'semantic'
+                ? 'text-violet-300 hover:text-violet-200'
+                : 'text-gray-500 hover:text-gray-300'
+            }`}
+            title={t(`projects.searchMode.${searchMode}Title`)}
+            aria-label={t(`projects.searchMode.${searchMode}Title`)}
+          >
+            {searchMode === 'semantic' ? '🧠' : '⚡'}
+          </button>
+          <input
+            type="text"
+            placeholder={t(`projects.searchMode.${searchMode}Placeholder`)}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="bg-gray-800 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 w-full"
+          />
+          {semanticLoading && (
+            <span className="absolute right-2 text-xs text-gray-500 animate-pulse">…</span>
+          )}
+          {searchModeOpen && (
+            <div className="absolute top-full left-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-10 overflow-hidden">
+              {(['substring', 'semantic'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setSearchMode(m);
+                    setSearchModeOpen(false);
+                  }}
+                  className={`flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-gray-700 ${
+                    searchMode === m ? 'text-violet-300' : 'text-gray-200'
+                  }`}
+                >
+                  <span>{m === 'semantic' ? '🧠' : '⚡'}</span>
+                  <span>{t(`projects.searchMode.${m}`)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {customers.length > 0 && (
           <select
             value={customerFilter}
@@ -346,6 +472,51 @@ export default function ProjectsOverview() {
           ))}
         </div>
       </div>
+
+      {searchMode === 'semantic' && search.trim() && relatedHits.length > 0 && (
+        <div className="mb-4 bg-gray-900/60 border border-gray-800 rounded-lg">
+          <button
+            type="button"
+            onClick={() => setRelatedExpanded((v) => !v)}
+            className="w-full flex items-center gap-2 px-4 py-2 text-left text-sm text-gray-300 hover:text-violet-300 transition-colors"
+          >
+            <span className={`text-gray-500 transition-transform ${relatedExpanded ? 'rotate-90' : ''}`}>
+              ▶
+            </span>
+            <span className="font-medium">{t('projects.relatedHits', { count: relatedHits.length })}</span>
+          </button>
+          {relatedExpanded && (
+            <div className="px-4 pb-3 space-y-1">
+              {(() => {
+                const grouped = new Map<string, ProjectRelatedHit[]>();
+                for (const h of relatedHits) {
+                  if (!grouped.has(h.entity)) grouped.set(h.entity, []);
+                  grouped.get(h.entity)!.push(h);
+                }
+                return [...grouped.entries()].map(([entity, hits]) => (
+                  <div key={entity}>
+                    <p className="text-xs uppercase tracking-wide text-gray-600 mt-2 mb-1">
+                      {t(`projects.entityLabel.${entity}`, { defaultValue: entity })} ({hits.length})
+                    </p>
+                    <ul className="space-y-0.5">
+                      {hits.map((hit) => (
+                        <li key={`${hit.entity}-${hit.id}`}>
+                          <Link
+                            to={routeForRelated(hit)}
+                            className="block text-sm text-gray-300 hover:text-violet-300 hover:bg-gray-800/60 rounded px-2 py-1 transition-colors"
+                          >
+                            {hit.title || hit.id}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ));
+              })()}
+            </div>
+          )}
+        </div>
+      )}
 
       {showEmpty ? (
         <EmptyState message={t('projects.noProjects')} />

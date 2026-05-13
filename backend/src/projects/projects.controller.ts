@@ -46,6 +46,16 @@ export class ProjectsController {
     return this.projectsService.listCustomerLinks();
   }
 
+  @Get('search')
+  search(
+    @Query('q') q?: string,
+    @Query('customerId') customerId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parsedLimit = limit ? Math.max(1, Math.min(50, parseInt(limit, 10) || 20)) : 20;
+    return this.projectsService.searchSemantic(q ?? '', customerId || undefined, parsedLimit);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.projectsService.findById(id);

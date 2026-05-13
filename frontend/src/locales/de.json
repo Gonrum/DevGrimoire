@@ -131,6 +131,27 @@
       "customer": "Nach Kunde",
       "customerTitle": "Gruppiert nach primärem Kunden"
     },
+    "searchMode": {
+      "substring": "Schnell",
+      "substringTitle": "Substring-Suche über Name, Beschreibung, Tags, Tech",
+      "substringPlaceholder": "Kapitel suchen…",
+      "semantic": "Semantisch",
+      "semanticTitle": "Semantische Suche (RAG) über alle Inhalte",
+      "semanticPlaceholder": "Semantisch suchen…"
+    },
+    "semanticSearchFailed": "Semantische Suche fehlgeschlagen",
+    "relatedHits": "Verwandte Inhalte ({{count}})",
+    "entityLabel": {
+      "knowledge": "Wissen",
+      "todo": "Aufgaben",
+      "manual": "Handbuch",
+      "changelog": "Changelog",
+      "session": "Sessions",
+      "snippet": "Snippets",
+      "research": "Recherche",
+      "attachment": "Anhänge",
+      "schema": "Schemas"
+    },
     "notFound": "Kapitel nicht gefunden."
   },
   "tagInput": {

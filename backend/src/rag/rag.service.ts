@@ -30,6 +30,7 @@ const INDEXABLE_ENTITIES = [
   'snippet',
   'attachment',
   'schema',
+  'project',
 ] as const;
 
 type IndexableEntity = (typeof INDEXABLE_ENTITIES)[number];
@@ -45,6 +46,7 @@ const ENTITY_COLLECTION_MAP: Record<IndexableEntity, string> = {
   snippet: 'snippets',
   attachment: 'attachments',
   schema: 'dbschemas',
+  project: 'projects',
 };
 
 interface RagDocument {
@@ -580,6 +582,18 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         return { title: String(doc.originalName || ''), content: String(doc.textContent || '') };
       case 'schema':
         return { title: String(doc.name || ''), content: this.serializeSchema(doc) };
+      case 'project': {
+        const parts: string[] = [];
+        if (doc.description) parts.push(String(doc.description));
+        if (Array.isArray(doc.techStack) && doc.techStack.length > 0) {
+          parts.push(`Tech: ${(doc.techStack as unknown[]).map(String).join(', ')}`);
+        }
+        if (Array.isArray(doc.tags) && doc.tags.length > 0) {
+          parts.push(`Tags: ${(doc.tags as unknown[]).map(String).join(', ')}`);
+        }
+        if (doc.instructions) parts.push(String(doc.instructions));
+        return { title: String(doc.name || ''), content: parts.join('\n') };
+      }
       default:
         return null;
     }
@@ -603,7 +617,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     if (!extracted || (!extracted.title && !extracted.content)) return;
 
     const docId = String(doc._id);
-    const projectId = String(doc.projectId || '');
+    // For project entities the doc IS the project, so its _id is the projectId.
+    const projectId = entity === 'project' ? docId : String(doc.projectId || '');
     const customerId = String(doc.customerId || '');
     const combinedText = `${extracted.title}\n${extracted.content}`.trim();
 
@@ -788,13 +803,23 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       const filter: Record<string, unknown> = {};
       const { ObjectId } = await import('mongodb');
       if (projectId) {
-        // Include project-specific + global entries (no projectId)
-        filter.$or = [
-          { projectId: new ObjectId(projectId) },
-          { projectId: { $exists: false } },
-          { projectId: null },
-        ];
+        if (entity === 'project') {
+          // Project docs identify by _id, not by projectId field.
+          filter._id = new ObjectId(projectId);
+        } else {
+          // Include project-specific + global entries (no projectId)
+          filter.$or = [
+            { projectId: new ObjectId(projectId) },
+            { projectId: { $exists: false } },
+            { projectId: null },
+          ];
+        }
       } else if (customerId) {
+        if (entity === 'project') {
+          // Skip projects in customer-scoped reindex (project↔customer is via
+          // customer_project_links, not a customerId field on Project).
+          continue;
+        }
         filter.customerId = new ObjectId(customerId);
       }
 
@@ -808,7 +833,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         if (!extracted || (!extracted.title && !extracted.content)) continue;
 
         const docId = String(doc._id);
-        const docProjectId = String(doc.projectId || '');
+        const docProjectId = entity === 'project' ? docId : String(doc.projectId || '');
         const docCustomerId = String(doc.customerId || '');
         const combinedText = `${extracted.title}\n${extracted.content}`.trim();
         const chunks = this.chunkText(combinedText);
