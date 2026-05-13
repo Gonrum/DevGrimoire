@@ -1154,6 +1154,20 @@ export const api = {
       if (customerId) params.set('customerId', customerId);
       return request<ProjectSemanticSearchResult>(`/projects/search?${params.toString()}`);
     },
+    renameTag: (from: string, to: string) =>
+      request<{ modified: number }>('/projects/tags/rename', {
+        method: 'POST',
+        body: JSON.stringify({ from, to }),
+      }),
+    mergeTags: (sources: string[], target: string) =>
+      request<{ modified: number }>('/projects/tags/merge', {
+        method: 'POST',
+        body: JSON.stringify({ sources, target }),
+      }),
+    deleteTag: (name: string) =>
+      request<{ modified: number }>(`/projects/tags/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+      }),
   },
   customers: {
     dashboard: () =>

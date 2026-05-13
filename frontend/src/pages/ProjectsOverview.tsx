@@ -471,6 +471,14 @@ export default function ProjectsOverview() {
             </button>
           ))}
         </div>
+        {groupMode === 'tag' && (
+          <Link
+            to="/projects/tags"
+            className="text-xs text-violet-400 hover:text-violet-300 whitespace-nowrap"
+          >
+            {t('projects.manageTags')}
+          </Link>
+        )}
       </div>
 
       {searchMode === 'semantic' && search.trim() && relatedHits.length > 0 && (

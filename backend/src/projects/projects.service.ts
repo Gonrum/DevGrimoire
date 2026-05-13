@@ -109,6 +109,130 @@ export class ProjectsService {
     return rows.map((r) => ({ name: r._id, usageCount: r.usageCount }));
   }
 
+  async renameTag(from: string, to: string): Promise<{ modified: number }> {
+    if (!from.trim() || !to.trim()) {
+      throw new ForbiddenException('Both from and to tag names are required');
+    }
+    if (from === to) return { modified: 0 };
+
+    const scopeFilter = buildScopeFilter(RequestContext.getUser(), {
+      axis: 'project',
+      field: '_id',
+    });
+    const docs = await this.projectModel
+      .find({ tags: from, ...scopeFilter })
+      .select('_id name tags')
+      .exec();
+
+    let modified = 0;
+    for (const doc of docs) {
+      const tags = doc.tags ?? [];
+      const idx = tags.indexOf(from);
+      if (idx === -1) continue;
+      const next = [...tags];
+      const targetIdx = next.indexOf(to);
+      if (targetIdx === -1) {
+        next[idx] = to;
+      } else {
+        // Target tag already on the project → merge: remove source, keep target at its position.
+        next.splice(idx, 1);
+      }
+      doc.tags = next;
+      await doc.save();
+      this.eventEmitter.emit(PROJECT_CHANGED, {
+        projectId: doc._id.toString(),
+        entity: 'project',
+        action: 'updated',
+        entityId: doc._id.toString(),
+        summary: `Tag "${from}" → "${to}" auf Projekt "${doc.name}"`,
+      });
+      modified++;
+    }
+    return { modified };
+  }
+
+  async mergeTags(sources: string[], target: string): Promise<{ modified: number }> {
+    if (!Array.isArray(sources) || sources.length === 0) {
+      throw new ForbiddenException('sources must be a non-empty array');
+    }
+    if (!target.trim()) {
+      throw new ForbiddenException('target is required');
+    }
+    const filteredSources = sources.filter((s) => s && s !== target);
+    if (filteredSources.length === 0) return { modified: 0 };
+
+    const scopeFilter = buildScopeFilter(RequestContext.getUser(), {
+      axis: 'project',
+      field: '_id',
+    });
+    const docs = await this.projectModel
+      .find({ tags: { $in: filteredSources }, ...scopeFilter })
+      .select('_id name tags')
+      .exec();
+
+    let modified = 0;
+    for (const doc of docs) {
+      const tags = doc.tags ?? [];
+      // First-source position determines target placement (when target not already present).
+      let firstSourceIdx = -1;
+      const next: string[] = [];
+      tags.forEach((tag, i) => {
+        if (filteredSources.includes(tag)) {
+          if (firstSourceIdx === -1) firstSourceIdx = i;
+          return; // skip — will be replaced
+        }
+        next.push(tag);
+      });
+      const existingTargetIdx = next.indexOf(target);
+      if (existingTargetIdx === -1) {
+        next.splice(Math.min(firstSourceIdx, next.length), 0, target);
+      }
+      doc.tags = next;
+      await doc.save();
+      this.eventEmitter.emit(PROJECT_CHANGED, {
+        projectId: doc._id.toString(),
+        entity: 'project',
+        action: 'updated',
+        entityId: doc._id.toString(),
+        summary: `Tags ${filteredSources.join(',')} → "${target}" auf Projekt "${doc.name}"`,
+      });
+      modified++;
+    }
+    return { modified };
+  }
+
+  async deleteTag(name: string): Promise<{ modified: number }> {
+    if (!name.trim()) {
+      throw new ForbiddenException('Tag name is required');
+    }
+    const scopeFilter = buildScopeFilter(RequestContext.getUser(), {
+      axis: 'project',
+      field: '_id',
+    });
+    const docs = await this.projectModel
+      .find({ tags: name, ...scopeFilter })
+      .select('_id name tags')
+      .exec();
+
+    let modified = 0;
+    for (const doc of docs) {
+      const tags = doc.tags ?? [];
+      const next = tags.filter((t) => t !== name);
+      if (next.length === tags.length) continue;
+      doc.tags = next;
+      await doc.save();
+      this.eventEmitter.emit(PROJECT_CHANGED, {
+        projectId: doc._id.toString(),
+        entity: 'project',
+        action: 'updated',
+        entityId: doc._id.toString(),
+        summary: `Tag "${name}" entfernt von "${doc.name}"`,
+      });
+      modified++;
+    }
+    return { modified };
+  }
+
   async listCustomerLinks(): Promise<Array<{
     projectId: string;
     customerId: string;

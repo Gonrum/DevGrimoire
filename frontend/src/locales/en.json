@@ -121,6 +121,7 @@
     "repo": "Repo",
     "tagsLabel": "Tags",
     "tagsPlaceholder": "Type a tag, press Enter to add…",
+    "manageTags": "Manage tags →",
     "sectionNoTag": "Untagged",
     "sectionNoCustomer": "No customer",
     "groupMode": {
@@ -157,6 +158,34 @@
   "tagInput": {
     "primaryHint": "The first tag is the primary tag and defines the section in the chapter overview. Drag to reorder.",
     "remove": "Remove tag {{tag}}"
+  },
+  "tagManagement": {
+    "title": "Tag management",
+    "subtitle": "Rename, merge or delete tags. Changes affect all chapters using them.",
+    "noTags": "No tags assigned yet.",
+    "col": {
+      "tag": "Tag",
+      "projects": "Chapters",
+      "actions": "Actions"
+    },
+    "action": {
+      "rename": "Rename",
+      "merge": "Merge",
+      "delete": "Delete"
+    },
+    "dialog": {
+      "renameTitle": "Rename tag \"{{tag}}\"",
+      "mergeTitle": "Merge tag \"{{tag}}\"",
+      "deleteTitle": "Delete tag \"{{tag}}\"",
+      "newName": "New tag name",
+      "chooseTarget": "Choose target tag…",
+      "affectedProjects": "{{count}} chapters affected",
+      "impliedMerge": "Tag \"{{target}}\" already exists — renaming will merge them per chapter.",
+      "deleteConfirm": "Tag \"{{tag}}\" will be removed from all affected chapters. The chapters themselves remain."
+    },
+    "renameSuccess": "{{count}} chapters renamed",
+    "mergeSuccess": "{{count}} chapters merged",
+    "deleteSuccess": "{{count}} chapters edited"
   },
   "customers": {
     "overview": "Customer Overview",

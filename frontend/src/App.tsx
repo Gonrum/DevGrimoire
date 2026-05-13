@@ -14,6 +14,7 @@ import CustomerProjectLinkEditPage from './pages/CustomerProjectLinkEditPage';
 import ContactCreatePage from './pages/ContactCreatePage';
 import ContactEditPage from './pages/ContactEditPage';
 import ProjectSettings from './pages/ProjectSettings';
+import TagManagement from './pages/TagManagement';
 import TodoDetailPage from './pages/TodoDetailPage';
 import TodoCreatePage from './pages/TodoCreatePage';
 import MilestoneCreatePage from './pages/MilestoneCreatePage';
@@ -321,6 +322,7 @@ function AppShell() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/projects" element={<ProjectsOverview />} />
           <Route path="/projects/new" element={<ProjectCreatePage />} />
+          <Route path="/projects/tags" element={<TagManagement />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route path="/customers" element={<CustomersOverview />} />
           <Route path="/customers/new" element={<CustomerCreatePage />} />

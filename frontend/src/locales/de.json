@@ -121,6 +121,7 @@
     "repo": "Repo",
     "tagsLabel": "Tags",
     "tagsPlaceholder": "Tag eingeben, Enter zum Hinzufügen…",
+    "manageTags": "Tags verwalten →",
     "sectionNoTag": "Ohne Tag",
     "sectionNoCustomer": "Ohne Kunde",
     "groupMode": {
@@ -157,6 +158,34 @@
   "tagInput": {
     "primaryHint": "Der erste Tag ist der Haupttag und bestimmt die Gruppen-Sektion in der Kapitelübersicht. Per Drag & Drop umsortieren.",
     "remove": "Tag {{tag}} entfernen"
+  },
+  "tagManagement": {
+    "title": "Tag-Verwaltung",
+    "subtitle": "Tags umbenennen, zusammenführen oder löschen. Änderungen wirken sich auf alle betroffenen Kapitel aus.",
+    "noTags": "Noch keine Tags vergeben.",
+    "col": {
+      "tag": "Tag",
+      "projects": "Kapitel",
+      "actions": "Aktionen"
+    },
+    "action": {
+      "rename": "Umbenennen",
+      "merge": "Mergen",
+      "delete": "Löschen"
+    },
+    "dialog": {
+      "renameTitle": "Tag \"{{tag}}\" umbenennen",
+      "mergeTitle": "Tag \"{{tag}}\" zusammenführen",
+      "deleteTitle": "Tag \"{{tag}}\" löschen",
+      "newName": "Neuer Tag-Name",
+      "chooseTarget": "Ziel-Tag wählen…",
+      "affectedProjects": "{{count}} Kapitel betroffen",
+      "impliedMerge": "Tag \"{{target}}\" existiert bereits — beim Umbenennen werden die Tags pro Kapitel zusammengeführt.",
+      "deleteConfirm": "Tag \"{{tag}}\" wird aus allen betroffenen Kapiteln entfernt. Die Kapitel selbst bleiben bestehen."
+    },
+    "renameSuccess": "{{count}} Kapitel umbenannt",
+    "mergeSuccess": "{{count}} Kapitel zusammengeführt",
+    "deleteSuccess": "{{count}} Kapitel bearbeitet"
   },
   "customers": {
     "overview": "Kundenübersicht",

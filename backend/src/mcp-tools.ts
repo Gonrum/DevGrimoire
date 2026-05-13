@@ -379,6 +379,49 @@ const tools = [
     },
   },
   {
+    name: 'project_tag_list',
+    description: 'List all project tags with usage count (number of projects using each tag).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
+  {
+    name: 'project_tag_rename',
+    description: 'Rename a tag across all projects. If the target tag already exists on a project, the source tag is removed and the target is kept at its existing position (effective merge for that project).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        from: { type: 'string', description: 'Current tag name' },
+        to: { type: 'string', description: 'New tag name' },
+      },
+      required: ['from', 'to'],
+    },
+  },
+  {
+    name: 'project_tag_merge',
+    description: 'Merge multiple source tags into a target tag across all projects. Projects with any source tag get the target tag; sources are removed.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        sources: { type: 'array', items: { type: 'string' }, description: 'Source tag names to merge' },
+        target: { type: 'string', description: 'Target tag name (kept)' },
+      },
+      required: ['sources', 'target'],
+    },
+  },
+  {
+    name: 'project_tag_delete',
+    description: 'Remove a tag from all projects. Does not delete projects.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Tag name to remove' },
+      },
+      required: ['name'],
+    },
+  },
+  {
     name: 'customer_create',
     description: 'Create a customer file. Customers are a top-level context for deployments, knowledge, workflows, environments, secrets, files, monitoring, and contacts.',
     inputSchema: {
@@ -3348,6 +3391,24 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = { deleted: true, id };
           break;
         }
+        case 'project_tag_list':
+          result = await projectsService.listTags();
+          break;
+        case 'project_tag_rename':
+          result = await projectsService.renameTag(
+            requireString(a, 'from'),
+            requireString(a, 'to'),
+          );
+          break;
+        case 'project_tag_merge':
+          result = await projectsService.mergeTags(
+            optionalStringArray(a, 'sources') ?? [],
+            requireString(a, 'target'),
+          );
+          break;
+        case 'project_tag_delete':
+          result = await projectsService.deleteTag(requireString(a, 'name'));
+          break;
         case 'customer_create': {
           const customer = await customersService.create({
             name: requireString(a, 'name'),
