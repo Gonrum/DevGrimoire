@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { SettingsService } from '../settings/settings.service';
 import { EncryptionService } from '../common/encryption.service';
 import {
@@ -35,7 +35,7 @@ export class WorkflowAgentService {
   constructor(
     private readonly settings: SettingsService,
     private readonly encryption: EncryptionService,
-    private readonly chatTools: ChatToolsService,
+    @Inject(forwardRef(() => ChatToolsService)) private readonly chatTools: ChatToolsService,
   ) {}
 
   async getConfig(): Promise<WorkflowAgentConfigPublic | null> {
