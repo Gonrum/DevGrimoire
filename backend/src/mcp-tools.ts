@@ -15,6 +15,7 @@ import { EnvironmentsService } from './environments/environments.service';
 import { SecretsService } from './secrets/secrets.service';
 import { ManualsService } from './manuals/manuals.service';
 import { ResearchService } from './research/research.service';
+import { ResearchSessionsService } from './research-sessions/research-sessions.service';
 import { SettingsService } from './settings/settings.service';
 import { NotificationsService } from './notifications/notifications.service';
 import { SchemasService } from './schemas/schemas.service';
@@ -270,6 +271,7 @@ export interface McpServices {
   secretsService: SecretsService;
   manualsService: ManualsService;
   researchService: ResearchService;
+  researchSessionsService: ResearchSessionsService;
   settingsService: SettingsService;
   notificationsService: NotificationsService;
   schemasService: SchemasService;
@@ -1335,6 +1337,103 @@ const tools = [
       type: 'object' as const,
       properties: {
         id: { type: 'string', description: 'Research entry MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'research_session_create',
+    description: 'Create a multi-project research session for step-by-step Q&A across one or more projects.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        title: { type: 'string', description: 'Research session title' },
+        projectIds: { type: 'array', items: { type: 'string' }, description: 'Project IDs the session scopes to' },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'research_session_list',
+    description: 'List research sessions (compact). Filter by status, optionally limit to sessions referencing a project.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        status: { type: 'string', enum: ['open', 'in_progress', 'done'] },
+        q: { type: 'string', description: 'Title substring filter' },
+      },
+    },
+  },
+  {
+    name: 'research_session_get',
+    description: 'Get a research session with its steps (no embedded message content in lists).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'ResearchSession MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'research_session_update',
+    description: 'Update title, projectIds, or status. Status transitions: open → in_progress → done (one step at a time). Done requires all steps to be done.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'ResearchSession MongoDB ID' },
+        title: { type: 'string' },
+        projectIds: { type: 'array', items: { type: 'string' } },
+        status: { type: 'string', enum: ['open', 'in_progress', 'done'] },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'research_session_delete',
+    description: 'Delete a research session and all its steps + embedded messages.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'ResearchSession MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'research_step_create',
+    description: 'Add a step (sub-question) to a research session.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        sessionId: { type: 'string', description: 'Parent ResearchSession ID' },
+        title: { type: 'string', description: 'Step title (the sub-question)' },
+        order: { type: 'number', description: 'Optional explicit order (default: append)' },
+      },
+      required: ['sessionId', 'title'],
+    },
+  },
+  {
+    name: 'research_step_update',
+    description: 'Update a research step. Status → done triggers auto-conversion to a research_* entry (Phase 4).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'ResearchStep MongoDB ID' },
+        title: { type: 'string' },
+        status: { type: 'string', enum: ['open', 'in_progress', 'done'] },
+        order: { type: 'number' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'research_step_delete',
+    description: 'Delete a research step and its embedded conversation.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'ResearchStep MongoDB ID' },
       },
       required: ['id'],
     },
@@ -3290,7 +3389,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, researchSessionsService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -4125,6 +4224,49 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         case 'research_delete':
           await researchService.remove(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
+          break;
+        case 'research_session_create':
+          result = await researchSessionsService.createSession({
+            title: requireString(a, 'title'),
+            projectIds: optionalStringArray(a, 'projectIds'),
+          });
+          break;
+        case 'research_session_list':
+          result = await researchSessionsService.listSessions({
+            status: optionalString(a, 'status') as any,
+            q: optionalString(a, 'q'),
+          });
+          break;
+        case 'research_session_get':
+          result = await researchSessionsService.getSessionWithSteps(requireString(a, 'id'));
+          break;
+        case 'research_session_update':
+          result = await researchSessionsService.updateSession(requireString(a, 'id'), {
+            title: optionalString(a, 'title'),
+            projectIds: optionalStringArray(a, 'projectIds'),
+            status: optionalString(a, 'status') as any,
+          });
+          break;
+        case 'research_session_delete':
+          await researchSessionsService.deleteSession(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
+          break;
+        case 'research_step_create':
+          result = await researchSessionsService.createStep(requireString(a, 'sessionId'), {
+            title: requireString(a, 'title'),
+            order: typeof a.order === 'number' ? (a.order as number) : undefined,
+          });
+          break;
+        case 'research_step_update':
+          result = await researchSessionsService.updateStep(requireString(a, 'id'), {
+            title: optionalString(a, 'title'),
+            status: optionalString(a, 'status') as any,
+            order: typeof a.order === 'number' ? (a.order as number) : undefined,
+          });
+          break;
+        case 'research_step_delete':
+          await researchSessionsService.deleteStep(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
           break;
         case 'system_instructions_get': {

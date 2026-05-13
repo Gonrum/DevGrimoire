@@ -16,6 +16,7 @@ import { EnvironmentsService } from './environments/environments.service';
 import { SecretsService } from './secrets/secrets.service';
 import { ManualsService } from './manuals/manuals.service';
 import { ResearchService } from './research/research.service';
+import { ResearchSessionsService } from './research-sessions/research-sessions.service';
 import { SettingsService } from './settings/settings.service';
 import { NotificationsService } from './notifications/notifications.service';
 import { SchemasService } from './schemas/schemas.service';
@@ -116,6 +117,7 @@ async function bootstrap() {
     secretsService: app.get(SecretsService),
     manualsService: app.get(ManualsService),
     researchService: app.get(ResearchService),
+    researchSessionsService: app.get(ResearchSessionsService),
     settingsService: app.get(SettingsService),
     notificationsService: app.get(NotificationsService),
     schemasService: app.get(SchemasService),

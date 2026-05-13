@@ -11,7 +11,7 @@ export class Counter {
   @Prop({ type: Types.ObjectId, ref: 'Customer' })
   customerId?: Types.ObjectId;
 
-  @Prop({ required: true, enum: ['todo', 'milestone'] })
+  @Prop({ required: true, enum: ['todo', 'milestone', 'research'] })
   entity: string;
 
   @Prop({ default: 0 })
