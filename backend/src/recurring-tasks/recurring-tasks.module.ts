@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { RecurringTask, RecurringTaskSchema } from './schemas/recurring-task.schema';
 import { RecurringTasksService } from './recurring-tasks.service';
@@ -20,8 +20,8 @@ import { Project, ProjectSchema } from '../projects/schemas/project.schema';
     TodosModule,
     NotificationsModule,
     CustomersModule,
-    ChatModule,
-    WorkflowsModule,
+    forwardRef(() => ChatModule),
+    forwardRef(() => WorkflowsModule),
   ],
   controllers: [RecurringTasksController],
   providers: [RecurringTasksService, RecurringTasksScheduler],

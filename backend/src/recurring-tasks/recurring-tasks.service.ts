@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { BadRequestException, forwardRef, Inject, Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types, isValidObjectId } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -30,8 +30,8 @@ export class RecurringTasksService {
     private readonly todosService: TodosService,
     private readonly notificationsService: NotificationsService,
     private readonly customersService: CustomersService,
-    private readonly chatService: ChatService,
-    private readonly workflowAgent: WorkflowAgentService,
+    @Inject(forwardRef(() => ChatService)) private readonly chatService: ChatService,
+    @Inject(forwardRef(() => WorkflowAgentService)) private readonly workflowAgent: WorkflowAgentService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 

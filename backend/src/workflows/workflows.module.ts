@@ -1,4 +1,4 @@
-import { Module, OnModuleInit } from '@nestjs/common';
+import { forwardRef, Module, OnModuleInit } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { WorkflowsController } from './workflows.controller';
 import { WorkflowsService } from './workflows.service';
@@ -55,7 +55,7 @@ import { CommonModule } from '../common/common.module';
     KnowledgeModule,
     ManualsModule,
     ChangelogModule,
-    ChatModule,
+    forwardRef(() => ChatModule),
     SettingsModule,
     CommonModule,
   ],

@@ -1,6 +1,12 @@
-import { ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ModuleRef } from '@nestjs/core';
 import { Model, Types } from 'mongoose';
 import { Project, ProjectDocument } from './schemas/project.schema';
 import { CreateProjectDto } from './dto/create-project.dto';
@@ -44,8 +50,15 @@ export class ProjectsService {
     @InjectModel(CustomerProjectLink.name)
     private customerProjectLinkModel: Model<CustomerProjectLinkDocument>,
     private eventEmitter: EventEmitter2,
-    private ragService: RagService,
+    private moduleRef: ModuleRef,
   ) {}
+
+  private getRagService(): RagService {
+    // Lazy lookup über den globalen DI-Container — ProjectsModule kann
+    // RagModule nicht direkt importieren (Circular-Module-Init), aber
+    // RagService ist als globaler Provider verfügbar.
+    return this.moduleRef.get(RagService, { strict: false });
+  }
 
   async create(dto: CreateProjectDto): Promise<ProjectDocument> {
     const project = await this.projectModel.create(dto);
@@ -336,12 +349,13 @@ export class ProjectsService {
       return { projects: [], relatedHits: [] };
     }
 
+    const ragService = this.getRagService();
     let projectHits: Awaited<ReturnType<RagService['search']>>;
     let relatedHits: Awaited<ReturnType<RagService['search']>>;
     try {
       [projectHits, relatedHits] = await Promise.all([
-        this.ragService.search(query, undefined, 'project', limit, customerId),
-        this.ragService.search(query, undefined, undefined, limit, customerId),
+        ragService.search(query, undefined, 'project', limit, customerId),
+        ragService.search(query, undefined, undefined, limit, customerId),
       ]);
     } catch (err) {
       throw new ServiceUnavailableException({

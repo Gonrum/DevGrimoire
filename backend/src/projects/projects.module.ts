@@ -7,7 +7,13 @@ import {
 } from '../customers/schemas/customer-project-link.schema';
 import { ProjectsService } from './projects.service';
 import { ProjectsController } from './projects.controller';
-import { RagModule } from '../rag/rag.module';
+
+// ProjectsModule importiert RagModule bewusst NICHT — ProjectsModule ist
+// @Global und wird sehr früh evaluiert; ein direktes RagModule-Import
+// verschiebt die Module-Eval-Reihenfolge so, dass der bestehende
+// ChatModule ↔ RecurringTasksModule Circular-Dep nicht mehr lazy
+// auflösbar ist. RagService wird stattdessen via ModuleRef.get() lazy
+// im ProjectsService aufgelöst (s. searchSemantic).
 
 @Global()
 @Module({
@@ -20,7 +26,6 @@ import { RagModule } from '../rag/rag.module';
       // eigene Service-Logik — das ist OK, MongooseModule.forFeature ist idempotent.
       { name: CustomerProjectLink.name, schema: CustomerProjectLinkSchema },
     ]),
-    RagModule,
   ],
   controllers: [ProjectsController],
   providers: [ProjectsService],

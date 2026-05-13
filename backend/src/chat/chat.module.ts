@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ChatSession, ChatSessionSchema } from './schemas/chat-session.schema';
 import { ChatActivity, ChatActivitySchema } from './schemas/chat-activity.schema';
@@ -63,7 +63,8 @@ import { AgentRolesModule } from '../agent-roles/agent-roles.module';
     WebSearchModule,
     WorkspacesModule,
     SnippetsModule,
-    RecurringTasksModule,
+    // forwardRef bricht den Cycle ChatModule → RecurringTasksModule → WorkflowsModule → ChatModule
+    forwardRef(() => RecurringTasksModule),
     ReleasesModule,
     SoulsModule,
     CommitsModule,

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { TodosService } from '../todos/todos.service';
 import { MilestonesService } from '../milestones/milestones.service';
 import { ChangelogService } from '../changelog/changelog.service';
@@ -1165,7 +1165,7 @@ export class ChatToolsService {
     private readonly workspaceCliToken: WorkspaceCliTokenService,
     private readonly snippets: SnippetsService,
     private readonly attachments: AttachmentsService,
-    private readonly recurringTasks: RecurringTasksService,
+    @Inject(forwardRef(() => RecurringTasksService)) private readonly recurringTasks: RecurringTasksService,
     private readonly releases: ReleasesService,
     private readonly souls: SoulsService,
     private readonly commits: CommitsService,
