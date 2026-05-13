@@ -32,7 +32,7 @@ export function renderWhiteboard(ctx: CanvasRenderingContext2D, doc: WhiteboardD
   ctx.translate(doc.viewport.x, doc.viewport.y);
   ctx.scale(doc.viewport.zoom, doc.viewport.zoom);
 
-  if (options.showGrid ?? true) drawGrid(ctx, doc.viewport.zoom, width, height);
+  if (options.showGrid ?? true) drawGrid(ctx, doc.viewport.x, doc.viewport.y, doc.viewport.zoom, width, height);
 
   Object.values(doc.edges).forEach((edge) => drawEdge(ctx, doc, edge));
   Object.values(doc.nodes).forEach((node) => drawNode(ctx, node));
@@ -48,15 +48,16 @@ export function renderWhiteboard(ctx: CanvasRenderingContext2D, doc: WhiteboardD
   ctx.restore();
 }
 
-function drawGrid(ctx: CanvasRenderingContext2D, zoom: number, screenWidth: number, screenHeight: number): void {
-  const base = 32;
-  const step = base;
-  const worldWidth = screenWidth / zoom;
-  const worldHeight = screenHeight / zoom;
-  const startX = -Math.ceil(worldWidth / step) * step;
-  const endX = Math.ceil(worldWidth * 2 / step) * step;
-  const startY = -Math.ceil(worldHeight / step) * step;
-  const endY = Math.ceil(worldHeight * 2 / step) * step;
+function drawGrid(ctx: CanvasRenderingContext2D, viewportX: number, viewportY: number, zoom: number, screenWidth: number, screenHeight: number): void {
+  const step = 32;
+  const worldLeft = -viewportX / zoom;
+  const worldTop = -viewportY / zoom;
+  const worldRight = worldLeft + screenWidth / zoom;
+  const worldBottom = worldTop + screenHeight / zoom;
+  const startX = Math.floor(worldLeft / step) * step;
+  const endX = Math.ceil(worldRight / step) * step;
+  const startY = Math.floor(worldTop / step) * step;
+  const endY = Math.ceil(worldBottom / step) * step;
 
   ctx.save();
   ctx.strokeStyle = 'rgba(148, 163, 184, 0.12)';

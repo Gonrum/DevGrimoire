@@ -680,6 +680,51 @@ export interface ResearchEntry {
   updatedAt: string;
 }
 
+export type ResearchSessionStatus = 'open' | 'in_progress' | 'done';
+export type ResearchStepStatus = 'open' | 'in_progress' | 'done';
+
+export interface ResearchChatContextRef {
+  entity: string;
+  entityId: string;
+  title?: string;
+  score?: number;
+}
+
+export interface ResearchStepMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+  contextUsed?: ResearchChatContextRef[];
+}
+
+export interface ResearchSessionEntry {
+  _id: string;
+  title: string;
+  projectIds: string[];
+  status: ResearchSessionStatus;
+  number: number;
+  displayNumber: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ResearchStepEntry {
+  _id: string;
+  sessionId: string;
+  title: string;
+  status: ResearchStepStatus;
+  order: number;
+  messages: ResearchStepMessage[];
+  researchEntryId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ResearchSessionDetail {
+  session: ResearchSessionEntry;
+  steps: ResearchStepEntry[];
+}
+
 export type SecretType = 'variable' | 'password' | 'token' | 'ssh_key' | 'certificate' | 'file';
 
 export interface SecretListItem {
@@ -1526,6 +1571,50 @@ export const api = {
     clearCache: () =>
       request<{ search: { deleted: number }; fetch: { deleted: number } }>(
         '/web-search/cache/clear',
+        { method: 'POST' },
+      ),
+  },
+  researchSessions: {
+    list: (filters?: { status?: ResearchSessionStatus; q?: string }) => {
+      const params = new URLSearchParams();
+      if (filters?.status) params.set('status', filters.status);
+      if (filters?.q) params.set('q', filters.q);
+      const qs = params.toString();
+      return request<ResearchSessionEntry[]>(`/research/sessions${qs ? `?${qs}` : ''}`);
+    },
+    get: (id: string) => request<ResearchSessionDetail>(`/research/sessions/${id}`),
+    create: (data: { title: string; projectIds?: string[] }) =>
+      request<ResearchSessionEntry>('/research/sessions', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: Partial<{ title: string; projectIds: string[]; status: ResearchSessionStatus }>) =>
+      request<ResearchSessionEntry>(`/research/sessions/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      request<void>(`/research/sessions/${id}`, { method: 'DELETE' }),
+
+    createStep: (sessionId: string, data: { title: string; order?: number }) =>
+      request<ResearchStepEntry>(`/research/sessions/${sessionId}/steps`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    updateStep: (
+      sessionId: string,
+      stepId: string,
+      data: Partial<{ title: string; status: ResearchStepStatus; order: number }>,
+    ) =>
+      request<ResearchStepEntry>(`/research/sessions/${sessionId}/steps/${stepId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    deleteStep: (sessionId: string, stepId: string) =>
+      request<void>(`/research/sessions/${sessionId}/steps/${stepId}`, { method: 'DELETE' }),
+    saveStepAsResearch: (sessionId: string, stepId: string) =>
+      request<{ researchEntryId: string }>(
+        `/research/sessions/${sessionId}/steps/${stepId}/save-research`,
         { method: 'POST' },
       ),
   },
