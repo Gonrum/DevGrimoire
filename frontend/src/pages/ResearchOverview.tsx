@@ -54,16 +54,16 @@ export default function ResearchOverview() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <h1 className="text-xl sm:text-2xl font-bold font-grimoire">{t('research.overviewTitle')}</h1>
+        <h1 className="text-xl sm:text-2xl font-bold font-grimoire">{t('researchSessions.overviewTitle')}</h1>
         <Button variant="primary" size="lg" onClick={() => setShowCreate(true)}>
-          {t('research.newSession')}
+          {t('researchSessions.newSession')}
         </Button>
       </div>
 
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
         <input
           type="text"
-          placeholder={t('research.searchPlaceholder')}
+          placeholder={t('researchSessions.searchPlaceholder')}
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
@@ -76,15 +76,15 @@ export default function ResearchOverview() {
           onChange={(e) => setStatusFilter(e.target.value as ResearchSessionStatus | '')}
           className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
         >
-          <option value="">{t('research.statusAll')}</option>
-          <option value="open">{t('research.statusOpen')}</option>
-          <option value="in_progress">{t('research.statusInProgress')}</option>
-          <option value="done">{t('research.statusDone')}</option>
+          <option value="">{t('researchSessions.statusAll')}</option>
+          <option value="open">{t('researchSessions.statusOpen')}</option>
+          <option value="in_progress">{t('researchSessions.statusInProgress')}</option>
+          <option value="done">{t('researchSessions.statusDone')}</option>
         </select>
       </div>
 
       {sessions.length === 0 ? (
-        <EmptyState message={t('research.noSessions')} />
+        <EmptyState message={t('researchSessions.noSessions')} />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {sessions.map((s) => (
@@ -96,7 +96,7 @@ export default function ResearchOverview() {
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-gray-500 font-mono">{s.displayNumber}</span>
                 <Badge color={statusColor(s.status)} rounded="full">
-                  {t(`research.status${capitalize(s.status)}` as never)}
+                  {t(`researchSessions.status${capitalize(s.status)}` as never)}
                 </Badge>
               </div>
               <h2 className="text-lg font-semibold mb-3">{s.title}</h2>
@@ -106,7 +106,7 @@ export default function ResearchOverview() {
                     const p = projectsById.get(pid);
                     return (
                       <Badge key={pid} color="bg-violet-900/40 text-violet-300">
-                        {p ? p.name : t('research.unknownProject')}
+                        {p ? p.name : t('researchSessions.unknownProject')}
                       </Badge>
                     );
                   })}
@@ -187,21 +187,21 @@ function CreateSessionDialog({ projects, onCancel, onCreated }: CreateSessionDia
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 p-4">
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 w-full max-w-lg space-y-4">
-        <h2 className="text-lg font-semibold text-gray-200">{t('research.createTitle')}</h2>
+        <h2 className="text-lg font-semibold text-gray-200">{t('researchSessions.createTitle')}</h2>
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder={t('research.titlePlaceholder')}
+          placeholder={t('researchSessions.titlePlaceholder')}
           className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
           autoFocus
         />
 
         <div>
-          <p className="text-xs font-medium text-gray-400 mb-2">{t('research.selectProjects')}</p>
+          <p className="text-xs font-medium text-gray-400 mb-2">{t('researchSessions.selectProjects')}</p>
           <div className="max-h-60 overflow-y-auto space-y-1 border border-gray-800 rounded-lg p-2">
             {projects.length === 0 ? (
-              <p className="text-sm text-gray-500 px-2 py-1">{t('research.noProjects')}</p>
+              <p className="text-sm text-gray-500 px-2 py-1">{t('researchSessions.noProjects')}</p>
             ) : (
               projects.map((p) => (
                 <label
@@ -231,7 +231,7 @@ function CreateSessionDialog({ projects, onCancel, onCreated }: CreateSessionDia
             onClick={handleCreate}
             disabled={saving || !title.trim() || selectedProjects.size === 0}
           >
-            {t('research.createAction')}
+            {t('researchSessions.createAction')}
           </Button>
         </div>
       </div>

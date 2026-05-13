@@ -78,7 +78,7 @@
     "profile": "Profil",
     "logout": "Abmelden"
   },
-  "research": {
+  "researchSessions": {
     "overviewTitle": "Recherche",
     "newSession": "+ Neue Recherche",
     "createTitle": "Neue Recherche-Session anlegen",

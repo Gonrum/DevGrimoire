@@ -23,60 +23,60 @@ interface SendMessageDto {
   content: string;
 }
 
-@Controller('research')
+@Controller('research-sessions')
 export class ResearchSessionsController {
   constructor(private readonly service: ResearchSessionsService) {}
 
-  @Get('sessions')
+  @Get()
   listSessions(@Query('status') status?: ResearchSessionStatus, @Query('q') q?: string) {
     return this.service.listSessions({ status, q });
   }
 
-  @Post('sessions')
+  @Post()
   @HttpCode(201)
   createSession(@Body() dto: CreateResearchSessionDto) {
     return this.service.createSession(dto);
   }
 
-  @Get('sessions/:id')
+  @Get(':id')
   getSession(@Param('id') id: string) {
     return this.service.getSessionWithSteps(id);
   }
 
-  @Patch('sessions/:id')
+  @Patch(':id')
   updateSession(@Param('id') id: string, @Body() dto: UpdateResearchSessionDto) {
     return this.service.updateSession(id, dto);
   }
 
-  @Delete('sessions/:id')
+  @Delete(':id')
   @HttpCode(204)
   async deleteSession(@Param('id') id: string) {
     await this.service.deleteSession(id);
   }
 
-  @Post('sessions/:id/steps')
+  @Post(':id/steps')
   @HttpCode(201)
   createStep(@Param('id') sessionId: string, @Body() dto: CreateResearchStepDto) {
     return this.service.createStep(sessionId, dto);
   }
 
-  @Patch('sessions/:id/steps/:stepId')
+  @Patch(':id/steps/:stepId')
   updateStep(@Param('stepId') stepId: string, @Body() dto: UpdateResearchStepDto) {
     return this.service.updateStep(stepId, dto);
   }
 
-  @Delete('sessions/:id/steps/:stepId')
+  @Delete(':id/steps/:stepId')
   @HttpCode(204)
   async deleteStep(@Param('stepId') stepId: string) {
     await this.service.deleteStep(stepId);
   }
 
-  @Post('sessions/:id/steps/:stepId/save-research')
+  @Post(':id/steps/:stepId/save-research')
   saveStepAsResearch(@Param('stepId') stepId: string) {
     return this.service.saveStepAsResearch(stepId);
   }
 
-  @Post('sessions/:id/steps/:stepId/messages')
+  @Post(':id/steps/:stepId/messages')
   async sendMessage(
     @Param('stepId') stepId: string,
     @Body() dto: SendMessageDto,

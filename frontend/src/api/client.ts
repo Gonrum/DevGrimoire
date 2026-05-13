@@ -1580,24 +1580,24 @@ export const api = {
       if (filters?.status) params.set('status', filters.status);
       if (filters?.q) params.set('q', filters.q);
       const qs = params.toString();
-      return request<ResearchSessionEntry[]>(`/research/sessions${qs ? `?${qs}` : ''}`);
+      return request<ResearchSessionEntry[]>(`/research-sessions${qs ? `?${qs}` : ''}`);
     },
-    get: (id: string) => request<ResearchSessionDetail>(`/research/sessions/${id}`),
+    get: (id: string) => request<ResearchSessionDetail>(`/research-sessions/${id}`),
     create: (data: { title: string; projectIds?: string[] }) =>
-      request<ResearchSessionEntry>('/research/sessions', {
+      request<ResearchSessionEntry>('/research-sessions', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
     update: (id: string, data: Partial<{ title: string; projectIds: string[]; status: ResearchSessionStatus }>) =>
-      request<ResearchSessionEntry>(`/research/sessions/${id}`, {
+      request<ResearchSessionEntry>(`/research-sessions/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(data),
       }),
     delete: (id: string) =>
-      request<void>(`/research/sessions/${id}`, { method: 'DELETE' }),
+      request<void>(`/research-sessions/${id}`, { method: 'DELETE' }),
 
     createStep: (sessionId: string, data: { title: string; order?: number }) =>
-      request<ResearchStepEntry>(`/research/sessions/${sessionId}/steps`, {
+      request<ResearchStepEntry>(`/research-sessions/${sessionId}/steps`, {
         method: 'POST',
         body: JSON.stringify(data),
       }),
@@ -1606,15 +1606,15 @@ export const api = {
       stepId: string,
       data: Partial<{ title: string; status: ResearchStepStatus; order: number }>,
     ) =>
-      request<ResearchStepEntry>(`/research/sessions/${sessionId}/steps/${stepId}`, {
+      request<ResearchStepEntry>(`/research-sessions/${sessionId}/steps/${stepId}`, {
         method: 'PATCH',
         body: JSON.stringify(data),
       }),
     deleteStep: (sessionId: string, stepId: string) =>
-      request<void>(`/research/sessions/${sessionId}/steps/${stepId}`, { method: 'DELETE' }),
+      request<void>(`/research-sessions/${sessionId}/steps/${stepId}`, { method: 'DELETE' }),
     saveStepAsResearch: (sessionId: string, stepId: string) =>
       request<{ researchEntryId: string }>(
-        `/research/sessions/${sessionId}/steps/${stepId}/save-research`,
+        `/research-sessions/${sessionId}/steps/${stepId}/save-research`,
         { method: 'POST' },
       ),
   },

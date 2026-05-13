@@ -66,7 +66,7 @@
     "selectAll": "Select all",
     "deselectAll": "Deselect all"
   },
-  "research": {
+  "researchSessions": {
     "overviewTitle": "Research",
     "newSession": "+ New research",
     "createTitle": "Create new research session",

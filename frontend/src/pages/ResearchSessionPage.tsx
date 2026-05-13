@@ -143,7 +143,7 @@ export default function ResearchSessionPage() {
         steps: steps.map((s) => (s._id === step._id ? updated : s)),
       });
       if (next === 'done' && updated.researchEntryId) {
-        showSuccess(t('research.autoSaved'));
+        showSuccess(t('researchSessions.autoSaved'));
       }
     } catch (err: unknown) {
       showError(err instanceof Error ? err.message : String(err));
@@ -182,7 +182,7 @@ export default function ResearchSessionPage() {
     <div className="max-w-7xl mx-auto">
       <div className="mb-4">
         <Link to="/research" className="text-sm text-gray-500 hover:text-gray-300">
-          &larr; {t('research.backToOverview')}
+          &larr; {t('researchSessions.backToOverview')}
         </Link>
       </div>
 
@@ -220,7 +220,7 @@ export default function ResearchSessionPage() {
             ◀
           </Button>
           <Badge color={statusColor(session.status)} rounded="full">
-            {t(`research.status${capitalize(session.status)}` as never)}
+            {t(`researchSessions.status${capitalize(session.status)}` as never)}
           </Badge>
           <Button variant="secondary" size="sm" onClick={() => cycleStatus(session.status, 1)}>
             ▶
@@ -248,7 +248,7 @@ export default function ResearchSessionPage() {
                 : 'text-gray-500 hover:text-gray-300'
             }`}
           >
-            {t(`research.tab${capitalize(tab)}` as never)}
+            {t(`researchSessions.tab${capitalize(tab)}` as never)}
           </button>
         ))}
       </div>
@@ -283,7 +283,7 @@ export default function ResearchSessionPage() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') addStep();
               }}
-              placeholder={t('research.newStepPlaceholder')}
+              placeholder={t('researchSessions.newStepPlaceholder')}
               className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
             />
             <Button variant="secondary" size="sm" onClick={addStep}>
@@ -306,7 +306,7 @@ export default function ResearchSessionPage() {
             />
           ) : (
             <div className="p-6 bg-gray-900 border border-gray-800 rounded-lg text-sm text-gray-500 text-center">
-              {t('research.noStepSelected')}
+              {t('researchSessions.noStepSelected')}
             </div>
           )}
         </div>
@@ -316,7 +316,7 @@ export default function ResearchSessionPage() {
           {activeStep ? (
             <ContextPane step={activeStep} />
           ) : (
-            <div className="p-3 text-xs text-gray-600">{t('research.contextEmpty')}</div>
+            <div className="p-3 text-xs text-gray-600">{t('researchSessions.contextEmpty')}</div>
           )}
         </div>
       </div>
@@ -338,9 +338,9 @@ function ProjectChips({ session, projects, projectsById, onToggle }: ProjectChip
 
   return (
     <div className="flex items-center flex-wrap gap-2 mb-4">
-      <span className="text-xs text-gray-500">{t('research.projectsLabel')}:</span>
+      <span className="text-xs text-gray-500">{t('researchSessions.projectsLabel')}:</span>
       {session.projectIds.length === 0 && (
-        <span className="text-xs text-amber-400">{t('research.noProjectsHint')}</span>
+        <span className="text-xs text-amber-400">{t('researchSessions.noProjectsHint')}</span>
       )}
       {session.projectIds.map((pid) => {
         const p = projectsById.get(pid);
@@ -349,7 +349,7 @@ function ProjectChips({ session, projects, projectsById, onToggle }: ProjectChip
             key={pid}
             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-900/40 text-violet-300 text-xs"
           >
-            <span>{p ? p.name : t('research.unknownProject')}</span>
+            <span>{p ? p.name : t('researchSessions.unknownProject')}</span>
             <button
               type="button"
               onClick={() => onToggle(pid)}
@@ -368,7 +368,7 @@ function ProjectChips({ session, projects, projectsById, onToggle }: ProjectChip
             onBlur={() => setTimeout(() => setAdding(false), 150)}
             className="text-xs px-2 py-0.5 rounded-full bg-gray-800 hover:bg-gray-700 text-gray-300"
           >
-            + {t('research.addProject')}
+            + {t('researchSessions.addProject')}
           </button>
           {adding && (
             <div className="absolute top-full left-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
@@ -442,7 +442,7 @@ function ResearchStepChat({
 
     try {
       const response = await fetch(
-        `/api/research/sessions/${sessionId}/steps/${step._id}/messages`,
+        `/api/research-sessions/${sessionId}/steps/${step._id}/messages`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -518,7 +518,7 @@ function ResearchStepChat({
           <h2 className="text-base font-medium text-gray-200 truncate">{step.title}</h2>
           {step.researchEntryId && (
             <Badge color="bg-green-900/40 text-green-300" rounded="full">
-              {t('research.savedAsResearch')}
+              {t('researchSessions.savedAsResearch')}
             </Badge>
           )}
         </div>
@@ -532,7 +532,7 @@ function ResearchStepChat({
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {step.messages.length === 0 && !streaming && (
-          <p className="text-sm text-gray-500 text-center py-6">{t('research.askYourFirstQuestion')}</p>
+          <p className="text-sm text-gray-500 text-center py-6">{t('researchSessions.askYourFirstQuestion')}</p>
         )}
         {step.messages.map((m, i) => (
           <MessageBubble key={`${m.timestamp}-${i}`} message={m} />
@@ -565,10 +565,10 @@ function ResearchStepChat({
             disabled={streaming || step.status === 'done' || sessionProjectsCount === 0}
             placeholder={
               sessionProjectsCount === 0
-                ? t('research.selectProjectsFirst')
+                ? t('researchSessions.selectProjectsFirst')
                 : step.status === 'done'
-                ? t('research.stepDoneNoInput')
-                : t('research.askPlaceholder')
+                ? t('researchSessions.stepDoneNoInput')
+                : t('researchSessions.askPlaceholder')
             }
             rows={2}
             className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 resize-none disabled:opacity-50"
@@ -579,7 +579,7 @@ function ResearchStepChat({
             onClick={send}
             disabled={!input.trim() || streaming || step.status === 'done' || sessionProjectsCount === 0}
           >
-            {streaming ? '…' : t('research.send')}
+            {streaming ? '…' : t('researchSessions.send')}
           </Button>
         </div>
       </div>
@@ -622,7 +622,7 @@ function ContextPane({ step }: { step: ResearchStepEntry }) {
   if (refs.length === 0) {
     return (
       <div className="p-3 text-xs text-gray-600">
-        {t('research.contextEmpty')}
+        {t('researchSessions.contextEmpty')}
       </div>
     );
   }
@@ -636,7 +636,7 @@ function ContextPane({ step }: { step: ResearchStepEntry }) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 space-y-3">
       <h3 className="text-xs uppercase tracking-wide text-gray-500">
-        {t('research.contextTitle')}
+        {t('researchSessions.contextTitle')}
       </h3>
       {[...groups.entries()].map(([entity, hits]) => (
         <div key={entity}>
