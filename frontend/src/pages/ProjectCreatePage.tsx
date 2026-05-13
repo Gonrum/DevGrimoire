@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
@@ -6,6 +6,7 @@ import { useToast } from '../components/Toast';
 import Button from '../components/ui/Button';
 import { FormInput, FormTextarea } from '../components/ui/FormField';
 import { WorkflowPageShell } from '../components/ui/WorkflowShell';
+import TagInput from '../components/ui/TagInput';
 
 export default function ProjectCreatePage() {
   const { t } = useTranslation();
@@ -16,7 +17,16 @@ export default function ProjectCreatePage() {
   const [path, setPath] = useState('');
   const [repository, setRepository] = useState('');
   const [techStack, setTechStack] = useState('');
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.projects
+      .listTags()
+      .then((rows) => setTagSuggestions(rows.map((r) => r.name)))
+      .catch(() => setTagSuggestions([]));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,6 +39,7 @@ export default function ProjectCreatePage() {
         path: path.trim() || undefined,
         repository: repository.trim() || undefined,
         techStack: techStack.split(',').map((s) => s.trim()).filter(Boolean),
+        tags,
       });
       navigate(`/projects/${project._id}`);
     } catch (err: any) {
@@ -76,6 +87,15 @@ export default function ProjectCreatePage() {
           onChange={(e) => setTechStack(e.target.value)}
           placeholder={t('projects.techStackHint')}
         />
+        <div>
+          <label className="block text-xs font-medium text-gray-400 mb-1.5">{t('projects.tagsLabel')}</label>
+          <TagInput
+            value={tags}
+            onChange={setTags}
+            suggestions={tagSuggestions}
+            placeholder={t('projects.tagsPlaceholder')}
+          />
+        </div>
         <div className="flex gap-2 pt-2">
           <Button type="submit" variant="primary" size="lg" disabled={saving || !name.trim()}>
             {saving ? t('common.creating') : t('projects.createProjectAction')}

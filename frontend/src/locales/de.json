@@ -119,7 +119,13 @@
     "removeFavorite": "Favorit entfernen",
     "path": "Pfad",
     "repo": "Repo",
+    "tagsLabel": "Tags",
+    "tagsPlaceholder": "Tag eingeben, Enter zum Hinzufügen…",
     "notFound": "Kapitel nicht gefunden."
+  },
+  "tagInput": {
+    "primaryHint": "Der erste Tag ist der Haupttag und bestimmt die Gruppen-Sektion in der Kapitelübersicht. Per Drag & Drop umsortieren.",
+    "remove": "Tag {{tag}} entfernen"
   },
   "customers": {
     "overview": "Kundenübersicht",

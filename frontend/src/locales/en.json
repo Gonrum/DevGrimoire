@@ -119,7 +119,13 @@
     "removeFavorite": "Remove favorite",
     "path": "Path",
     "repo": "Repo",
+    "tagsLabel": "Tags",
+    "tagsPlaceholder": "Type a tag, press Enter to add…",
     "notFound": "Chapter not found."
+  },
+  "tagInput": {
+    "primaryHint": "The first tag is the primary tag and defines the section in the chapter overview. Drag to reorder.",
+    "remove": "Remove tag {{tag}}"
   },
   "customers": {
     "overview": "Customer Overview",

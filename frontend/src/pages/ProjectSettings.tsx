@@ -8,6 +8,7 @@ import { FormInput, FormTextarea } from '../components/ui/FormField';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { SettingsSection, SettingsShell } from '../components/ui/SettingsShell';
 import ProjectGitRepositorySettings from '../components/settings/ProjectGitRepositorySettings';
+import TagInput from '../components/ui/TagInput';
 
 const TEMPLATE_INSTRUCTIONS = `## Arbeitsweise
 1. Immer erst Planen und einen Überblick verschaffen
@@ -38,6 +39,8 @@ export default function ProjectSettings() {
   const [path, setPath] = useState('');
   const [repository, setRepository] = useState('');
   const [techStack, setTechStack] = useState('');
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   const [active, setActive] = useState(true);
   const [instructions, setInstructions] = useState('');
   const [todoNumberFormat, setTodoNumberFormat] = useState('{type}-{n}');
@@ -63,6 +66,7 @@ export default function ProjectSettings() {
         setPath(p.path || '');
         setRepository(p.repository || '');
         setTechStack(p.techStack.join(', '));
+        setTags(p.tags ?? []);
         setActive(p.active);
         setInstructions(p.instructions || '');
         setTodoNumberFormat(p.todoNumberFormat || '{type}-{n}');
@@ -71,6 +75,10 @@ export default function ProjectSettings() {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
+    api.projects
+      .listTags()
+      .then((rows) => setTagSuggestions(rows.map((r) => r.name)))
+      .catch(() => setTagSuggestions([]));
   }, [id]);
 
 
@@ -85,6 +93,7 @@ export default function ProjectSettings() {
         path: path.trim() || undefined,
         repository: repository.trim() || undefined,
         techStack: techStack.split(',').map((t) => t.trim()).filter(Boolean),
+        tags,
         active,
         instructions,
         todoNumberFormat,
@@ -184,6 +193,16 @@ export default function ProjectSettings() {
           onChange={(e) => setTechStack(e.target.value)}
           placeholder="React, Node.js, MongoDB"
         />
+
+        <div>
+          <label className="block text-xs font-medium text-gray-400 mb-1.5">{t('projects.tagsLabel')}</label>
+          <TagInput
+            value={tags}
+            onChange={setTags}
+            suggestions={tagSuggestions}
+            placeholder={t('projects.tagsPlaceholder')}
+          />
+        </div>
 
         <div className="flex items-center gap-3">
           <label className="text-xs text-gray-500">{t('common.status')}:</label>
