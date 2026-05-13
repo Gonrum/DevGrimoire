@@ -24,6 +24,9 @@ export class Project {
   @Prop({ type: [String], default: [] })
   techStack: string[];
 
+  @Prop({ type: [String], default: [] })
+  tags: string[];
+
   @Prop()
   repository: string;
 

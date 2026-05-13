@@ -19,6 +19,11 @@ export class CreateProjectDto {
   @IsOptional()
   techStack?: string[];
 
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  tags?: string[];
+
   @IsString()
   @IsOptional()
   repository?: string;

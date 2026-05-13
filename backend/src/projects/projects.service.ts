@@ -71,6 +71,20 @@ export class ProjectsService {
     return this.projectModel.findOne({ name }).exec();
   }
 
+  async listTags(): Promise<Array<{ name: string; usageCount: number }>> {
+    const scopeFilter = buildScopeFilter(RequestContext.getUser(), {
+      axis: 'project',
+      field: '_id',
+    });
+    const rows = await this.projectModel.aggregate<{ _id: string; usageCount: number }>([
+      { $match: scopeFilter },
+      { $unwind: '$tags' },
+      { $group: { _id: '$tags', usageCount: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]);
+    return rows.map((r) => ({ name: r._id, usageCount: r.usageCount }));
+  }
+
   /**
    * Set or clear the per-project replication opt-in flag. Used by the
    * replication controller's project-config endpoint. Returns the updated

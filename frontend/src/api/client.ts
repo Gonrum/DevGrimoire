@@ -62,6 +62,7 @@ export interface Project {
   path?: string;
   description?: string;
   techStack: string[];
+  tags?: string[];
   repository?: string;
   active: boolean;
   favorite: boolean;
@@ -72,6 +73,11 @@ export interface Project {
   gitRepositories?: GitRepository[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProjectTag {
+  name: string;
+  usageCount: number;
 }
 
 export type CustomerStatus = 'lead' | 'onboarding' | 'active' | 'paused' | 'offboarding' | 'cancelled' | 'archived';
@@ -1112,6 +1118,7 @@ export const api = {
       request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/projects/${id}`, { method: 'DELETE' }),
+    listTags: () => request<ProjectTag[]>('/projects/tags'),
   },
   customers: {
     dashboard: () =>
