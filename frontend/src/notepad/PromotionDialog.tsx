@@ -83,26 +83,14 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
     })();
   }, []);
 
-  // Open the SSE stream for promotion analysis.
+  // Stream the promotion analysis via fetch + ReadableStream (same pattern as
+  // ChatDock — avoids the EventSource limitation of not being able to send
+  // Authorization headers).
   useEffect(() => {
-    const token = getCurrentAccessToken();
-    const url = token
-      ? `/api/notes/${note._id}/promote?token=${encodeURIComponent(token)}`
-      : `/api/notes/${note._id}/promote`;
     let cancelled = false;
+    const controller = new AbortController();
 
-    // SSE via EventSource — note: EventSource cannot send custom headers,
-    // hence the token=… query param fallback supported by JwtAuthGuard.
-    const es = new EventSource(url, { withCredentials: false });
-
-    es.onmessage = (e: MessageEvent) => {
-      if (cancelled) return;
-      let payload: { type?: string; [key: string]: unknown };
-      try {
-        payload = JSON.parse(e.data);
-      } catch {
-        return;
-      }
+    const handlePayload = (payload: { type?: string; [key: string]: unknown }) => {
       switch (payload.type) {
         case 'token':
           setStreamingText((prev) => prev + String(payload.text ?? ''));
@@ -112,7 +100,6 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
           if (!p) {
             setPhase('error');
             setErrorMessage(t('vermerke.promoteParseError'));
-            es.close();
             return;
           }
           setProposal(p);
@@ -127,32 +114,70 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
         }
         case 'error':
           setPhase('error');
-          setErrorMessage(String(payload.message ?? '') || t('vermerke.promoteLlmError'));
-          es.close();
+          setErrorMessage(
+            String(payload.message ?? '') || t('vermerke.promoteLlmError'),
+          );
           break;
-        case 'done':
-          es.close();
-          break;
-        // status / unknown → ignore
+        // status / done / unknown → ignore (done closes the stream naturally)
       }
     };
 
-    es.onerror = () => {
-      if (cancelled) return;
-      // Browser fires `onerror` also at normal stream close — only act if we
-      // never reached review.
-      setPhase((prev) => {
-        if (prev === 'analyzing') {
-          setErrorMessage(t('vermerke.promoteLlmError'));
-          return 'error';
+    (async () => {
+      try {
+        const headers: Record<string, string> = {};
+        const token = getCurrentAccessToken();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const res = await fetch(`/api/notes/${note._id}/promote`, {
+          method: 'POST',
+          headers,
+          signal: controller.signal,
+        });
+        if (!res.ok || !res.body) {
+          let msg = res.statusText;
+          try {
+            const errBody = await res.json();
+            if (errBody?.message) msg = errBody.message;
+          } catch {
+            /* ignore */
+          }
+          if (cancelled) return;
+          setPhase('error');
+          setErrorMessage(msg || t('vermerke.promoteLlmError'));
+          return;
         }
-        return prev;
-      });
-    };
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (cancelled) return;
+          buffer += decoder.decode(value, { stream: true });
+          const chunks = buffer.split('\n\n');
+          buffer = chunks.pop() ?? '';
+          for (const chunk of chunks) {
+            const line = chunk.split('\n').find((l) => l.startsWith('data:'));
+            if (!line) continue;
+            const data = line.slice(5).trim();
+            if (!data) continue;
+            try {
+              handlePayload(JSON.parse(data));
+            } catch {
+              /* ignore bad SSE chunk */
+            }
+          }
+        }
+      } catch (err: any) {
+        if (cancelled || err?.name === 'AbortError') return;
+        setPhase('error');
+        setErrorMessage(err?.message || t('vermerke.promoteLlmError'));
+      }
+    })();
 
     return () => {
       cancelled = true;
-      es.close();
+      controller.abort();
     };
   }, [note._id, note.title, t]);
 
