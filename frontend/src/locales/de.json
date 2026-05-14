@@ -1928,6 +1928,7 @@
       "todo": "Quest",
       "research": "Studie",
       "manual": "Handbuch-Kapitel"
-    }
+    },
+    "resizeHandle": "Breite ziehen (Doppelklick: Standard)"
   }
 }

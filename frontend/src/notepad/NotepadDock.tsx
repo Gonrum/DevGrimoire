@@ -12,6 +12,17 @@ import PromotionDialog from './PromotionDialog';
 
 type View = 'active' | 'archive';
 
+const DOCK_WIDTH_KEY = 'devgrimoire_notepad_dock_width';
+const DOCK_DEFAULT_WIDTH = 600;
+const DOCK_MIN_WIDTH = 360;
+
+function loadDockWidth(): number {
+  if (typeof window === 'undefined') return DOCK_DEFAULT_WIDTH;
+  const stored = localStorage.getItem(DOCK_WIDTH_KEY);
+  const n = stored ? parseInt(stored, 10) : NaN;
+  return Number.isFinite(n) && n >= DOCK_MIN_WIDTH ? n : DOCK_DEFAULT_WIDTH;
+}
+
 export default function NotepadDock() {
   const { t } = useTranslation();
   const { showError, showSuccess } = useToast();
@@ -24,7 +35,50 @@ export default function NotepadDock() {
   const [idleNote, setIdleNote] = useState<Note | null>(null);
   const [promotionTarget, setPromotionTarget] = useState<Note | null>(null);
 
+  const [dockWidth, setDockWidth] = useState<number>(loadDockWidth);
+  const [resizing, setResizing] = useState(false);
+
   const idleShownThisOpenRef = useRef(false);
+
+  // Resize handle drag (sm+ only — mobile stays full-width)
+  useEffect(() => {
+    if (!resizing) return;
+    const onMove = (e: MouseEvent) => {
+      const vw = window.innerWidth;
+      const max = Math.floor(vw * 0.8);
+      // Panel is anchored to the left edge → new width = cursor X.
+      const next = Math.min(Math.max(e.clientX, DOCK_MIN_WIDTH), max);
+      setDockWidth(next);
+    };
+    const onUp = () => {
+      setResizing(false);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [resizing]);
+
+  // Persist width once a drag commits.
+  useEffect(() => {
+    if (resizing) return;
+    localStorage.setItem(DOCK_WIDTH_KEY, String(dockWidth));
+  }, [dockWidth, resizing]);
+
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setResizing(true);
+  };
+
+  const resetWidth = () => {
+    setDockWidth(DOCK_DEFAULT_WIDTH);
+  };
 
   // Load active notes whenever the overlay opens (or after mutations).
   const refresh = useCallback(async () => {
@@ -206,8 +260,18 @@ export default function NotepadDock() {
       {/* Slide-in panel from the left */}
       {open && (
         <div
-          className="fixed top-0 left-0 z-50 h-full w-full sm:w-[600px] bg-gray-900 border-r border-gray-800 shadow-2xl flex flex-col"
+          className="fixed top-0 left-0 z-50 h-full w-full bg-gray-900 border-r border-gray-800 shadow-2xl flex flex-col sm:w-[var(--dock-w)]"
+          style={{ ['--dock-w' as any]: `${dockWidth}px` }}
         >
+          {/* Resize handle on the right edge (sm+ only) */}
+          <div
+            className="hidden sm:block absolute top-0 right-0 h-full w-1.5 cursor-col-resize group hover:bg-amber-600/30 z-10"
+            onMouseDown={startResize}
+            onDoubleClick={resetWidth}
+            title={t('vermerke.resizeHandle')}
+          >
+            <div className="absolute inset-y-0 right-0 w-px bg-gray-800 group-hover:bg-amber-600 transition-colors" />
+          </div>
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
             <div className="flex items-center gap-2">

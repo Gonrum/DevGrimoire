@@ -1929,6 +1929,7 @@
       "todo": "Quest",
       "research": "Research",
       "manual": "Manual chapter"
-    }
+    },
+    "resizeHandle": "Drag to resize (double-click: reset)"
   }
 }
