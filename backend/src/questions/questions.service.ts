@@ -123,7 +123,7 @@ export class QuestionsService implements OnModuleInit {
         ? `/projects/${projectId}/todos/${entry.todoId}`
         : undefined;
       await this.notificationsService
-        .create(title, body, url, 'question')
+        .create(title, body, url, 'ask_user')
         .catch(() => {
           /* push not available — ignore */
         });

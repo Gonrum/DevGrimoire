@@ -1407,7 +1407,21 @@
     "workflowAgentSave": "Save",
     "workflowAgentSaved": "saved",
     "workflowAgentLoading": "Loading config…",
-    "workflowAgentNotConfigured": "Not configured yet."
+    "workflowAgentNotConfigured": "Not configured yet.",
+    "pushGroup_system": "System events",
+    "pushGroup_system_desc": "Important system events (failures, healthchecks, backups).",
+    "pushCategory_ask_user": "Agent questions",
+    "pushCategory_ask_user_desc": "When an agent asks a question and waits for your answer.",
+    "pushCategory_workflow_failure": "Workflow failure",
+    "pushCategory_workflow_failure_desc": "When a workflow run fails.",
+    "pushCategory_monitoring_unhealthy": "Monitoring: unhealthy",
+    "pushCategory_monitoring_unhealthy_desc": "A healthcheck transitions to unhealthy (or recovers).",
+    "pushCategory_replication_failed": "Replication: failed",
+    "pushCategory_replication_failed_desc": "Replication events could not be delivered (debounced 1×/hour).",
+    "pushCategory_backup_failed": "Backup failed",
+    "pushCategory_backup_failed_desc": "A backup job failed (manual or scheduled).",
+    "pushCategory_recurring": "Recurring tasks",
+    "pushCategory_recurring_desc": "When a recurring task fires a notification action."
   },
   "chat": {
     "open": "Open chat",

@@ -8,8 +8,16 @@ import { SettingsService } from '../settings/settings.service';
 
 export const NOTIFICATION_CREATED = 'notification.created';
 export const NOTIFICATION_PUSH_CATEGORIES_KEY = 'notification_push_categories';
-// Default: only notify_user sends push; all mcp_* disabled
-export const DEFAULT_PUSH_CATEGORIES = 'notify_user';
+// Default: high-signal system events + notify_user/ask_user. All mcp_* disabled.
+// Users can opt-in/out per category in NotificationsSettings.
+export const DEFAULT_PUSH_CATEGORIES = [
+  'notify_user',
+  'ask_user',
+  'workflow_failure',
+  'monitoring_unhealthy',
+  'replication_failed',
+  'backup_failed',
+].join(',');
 
 @Injectable()
 export class NotificationsService {

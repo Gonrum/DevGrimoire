@@ -11,6 +11,7 @@ import { ReplicationScheduler } from './replication.scheduler';
 import { ReplicationReadonlyGuard } from './replication-readonly.guard';
 import { SettingsModule } from '../settings/settings.module';
 import { ProjectsModule } from '../projects/projects.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ProjectsModule } from '../projects/projects.module';
     }),
     SettingsModule,
     ProjectsModule,
+    NotificationsModule,
   ],
   controllers: [ReplicationController],
   providers: [

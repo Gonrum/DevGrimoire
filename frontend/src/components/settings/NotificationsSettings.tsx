@@ -13,6 +13,14 @@ interface PushCategory {
 
 const PUSH_CATEGORIES: PushCategory[] = [
   { key: 'notify_user', default: true },
+  // System-Ereignisse (default ON für die hohen-Signal-Trigger)
+  { key: 'ask_user', default: true, group: 'system' },
+  { key: 'workflow_failure', default: true, group: 'system' },
+  { key: 'monitoring_unhealthy', default: true, group: 'system' },
+  { key: 'replication_failed', default: true, group: 'system' },
+  { key: 'backup_failed', default: true, group: 'system' },
+  { key: 'recurring', default: false, group: 'system' },
+  // MCP-Mutationen (alle default OFF — sehr geschwätzig)
   { key: 'mcp_project', default: false, group: 'mcp' },
   { key: 'mcp_todo', default: false, group: 'mcp' },
   { key: 'mcp_milestone', default: false, group: 'mcp' },
@@ -75,11 +83,11 @@ export default function NotificationsSettings() {
     savePushCategories({ ...pushCategories, [key]: !pushCategories[key] });
   };
 
-  const toggleAllMcp = () => {
-    const mcpKeys = PUSH_CATEGORIES.filter((c) => c.group === 'mcp').map((c) => c.key);
-    const allOn = mcpKeys.every((k) => pushCategories[k]);
+  const toggleAllInGroup = (group: string) => {
+    const keys = PUSH_CATEGORIES.filter((c) => c.group === group).map((c) => c.key);
+    const allOn = keys.every((k) => pushCategories[k]);
     const updated = { ...pushCategories };
-    for (const k of mcpKeys) updated[k] = !allOn;
+    for (const k of keys) updated[k] = !allOn;
     savePushCategories(updated);
   };
 
@@ -93,9 +101,57 @@ export default function NotificationsSettings() {
     alert(t('settings.dictationConsentReset') || 'Consent zurückgesetzt');
   };
 
+  const systemCats = PUSH_CATEGORIES.filter((c) => c.group === 'system');
+  const allSystemOn = systemCats.every((c) => pushCategories[c.key]);
+  const someSystemOn = systemCats.some((c) => pushCategories[c.key]);
   const mcpCats = PUSH_CATEGORIES.filter((c) => c.group === 'mcp');
   const allMcpOn = mcpCats.every((c) => pushCategories[c.key]);
   const someMcpOn = mcpCats.some((c) => pushCategories[c.key]);
+
+  const renderGroup = (
+    title: string,
+    desc: string,
+    cats: PushCategory[],
+    allOn: boolean,
+    someOn: boolean,
+    toggleAll: () => void,
+  ) => (
+    <section className="overflow-hidden rounded-lg border border-gray-800 bg-gray-900/50">
+      <div className="flex items-center justify-between border-b border-gray-800 bg-gray-800/50 px-4 py-3">
+        <div>
+          <div className="text-sm font-medium text-gray-200">{title}</div>
+          <div className="mt-0.5 text-xs text-gray-500">{desc}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">
+            {someOn
+              ? `${cats.filter((c) => pushCategories[c.key]).length}/${cats.length}`
+              : t('common.none')}
+          </span>
+          <Switch checked={allOn} onChange={toggleAll} disabled={pushSaving} />
+        </div>
+      </div>
+      <div className="divide-y divide-gray-800">
+        {cats.map((cat) => (
+          <div key={cat.key} className="flex items-center justify-between gap-4 px-4 py-3">
+            <div>
+              <div className="text-sm text-gray-300">
+                {t(`settings.pushCategory_${cat.key}`)}
+              </div>
+              <div className="mt-0.5 text-xs text-gray-600">
+                {t(`settings.pushCategory_${cat.key}_desc`)}
+              </div>
+            </div>
+            <Switch
+              checked={pushCategories[cat.key] ?? false}
+              onChange={() => togglePushCategory(cat.key)}
+              disabled={pushSaving}
+            />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 
   return (
     <>
@@ -141,41 +197,23 @@ export default function NotificationsSettings() {
               </SettingsSection>
             ))}
 
-            <section className="overflow-hidden rounded-lg border border-gray-800 bg-gray-900/50">
-              <div className="flex items-center justify-between border-b border-gray-800 bg-gray-800/50 px-4 py-3">
-                <div>
-                  <div className="text-sm font-medium text-gray-200">{t('settings.pushGroup_mcp')}</div>
-                  <div className="mt-0.5 text-xs text-gray-500">{t('settings.pushGroup_mcp_desc')}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">
-                    {someMcpOn
-                      ? `${mcpCats.filter((c) => pushCategories[c.key]).length}/${mcpCats.length}`
-                      : t('common.none')}
-                  </span>
-                  <Switch checked={allMcpOn} onChange={() => toggleAllMcp()} disabled={pushSaving} />
-                </div>
-              </div>
-              <div className="divide-y divide-gray-800">
-                {mcpCats.map((cat) => (
-                  <div key={cat.key} className="flex items-center justify-between gap-4 px-4 py-3">
-                    <div>
-                      <div className="text-sm text-gray-300">
-                        {t(`settings.pushCategory_${cat.key}`)}
-                      </div>
-                      <div className="mt-0.5 text-xs text-gray-600">
-                        {t(`settings.pushCategory_${cat.key}_desc`)}
-                      </div>
-                    </div>
-                    <Switch
-                      checked={pushCategories[cat.key] ?? false}
-                      onChange={() => togglePushCategory(cat.key)}
-                      disabled={pushSaving}
-                    />
-                  </div>
-                ))}
-              </div>
-            </section>
+            {renderGroup(
+              t('settings.pushGroup_system'),
+              t('settings.pushGroup_system_desc'),
+              systemCats,
+              allSystemOn,
+              someSystemOn,
+              () => toggleAllInGroup('system'),
+            )}
+
+            {renderGroup(
+              t('settings.pushGroup_mcp'),
+              t('settings.pushGroup_mcp_desc'),
+              mcpCats,
+              allMcpOn,
+              someMcpOn,
+              () => toggleAllInGroup('mcp'),
+            )}
           </>
         )}
       </div>

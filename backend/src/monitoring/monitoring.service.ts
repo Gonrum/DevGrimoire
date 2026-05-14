@@ -441,7 +441,7 @@ export class MonitoringService {
 
   private async safeNotify(title: string, body: string, url?: string): Promise<void> {
     try {
-      await this.notificationsService.create(title, body, url, 'monitoring');
+      await this.notificationsService.create(title, body, url, 'monitoring_unhealthy');
     } catch (err) {
       this.logger.warn(`Failed to dispatch monitoring notification: ${(err as Error).message}`);
     }

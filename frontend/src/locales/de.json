@@ -1407,7 +1407,21 @@
     "workflowAgentSave": "Speichern",
     "workflowAgentSaved": "gespeichert",
     "workflowAgentLoading": "Lade Konfiguration…",
-    "workflowAgentNotConfigured": "Noch nicht konfiguriert."
+    "workflowAgentNotConfigured": "Noch nicht konfiguriert.",
+    "pushGroup_system": "System-Ereignisse",
+    "pushGroup_system_desc": "Wichtige Vorgänge im System (Fehler, Healthchecks, Sicherungen).",
+    "pushCategory_ask_user": "Agent-Rückfragen",
+    "pushCategory_ask_user_desc": "Wenn ein Agent eine Frage stellt und auf Antwort wartet.",
+    "pushCategory_workflow_failure": "Workflow-Fehler",
+    "pushCategory_workflow_failure_desc": "Wenn ein Workflow-Run fehlschlägt.",
+    "pushCategory_monitoring_unhealthy": "Monitoring: Unhealthy",
+    "pushCategory_monitoring_unhealthy_desc": "Healthcheck schlägt in unhealthy um (oder erholt sich).",
+    "pushCategory_replication_failed": "Replikation: fehlgeschlagen",
+    "pushCategory_replication_failed_desc": "Wenn Replikations-Events nicht zugestellt werden konnten (debounced auf 1×/Stunde).",
+    "pushCategory_backup_failed": "Backup fehlgeschlagen",
+    "pushCategory_backup_failed_desc": "Bei einem fehlgeschlagenen Backup-Job (manuell oder geplant).",
+    "pushCategory_recurring": "Wiederkehrende Aufgaben",
+    "pushCategory_recurring_desc": "Wenn eine Rite eine Notification-Action ausführt."
   },
   "chat": {
     "open": "Chat öffnen",

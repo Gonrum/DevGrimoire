@@ -7,6 +7,7 @@ import { gzipSync, gunzipSync } from 'zlib';
 import { BackupJob, BackupJobDocument, BackupMode, BackupStatus } from './schemas/backup-job.schema';
 import { CreateBackupDto } from './dto/create-backup.dto';
 import { MinioService } from '../minio/minio.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 interface BackupArtifact {
   key: string;
@@ -45,6 +46,7 @@ export class BackupsService {
     @InjectModel(BackupJob.name) private backupJobModel: Model<BackupJobDocument>,
     @InjectConnection() private readonly connection: Connection,
     private readonly minioService: MinioService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async createManualBackup(dto: CreateBackupDto): Promise<BackupJobDocument> {
@@ -212,6 +214,17 @@ export class BackupsService {
         error: message,
         finishedAt: new Date(),
       }).exec();
+      const jobId = (job._id as { toString(): string }).toString();
+      void this.notificationsService
+        .create(
+          '⚠ Backup fehlgeschlagen',
+          message.length > 200 ? message.slice(0, 200) + '…' : message,
+          `/settings?tab=backups&jobId=${jobId}`,
+          'backup_failed',
+        )
+        .catch(() => {
+          this.logger.warn(`Failed to dispatch backup_failed notification for job ${jobId}`);
+        });
       throw err;
     } finally {
       this.running = false;

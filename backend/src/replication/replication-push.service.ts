@@ -8,6 +8,7 @@ import { firstValueFrom } from 'rxjs';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { SettingsService } from '../settings/settings.service';
 import { MinioService } from '../minio/minio.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ReplicationQueue, ReplicationQueueDocument } from './schemas/replication-queue.schema';
 import {
@@ -55,9 +56,14 @@ const ENTITY_COLLECTION: Record<string, string> = {
 const MAX_ATTEMPTS = 5;
 const MAX_QUEUE_SIZE = 1000;
 
+// Notify at most once per hour to avoid spamming the inbox if a peer is down.
+const FAILED_NOTIFICATION_DEBOUNCE_MS = 60 * 60 * 1000;
+
 @Injectable()
 export class ReplicationPushService {
   private readonly logger = new Logger(ReplicationPushService.name);
+  private lastFailedNotifiedCount = 0;
+  private lastFailedNotifiedAt = 0;
 
   constructor(
     @InjectConnection() private readonly connection: Connection,
@@ -66,6 +72,7 @@ export class ReplicationPushService {
     private minioService: MinioService,
     private projectsService: ProjectsService,
     private httpService: HttpService,
+    private notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -273,7 +280,39 @@ export class ReplicationPushService {
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
     await this.queueModel.deleteMany({ status: 'sent', createdAt: { $lt: cutoff } }).exec();
 
+    await this.maybeNotifyOnFailures();
+
     return sent;
+  }
+
+  /**
+   * Fire a single notification when the failed-queue count crosses the
+   * debounce threshold. Reset baseline once the failed count drops, so the
+   * user gets a fresh ping after they cleared the failed bucket.
+   */
+  private async maybeNotifyOnFailures(): Promise<void> {
+    const failedCount = await this.queueModel.countDocuments({ status: 'failed' }).exec();
+    if (failedCount === 0) {
+      this.lastFailedNotifiedCount = 0;
+      return;
+    }
+    const now = Date.now();
+    const fresh = failedCount > this.lastFailedNotifiedCount;
+    const cooledDown = now - this.lastFailedNotifiedAt > FAILED_NOTIFICATION_DEBOUNCE_MS;
+    if (!fresh || !cooledDown) return;
+
+    this.lastFailedNotifiedCount = failedCount;
+    this.lastFailedNotifiedAt = now;
+    void this.notificationsService
+      .create(
+        `⚠ Replication: ${failedCount} fehlgeschlagen`,
+        `${failedCount} Events konnten nach mehreren Versuchen nicht an die Gegenstelle gesendet werden.`,
+        '/settings?tab=replication',
+        'replication_failed',
+      )
+      .catch(() => {
+        this.logger.warn('Failed to dispatch replication_failed notification');
+      });
   }
 
   async getQueueStats(): Promise<{ pending: number; failed: number }> {

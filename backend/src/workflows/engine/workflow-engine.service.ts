@@ -33,6 +33,7 @@ import { QuestionsService, QUESTION_ANSWERED } from '../../questions/questions.s
 import { TestWorkflowNodeDto } from '../dto/workflow.dto';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { AuditLogService } from '../../audit-log/audit-log.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 import { redact, redactLogs, redactValue } from '../workflow-redaction';
 import {
   checkRunBudget,
@@ -63,6 +64,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     private readonly questionsService: QuestionsService,
     private readonly moduleRef: ModuleRef,
     private readonly auditLog: AuditLogService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private audit(action: string, meta: Record<string, unknown> & { runId?: string }): void {
@@ -555,6 +557,23 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       errorCode: run.error?.code,
       executedNodeCount: run.executedNodeCount,
     });
+    // Fire-and-forget user-facing notification — never let dispatch errors
+    // bubble back into the engine.
+    const runId = (run._id as Types.ObjectId).toString();
+    const defId = run.definitionId?.toString();
+    const errCode = typeof error?.code === 'string' ? error.code : 'unknown';
+    const errMsgRaw = typeof error?.message === 'string' ? error.message : 'Workflow-Run fehlgeschlagen';
+    const errMsg = errMsgRaw.length > 200 ? errMsgRaw.slice(0, 200) + '…' : errMsgRaw;
+    void this.notificationsService
+      .create(
+        '⚠ Workflow-Run fehlgeschlagen',
+        `${errCode}: ${errMsg}`,
+        defId ? `/workflows/${defId}` : undefined,
+        'workflow_failure',
+      )
+      .catch(() => {
+        this.logger.warn(`Failed to dispatch workflow_failure notification for run ${runId}`);
+      });
   }
 
   @OnEvent(QUESTION_ANSWERED)
