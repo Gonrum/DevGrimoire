@@ -32,13 +32,13 @@ export class Note {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
   userId: Types.ObjectId;
 
-  @Prop({ required: true, default: '' })
+  @Prop({ type: String, default: '' })
   title: string;
 
-  @Prop({ required: true, default: '' })
+  @Prop({ type: String, default: '' })
   content: string;
 
-  @Prop({ required: true, default: 0 })
+  @Prop({ type: Number, default: 0 })
   order: number;
 
   @Prop({ default: false })
