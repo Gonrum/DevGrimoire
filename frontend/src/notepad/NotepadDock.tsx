@@ -190,23 +190,23 @@ export default function NotepadDock() {
 
   return (
     <>
-      {/* Floating button — stacked above ChatDock button */}
+      {/* Floating button — bottom-left, separate from ChatDock (bottom-right) */}
       {!open && (
         <button
           type="button"
           aria-label={t('vermerke.openButton')}
           onClick={() => setOpen(true)}
-          className="fixed bottom-24 right-6 z-50 bg-amber-700 hover:bg-amber-600 text-white rounded-full shadow-lg shadow-amber-900/40 p-3 transition-transform hover:scale-105"
+          className="fixed bottom-6 left-6 z-50 bg-amber-700 hover:bg-amber-600 text-white rounded-full shadow-lg shadow-amber-900/40 p-3 transition-transform hover:scale-105"
           title={t('vermerke.openButton')}
         >
           <Notebook className="w-5 h-5" />
         </button>
       )}
 
-      {/* Slide-in panel */}
+      {/* Slide-in panel from the left */}
       {open && (
         <div
-          className="fixed top-0 right-0 z-50 h-full w-full sm:w-[600px] bg-gray-900 border-l border-gray-800 shadow-2xl flex flex-col"
+          className="fixed top-0 left-0 z-50 h-full w-full sm:w-[600px] bg-gray-900 border-r border-gray-800 shadow-2xl flex flex-col"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
