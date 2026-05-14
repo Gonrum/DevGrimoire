@@ -1,6 +1,6 @@
 # MCP Apps Security and Audit Model
 
-MCP Apps (`io.modelcontextprotocol/ui`) can let DevGrimoire expose interactive `ui://` resources such as todo cards, workflow summaries, or whiteboard previews to compatible MCP hosts. Treat these resources as untrusted, sandboxed presentation surfaces: useful for review and interaction, never a place to embed secrets or bypass DevGrimoire's existing auth, scope, and audit rules.
+MCP Apps (`io.modelcontextprotocol/ui`) can let DevGrimoire expose interactive `ui://` resources such as todo cards or workflow summaries to compatible MCP hosts. Treat these resources as untrusted, sandboxed presentation surfaces: useful for review and interaction, never a place to embed secrets or bypass DevGrimoire's existing auth, scope, and audit rules.
 
 Status: design baseline for future implementation. Do not expose interactive UI resources until the checklist below is implemented.
 
@@ -100,7 +100,7 @@ Suggested fields:
 - `event`: `ui_resource_read`
 - `projectId` / `customerId` when applicable
 - `resourceUri`
-- `resourceType` such as `todo-card`, `workflow-summary`, `whiteboard-preview`
+- `resourceType` such as `todo-card` or `workflow-summary`
 - `entityType` and `entityId`
 - `actorType`: `api-key`, `jwt`, or `system`
 - `apiKeyPrefix` only, never the raw key
@@ -157,7 +157,7 @@ The check should start from fixture data and exercise the same rendering/helper 
 2. Keep direct network access disabled in CSP.
 3. Link UI metadata only after capability negotiation.
 4. Add the security check script and manifest regression checks before merging more UI resources.
-5. Expand to workflow and whiteboard previews only after the audit and fallback behavior is proven.
+5. Expand to additional UI resource types only after the audit and fallback behavior is proven.
 
 ## Sources
 
