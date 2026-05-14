@@ -84,6 +84,7 @@ export interface WorkflowNodeRun {
   startedAt?: string;
   finishedAt?: string;
   durationMs?: number;
+  inputSnapshot?: Record<string, unknown>;
   outputSnapshot?: Record<string, unknown>;
   logs?: Array<Record<string, unknown>>;
   error?: { code: string; message: string };

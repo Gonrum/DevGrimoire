@@ -22,7 +22,12 @@ export function WorkflowNodePalette({ catalog, workflowScope, onDragStart, onTap
 
   const q = search.trim().toLowerCase();
   const matches = (m: WorkflowNodeMetadata) =>
-    !q || m.label.toLowerCase().includes(q) || m.type.toLowerCase().includes(q);
+    !q ||
+    m.label.toLowerCase().includes(q) ||
+    m.type.toLowerCase().includes(q) ||
+    (m.description?.toLowerCase().includes(q) ?? false);
+
+  const totalMatches = q ? catalog.filter(matches).length : catalog.length;
 
   return (
     <div className="flex h-full flex-col border-r border-gray-800 bg-gray-950">
@@ -31,14 +36,34 @@ export function WorkflowNodePalette({ catalog, workflowScope, onDragStart, onTap
           <Search size={14} className="text-gray-500" />
           <input
             type="text"
-            placeholder="Suche…"
+            placeholder="Suche in Name & Beschreibung…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 bg-transparent text-sm text-gray-200 focus:outline-none"
           />
+          {q && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="text-xs text-gray-500 hover:text-gray-300"
+              title="Suche leeren"
+            >
+              ×
+            </button>
+          )}
         </div>
+        {q && (
+          <p className="mt-1 px-1 text-xs text-gray-500">
+            {totalMatches} Treffer
+          </p>
+        )}
       </div>
       <div className="flex-1 overflow-y-auto p-2">
+        {q && totalMatches === 0 && (
+          <div className="px-3 py-6 text-center text-sm text-gray-500">
+            Kein Node mit „{search}" gefunden.
+          </div>
+        )}
         {CATEGORIES.map((cat) => {
           const items = catalog.filter((m) => m.category === cat && matches(m));
           if (items.length === 0) return null;

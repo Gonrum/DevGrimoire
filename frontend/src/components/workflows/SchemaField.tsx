@@ -202,6 +202,83 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
     );
   }
 
+  // Record / map: object with additionalProperties but no fixed properties.
+  // Render as a key/value table where each row uses the additionalProperties
+  // schema for the value. Used e.g. by action.user-question's `branchMap`.
+  if (
+    schema.type === 'object' &&
+    !schema.properties &&
+    schema.additionalProperties &&
+    typeof schema.additionalProperties === 'object'
+  ) {
+    const valueSchema = schema.additionalProperties as JsonSchema;
+    const obj = (value as Record<string, unknown> | undefined) ?? {};
+    const entries = Object.entries(obj);
+    const setEntries = (next: Array<[string, unknown]>) => {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of next) {
+        if (k.trim() !== '') out[k] = v;
+      }
+      onChange(Object.keys(out).length === 0 ? undefined : out);
+    };
+    return (
+      <Labeled label={labelText} required={required}>
+        <div className="space-y-2">
+          {entries.length === 0 && (
+            <div className="text-xs text-gray-600 italic">(keine Einträge — „hinzufügen" klicken)</div>
+          )}
+          {entries.map(([k, v], idx) => (
+            <div key={idx} className="flex items-start gap-2 rounded border border-gray-700 bg-gray-900/40 p-2">
+              <input
+                type="text"
+                value={k}
+                placeholder="Schlüssel"
+                onChange={(e) => {
+                  const next = [...entries];
+                  next[idx] = [e.target.value, v];
+                  setEntries(next);
+                }}
+                className="w-1/3 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-gray-200 focus:border-cyan-500 focus:outline-none"
+              />
+              <div className="flex-1">
+                <SchemaField
+                  schema={valueSchema}
+                  path={[...path, k]}
+                  value={v}
+                  onChange={(nv) => {
+                    const next = [...entries];
+                    next[idx] = [k, nv];
+                    setEntries(next);
+                  }}
+                  templateOptions={templateOptions}
+                  hideLabel
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = entries.filter((_, i) => i !== idx);
+                  setEntries(next);
+                }}
+                className="text-red-400 hover:text-red-300 mt-1"
+                title="Eintrag entfernen"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => setEntries([...entries, ['', getEmpty(valueSchema)]])}
+            className="inline-flex items-center gap-1 rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800"
+          >
+            <Plus size={12} /> hinzufügen
+          </button>
+        </div>
+      </Labeled>
+    );
+  }
+
   if (Array.isArray(schema.anyOf) || Array.isArray(schema.oneOf)) {
     const variants = (schema.anyOf ?? schema.oneOf) as JsonSchema[];
     return (
@@ -222,19 +299,51 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
     );
   }
 
+  // z.unknown() / no-type fallback: render a single-line input that tries to
+  // interpret the entered text as JSON (number, boolean, array, object,
+  // quoted-string), otherwise stores the raw string. Used e.g. by
+  // control.condition's `value` field where the right-hand-side type depends
+  // on the operator.
+  const renderedValue =
+    value === undefined || value === null
+      ? ''
+      : typeof value === 'string'
+        ? value
+        : JSON.stringify(value);
   return (
     <Labeled label={labelText} required={required}>
-      <textarea
-        value={typeof value === 'string' ? value : JSON.stringify(value ?? null, null, 2)}
+      <input
+        type="text"
+        value={renderedValue}
         onChange={(e) => {
-          try {
-            onChange(JSON.parse(e.target.value));
-          } catch {
-            onChange(e.target.value);
+          const raw = e.target.value;
+          if (raw === '') {
+            onChange(undefined);
+            return;
           }
+          // Numbers / booleans / null / JSON literals → parse. Otherwise keep
+          // as plain string so users don't have to wrap normal text in quotes.
+          const trimmed = raw.trim();
+          if (
+            trimmed === 'true' ||
+            trimmed === 'false' ||
+            trimmed === 'null' ||
+            /^-?\d+(\.\d+)?$/.test(trimmed) ||
+            trimmed.startsWith('"') ||
+            trimmed.startsWith('[') ||
+            trimmed.startsWith('{')
+          ) {
+            try {
+              onChange(JSON.parse(trimmed));
+              return;
+            } catch {
+              /* fall through to raw string */
+            }
+          }
+          onChange(raw);
         }}
-        rows={3}
-        className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 font-mono text-xs text-gray-200"
+        placeholder="Wert (Text · Zahl · true/false · oder JSON)"
+        className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-none"
       />
     </Labeled>
   );

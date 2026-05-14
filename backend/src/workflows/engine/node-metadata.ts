@@ -27,13 +27,20 @@ export interface NodeMetadataPublic {
 }
 
 export function toPublicMetadata(meta: NodeMetadata): NodeMetadataPublic {
+  // $refStrategy: 'none' inlines all schemas so the frontend never has to
+  // resolve internal references. Without this, e.g. control.condition's
+  // `default` property emits a `$ref` to a deeply nested branch enum, which
+  // the renderer can't follow and falls back to a JSON textarea.
   return {
     type: meta.type,
     category: meta.category,
     label: meta.label,
     description: meta.description,
     allowedScopes: meta.allowedScopes,
-    configJsonSchema: zodToJsonSchema(meta.configSchema as any, { name: meta.type }),
+    configJsonSchema: zodToJsonSchema(meta.configSchema as any, {
+      name: meta.type,
+      $refStrategy: 'none',
+    }),
     outputs: meta.outputs,
     branches: meta.branches ?? ['success', 'failure'],
   };

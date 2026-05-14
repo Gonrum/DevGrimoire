@@ -132,8 +132,20 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
               <div className="w-1/2 overflow-y-auto p-4">
                 {selected ? (
                   <>
-                    <h4 className="mb-2 text-xs uppercase tracking-wide text-gray-500">Output</h4>
-                    <pre className="mb-4 max-h-40 overflow-y-auto rounded bg-gray-950 p-2 text-xs text-gray-300">{JSON.stringify(selected.outputSnapshot ?? {}, null, 2)}</pre>
+                    <SnapshotBlock
+                      title="Input (was in den Node ging)"
+                      data={selected.inputSnapshot}
+                      tone="neutral"
+                      defaultOpen={!!selected.error}
+                      emptyText="(kein inputSnapshot erfasst)"
+                    />
+                    <SnapshotBlock
+                      title="Output (was an nächste Nodes weitergegeben wurde)"
+                      data={selected.outputSnapshot}
+                      tone="success"
+                      defaultOpen
+                      emptyText="(kein outputSnapshot — z.B. weil der Node fehlschlug oder kein Output schreibt)"
+                    />
                     {selected.error && (
                       <>
                         <h4 className="mb-2 text-xs uppercase tracking-wide text-red-400">Fehler</h4>
@@ -167,6 +179,43 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function SnapshotBlock({
+  title,
+  data,
+  tone,
+  defaultOpen = false,
+  emptyText,
+}: {
+  title: string;
+  data: Record<string, unknown> | undefined;
+  tone: 'neutral' | 'success';
+  defaultOpen?: boolean;
+  emptyText: string;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const hasData = data && Object.keys(data).length > 0;
+  const headerColor = tone === 'success' ? 'text-cyan-300' : 'text-gray-400';
+  return (
+    <div className="mb-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex w-full items-center justify-between rounded px-1 py-1 text-xs uppercase tracking-wide hover:bg-gray-800 ${headerColor}`}
+      >
+        <span>{open ? '▾' : '▸'} {title}</span>
+        {hasData && (
+          <span className="text-gray-500 normal-case">{Object.keys(data!).length} Felder</span>
+        )}
+      </button>
+      {open && (
+        <pre className="mt-1 max-h-48 overflow-y-auto rounded bg-gray-950 p-2 text-xs text-gray-300">
+          {hasData ? JSON.stringify(data, null, 2) : emptyText}
+        </pre>
+      )}
     </div>
   );
 }
