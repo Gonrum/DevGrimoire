@@ -268,10 +268,11 @@ export class RecurringTasksService {
         $push: { createdTodoIds: todo._id },
       }).exec();
     } else {
+      const url = `/recurring-tasks/${(task._id as Types.ObjectId).toString()}`;
       await this.notificationsService.create(
         task.title,
         task.description || task.title,
-        undefined,
+        url,
         'recurring',
       );
     }

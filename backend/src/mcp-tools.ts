@@ -5871,8 +5871,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         const toolPrefix = name.split('_')[0];
         const derivedUrl = deriveNotificationUrl(name, a, result);
         notificationsService.create(
-          `MCP: ${name}`,
-          formatToolSummary(name, a),
+          formatToolTitle(name, result),
+          formatToolBody(name, a, result),
           derivedUrl,
           `mcp_${toolPrefix}`,
         ).catch(() => {});
@@ -5940,12 +5940,83 @@ function deriveNotificationUrl(toolName: string, args: Record<string, unknown>, 
   return undefined;
 }
 
-function formatToolSummary(toolName: string, args: Record<string, unknown>): string {
-  const parts: string[] = [];
+// Human-readable verb for a tool name, used in the notification title.
+function toolVerb(toolName: string): string {
+  if (toolName.endsWith('_create') || toolName.endsWith('_add') || toolName.endsWith('_save')) {
+    return 'angelegt';
+  }
+  if (toolName.endsWith('_update')) return 'aktualisiert';
+  if (toolName.endsWith('_delete') || toolName.endsWith('_remove')) return 'gelöscht';
+  if (toolName.endsWith('_comment')) return 'kommentiert';
+  if (toolName.endsWith('_archive')) return 'archiviert';
+  if (toolName.endsWith('_get') || toolName.endsWith('_list') || toolName.endsWith('_search')) return 'gelesen';
+  return 'ausgeführt';
+}
+
+// Friendly entity label, e.g. 'todo_create' → 'Quest'.
+function toolEntityLabel(toolName: string): string {
+  const map: Record<string, string> = {
+    todo: 'Quest', milestone: 'Meilenstein', project: 'Projekt', knowledge: 'Wissen',
+    changelog: 'Chronik', research: 'Studie', manual: 'Handbuch', session: 'Session',
+    schema: 'Schema', dependency: 'Abhängigkeit', environment: 'Umgebung', secret: 'Siegel',
+    feature: 'Feature', soul: 'Seele', commit: 'Commit', snippet: 'Pergament',
+    attachment: 'Anhang', release: 'Release', recurring: 'Rite', customer: 'Kunde',
+    contact: 'Kontakt', workflow: 'Workflow', oracle: 'Orakel', notify: 'Hinweis',
+  };
+  const prefix = toolName.split('_')[0];
+  return map[prefix] ?? prefix;
+}
+
+function formatToolTitle(toolName: string, result: unknown): string {
+  const r = result as Record<string, unknown> | null | undefined;
+  const verb = toolVerb(toolName);
+  const entity = toolEntityLabel(toolName);
+  const display = typeof r?.displayNumber === 'string' ? r.displayNumber : undefined;
+  const ref = display ? ` ${display}` : '';
+  return `${entity}${ref} ${verb}`;
+}
+
+// Pretty-print a value for the notification body. Strips Mongo ObjectIds
+// (24-hex-char strings) and falls back to a short slug.
+function isObjectIdLike(v: string): boolean {
+  return /^[0-9a-f]{24}$/i.test(v);
+}
+
+function formatToolBody(toolName: string, args: Record<string, unknown>, result: unknown): string {
+  const r = result as Record<string, unknown> | null | undefined;
+  const pieces: string[] = [];
+
+  // Prefer human-readable result fields.
+  const title = typeof r?.title === 'string' ? r.title : undefined;
+  const name = typeof r?.name === 'string' ? r.name : undefined;
+  const topic = typeof r?.topic === 'string' ? r.topic : undefined;
+  const summary = typeof r?.summary === 'string' ? r.summary : undefined;
+  const displayNumber = typeof r?.displayNumber === 'string' ? r.displayNumber : undefined;
+  const head = title ?? name ?? topic ?? summary;
+  if (head) {
+    pieces.push(displayNumber ? `${displayNumber}: ${head}` : head);
+  }
+
+  // Status / priority / category if the tool sets them.
+  for (const key of ['status', 'priority', 'category', 'scope']) {
+    const v = (r as any)?.[key];
+    if (typeof v === 'string') pieces.push(`${key}: ${v}`);
+  }
+
+  // From args, surface fields that aren't IDs and aren't already covered.
+  const skipKeys = new Set(['projectId', 'customerId', 'milestoneId', 'todoId', 'id', '_id']);
   for (const [key, value] of Object.entries(args)) {
+    if (skipKeys.has(key)) continue;
     if (value === undefined || value === null) continue;
     const str = typeof value === 'string' ? value : JSON.stringify(value);
-    parts.push(`${key}: ${str.length > 80 ? str.slice(0, 80) + '…' : str}`);
+    if (typeof value === 'string' && isObjectIdLike(value)) continue;
+    if (key === 'title' && head === value) continue;
+    if (key === 'topic' && head === value) continue;
+    if (key === 'name' && head === value) continue;
+    const cut = str.length > 80 ? str.slice(0, 80) + '…' : str;
+    pieces.push(`${key}: ${cut}`);
+    if (pieces.length >= 4) break;
   }
-  return parts.length > 0 ? parts.join(', ') : '(keine Parameter)';
+
+  return pieces.length > 0 ? pieces.join(' · ') : toolName;
 }

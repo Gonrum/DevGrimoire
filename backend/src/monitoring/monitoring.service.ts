@@ -416,10 +416,12 @@ export class MonitoringService {
       // Only notify on transitions into UNHEALTHY or recovery from UNHEALTHY.
       const wasUnhealthy = previousStatus === HealthcheckStatus.UNHEALTHY;
       const isUnhealthy = newStatus === HealthcheckStatus.UNHEALTHY;
+      const monitoringUrl = `/customers/${check.customerId.toString()}?tab=monitoring`;
       if (isUnhealthy && check.lastNotifiedStatus !== HealthcheckStatus.UNHEALTHY) {
         await this.safeNotify(
           `🔴 ${check.name} ist nicht erreichbar`,
           evaluation.errorMessage || error || `HTTP ${statusCode}`,
+          monitoringUrl,
         );
         await this.checkModel.findByIdAndUpdate(check._id, {
           lastNotifiedStatus: HealthcheckStatus.UNHEALTHY,
@@ -428,6 +430,7 @@ export class MonitoringService {
         await this.safeNotify(
           `🟢 ${check.name} wieder verfügbar`,
           `HTTP ${statusCode ?? '-'} in ${latencyMs}ms`,
+          monitoringUrl,
         );
         await this.checkModel.findByIdAndUpdate(check._id, {
           lastNotifiedStatus: newStatus,
@@ -436,9 +439,9 @@ export class MonitoringService {
     }
   }
 
-  private async safeNotify(title: string, body: string): Promise<void> {
+  private async safeNotify(title: string, body: string, url?: string): Promise<void> {
     try {
-      await this.notificationsService.create(title, body, undefined, 'monitoring');
+      await this.notificationsService.create(title, body, url, 'monitoring');
     } catch (err) {
       this.logger.warn(`Failed to dispatch monitoring notification: ${(err as Error).message}`);
     }
