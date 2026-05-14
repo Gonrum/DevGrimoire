@@ -347,6 +347,8 @@ export default function NotepadDock() {
                     note={activeNote}
                     onLocalChange={handleContentChange}
                     onSaved={handleNoteSaved}
+                    onPromote={setPromotionTarget}
+                    onArchive={handleArchive}
                   />
                 ) : (
                   <div className="p-6 text-sm text-gray-500">

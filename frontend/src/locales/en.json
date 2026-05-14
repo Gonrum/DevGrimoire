@@ -1930,6 +1930,10 @@
       "research": "Research",
       "manual": "Manual chapter"
     },
-    "resizeHandle": "Drag to resize (double-click: reset)"
+    "resizeHandle": "Drag to resize (double-click: reset)",
+    "promoteAction": "Save with agent",
+    "promoteActionTooltip": "Agent analyses the note and suggests a target entity",
+    "archiveAction": "Archive",
+    "archiveActionTooltip": "Move note straight to archive (no agent)"
   }
 }

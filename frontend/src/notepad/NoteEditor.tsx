@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Sparkles, Archive as ArchiveIcon } from 'lucide-react';
 import { notesApi } from './api';
 import type { Note } from './types';
 
@@ -9,12 +10,14 @@ interface Props {
   note: Note;
   onLocalChange: (id: string, content: string) => void;
   onSaved: (note: Note) => void;
+  onPromote: (note: Note) => void;
+  onArchive: (id: string) => void;
 }
 
 const DEBOUNCE_MS = 500;
 const SAVED_INDICATOR_MS = 1500;
 
-export default function NoteEditor({ note, onLocalChange, onSaved }: Props) {
+export default function NoteEditor({ note, onLocalChange, onSaved, onPromote, onArchive }: Props) {
   const { t } = useTranslation();
   const [content, setContent] = useState(note.content);
   const [status, setStatus] = useState<SaveStatus>('idle');
@@ -127,8 +130,8 @@ export default function NoteEditor({ note, onLocalChange, onSaved }: Props) {
         className="flex-1 w-full bg-gray-900 text-gray-100 font-mono text-sm p-4 resize-none outline-none border-0 placeholder-gray-600"
         placeholder={t('vermerke.editorPlaceholder')}
       />
-      <div className="flex items-center justify-between px-3 py-1.5 border-t border-gray-800 bg-gray-950/50 text-xs">
-        <span className={statusColor[status]}>
+      <div className="flex items-center justify-between px-3 py-1.5 border-t border-gray-800 bg-gray-950/50 text-xs gap-2">
+        <span className={`${statusColor[status]} flex-1 truncate`}>
           {statusLabel[status] || ' '}
         </span>
         {status === 'error' && (
@@ -140,6 +143,26 @@ export default function NoteEditor({ note, onLocalChange, onSaved }: Props) {
             {t('vermerke.retry')}
           </button>
         )}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => onPromote(note)}
+            className="flex items-center gap-1 text-amber-400 hover:text-amber-300 hover:bg-gray-800 px-2 py-1 rounded transition-colors"
+            title={t('vermerke.promoteActionTooltip')}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>{t('vermerke.promoteAction')}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onArchive(note._id)}
+            className="flex items-center gap-1 text-gray-400 hover:text-gray-200 hover:bg-gray-800 px-2 py-1 rounded transition-colors"
+            title={t('vermerke.archiveActionTooltip')}
+          >
+            <ArchiveIcon className="w-3.5 h-3.5" />
+            <span>{t('vermerke.archiveAction')}</span>
+          </button>
+        </div>
       </div>
     </div>
   );

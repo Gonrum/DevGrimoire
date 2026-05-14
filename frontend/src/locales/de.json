@@ -1929,6 +1929,10 @@
       "research": "Studie",
       "manual": "Handbuch-Kapitel"
     },
-    "resizeHandle": "Breite ziehen (Doppelklick: Standard)"
+    "resizeHandle": "Breite ziehen (Doppelklick: Standard)",
+    "promoteAction": "Mit Agent speichern",
+    "promoteActionTooltip": "Agent analysiert den Vermerk und schlägt ein Ziel-Entity vor",
+    "archiveAction": "Archivieren",
+    "archiveActionTooltip": "Vermerk direkt ins Archiv verschieben (ohne Agent)"
   }
 }
