@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Project, Question, QuestionDirection } from '../../api/client';
+import { wsEventBus, isQuestionEvent } from '../../api/wsEventBus';
 import Markdown from '../Markdown';
 
 interface Props {
@@ -59,9 +60,12 @@ export default function PendingQuestionsWidget({ projectId, initialDirection, cl
 
   useEffect(() => {
     load();
-    // Re-poll every 30 s. SSE would be nicer; fine for the widget scale.
-    const interval = window.setInterval(load, 30_000);
-    return () => window.clearInterval(interval);
+    // Live updates via WS bus — refresh on every question event since either
+    // direction (created/answered) changes the pending list.
+    const unsub = wsEventBus.subscribe({ kind: 'global' }, (event) => {
+      if (isQuestionEvent(event)) load();
+    });
+    return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, direction]);
 

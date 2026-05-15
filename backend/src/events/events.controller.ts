@@ -1,232 +1,23 @@
-import { Controller, Logger, OnModuleDestroy, OnModuleInit, Query, Req, Sse } from '@nestjs/common';
+import { Controller, Logger, Query, Req, Sse } from '@nestjs/common';
 import type { Request } from 'express';
-import { OnEvent } from '@nestjs/event-emitter';
-import { InjectConnection } from '@nestjs/mongoose';
-import { Connection } from 'mongoose';
-import { Observable, Subject, filter, map, merge } from 'rxjs';
-import { PROJECT_CHANGED, ProjectChangeEvent } from './project-event';
-import { NOTIFICATION_CREATED } from '../notifications/notifications.service';
-import { QUESTION_CREATED, QUESTION_ANSWERED } from '../questions/questions.service';
+import { Observable, filter, map, merge } from 'rxjs';
+import { EventsBusService } from './events-bus.service';
 
 interface MessageEvent {
   data: string;
 }
 
-interface QuestionEvent {
-  type: 'question_created' | 'question_answered';
-  questionId: string;
-  question?: string;
-  options?: string[];
-  context?: string;
-  todoId?: string | null;
-  projectId?: string | null;
-  targetUserId?: string | null;
-  expiresAt?: string;
-  answer?: string;
-  answeredByUserId?: string | null;
-}
-
-const COLLECTION_ENTITY_MAP: Record<string, ProjectChangeEvent['entity']> = {
-  todos: 'todo',
-  projects: 'project',
-  sessions: 'session',
-  knowledges: 'knowledge',
-  changelogs: 'changelog',
-  milestones: 'milestone',
-  manuals: 'manual',
-  researches: 'research',
-  environments: 'environment',
-  secrets: 'secret',
-  schemas: 'schema',
-  dependencies: 'dependency',
-  features: 'feature',
-  souls: 'soul',
-  commits: 'commit',
-  workspaces: 'workspace',
-};
-
-/** Collections watched separately (not ProjectChangeEvent) */
-const QUESTION_COLLECTION = 'questions';
-
-const OPERATION_ACTION_MAP: Record<string, ProjectChangeEvent['action']> = {
-  insert: 'created',
-  update: 'updated',
-  replace: 'updated',
-  delete: 'deleted',
-};
-
+/**
+ * Legacy SSE endpoint. Kept for backwards-compat with any tool that may still
+ * subscribe to /api/events. First-party UI moved to the WebSocket multiplex
+ * endpoint at /api/ws/events (see main.ts) which avoids the HTTP/1.1
+ * 6-connections-per-origin limit when multiple tabs are open.
+ */
 @Controller('events')
-export class EventsController implements OnModuleInit, OnModuleDestroy {
+export class EventsController {
   private readonly logger = new Logger(EventsController.name);
-  private readonly events$ = new Subject<ProjectChangeEvent>();
-  private readonly questionEvents$ = new Subject<QuestionEvent>();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private changeStream: any = null;
-  private readonly recentEvents = new Map<string, number>();
 
-  private readonly standalone: boolean;
-
-  constructor(@InjectConnection() private readonly connection: Connection) {
-    this.standalone = process.env.MONGODB_STANDALONE === 'true';
-  }
-
-  onModuleInit() {
-    if (this.standalone) {
-      this.logger.log('Standalone mode: Change Streams disabled, using EventEmitter only');
-      return;
-    }
-    this.watchChangeStreams();
-  }
-
-  onModuleDestroy() {
-    this.changeStream?.close();
-  }
-
-  private watchChangeStreams() {
-    const watchedCollections = [...Object.keys(COLLECTION_ENTITY_MAP), QUESTION_COLLECTION];
-    const pipeline = [
-      { $match: { 'ns.coll': { $in: watchedCollections } } },
-    ];
-
-    try {
-      const db = this.connection.db;
-      if (!db) {
-        this.logger.warn('Database not available for Change Streams');
-        return;
-      }
-      this.changeStream = db.watch(pipeline, { fullDocument: 'updateLookup' });
-
-      this.changeStream.on('change', (change: any) => {
-        const coll = change.ns?.coll;
-        const doc = change.fullDocument || change.documentKey;
-        const action = OPERATION_ACTION_MAP[change.operationType];
-        if (!action) return;
-
-        // Handle question events separately (cross-process via Change Stream)
-        if (coll === QUESTION_COLLECTION && doc && change.operationType === 'insert') {
-          const questionId = doc._id?.toString();
-          if (questionId && doc.status === 'pending') {
-            this.questionEvents$.next({
-              type: 'question_created',
-              questionId,
-              question: doc.question,
-              options: doc.options || [],
-              context: doc.context,
-              todoId: doc.todoId?.toString() || null,
-              projectId: doc.projectId?.toString() || null,
-              targetUserId: doc.targetUserId?.toString() || null,
-              expiresAt: doc.expiresAt?.toISOString?.() || doc.expiresAt,
-            });
-          }
-          return;
-        }
-        if (coll === QUESTION_COLLECTION && doc && (change.operationType === 'update' || change.operationType === 'replace')) {
-          const questionId = (doc._id || change.documentKey?._id)?.toString();
-          if (questionId && doc.status === 'answered') {
-            this.questionEvents$.next({
-              type: 'question_answered',
-              questionId,
-              answer: doc.answer,
-              answeredByUserId: doc.answeredByUserId?.toString() || null,
-            });
-          }
-          return;
-        }
-
-        const entity = COLLECTION_ENTITY_MAP[coll];
-        if (!entity) return;
-
-        let projectId: string | undefined;
-
-        if (entity === 'project') {
-          projectId = (doc?._id || change.documentKey?._id)?.toString();
-        } else {
-          projectId = doc?.projectId?.toString();
-        }
-
-        if (!projectId) return;
-
-        const event: ProjectChangeEvent = {
-          projectId,
-          entity,
-          action,
-          entityId: (doc?._id || change.documentKey?._id)?.toString(),
-        };
-
-        // Deduplicate with EventEmitter events (300ms window)
-        const key = `${event.projectId}:${event.entity}:${event.action}:${event.entityId}`;
-        const now = Date.now();
-        const lastSeen = this.recentEvents.get(key);
-        if (lastSeen && now - lastSeen < 300) return;
-        this.recentEvents.set(key, now);
-
-        // Cleanup old entries periodically
-        if (this.recentEvents.size > 100) {
-          for (const [k, t] of this.recentEvents) {
-            if (now - t > 5000) this.recentEvents.delete(k);
-          }
-        }
-
-        this.events$.next(event);
-      });
-
-      this.changeStream.on('error', (err: Error) => {
-        this.logger.error('Change stream error', err.message);
-      });
-
-      this.logger.log('MongoDB Change Stream watching: ' + watchedCollections.join(', '));
-    } catch (err) {
-      this.logger.warn('Change Streams not available (requires replica set). Falling back to EventEmitter only.');
-    }
-  }
-
-  @OnEvent(PROJECT_CHANGED)
-  handleProjectChange(event: ProjectChangeEvent) {
-    // Deduplicate with Change Stream events
-    const key = `${event.projectId}:${event.entity}:${event.action}:${event.entityId}`;
-    const now = Date.now();
-    const lastSeen = this.recentEvents.get(key);
-    if (lastSeen && now - lastSeen < 300) return;
-    this.recentEvents.set(key, now);
-
-    this.events$.next(event);
-  }
-
-  @OnEvent(NOTIFICATION_CREATED)
-  handleNotificationCreated(event: { id: string; title: string; body: string }) {
-    this.events$.next({
-      projectId: '__global__',
-      entity: 'notification',
-      action: 'created',
-      entityId: event.id,
-      summary: event.title,
-    });
-  }
-
-  @OnEvent(QUESTION_CREATED)
-  handleQuestionCreated(event: any) {
-    this.questionEvents$.next({
-      type: 'question_created',
-      questionId: event.questionId,
-      question: event.question,
-      options: event.options,
-      context: event.context,
-      todoId: event.todoId,
-      projectId: event.projectId,
-      targetUserId: event.targetUserId,
-      expiresAt: event.expiresAt,
-    });
-  }
-
-  @OnEvent(QUESTION_ANSWERED)
-  handleQuestionAnswered(event: any) {
-    this.questionEvents$.next({
-      type: 'question_answered',
-      questionId: event.questionId,
-      answer: event.answer,
-      answeredByUserId: event.answeredByUserId,
-    });
-  }
+  constructor(private readonly bus: EventsBusService) {}
 
   @Sse()
   sse(
@@ -234,20 +25,18 @@ export class EventsController implements OnModuleInit, OnModuleDestroy {
     @Query('projectId') projectId?: string,
     @Query('userId') queryUserId?: string,
   ): Observable<MessageEvent> {
-    // Trust the JWT-derived userId over any client-supplied query parameter.
+    this.logger.warn(
+      `Deprecated SSE /api/events used (UA="${req.headers['user-agent'] || ''}"). Migrate to /api/ws/events.`,
+    );
     const authedUserId =
       (req as Request & { user?: { userId?: string } }).user?.userId || queryUserId;
 
-    const projectEvents$ = this.events$.pipe(
+    const projectEvents$ = this.bus.events$.pipe(
       filter((event) => {
-        // Privacy-scoped events (chat, future per-user entities) only flow to
-        // the owner. Without a userId on the SSE connection we drop them.
         if (event.userId) {
           return !!authedUserId && event.userId === authedUserId;
         }
-        // Notification events go to ALL clients (they're already per-user-targeted at app level)
         if (event.entity === 'notification') return true;
-        // Global events (projectId=null) go to ALL clients
         if (event.projectId === null) return true;
         if (projectId) return event.projectId === projectId;
         return event.entity === 'project';
@@ -255,13 +44,10 @@ export class EventsController implements OnModuleInit, OnModuleDestroy {
       map((event) => ({ data: JSON.stringify(event) })),
     );
 
-    const questionStream$ = this.questionEvents$.pipe(
+    const questionStream$ = this.bus.questionEvents$.pipe(
       filter((event) => {
-        // Broadcast questions (no targetUserId) go to all clients
         if (!event.targetUserId) return true;
-        // Targeted questions: only to the target user
         if (authedUserId) return event.targetUserId === authedUserId;
-        // No userId on SSE connection: show all (client filters)
         return true;
       }),
       map((event) => ({ data: JSON.stringify(event) })),

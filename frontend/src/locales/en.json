@@ -1061,6 +1061,7 @@
   },
   "connection": {
     "connected": "Live connection active",
+    "connecting": "Connecting…",
     "disconnected": "No connection"
   },
   "profile": {

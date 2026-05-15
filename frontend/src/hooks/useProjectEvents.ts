@@ -1,87 +1,51 @@
 import { useEffect, useRef } from 'react';
-import { useAuth } from './useAuth';
+import { wsEventBus, isProjectChangeEvent, type BusEvent, type ProjectChangeEvent } from '../api/wsEventBus';
 
-export interface ProjectChangeEvent {
-  projectId: string;
-  entity: 'project' | 'todo' | 'session' | 'knowledge' | 'changelog' | 'milestone' | 'manual' | 'research' | 'notification' | 'environment' | 'secret' | 'schema' | 'dependency' | 'feature' | 'soul' | 'commit' | 'recurring-task' | 'snippet' | 'doc-update-proposal' | 'knowledge-graph' | 'oracle';
-  action: 'created' | 'updated' | 'deleted';
-  entityId?: string;
-}
+export type { ProjectChangeEvent };
 
 type EventHandler = (event: ProjectChangeEvent) => void;
 
-function useSSE(url: string | null, onEvent: EventHandler, token: string | null, authEnabled: boolean | null) {
+/**
+ * 300ms-coalescing wrapper around a WS-bus subscription. Multiple updates to
+ * the same entity within the window collapse to one handler call — keeps
+ * busy edit flows from triggering a refetch storm.
+ */
+function useBus(scope: { kind: 'global' | 'project'; projectId?: string } | null, onEvent: EventHandler) {
   const handlerRef = useRef(onEvent);
   handlerRef.current = onEvent;
 
-  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const pendingRef = useRef<Map<string, ProjectChangeEvent>>(new Map());
-
   useEffect(() => {
-    if (!url) return;
-    // Don't connect until auth is resolved; if auth is enabled, wait for token
-    if (authEnabled === null) return;
-    if (authEnabled && !token) return;
+    if (!scope) return;
+    const pending = new Map<string, ProjectChangeEvent>();
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const sep = url.includes('?') ? '&' : '?';
-    const fullUrl = token ? `${url}${sep}token=${token}` : url;
-
-    let es: EventSource | null = null;
-    let retryTimer: ReturnType<typeof setTimeout>;
-    let retryDelay = 1000;
-    const MAX_RETRY_DELAY = 30000;
-
-    function connect() {
-      es = new EventSource(fullUrl);
-
-      es.onopen = () => {
-        retryDelay = 1000;
-      };
-
-      es.onmessage = (msg) => {
-        const event: ProjectChangeEvent = JSON.parse(msg.data);
-        pendingRef.current.set(event.entity, event);
-
-        if (timerRef.current) clearTimeout(timerRef.current);
-        timerRef.current = setTimeout(() => {
-          const events = Array.from(pendingRef.current.values());
-          pendingRef.current.clear();
-          events.forEach((e) => handlerRef.current(e));
-        }, 300);
-      };
-
-      es.onerror = () => {
-        es?.close();
-        retryTimer = setTimeout(connect, retryDelay);
-        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
-      };
-    }
-
-    connect();
+    const unsub = wsEventBus.subscribe(scope, (event: BusEvent) => {
+      if (!isProjectChangeEvent(event)) return;
+      pending.set(event.entity, event);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        const events = Array.from(pending.values());
+        pending.clear();
+        for (const e of events) handlerRef.current(e);
+      }, 300);
+    });
 
     return () => {
-      es?.close();
-      clearTimeout(retryTimer);
-      if (timerRef.current) clearTimeout(timerRef.current);
-      pendingRef.current.clear();
+      unsub();
+      if (timer) clearTimeout(timer);
+      pending.clear();
     };
-  }, [url, token, authEnabled]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope?.kind, scope?.projectId]);
 }
 
 export function useProjectEvents(
   projectId: string | undefined,
   onEvent: EventHandler,
 ) {
-  const { getAccessToken, authEnabled } = useAuth();
-  useSSE(
-    projectId ? `/api/events?projectId=${projectId}` : null,
-    onEvent,
-    getAccessToken(),
-    authEnabled,
-  );
+  useBus(projectId ? { kind: 'project', projectId } : null, onEvent);
 }
 
 export function useDashboardEvents(onEvent: EventHandler) {
-  const { getAccessToken, authEnabled } = useAuth();
-  useSSE('/api/events', onEvent, getAccessToken(), authEnabled);
+  useBus({ kind: 'global' }, onEvent);
 }

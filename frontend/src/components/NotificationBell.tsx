@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { api, Notification } from '../api/client';
-import { useAuth } from '../hooks/useAuth';
+import { wsEventBus, isProjectChangeEvent } from '../api/wsEventBus';
 
 function timeAgo(date: string): string {
   const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
@@ -41,56 +41,22 @@ export default function NotificationBell() {
     setLoading(false);
   }, []);
 
-  // Initial load + poll every 15s
   useEffect(() => {
     fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 15000);
-    return () => clearInterval(interval);
   }, [fetchUnreadCount]);
 
-  // Listen for SSE notification events with auto-reconnect
-  const { getAccessToken, authEnabled } = useAuth();
+  // Live updates via the WS bus. The bus handles reconnect/heartbeat for us;
+  // the 15s belt-and-suspenders fetch loop the old SSE path needed is gone.
   useEffect(() => {
-    // Wait for auth to resolve; if auth is enabled, require token
-    if (authEnabled === null) return;
-    const token = getAccessToken();
-    if (authEnabled && !token) return;
-
-    const params = new URLSearchParams();
-    if (token) params.set('token', token);
-    const url = `/api/events?${params}`;
-
-    let es: EventSource | null = null;
-    let retryTimer: ReturnType<typeof setTimeout>;
-    let retryDelay = 1000;
-    const MAX_RETRY_DELAY = 30000;
-
-    function connect() {
-      es = new EventSource(url);
-      es.onopen = () => { retryDelay = 1000; };
-      es.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.entity === 'notification' && data.action === 'created') {
-            fetchUnreadCount();
-            if (open) fetchNotifications();
-          }
-        } catch { /* ignore */ }
-      };
-      es.onerror = () => {
-        es?.close();
-        retryTimer = setTimeout(connect, retryDelay);
-        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
-      };
-    }
-
-    connect();
-
-    return () => {
-      es?.close();
-      clearTimeout(retryTimer);
-    };
-  }, [fetchUnreadCount, fetchNotifications, open, getAccessToken, authEnabled]);
+    const unsub = wsEventBus.subscribe({ kind: 'global' }, (event) => {
+      if (!isProjectChangeEvent(event)) return;
+      if (event.entity === 'notification' && event.action === 'created') {
+        fetchUnreadCount();
+        if (open) fetchNotifications();
+      }
+    });
+    return unsub;
+  }, [fetchUnreadCount, fetchNotifications, open]);
 
   // Close on click outside
   useEffect(() => {

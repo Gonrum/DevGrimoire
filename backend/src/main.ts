@@ -64,6 +64,9 @@ import { AuthService } from './auth/auth.service';
 import { JwtService } from '@nestjs/jwt';
 import WebSocket, { WebSocketServer } from 'ws';
 import { RequestContext, RequestUser } from './common/request-context';
+import { EventsBusService, QuestionEvent } from './events/events-bus.service';
+import { ProjectChangeEvent } from './events/project-event';
+import { Subscription } from 'rxjs';
 
 function createMcpServer(services: McpServices): Server {
   const server = new Server(
@@ -615,6 +618,148 @@ async function bootstrap() {
     });
 
     upstream.on('error', () => reject(502, 'Bad Gateway'));
+  });
+
+  // ─── WebSocket multiplex bus for live events ─────────────────────────
+  // Replaces the long-lived /api/events SSE stream that, multiplied by 3
+  // EventSources per tab (ConnectionStatus, NotificationBell, project
+  // events), starved the HTTP/1.1 6-connections-per-origin pool at 2+ tabs.
+  // One WS per tab carries N filtered subscriptions; WS connections live in
+  // their own browser pool (~200+ per origin) and don't contend with normal
+  // HTTP requests.
+  //
+  // Protocol (JSON over text frames):
+  //   client → server:
+  //     {type:'subscribe', id, scope:'global'|'project', projectId?}
+  //     {type:'unsubscribe', id}
+  //   server → client:
+  //     {type:'hello', userId}
+  //     {type:'subscribed', id}
+  //     {type:'event', subIds, payload: ProjectChangeEvent}
+  //     {type:'question', subIds, payload: QuestionEvent}
+  //
+  // Heartbeat: server pings every 25s; misses 1 pong → terminate(). Browsers
+  // auto-respond to pings, so no client timer is needed (which means
+  // background-tab throttling can't break liveness).
+  const eventsBus = app.get(EventsBusService);
+  const eventsWss = new WebSocketServer({ noServer: true });
+  const EVENTS_ROUTE = /^\/api\/ws\/events\/?$/i;
+  const HEARTBEAT_INTERVAL_MS = 25_000;
+
+  interface WsSubscription {
+    id: string;
+    scope: 'global' | 'project';
+    projectId?: string;
+  }
+
+  httpServer.on('upgrade', (req: import('http').IncomingMessage, socket: import('net').Socket, head: Buffer) => {
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    if (!EVENTS_ROUTE.test(url.pathname)) return;
+
+    const reject = (status: number, msg: string) => {
+      socket.write(`HTTP/1.1 ${status} ${msg}\r\nContent-Length: 0\r\n\r\n`);
+      socket.destroy();
+    };
+
+    let userId: string | undefined;
+    if (authService.isAuthEnabled()) {
+      const token = url.searchParams.get('token');
+      if (!token) return reject(401, 'Unauthorized');
+      try {
+        const payload = jwt.verify(token) as { sub?: string; userId?: string };
+        userId = payload.sub || payload.userId;
+      } catch {
+        return reject(401, 'Unauthorized');
+      }
+      if (!userId) return reject(401, 'Unauthorized');
+    }
+
+    eventsWss.handleUpgrade(req, socket, head, (ws) => {
+      const subs = new Map<string, WsSubscription>();
+      let isAlive = true;
+      const send = (msg: unknown) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          try { ws.send(JSON.stringify(msg)); } catch { /* noop */ }
+        }
+      };
+
+      const matchProjectEvent = (event: ProjectChangeEvent): string[] => {
+        // Privacy filter first — userId-scoped events never leak across users.
+        if (event.userId && event.userId !== userId) return [];
+        const hits: string[] = [];
+        for (const sub of subs.values()) {
+          // Notifications and global (projectId === null) events broadcast to
+          // every subscription on this connection regardless of scope.
+          if (event.entity === 'notification' || event.projectId === null) {
+            hits.push(sub.id);
+            continue;
+          }
+          if (sub.scope === 'project') {
+            if (event.projectId === sub.projectId) hits.push(sub.id);
+          } else {
+            // global-scope subscription receives all non-private events
+            hits.push(sub.id);
+          }
+        }
+        return hits;
+      };
+
+      const matchQuestionEvent = (event: QuestionEvent): string[] => {
+        // Targeted questions only flow to the addressed user. Broadcast
+        // questions (no targetUserId) flow to every subscription.
+        if (event.targetUserId && event.targetUserId !== userId) return [];
+        return Array.from(subs.keys());
+      };
+
+      const projectRxSub: Subscription = eventsBus.events$.subscribe((event) => {
+        const subIds = matchProjectEvent(event);
+        if (subIds.length > 0) send({ type: 'event', subIds, payload: event });
+      });
+      const questionRxSub: Subscription = eventsBus.questionEvents$.subscribe((event) => {
+        const subIds = matchQuestionEvent(event);
+        if (subIds.length > 0) send({ type: 'question', subIds, payload: event });
+      });
+
+      ws.on('pong', () => { isAlive = true; });
+      const heartbeat = setInterval(() => {
+        if (!isAlive) {
+          try { ws.terminate(); } catch { /* noop */ }
+          return;
+        }
+        isAlive = false;
+        try { ws.ping(); } catch { /* noop */ }
+      }, HEARTBEAT_INTERVAL_MS);
+
+      ws.on('message', (data) => {
+        let msg: { type?: string; id?: string; scope?: string; projectId?: string };
+        try {
+          msg = JSON.parse(data.toString());
+        } catch {
+          return;
+        }
+        if (!msg || typeof msg !== 'object') return;
+        if (msg.type === 'subscribe' && typeof msg.id === 'string') {
+          subs.set(msg.id, {
+            id: msg.id,
+            scope: msg.scope === 'project' ? 'project' : 'global',
+            projectId: typeof msg.projectId === 'string' ? msg.projectId : undefined,
+          });
+          send({ type: 'subscribed', id: msg.id });
+        } else if (msg.type === 'unsubscribe' && typeof msg.id === 'string') {
+          subs.delete(msg.id);
+        }
+      });
+
+      const cleanup = () => {
+        clearInterval(heartbeat);
+        projectRxSub.unsubscribe();
+        questionRxSub.unsubscribe();
+      };
+      ws.on('close', cleanup);
+      ws.on('error', cleanup);
+
+      send({ type: 'hello', userId: userId ?? null });
+    });
   });
 
   const port = process.env.PORT || 3000;

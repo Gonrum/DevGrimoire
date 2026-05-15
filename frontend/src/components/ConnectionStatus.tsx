@@ -1,50 +1,31 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAuth } from '../hooks/useAuth';
+import { wsEventBus, type WsConnectionState } from '../api/wsEventBus';
+
+const STATE_COLORS: Record<WsConnectionState, string> = {
+  open: 'bg-green-500',
+  connecting: 'bg-yellow-500 animate-pulse',
+  reconnecting: 'bg-yellow-500 animate-pulse',
+  closed: 'bg-red-500',
+};
 
 export default function ConnectionStatus() {
   const { t } = useTranslation();
-  const [connected, setConnected] = useState(false);
-  const { getAccessToken, authEnabled } = useAuth();
+  const [state, setState] = useState<WsConnectionState>(wsEventBus.getState());
 
-  useEffect(() => {
-    // Wait for auth to resolve; if auth is enabled, require token
-    if (authEnabled === null) return;
-    const token = getAccessToken();
-    if (authEnabled && !token) return;
+  useEffect(() => wsEventBus.onStateChange(setState), []);
 
-    const params = new URLSearchParams();
-    if (token) params.set('token', token);
-    const url = `/api/events?${params}`;
-
-    let es: EventSource | null = null;
-    let retryTimer: ReturnType<typeof setTimeout>;
-    let retryDelay = 1000;
-    const MAX_RETRY_DELAY = 30000;
-
-    function connect() {
-      es = new EventSource(url);
-      es.onopen = () => { setConnected(true); retryDelay = 1000; };
-      es.onerror = () => {
-        setConnected(false);
-        es?.close();
-        retryTimer = setTimeout(connect, retryDelay);
-        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
-      };
-    }
-
-    connect();
-
-    return () => {
-      es?.close();
-      clearTimeout(retryTimer);
-    };
-  }, [getAccessToken, authEnabled]);
+  const title =
+    state === 'open'
+      ? t('connection.connected')
+      : state === 'connecting' || state === 'reconnecting'
+        ? t('connection.connecting')
+        : t('connection.disconnected');
 
   return (
     <span
-      className={`w-2 h-2 rounded-full shrink-0 ${connected ? 'bg-green-500' : 'bg-red-500'}`}
-      title={connected ? t('connection.connected') : t('connection.disconnected')}
+      className={`w-2 h-2 rounded-full shrink-0 ${STATE_COLORS[state]}`}
+      title={title}
     />
   );
 }

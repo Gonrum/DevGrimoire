@@ -39,6 +39,7 @@ import { ToastProvider } from './components/Toast';
 import { LoadingText } from './components/ui/LoadingSpinner';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { configureAuth, api } from './api/client';
+import { wsEventBus } from './api/wsEventBus';
 import ParticleBackground from './components/ParticleBackground';
 import QuestionDialog from './components/QuestionDialog';
 import ChatDock from './components/ChatDock';
@@ -111,6 +112,15 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       },
     );
   }, [getAccessToken]);
+
+  useEffect(() => {
+    if (authEnabled === null) return;
+    if (authEnabled && !isAuthenticated) {
+      wsEventBus.stop();
+      return;
+    }
+    wsEventBus.start(getAccessToken, !!authEnabled);
+  }, [authEnabled, isAuthenticated, getAccessToken]);
 
   if (loading) {
     return (

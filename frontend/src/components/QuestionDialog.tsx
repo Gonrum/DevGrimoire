@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
+import { wsEventBus, isQuestionEvent } from '../api/wsEventBus';
 import Markdown from './Markdown';
 
 interface PendingQuestion {
@@ -51,11 +52,24 @@ export default function QuestionDialog() {
     } catch { /* ignore */ }
   }, [getAccessToken, authEnabled]);
 
-  // Poll for pending questions every 3 seconds
+  // Initial load — subsequent updates flow via the WS bus.
   useEffect(() => {
     fetchPending();
-    const interval = setInterval(fetchPending, 3000);
-    return () => clearInterval(interval);
+  }, [fetchPending]);
+
+  // Live updates: a created question triggers a refetch (cheaper than
+  // reconstructing the pending list client-side); an answered question
+  // drops out of the local state immediately.
+  useEffect(() => {
+    const unsub = wsEventBus.subscribe({ kind: 'global' }, (event) => {
+      if (!isQuestionEvent(event)) return;
+      if (event.type === 'question_created') {
+        fetchPending();
+      } else if (event.type === 'question_answered') {
+        setQuestions((prev) => prev.filter((q) => q._id !== event.questionId));
+      }
+    });
+    return unsub;
   }, [fetchPending]);
 
   const submitAnswer = useCallback(
