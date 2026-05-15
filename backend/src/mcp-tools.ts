@@ -237,14 +237,37 @@ function errorResult(message: string) {
   return { content: [{ type: 'text' as const, text: message }], isError: true };
 }
 
-function compactUpdateResult(doc: any): Record<string, unknown> {
-  const obj = typeof doc.toJSON === 'function' ? doc.toJSON() : { ...doc };
-  return { updated: true, _id: obj._id, updatedAt: obj.updatedAt };
+/** Coerce a Mongo id (ObjectId | string | {toString}) to a plain string, or undefined. */
+function idToString(v: unknown): string | undefined {
+  if (v == null) return undefined;
+  if (typeof v === 'string') return v;
+  const s = typeof (v as { toString?: () => string }).toString === 'function'
+    ? (v as { toString: () => string }).toString()
+    : String(v);
+  return s && s !== '[object Object]' ? s : undefined;
 }
 
-function compactCreateResult(doc: any, extra?: Record<string, unknown>): Record<string, unknown> {
+export function compactUpdateResult(doc: any): Record<string, unknown> {
   const obj = typeof doc.toJSON === 'function' ? doc.toJSON() : { ...doc };
-  return { created: true, _id: obj._id, createdAt: obj.createdAt, ...extra };
+  return {
+    updated: true,
+    _id: idToString(obj._id),
+    projectId: idToString(obj.projectId),
+    customerId: idToString(obj.customerId),
+    updatedAt: obj.updatedAt,
+  };
+}
+
+export function compactCreateResult(doc: any, extra?: Record<string, unknown>): Record<string, unknown> {
+  const obj = typeof doc.toJSON === 'function' ? doc.toJSON() : { ...doc };
+  return {
+    created: true,
+    _id: idToString(obj._id),
+    projectId: idToString(obj.projectId),
+    customerId: idToString(obj.customerId),
+    createdAt: obj.createdAt,
+    ...extra,
+  };
 }
 
 async function getClientRoots(server: Server): Promise<McpRootLike[] | undefined> {
@@ -5886,21 +5909,24 @@ export function registerMcpTools(server: Server, services: McpServices): void {
   });
 }
 
-function deriveNotificationUrl(toolName: string, args: Record<string, unknown>, result: unknown): string | undefined {
+export function deriveNotificationUrl(toolName: string, args: Record<string, unknown>, result: unknown): string | undefined {
   const r = result as Record<string, unknown> | null | undefined;
-  const argProjectId = typeof args.projectId === 'string' ? args.projectId : undefined;
-  const resultProjectId = typeof r?.projectId === 'string' ? r.projectId : argProjectId;
-  const resultId = typeof r?._id === 'string' ? r._id : undefined;
+  // Coerce via idToString: results may be raw Mongoose docs (todo_comment)
+  // or compact results — _id/projectId can be ObjectId or string.
+  const resultProjectId = idToString(r?.projectId) ?? idToString(args.projectId);
+  const resultCustomerId = idToString(r?.customerId) ?? idToString(args.customerId);
+  const resultId = idToString(r?._id);
 
   switch (toolName) {
     case 'todo_create':
     case 'todo_update':
     case 'todo_comment':
-      if (resultProjectId && resultId) return `/projects/${resultProjectId}/todos/${resultId}`;
+      if (resultId && resultProjectId) return `/projects/${resultProjectId}/todos/${resultId}`;
+      if (resultId && resultCustomerId) return `/customers/${resultCustomerId}/todos/${resultId}`;
       break;
     case 'milestone_create':
     case 'milestone_update':
-      if (resultProjectId && resultId) return `/projects/${resultProjectId}/milestones/${resultId}`;
+      if (resultId && resultProjectId) return `/projects/${resultProjectId}/milestones/${resultId}`;
       break;
     case 'project_create':
     case 'project_update':
