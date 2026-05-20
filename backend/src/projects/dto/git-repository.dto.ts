@@ -3,6 +3,7 @@ import { IsString, IsOptional, IsEnum, IsBoolean, IsDateString, IsMongoId } from
 enum GitProviderEnum {
   GITHUB = 'github',
   GITLAB = 'gitlab',
+  GITEA = 'gitea',
 }
 
 export class GitRepositoryDto {
@@ -14,7 +15,7 @@ export class GitRepositoryDto {
   _id?: string;
 
   @IsEnum(GitProviderEnum)
-  provider: 'github' | 'gitlab';
+  provider: 'github' | 'gitlab' | 'gitea';
 
   @IsString()
   @IsOptional()
@@ -23,6 +24,10 @@ export class GitRepositoryDto {
   @IsString()
   @IsOptional()
   baseUrl?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  allowPrivateHost?: boolean;
 
   @IsString()
   @IsOptional()
