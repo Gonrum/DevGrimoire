@@ -632,6 +632,42 @@ async function bootstrap() {
   // frontend can share a hook (planned, Schritt 5/8): JSON `{type:'resize',
   // cols, rows}` from client → server, JSON `{type:'exit', exitCode}` from
   // server → client. All other frames are stdin/stdout bytes.
+  //
+  // Close-code mapping for SSH connect/auth failures (Spec §4.3):
+  //   host_key_mismatch    → 4001 (spec-mandated)
+  //   tofu_not_accepted    → 4002
+  //   credential_missing   → 4003
+  //   auth_failed          → 4004
+  //   timeout / network    → 4008
+  //   anything else        → 1011 (internal server error)
+  // The reason string is the raw error code so the frontend can also
+  // disambiguate without depending on the numeric mapping.
+  const sshConnectErrorToCloseCode = (reason: string): number => {
+    // Match prefix-style (some errors include extra context after the code,
+    // e.g. "upload_too_large: 12345 > 10485760").
+    const head = reason.split(/[:\s]/, 1)[0] || reason;
+    switch (head) {
+      case 'host_key_mismatch':
+        return 4001;
+      case 'tofu_not_accepted':
+        return 4002;
+      case 'credential_missing':
+        return 4003;
+      case 'auth_failed':
+        return 4004;
+      case 'timeout':
+      case 'ETIMEDOUT':
+      case 'ECONNREFUSED':
+      case 'ENOTFOUND':
+      case 'EHOSTUNREACH':
+      case 'ENETUNREACH':
+      case 'ECONNRESET':
+        return 4008;
+      default:
+        return 1011;
+    }
+  };
+
   const sshSessionService = app.get(SshSessionService);
   const sshTerminalWss = new WebSocketServer({ noServer: true });
   const SSH_TERMINAL_ROUTE = /^\/api\/ssh\/([a-f0-9]{24})\/terminal\/?$/i;
@@ -706,10 +742,12 @@ async function bootstrap() {
       } catch (err) {
         const reason = (err as Error).message || 'ssh_connect_failed';
         // WS close codes 4000-4999 are reserved for application-defined
-        // semantics; 4001 mirrors the spec's choice for SSH connect
-        // failures and lets the frontend distinguish "real" disconnects
-        // (1006/1011) from "the SSH layer refused".
-        try { clientWs.close(4001, reason); } catch { /* noop */ }
+        // semantics. The spec (§4.3) mandates 4001 for host_key_mismatch;
+        // we extend the mapping so the frontend can distinguish the
+        // different SSH failure modes without parsing reason strings.
+        // Anything we don't recognise falls back to 1011 (internal err).
+        const code = sshConnectErrorToCloseCode(reason);
+        try { clientWs.close(code, reason); } catch { /* noop */ }
         return;
       }
 
@@ -729,7 +767,10 @@ async function bootstrap() {
         { term: 'xterm-256color', cols: initialCols, rows: initialRows },
         (err, stream) => {
           if (err) {
-            closeAll(4001, `shell_failed: ${err.message}`);
+            // Post-connect failure → 1011 (internal). Spec §4.3's 4xxx codes
+            // are reserved for connect/auth-phase errors; future work could
+            // extend the mapping if shell-open distinguishes further.
+            closeAll(1011, `shell_failed: ${err.message}`);
             return;
           }
           channel = stream;
@@ -799,7 +840,7 @@ async function bootstrap() {
       clientWs.on('error', () => closeAll(1011, 'ws_error'));
       sshClient.on('end', () => closeAll());
       sshClient.on('close', () => closeAll());
-      sshClient.on('error', (err) => closeAll(4001, err.message || 'ssh_error'));
+      sshClient.on('error', (err) => closeAll(1011, err.message || 'ssh_error'));
     });
   });
 

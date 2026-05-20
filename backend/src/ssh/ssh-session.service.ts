@@ -41,6 +41,7 @@ const STDERR_LIMIT = 64 * 1024;
 const SIGKILL_GRACE_MS = 5_000;
 const DEFAULT_DOWNLOAD_BYTES = 1_048_576; // 1 MB
 const HARD_MAX_DOWNLOAD_BYTES = 10_485_760; // 10 MB
+const SFTP_MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB (spec §6.4)
 const DEFAULT_LIST_ENTRIES = 200;
 const HARD_MAX_LIST_ENTRIES = 2000;
 const LIST_RECURSE_MAX_DEPTH = 10;
@@ -166,9 +167,15 @@ export class SshSessionService {
   // ===========================================================================
 
   /**
-   * Open and return a ready ssh2.Client. The CALLER owns the lifecycle from
-   * here on — must call `client.end()`/`client.destroy()`. Used by the WS
-   * terminal route which keeps the client alive for the session duration.
+   * Opens a long-lived ssh2 client for the caller (typically the WS terminal
+   * handler). The CALLER owns the lifecycle from here on — must call
+   * `client.end()` and `client.destroy()` when done. Used by the WS terminal
+   * route which keeps the client alive for the session duration.
+   *
+   * NOTE: Bypasses the concurrency-semaphore by design (Spec §6.4: terminal
+   * sessions are user-driven and have no per-connection limit). For one-shot
+   * operations (exec/sftpUpload/sftpDownload/listFiles) use the higher-level
+   * methods on this service which respect the semaphore.
    *
    * The `ptyCols`/`ptyRows` opts are accepted for API symmetry with callers
    * that pass them through — actual PTY allocation happens at `client.shell()`
@@ -267,6 +274,14 @@ export class SshSessionService {
     const startedAt = Date.now();
     const sourceContext = opts.sourceContext ?? 'mcp';
     await this.acquireSlot(connId);
+    // Hard size cap per spec §6.4. Guard inside the slot so the release in
+    // finally still runs, but before we open any network resources.
+    if (content.length > SFTP_MAX_UPLOAD_BYTES) {
+      this.releaseSlot(connId);
+      throw new Error(
+        `upload_too_large: ${content.length} > ${SFTP_MAX_UPLOAD_BYTES}`,
+      );
+    }
     let client: Ssh2Client | null = null;
     try {
       const connection = await this.sshService.findById(connId);
@@ -416,7 +431,13 @@ export class SshSessionService {
   }): Promise<void> {
     // Same guard as SshTestService: 'system' (or any non-ObjectId userId)
     // would blow up Mongoose's required-ObjectId validation on userId.
+    // We log at debug so silent drops are visible in dev/ops but don't
+    // pollute prod logs (most legitimate non-ObjectId paths are 'system'
+    // and internal callers without a user context).
     if (!entry.userId || !Types.ObjectId.isValid(entry.userId)) {
+      this.logger.debug(
+        `Audit-Write übersprungen: userId='${entry.userId ?? 'undefined'}' ist kein ObjectId (action=${entry.action}, sourceContext=${entry.sourceContext})`,
+      );
       return Promise.resolve();
     }
     const doc: Record<string, unknown> = {
@@ -990,6 +1011,12 @@ export class SshSessionService {
       state.active += 1;
       return;
     }
+    // Slow path: queue + wait. NOTE: when the waiter resolves we do NOT
+    // bump `active` again — the releaser hands off its slot to us via the
+    // slot-transfer pattern in `releaseSlot` (it skips the `-=1` when a
+    // waiter is present). Without this transfer a third acquireSlot could
+    // race in via the fast-path between releaser's `-=1` and waiter's
+    // `+=1`, breaking the LIMIT.
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         // Remove ourselves from the queue if we're still in it.
@@ -999,18 +1026,22 @@ export class SshSessionService {
       }, CONCURRENCY_WAIT_MS);
       state.queue.push({ resolve, reject, timer });
     });
-    state.active += 1;
   }
 
   private releaseSlot(connId: string): void {
     const state = this.getState(connId);
-    state.active = Math.max(0, state.active - 1);
     const next = state.queue.shift();
     if (next) {
+      // Slot transfer: the slot stays "active" but the owner changes from
+      // the releaser to the waiter. We MUST NOT decrement active here —
+      // otherwise active < LIMIT briefly, and a fresh acquireSlot caller
+      // could fast-path past the semaphore (#C1 race).
       clearTimeout(next.timer);
       next.resolve();
+      return;
     }
-    if (state.active === 0 && state.queue.length === 0) {
+    state.active = Math.max(0, state.active - 1);
+    if (state.active === 0) {
       this.concurrency.delete(connId);
     }
   }

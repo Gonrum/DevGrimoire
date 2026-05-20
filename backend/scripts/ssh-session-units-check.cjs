@@ -619,6 +619,162 @@ function makeFakeSftp({
     for (let i = 0; i < 5; i += 1) svc['releaseSlot'](String(conn._id));
   });
 
+  // 13) Slot-Transfer: releaseSlot must hand off the slot to a waiter without
+  //     dropping active below LIMIT. Reproduces the #C1 race window — a buggy
+  //     implementation (state.active -= 1 + waiter.resolve + waiter += 1)
+  //     would let a third acquireSlot fast-path in between the -=1 and the
+  //     waiter resuming.
+  await check('releaseSlot() transfers slot to waiter without breaching LIMIT (no #C1 race)', async () => {
+    const conn = makeKeyConnection({ knownHostFingerprint: FAKE_FINGERPRINT });
+    const sshService = makeSshServiceStub({ connection: conn });
+    const secrets = makeSecretsServiceStub();
+    const audit = makeAuditModelStub();
+    const factory = makeClientFactory();
+    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const connId = String(conn._id);
+
+    // 1) Fill all 5 slots.
+    for (let i = 0; i < 5; i += 1) await svc['acquireSlot'](connId);
+    let state = svc['concurrency'].get(connId);
+    assert.equal(state.active, 5, 'after 5 acquires active must be 5');
+    assert.equal(state.queue.length, 0);
+
+    // 2) Two more acquires → both queued.
+    let sixthResolved = false;
+    let seventhResolved = false;
+    const sixth = svc['acquireSlot'](connId).then(() => { sixthResolved = true; });
+    const seventh = svc['acquireSlot'](connId).then(() => { seventhResolved = true; });
+
+    await new Promise((r) => setImmediate(r));
+    state = svc['concurrency'].get(connId);
+    assert.equal(state.active, 5, 'active stays 5 while waiters queue');
+    assert.equal(state.queue.length, 2, '6th and 7th are queued');
+    assert.equal(sixthResolved, false);
+    assert.equal(seventhResolved, false);
+
+    // 3) releaseSlot once — slot transfers to the 6th waiter. Active MUST
+    //    stay at 5 (not drop to 4, not grow to 6). The 7th stays queued.
+    svc['releaseSlot'](connId);
+
+    // CRITICAL: check active SYNCHRONOUSLY after releaseSlot returns,
+    // BEFORE any microtasks/setImmediates run. A #C1-buggy releaseSlot
+    // would have already done `state.active -= 1` here (active=4), and
+    // the waiter's `state.active += 1` is queued as a microtask that
+    // hasn't run yet. The slot-transfer fix keeps active at 5 across
+    // this synchronous moment.
+    state = svc['concurrency'].get(connId);
+    assert.equal(
+      state.active,
+      5,
+      '#C1 race: releaseSlot must NOT drop active below LIMIT mid-handoff (slot-transfer pattern required)',
+    );
+
+    // 4) The same micro-window is when a brand-new acquireSlot could
+    //    race in via the fast-path. Try it NOW — before awaiting the
+    //    6th. With the bug it would resolve synchronously (active was 4,
+    //    bumps to 5, returns). With the fix it queues (active is 5).
+    let eighthResolved = false;
+    const eighth = svc['acquireSlot'](connId).then(() => { eighthResolved = true; });
+    // After this synchronous call: the bug version would have queued the
+    // microtask for the 8th to resolve already (it'd be on the microtask
+    // queue ahead of the 6th's waiter resume). One microtask flush is
+    // enough for either bug or fix to express its outcome.
+    await new Promise((r) => setImmediate(r));
+
+    await sixth;
+    state = svc['concurrency'].get(connId);
+    assert.equal(state.active, 5, 'after transfer + queued 8th, active is still 5');
+    assert.equal(sixthResolved, true);
+    assert.equal(seventhResolved, false, '7th still queued (not its turn)');
+    assert.equal(eighthResolved, false, '8th must be queued, not fast-pathed (#C1 race)');
+    assert.equal(state.queue.length, 2, '7th + 8th both queued');
+
+    // 5) Drain — release four to free the four remaining slot-holders,
+    //    then release once more to clear the 7th waiter, etc. We need 7
+    //    total releases (1 already done + 6 more for the 6th-now-active +
+    //    4 originals + 2 still-queued waiters).
+    // Currently: active=5 (5 slot owners including the 6th), queue=[7th, 8th]
+    // Release the 6th → 7th picks up the slot (transfer), active=5, queue=[8th]
+    svc['releaseSlot'](connId);
+    await seventh;
+    assert.equal(seventhResolved, true);
+    state = svc['concurrency'].get(connId);
+    assert.equal(state.active, 5);
+    assert.equal(state.queue.length, 1);
+
+    // Release the 7th → 8th picks up the slot.
+    svc['releaseSlot'](connId);
+    await eighth;
+    assert.equal(eighthResolved, true);
+    state = svc['concurrency'].get(connId);
+    assert.equal(state.active, 5);
+    assert.equal(state.queue.length, 0);
+
+    // Final drain — 5 releases bring active back to 0 and remove the state.
+    for (let i = 0; i < 5; i += 1) svc['releaseSlot'](connId);
+    assert.equal(svc['concurrency'].get(connId), undefined, 'state cleaned up at active=0');
+  });
+
+  // 14) Upload size guard: spec §6.4 caps single upload calls at 10 MB.
+  await check('sftpUpload() throws upload_too_large when content exceeds 10 MB', async () => {
+    const conn = makeKeyConnection({ knownHostFingerprint: FAKE_FINGERPRINT });
+    const sshService = makeSshServiceStub({ connection: conn });
+    const secrets = makeSecretsServiceStub();
+    const audit = makeAuditModelStub();
+    const sftp = makeFakeSftp({ writeBehaviour: {} });
+    const factory = makeClientFactory({ sftp });
+    const svc = new SshSessionService(sshService, secrets, audit, factory);
+
+    const userId = new Types.ObjectId().toString();
+    const big = Buffer.alloc(11 * 1024 * 1024); // 11 MB > 10 MB cap
+    await assert.rejects(
+      () => svc.sftpUpload(String(conn._id), '/srv/big.bin', big, { userId }),
+      /upload_too_large: \d+ > \d+/,
+    );
+
+    // Slot must be released even on the early-throw path so subsequent
+    // ops aren't permanently blocked by the saturated semaphore.
+    const state = svc['concurrency'].get(String(conn._id));
+    // After the throw, state may be cleaned up (active=0, no waiters) or
+    // simply have active=0; either way the next acquireSlot must take
+    // the fast path immediately.
+    if (state) assert.equal(state.active, 0, 'slot released after upload_too_large');
+
+    // Smoke-check: a fresh acquire works without queueing.
+    await svc['acquireSlot'](String(conn._id));
+    const afterAcquire = svc['concurrency'].get(String(conn._id));
+    assert.equal(afterAcquire.active, 1);
+    svc['releaseSlot'](String(conn._id));
+
+    // No audit row for the rejected upload — we never reached the audit
+    // write site (intentional: guard fires before findById/audit).
+    assert.equal(audit._writes.length, 0);
+  });
+
+  // 15) Upload at exactly the cap is still accepted (boundary test).
+  await check('sftpUpload() accepts content at exactly 10 MB (cap inclusive)', async () => {
+    const conn = makeKeyConnection({ knownHostFingerprint: FAKE_FINGERPRINT });
+    const sshService = makeSshServiceStub({ connection: conn });
+    const secrets = makeSecretsServiceStub();
+    const audit = makeAuditModelStub();
+    const writeBehaviour = {};
+    const sftp = makeFakeSftp({ writeBehaviour });
+    const factory = makeClientFactory({ sftp });
+    const svc = new SshSessionService(sshService, secrets, audit, factory);
+
+    const userId = new Types.ObjectId().toString();
+    const exact = Buffer.alloc(10 * 1024 * 1024); // 10 MB, == cap
+    const out = await svc.sftpUpload(
+      String(conn._id),
+      '/srv/exact.bin',
+      exact,
+      { userId },
+    );
+    assert.equal(out.bytesWritten, 10 * 1024 * 1024);
+    assert.equal(audit._writes.length, 1);
+    assert.equal(audit._writes[0].action, 'upload');
+  });
+
   // ------------------------------------------------------------------
   // Summary
   // ------------------------------------------------------------------
