@@ -5278,9 +5278,18 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           // bytes — but the SAFE upper bound on the post-decode buffer is
           // `content.length` itself, so any string longer than the hard cap
           // can be rejected up-front without spending RAM on the decode.
+          //
+          // For base64 we use a tighter cap (HARD_MAX * 4/3 + padding slack):
+          // anything above that string length can only ever decode to >
+          // HARD_MAX bytes, so we reject before paying for ~30 MB of decode
+          // RAM. Post-decode check below stays as second line of defense.
           const HARD_MAX = 10 * 1024 * 1024;
-          if (content.length > HARD_MAX && encoding === 'utf-8') {
+          const BASE64_PRE_MAX = Math.ceil((HARD_MAX * 4) / 3) + 4;
+          if (encoding === 'utf-8' && content.length > HARD_MAX) {
             throw new Error(`upload_too_large: utf-8 content length ${content.length} exceeds ${HARD_MAX} bytes`);
+          }
+          if (encoding === 'base64' && content.length > BASE64_PRE_MAX) {
+            throw new Error(`upload_too_large: base64 input length ${content.length} would decode beyond ${HARD_MAX} bytes`);
           }
           const buf = encoding === 'base64'
             ? Buffer.from(content, 'base64')

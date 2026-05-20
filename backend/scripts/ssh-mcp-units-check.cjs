@@ -566,6 +566,44 @@ process.env.MCP_STDIO_USER_ID = TEST_USER_ID;
     assert.equal(session.calls.upload.length, 0);
   });
 
+  await check('ssh_upload rejects oversized base64 BEFORE decoding (RAM guard)', async () => {
+    const projectId = new Types.ObjectId();
+    const conn = makeConn({ projectId, knownHostFingerprint: 'aa' });
+    const ssh = makeSshServiceStub({ connections: [conn] });
+    const session = makeSshSessionServiceStub();
+    const server = makeFakeServer();
+    mcpTools.registerMcpTools(server, buildServices({ sshService: ssh, sshSessionService: session }));
+    // BASE64_PRE_MAX = ceil(10MB * 4/3) + 4 ≈ 13_981_018. Use a string well
+    // above that — about 14 MB — to ensure pre-decode rejection. Decoding
+    // this would yield ~10.5 MB which is over HARD_MAX but the point is the
+    // pre-decode cap must fire first.
+    const overcap = 'A'.repeat(14 * 1024 * 1024);
+    // Spy on Buffer.from to assert the base64 decode path is NOT taken.
+    const realBufferFrom = Buffer.from;
+    let base64DecodeCalled = false;
+    Buffer.from = function patched(...args) {
+      if (args.length >= 2 && args[1] === 'base64') {
+        base64DecodeCalled = true;
+      }
+      return realBufferFrom.apply(Buffer, args);
+    };
+    try {
+      const res = unwrap(await server.invoke('ssh_upload', {
+        connectionId: conn._id.toString(),
+        remotePath: '/tmp/huge.bin',
+        content: overcap,
+        encoding: 'base64',
+      }));
+      assert.ok(res.error, 'expected error');
+      assert.match(res.error, /upload_too_large/);
+      assert.match(res.error, /would decode beyond/);
+      assert.equal(base64DecodeCalled, false, 'base64 decode must NOT run before pre-decode cap');
+      assert.equal(session.calls.upload.length, 0);
+    } finally {
+      Buffer.from = realBufferFrom;
+    }
+  });
+
   // -------------------------------------------------------------------------
   // ssh_download
   // -------------------------------------------------------------------------
