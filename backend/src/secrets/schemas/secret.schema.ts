@@ -25,6 +25,12 @@ export class Secret {
 
   @Prop({ type: String, default: 'variable' })
   type: string;
+
+  // Marker for cascade-delete from SshConnection. When set, the secret is
+  // deleted together with its owning SshConnection. Secrets the user picked
+  // explicitly via "Pick-Existing" leave this unset and stay independent.
+  @Prop({ type: Types.ObjectId, ref: 'SshConnection' })
+  ownedBySshConnectionId?: Types.ObjectId;
 }
 
 export const SecretSchema = SchemaFactory.createForClass(Secret);
