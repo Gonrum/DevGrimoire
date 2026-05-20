@@ -97,7 +97,7 @@ export class CommitsController {
   @HttpCode(200)
   async validateToken(@Body() dto: ValidateTokenDto) {
     const config = {
-      provider: dto.provider as 'github' | 'gitlab',
+      provider: dto.provider as 'github' | 'gitlab' | 'gitea',
       label: '',
       baseUrl: dto.baseUrl || '',
       owner: dto.owner || '',
@@ -105,6 +105,7 @@ export class CommitsController {
       gitlabProjectId: dto.gitlabProjectId || '',
       defaultBranch: 'main',
       syncEnabled: true,
+      allowPrivateHost: dto.allowPrivateHost ?? false,
     };
     const valid = await this.commitsService.validateRepoToken(config, dto.token);
     return { valid };

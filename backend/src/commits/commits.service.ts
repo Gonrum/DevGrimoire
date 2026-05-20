@@ -3,9 +3,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
 import { Commit, CommitDocument } from './schemas/commit.schema';
-import { GitHubProviderService } from './providers/github-provider.service';
-import { GitLabProviderService } from './providers/gitlab-provider.service';
 import { GitProviderInterface } from './providers/git-provider.interface';
+import { GitProviderRegistry } from './providers/git-provider.registry';
 import { GitRepository } from './schemas/git-repository.schema';
 import { SecretsService } from '../secrets/secrets.service';
 import { ProjectsService } from '../projects/projects.service';
@@ -19,22 +18,10 @@ export class CommitsService {
   constructor(
     @InjectModel(Commit.name) private commitModel: Model<CommitDocument>,
     private eventEmitter: EventEmitter2,
-    private githubProvider: GitHubProviderService,
-    private gitlabProvider: GitLabProviderService,
+    private registry: GitProviderRegistry,
     private secretsService: SecretsService,
     private projectsService: ProjectsService,
   ) {}
-
-  private getProvider(provider: string): GitProviderInterface {
-    switch (provider) {
-      case 'github':
-        return this.githubProvider;
-      case 'gitlab':
-        return this.gitlabProvider;
-      default:
-        throw new BadRequestException(`Unknown provider: ${provider}`);
-    }
-  }
 
   private async getToken(tokenSecretId: string): Promise<string> {
     const secret = await this.secretsService.findById(tokenSecretId);
@@ -56,7 +43,7 @@ export class CommitsService {
     }
 
     const token = await this.getToken(repoConfig.tokenSecretId);
-    const provider = this.getProvider(repoConfig.provider);
+    const provider = this.registry.get(repoConfig.provider);
 
     // `lastSyncAt` is only trustworthy AFTER we've actually fetched a commit
     // (== `lastSyncSha` is set). Otherwise an initial mis-sync (wrong branch,
@@ -275,7 +262,7 @@ export class CommitsService {
   }
 
   async validateRepoToken(config: GitRepository, token: string): Promise<boolean> {
-    const provider = this.getProvider(config.provider);
+    const provider = this.registry.get(config.provider);
     return provider.validateToken(config, token);
   }
 
@@ -294,7 +281,7 @@ export class CommitsService {
     }
 
     const token = await this.getToken(repoConfig.tokenSecretId);
-    const provider = this.getProvider(repoConfig.provider);
+    const provider = this.registry.get(repoConfig.provider);
     return provider.fetchBranches(repoConfig, token);
   }
 }

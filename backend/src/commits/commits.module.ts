@@ -5,6 +5,8 @@ import { CommitsService } from './commits.service';
 import { CommitsController } from './commits.controller';
 import { GitHubProviderService } from './providers/github-provider.service';
 import { GitLabProviderService } from './providers/gitlab-provider.service';
+import { GiteaProviderService } from './providers/gitea-provider.service';
+import { GitProviderRegistry } from './providers/git-provider.registry';
 import { CommitsScheduler } from './commits.scheduler';
 import { SecretsModule } from '../secrets/secrets.module';
 
@@ -14,7 +16,14 @@ import { SecretsModule } from '../secrets/secrets.module';
     SecretsModule,
   ],
   controllers: [CommitsController],
-  providers: [CommitsService, GitHubProviderService, GitLabProviderService, CommitsScheduler],
-  exports: [CommitsService],
+  providers: [
+    CommitsService,
+    CommitsScheduler,
+    GitHubProviderService,
+    GitLabProviderService,
+    GiteaProviderService,
+    GitProviderRegistry,
+  ],
+  exports: [CommitsService, GitProviderRegistry],
 })
 export class CommitsModule {}
