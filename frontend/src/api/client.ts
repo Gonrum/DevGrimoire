@@ -777,6 +777,14 @@ export interface SshConnectionListItem {
   lastConnectedAt?: string;
   lastConnectError?: SshLastConnectError;
   notifyOnAuthFailure: boolean;
+  /**
+   * Set when this row was surfaced into a project-scoped listing because
+   * its owning customer is linked to that project (T-386). Project tabs
+   * use this marker to hide edit/delete affordances — the connection is
+   * managed at the customer's "Server" tab. Customer-scoped lists never
+   * set this field.
+   */
+  inheritedFromCustomerId?: string;
 }
 
 /** Shape returned by `toDetail` — list-shape + secret refs + accepted fingerprint. */

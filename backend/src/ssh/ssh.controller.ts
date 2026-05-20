@@ -27,6 +27,7 @@ import { AcceptFingerprintDto } from './dto/accept-fingerprint.dto';
 import { AuditQueryDto } from './dto/audit-query.dto';
 import { ListSshConnectionsDto } from './dto/list-ssh-connections.dto';
 import { SshConnectionDocument } from './schemas/ssh-connection.schema';
+import { SshConnectionWithInheritance } from './ssh.service';
 
 interface AuthRequest {
   user?: { userId?: string };
@@ -215,6 +216,13 @@ export class SshController {
   // ---------------------------------------------------------------------------
 
   private toListItem(doc: SshConnectionDocument): Record<string, unknown> {
+    // Project-scoped lists may carry an inherited-from-customer marker
+    // (T-386). The field is synthetic — stamped by SshService.findByProjectId
+    // for connections that belong to a customer linked to the queried
+    // project. Frontend uses it to hide edit/delete affordances on the
+    // inherited cards.
+    const inheritedFromCustomerId = (doc as SshConnectionWithInheritance)
+      .inheritedFromCustomerId;
     return {
       id: (doc._id as Types.ObjectId).toString(),
       label: doc.label,
@@ -230,6 +238,7 @@ export class SshController {
       lastConnectedAt: doc.lastConnectedAt,
       lastConnectError: doc.lastConnectError,
       notifyOnAuthFailure: doc.notifyOnAuthFailure,
+      ...(inheritedFromCustomerId ? { inheritedFromCustomerId } : {}),
     };
   }
 

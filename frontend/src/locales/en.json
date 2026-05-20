@@ -1965,7 +1965,11 @@
       "connectBlockedFingerprint": "Run Test and accept the fingerprint first.",
       "test": "Test",
       "audit": "Audit log",
-      "empty": "No SSH access yet — add your first server."
+      "empty": "No SSH access yet — add your first server.",
+      "ownConnections": "Own servers",
+      "inheritedConnections": "Inherited from customer",
+      "inheritedBadge": "inherited",
+      "inheritedHint": "Managed at the customer — edit there."
     },
     "audit": {
       "title": "Audit log for {{label}}",

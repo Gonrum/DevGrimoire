@@ -6,6 +6,10 @@ import {
 } from './schemas/ssh-connection.schema';
 import { SshAudit, SshAuditSchema } from './schemas/ssh-audit.schema';
 import { Secret, SecretSchema } from '../secrets/schemas/secret.schema';
+import {
+  CustomerProjectLink,
+  CustomerProjectLinkSchema,
+} from '../customers/schemas/customer-project-link.schema';
 import { SshService } from './ssh.service';
 import { SshTestService } from './ssh-test.service';
 import { SshSessionService } from './ssh-session.service';
@@ -22,6 +26,12 @@ import { NotificationsModule } from '../notifications/notifications.module';
       // `ownedBySshConnectionId` marker directly (cascade-delete pivot).
       // The owning module remains SecretsModule, which sets up indexes etc.
       { name: Secret.name, schema: SecretSchema },
+      // CustomerProjectLink is read-only here — SshService.findByProjectId
+      // joins through it to expose customer-scoped connections in linked
+      // projects as inherited (T-386). The schema is owned by
+      // CustomersModule; this registration is purely about wiring up
+      // `getModelToken` in this module's injector.
+      { name: CustomerProjectLink.name, schema: CustomerProjectLinkSchema },
     ]),
     SecretsModule,
     // Auth-failure push (T-385 §6.6) routes through NotificationsService.

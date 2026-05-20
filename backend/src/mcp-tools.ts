@@ -66,6 +66,7 @@ import { MonitoringService } from './monitoring/monitoring.service';
 import { SshService } from './ssh/ssh.service';
 import { SshSessionService } from './ssh/ssh-session.service';
 import { SshConnectionDocument } from './ssh/schemas/ssh-connection.schema';
+import type { SshConnectionWithInheritance } from './ssh/ssh.service';
 import { SshAuditDocument } from './ssh/schemas/ssh-audit.schema';
 
 const RAG_BACKEND_URL = process.env.RAG_BACKEND_URL || 'http://localhost:3200';
@@ -303,6 +304,13 @@ export function deriveSshStatus(
 function serializeSshConnectionForMcp(
   doc: SshConnectionDocument,
 ): Record<string, unknown> {
+  // `inheritedFromCustomerId` is a synthetic marker stamped by
+  // SshService.findByProjectId when a queried project is linked to a
+  // customer that owns this connection (T-386). It's only present on
+  // documents returned from the project-scoped list path; customer-scoped
+  // queries never set it.
+  const inheritedFromCustomerId = (doc as SshConnectionWithInheritance)
+    .inheritedFromCustomerId;
   return {
     id: idToString(doc._id),
     slug: doc.slug,
@@ -319,6 +327,7 @@ function serializeSshConnectionForMcp(
     description: doc.description,
     status: deriveSshStatus(doc),
     lastConnectedAt: doc.lastConnectedAt,
+    ...(inheritedFromCustomerId ? { inheritedFromCustomerId } : {}),
   };
 }
 
@@ -2357,7 +2366,7 @@ const tools = [
   },
   {
     name: 'ssh_connection_list',
-    description: 'List SSH connections that have been configured in DevGrimoire for a customer or project. Scope is required (either projectId or customerId — no global discovery). Output contains host, port, username, authMethod, tags, status, lastConnectedAt — never credentials or host-key fingerprints. status: "ok" (lastConnectedAt set, no error), "error" (last connect failed), "fingerprint_pending" (TOFU not yet accepted in the UI), "never_tested" (fresh). Use this before ssh_exec/ssh_upload/ssh_download/ssh_list_files to discover available connections.',
+    description: 'List SSH connections that have been configured in DevGrimoire for a customer or project. Scope is required (either projectId or customerId — no global discovery). Output contains host, port, username, authMethod, tags, status, lastConnectedAt — never credentials or host-key fingerprints. status: "ok" (lastConnectedAt set, no error), "error" (last connect failed), "fingerprint_pending" (TOFU not yet accepted in the UI), "never_tested" (fresh). When listing by projectId, the response also includes connections inherited from customers that are linked to the project — those entries carry `inheritedFromCustomerId` set to the owning customer\'s id and must be edited at the customer scope (the project may still ssh_exec / ssh_upload / ssh_download / ssh_list_files against them). Use this before ssh_exec/ssh_upload/ssh_download/ssh_list_files to discover available connections.',
     inputSchema: {
       type: 'object' as const,
       properties: {

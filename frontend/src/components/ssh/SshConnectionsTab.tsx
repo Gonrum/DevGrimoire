@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getCurrentAccessToken, SshConnectionListItem } from '../../api/client';
 import Badge from '../ui/Badge';
@@ -108,6 +108,132 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
     await reload();
   };
 
+  // Split into "own" vs "inherited from linked customer" (T-386). Inherited
+  // entries are only ever populated when the tab is project-scoped — the
+  // backend never stamps inheritedFromCustomerId on customer-scope responses.
+  const { ownConnections, inheritedConnections } = useMemo(() => {
+    const own: SshConnectionListItem[] = [];
+    const inherited: SshConnectionListItem[] = [];
+    for (const conn of connections) {
+      if (conn.inheritedFromCustomerId) inherited.push(conn);
+      else own.push(conn);
+    }
+    return { ownConnections: own, inheritedConnections: inherited };
+  }, [connections]);
+
+  const isProjectScope = !!scope.projectId;
+
+  /**
+   * Render a single connection card. `inherited` controls which action
+   * affordances appear: inherited cards must NEVER show edit/delete because
+   * those would route through customer-scope endpoints the user already has
+   * access to from the customer tab — but exposing them here would confuse
+   * "ownership" boundaries.
+   */
+  const renderCard = (conn: SshConnectionListItem, inherited: boolean) => {
+    const status = deriveSshStatus(conn);
+    const visual = SSH_STATUS_VISUAL[status];
+    const lastError =
+      conn.lastConnectError &&
+      `${new Date(conn.lastConnectError.at).toLocaleString()}: ${conn.lastConnectError.message}`;
+    return (
+      <div
+        key={conn.id}
+        className="border border-gray-800 rounded bg-gray-900/50 p-3 flex flex-wrap items-start gap-3"
+      >
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <span className="font-medium text-gray-200">{conn.label}</span>
+            {inherited && (
+              <span title={t('ssh.tab.inheritedHint')}>
+                <Badge color="bg-sky-900/40 text-sky-300">
+                  🔗 {t('ssh.tab.inheritedBadge')}
+                </Badge>
+              </span>
+            )}
+            <Badge color={visual.badgeClass}>
+              {visual.emoji} {t(visual.i18nKey)}
+            </Badge>
+            <Badge color="bg-gray-800 text-gray-400">
+              {conn.authMethod === 'key' ? '🔑' : '🔒'}{' '}
+              {t(`ssh.authMethod.${conn.authMethod}`)}
+            </Badge>
+            {conn.tags.map((tag) => (
+              <Badge key={tag} color="bg-violet-900/40 text-violet-300">
+                {tag}
+              </Badge>
+            ))}
+          </div>
+          <div className="text-xs text-gray-500 truncate">
+            {conn.username}@{conn.host}:{conn.port}
+          </div>
+          <div className="text-xs text-gray-600 mt-1 flex flex-wrap gap-x-4 gap-y-1">
+            <span>slug: {conn.slug}</span>
+            {conn.lastConnectedAt && (
+              <span>
+                {t('ssh.field.lastConnectedAt')}:{' '}
+                {new Date(conn.lastConnectedAt).toLocaleString()}
+              </span>
+            )}
+          </div>
+          {inherited && (
+            <div className="text-xs text-sky-400/80 mt-1">{t('ssh.tab.inheritedHint')}</div>
+          )}
+          {lastError && (
+            <div className="text-xs text-red-400 mt-1 truncate" title={lastError}>
+              {lastError}
+            </div>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {(() => {
+            // Status-gating: fingerprint_pending blocks Connect because the
+            // backend would WS-close 4002 immediately. Render but disable
+            // with a tooltip — clearer than hiding the button. Inherited
+            // cards keep the same gating rules because the underlying
+            // connection's host-key state is shared with the customer tab.
+            const blocked = status === 'fingerprint_pending';
+            const tooltip = blocked
+              ? t('ssh.tab.connectBlockedFingerprint')
+              : undefined;
+            return (
+              <Button
+                size="xs"
+                variant="success"
+                disabled={blocked}
+                title={tooltip}
+                onClick={() => setOpenTerminalConn(conn)}
+              >
+                ⚡ {t('ssh.tab.connect')}
+              </Button>
+            );
+          })()}
+          <Button
+            size="xs"
+            variant="secondary"
+            disabled={testingId === conn.id}
+            onClick={() => handleQuickTest(conn)}
+          >
+            {testingId === conn.id ? '…' : t('ssh.tab.test')}
+          </Button>
+          {!inherited && (
+            <Button size="xs" variant="edit" onClick={() => openEdit(conn)}>
+              {t('common.edit')}
+            </Button>
+          )}
+          <Button
+            size="xs"
+            variant="secondary"
+            onClick={() => setOpenAuditConn(conn)}
+            title={t('ssh.tab.audit')}
+          >
+            📜 {t('ssh.tab.audit')}
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -130,101 +256,44 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
       )}
 
       {!loading && connections.length > 0 && (
-        <div className="space-y-2">
-          {connections.map((conn) => {
-            const status = deriveSshStatus(conn);
-            const visual = SSH_STATUS_VISUAL[status];
-            const lastError =
-              conn.lastConnectError &&
-              `${new Date(conn.lastConnectError.at).toLocaleString()}: ${conn.lastConnectError.message}`;
-            return (
-              <div
-                key={conn.id}
-                className="border border-gray-800 rounded bg-gray-900/50 p-3 flex flex-wrap items-start gap-3"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <span className="font-medium text-gray-200">{conn.label}</span>
-                    <Badge color={visual.badgeClass}>
-                      {visual.emoji} {t(visual.i18nKey)}
-                    </Badge>
-                    <Badge color="bg-gray-800 text-gray-400">
-                      {conn.authMethod === 'key' ? '🔑' : '🔒'}{' '}
-                      {t(`ssh.authMethod.${conn.authMethod}`)}
-                    </Badge>
-                    {conn.tags.map((tag) => (
-                      <Badge key={tag} color="bg-violet-900/40 text-violet-300">
-                        {tag}
-                      </Badge>
-                    ))}
+        <div className="space-y-4">
+          {/*
+            Project tab: render "Own" + "Inherited" as two distinct sections
+            with headings, so the user has a clear visual boundary between
+            connections they can edit here vs. ones managed at the customer
+            scope. Customer tab: no inherited entries possible — just a flat
+            list without a section heading, matching the pre-T-386 layout.
+          */}
+          {isProjectScope ? (
+            <>
+              <section className="space-y-2">
+                <h3 className="text-sm font-medium text-gray-300">
+                  {t('ssh.tab.ownConnections')}
+                </h3>
+                {ownConnections.length > 0 ? (
+                  <div className="space-y-2">
+                    {ownConnections.map((conn) => renderCard(conn, false))}
                   </div>
-                  <div className="text-xs text-gray-500 truncate">
-                    {conn.username}@{conn.host}:{conn.port}
+                ) : (
+                  <EmptyState message={t('ssh.tab.empty')} />
+                )}
+              </section>
+              {inheritedConnections.length > 0 && (
+                <section className="space-y-2">
+                  <h3 className="text-sm font-medium text-gray-300">
+                    {t('ssh.tab.inheritedConnections')}
+                  </h3>
+                  <div className="space-y-2">
+                    {inheritedConnections.map((conn) => renderCard(conn, true))}
                   </div>
-                  <div className="text-xs text-gray-600 mt-1 flex flex-wrap gap-x-4 gap-y-1">
-                    <span>slug: {conn.slug}</span>
-                    {conn.lastConnectedAt && (
-                      <span>
-                        {t('ssh.field.lastConnectedAt')}:{' '}
-                        {new Date(conn.lastConnectedAt).toLocaleString()}
-                      </span>
-                    )}
-                  </div>
-                  {lastError && (
-                    <div className="text-xs text-red-400 mt-1 truncate" title={lastError}>
-                      {lastError}
-                    </div>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {(() => {
-                    // Status-gating: fingerprint_pending blocks Connect because
-                    // the backend would WS-close 4002 immediately. Render but
-                    // disable with a tooltip — clearer than hiding the button.
-                    // `never_tested` is allowed; first Connect populates the
-                    // fingerprint via TOFU on the test flow, but if a user
-                    // hasn't pressed Test we let the backend speak (it may
-                    // also reject) and surface the WS close-code in the
-                    // terminal.
-                    const blocked = status === 'fingerprint_pending';
-                    const tooltip = blocked
-                      ? t('ssh.tab.connectBlockedFingerprint')
-                      : undefined;
-                    return (
-                      <Button
-                        size="xs"
-                        variant="success"
-                        disabled={blocked}
-                        title={tooltip}
-                        onClick={() => setOpenTerminalConn(conn)}
-                      >
-                        ⚡ {t('ssh.tab.connect')}
-                      </Button>
-                    );
-                  })()}
-                  <Button
-                    size="xs"
-                    variant="secondary"
-                    disabled={testingId === conn.id}
-                    onClick={() => handleQuickTest(conn)}
-                  >
-                    {testingId === conn.id ? '…' : t('ssh.tab.test')}
-                  </Button>
-                  <Button size="xs" variant="edit" onClick={() => openEdit(conn)}>
-                    {t('common.edit')}
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="secondary"
-                    onClick={() => setOpenAuditConn(conn)}
-                    title={t('ssh.tab.audit')}
-                  >
-                    📜 {t('ssh.tab.audit')}
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
+                </section>
+              )}
+            </>
+          ) : (
+            <div className="space-y-2">
+              {ownConnections.map((conn) => renderCard(conn, false))}
+            </div>
+          )}
         </div>
       )}
 

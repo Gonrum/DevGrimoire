@@ -78,19 +78,19 @@ export function useSshConnections(scope: UseSshConnectionsScope): UseSshConnecti
     const unsub = wsEventBus.subscribe(scopeArg, (event) => {
       if (!isProjectChangeEvent(event)) return;
       if (event.entity !== 'ssh-connection') return;
-      // Scope match: customer-scope events broadcast with projectId=null,
-      // so we filter by customerId here; project-scope events broadcast with
-      // customerId=null and a real projectId, which we match strictly so a
-      // project-tab doesn't reload when a foreign customer's ssh-connection
-      // mutates (both arrive on the bus because the projectId=null broadcast
-      // rule is intentionally generous for notifications).
+      // Scope match. Customer-scope tabs stay strict (filter on customerId).
+      // Project-scope tabs are pragmatically lenient (T-386): any
+      // ssh-connection event triggers reload. Reason: the project may
+      // inherit connections from linked customers, and a fine-grained
+      // membership check would require pulling the customer-project-link
+      // table into the browser. A single extra debounced fetch is cheaper.
       if (customerId) {
         if (event.customerId && event.customerId !== customerId) return;
         if (!event.customerId) return; // foreign project event
-      } else if (projectId) {
-        if (event.projectId && event.projectId !== projectId) return;
-        if (!event.projectId) return; // foreign customer event
       }
+      // For projectId scope: no client-side filter — debounced reload
+      // covers both own-project events and customer-side mutations that
+      // would change what the project sees as "inherited".
       debouncedReload();
     });
     return () => {

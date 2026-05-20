@@ -1964,7 +1964,11 @@
       "connectBlockedFingerprint": "Bitte erst testen + Fingerprint akzeptieren.",
       "test": "Test",
       "audit": "Audit-Log",
-      "empty": "Noch keine SSH-Zugänge — leg den ersten Server an."
+      "empty": "Noch keine SSH-Zugänge — leg den ersten Server an.",
+      "ownConnections": "Eigene Server",
+      "inheritedConnections": "Vom Kunden geerbt",
+      "inheritedBadge": "geerbt",
+      "inheritedHint": "Verwaltet beim Kunden — dort bearbeiten."
     },
     "audit": {
       "title": "Audit-Log für {{label}}",

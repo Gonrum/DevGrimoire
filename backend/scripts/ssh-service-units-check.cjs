@@ -304,6 +304,10 @@ function newWorld() {
   // by SshService.findLatestAudit; these tests don't go near it, but we
   // still need a non-undefined object so constructor wiring is valid).
   const auditModel = makeModel('SshAudit');
+  // CustomerProjectLink model — added in T-386 so findByProjectId can join
+  // through linked customers. The fake supports `.select('customerId')` and
+  // `.lean()` chains because the production query uses them.
+  const customerProjectLinkModel = makeLinkModel();
   const secretsService = makeSecretsServiceWith(secretModel);
   // Fake EventEmitter2 — captures emits without firing handlers so unit
   // tests can assert (or just ignore) the new ssh-connection change events.
@@ -312,8 +316,46 @@ function newWorld() {
     emit(name, payload) { events.push({ name, payload }); return true; },
     events,
   };
-  const svc = new SshService(sshModel, secretModel, auditModel, secretsService, eventEmitter);
-  return { svc, sshModel, secretModel, auditModel, secretsService, eventEmitter };
+  const svc = new SshService(
+    sshModel,
+    secretModel,
+    auditModel,
+    secretsService,
+    eventEmitter,
+    customerProjectLinkModel,
+  );
+  return {
+    svc,
+    sshModel,
+    secretModel,
+    auditModel,
+    secretsService,
+    eventEmitter,
+    customerProjectLinkModel,
+  };
+}
+
+// CustomerProjectLink fake — only `find().select().lean().exec()` is used.
+// We expose a `.records` array so tests can push link rows directly.
+function makeLinkModel() {
+  const records = [];
+  return {
+    records,
+    find(filter) {
+      const matches = records.filter((r) => {
+        if (filter && filter.projectId) {
+          return String(r.projectId) === String(filter.projectId);
+        }
+        return true;
+      });
+      const q = {
+        select() { return q; },
+        lean() { return q; },
+        async exec() { return matches; },
+      };
+      return q;
+    },
+  };
 }
 
 const customerId = new Types.ObjectId().toString();
@@ -699,6 +741,162 @@ const userId = new Types.ObjectId().toString();
     assert.equal(forCustomer[0].label, 'a');
     assert.equal(forProject.length, 1);
     assert.equal(forProject[0].label, 'b');
+    // No inheritance link in this world → no inheritedFromCustomerId stamp.
+    assert.equal(forProject[0].inheritedFromCustomerId, undefined);
+  });
+
+  // ----------------------------------------------------------------
+  // T-386: findByProjectId returns own + inherited (linked customer)
+  // connections; inherited ones carry inheritedFromCustomerId.
+  // ----------------------------------------------------------------
+  await check('findByProjectId returns own connections without inheritedFromCustomerId', async () => {
+    const { svc, customerProjectLinkModel } = newWorld();
+    await svc.create(
+      {
+        label: 'project-server',
+        slug: 'project-server',
+        projectId,
+        host: 'h',
+        username: 'u',
+        authMethod: 'password',
+        inlineSecrets: { password: { password: 'pw' } },
+      },
+      userId,
+    );
+    // No link rows — project is standalone.
+    assert.equal(customerProjectLinkModel.records.length, 0);
+
+    const list = await svc.findByProjectId(projectId);
+    assert.equal(list.length, 1);
+    assert.equal(list[0].label, 'project-server');
+    assert.equal(list[0].inheritedFromCustomerId, undefined);
+  });
+
+  await check('findByProjectId returns inherited customer connections with inheritedFromCustomerId stamp', async () => {
+    const { svc, customerProjectLinkModel } = newWorld();
+    // Project-own connection.
+    await svc.create(
+      {
+        label: 'own-srv',
+        slug: 'own-srv',
+        projectId,
+        host: 'h',
+        username: 'u',
+        authMethod: 'password',
+        inlineSecrets: { password: { password: 'pw' } },
+      },
+      userId,
+    );
+    // Customer connection — should be inherited because we link below.
+    const customerConn = await svc.create(
+      {
+        label: 'cust-srv',
+        slug: 'cust-srv',
+        customerId,
+        host: 'h',
+        username: 'u',
+        authMethod: 'password',
+        inlineSecrets: { password: { password: 'pw' } },
+      },
+      userId,
+    );
+    // Foreign customer connection — must NOT show up (no link to project).
+    const otherCustomerId = new Types.ObjectId().toString();
+    await svc.create(
+      {
+        label: 'foreign-srv',
+        slug: 'foreign-srv',
+        customerId: otherCustomerId,
+        host: 'h',
+        username: 'u',
+        authMethod: 'password',
+        inlineSecrets: { password: { password: 'pw' } },
+      },
+      userId,
+    );
+    // Establish the link.
+    customerProjectLinkModel.records.push({
+      projectId: new Types.ObjectId(projectId),
+      customerId: new Types.ObjectId(customerId),
+    });
+
+    const list = await svc.findByProjectId(projectId);
+    const byLabel = new Map(list.map((c) => [c.label, c]));
+    assert.equal(list.length, 2, 'expect own + 1 inherited (foreign customer excluded)');
+    assert.ok(byLabel.has('own-srv'), 'own connection present');
+    assert.ok(byLabel.has('cust-srv'), 'inherited customer connection present');
+    assert.equal(byLabel.has('foreign-srv'), false, 'unlinked customer connection excluded');
+    // Stamps.
+    assert.equal(byLabel.get('own-srv').inheritedFromCustomerId, undefined);
+    assert.equal(
+      byLabel.get('cust-srv').inheritedFromCustomerId,
+      String(customerConn.customerId),
+    );
+  });
+
+  await check('findByScopeAndTags with projectId applies tag filter across own + inherited', async () => {
+    const { svc, customerProjectLinkModel } = newWorld();
+    await svc.create(
+      {
+        label: 'own-tagged',
+        slug: 'own-tagged',
+        projectId,
+        host: 'h',
+        username: 'u',
+        authMethod: 'password',
+        tags: ['prod'],
+        inlineSecrets: { password: { password: 'pw' } },
+      },
+      userId,
+    );
+    await svc.create(
+      {
+        label: 'own-untagged',
+        slug: 'own-untagged',
+        projectId,
+        host: 'h',
+        username: 'u',
+        authMethod: 'password',
+        inlineSecrets: { password: { password: 'pw' } },
+      },
+      userId,
+    );
+    await svc.create(
+      {
+        label: 'cust-tagged',
+        slug: 'cust-tagged',
+        customerId,
+        host: 'h',
+        username: 'u',
+        authMethod: 'password',
+        tags: ['prod'],
+        inlineSecrets: { password: { password: 'pw' } },
+      },
+      userId,
+    );
+    await svc.create(
+      {
+        label: 'cust-untagged',
+        slug: 'cust-untagged',
+        customerId,
+        host: 'h',
+        username: 'u',
+        authMethod: 'password',
+        inlineSecrets: { password: { password: 'pw' } },
+      },
+      userId,
+    );
+    customerProjectLinkModel.records.push({
+      projectId: new Types.ObjectId(projectId),
+      customerId: new Types.ObjectId(customerId),
+    });
+
+    const tagged = await svc.findByScopeAndTags({ projectId, tags: ['prod'] });
+    const labels = tagged.map((c) => c.label).sort();
+    assert.deepEqual(labels, ['cust-tagged', 'own-tagged']);
+    // Inheritance stamp survives the tag filter.
+    const cust = tagged.find((c) => c.label === 'cust-tagged');
+    assert.equal(cust.inheritedFromCustomerId, String(new Types.ObjectId(customerId)));
   });
 
   await check('findById throws NotFoundException for missing id', async () => {

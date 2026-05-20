@@ -20,6 +20,10 @@ import {
   Secret,
   SecretDocument,
 } from '../secrets/schemas/secret.schema';
+import {
+  CustomerProjectLink,
+  CustomerProjectLinkDocument,
+} from '../customers/schemas/customer-project-link.schema';
 import { SecretsService } from '../secrets/secrets.service';
 import { CreateSshConnectionDto } from './dto/create-ssh-connection.dto';
 import { UpdateSshConnectionDto } from './dto/update-ssh-connection.dto';
@@ -29,6 +33,17 @@ interface CreatedOwnedSecretRef {
   id: Types.ObjectId;
   field: 'privateKeySecretId' | 'passphraseSecretId' | 'passwordSecretId';
 }
+
+/**
+ * A connection document plus a synthetic `inheritedFromCustomerId` marker
+ * that's stamped at query time when the connection belongs to a customer
+ * linked to the queried project (T-386). The field is NEVER persisted —
+ * it's a computed projection added to the Mongoose document object so the
+ * controller / MCP layer can decide whether to render edit/delete affordances.
+ */
+export type SshConnectionWithInheritance = SshConnectionDocument & {
+  inheritedFromCustomerId?: string;
+};
 
 @Injectable()
 export class SshService {
@@ -43,6 +58,13 @@ export class SshService {
     private readonly auditModel: Model<SshAuditDocument>,
     private readonly secretsService: SecretsService,
     private readonly eventEmitter: EventEmitter2,
+    // CustomerProjectLink is read-only here — we only need it to discover
+    // which customers a queried project is linked to so we can surface their
+    // SSH connections as inherited (T-386). Injecting the model directly
+    // avoids pulling in CustomersService (and with it ProjectsService) which
+    // would create a circular module dependency through the customer module.
+    @InjectModel(CustomerProjectLink.name)
+    private readonly customerProjectLinkModel: Model<CustomerProjectLinkDocument>,
   ) {}
 
   /**
@@ -223,11 +245,55 @@ export class SshService {
       .exec();
   }
 
-  async findByProjectId(projectId: string): Promise<SshConnectionDocument[]> {
-    return this.sshModel
-      .find({ projectId: this.toObjectId(projectId, 'projectId') })
+  /**
+   * Return connections directly scoped to the project PLUS connections that
+   * belong to customers linked to this project (T-386). Inherited
+   * connections are tagged with `inheritedFromCustomerId` so the caller can
+   * gate destructive actions (edit/delete) — they remain editable only at
+   * the owning customer's "Server" tab.
+   *
+   * Project-own connections come first, then inherited ones; both sorted by
+   * label. The synthetic `inheritedFromCustomerId` field is stamped directly
+   * on the Mongoose document object — it is NOT part of the schema and will
+   * NOT be saved back to Mongo if a caller happens to `save()` the doc
+   * (callers shouldn't, but the marker is harmless if they do).
+   */
+  async findByProjectId(projectId: string): Promise<SshConnectionWithInheritance[]> {
+    const projectObjectId = this.toObjectId(projectId, 'projectId');
+
+    // Project-own connections — existing behaviour, kept first in the result.
+    const ownConnections = await this.sshModel
+      .find({ projectId: projectObjectId })
       .sort({ label: 1 })
       .exec();
+
+    // Linked-customer connections — read the link table, then fetch each
+    // customer's connections in a single $in query. Empty array short-circuits
+    // when nothing is linked, keeping the existing fast-path identical for
+    // standalone projects.
+    const links = await this.customerProjectLinkModel
+      .find({ projectId: projectObjectId })
+      .select('customerId')
+      .lean()
+      .exec();
+    if (links.length === 0) {
+      return ownConnections as SshConnectionWithInheritance[];
+    }
+
+    const linkedCustomerIds = links.map((l) => l.customerId);
+    const inheritedConnections = await this.sshModel
+      .find({ customerId: { $in: linkedCustomerIds } })
+      .sort({ label: 1 })
+      .exec();
+    for (const conn of inheritedConnections) {
+      (conn as SshConnectionWithInheritance).inheritedFromCustomerId =
+        conn.customerId?.toString();
+    }
+
+    return [
+      ...(ownConnections as SshConnectionWithInheritance[]),
+      ...(inheritedConnections as SshConnectionWithInheritance[]),
+    ];
   }
 
   /**
@@ -627,21 +693,35 @@ export class SshService {
     projectId?: string;
     customerId?: string;
     tags?: string[];
-  }): Promise<SshConnectionDocument[]> {
-    const filter: Record<string, unknown> = {};
+  }): Promise<SshConnectionWithInheritance[]> {
     if (args.projectId) {
       if (!Types.ObjectId.isValid(args.projectId)) return [];
-      filter.projectId = new Types.ObjectId(args.projectId);
-    } else if (args.customerId) {
+      // Route through findByProjectId so MCP callers see the same inherited
+      // connections the UI sees (T-386). We apply the tag filter ourselves
+      // because findByProjectId doesn't know about tags.
+      const combined = await this.findByProjectId(args.projectId);
+      if (args.tags && args.tags.length > 0) {
+        const required = args.tags;
+        return combined.filter((doc) =>
+          required.every((tag) => (doc.tags || []).includes(tag)),
+        );
+      }
+      return combined;
+    }
+    if (args.customerId) {
       if (!Types.ObjectId.isValid(args.customerId)) return [];
-      filter.customerId = new Types.ObjectId(args.customerId);
-    } else {
-      return [];
+      const filter: Record<string, unknown> = {
+        customerId: new Types.ObjectId(args.customerId),
+      };
+      if (args.tags && args.tags.length > 0) {
+        filter.tags = { $all: args.tags };
+      }
+      return this.sshModel
+        .find(filter)
+        .sort({ label: 1 })
+        .exec() as Promise<SshConnectionWithInheritance[]>;
     }
-    if (args.tags && args.tags.length > 0) {
-      filter.tags = { $all: args.tags };
-    }
-    return this.sshModel.find(filter).sort({ label: 1 }).exec();
+    return [];
   }
 
   // -------------------------------------------------------------------------
