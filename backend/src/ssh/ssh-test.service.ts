@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -46,6 +47,11 @@ const DEFAULT_FACTORY: SshClientFactory = {
 };
 
 const CONNECT_TIMEOUT_MS = 10_000;
+// ssh2's internal readyTimeout fires SLIGHTLY before our outer setTimeout
+// backstop so its own error event (with `code:'ETIMEDOUT'`/`ECONNREFUSED`)
+// has a chance to be classified as `host_unreachable` rather than the
+// generic outer-timeout `code:'timeout'` bucket.
+const SSH2_READY_TIMEOUT_MS = CONNECT_TIMEOUT_MS - 500;
 
 /**
  * SshTestService — REST `/test` probe.
@@ -138,9 +144,17 @@ export class SshTestService {
         if (settled) return;
         settled = true;
         clearTimeout(timeoutHandle);
+        // Defensive cleanup — end() is a no-op on never-opened sessions
+        // (error/timeout paths), so we ALSO call destroy() to make sure the
+        // underlying TCP socket gets released. Both throws are ignored:
+        // ssh2 may have already errored and torn itself down.
         try {
-          // ssh2 client may have already errored; destroy is safe-to-call.
           (client as Ssh2Client).end();
+        } catch {
+          /* ignore */
+        }
+        try {
+          (client as Ssh2Client).destroy();
         } catch {
           /* ignore */
         }
@@ -192,10 +206,12 @@ export class SshTestService {
       }, CONNECT_TIMEOUT_MS);
 
       client.on('ready', () => {
+        // Defense-in-depth: if a permissive ssh2 build ever emits `ready`
+        // after the hostVerifier rejected (which the spec says it should
+        // not — `error` is the real path, handled below), we still gate on
+        // explicit fingerprint accept via /accept-fingerprint instead of
+        // silently trusting the host.
         if (firstTimeFingerprint) {
-          // We saw a brand-new host key — return ok=false so the UI gates on
-          // explicit user confirmation via /accept-fingerprint. The
-          // fingerprint is delivered for that dialog.
           finalize({
             ok: false,
             fingerprint: observedFingerprint,
@@ -210,9 +226,18 @@ export class SshTestService {
       });
 
       client.on('error', (err: Error & { level?: string }) => {
-        // ssh2 emits 'error' for host-key rejection too. The hostVerifier
-        // callback already populated `fingerprintMismatch`, so we know which
-        // bucket we're in.
+        // ssh2 emits 'error' (NOT 'ready') whenever hostVerifier returned
+        // accept=false. We split the two cases the verifier set up:
+        //   1) First-time host (no stored fingerprint yet) — return the
+        //      observed fingerprint so the UI can show the accept dialog.
+        //   2) Stored fingerprint mismatch — return host_key_mismatch.
+        if (firstTimeFingerprint && observedFingerprint) {
+          finalize({
+            ok: false,
+            fingerprint: observedFingerprint,
+          });
+          return;
+        }
         if (fingerprintMismatch) {
           finalize({
             ok: false,
@@ -238,7 +263,7 @@ export class SshTestService {
           host: connection.host,
           port: connection.port,
           username: connection.username,
-          readyTimeout: CONNECT_TIMEOUT_MS,
+          readyTimeout: SSH2_READY_TIMEOUT_MS,
           // Reject all but our explicit list. ssh2 also exposes hostHash so we
           // can request a SHA-256 hash from the lib — we still compute our own
           // canonical hex form below to keep the stored value in our control.
@@ -348,9 +373,7 @@ export class SshTestService {
       bytes = buf;
     } else {
       // Compute SHA-256 over whatever ssh2 handed us.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const crypto = require('node:crypto');
-      bytes = crypto.createHash('sha256').update(buf).digest();
+      bytes = createHash('sha256').update(buf).digest();
     }
     return Array.from(bytes)
       .map((b) => b.toString(16).padStart(2, '0'))

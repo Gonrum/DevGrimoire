@@ -58,6 +58,11 @@ function makeFakeClient(behaviour) {
   //   { kind: 'error', err }                  → error event
   //   { kind: 'authError' }                   → ssh2-style auth-failed error
   //   { kind: 'hostKeyError' }                → ssh2 error after rejecting host
+  //   { kind: 'mismatch' }                    → host-key mismatch path
+  //   { kind: 'firstTimeError' }              → realistic ssh2: hostVerifier
+  //                                              returned accept=false for an
+  //                                              unknown host → 'error' fires,
+  //                                              not 'ready'.
   //   { kind: 'silent' }                      → never emits → timeout path
   //   { kind: 'throwOnConnect', err }         → connect() throws synchronously
   const handlers = {};
@@ -66,8 +71,14 @@ function makeFakeClient(behaviour) {
       handlers[event] = cb;
       return client;
     },
-    end() {},
-    destroy() {},
+    endCalls: 0,
+    destroyCalls: 0,
+    end() {
+      this.endCalls += 1;
+    },
+    destroy() {
+      this.destroyCalls += 1;
+    },
     connect(opts) {
       // Drive the hostVerifier first — exactly what real ssh2 does.
       const hash = Buffer.from(
@@ -86,13 +97,9 @@ function makeFakeClient(behaviour) {
       const ret = verifier ? verifier(hash, cb) : true;
       if (!cbCalled && typeof ret === 'boolean') verifierAccept = ret;
 
-      // Mimic ssh2: if verifier rejected, emit error (host key mismatch).
+      // Mimic ssh2: if verifier rejected, emit error (host key rejected).
       if (!verifierAccept) {
-        // Either explicit hostKeyError test forced this, or first-time
-        // fingerprint accept=false. In the first-time-fingerprint case the
-        // service still wants ready (we model this with behaviour.kind===
-        // 'ready' even when verifier returns false — that mirrors how ssh2
-        // behaves when handshake is allowed via a permissive verifier).
+        // Stored fingerprint did NOT match → emit error (mismatch path).
         if (
           behaviour.kind === 'hostKeyError' ||
           behaviour.kind === 'mismatch'
@@ -106,6 +113,23 @@ function makeFakeClient(behaviour) {
           });
           return;
         }
+        // First-time-fingerprint with realistic ssh2 behaviour: verifier
+        // returned false, so ssh2 fires 'error' (NOT 'ready'). This is the
+        // path Critical #2 is about.
+        if (behaviour.kind === 'firstTimeError') {
+          process.nextTick(() => {
+            if (handlers.error) {
+              const e = new Error('Host key verification failed');
+              e.level = 'protocol';
+              handlers.error(e);
+            }
+          });
+          return;
+        }
+        // Legacy permissive behaviour: kind==='ready' models an ssh2 build
+        // that ignores the verifier-reject and still emits ready. The
+        // service's ready-handler firstTimeFingerprint branch is kept as
+        // defense-in-depth for that case.
       }
 
       if (behaviour.kind === 'throwOnConnect') {
@@ -319,6 +343,97 @@ function makePasswordConnection(overrides = {}) {
     assert.equal(auditModel._writes[0].sourceContext, 'rest');
     assert.equal(auditModel._writes[0].errorMsg, undefined);
   });
+
+  // ------------------------------------------------------------------
+  // SshTestService: TOFU first-time via the realistic ssh2 'error' path.
+  // Critical #2 regression: the previous implementation only handled the
+  // first-time-fingerprint case in the 'ready' handler, which is dead-code
+  // because ssh2 emits 'error' (not 'ready') when hostVerifier returns
+  // accept=false. Without this branch the user got a generic auth_failed/
+  // unknown response and never saw the accept-fingerprint dialog.
+  // ------------------------------------------------------------------
+  await check(
+    'testConnection() returns ok=false + fingerprint when ssh2 emits error after first-time hostVerifier reject',
+    async () => {
+      const conn = makeKeyConnection();
+      const sshService = makeSshServiceStub({ connection: conn });
+      const secretsService = makeSecretsServiceStub();
+      const auditModel = makeAuditModelStub();
+      const factory = makeClientFactory({ kind: 'firstTimeError' });
+
+      const svc = new SshTestService(sshService, secretsService, auditModel, factory);
+      const result = await svc.testConnection(String(conn._id), {
+        userId: new Types.ObjectId().toString(),
+      });
+
+      // Behaves exactly like the 'ready'-path first-time case from the
+      // caller's perspective: ok=false, fingerprint surfaces, no error
+      // code is set (we want the UI to render the accept dialog, not an
+      // error banner).
+      assert.equal(result.ok, false);
+      assert.ok(result.fingerprint, 'fingerprint must surface to the UI');
+      assert.match(result.fingerprint, SSH_FINGERPRINT_REGEX);
+      assert.equal(result.fingerprintMismatch, undefined);
+      assert.equal(result.error, undefined, 'no error code on first-time pending');
+
+      // No success / no error persisted — pending state must not clobber
+      // lastConnect* fields either way.
+      assert.equal(sshService.calls.recordConnectSuccess.length, 0);
+      assert.equal(sshService.calls.recordConnectError.length, 0);
+    },
+  );
+
+  // ------------------------------------------------------------------
+  // SshTestService: audit-write failure path (Important #4).
+  // The audit insert is fire-and-forget. We verify the user-facing result
+  // is unaffected and that the failure surfaces via logger.warn so an op
+  // can find it in the log stream.
+  // ------------------------------------------------------------------
+  await check(
+    'testConnection() resolves with the correct result even when audit-write throws',
+    async () => {
+      const expectedFp =
+        '01:23:45:67:89:ab:cd:ef:01:23:45:67:89:ab:cd:ef:' +
+        '01:23:45:67:89:ab:cd:ef:01:23:45:67:89:ab:cd:ef';
+      const conn = makeKeyConnection({ knownHostFingerprint: expectedFp });
+      const sshService = makeSshServiceStub({ connection: conn });
+      const secretsService = makeSecretsServiceStub();
+      // Audit model that always blows up on create():
+      const failingAuditModel = {
+        _writes: [],
+        async create() {
+          throw new Error('synthetic mongo write failure');
+        },
+      };
+      const factory = makeClientFactory({ kind: 'ready' });
+
+      const svc = new SshTestService(sshService, secretsService, failingAuditModel, factory);
+
+      // Spy the logger so we can prove the warn fires.
+      const warnCalls = [];
+      svc.logger = { warn: (msg) => warnCalls.push(String(msg)) };
+
+      const result = await svc.testConnection(String(conn._id), {
+        userId: new Types.ObjectId().toString(),
+      });
+
+      // User still sees the ok=true result — audit is best-effort.
+      assert.equal(result.ok, true);
+      assert.equal(result.fingerprintAccepted, true);
+      // recordConnectSuccess still ran (it doesn't depend on audit).
+      assert.equal(sshService.calls.recordConnectSuccess.length, 1);
+      // logger.warn was invoked at least once for the audit failure path.
+      // persist() runs after resolve(); poll a handful of ticks for the
+      // background .catch to land.
+      for (let i = 0; i < 20 && warnCalls.length === 0; i += 1) {
+        await new Promise((r) => setImmediate(r));
+      }
+      assert.ok(
+        warnCalls.some((m) => /Audit persistence failed/i.test(m)),
+        `expected logger.warn call mentioning audit failure, got ${JSON.stringify(warnCalls)}`,
+      );
+    },
+  );
 
   // ------------------------------------------------------------------
   // SshTestService: TOFU known fingerprint match
