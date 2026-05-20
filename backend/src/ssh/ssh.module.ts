@@ -7,6 +7,8 @@ import {
 import { SshAudit, SshAuditSchema } from './schemas/ssh-audit.schema';
 import { Secret, SecretSchema } from '../secrets/schemas/secret.schema';
 import { SshService } from './ssh.service';
+import { SshTestService } from './ssh-test.service';
+import { SshController } from './ssh.controller';
 import { SecretsModule } from '../secrets/secrets.module';
 
 @Module({
@@ -21,7 +23,8 @@ import { SecretsModule } from '../secrets/secrets.module';
     ]),
     SecretsModule,
   ],
-  providers: [SshService],
-  exports: [SshService],
+  controllers: [SshController],
+  providers: [SshService, SshTestService],
+  exports: [SshService, SshTestService],
 })
 export class SshModule {}
