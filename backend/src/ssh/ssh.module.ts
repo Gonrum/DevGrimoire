@@ -8,6 +8,7 @@ import { SshAudit, SshAuditSchema } from './schemas/ssh-audit.schema';
 import { Secret, SecretSchema } from '../secrets/schemas/secret.schema';
 import { SshService } from './ssh.service';
 import { SshTestService } from './ssh-test.service';
+import { SshSessionService } from './ssh-session.service';
 import { SshController } from './ssh.controller';
 import { SecretsModule } from '../secrets/secrets.module';
 
@@ -24,7 +25,9 @@ import { SecretsModule } from '../secrets/secrets.module';
     SecretsModule,
   ],
   controllers: [SshController],
-  providers: [SshService, SshTestService],
-  exports: [SshService, SshTestService],
+  // SshSessionService is exported so main.ts can grab it via `app.get(...)`
+  // for the WS-terminal route (same pattern as WorkspacesService).
+  providers: [SshService, SshTestService, SshSessionService],
+  exports: [SshService, SshTestService, SshSessionService],
 })
 export class SshModule {}

@@ -19,7 +19,8 @@
     "check:workflow-nodes-engine": "node scripts/workflow-nodes-engine-check.cjs",
     "check:notification-url": "node scripts/notification-url-units-check.cjs",
     "check:ssh-service": "node scripts/ssh-service-units-check.cjs",
-    "check:ssh-rest": "node scripts/ssh-rest-units-check.cjs"
+    "check:ssh-rest": "node scripts/ssh-rest-units-check.cjs",
+    "check:ssh-session": "node scripts/ssh-session-units-check.cjs"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.0",

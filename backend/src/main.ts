@@ -54,6 +54,8 @@ import { WorkspacesService } from './workspaces/workspaces.service';
 import { WorkspaceClient } from './workspaces/workspace-client.service';
 import { WorkspaceGitTokensService } from './workspaces/workspace-git-tokens.service';
 import { WorkspaceCliTokenService } from './workspaces/workspace-cli-token.service';
+import { SshSessionService } from './ssh/ssh-session.service';
+import { Types as MongoTypes } from 'mongoose';
 import { CustomersService } from './customers/customers.service';
 import { ContactsService } from './contacts/contacts.service';
 import { MonitoringService } from './monitoring/monitoring.service';
@@ -618,6 +620,187 @@ async function bootstrap() {
     });
 
     upstream.on('error', () => reject(502, 'Bad Gateway'));
+  });
+
+  // ─── WebSocket SSH terminal ──────────────────────────────────────────
+  // Same JWT-via-query-param pattern as the workspace terminal above. We
+  // diverge only at the upstream end: instead of proxying to a sidecar WS
+  // we open an ssh2 client locally via SshSessionService.connect(), then
+  // request an interactive shell channel and pipe both directions on it.
+  //
+  // Control-frame protocol mirrors the workspace terminal exactly so the
+  // frontend can share a hook (planned, Schritt 5/8): JSON `{type:'resize',
+  // cols, rows}` from client → server, JSON `{type:'exit', exitCode}` from
+  // server → client. All other frames are stdin/stdout bytes.
+  const sshSessionService = app.get(SshSessionService);
+  const sshTerminalWss = new WebSocketServer({ noServer: true });
+  const SSH_TERMINAL_ROUTE = /^\/api\/ssh\/([a-f0-9]{24})\/terminal\/?$/i;
+
+  httpServer.on('upgrade', async (req: import('http').IncomingMessage, socket: import('net').Socket, head: Buffer) => {
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const match = SSH_TERMINAL_ROUTE.exec(url.pathname);
+    if (!match) return;
+
+    const rejectUpgrade = (status: number, msg: string) => {
+      socket.write(`HTTP/1.1 ${status} ${msg}\r\nContent-Length: 0\r\n\r\n`);
+      socket.destroy();
+    };
+
+    const token = url.searchParams.get('token');
+    if (!token) return rejectUpgrade(401, 'Unauthorized');
+
+    let userId: string | undefined;
+    try {
+      const payload = jwt.verify(token) as { sub?: string; userId?: string };
+      userId = payload.sub || payload.userId;
+    } catch {
+      return rejectUpgrade(401, 'Unauthorized');
+    }
+    if (!userId) return rejectUpgrade(401, 'Unauthorized');
+
+    const connectionId = match[1];
+
+    // Parse optional initial PTY size from query string for the very first
+    // shell allocation; the frontend will follow up with explicit resize
+    // frames anyway, but starting with the right viewport avoids a flash
+    // of misformatted output.
+    const initialCols = Number.parseInt(url.searchParams.get('cols') || '', 10) || 80;
+    const initialRows = Number.parseInt(url.searchParams.get('rows') || '', 10) || 24;
+
+    // ssh2 client setup happens AFTER the WS upgrade so we can surface
+    // ssh errors as close-frames (with a reason the UI can render),
+    // rather than as raw HTTP rejects with cryptic codes.
+    sshTerminalWss.handleUpgrade(req, socket, head, async (clientWs) => {
+      const startedAt = Date.now();
+      let sshClient: import('ssh2').Client | null = null;
+      let channel: import('ssh2').ClientChannel | null = null;
+      let closed = false;
+      let connectionObjectId: MongoTypes.ObjectId | null = null;
+
+      const closeAll = (code = 1000, reason = '') => {
+        if (closed) return;
+        closed = true;
+        try { clientWs.close(code, reason); } catch { /* noop */ }
+        try { channel?.close(); } catch { /* noop */ }
+        try { sshClient?.end(); } catch { /* noop */ }
+        try { sshClient?.destroy(); } catch { /* noop */ }
+        if (connectionObjectId && userId) {
+          // Fire-and-forget audit close row. Duration is end-to-end WS
+          // lifetime, which is the only "session duration" the user
+          // cares about — channel-only timing would be misleading.
+          void sshSessionService.writeAudit({
+            connectionId: connectionObjectId,
+            action: 'terminal_close',
+            sourceContext: 'terminal',
+            userId,
+            durationMs: Date.now() - startedAt,
+          });
+        }
+      };
+
+      try {
+        sshClient = await sshSessionService.connect(connectionId, {
+          ptyCols: initialCols,
+          ptyRows: initialRows,
+        });
+      } catch (err) {
+        const reason = (err as Error).message || 'ssh_connect_failed';
+        // WS close codes 4000-4999 are reserved for application-defined
+        // semantics; 4001 mirrors the spec's choice for SSH connect
+        // failures and lets the frontend distinguish "real" disconnects
+        // (1006/1011) from "the SSH layer refused".
+        try { clientWs.close(4001, reason); } catch { /* noop */ }
+        return;
+      }
+
+      // We have a ready client → log the open. Best-effort; never block
+      // the user-facing data path.
+      if (MongoTypes.ObjectId.isValid(connectionId)) {
+        connectionObjectId = new MongoTypes.ObjectId(connectionId);
+        void sshSessionService.writeAudit({
+          connectionId: connectionObjectId,
+          action: 'terminal_open',
+          sourceContext: 'terminal',
+          userId,
+        });
+      }
+
+      sshClient.shell(
+        { term: 'xterm-256color', cols: initialCols, rows: initialRows },
+        (err, stream) => {
+          if (err) {
+            closeAll(4001, `shell_failed: ${err.message}`);
+            return;
+          }
+          channel = stream;
+
+          // SSH → WS: ship both stdout and stderr as binary frames. ssh2
+          // separates them on the channel but xterm-js handles ANSI on a
+          // single byte stream just fine.
+          stream.on('data', (chunk: Buffer) => {
+            if (clientWs.readyState === WebSocket.OPEN) {
+              try { clientWs.send(chunk, { binary: true }); } catch { /* noop */ }
+            }
+          });
+          stream.stderr.on('data', (chunk: Buffer) => {
+            if (clientWs.readyState === WebSocket.OPEN) {
+              try { clientWs.send(chunk, { binary: true }); } catch { /* noop */ }
+            }
+          });
+
+          // Mirror the workspace-terminal protocol on exit so the frontend
+          // can share a single hook later: JSON text-frame, NOT binary.
+          stream.on('exit', (code: number | null) => {
+            if (clientWs.readyState === WebSocket.OPEN) {
+              try {
+                clientWs.send(
+                  JSON.stringify({ type: 'exit', exitCode: code ?? null }),
+                );
+              } catch { /* noop */ }
+            }
+          });
+          stream.on('close', () => closeAll());
+        },
+      );
+
+      // WS → SSH: text JSON frames are control (only `resize` defined);
+      // anything else gets piped to stdin as bytes. Mirrors the
+      // workspace-terminal direction for protocol symmetry.
+      clientWs.on('message', (data, isBinary) => {
+        if (!channel) {
+          // Pre-shell stdin gets dropped; the user is typing before the
+          // channel is alive. Cheaper than buffering.
+          return;
+        }
+        if (!isBinary) {
+          const text = data.toString();
+          // Tolerate either a stringified Buffer or a real text frame.
+          try {
+            const msg = JSON.parse(text);
+            if (msg && msg.type === 'resize') {
+              const cols = Number(msg.cols);
+              const rows = Number(msg.rows);
+              if (Number.isFinite(cols) && Number.isFinite(rows) && cols > 0 && rows > 0) {
+                try { channel.setWindow(rows, cols, 0, 0); } catch { /* noop */ }
+              }
+              return;
+            }
+            // Unknown control frame — fall through and treat as stdin.
+          } catch {
+            // Not JSON — fall through to stdin.
+          }
+          try { channel.write(text); } catch { /* noop */ }
+          return;
+        }
+        try { channel.write(data as Buffer); } catch { /* noop */ }
+      });
+
+      clientWs.on('close', () => closeAll());
+      clientWs.on('error', () => closeAll(1011, 'ws_error'));
+      sshClient.on('end', () => closeAll());
+      sshClient.on('close', () => closeAll());
+      sshClient.on('error', (err) => closeAll(4001, err.message || 'ssh_error'));
+    });
   });
 
   // ─── WebSocket multiplex bus for live events ─────────────────────────
