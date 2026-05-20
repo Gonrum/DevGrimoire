@@ -936,7 +936,7 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
   },
   release_sync_gitlab: {
     name: 'release_sync_gitlab',
-    description: 'Synchronisiert Releases aus konfigurierten GitLab-Repos.',
+    description: 'Synchronisiert Releases aus konfigurierten Git-Repos (GitHub/GitLab/Gitea). Alias-Name (wird in nächster Release umbenannt).',
     parameters: {
       type: 'object',
       properties: { projectId: PROJECT_ID_PROP, repoIndex: { type: 'number' } },

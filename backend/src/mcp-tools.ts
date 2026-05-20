@@ -2018,7 +2018,7 @@ const tools = [
   },
   {
     name: 'release_sync_gitlab',
-    description: 'Sync releases from GitLab for a project. Fetches all releases from configured GitLab repositories and creates/updates them locally.',
+    description: 'Sync releases from all configured git repositories (GitHub, GitLab, Gitea). Alias of release_sync — tool name kept for backwards compatibility, will be renamed in next release.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -4709,7 +4709,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             optionalNumber(a, 'limit'),
             optionalNumber(a, 'offset'),
           );
-          result = compactList(releases as any, ['description', 'assets', 'downloadUrl', 'gitlabReleaseId', 'gitlabTagName', 'repoLabel', '__v']);
+          result = compactList(releases as any, ['description', 'assets', 'downloadUrl', 'gitlabReleaseId', 'gitlabTagName', 'providerReleaseId', 'repoLabel', '__v']);
           break;
         }
         case 'release_get':
@@ -4732,6 +4732,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           await releasesService.remove(requireString(a, 'id'));
           result = { deleted: true, id: requireString(a, 'id') };
           break;
+        // ALIAS: release_sync_gitlab → syncReleases() across all providers. Renamed in next release.
         case 'release_sync_gitlab':
           result = await releasesService.syncReleases(
             requireString(a, 'projectId'),

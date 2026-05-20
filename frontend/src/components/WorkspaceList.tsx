@@ -373,6 +373,7 @@ function CreateWorkspaceForm({
           >
             <option value="">{t('workspaces.formGitRepoDefault')}</option>
             {gitRepos.map((r) => (
+              // NOTE: ProviderBadge (SVG) cannot render inside <option>; text abbreviation is intentional.
               <option key={r._id} value={r._id ?? ''}>
                 [{r.provider === 'gitlab' ? 'GL' : r.provider === 'gitea' ? 'GT' : 'GH'}] {gitRepoLabel(r)}
               </option>

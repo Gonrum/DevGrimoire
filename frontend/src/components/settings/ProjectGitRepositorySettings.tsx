@@ -316,7 +316,10 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                       label={t('projectGit.baseUrl')}
                       type="text"
                       value={editRepoBaseUrl}
-                      onChange={(e) => setEditRepoBaseUrl(e.target.value)}
+                      onChange={(e) => {
+                        setEditRepoBaseUrl(e.target.value);
+                        if (!isPrivateLike(e.target.value)) setEditAllowPrivateHost(false);
+                      }}
                       placeholder={editRepoProvider === 'gitea' ? 'https://gitea.example.com' : 'https://gitlab.example.com'}
                     />
                     {editRepoProvider === 'gitea' && (
@@ -475,7 +478,10 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                 label={t('projectGit.baseUrl')}
                 type="text"
                 value={newRepoBaseUrl}
-                onChange={(e) => setNewRepoBaseUrl(e.target.value)}
+                onChange={(e) => {
+                  setNewRepoBaseUrl(e.target.value);
+                  if (!isPrivateLike(e.target.value)) setNewAllowPrivateHost(false);
+                }}
                 placeholder={newRepoProvider === 'gitea' ? 'https://gitea.example.com' : 'https://gitlab.example.com'}
               />
               {newRepoProvider === 'gitea' && (
