@@ -1960,8 +1960,35 @@
       "newServer": "New server",
       "connect": "Connect",
       "connectComingSoon": "Terminal modal lands in the next step (T-382)",
+      "connectBlockedFingerprint": "Run Test and accept the fingerprint first.",
       "test": "Test",
       "empty": "No SSH access yet — add your first server."
+    },
+    "terminal": {
+      "modalTitle": "SSH — {{label}}",
+      "disconnect": "Disconnect",
+      "reconnect": "Reconnect",
+      "statusConnecting": "Connecting…",
+      "statusConnected": "Connected",
+      "statusDisconnected": "Disconnected",
+      "statusExited": "Shell exited",
+      "statusError": "Error",
+      "exited": "Shell exited",
+      "disconnected": "Connection closed",
+      "errorWriting": "Connection error — use Reconnect in the header.",
+      "hint": "Live SSH shell. Ctrl+D or `exit` ends the session. Esc asks before closing while a session is active.",
+      "confirmCloseTitle": "Close connection?",
+      "confirmCloseBody": "The running SSH session will be terminated. Unsaved input will be lost.",
+      "confirmCloseConfirm": "Close",
+      "closeReason": {
+        "host_key_mismatch": "Host key mismatch (4001)",
+        "tofu_not_accepted": "Fingerprint not yet accepted (4002)",
+        "credential_missing": "Credentials missing (4003)",
+        "auth_failed": "Authentication failed (4004)",
+        "timeout": "Timeout or network error (4008)",
+        "internal": "Internal server error (1011)",
+        "normal": "Connection closed"
+      }
     },
     "status": {
       "ok": "OK",

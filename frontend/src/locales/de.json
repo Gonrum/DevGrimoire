@@ -1959,8 +1959,35 @@
       "newServer": "Neuer Server",
       "connect": "Connect",
       "connectComingSoon": "Terminal-Modal kommt im nächsten Schritt (T-382)",
+      "connectBlockedFingerprint": "Bitte erst testen + Fingerprint akzeptieren.",
       "test": "Test",
       "empty": "Noch keine SSH-Zugänge — leg den ersten Server an."
+    },
+    "terminal": {
+      "modalTitle": "SSH — {{label}}",
+      "disconnect": "Trennen",
+      "reconnect": "Neu verbinden",
+      "statusConnecting": "Verbinde…",
+      "statusConnected": "Verbunden",
+      "statusDisconnected": "Getrennt",
+      "statusExited": "Shell beendet",
+      "statusError": "Fehler",
+      "exited": "Shell beendet",
+      "disconnected": "Verbindung getrennt",
+      "errorWriting": "Verbindungsfehler — Reconnect über Header.",
+      "hint": "Live-SSH-Shell. Strg+D oder `exit` beendet die Sitzung. Esc fragt vor dem Schließen nach, wenn die Verbindung aktiv ist.",
+      "confirmCloseTitle": "Verbindung schließen?",
+      "confirmCloseBody": "Die laufende SSH-Sitzung wird beendet. Nicht gespeicherte Eingaben gehen verloren.",
+      "confirmCloseConfirm": "Schließen",
+      "closeReason": {
+        "host_key_mismatch": "Host-Key stimmt nicht überein (4001)",
+        "tofu_not_accepted": "Fingerprint noch nicht akzeptiert (4002)",
+        "credential_missing": "Credentials fehlen (4003)",
+        "auth_failed": "Authentifizierung fehlgeschlagen (4004)",
+        "timeout": "Timeout oder Netzwerkfehler (4008)",
+        "internal": "Interner Server-Fehler (1011)",
+        "normal": "Verbindung beendet"
+      }
     },
     "status": {
       "ok": "OK",

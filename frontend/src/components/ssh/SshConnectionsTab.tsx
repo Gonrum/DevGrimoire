@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { SshConnectionListItem } from '../../api/client';
+import { getCurrentAccessToken, SshConnectionListItem } from '../../api/client';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import EmptyState from '../ui/EmptyState';
@@ -8,6 +8,7 @@ import { LoadingText } from '../ui/LoadingSpinner';
 import { useToast } from '../Toast';
 import SshConnectionForm from './SshConnectionForm';
 import SshFingerprintDialog from './SshFingerprintDialog';
+import SshTerminalModal from './SshTerminalModal';
 import { deriveSshStatus, SSH_STATUS_VISUAL } from './sshStatus';
 import { useSshConnections } from './hooks/useSshConnections';
 import {
@@ -36,6 +37,7 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<SshConnectionListItem | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [openTerminalConn, setOpenTerminalConn] = useState<SshConnectionListItem | null>(null);
   const [testConnection] = useTestSshConnection();
   const [acceptFingerprint] = useAcceptSshFingerprint();
   // When the quick-test surfaces a new (or mismatched) host key we render
@@ -173,20 +175,31 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
                   )}
                 </div>
                 <div className="flex flex-wrap gap-1">
-                  <Button
-                    size="xs"
-                    variant="success"
-                    disabled
-                    title={t('ssh.tab.connectComingSoon')}
-                    onClick={() => {
-                      // Wired in T-382; for now we leave a breadcrumb so a
-                      // misclick during dev surfaces in the console.
-                      // eslint-disable-next-line no-console
-                      console.warn('Terminal kommt mit T-382');
-                    }}
-                  >
-                    ⚡ {t('ssh.tab.connect')}
-                  </Button>
+                  {(() => {
+                    // Status-gating: fingerprint_pending blocks Connect because
+                    // the backend would WS-close 4002 immediately. Render but
+                    // disable with a tooltip — clearer than hiding the button.
+                    // `never_tested` is allowed; first Connect populates the
+                    // fingerprint via TOFU on the test flow, but if a user
+                    // hasn't pressed Test we let the backend speak (it may
+                    // also reject) and surface the WS close-code in the
+                    // terminal.
+                    const blocked = status === 'fingerprint_pending';
+                    const tooltip = blocked
+                      ? t('ssh.tab.connectBlockedFingerprint')
+                      : undefined;
+                    return (
+                      <Button
+                        size="xs"
+                        variant="success"
+                        disabled={blocked}
+                        title={tooltip}
+                        onClick={() => setOpenTerminalConn(conn)}
+                      >
+                        ⚡ {t('ssh.tab.connect')}
+                      </Button>
+                    );
+                  })()}
                   <Button
                     size="xs"
                     variant="secondary"
@@ -226,6 +239,19 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
           mismatch={pendingFingerprint.mismatch}
           onAccept={handleAcceptPendingFingerprint}
           onCancel={handleCancelPendingFingerprint}
+        />
+      )}
+
+      {openTerminalConn && (
+        <SshTerminalModal
+          open={!!openTerminalConn}
+          onClose={() => {
+            setOpenTerminalConn(null);
+            // refresh so lastConnectedAt + audit-driven status update reflect.
+            reload();
+          }}
+          connection={openTerminalConn}
+          authToken={getCurrentAccessToken()}
         />
       )}
     </div>

@@ -1,0 +1,317 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Terminal } from 'xterm';
+import { FitAddon } from 'xterm-addon-fit';
+import 'xterm/css/xterm.css';
+import Button from '../ui/Button';
+
+const BASE_URL =
+  (typeof window !== 'undefined' && (window as unknown as { __DG_API_URL__?: string }).__DG_API_URL__) ||
+  '/api';
+
+export interface SshTerminalProps {
+  connectionId: string;
+  connectionLabel: string;
+  hostInfo: string;
+  authToken: string | null;
+  onClose?: () => void;
+  /** Called when the WS state transitions (used by parent for Esc-confirm). */
+  onConnectionStateChange?: (state: TerminalState) => void;
+}
+
+export type TerminalState =
+  | 'connecting'
+  | 'connected'
+  | 'exited'
+  | 'disconnected'
+  | 'error';
+
+function buildWsUrl(connectionId: string, token: string | null): string {
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const apiPath = BASE_URL.startsWith('http')
+    ? BASE_URL.replace(/^http/i, proto)
+    : `${proto}://${window.location.host}${BASE_URL}`;
+  const url = new URL(`${apiPath}/ssh/${connectionId}/terminal`);
+  url.searchParams.set('token', token || '');
+  return url.toString();
+}
+
+/**
+ * Map close codes from the backend SSH WS gateway (T-380) to a
+ * user-readable reason. Falls back to the raw code/reason when unknown.
+ *
+ * Codes per Spec §4.3 / §7.5:
+ *   4001 host_key_mismatch
+ *   4002 tofu_not_accepted
+ *   4003 credential_missing
+ *   4004 auth_failed
+ *   4008 timeout / network
+ *   1011 internal
+ */
+function describeCloseCode(
+  code: number,
+  reason: string,
+  t: (key: string) => string,
+): string {
+  switch (code) {
+    case 4001:
+      return t('ssh.terminal.closeReason.host_key_mismatch');
+    case 4002:
+      return t('ssh.terminal.closeReason.tofu_not_accepted');
+    case 4003:
+      return t('ssh.terminal.closeReason.credential_missing');
+    case 4004:
+      return t('ssh.terminal.closeReason.auth_failed');
+    case 4008:
+      return t('ssh.terminal.closeReason.timeout');
+    case 1011:
+      return t('ssh.terminal.closeReason.internal');
+    case 1000:
+    case 1005:
+    case 1006:
+      return t('ssh.terminal.closeReason.normal');
+    default:
+      return reason ? `${code}: ${reason}` : String(code);
+  }
+}
+
+/**
+ * Live SSH terminal — mirrors `WorkspaceTerminal` because the backend
+ * (T-380) re-uses the same control protocol (`resize` / `exit`). Only the
+ * WS endpoint and the header styling differ.
+ */
+export default function SshTerminal({
+  connectionId,
+  connectionLabel,
+  hostInfo,
+  authToken,
+  onClose,
+  onConnectionStateChange,
+}: SshTerminalProps) {
+  const { t } = useTranslation();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+
+  const [state, setState] = useState<TerminalState>('connecting');
+  const [closeInfo, setCloseInfo] = useState<{ code: number; reason: string } | null>(null);
+  const [reconnectKey, setReconnectKey] = useState(0);
+
+  const notifyState = useCallback(
+    (next: TerminalState) => {
+      setState(next);
+      onConnectionStateChange?.(next);
+    },
+    [onConnectionStateChange],
+  );
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const term = new Terminal({
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontSize: 13,
+      lineHeight: 1.2,
+      cursorBlink: true,
+      theme: {
+        background: '#000000',
+        foreground: '#e5e7eb',
+        cursor: '#a78bfa',
+        cursorAccent: '#000000',
+        selectionBackground: '#4c1d95',
+      },
+      scrollback: 5000,
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(container);
+    try {
+      fit.fit();
+    } catch {
+      // container may not have layout yet — initial-resize will re-try
+    }
+    termRef.current = term;
+    fitRef.current = fit;
+
+    setCloseInfo(null);
+    notifyState('connecting');
+
+    const ws = new WebSocket(buildWsUrl(connectionId, authToken));
+    ws.binaryType = 'arraybuffer';
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      notifyState('connected');
+      try {
+        fit.fit();
+      } catch {
+        // ignore — initial fit failure
+      }
+      const cols = term.cols;
+      const rows = term.rows;
+      ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+      term.focus();
+    };
+
+    ws.onmessage = (ev) => {
+      if (typeof ev.data === 'string') {
+        // Control frame from the gateway. Today only 'exit' uses this path.
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg && msg.type === 'exit') {
+            const code = msg.exitCode ?? '?';
+            term.write(
+              `\r\n\x1b[2m# ${t('ssh.terminal.exited')} (exit code ${code})\x1b[0m\r\n`,
+            );
+            notifyState('exited');
+            return;
+          }
+        } catch {
+          // not JSON — write raw text
+        }
+        term.write(ev.data);
+      } else {
+        term.write(new Uint8Array(ev.data));
+      }
+    };
+
+    ws.onerror = () => {
+      // `onerror` always precedes `onclose` per WS spec — keep the state
+      // transition for the `onclose` handler which has the actual code.
+      term.write(
+        `\r\n\x1b[31m# ${t('ssh.terminal.errorWriting')}\x1b[0m\r\n`,
+      );
+    };
+
+    ws.onclose = (ev) => {
+      const reason = describeCloseCode(ev.code, ev.reason, t);
+      term.write(
+        `\r\n\x1b[2m# ${t('ssh.terminal.disconnected')} — ${reason}\x1b[0m\r\n`,
+      );
+      setCloseInfo({ code: ev.code, reason });
+      // Distinguish "shell exited cleanly" (already 'exited') from network/
+      // auth termination so the header label and the Reconnect button can
+      // react accordingly. WS application-error codes start at 4000+ and
+      // 1011 = internal error → all treated as 'error'. 1000/1005/1006 =
+      // normal/no-status → 'disconnected'.
+      setState((prev) => {
+        if (prev === 'exited') return 'exited';
+        const isError =
+          (ev.code >= 4000 && ev.code <= 4999) || ev.code === 1011;
+        const next: TerminalState = isError ? 'error' : 'disconnected';
+        onConnectionStateChange?.(next);
+        return next;
+      });
+    };
+
+    const onData = term.onData((data) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    });
+
+    const sendResize = () => {
+      if (!fitRef.current || !termRef.current) return;
+      try {
+        fitRef.current.fit();
+      } catch {
+        return;
+      }
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: 'resize',
+            cols: termRef.current.cols,
+            rows: termRef.current.rows,
+          }),
+        );
+      }
+    };
+
+    const ro = new ResizeObserver(() => sendResize());
+    ro.observe(container);
+    window.addEventListener('resize', sendResize);
+
+    return () => {
+      window.removeEventListener('resize', sendResize);
+      ro.disconnect();
+      onData.dispose();
+      try {
+        ws.close();
+      } catch {
+        // noop
+      }
+      term.dispose();
+      termRef.current = null;
+      wsRef.current = null;
+      fitRef.current = null;
+    };
+    // `reconnectKey` triggers a full re-mount of the effect — that's how the
+    // Reconnect button works (build a fresh WS + Terminal).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionId, authToken, reconnectKey]);
+
+  const handleDisconnect = () => {
+    try {
+      wsRef.current?.close();
+    } catch {
+      // noop
+    }
+    onClose?.();
+  };
+
+  const handleReconnect = () => {
+    setReconnectKey((k) => k + 1);
+  };
+
+  const statusLabel = (() => {
+    switch (state) {
+      case 'connecting':
+        return `⏳ ${t('ssh.terminal.statusConnecting')}`;
+      case 'connected':
+        return `🟢 ${t('ssh.terminal.statusConnected')}`;
+      case 'exited':
+        return `⚪ ${t('ssh.terminal.statusExited')}`;
+      case 'disconnected':
+        return `🔴 ${t('ssh.terminal.statusDisconnected')}`;
+      case 'error':
+        return `❌ ${closeInfo ? closeInfo.reason : t('ssh.terminal.statusError')}`;
+    }
+  })();
+
+  const canReconnect = state === 'disconnected' || state === 'error' || state === 'exited';
+
+  return (
+    <div className="flex flex-col h-[80vh] min-h-[480px]">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 bg-gray-950">
+        <div className="text-xs min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-gray-200 truncate">{connectionLabel}</span>
+            <span className="text-gray-600">·</span>
+            <span className="font-mono text-gray-500 truncate">{hostInfo}</span>
+          </div>
+          <div className="text-[11px] text-gray-500 mt-0.5">{statusLabel}</div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {canReconnect && (
+            <Button size="xs" variant="success" onClick={handleReconnect}>
+              ↻ {t('ssh.terminal.reconnect')}
+            </Button>
+          )}
+          <Button size="xs" variant="secondary" onClick={handleDisconnect}>
+            {t('ssh.terminal.disconnect')}
+          </Button>
+        </div>
+      </div>
+
+      <div
+        ref={containerRef}
+        className="flex-1 bg-black px-2 py-1 overflow-hidden"
+      />
+
+      <div className="px-3 py-1.5 text-[10px] text-gray-500 border-t border-gray-800 bg-gray-950">
+        {t('ssh.terminal.hint')}
+      </div>
+    </div>
+  );
+}
