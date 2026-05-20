@@ -1,8 +1,10 @@
 import { Schema as MongooseSchema } from 'mongoose';
 
+export type GitProvider = 'github' | 'gitlab' | 'gitea';
+
 export const GitRepositorySchema = new MongooseSchema(
   {
-    provider: { type: String, enum: ['github', 'gitlab'], required: true },
+    provider: { type: String, enum: ['github', 'gitlab', 'gitea'], required: true },
     label: { type: String, default: '' },
     baseUrl: { type: String, default: '' },
     owner: { type: String, default: '' },
@@ -11,6 +13,7 @@ export const GitRepositorySchema = new MongooseSchema(
     defaultBranch: { type: String, default: 'main' },
     tokenSecretId: { type: String },
     syncEnabled: { type: Boolean, default: true },
+    allowPrivateHost: { type: Boolean, default: false },
     lastSyncAt: { type: Date },
     lastSyncSha: { type: String },
     lastEtag: { type: String },
@@ -20,7 +23,7 @@ export const GitRepositorySchema = new MongooseSchema(
 
 export interface GitRepository {
   _id?: string;
-  provider: 'github' | 'gitlab';
+  provider: GitProvider;
   label: string;
   baseUrl: string;
   owner: string;
@@ -29,6 +32,7 @@ export interface GitRepository {
   defaultBranch: string;
   tokenSecretId?: string;
   syncEnabled: boolean;
+  allowPrivateHost: boolean;
   lastSyncAt?: Date;
   lastSyncSha?: string;
   lastEtag?: string;
