@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { GitProviderInterface, NormalizedCommit, FetchCommitsResult, GitBranch, CommitStats } from './git-provider.interface';
+import { GitProviderInterface, NormalizedCommit, FetchCommitsResult, GitBranch, CommitStats, NormalizedRelease } from './git-provider.interface';
 import { GitRepository } from '../schemas/git-repository.schema';
 import { validateGitBaseUrl } from './url-validator';
 
@@ -141,5 +141,41 @@ export class GitHubProviderService implements GitProviderInterface {
     } catch {
       return false;
     }
+  }
+
+  async fetchReleases(config: GitRepository, token: string): Promise<NormalizedRelease[]> {
+    validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
+    const baseUrl = this.getBaseUrl(config);
+    const url = `${baseUrl}/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/releases?per_page=100`;
+
+    const response = await fetch(url, {
+      headers: this.getHeaders(token),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT),
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(`GitHub auth error: ${response.status}`);
+    }
+    if (!response.ok) {
+      throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
+    }
+    const data = await response.json();
+    if (!Array.isArray(data)) return [];
+
+    return data.map((ghRelease: any): NormalizedRelease => ({
+      providerReleaseId: String(ghRelease.id),
+      tagName: ghRelease.tag_name,
+      name: ghRelease.name || ghRelease.tag_name,
+      description: ghRelease.body || '',
+      releasedAt: new Date(ghRelease.published_at || ghRelease.created_at),
+      url: ghRelease.html_url,
+      draft: ghRelease.draft === true,
+      prerelease: ghRelease.prerelease === true,
+      assets: (ghRelease.assets ?? []).map((a: any) => ({
+        name: a.name,
+        url: a.browser_download_url,
+        format: a.content_type,
+      })),
+    }));
   }
 }
