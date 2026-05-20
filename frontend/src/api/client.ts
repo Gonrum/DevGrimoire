@@ -859,6 +859,46 @@ export interface SshConnectionUpdateInput {
   passwordSecretId?: string;
 }
 
+export type SshAuditAction =
+  | 'connect'
+  | 'exec'
+  | 'upload'
+  | 'download'
+  | 'list_files'
+  | 'terminal_open'
+  | 'terminal_close';
+
+export type SshAuditSourceContext = 'terminal' | 'mcp' | 'rest';
+
+/** One entry as returned by `GET /api/ssh-connections/:id/audit`. */
+export interface SshAuditEntry {
+  _id: string;
+  at: string;
+  action: SshAuditAction;
+  sourceContext: SshAuditSourceContext;
+  userId?: string;
+  agentRoleId?: string;
+  command?: string;
+  remotePath?: string;
+  bytes?: number;
+  exitCode?: number;
+  durationMs?: number;
+  errorMsg?: string;
+}
+
+export interface SshAuditResponse {
+  items: SshAuditEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface SshAuditQueryParams {
+  limit?: number;
+  offset?: number;
+  sourceContext?: SshAuditSourceContext;
+}
+
 export interface Notification {
   _id: string;
   title: string;
@@ -1606,6 +1646,14 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ fingerprint }),
       }),
+    getAudit: (id: string, params: SshAuditQueryParams = {}) => {
+      const qs = new URLSearchParams();
+      if (params.limit !== undefined) qs.set('limit', String(params.limit));
+      if (params.offset !== undefined) qs.set('offset', String(params.offset));
+      if (params.sourceContext) qs.set('sourceContext', params.sourceContext);
+      const suffix = qs.toString() ? `?${qs.toString()}` : '';
+      return request<SshAuditResponse>(`/ssh-connections/${id}/audit${suffix}`);
+    },
   },
   manuals: {
     list: (projectId: string, category?: string) => {

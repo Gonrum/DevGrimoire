@@ -6,6 +6,7 @@ import Button from '../ui/Button';
 import EmptyState from '../ui/EmptyState';
 import { LoadingText } from '../ui/LoadingSpinner';
 import { useToast } from '../Toast';
+import SshAuditTab from './SshAuditTab';
 import SshConnectionForm from './SshConnectionForm';
 import SshFingerprintDialog from './SshFingerprintDialog';
 import SshTerminalModal from './SshTerminalModal';
@@ -38,6 +39,7 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
   const [editing, setEditing] = useState<SshConnectionListItem | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [openTerminalConn, setOpenTerminalConn] = useState<SshConnectionListItem | null>(null);
+  const [openAuditConn, setOpenAuditConn] = useState<SshConnectionListItem | null>(null);
   const [testConnection] = useTestSshConnection();
   const [acceptFingerprint] = useAcceptSshFingerprint();
   // When the quick-test surfaces a new (or mismatched) host key we render
@@ -211,6 +213,14 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
                   <Button size="xs" variant="edit" onClick={() => openEdit(conn)}>
                     {t('common.edit')}
                   </Button>
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    onClick={() => setOpenAuditConn(conn)}
+                    title={t('ssh.tab.audit')}
+                  >
+                    📜 {t('ssh.tab.audit')}
+                  </Button>
                 </div>
               </div>
             );
@@ -252,6 +262,14 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
           }}
           connection={openTerminalConn}
           authToken={getCurrentAccessToken()}
+        />
+      )}
+
+      {openAuditConn && (
+        <SshAuditTab
+          open={!!openAuditConn}
+          onClose={() => setOpenAuditConn(null)}
+          connection={openAuditConn}
         />
       )}
     </div>

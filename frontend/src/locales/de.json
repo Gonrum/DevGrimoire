@@ -1961,7 +1961,43 @@
       "connectComingSoon": "Terminal-Modal kommt im nächsten Schritt (T-382)",
       "connectBlockedFingerprint": "Bitte erst testen + Fingerprint akzeptieren.",
       "test": "Test",
+      "audit": "Audit-Log",
       "empty": "Noch keine SSH-Zugänge — leg den ersten Server an."
+    },
+    "audit": {
+      "title": "Audit-Log für {{label}}",
+      "filterSource": "Quelle",
+      "filterAll": "Alle",
+      "empty": "Noch keine Audit-Einträge.",
+      "totalEntries": "{{count}} Einträge",
+      "errorLabel": "Fehler",
+      "pageOf": "Seite {{current}} von {{total}}",
+      "noPages": "—",
+      "prev": "Vorherige",
+      "next": "Nächste",
+      "retry": "Erneut versuchen",
+      "col": {
+        "at": "Datum",
+        "source": "Quelle",
+        "action": "Aktion",
+        "detail": "Detail",
+        "result": "Ergebnis",
+        "duration": "Dauer"
+      },
+      "source": {
+        "terminal": "terminal",
+        "mcp": "mcp",
+        "rest": "rest"
+      },
+      "action": {
+        "connect": "connect",
+        "exec": "exec",
+        "upload": "upload",
+        "download": "download",
+        "list_files": "list_files",
+        "terminal_open": "terminal_open",
+        "terminal_close": "terminal_close"
+      }
     },
     "terminal": {
       "modalTitle": "SSH — {{label}}",
