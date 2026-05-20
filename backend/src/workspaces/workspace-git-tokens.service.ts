@@ -46,6 +46,10 @@ export class WorkspaceGitTokensService {
             env.GITLAB_TOKEN = token;
             const host = normaliseGitlabHost(explicit.baseUrl);
             if (host) env.GITLAB_HOST = host;
+          } else if (explicit.provider === 'gitea') {
+            env.GITEA_TOKEN = token;
+            const host = normaliseGiteaHost(explicit.baseUrl);
+            if (host) env.GITEA_HOST = host;
           }
           return env;
         }
@@ -57,6 +61,7 @@ export class WorkspaceGitTokensService {
 
     let ghDone = false;
     let glDone = false;
+    let gtDone = false;
 
     for (const repo of repos) {
       if (!repo.tokenSecretId) continue;
@@ -74,8 +79,16 @@ export class WorkspaceGitTokensService {
           if (host) env.GITLAB_HOST = host;
           glDone = true;
         }
+      } else if (repo.provider === 'gitea' && !gtDone) {
+        const token = await this.decrypt(repo.tokenSecretId);
+        if (token) {
+          env.GITEA_TOKEN = token;
+          const host = normaliseGiteaHost(repo.baseUrl);
+          if (host) env.GITEA_HOST = host;
+          gtDone = true;
+        }
       }
-      if (ghDone && glDone) break;
+      if (ghDone && glDone && gtDone) break;
     }
     return env;
   }
@@ -123,7 +136,10 @@ export class WorkspaceGitTokensService {
     const token = await this.decrypt(matched.tokenSecretId);
     if (!token) return repoUrl;
 
-    const userPrefix = matched.provider === 'github' ? 'x-access-token' : 'oauth2';
+    const userPrefix =
+      matched.provider === 'github' ? 'x-access-token' :
+      matched.provider === 'gitlab' ? 'oauth2' :
+      /* gitea */ 'oauth2';
     parsed.username = userPrefix;
     parsed.password = encodeURIComponent(token);
     return parsed.toString();
@@ -144,7 +160,7 @@ export class WorkspaceGitTokensService {
 
 interface RepoLike {
   _id?: { toString(): string } | string;
-  provider: 'github' | 'gitlab';
+  provider: 'github' | 'gitlab' | 'gitea';
   baseUrl?: string;
   tokenSecretId?: string;
 }
@@ -160,12 +176,20 @@ function pickRepoForUrl<T extends RepoLike>(
   }
   const hostMatch = repos.find((r) => {
     if (r.provider === 'github') return urlHost === 'github.com';
+    if (r.provider === 'gitea') {
+      const cfgHost = normaliseGiteaHost(r.baseUrl);
+      return cfgHost !== null && urlHost === cfgHost;
+    }
     const cfgHost = normaliseGitlabHost(r.baseUrl) ?? 'gitlab.com';
     return cfgHost === urlHost;
   });
   if (hostMatch) return hostMatch;
   if (urlHost === 'github.com') return repos.find((r) => r.provider === 'github') ?? null;
-  return repos.find((r) => r.provider === 'gitlab') ?? null;
+  return (
+    repos.find((r) => r.provider === 'gitea') ??
+    repos.find((r) => r.provider === 'gitlab') ??
+    null
+  );
 }
 
 function idToString(id: unknown): string | null {
@@ -178,6 +202,18 @@ function idToString(id: unknown): string | null {
 }
 
 function normaliseGitlabHost(baseUrl?: string): string | null {
+  if (!baseUrl) return null;
+  const trimmed = baseUrl.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
+    return url.host || null;
+  } catch {
+    return null;
+  }
+}
+
+function normaliseGiteaHost(baseUrl: string | undefined): string | null {
   if (!baseUrl) return null;
   const trimmed = baseUrl.trim();
   if (!trimmed) return null;
