@@ -300,9 +300,13 @@ function makeSecretsServiceWith(secretModel) {
 function newWorld() {
   const sshModel = makeModel('SshConnection');
   const secretModel = makeModel('Secret');
+  // SshAudit model surface (only `findOne` + `countDocuments` are exercised
+  // by SshService.findLatestAudit; these tests don't go near it, but we
+  // still need a non-undefined object so constructor wiring is valid).
+  const auditModel = makeModel('SshAudit');
   const secretsService = makeSecretsServiceWith(secretModel);
-  const svc = new SshService(sshModel, secretModel, secretsService);
-  return { svc, sshModel, secretModel, secretsService };
+  const svc = new SshService(sshModel, secretModel, auditModel, secretsService);
+  return { svc, sshModel, secretModel, auditModel, secretsService };
 }
 
 const customerId = new Types.ObjectId().toString();

@@ -12,6 +12,10 @@ import {
   SshConnectionDocument,
 } from './schemas/ssh-connection.schema';
 import {
+  SshAudit,
+  SshAuditDocument,
+} from './schemas/ssh-audit.schema';
+import {
   Secret,
   SecretDocument,
 } from '../secrets/schemas/secret.schema';
@@ -33,6 +37,8 @@ export class SshService {
     private readonly sshModel: Model<SshConnectionDocument>,
     @InjectModel(Secret.name)
     private readonly secretModel: Model<SecretDocument>,
+    @InjectModel(SshAudit.name)
+    private readonly auditModel: Model<SshAuditDocument>,
     private readonly secretsService: SecretsService,
   ) {}
 
@@ -439,6 +445,68 @@ export class SshService {
     doc.lastConnectError = undefined;
     await doc.save();
     return doc;
+  }
+
+  /**
+   * Find by `slug` within a scope (customerId OR projectId — exactly one).
+   * Returns null when not found instead of throwing, so callers can map to
+   * structured MCP error codes.
+   */
+  async findBySlug(
+    slug: string,
+    scope: { projectId?: string; customerId?: string },
+  ): Promise<SshConnectionDocument | null> {
+    const filter: Record<string, unknown> = { slug };
+    if (scope.projectId) {
+      if (!Types.ObjectId.isValid(scope.projectId)) return null;
+      filter.projectId = new Types.ObjectId(scope.projectId);
+    } else if (scope.customerId) {
+      if (!Types.ObjectId.isValid(scope.customerId)) return null;
+      filter.customerId = new Types.ObjectId(scope.customerId);
+    } else {
+      return null;
+    }
+    return this.sshModel.findOne(filter).exec();
+  }
+
+  /**
+   * Look up the most recent SshAudit row for a connection. Used by MCP
+   * `ssh_connection_get` to surface "what happened last" without exposing
+   * the whole audit trail. Returns null when nothing has been recorded yet.
+   */
+  async findLatestAudit(connectionId: string): Promise<SshAuditDocument | null> {
+    if (!Types.ObjectId.isValid(connectionId)) return null;
+    return this.auditModel
+      .findOne({ connectionId: new Types.ObjectId(connectionId) })
+      .sort({ at: -1 })
+      .exec();
+  }
+
+  /**
+   * Filter connections by scope + tags (AND semantics: every tag in the
+   * filter must be present on the connection). Used by MCP
+   * `ssh_connection_list`. Scope is mandatory — callers must pass either
+   * customerId or projectId.
+   */
+  async findByScopeAndTags(args: {
+    projectId?: string;
+    customerId?: string;
+    tags?: string[];
+  }): Promise<SshConnectionDocument[]> {
+    const filter: Record<string, unknown> = {};
+    if (args.projectId) {
+      if (!Types.ObjectId.isValid(args.projectId)) return [];
+      filter.projectId = new Types.ObjectId(args.projectId);
+    } else if (args.customerId) {
+      if (!Types.ObjectId.isValid(args.customerId)) return [];
+      filter.customerId = new Types.ObjectId(args.customerId);
+    } else {
+      return [];
+    }
+    if (args.tags && args.tags.length > 0) {
+      filter.tags = { $all: args.tags };
+    }
+    return this.sshModel.find(filter).sort({ label: 1 }).exec();
   }
 
   // -------------------------------------------------------------------------

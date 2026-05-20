@@ -63,6 +63,10 @@ import { AuthService } from './auth/auth.service';
 import { CustomersService } from './customers/customers.service';
 import { ContactsService } from './contacts/contacts.service';
 import { MonitoringService } from './monitoring/monitoring.service';
+import { SshService } from './ssh/ssh.service';
+import { SshSessionService } from './ssh/ssh-session.service';
+import { SshConnectionDocument } from './ssh/schemas/ssh-connection.schema';
+import { SshAuditDocument } from './ssh/schemas/ssh-audit.schema';
 
 const RAG_BACKEND_URL = process.env.RAG_BACKEND_URL || 'http://localhost:3200';
 
@@ -270,6 +274,118 @@ export function compactCreateResult(doc: any, extra?: Record<string, unknown>): 
   };
 }
 
+/**
+ * Derive the high-level connection status from the persisted error/fingerprint
+ * fields. Mirrors what the SSH UI shows so MCP callers see the same picture
+ * as the dashboard.
+ *
+ * Precedence is intentional and matches the spec:
+ *   1) `lastConnectError` set → 'error' (most actionable)
+ *   2) no `knownHostFingerprint` → 'fingerprint_pending' (user must TOFU)
+ *   3) `lastConnectedAt` set → 'ok' (we've been there before)
+ *   4) otherwise → 'never_tested'
+ */
+export function deriveSshStatus(
+  doc: Pick<SshConnectionDocument, 'lastConnectError' | 'knownHostFingerprint' | 'lastConnectedAt'>,
+): 'ok' | 'never_tested' | 'error' | 'fingerprint_pending' {
+  if (doc.lastConnectError) return 'error';
+  if (!doc.knownHostFingerprint) return 'fingerprint_pending';
+  if (doc.lastConnectedAt) return 'ok';
+  return 'never_tested';
+}
+
+/**
+ * Project an SshConnection document into the safe MCP list/get shape. NEVER
+ * includes credential references (privateKeySecretId/passphraseSecretId/
+ * passwordSecretId) or the host-key fingerprint — defense-in-depth so a
+ * compromised tool can't exfiltrate them via discovery.
+ */
+function serializeSshConnectionForMcp(
+  doc: SshConnectionDocument,
+): Record<string, unknown> {
+  return {
+    id: idToString(doc._id),
+    slug: doc.slug,
+    label: doc.label,
+    host: doc.host,
+    port: doc.port,
+    username: doc.username,
+    authMethod: doc.authMethod,
+    scope: {
+      projectId: idToString(doc.projectId),
+      customerId: idToString(doc.customerId),
+    },
+    tags: doc.tags,
+    description: doc.description,
+    status: deriveSshStatus(doc),
+    lastConnectedAt: doc.lastConnectedAt,
+  };
+}
+
+/**
+ * Compact a SshAudit row for MCP. Only safe fields surface — no command text,
+ * no remotePath, no userId. Callers want to know "did the last op succeed",
+ * not the full audit trail (that's what the REST `/audit` endpoint is for).
+ */
+function serializeSshAuditForMcp(
+  audit: SshAuditDocument,
+): Record<string, unknown> {
+  return {
+    at: audit.at,
+    action: audit.action,
+    sourceContext: audit.sourceContext,
+    exitCode: audit.exitCode,
+    errorMsg: audit.errorMsg,
+  };
+}
+
+/**
+ * Resolve an SshConnection from MCP-tool args. Logic:
+ *   - `id` wins outright (no scope needed)
+ *   - else `slug` + (projectId XOR customerId)
+ *   - missing both id and slug → 'connection_identifier_required'
+ *   - slug without scope → 'slug_requires_scope'
+ *   - resolved-but-not-found → 'connection_not_found'
+ *
+ * Defensive: never exposes the raw Mongo error to the LLM.
+ */
+async function resolveSshConnection(
+  sshService: SshService,
+  args: { id?: string; slug?: string; projectId?: string; customerId?: string },
+): Promise<SshConnectionDocument> {
+  if (args.id) {
+    try {
+      return await sshService.findById(args.id);
+    } catch {
+      throw new Error('connection_not_found');
+    }
+  }
+  if (!args.slug) {
+    throw new Error('connection_identifier_required');
+  }
+  if (!args.projectId && !args.customerId) {
+    throw new Error('slug_requires_scope');
+  }
+  const found = await sshService.findBySlug(args.slug, {
+    projectId: args.projectId,
+    customerId: args.customerId,
+  });
+  if (!found) throw new Error('connection_not_found');
+  return found;
+}
+
+/**
+ * Heuristic for "is this buffer safe to send back as a UTF-8 string?". We
+ * reject any null byte (most-common quick-check for binary) and verify the
+ * round-trip through `Buffer.from(s, 'utf8')` matches the original bytes — so
+ * malformed UTF-8 sequences flip the result to base64 too.
+ */
+export function isUtf8RoundTripSafe(buf: Buffer): boolean {
+  if (buf.indexOf(0) !== -1) return false;
+  const s = buf.toString('utf8');
+  return Buffer.from(s, 'utf8').equals(buf);
+}
+
 async function getClientRoots(server: Server): Promise<McpRootLike[] | undefined> {
   try {
     const result = await server.listRoots(undefined, { timeout: 2_000 });
@@ -330,6 +446,8 @@ export interface McpServices {
   workspaceClient: WorkspaceClient;
   workspaceGitTokens: WorkspaceGitTokensService;
   workspaceCliToken: WorkspaceCliTokenService;
+  sshService: SshService;
+  sshSessionService: SshSessionService;
 }
 
 const tools = [
@@ -2238,6 +2356,102 @@ const tools = [
     },
   },
   {
+    name: 'ssh_connection_list',
+    description: 'List SSH connections that have been configured in DevGrimoire for a customer or project. Scope is required (either projectId or customerId — no global discovery). Output contains host, port, username, authMethod, tags, status, lastConnectedAt — never credentials or host-key fingerprints. status: "ok" (lastConnectedAt set, no error), "error" (last connect failed), "fingerprint_pending" (TOFU not yet accepted in the UI), "never_tested" (fresh). Use this before ssh_exec/ssh_upload/ssh_download/ssh_list_files to discover available connections.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID (mutually exclusive with projectId)' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter (AND semantics: every tag must be present on the connection)' },
+      },
+    },
+  },
+  {
+    name: 'ssh_connection_get',
+    description: 'Get a single SSH connection by id OR slug+scope. Includes the latest audit row (action, sourceContext, exitCode, errorMsg). Never includes credentials or host-key fingerprints. Use this to confirm a connection is healthy (status=ok) before running ssh_exec against it.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'SshConnection MongoDB ID — wins if given' },
+        slug: { type: 'string', description: 'SshConnection slug (kebab-case). Requires projectId or customerId to disambiguate scope.' },
+        projectId: { type: 'string', description: 'Required with slug if the connection is project-scoped' },
+        customerId: { type: 'string', description: 'Required with slug if the connection is customer-scoped' },
+      },
+    },
+  },
+  {
+    name: 'ssh_exec',
+    description: 'Execute a shell command on a remote server that was previously configured in DevGrimoire. Look up available connections with ssh_connection_list first. You never have direct access to SSH keys/passwords — they are resolved server-side. Stdout is truncated at 256 KB, stderr at 64 KB. Default timeout 60s, max 600s. Audit-logged with sourceContext="mcp". Connection lookup: connectionId wins; otherwise slug + (projectId|customerId).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        connectionId: { type: 'string', description: 'SshConnection MongoDB ID — wins if given' },
+        slug: { type: 'string', description: 'SshConnection slug (requires projectId or customerId)' },
+        projectId: { type: 'string', description: 'Required with slug for project-scoped connections' },
+        customerId: { type: 'string', description: 'Required with slug for customer-scoped connections' },
+        command: { type: 'string', description: 'Shell command to execute on the remote (runs via ssh2.Client.exec, supports pipes/globbing on the remote shell).' },
+        timeoutMs: { type: 'number', description: 'Timeout in milliseconds (default 60000, max 600000). SIGTERM is sent first, then SIGKILL after a 5s grace.' },
+        env: { type: 'object', description: 'Optional environment variables forwarded to the remote command. Server-side may reject these if AcceptEnv is restrictive on the remote.', additionalProperties: { type: 'string' } },
+        cwd: { type: 'string', description: 'Optional working directory on the remote. Wrapped as `cd \'...\' && <command>` with POSIX single-quote escaping.' },
+      },
+      required: ['command'],
+    },
+  },
+  {
+    name: 'ssh_upload',
+    description: 'Upload a file to a remote server via SFTP. Max 10 MB per upload (hard cap). Use encoding="base64" for binary content (zips, images, etc.); otherwise utf-8 is assumed. Set createDirs=true to ensure parent directories exist (idempotent mkdir -p). Default file mode is 0o644. Connection lookup is identical to ssh_exec: connectionId wins; otherwise slug + (projectId|customerId).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        connectionId: { type: 'string', description: 'SshConnection MongoDB ID — wins if given' },
+        slug: { type: 'string', description: 'SshConnection slug (requires projectId or customerId)' },
+        projectId: { type: 'string', description: 'Required with slug for project-scoped connections' },
+        customerId: { type: 'string', description: 'Required with slug for customer-scoped connections' },
+        remotePath: { type: 'string', description: 'Absolute path on the remote where the file will be written' },
+        content: { type: 'string', description: 'File content. For encoding="utf-8" send the raw text; for encoding="base64" send the base64-encoded bytes.' },
+        encoding: { type: 'string', enum: ['utf-8', 'base64'], description: 'How `content` is encoded. Default "utf-8". Use "base64" for binary.' },
+        mode: { type: 'number', description: 'File permission bits as a decimal number (e.g. 420 for 0o644, 493 for 0o755). Default 420.' },
+        createDirs: { type: 'boolean', description: 'When true, mkdir -p the parent directories before writing. Default false.' },
+      },
+      required: ['remotePath', 'content'],
+    },
+  },
+  {
+    name: 'ssh_download',
+    description: 'Download a file from a remote server via SFTP. Default cap is 1 MB; pass maxBytes to raise it (hard limit 10 MB). Encoding is "utf-8" by default; the tool auto-switches to "base64" if the bytes contain null bytes or aren\'t round-trip-safe as UTF-8. truncated=true means the file was larger than maxBytes and only the prefix is returned.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        connectionId: { type: 'string', description: 'SshConnection MongoDB ID — wins if given' },
+        slug: { type: 'string', description: 'SshConnection slug (requires projectId or customerId)' },
+        projectId: { type: 'string', description: 'Required with slug for project-scoped connections' },
+        customerId: { type: 'string', description: 'Required with slug for customer-scoped connections' },
+        remotePath: { type: 'string', description: 'Absolute path on the remote to read' },
+        maxBytes: { type: 'number', description: 'Maximum bytes to read (default 1048576 = 1 MB, max 10485760 = 10 MB)' },
+        encoding: { type: 'string', enum: ['utf-8', 'base64'], description: 'Desired encoding. Default "utf-8"; auto-switches to "base64" for binary content.' },
+      },
+      required: ['remotePath'],
+    },
+  },
+  {
+    name: 'ssh_list_files',
+    description: 'List files in a directory on a remote server via SFTP. Default 200 entries (max 2000). recursive=true walks subdirectories (depth-capped to 10). entries[].type is "file"|"dir"|"symlink", mode is the raw POSIX bits, mtime is an ISO timestamp.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        connectionId: { type: 'string', description: 'SshConnection MongoDB ID — wins if given' },
+        slug: { type: 'string', description: 'SshConnection slug (requires projectId or customerId)' },
+        projectId: { type: 'string', description: 'Required with slug for project-scoped connections' },
+        customerId: { type: 'string', description: 'Required with slug for customer-scoped connections' },
+        remotePath: { type: 'string', description: 'Absolute directory path on the remote' },
+        recursive: { type: 'boolean', description: 'When true, recurse into subdirectories (max depth 10). Default false.' },
+        maxEntries: { type: 'number', description: 'Maximum number of entries to return (default 200, max 2000).' },
+      },
+      required: ['remotePath'],
+    },
+  },
+  {
     name: 'recurring_task_create',
     description: 'Create a recurring task. With projectId: creates project todos. With customerId: creates customer-scoped quests. With neither: system-wide task that creates notifications.',
     inputSchema: {
@@ -3424,7 +3638,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, researchSessionsService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, researchSessionsService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -4989,6 +5203,156 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             fileName,
             sizeBytes: file.size,
           };
+          break;
+        }
+        case 'ssh_connection_list': {
+          const projectId = optionalString(a, 'projectId');
+          const customerId = optionalString(a, 'customerId');
+          if (!projectId && !customerId) {
+            throw new Error('scope_required');
+          }
+          const tags = optionalStringArray(a, 'tags');
+          const docs = await sshService.findByScopeAndTags({ projectId, customerId, tags });
+          result = docs.map((d) => serializeSshConnectionForMcp(d));
+          break;
+        }
+        case 'ssh_connection_get': {
+          const conn = await resolveSshConnection(sshService, {
+            id: optionalString(a, 'id'),
+            slug: optionalString(a, 'slug'),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
+          });
+          const latest = await sshService.findLatestAudit(conn._id.toString());
+          result = {
+            ...serializeSshConnectionForMcp(conn),
+            lastAuditEntry: latest ? serializeSshAuditForMcp(latest) : null,
+          };
+          break;
+        }
+        case 'ssh_exec': {
+          const conn = await resolveSshConnection(sshService, {
+            id: optionalString(a, 'connectionId'),
+            slug: optionalString(a, 'slug'),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
+          });
+          const command = requireString(a, 'command');
+          const timeoutMs = optionalNumber(a, 'timeoutMs');
+          const cwd = optionalString(a, 'cwd');
+          const envObj = optionalObject(a, 'env');
+          let env: Record<string, string> | undefined;
+          if (envObj) {
+            env = {};
+            for (const [k, v] of Object.entries(envObj)) {
+              if (typeof v === 'string') env[k] = v;
+            }
+          }
+          // requireUserId throws if neither auth context nor MCP_STDIO_USER_ID
+          // is set — that's correct for write-tier SSH ops because the audit
+          // row would otherwise be userId-less and fail validation.
+          const userId = requireUserId();
+          result = await sshSessionService.exec(conn._id.toString(), command, {
+            timeoutMs,
+            env,
+            cwd,
+            sourceContext: 'mcp',
+            userId,
+          });
+          break;
+        }
+        case 'ssh_upload': {
+          const conn = await resolveSshConnection(sshService, {
+            id: optionalString(a, 'connectionId'),
+            slug: optionalString(a, 'slug'),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
+          });
+          const remotePath = requireString(a, 'remotePath');
+          const content = requireString(a, 'content');
+          const encoding = optionalString(a, 'encoding') ?? 'utf-8';
+          if (encoding !== 'utf-8' && encoding !== 'base64') {
+            throw new Error(`encoding must be 'utf-8' or 'base64' (got ${encoding})`);
+          }
+          // Pre-decode size cap: a 10 MB base64 string decodes to ~7.5 MB
+          // bytes — but the SAFE upper bound on the post-decode buffer is
+          // `content.length` itself, so any string longer than the hard cap
+          // can be rejected up-front without spending RAM on the decode.
+          const HARD_MAX = 10 * 1024 * 1024;
+          if (content.length > HARD_MAX && encoding === 'utf-8') {
+            throw new Error(`upload_too_large: utf-8 content length ${content.length} exceeds ${HARD_MAX} bytes`);
+          }
+          const buf = encoding === 'base64'
+            ? Buffer.from(content, 'base64')
+            : Buffer.from(content, 'utf8');
+          if (buf.length > HARD_MAX) {
+            throw new Error(`upload_too_large: decoded length ${buf.length} exceeds ${HARD_MAX} bytes`);
+          }
+          const mode = optionalNumber(a, 'mode');
+          const createDirs = optionalBoolean(a, 'createDirs');
+          const userId = requireUserId();
+          result = await sshSessionService.sftpUpload(conn._id.toString(), remotePath, buf, {
+            mode,
+            createDirs,
+            sourceContext: 'mcp',
+            userId,
+          });
+          break;
+        }
+        case 'ssh_download': {
+          const conn = await resolveSshConnection(sshService, {
+            id: optionalString(a, 'connectionId'),
+            slug: optionalString(a, 'slug'),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
+          });
+          const remotePath = requireString(a, 'remotePath');
+          const maxBytes = optionalNumber(a, 'maxBytes');
+          const requestedEncoding = optionalString(a, 'encoding') ?? 'utf-8';
+          if (requestedEncoding !== 'utf-8' && requestedEncoding !== 'base64') {
+            throw new Error(`encoding must be 'utf-8' or 'base64' (got ${requestedEncoding})`);
+          }
+          const userId = requireUserId();
+          const dl = await sshSessionService.sftpDownload(conn._id.toString(), remotePath, {
+            maxBytes,
+            sourceContext: 'mcp',
+            userId,
+          });
+          // Binary detection: when caller asked for utf-8, downgrade to
+          // base64 if the buffer isn't round-trip-safe (null byte or invalid
+          // UTF-8 sequence). When caller asked for base64, honour that.
+          const effectiveEncoding: 'utf-8' | 'base64' =
+            requestedEncoding === 'base64' || !isUtf8RoundTripSafe(dl.content)
+              ? 'base64'
+              : 'utf-8';
+          const contentStr = effectiveEncoding === 'base64'
+            ? dl.content.toString('base64')
+            : dl.content.toString('utf8');
+          result = {
+            content: contentStr,
+            encoding: effectiveEncoding,
+            bytesRead: dl.bytesRead,
+            truncated: dl.truncated,
+          };
+          break;
+        }
+        case 'ssh_list_files': {
+          const conn = await resolveSshConnection(sshService, {
+            id: optionalString(a, 'connectionId'),
+            slug: optionalString(a, 'slug'),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
+          });
+          const remotePath = requireString(a, 'remotePath');
+          const recursive = optionalBoolean(a, 'recursive');
+          const maxEntries = optionalNumber(a, 'maxEntries');
+          const userId = requireUserId();
+          result = await sshSessionService.listFiles(conn._id.toString(), remotePath, {
+            recursive,
+            maxEntries,
+            sourceContext: 'mcp',
+            userId,
+          });
           break;
         }
         case 'recurring_task_create': {

@@ -20,7 +20,8 @@
     "check:notification-url": "node scripts/notification-url-units-check.cjs",
     "check:ssh-service": "node scripts/ssh-service-units-check.cjs",
     "check:ssh-rest": "node scripts/ssh-rest-units-check.cjs",
-    "check:ssh-session": "node scripts/ssh-session-units-check.cjs"
+    "check:ssh-session": "node scripts/ssh-session-units-check.cjs",
+    "check:ssh-mcp": "node scripts/ssh-mcp-units-check.cjs"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.0",

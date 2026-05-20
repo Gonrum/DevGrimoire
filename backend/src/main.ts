@@ -54,6 +54,7 @@ import { WorkspacesService } from './workspaces/workspaces.service';
 import { WorkspaceClient } from './workspaces/workspace-client.service';
 import { WorkspaceGitTokensService } from './workspaces/workspace-git-tokens.service';
 import { WorkspaceCliTokenService } from './workspaces/workspace-cli-token.service';
+import { SshService } from './ssh/ssh.service';
 import { SshSessionService } from './ssh/ssh-session.service';
 import { Types as MongoTypes } from 'mongoose';
 import { CustomersService } from './customers/customers.service';
@@ -141,6 +142,8 @@ async function bootstrap() {
     workspaceClient: app.get(WorkspaceClient),
     workspaceGitTokens: app.get(WorkspaceGitTokensService),
     workspaceCliToken: app.get(WorkspaceCliTokenService),
+    sshService: app.get(SshService),
+    sshSessionService: app.get(SshSessionService),
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};
