@@ -30,6 +30,24 @@ export interface GitBranch {
   isDefault: boolean;
 }
 
+export interface NormalizedReleaseAsset {
+  name: string;
+  url: string;
+  format?: string;
+}
+
+export interface NormalizedRelease {
+  providerReleaseId: string;
+  tagName: string;
+  name: string;
+  description?: string;
+  releasedAt: Date;
+  url: string;
+  draft?: boolean;
+  prerelease?: boolean;
+  assets: NormalizedReleaseAsset[];
+}
+
 export interface GitProviderInterface {
   fetchCommits(
     config: GitRepository,
@@ -47,4 +65,6 @@ export interface GitProviderInterface {
   validateToken(config: GitRepository, token: string): Promise<boolean>;
 
   fetchBranches(config: GitRepository, token: string): Promise<GitBranch[]>;
+
+  fetchReleases(config: GitRepository, token: string): Promise<NormalizedRelease[]>;
 }
