@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { GitProviderInterface, NormalizedCommit, FetchCommitsResult, GitBranch, CommitStats } from './git-provider.interface';
+import { GitProviderInterface, NormalizedCommit, FetchCommitsResult, GitBranch, CommitStats, NormalizedRelease } from './git-provider.interface';
 import { GitRepository } from '../schemas/git-repository.schema';
 import { validateGitBaseUrl } from './url-validator';
 
@@ -144,5 +144,52 @@ export class GitLabProviderService implements GitProviderInterface {
     } catch {
       return false;
     }
+  }
+
+  async fetchReleases(config: GitRepository, token: string): Promise<NormalizedRelease[]> {
+    validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
+    const baseUrl = this.getBaseUrl(config);
+    const projectPath = this.getProjectPath(config);
+    const url = `${baseUrl}/api/v4/projects/${projectPath}/releases?per_page=100`;
+
+    const response = await fetch(url, {
+      headers: this.getHeaders(token),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT),
+    });
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(`GitLab auth error: ${response.status}`);
+    }
+    if (!response.ok) {
+      throw new Error(`GitLab API error: ${response.status} ${response.statusText}`);
+    }
+    const data = await response.json();
+    if (!Array.isArray(data)) return [];
+
+    return data.map((glRelease: any): NormalizedRelease => {
+      const assets: { name: string; url: string; format?: string }[] = [];
+      for (const link of glRelease.assets?.links ?? []) {
+        assets.push({
+          name: link.name,
+          url: link.direct_asset_url || link.url,
+          format: link.link_type,
+        });
+      }
+      for (const source of glRelease.assets?.sources ?? []) {
+        assets.push({
+          name: `source.${source.format}`,
+          url: source.url,
+          format: source.format,
+        });
+      }
+      return {
+        providerReleaseId: String(glRelease.tag_name),
+        tagName: glRelease.tag_name,
+        name: glRelease.name || glRelease.tag_name,
+        description: glRelease.description || '',
+        releasedAt: new Date(glRelease.released_at || glRelease.created_at),
+        url: glRelease._links?.self || `${baseUrl}/-/releases/${glRelease.tag_name}`,
+        assets,
+      };
+    });
   }
 }
