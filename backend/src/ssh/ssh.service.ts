@@ -233,6 +233,10 @@ export class SshService {
       doc.label = dto.label;
       metaPatch.label = dto.label;
     }
+    if (dto.slug !== undefined && dto.slug !== doc.slug) {
+      doc.slug = dto.slug;
+      metaPatch.slug = dto.slug;
+    }
     if (dto.host !== undefined) {
       doc.host = dto.host;
       metaPatch.host = dto.host;
@@ -258,7 +262,21 @@ export class SshService {
       metaPatch.notifyOnAuthFailure = dto.notifyOnAuthFailure;
     }
 
-    // Credential rotation path.
+    // Did the caller supply pick-existing rotation refs?
+    const hasPickRotation =
+      dto.privateKeySecretId !== undefined ||
+      dto.passwordSecretId !== undefined;
+
+    // Auth-method effective for this update — may switch atomically with a
+    // credential rotation. Pure metadata patches keep the existing method.
+    const effectiveAuthMethod = dto.authMethod ?? doc.authMethod;
+    const isRotation = !!dto.inlineSecrets || hasPickRotation;
+    if (isRotation && dto.authMethod && dto.authMethod !== doc.authMethod) {
+      doc.authMethod = dto.authMethod;
+      metaPatch.authMethod = dto.authMethod;
+    }
+
+    // Credential rotation path — inline.
     if (dto.inlineSecrets) {
       const oldOwnedIds: Types.ObjectId[] = [];
       if (origRefs.privateKeySecretId) oldOwnedIds.push(origRefs.privateKeySecretId);
@@ -292,7 +310,7 @@ export class SshService {
       }
 
       try {
-        if (doc.authMethod === 'key' && dto.inlineSecrets.key) {
+        if (effectiveAuthMethod === 'key' && dto.inlineSecrets.key) {
           const pkRef = await this.createOwnedSecret({
             scope,
             key: `ssh:${doc.slug}:privatekey`,
@@ -316,7 +334,9 @@ export class SshService {
           } else {
             doc.passphraseSecretId = undefined;
           }
-        } else if (doc.authMethod === 'password' && dto.inlineSecrets.password) {
+          // Clear the opposite-method ref if we just switched auth method.
+          doc.passwordSecretId = undefined;
+        } else if (effectiveAuthMethod === 'password' && dto.inlineSecrets.password) {
           const pwRef = await this.createOwnedSecret({
             scope,
             key: `ssh:${doc.slug}:password`,
@@ -326,9 +346,12 @@ export class SshService {
           });
           newCreated.push({ id: pwRef, field: 'passwordSecretId' });
           doc.passwordSecretId = pwRef;
+          // Clear the opposite-method refs if we just switched auth method.
+          doc.privateKeySecretId = undefined;
+          doc.passphraseSecretId = undefined;
         } else {
           throw new BadRequestException(
-            `inlineSecrets does not match authMethod=${doc.authMethod}`,
+            `inlineSecrets does not match authMethod=${effectiveAuthMethod}`,
           );
         }
 
@@ -385,6 +408,78 @@ export class SshService {
         doc.passwordSecretId = origRefs.passwordSecretId;
         throw err;
       }
+    }
+
+    // Credential rotation path — pick-existing. Drop previously-owned
+    // secrets first (just like the inline path) so an existing owned secret
+    // with a colliding key can be freed before we swap refs in.
+    if (hasPickRotation) {
+      const oldOwnedIds: Types.ObjectId[] = [];
+      if (origRefs.privateKeySecretId) oldOwnedIds.push(origRefs.privateKeySecretId);
+      if (origRefs.passphraseSecretId) oldOwnedIds.push(origRefs.passphraseSecretId);
+      if (origRefs.passwordSecretId) oldOwnedIds.push(origRefs.passwordSecretId);
+      if (oldOwnedIds.length > 0) {
+        const ownedDocs = await this.secretModel
+          .find({
+            _id: { $in: oldOwnedIds },
+            ownedBySshConnectionId: doc._id,
+          })
+          .exec();
+        const deletedIds = ownedDocs.map((s) => s._id as Types.ObjectId);
+        if (deletedIds.length > 0) {
+          await this.secretModel.deleteMany({ _id: { $in: deletedIds } }).exec();
+        }
+      }
+
+      if (effectiveAuthMethod === 'key') {
+        if (!dto.privateKeySecretId) {
+          throw new BadRequestException(
+            'privateKeySecretId is required for key-auth rotation',
+          );
+        }
+        doc.privateKeySecretId = this.toObjectId(
+          dto.privateKeySecretId,
+          'privateKeySecretId',
+        );
+        doc.passphraseSecretId = dto.passphraseSecretId
+          ? this.toObjectId(dto.passphraseSecretId, 'passphraseSecretId')
+          : undefined;
+        doc.passwordSecretId = undefined;
+      } else {
+        if (!dto.passwordSecretId) {
+          throw new BadRequestException(
+            'passwordSecretId is required for password-auth rotation',
+          );
+        }
+        doc.passwordSecretId = this.toObjectId(
+          dto.passwordSecretId,
+          'passwordSecretId',
+        );
+        doc.privateKeySecretId = undefined;
+        doc.passphraseSecretId = undefined;
+      }
+
+      const updated = await this.sshModel
+        .findOneAndUpdate(
+          { _id: doc._id, __v: expectedVersion },
+          {
+            $set: {
+              ...metaPatch,
+              privateKeySecretId: doc.privateKeySecretId,
+              passphraseSecretId: doc.passphraseSecretId,
+              passwordSecretId: doc.passwordSecretId,
+            },
+            $inc: { __v: 1 },
+          },
+          { new: true },
+        )
+        .exec();
+      if (!updated) {
+        throw new ConflictException(
+          'SshConnection was modified by another request; please retry',
+        );
+      }
+      return updated;
     }
 
     // Pure-metadata path: still version-guarded.

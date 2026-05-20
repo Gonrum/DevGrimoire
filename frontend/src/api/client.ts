@@ -849,6 +849,14 @@ export interface SshConnectionUpdateInput {
   description?: string;
   tags?: string[];
   notifyOnAuthFailure?: boolean;
+  authMethod?: SshAuthMethod;
+  // Credential rotation (only sent when the user explicitly unlocked the
+  // credentials section in the edit form). Backend `SshService.update()`
+  // accepts either inline secrets *or* existing secret IDs, never both.
+  inlineSecrets?: SshCreateInlineSecrets;
+  privateKeySecretId?: string;
+  passphraseSecretId?: string;
+  passwordSecretId?: string;
 }
 
 export interface Notification {

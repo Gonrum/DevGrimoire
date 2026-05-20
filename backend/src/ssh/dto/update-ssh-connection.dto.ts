@@ -3,9 +3,12 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
+  IsMongoId,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -15,10 +18,11 @@ import {
 import { CreateSshConnectionInlineSecretsDto } from './create-ssh-connection.dto';
 
 /**
- * Update only patches metadata fields by default. Credential rotation is a
- * separate code path triggered by setting `inlineSecrets` (the service will
- * create new Secrets, swap the references, and cascade-delete the old
- * `ownedBy`-marked secrets).
+ * Update patches metadata by default. Credential rotation is triggered by
+ * setting either `inlineSecrets` (service creates new owned Secrets) or by
+ * setting one of `privateKeySecretId` / `passwordSecretId` (pick-existing).
+ * `authMethod` may switch atomically with the rotation; the service
+ * cascades-deletes the previously-owned secrets either way.
  */
 export class UpdateSshConnectionDto {
   @IsOptional()
@@ -26,6 +30,17 @@ export class UpdateSshConnectionDto {
   @MinLength(1)
   @MaxLength(120)
   label?: string;
+
+  // Slug rename is allowed — the service guards against duplicates via the
+  // unique index and surfaces a 409 if the new slug clashes.
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(60)
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'slug must be kebab-case, [a-z0-9-]',
+  })
+  slug?: string;
 
   @IsOptional()
   @IsString()
@@ -60,8 +75,26 @@ export class UpdateSshConnectionDto {
   @IsBoolean()
   notifyOnAuthFailure?: boolean;
 
+  // ----- Credential rotation ------------------------------------------------
+  @IsOptional()
+  @IsIn(['key', 'password'])
+  authMethod?: 'key' | 'password';
+
   @IsOptional()
   @ValidateNested()
   @Type(() => CreateSshConnectionInlineSecretsDto)
   inlineSecrets?: CreateSshConnectionInlineSecretsDto;
+
+  // Pick-existing rotation path.
+  @IsOptional()
+  @IsMongoId()
+  privateKeySecretId?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  passphraseSecretId?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  passwordSecretId?: string;
 }

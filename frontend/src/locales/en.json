@@ -1961,8 +1961,7 @@
       "connect": "Connect",
       "connectComingSoon": "Terminal modal lands in the next step (T-382)",
       "test": "Test",
-      "empty": "No SSH access yet — add your first server.",
-      "testFingerprintPrompt": "New host key detected — please confirm in the open dialog."
+      "empty": "No SSH access yet — add your first server."
     },
     "status": {
       "ok": "OK",
@@ -1989,6 +1988,7 @@
       "slug": "Slug",
       "slugHelp": "Auto from label, kebab-case (3–60 chars, [a-z0-9-]).",
       "slugInvalid": "Slug must be kebab-case, 3–60 chars, [a-z0-9-] only.",
+      "slugCouldNotBeGenerated": "Could not derive a slug from the label — please enter one manually (kebab-case, [a-z0-9-]).",
       "tagsPlaceholder": "Add tag…",
       "notifyOnAuthFailure": "Notify on auth failure",
       "authKey": "Private key",

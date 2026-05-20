@@ -1960,8 +1960,7 @@
       "connect": "Connect",
       "connectComingSoon": "Terminal-Modal kommt im nächsten Schritt (T-382)",
       "test": "Test",
-      "empty": "Noch keine SSH-Zugänge — leg den ersten Server an.",
-      "testFingerprintPrompt": "Neuer Host-Key gefunden — bitte im geöffneten Dialog bestätigen."
+      "empty": "Noch keine SSH-Zugänge — leg den ersten Server an."
     },
     "status": {
       "ok": "OK",
@@ -1988,6 +1987,7 @@
       "slug": "Slug",
       "slugHelp": "Auto aus Label, kebab-case (3–60 Zeichen, [a-z0-9-]).",
       "slugInvalid": "Slug muss kebab-case sein, 3–60 Zeichen, nur [a-z0-9-].",
+      "slugCouldNotBeGenerated": "Slug konnte nicht aus dem Label erzeugt werden — bitte manuell eingeben (kebab-case, [a-z0-9-]).",
       "tagsPlaceholder": "Tag hinzufügen…",
       "notifyOnAuthFailure": "Bei Auth-Failure benachrichtigen",
       "authKey": "Private Key",

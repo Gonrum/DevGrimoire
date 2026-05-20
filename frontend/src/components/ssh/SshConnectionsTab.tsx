@@ -7,9 +7,13 @@ import EmptyState from '../ui/EmptyState';
 import { LoadingText } from '../ui/LoadingSpinner';
 import { useToast } from '../Toast';
 import SshConnectionForm from './SshConnectionForm';
+import SshFingerprintDialog from './SshFingerprintDialog';
 import { deriveSshStatus, SSH_STATUS_VISUAL } from './sshStatus';
 import { useSshConnections } from './hooks/useSshConnections';
-import { useTestSshConnection } from './hooks/useSshConnectionMutations';
+import {
+  useAcceptSshFingerprint,
+  useTestSshConnection,
+} from './hooks/useSshConnectionMutations';
 
 export interface SshConnectionsTabProps {
   /** Exactly one of `customerId` / `projectId` must be set. */
@@ -33,16 +37,26 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
   const [editing, setEditing] = useState<SshConnectionListItem | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testConnection] = useTestSshConnection();
+  const [acceptFingerprint] = useAcceptSshFingerprint();
+  // When the quick-test surfaces a new (or mismatched) host key we render
+  // the TOFU dialog directly in the tab — opening the edit-form would have
+  // pushed the user into an unrelated modal without the dialog visible.
+  const [pendingFingerprint, setPendingFingerprint] = useState<{
+    conn: SshConnectionListItem;
+    fingerprint: string;
+    mismatch: boolean;
+  } | null>(null);
 
   const handleQuickTest = async (conn: SshConnectionListItem) => {
     setTestingId(conn.id);
     try {
       const result = await testConnection(conn.id);
       if (result.fingerprint) {
-        // Surface the fingerprint via the edit-modal so the user can accept it.
-        setEditing(conn);
-        setFormOpen(true);
-        showSuccess(t('ssh.tab.testFingerprintPrompt'));
+        setPendingFingerprint({
+          conn,
+          fingerprint: result.fingerprint,
+          mismatch: !!result.fingerprintMismatch,
+        });
       } else if (result.ok) {
         showSuccess(t('ssh.form.testSuccess'));
       } else if (result.error) {
@@ -54,6 +68,26 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
     } finally {
       setTestingId(null);
     }
+  };
+
+  const handleAcceptPendingFingerprint = async () => {
+    if (!pendingFingerprint) return;
+    try {
+      await acceptFingerprint(
+        pendingFingerprint.conn.id,
+        pendingFingerprint.fingerprint,
+      );
+      setPendingFingerprint(null);
+      showSuccess(t('ssh.fingerprint.accepted'));
+      await reload();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleCancelPendingFingerprint = () => {
+    // Connection remains persisted in `fingerprint_pending`; just close.
+    setPendingFingerprint(null);
   };
 
   const openCreate = () => {
@@ -180,6 +214,18 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
             setEditing(null);
           }}
           onSaved={handleSaved}
+        />
+      )}
+
+      {pendingFingerprint && (
+        <SshFingerprintDialog
+          host={pendingFingerprint.conn.host}
+          port={pendingFingerprint.conn.port}
+          username={pendingFingerprint.conn.username}
+          fingerprint={pendingFingerprint.fingerprint}
+          mismatch={pendingFingerprint.mismatch}
+          onAccept={handleAcceptPendingFingerprint}
+          onCancel={handleCancelPendingFingerprint}
         />
       )}
     </div>

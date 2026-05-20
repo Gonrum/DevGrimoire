@@ -93,7 +93,9 @@ export default function SshConnectionForm({
   const [host, setHost] = useState(initial?.host ?? '');
   const [port, setPort] = useState<number>(initial?.port ?? 22);
   const [username, setUsername] = useState(initial?.username ?? '');
-  const [description, setDescription] = useState<string>(detail?.description ?? '');
+  // `detail` is always null at mount (async fetch). The useEffect below
+  // syncs the description once the detail-fetch resolves.
+  const [description, setDescription] = useState('');
   const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
   const [notifyOnAuthFailure, setNotifyOnAuthFailure] = useState<boolean>(
     initial?.notifyOnAuthFailure ?? false,
@@ -175,9 +177,15 @@ export default function SshConnectionForm({
 
   // ----- Submit-helpers -----------------------------------------------------
   const slugError = useMemo(() => {
-    if (!slug) return null;
+    if (!slug) {
+      // If the user has typed a label (e.g. only emoji / whitespace), the
+      // auto-slugifier produced an empty string and there's no inline hint
+      // yet. Surface that explicitly so the user knows the label needs
+      // ASCII characters.
+      return label.trim().length > 0 ? t('ssh.form.slugCouldNotBeGenerated') : null;
+    }
     return isValidSlug(slug) ? null : t('ssh.form.slugInvalid');
-  }, [slug, t]);
+  }, [slug, label, t]);
 
   const formIsValid =
     label.trim().length > 0 &&
@@ -286,6 +294,29 @@ export default function SshConnectionForm({
         tags,
         notifyOnAuthFailure,
       };
+      // Credential rotation — only when the user explicitly unlocked the
+      // credentials section via the "Credentials ändern" confirm. Mirrors
+      // `buildCreatePayload()` so the backend sees the same nested shape.
+      if (credentialsUnlocked) {
+        if (credMode === 'inline') {
+          if (authTab === 'key') {
+            patch.inlineSecrets = {
+              key: {
+                privateKey: privateKey.trim(),
+                ...(passphrase ? { passphrase } : {}),
+              },
+            };
+          } else {
+            patch.inlineSecrets = { password: { password } };
+          }
+        } else if (authTab === 'key') {
+          patch.privateKeySecretId = privateKeySecretId;
+          if (passphraseSecretId) patch.passphraseSecretId = passphraseSecretId;
+        } else {
+          patch.passwordSecretId = passwordSecretId;
+        }
+        patch.authMethod = authTab;
+      }
       await updateConnection(editingId, patch);
       showSuccess(t('ssh.form.saved'));
       onSaved();
@@ -340,8 +371,10 @@ export default function SshConnectionForm({
   };
 
   const pending = createState.pending || updateState.pending || testState.pending;
+  // `credentialsAreValid()` already short-circuits to true for an
+  // edit-mode patch that doesn't rotate credentials, so we always call it.
   const submitDisabled =
-    pending || !formIsValid || (!isEdit && !credentialsAreValid()) || !!slugError;
+    pending || !formIsValid || !credentialsAreValid() || !!slugError;
 
   return (
     <>
