@@ -305,8 +305,15 @@ function newWorld() {
   // still need a non-undefined object so constructor wiring is valid).
   const auditModel = makeModel('SshAudit');
   const secretsService = makeSecretsServiceWith(secretModel);
-  const svc = new SshService(sshModel, secretModel, auditModel, secretsService);
-  return { svc, sshModel, secretModel, auditModel, secretsService };
+  // Fake EventEmitter2 — captures emits without firing handlers so unit
+  // tests can assert (or just ignore) the new ssh-connection change events.
+  const events = [];
+  const eventEmitter = {
+    emit(name, payload) { events.push({ name, payload }); return true; },
+    events,
+  };
+  const svc = new SshService(sshModel, secretModel, auditModel, secretsService, eventEmitter);
+  return { svc, sshModel, secretModel, auditModel, secretsService, eventEmitter };
 }
 
 const customerId = new Types.ObjectId().toString();

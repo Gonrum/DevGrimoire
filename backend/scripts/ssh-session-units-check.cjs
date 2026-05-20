@@ -128,6 +128,23 @@ function makeAuditModelStub() {
   };
 }
 
+/**
+ * Minimal NotificationsService stub. Records `create()` calls so tests can
+ * assert auth-failure pushes (T-385) without needing the real service /
+ * push-subscription plumbing.
+ */
+function makeNotificationsStub() {
+  const calls = [];
+  return {
+    calls,
+    async create(title, body, url, category) {
+      const entry = { title, body, url, category, _id: `notif-${calls.length}` };
+      calls.push(entry);
+      return entry;
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Fake ssh2.Client. Each test builds its own and primes behaviour via the
 // `behaviour` arg + per-channel hooks attached after `client.exec()` returns
@@ -307,7 +324,7 @@ function makeFakeSftp({
     const secrets = makeSecretsServiceStub();
     const audit = makeAuditModelStub();
     const factory = makeClientFactory();
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
 
     await assert.rejects(() => svc.connect(String(conn._id)), /tofu_not_accepted/);
     assert.equal(sshService.calls.recordConnectError.length, 1);
@@ -325,7 +342,7 @@ function makeFakeSftp({
     const secrets = makeSecretsServiceStub();
     const audit = makeAuditModelStub();
     const factory = makeClientFactory();
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
 
     await assert.rejects(() => svc.connect(String(conn._id)), /host_key_mismatch/);
     assert.equal(sshService.calls.recordConnectError.length, 1);
@@ -339,7 +356,7 @@ function makeFakeSftp({
     const secrets = makeSecretsServiceStub({ failOn: String(conn.privateKeySecretId) });
     const audit = makeAuditModelStub();
     const factory = makeClientFactory();
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
 
     await assert.rejects(() => svc.connect(String(conn._id)), /credential_missing/);
     assert.equal(sshService.calls.recordConnectError.length, 1);
@@ -360,7 +377,7 @@ function makeFakeSftp({
         stream.emit('close');
       },
     });
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
 
     const userId = new Types.ObjectId().toString();
     const out = await svc.exec(String(conn._id), 'echo hello', { userId });
@@ -395,7 +412,7 @@ function makeFakeSftp({
         stream.emit('close');
       },
     });
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
 
     const userId = new Types.ObjectId().toString();
     const out = await svc.exec(String(conn._id), 'spam', { userId });
@@ -422,7 +439,7 @@ function makeFakeSftp({
         // timeout path must end the wait.
       },
     });
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
 
     const userId = new Types.ObjectId().toString();
     // Patch global setTimeout so the 5s SIGKILL grace and the 50ms timeout
@@ -468,7 +485,7 @@ function makeFakeSftp({
         stream.emit('close');
       },
     });
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
 
     const userId = new Types.ObjectId().toString();
     await svc.exec(String(conn._id), 'ls', { userId, cwd: "/tmp/it's a dir" });
@@ -489,7 +506,7 @@ function makeFakeSftp({
     const writeBehaviour = {};
     const sftp = makeFakeSftp({ writeBehaviour });
     const factory = makeClientFactory({ sftp });
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
 
     const userId = new Types.ObjectId().toString();
     const out = await svc.sftpUpload(
@@ -518,7 +535,7 @@ function makeFakeSftp({
       },
     });
     const factory = makeClientFactory({ sftp });
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
 
     const userId = new Types.ObjectId().toString();
     const out = await svc.sftpDownload(
@@ -549,7 +566,7 @@ function makeFakeSftp({
       ],
     });
     const factory = makeClientFactory({ sftp });
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
 
     const userId = new Types.ObjectId().toString();
     const out = await svc.listFiles(String(conn._id), '/srv', { userId, maxEntries: 3 });
@@ -568,7 +585,7 @@ function makeFakeSftp({
     const secrets = makeSecretsServiceStub();
     const audit = makeAuditModelStub();
     const factory = makeClientFactory();
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
 
     // Saturate the in-process semaphore directly via the private methods.
     // The spec mandates max 5 concurrent slots per connection.
@@ -600,7 +617,7 @@ function makeFakeSftp({
     const secrets = makeSecretsServiceStub();
     const audit = makeAuditModelStub();
     const factory = makeClientFactory();
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
 
     for (let i = 0; i < 5; i += 1) await svc['acquireSlot'](String(conn._id));
     let resolved = false;
@@ -630,7 +647,7 @@ function makeFakeSftp({
     const secrets = makeSecretsServiceStub();
     const audit = makeAuditModelStub();
     const factory = makeClientFactory();
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
     const connId = String(conn._id);
 
     // 1) Fill all 5 slots.
@@ -723,7 +740,7 @@ function makeFakeSftp({
     const audit = makeAuditModelStub();
     const sftp = makeFakeSftp({ writeBehaviour: {} });
     const factory = makeClientFactory({ sftp });
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
 
     const userId = new Types.ObjectId().toString();
     const big = Buffer.alloc(11 * 1024 * 1024); // 11 MB > 10 MB cap
@@ -760,7 +777,7 @@ function makeFakeSftp({
     const writeBehaviour = {};
     const sftp = makeFakeSftp({ writeBehaviour });
     const factory = makeClientFactory({ sftp });
-    const svc = new SshSessionService(sshService, secrets, audit, factory);
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
 
     const userId = new Types.ObjectId().toString();
     const exact = Buffer.alloc(10 * 1024 * 1024); // 10 MB, == cap

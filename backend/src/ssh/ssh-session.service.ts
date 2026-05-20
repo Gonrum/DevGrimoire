@@ -10,6 +10,7 @@ import {
 } from 'ssh2';
 import { SshService } from './ssh.service';
 import { SecretsService } from '../secrets/secrets.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   SshAudit,
   SshAuditAction,
@@ -159,6 +160,7 @@ export class SshSessionService {
     private readonly secretsService: SecretsService,
     @InjectModel(SshAudit.name)
     private readonly auditModel: Model<SshAuditDocument>,
+    private readonly notificationsService: NotificationsService,
     private readonly clientFactory: SshClientFactory = DEFAULT_FACTORY,
   ) {}
 
@@ -497,6 +499,20 @@ export class SshSessionService {
             err.message,
           )
           .catch(() => { /* noop */ });
+        // Auth-failure push (Spec §6.6). The SSH-Session path classifies the
+        // error code from the ssh2 error.level/message here so the
+        // recordConnectError stamp and the notification dispatch agree on
+        // whether this was an auth failure.
+        if (
+          connection.notifyOnAuthFailure &&
+          this.isAuthFailure(err)
+        ) {
+          this.dispatchAuthFailureNotification(connection).catch((nerr) => {
+            this.logger.warn(
+              `Auth-failure notification failed for SshConnection ${(connection._id as Types.ObjectId).toString()}: ${(nerr as Error).message}`,
+            );
+          });
+        }
         reject(err);
       };
 
@@ -962,6 +978,36 @@ export class SshSessionService {
       );
       throw new Error('credential_missing');
     }
+  }
+
+  /**
+   * Detect ssh2 auth failures by inspecting both the `level` field (set on
+   * structured ssh2 errors) and the message. Mirrors the classifier in
+   * `SshTestService.classifyConnectError` so notify-eligibility is consistent
+   * across the test-probe and the session-pump entry points.
+   */
+  private isAuthFailure(err: Error & { level?: string; code?: string }): boolean {
+    const message = err?.message || '';
+    const level = err?.level;
+    if (level === 'client-authentication') return true;
+    if (/All configured authentication methods failed/i.test(message)) return true;
+    if (/authentication/i.test(message)) return true;
+    if (message === 'auth_failed' || message.startsWith('auth_failed:')) return true;
+    return false;
+  }
+
+  /**
+   * Dispatch a notification when an SSH connect failed with `auth_failed` and
+   * the connection has `notifyOnAuthFailure` enabled (Spec §6.6). Mirrors the
+   * counterpart in SshTestService so both connect paths feed the same
+   * `ssh_auth_failure` push category.
+   */
+  private async dispatchAuthFailureNotification(
+    connection: SshConnectionDocument,
+  ): Promise<void> {
+    const title = `SSH-Auth fehlgeschlagen: ${connection.label}`;
+    const body = `Authentifizierung gegen ${connection.username}@${connection.host}:${connection.port} schlug fehl.`;
+    await this.notificationsService.create(title, body, undefined, 'ssh_auth_failure');
   }
 
   private async recordError(connId: string, code: string, err: Error): Promise<void> {

@@ -17,6 +17,7 @@ export const DEFAULT_PUSH_CATEGORIES = [
   'monitoring_unhealthy',
   'replication_failed',
   'backup_failed',
+  'ssh_auth_failure',
 ].join(',');
 
 @Injectable()

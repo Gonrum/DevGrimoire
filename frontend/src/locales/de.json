@@ -1424,6 +1424,8 @@
     "pushCategory_replication_failed_desc": "Wenn Replikations-Events nicht zugestellt werden konnten (debounced auf 1×/Stunde).",
     "pushCategory_backup_failed": "Backup fehlgeschlagen",
     "pushCategory_backup_failed_desc": "Bei einem fehlgeschlagenen Backup-Job (manuell oder geplant).",
+    "pushCategory_ssh_auth_failure": "SSH-Auth fehlgeschlagen",
+    "pushCategory_ssh_auth_failure_desc": "Wenn eine SSH-Verbindung mit aktiviertem \"Bei Auth-Failure benachrichtigen\" einen Authentifizierungsfehler meldet.",
     "pushCategory_recurring": "Wiederkehrende Aufgaben",
     "pushCategory_recurring_desc": "Wenn eine Rite eine Notification-Action ausführt."
   },
@@ -2030,7 +2032,8 @@
       "never_tested": "ungetestet",
       "error": "Fehler",
       "fingerprint_pending": "Fingerprint ausstehend",
-      "key_missing": "Key fehlt"
+      "key_missing": "Key fehlt",
+      "warning": "Credentials fehlen"
     },
     "authMethod": {
       "key": "Key",

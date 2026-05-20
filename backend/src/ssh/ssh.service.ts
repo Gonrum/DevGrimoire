@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
@@ -22,6 +23,7 @@ import {
 import { SecretsService } from '../secrets/secrets.service';
 import { CreateSshConnectionDto } from './dto/create-ssh-connection.dto';
 import { UpdateSshConnectionDto } from './dto/update-ssh-connection.dto';
+import { PROJECT_CHANGED } from '../events/project-event';
 
 interface CreatedOwnedSecretRef {
   id: Types.ObjectId;
@@ -40,7 +42,33 @@ export class SshService {
     @InjectModel(SshAudit.name)
     private readonly auditModel: Model<SshAuditDocument>,
     private readonly secretsService: SecretsService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * Emit a `PROJECT_CHANGED` event for an SSH connection mutation. Routes
+   * through the EventEmitter so the WS-Multiplex bus picks it up immediately
+   * (the Change-Stream watcher would also fire, but that has higher latency
+   * and skips customer-scoped docs by default until M-38's dual-scope rules
+   * kick in).
+   *
+   * `summary` is consumed by clients that want a quick label without
+   * re-fetching the doc (currently informational only).
+   */
+  private emitConnectionChange(
+    doc: SshConnectionDocument,
+    action: 'created' | 'updated' | 'deleted',
+    summary?: string,
+  ): void {
+    this.eventEmitter.emit(PROJECT_CHANGED, {
+      projectId: doc.projectId?.toString() || null,
+      customerId: doc.customerId?.toString() || null,
+      entity: 'ssh-connection',
+      action,
+      entityId: (doc._id as Types.ObjectId).toString(),
+      summary,
+    });
+  }
 
   // -------------------------------------------------------------------------
   // Public CRUD
@@ -156,6 +184,7 @@ export class SshService {
           .exec();
       }
 
+      this.emitConnectionChange(created, 'created', `SSH-Verbindung "${created.label}" angelegt`);
       return created;
     } catch (err) {
       // Rollback any secrets we created in this transaction.
@@ -389,6 +418,7 @@ export class SshService {
             .exec();
         }
 
+        this.emitConnectionChange(updated, 'updated', `SSH-Verbindung "${updated.label}" rotiert`);
         return updated;
       } catch (err) {
         // Rollback new secrets we just created so we don't leak orphans.
@@ -479,6 +509,7 @@ export class SshService {
           'SshConnection was modified by another request; please retry',
         );
       }
+      this.emitConnectionChange(updated, 'updated', `SSH-Verbindung "${updated.label}" rotiert`);
       return updated;
     }
 
@@ -499,6 +530,7 @@ export class SshService {
         'SshConnection was modified by another request; please retry',
       );
     }
+    this.emitConnectionChange(updated, 'updated', `SSH-Verbindung "${updated.label}" aktualisiert`);
     return updated;
   }
 
@@ -518,12 +550,16 @@ export class SshService {
       .exec();
 
     await this.sshModel.deleteOne({ _id: doc._id }).exec();
+    this.emitConnectionChange(doc, 'deleted', `SSH-Verbindung "${doc.label}" gelöscht`);
   }
 
   async setKnownHostFingerprint(id: string, fingerprint: string): Promise<SshConnectionDocument> {
     const doc = await this.findById(id);
     doc.knownHostFingerprint = fingerprint;
     await doc.save();
+    // Status change (TOFU accept) → re-emit so the UI flips from
+    // 🔒 fingerprint_pending to ✅ ok without a manual refresh.
+    this.emitConnectionChange(doc, 'updated', `SSH-Fingerprint für "${doc.label}" akzeptiert`);
     return doc;
   }
 
@@ -531,6 +567,8 @@ export class SshService {
     const doc = await this.findById(id);
     doc.lastConnectError = { at: new Date(), message };
     await doc.save();
+    // Status change (connect failure) → re-emit so the UI flips to ❌/⚠️.
+    this.emitConnectionChange(doc, 'updated', `SSH-Connect-Fehler für "${doc.label}"`);
     return doc;
   }
 
@@ -539,6 +577,8 @@ export class SshService {
     doc.lastConnectedAt = new Date();
     doc.lastConnectError = undefined;
     await doc.save();
+    // Status change (connect success) → re-emit so the UI flips to ✅.
+    this.emitConnectionChange(doc, 'updated', `SSH-Connect-Success für "${doc.label}"`);
     return doc;
   }
 

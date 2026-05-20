@@ -12,10 +12,14 @@ import {
  * Order matters:
  *   1. `key_missing` — auth=key without a privateKeySecretId ref. Only
  *      derivable from the detail-shape (list doesn't include refs).
- *   2. `fingerprint_pending` — no fingerprint accepted yet.
- *   3. `error` — `lastConnectError` populated.
- *   4. `ok` — `lastConnectedAt` set without a stale error.
- *   5. `never_tested` — fallback when nothing was ever attempted.
+ *   2. `warning` — last connect failed with `credential_missing` (referenced
+ *      secret deleted or unreadable). Spec §6.5: surface ⚠️ instead of ❌
+ *      so the user sees this as recoverable (rotate creds) rather than a
+ *      generic host-side error.
+ *   3. `fingerprint_pending` — no fingerprint accepted yet.
+ *   4. `error` — `lastConnectError` populated.
+ *   5. `ok` — `lastConnectedAt` set without a stale error.
+ *   6. `never_tested` — fallback when nothing was ever attempted.
  */
 export function deriveSshStatus(
   conn: SshConnectionListItem | SshConnectionDetail,
@@ -24,6 +28,12 @@ export function deriveSshStatus(
   if (conn.authMethod === 'key' && detail.privateKeySecretId !== undefined && !detail.privateKeySecretId) {
     // Detail-shape with explicit-null privateKeySecretId — defensive guard.
     return 'key_missing';
+  }
+  // Credential-missing maps to a soft warning, not a hard error — the user
+  // can fix this by rotating creds without re-running TOFU. Match both the
+  // prefix-stamped form ("credential_missing: …") and the bare code.
+  if (conn.lastConnectError && /^credential_missing(\b|:)/.test(conn.lastConnectError.message)) {
+    return 'warning';
   }
   if (conn.lastConnectError) return 'error';
   if (!conn.knownHostFingerprintSet) {
@@ -68,5 +78,10 @@ export const SSH_STATUS_VISUAL: Record<SshConnectionStatus, SshStatusVisual> = {
     emoji: '⚠️',
     badgeClass: 'bg-amber-900/50 text-amber-300',
     i18nKey: 'ssh.status.key_missing',
+  },
+  warning: {
+    emoji: '⚠️',
+    badgeClass: 'bg-amber-900/50 text-amber-300',
+    i18nKey: 'ssh.status.warning',
   },
 };

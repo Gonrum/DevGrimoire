@@ -17,7 +17,10 @@
 export type WsConnectionState = 'connecting' | 'open' | 'reconnecting' | 'closed';
 
 export interface ProjectChangeEvent {
-  projectId: string;
+  /** Null when the entity is customer-scoped only (e.g. SSH-connections owned by a customer). */
+  projectId: string | null;
+  /** Set when the entity owner is a customer. Mutually exclusive with projectId for owned entities. */
+  customerId?: string | null;
   entity:
     | 'project'
     | 'todo'
@@ -39,7 +42,9 @@ export interface ProjectChangeEvent {
     | 'snippet'
     | 'doc-update-proposal'
     | 'knowledge-graph'
-    | 'oracle';
+    | 'oracle'
+    | 'ssh-connection'
+    | 'ssh-audit';
   action: 'created' | 'updated' | 'deleted';
   entityId?: string;
 }

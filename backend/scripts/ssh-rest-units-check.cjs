@@ -197,6 +197,23 @@ function makeSshServiceStub({ connection } = {}) {
   };
 }
 
+/**
+ * Minimal NotificationsService stub. Records `create()` calls so tests can
+ * assert auth-failure pushes (T-385) without needing the real service /
+ * push-subscription plumbing.
+ */
+function makeNotificationsStub() {
+  const calls = [];
+  return {
+    calls,
+    async create(title, body, url, category) {
+      const entry = { title, body, url, category, _id: `notif-${calls.length}` };
+      calls.push(entry);
+      return entry;
+    },
+  };
+}
+
 function makeSecretsServiceStub({ failOn = null } = {}) {
   return {
     async findById(id) {
@@ -322,7 +339,7 @@ function makePasswordConnection(overrides = {}) {
     const auditModel = makeAuditModelStub();
     const factory = makeClientFactory({ kind: 'ready' });
 
-    const svc = new SshTestService(sshService, secretsService, auditModel, factory);
+    const svc = new SshTestService(sshService, secretsService, auditModel, makeNotificationsStub(), factory);
     const result = await svc.testConnection(String(conn._id), {
       userId: new Types.ObjectId().toString(),
     });
@@ -361,7 +378,7 @@ function makePasswordConnection(overrides = {}) {
       const auditModel = makeAuditModelStub();
       const factory = makeClientFactory({ kind: 'firstTimeError' });
 
-      const svc = new SshTestService(sshService, secretsService, auditModel, factory);
+      const svc = new SshTestService(sshService, secretsService, auditModel, makeNotificationsStub(), factory);
       const result = await svc.testConnection(String(conn._id), {
         userId: new Types.ObjectId().toString(),
       });
@@ -407,7 +424,7 @@ function makePasswordConnection(overrides = {}) {
       };
       const factory = makeClientFactory({ kind: 'ready' });
 
-      const svc = new SshTestService(sshService, secretsService, failingAuditModel, factory);
+      const svc = new SshTestService(sshService, secretsService, failingAuditModel, makeNotificationsStub(), factory);
 
       // Spy the logger so we can prove the warn fires.
       const warnCalls = [];
@@ -449,7 +466,7 @@ function makePasswordConnection(overrides = {}) {
     const auditModel = makeAuditModelStub();
     const factory = makeClientFactory({ kind: 'ready' });
 
-    const svc = new SshTestService(sshService, secretsService, auditModel, factory);
+    const svc = new SshTestService(sshService, secretsService, auditModel, makeNotificationsStub(), factory);
     const result = await svc.testConnection(String(conn._id), {
       userId: new Types.ObjectId().toString(),
     });
@@ -476,7 +493,7 @@ function makePasswordConnection(overrides = {}) {
     const auditModel = makeAuditModelStub();
     const factory = makeClientFactory({ kind: 'mismatch' });
 
-    const svc = new SshTestService(sshService, secretsService, auditModel, factory);
+    const svc = new SshTestService(sshService, secretsService, auditModel, makeNotificationsStub(), factory);
     const result = await svc.testConnection(String(conn._id), {
       userId: new Types.ObjectId().toString(),
     });
@@ -504,7 +521,7 @@ function makePasswordConnection(overrides = {}) {
     const auditModel = makeAuditModelStub();
     const factory = makeClientFactory({ kind: 'authError' });
 
-    const svc = new SshTestService(sshService, secretsService, auditModel, factory);
+    const svc = new SshTestService(sshService, secretsService, auditModel, makeNotificationsStub(), factory);
     const result = await svc.testConnection(String(conn._id), {
       userId: new Types.ObjectId().toString(),
     });
@@ -537,7 +554,7 @@ function makePasswordConnection(overrides = {}) {
     const realSetTimeout = global.setTimeout;
     global.setTimeout = (fn, _ms) => realSetTimeout(fn, 0);
     try {
-      const svc = new SshTestService(sshService, secretsService, auditModel, factory);
+      const svc = new SshTestService(sshService, secretsService, auditModel, makeNotificationsStub(), factory);
       const result = await svc.testConnection(String(conn._id), {
         userId: new Types.ObjectId().toString(),
       });
@@ -562,7 +579,7 @@ function makePasswordConnection(overrides = {}) {
     const auditModel = makeAuditModelStub();
     const factory = makeClientFactory({ kind: 'ready' }); // never reached
 
-    const svc = new SshTestService(sshService, secretsService, auditModel, factory);
+    const svc = new SshTestService(sshService, secretsService, auditModel, makeNotificationsStub(), factory);
     const result = await svc.testConnection(String(conn._id), {
       userId: new Types.ObjectId().toString(),
     });
@@ -587,7 +604,7 @@ function makePasswordConnection(overrides = {}) {
     const auditModel = makeAuditModelStub();
     const factory = makeClientFactory({ kind: 'ready' });
 
-    const svc = new SshTestService(sshService, secretsService, auditModel, factory);
+    const svc = new SshTestService(sshService, secretsService, auditModel, makeNotificationsStub(), factory);
     const result = await svc.testConnection(String(conn._id), { userId: 'system' });
 
     assert.equal(result.ok, false);

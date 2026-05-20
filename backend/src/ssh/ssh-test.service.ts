@@ -5,11 +5,13 @@ import { Model, Types } from 'mongoose';
 import { Client as Ssh2Client } from 'ssh2';
 import { SshService } from './ssh.service';
 import { SecretsService } from '../secrets/secrets.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   SshAudit,
   SshAuditDocument,
   SshAuditSourceContext,
 } from './schemas/ssh-audit.schema';
+import type { SshConnectionDocument } from './schemas/ssh-connection.schema';
 
 export type SshTestErrorCode =
   | 'auth_failed'
@@ -74,6 +76,7 @@ export class SshTestService {
     private readonly secretsService: SecretsService,
     @InjectModel(SshAudit.name)
     private readonly auditModel: Model<SshAuditDocument>,
+    private readonly notificationsService: NotificationsService,
     private readonly clientFactory: SshClientFactory = DEFAULT_FACTORY,
   ) {}
 
@@ -184,6 +187,18 @@ export class SshTestService {
               ? `${result.error.code}: ${result.error.message}`
               : undefined,
           });
+          // Auth-failure push (Spec §6.6). Fire-and-forget; the user already
+          // sees the error in the test-dialog and notifications are advisory.
+          if (
+            result.error?.code === 'auth_failed' &&
+            connection.notifyOnAuthFailure
+          ) {
+            this.dispatchAuthFailureNotification(connection).catch((err) => {
+              this.logger.warn(
+                `Auth-failure notification failed for SshConnection ${connId}: ${(err as Error).message}`,
+              );
+            });
+          }
         };
         persist().catch((err) => {
           this.logger.warn(
@@ -413,6 +428,22 @@ export class SshTestService {
       return { code: 'timeout', message };
     }
     return { code: 'unknown', message };
+  }
+
+  /**
+   * Dispatch a notification when an SSH connect failed with `auth_failed` and
+   * the connection has `notifyOnAuthFailure` enabled (Spec §6.6). Reuses the
+   * standard NotificationsService channel so the existing per-category
+   * push-toggle in NotificationsSettings applies.
+   *
+   * Best-effort — the caller catches and logs but never fails the user flow.
+   */
+  private async dispatchAuthFailureNotification(
+    connection: SshConnectionDocument,
+  ): Promise<void> {
+    const title = `SSH-Auth fehlgeschlagen: ${connection.label}`;
+    const body = `Authentifizierung gegen ${connection.username}@${connection.host}:${connection.port} schlug fehl.`;
+    await this.notificationsService.create(title, body, undefined, 'ssh_auth_failure');
   }
 
   private async writeAudit(entry: {

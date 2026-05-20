@@ -11,6 +11,7 @@ import { SshTestService } from './ssh-test.service';
 import { SshSessionService } from './ssh-session.service';
 import { SshController } from './ssh.controller';
 import { SecretsModule } from '../secrets/secrets.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -23,6 +24,8 @@ import { SecretsModule } from '../secrets/secrets.module';
       { name: Secret.name, schema: SecretSchema },
     ]),
     SecretsModule,
+    // Auth-failure push (T-385 §6.6) routes through NotificationsService.
+    NotificationsModule,
   ],
   controllers: [SshController],
   // SshSessionService is exported so main.ts can grab it via `app.get(...)`

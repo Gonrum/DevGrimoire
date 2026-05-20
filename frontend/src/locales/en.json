@@ -1424,6 +1424,8 @@
     "pushCategory_replication_failed_desc": "Replication events could not be delivered (debounced 1×/hour).",
     "pushCategory_backup_failed": "Backup failed",
     "pushCategory_backup_failed_desc": "A backup job failed (manual or scheduled).",
+    "pushCategory_ssh_auth_failure": "SSH auth failure",
+    "pushCategory_ssh_auth_failure_desc": "An SSH connection with \"Notify on auth failure\" enabled reported an authentication error.",
     "pushCategory_recurring": "Recurring tasks",
     "pushCategory_recurring_desc": "When a recurring task fires a notification action."
   },
@@ -2031,7 +2033,8 @@
       "never_tested": "untested",
       "error": "error",
       "fingerprint_pending": "fingerprint pending",
-      "key_missing": "key missing"
+      "key_missing": "key missing",
+      "warning": "credentials missing"
     },
     "authMethod": {
       "key": "Key",

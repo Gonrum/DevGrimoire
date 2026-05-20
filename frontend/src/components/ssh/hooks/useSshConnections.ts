@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, SshConnectionListItem } from '../../../api/client';
+import { isProjectChangeEvent, wsEventBus } from '../../../api/wsEventBus';
 
 export interface UseSshConnectionsScope {
   customerId?: string;
@@ -19,9 +20,10 @@ interface UseSshConnectionsResult {
  * and `/api/projects/:id/ssh-connections`).
  *
  * Implementation note: the rest of the codebase doesn't use react-query, so
- * this hook follows the same plain-state pattern as `MonitoringTab`. Live
- * updates over the WS multiplex bus come in T-385; for now callers invalidate
- * by calling `reload()` after a mutation.
+ * this hook follows the same plain-state pattern as `MonitoringTab`. T-385
+ * wires live updates by subscribing to ssh-connection events on the WS
+ * multiplex bus — every relevant event coalesces into a debounced `reload()`
+ * so two browser tabs stay in sync without polling.
  */
 export function useSshConnections(scope: UseSshConnectionsScope): UseSshConnectionsResult {
   const { customerId, projectId } = scope;
@@ -52,6 +54,50 @@ export function useSshConnections(scope: UseSshConnectionsScope): UseSshConnecti
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // Live updates (T-385): subscribe to ssh-connection events on the WS bus.
+  // Customer-scoped events come in with projectId=null (broadcast), so we
+  // filter client-side by matching customerId on the payload. Project-scoped
+  // subscriptions use the existing `project` scope filter on the bus.
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
+  useEffect(() => {
+    if (!customerId && !projectId) return;
+    const scopeArg = projectId
+      ? ({ kind: 'project', projectId } as const)
+      : ({ kind: 'global' } as const);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const debouncedReload = () => {
+      if (timer) clearTimeout(timer);
+      // 250ms coalescing keeps an update-burst (e.g. status + auth row in
+      // quick succession) from triggering N back-to-back fetches.
+      timer = setTimeout(() => {
+        void reloadRef.current();
+      }, 250);
+    };
+    const unsub = wsEventBus.subscribe(scopeArg, (event) => {
+      if (!isProjectChangeEvent(event)) return;
+      if (event.entity !== 'ssh-connection') return;
+      // Scope match: customer-scope events broadcast with projectId=null,
+      // so we filter by customerId here; project-scope events broadcast with
+      // customerId=null and a real projectId, which we match strictly so a
+      // project-tab doesn't reload when a foreign customer's ssh-connection
+      // mutates (both arrive on the bus because the projectId=null broadcast
+      // rule is intentionally generous for notifications).
+      if (customerId) {
+        if (event.customerId && event.customerId !== customerId) return;
+        if (!event.customerId) return; // foreign project event
+      } else if (projectId) {
+        if (event.projectId && event.projectId !== projectId) return;
+        if (!event.projectId) return; // foreign customer event
+      }
+      debouncedReload();
+    });
+    return () => {
+      unsub();
+      if (timer) clearTimeout(timer);
+    };
+  }, [customerId, projectId]);
 
   return { data, loading, error, reload };
 }

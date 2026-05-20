@@ -753,7 +753,8 @@ export type SshConnectionStatus =
   | 'never_tested'
   | 'error'
   | 'fingerprint_pending'
-  | 'key_missing';
+  | 'key_missing'
+  | 'warning';
 
 export interface SshLastConnectError {
   at: string;

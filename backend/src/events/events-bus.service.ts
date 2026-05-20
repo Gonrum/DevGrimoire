@@ -38,7 +38,21 @@ const COLLECTION_ENTITY_MAP: Record<string, ProjectChangeEvent['entity']> = {
   souls: 'soul',
   commits: 'commit',
   workspaces: 'workspace',
+  sshconnections: 'ssh-connection',
+  sshaudits: 'ssh-audit',
 };
+
+// Entities whose owner can be either project- OR customer-scoped. The
+// change-stream watcher emits both ids so subscribers (and the WS multiplex
+// filter) can route customer-scoped events correctly even when projectId is
+// null on the document.
+const DUAL_SCOPED_ENTITIES = new Set<ProjectChangeEvent['entity']>([
+  'ssh-connection',
+  'secret',
+  'environment',
+  'healthcheck',
+  'contact',
+]);
 
 const QUESTION_COLLECTION = 'questions';
 
@@ -148,16 +162,29 @@ export class EventsBusService implements OnModuleInit, OnModuleDestroy {
         const entity = COLLECTION_ENTITY_MAP[coll];
         if (!entity) return;
 
-        let projectId: string | undefined;
+        let projectId: string | null | undefined;
+        let customerId: string | null | undefined;
         if (entity === 'project') {
           projectId = (doc?._id || change.documentKey?._id)?.toString();
         } else {
           projectId = doc?.projectId?.toString();
+          customerId = doc?.customerId?.toString();
         }
-        if (!projectId) return;
+        // ssh-audit rows carry only `connectionId` — no project/customer. We
+        // still want to broadcast them so the audit-tab can live-refresh; the
+        // WS filter's "projectId === null" branch handles this.
+        if (entity === 'ssh-audit') {
+          projectId = null;
+          customerId = null;
+        }
+        // Dual-scoped entities can be customer-scoped (no projectId). Allow
+        // null projectId in that case so the WS bus can still broadcast (or
+        // future-route by customerId).
+        if (!projectId && !DUAL_SCOPED_ENTITIES.has(entity)) return;
 
         const event: ProjectChangeEvent = {
-          projectId,
+          projectId: projectId ?? null,
+          customerId: customerId ?? null,
           entity,
           action,
           entityId: (doc?._id || change.documentKey?._id)?.toString(),
@@ -180,7 +207,7 @@ export class EventsBusService implements OnModuleInit, OnModuleDestroy {
   }
 
   private isDuplicate(event: ProjectChangeEvent): boolean {
-    const key = `${event.projectId}:${event.entity}:${event.action}:${event.entityId}`;
+    const key = `${event.projectId ?? ''}:${event.customerId ?? ''}:${event.entity}:${event.action}:${event.entityId}`;
     const now = Date.now();
     const lastSeen = this.recentEvents.get(key);
     if (lastSeen && now - lastSeen < 300) return true;
