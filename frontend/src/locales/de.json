@@ -343,6 +343,7 @@
       "secrets": "Siegel",
       "files": "Pergamente",
       "monitoring": "Observatorium",
+      "ssh": "Server",
       "contacts": "Kontakte",
       "activity": "Chronik",
       "soul": "Mandantenseele",
@@ -774,6 +775,7 @@
       "workspaces": "Werkstätten",
       "environments": "Reiche",
       "secrets": "Siegel",
+      "ssh": "Server",
       "recurringTasks": "Riten",
       "commits": "Vermerke",
       "logs": "Orakel"
@@ -793,6 +795,7 @@
       "workspaces": "Sandbox-Container, in denen der Agent Code klonen und ausführen kann.",
       "environments": "Umgebungen (dev/staging/prod) mit Variablen.",
       "secrets": "Verschlüsselte Secrets pro Projekt oder Umgebung.",
+      "ssh": "SSH-Zugänge zu Servern dieses Projekts — Terminal, Test, Audit.",
       "recurringTasks": "Wiederkehrende Aufgaben — Riten und Routinen.",
       "commits": "Commit-Historie aus verbundenen Git-Repositories.",
       "files": "Dateianhänge und Pergamente dieses Projekts.",
@@ -1949,5 +1952,73 @@
     "promoteActionTooltip": "Agent analysiert den Vermerk und schlägt ein Ziel-Entity vor",
     "archiveAction": "Archivieren",
     "archiveActionTooltip": "Vermerk direkt ins Archiv verschieben (ohne Agent)"
+  },
+  "ssh": {
+    "tab": {
+      "title": "Server",
+      "newServer": "Neuer Server",
+      "connect": "Connect",
+      "connectComingSoon": "Terminal-Modal kommt im nächsten Schritt (T-382)",
+      "test": "Test",
+      "empty": "Noch keine SSH-Zugänge — leg den ersten Server an.",
+      "testFingerprintPrompt": "Neuer Host-Key gefunden — bitte im geöffneten Dialog bestätigen."
+    },
+    "status": {
+      "ok": "OK",
+      "never_tested": "ungetestet",
+      "error": "Fehler",
+      "fingerprint_pending": "Fingerprint ausstehend",
+      "key_missing": "Key fehlt"
+    },
+    "authMethod": {
+      "key": "Key",
+      "password": "Passwort"
+    },
+    "field": {
+      "host": "Host",
+      "port": "Port",
+      "username": "User",
+      "lastConnectedAt": "Letzter Connect"
+    },
+    "form": {
+      "titleCreate": "Neuer Server",
+      "titleEdit": "Server bearbeiten",
+      "label": "Label",
+      "labelPlaceholder": "z. B. Production Web",
+      "slug": "Slug",
+      "slugHelp": "Auto aus Label, kebab-case (3–60 Zeichen, [a-z0-9-]).",
+      "slugInvalid": "Slug muss kebab-case sein, 3–60 Zeichen, nur [a-z0-9-].",
+      "tagsPlaceholder": "Tag hinzufügen…",
+      "notifyOnAuthFailure": "Bei Auth-Failure benachrichtigen",
+      "authKey": "Private Key",
+      "authPassword": "Passwort",
+      "credInline": "Neu eingeben",
+      "credPick": "Existierenden Secret wählen",
+      "privateKey": "Private Key (PEM)",
+      "passphraseOptional": "Passphrase (optional)",
+      "password": "Passwort",
+      "pickKey": "Private Key auswählen",
+      "pickKeyEmpty": "Keine SSH-Keys im Scope vorhanden.",
+      "pickPassphraseOptional": "Passphrase auswählen (optional)",
+      "pickPassword": "Passwort-Secret auswählen",
+      "pickPasswordEmpty": "Keine passenden Secrets im Scope vorhanden.",
+      "credentialsLocked": "Credentials werden im Edit-Modus nicht angezeigt. Über den Button unten ersetzen.",
+      "changeCredentials": "Credentials ändern…",
+      "changeCredentialsConfirm": "Wirklich ersetzen?",
+      "test": "Test",
+      "testSuccess": "Test erfolgreich.",
+      "testFailed": "Test fehlgeschlagen: {{reason}}. Connection wurde gespeichert — du kannst Host/Username/Auth jetzt korrigieren und nochmal testen.",
+      "saved": "Server gespeichert.",
+      "deleted": "Server gelöscht."
+    },
+    "fingerprint": {
+      "title": "Host-Key bestätigen",
+      "sha256": "Fingerprint (SHA-256)",
+      "hint": "Stelle sicher, dass du diesem Server vertraust. Akzeptiere nur Fingerprints, die du vom Server-Administrator verifiziert hast.",
+      "accept": "Akzeptieren",
+      "accepted": "Host-Key gespeichert.",
+      "mismatchTitle": "Der Host-Key hat sich geändert!",
+      "mismatchBody": "Das kann ein Man-in-the-Middle-Angriff sein oder der Server wurde neu installiert. Bitte den neuen Fingerprint extern verifizieren, bevor du fortfährst."
+    }
   }
 }

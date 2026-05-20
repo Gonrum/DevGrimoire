@@ -33,6 +33,7 @@ import ManualView from '../components/ManualView';
 import FileUploadZone from '../components/FileUploadZone';
 import EnvironmentList, { SecretsList } from '../components/EnvironmentList';
 import MonitoringTab from '../components/MonitoringTab';
+import SshConnectionsTab from '../components/ssh/SshConnectionsTab';
 import SoulView from '../components/SoulView';
 import SnippetList from '../components/SnippetList';
 import ResearchList from '../components/ResearchList';
@@ -51,6 +52,7 @@ type Tab =
   | 'secrets'
   | 'files'
   | 'monitoring'
+  | 'ssh'
   | 'contacts'
   | 'activity'
   | 'soul'
@@ -306,6 +308,7 @@ export default function CustomerDetail() {
         { key: 'environments', label: t('customers.tab.environments'), count: customerEnvironments.length + linkedOnlyEnvironments.length },
         { key: 'secrets', label: t('customers.tab.secrets'), count: customerSecrets.length + linkedSecrets.length },
         { key: 'monitoring', label: t('customers.tab.monitoring') },
+        { key: 'ssh', label: t('customers.tab.ssh') },
         { key: 'automation', label: t('nav.workflows') },
         { key: 'contacts', label: t('customers.tab.contacts'), count: contacts.length },
       ],
@@ -659,6 +662,10 @@ export default function CustomerDetail() {
                 projectsById={projectsById}
                 linkedProjectIds={linkedProjectIds}
               />
+            )}
+
+            {tab === 'ssh' && (
+              <SshConnectionsTab scope={{ customerId: id }} />
             )}
 
             {tab === 'automation' && (

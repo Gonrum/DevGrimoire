@@ -34,8 +34,9 @@ import Badge from '../components/ui/Badge';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import ProjectTabShell from '../components/ui/ProjectTabShell';
 import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
+import SshConnectionsTab from '../components/ssh/SshConnectionsTab';
 
-type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces' | 'workflows' | 'docs-health' | 'graph' | 'oracle';
+type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces' | 'workflows' | 'ssh' | 'docs-health' | 'graph' | 'oracle';
 
 export default function ProjectDetail() {
   const { t, i18n } = useTranslation();
@@ -255,6 +256,7 @@ export default function ProjectDetail() {
         { key: 'workspaces', label: t('projectDetail.tab.workspaces'), count: workspaceCount },
         { key: 'environments', label: t('projectDetail.tab.environments'), count: environments.length },
         { key: 'secrets', label: t('projectDetail.tab.secrets'), count: secrets.length },
+        { key: 'ssh', label: t('projectDetail.tab.ssh'), count: 0 },
         { key: 'recurring-tasks', label: t('projectDetail.tab.recurringTasks'), count: recurringTasks.filter((rt) => rt.active).length },
         { key: 'workflows', label: t('nav.workflows'), count: 0 },
         { key: 'commits', label: t('projectDetail.tab.commits'), count: commitCount },
@@ -283,6 +285,7 @@ export default function ProjectDetail() {
     workspaces: t('projectDetail.tabDesc.workspaces'),
     environments: t('projectDetail.tabDesc.environments'),
     secrets: t('projectDetail.tabDesc.secrets'),
+    ssh: t('projectDetail.tabDesc.ssh'),
     'recurring-tasks': t('projectDetail.tabDesc.recurringTasks'),
     commits: t('projectDetail.tabDesc.commits'),
     files: t('projectDetail.tabDesc.files'),
@@ -467,6 +470,7 @@ export default function ProjectDetail() {
             {tab === 'research' && <ResearchList entries={research} projectId={id!} onUpdate={() => api.research.list(id!).then(setResearch)} />}
             {tab === 'environments' && <EnvironmentList key={envKey} projectId={id!} />}
             {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id!} />}
+            {tab === 'ssh' && <SshConnectionsTab scope={{ projectId: id! }} />}
             {tab === 'recurring-tasks' && <RecurringTaskList entries={recurringTasks} projectId={id!} />}
             {tab === 'workflows' && (
               <WorkflowProjectTab scope="project" projectId={id!} />

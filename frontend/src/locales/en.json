@@ -343,6 +343,7 @@
       "secrets": "Seals",
       "files": "Scrolls",
       "monitoring": "Observatory",
+      "ssh": "Servers",
       "contacts": "Contacts",
       "activity": "Chronicle",
       "soul": "Customer Soul",
@@ -774,6 +775,7 @@
       "workspaces": "Workshops",
       "environments": "Realms",
       "secrets": "Seals",
+      "ssh": "Servers",
       "recurringTasks": "Rites",
       "commits": "Inscriptions",
       "logs": "Oracles"
@@ -793,6 +795,7 @@
       "workspaces": "Sandbox containers where the agent can clone and run code.",
       "environments": "Environments (dev/staging/prod) with variables.",
       "secrets": "Encrypted secrets per project or environment.",
+      "ssh": "SSH connections for this project — terminal, test, audit.",
       "recurringTasks": "Recurring tasks — rites and routines.",
       "commits": "Commit history from connected git repositories.",
       "files": "File attachments and scrolls of this project.",
@@ -1950,5 +1953,73 @@
     "promoteActionTooltip": "Agent analyses the note and suggests a target entity",
     "archiveAction": "Archive",
     "archiveActionTooltip": "Move note straight to archive (no agent)"
+  },
+  "ssh": {
+    "tab": {
+      "title": "Servers",
+      "newServer": "New server",
+      "connect": "Connect",
+      "connectComingSoon": "Terminal modal lands in the next step (T-382)",
+      "test": "Test",
+      "empty": "No SSH access yet — add your first server.",
+      "testFingerprintPrompt": "New host key detected — please confirm in the open dialog."
+    },
+    "status": {
+      "ok": "OK",
+      "never_tested": "untested",
+      "error": "error",
+      "fingerprint_pending": "fingerprint pending",
+      "key_missing": "key missing"
+    },
+    "authMethod": {
+      "key": "Key",
+      "password": "Password"
+    },
+    "field": {
+      "host": "Host",
+      "port": "Port",
+      "username": "User",
+      "lastConnectedAt": "Last connect"
+    },
+    "form": {
+      "titleCreate": "New server",
+      "titleEdit": "Edit server",
+      "label": "Label",
+      "labelPlaceholder": "e.g. Production Web",
+      "slug": "Slug",
+      "slugHelp": "Auto from label, kebab-case (3–60 chars, [a-z0-9-]).",
+      "slugInvalid": "Slug must be kebab-case, 3–60 chars, [a-z0-9-] only.",
+      "tagsPlaceholder": "Add tag…",
+      "notifyOnAuthFailure": "Notify on auth failure",
+      "authKey": "Private key",
+      "authPassword": "Password",
+      "credInline": "Enter new",
+      "credPick": "Pick existing secret",
+      "privateKey": "Private key (PEM)",
+      "passphraseOptional": "Passphrase (optional)",
+      "password": "Password",
+      "pickKey": "Pick private key",
+      "pickKeyEmpty": "No SSH keys in scope.",
+      "pickPassphraseOptional": "Pick passphrase (optional)",
+      "pickPassword": "Pick password secret",
+      "pickPasswordEmpty": "No matching secrets in scope.",
+      "credentialsLocked": "Credentials are hidden in edit mode. Use the button below to replace them.",
+      "changeCredentials": "Change credentials…",
+      "changeCredentialsConfirm": "Really replace?",
+      "test": "Test",
+      "testSuccess": "Test succeeded.",
+      "testFailed": "Test failed: {{reason}}. Connection was saved — you can correct host/username/auth and test again.",
+      "saved": "Server saved.",
+      "deleted": "Server deleted."
+    },
+    "fingerprint": {
+      "title": "Confirm host key",
+      "sha256": "Fingerprint (SHA-256)",
+      "hint": "Make sure you trust this server. Only accept fingerprints you have verified out-of-band with the server admin.",
+      "accept": "Accept",
+      "accepted": "Host key saved.",
+      "mismatchTitle": "The host key has changed!",
+      "mismatchBody": "This could be a man-in-the-middle attack or the server was reinstalled. Verify the new fingerprint externally before continuing."
+    }
   }
 }

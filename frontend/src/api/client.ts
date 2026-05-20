@@ -743,6 +743,114 @@ export interface SecretWithValue extends SecretListItem {
   value: string;
 }
 
+// ---- SSH connections ------------------------------------------------------
+
+export type SshAuthMethod = 'key' | 'password';
+
+/** Client-derived status (Spec §5.3). Backend has no `status` field. */
+export type SshConnectionStatus =
+  | 'ok'
+  | 'never_tested'
+  | 'error'
+  | 'fingerprint_pending'
+  | 'key_missing';
+
+export interface SshLastConnectError {
+  at: string;
+  message: string;
+}
+
+/** Shape returned by `toListItem` in the backend SshController. */
+export interface SshConnectionListItem {
+  id: string;
+  label: string;
+  slug: string;
+  customerId?: string;
+  projectId?: string;
+  host: string;
+  port: number;
+  username: string;
+  authMethod: SshAuthMethod;
+  tags: string[];
+  knownHostFingerprintSet: boolean;
+  lastConnectedAt?: string;
+  lastConnectError?: SshLastConnectError;
+  notifyOnAuthFailure: boolean;
+}
+
+/** Shape returned by `toDetail` — list-shape + secret refs + accepted fingerprint. */
+export interface SshConnectionDetail extends SshConnectionListItem {
+  description?: string;
+  privateKeySecretId?: string;
+  passphraseSecretId?: string;
+  passwordSecretId?: string;
+  knownHostFingerprint?: string;
+}
+
+export interface SshTestErrorPayload {
+  code:
+    | 'auth_failed'
+    | 'host_unreachable'
+    | 'host_key_mismatch'
+    | 'credential_missing'
+    | 'timeout'
+    | 'unknown';
+  message: string;
+}
+
+export interface SshTestResult {
+  ok: boolean;
+  fingerprint?: string;
+  fingerprintAccepted?: boolean;
+  fingerprintMismatch?: boolean;
+  error?: SshTestErrorPayload;
+}
+
+/**
+ * Inline-secrets sub-object as accepted by `CreateSshConnectionDto`.
+ * Backend nests by auth-method (NOT flat) — keep this shape locked.
+ */
+export interface SshCreateInlineSecrets {
+  key?: {
+    privateKey: string;
+    passphrase?: string;
+  };
+  password?: {
+    password: string;
+  };
+}
+
+export interface SshConnectionCreateInput {
+  label: string;
+  slug: string;
+  customerId?: string;
+  projectId?: string;
+  host: string;
+  port?: number;
+  username: string;
+  authMethod: SshAuthMethod;
+  description?: string;
+  tags?: string[];
+  notifyOnAuthFailure?: boolean;
+  // Variant A — fresh secrets.
+  inlineSecrets?: SshCreateInlineSecrets;
+  // Variant B — pick-existing.
+  privateKeySecretId?: string;
+  passphraseSecretId?: string;
+  passwordSecretId?: string;
+}
+
+export interface SshConnectionUpdateInput {
+  label?: string;
+  slug?: string;
+  host?: string;
+  port?: number;
+  username?: string;
+  description?: string;
+  tags?: string[];
+  notifyOnAuthFailure?: boolean;
+}
+
 export interface Notification {
   _id: string;
   title: string;
@@ -1461,6 +1569,35 @@ export const api = {
       request<SecretListItem>(`/secrets/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/secrets/${id}`, { method: 'DELETE' }),
+  },
+  ssh: {
+    listForCustomer: (customerId: string) =>
+      request<SshConnectionListItem[]>(`/customers/${customerId}/ssh-connections`),
+    listForProject: (projectId: string) =>
+      request<SshConnectionListItem[]>(`/projects/${projectId}/ssh-connections`),
+    get: (id: string) => request<SshConnectionDetail>(`/ssh-connections/${id}`),
+    create: (data: SshConnectionCreateInput) =>
+      request<SshConnectionDetail>('/ssh-connections', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: SshConnectionUpdateInput) =>
+      request<SshConnectionDetail>(`/ssh-connections/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      request<void>(`/ssh-connections/${id}`, { method: 'DELETE' }),
+    test: (id: string) =>
+      request<SshTestResult>(`/ssh-connections/${id}/test`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }),
+    acceptFingerprint: (id: string, fingerprint: string) =>
+      request<SshConnectionDetail>(`/ssh-connections/${id}/accept-fingerprint`, {
+        method: 'POST',
+        body: JSON.stringify({ fingerprint }),
+      }),
   },
   manuals: {
     list: (projectId: string, category?: string) => {
