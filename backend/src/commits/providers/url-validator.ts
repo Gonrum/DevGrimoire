@@ -22,8 +22,12 @@ function isPrivateHostname(hostname: string): boolean {
   return lower === 'localhost' || lower === '[::1]' || lower.endsWith('.local') || lower.endsWith('.internal');
 }
 
-export function validateGitBaseUrl(baseUrl: string | undefined): void {
-  if (!baseUrl) return; // No custom baseUrl = use default (github.com/gitlab.com), always OK
+export function validateGitBaseUrl(
+  baseUrl: string | undefined,
+  allowPrivateHost = false,
+): void {
+  if (!baseUrl) return;
+  if (allowPrivateHost) return;
 
   let parsed: URL;
   try {
@@ -38,7 +42,6 @@ export function validateGitBaseUrl(baseUrl: string | undefined): void {
 
   const hostname = parsed.hostname;
 
-  // Block private IPs and hostnames (SSRF protection)
   if (isPrivateIp(hostname) || isPrivateHostname(hostname)) {
     throw new BadRequestException('Base URL must not point to private/internal addresses');
   }

@@ -153,7 +153,7 @@ export class ReleasesService {
     token: string,
     repoIndex: number,
   ): Promise<{ synced: number; created: number; updated: number }> {
-    validateGitBaseUrl(repoConfig.baseUrl);
+    validateGitBaseUrl(repoConfig.baseUrl, repoConfig.allowPrivateHost);
     const baseUrl = repoConfig.baseUrl || 'https://gitlab.com';
     const projectPath = repoConfig.gitlabProjectId
       ? encodeURIComponent(repoConfig.gitlabProjectId)

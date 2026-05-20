@@ -33,7 +33,7 @@ export class GitLabProviderService implements GitProviderInterface {
     token: string,
     since?: Date,
   ): Promise<FetchCommitsResult> {
-    validateGitBaseUrl(config.baseUrl);
+    validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
     const baseUrl = this.getBaseUrl(config);
     const projectPath = this.getProjectPath(config);
     const allCommits: NormalizedCommit[] = [];
@@ -97,7 +97,7 @@ export class GitLabProviderService implements GitProviderInterface {
   }
 
   async fetchCommitStats(config: GitRepository, token: string, sha: string): Promise<CommitStats> {
-    validateGitBaseUrl(config.baseUrl);
+    validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
     const baseUrl = this.getBaseUrl(config);
     const projectPath = this.getProjectPath(config);
     // Fetch diff to get file count
@@ -121,7 +121,7 @@ export class GitLabProviderService implements GitProviderInterface {
   }
 
   async fetchBranches(config: GitRepository, token: string): Promise<GitBranch[]> {
-    validateGitBaseUrl(config.baseUrl);
+    validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
     const baseUrl = this.getBaseUrl(config);
     const projectPath = this.getProjectPath(config);
     const url = `${baseUrl}/api/v4/projects/${projectPath}/repository/branches?per_page=100`;
@@ -135,7 +135,7 @@ export class GitLabProviderService implements GitProviderInterface {
 
   async validateToken(config: GitRepository, token: string): Promise<boolean> {
     try {
-      validateGitBaseUrl(config.baseUrl);
+      validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
       const baseUrl = this.getBaseUrl(config);
       const projectPath = this.getProjectPath(config);
       const url = `${baseUrl}/api/v4/projects/${projectPath}`;

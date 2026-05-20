@@ -33,7 +33,7 @@ export class GitHubProviderService implements GitProviderInterface {
     since?: Date,
     etag?: string,
   ): Promise<FetchCommitsResult> {
-    validateGitBaseUrl(config.baseUrl);
+    validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
     const baseUrl = this.getBaseUrl(config);
     const allCommits: NormalizedCommit[] = [];
     let page = 1;
@@ -106,7 +106,7 @@ export class GitHubProviderService implements GitProviderInterface {
   }
 
   async fetchCommitStats(config: GitRepository, token: string, sha: string): Promise<CommitStats> {
-    validateGitBaseUrl(config.baseUrl);
+    validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
     const baseUrl = this.getBaseUrl(config);
     const url = `${baseUrl}/repos/${config.owner}/${config.repo}/commits/${sha}`;
     const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
@@ -120,7 +120,7 @@ export class GitHubProviderService implements GitProviderInterface {
   }
 
   async fetchBranches(config: GitRepository, token: string): Promise<GitBranch[]> {
-    validateGitBaseUrl(config.baseUrl);
+    validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
     const baseUrl = this.getBaseUrl(config);
     const url = `${baseUrl}/repos/${config.owner}/${config.repo}/branches?per_page=100`;
     const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
@@ -133,7 +133,7 @@ export class GitHubProviderService implements GitProviderInterface {
 
   async validateToken(config: GitRepository, token: string): Promise<boolean> {
     try {
-      validateGitBaseUrl(config.baseUrl);
+      validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
       const baseUrl = this.getBaseUrl(config);
       const url = `${baseUrl}/repos/${config.owner}/${config.repo}`;
       const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
