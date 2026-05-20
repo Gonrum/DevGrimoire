@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
@@ -161,6 +161,7 @@ export class SshSessionService {
     @InjectModel(SshAudit.name)
     private readonly auditModel: Model<SshAuditDocument>,
     private readonly notificationsService: NotificationsService,
+    @Optional()
     private readonly clientFactory: SshClientFactory = DEFAULT_FACTORY,
   ) {}
 
