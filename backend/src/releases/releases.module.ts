@@ -6,6 +6,7 @@ import { ReleasesController } from './releases.controller';
 import { Project, ProjectSchema } from '../projects/schemas/project.schema';
 import { ProjectsModule } from '../projects/projects.module';
 import { SecretsModule } from '../secrets/secrets.module';
+import { CommitsModule } from '../commits/commits.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { SecretsModule } from '../secrets/secrets.module';
     ]),
     ProjectsModule,
     SecretsModule,
+    CommitsModule,
   ],
   controllers: [ReleasesController],
   providers: [ReleasesService],

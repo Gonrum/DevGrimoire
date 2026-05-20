@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsArray, ValidateNested, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsIn, IsArray, ValidateNested, IsNumber } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ReleaseType, ReleasePlatform, ReleaseStatus } from '../schemas/release.schema';
 import { ReleaseAssetDto } from './create-release.dto';
@@ -33,12 +33,16 @@ export class UpdateReleaseDto {
   downloadUrl?: string;
 
   @IsOptional()
-  @IsString()
-  gitlabReleaseId?: string;
+  @IsIn(['github', 'gitlab', 'gitea'])
+  provider?: 'github' | 'gitlab' | 'gitea';
 
   @IsOptional()
   @IsString()
-  gitlabTagName?: string;
+  providerReleaseId?: string;
+
+  @IsOptional()
+  @IsString()
+  tagName?: string;
 
   @IsOptional()
   @IsArray()

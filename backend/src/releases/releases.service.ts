@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
@@ -8,13 +8,13 @@ import { UpdateReleaseDto } from './dto/update-release.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { ProjectsService } from '../projects/projects.service';
 import { SecretsService } from '../secrets/secrets.service';
-import { validateGitBaseUrl } from '../commits/providers/url-validator';
 import { projectIdFilter } from '../common/project-id-filter';
+import { GitProviderRegistry } from '../commits/providers/git-provider.registry';
 
 const FETCH_TIMEOUT = 30000;
 
 @Injectable()
-export class ReleasesService {
+export class ReleasesService implements OnApplicationBootstrap {
   private readonly logger = new Logger(ReleasesService.name);
 
   constructor(
@@ -22,7 +22,29 @@ export class ReleasesService {
     private eventEmitter: EventEmitter2,
     private projectsService: ProjectsService,
     private secretsService: SecretsService,
+    private registry: GitProviderRegistry,
   ) {}
+
+  async onApplicationBootstrap(): Promise<void> {
+    const result = await this.releaseModel.updateMany(
+      {
+        gitlabReleaseId: { $exists: true, $ne: null },
+        providerReleaseId: { $exists: false },
+      },
+      [
+        {
+          $set: {
+            provider: 'gitlab',
+            providerReleaseId: '$gitlabReleaseId',
+            tagName: '$gitlabTagName',
+          },
+        },
+      ],
+    ).exec();
+    if (result.modifiedCount > 0) {
+      this.logger.log(`Migrated ${result.modifiedCount} legacy GitLab releases to generic provider fields`);
+    }
+  }
 
   async create(dto: CreateReleaseDto): Promise<ReleaseDocument> {
     const release = await this.releaseModel.create(dto);
@@ -60,10 +82,6 @@ export class ReleasesService {
     return release;
   }
 
-  async findByGitlabReleaseId(projectId: string, gitlabReleaseId: string): Promise<ReleaseDocument | null> {
-    return this.releaseModel.findOne({ projectId: projectIdFilter(projectId), gitlabReleaseId }).exec();
-  }
-
   async update(id: string, dto: UpdateReleaseDto): Promise<ReleaseDocument> {
     const release = await this.releaseModel.findByIdAndUpdate(id, dto, { new: true }).exec();
     if (!release) throw new NotFoundException(`Release ${id} not found`);
@@ -94,10 +112,10 @@ export class ReleasesService {
   }
 
   // =========================================================================
-  // GitLab Release Sync
+  // Provider-agnostic Release Sync
   // =========================================================================
 
-  async syncGitlab(projectId: string, repoIndex?: number): Promise<{ synced: number; created: number; updated: number }> {
+  async syncReleases(projectId: string, repoIndex?: number): Promise<{ synced: number; created: number; updated: number }> {
     const project = await this.projectsService.findById(projectId);
     const projectObj = project.toObject() as any;
     const repos = projectObj.gitRepositories || [];
@@ -118,10 +136,6 @@ export class ReleasesService {
       }
 
       const repoConfig = repos[idx];
-      if (repoConfig.provider !== 'gitlab') {
-        this.logger.debug(`Skipping non-GitLab repository at index ${idx}`);
-        continue;
-      }
 
       if (!repoConfig.tokenSecretId) {
         throw new BadRequestException('No token configured for this repository');
@@ -129,7 +143,7 @@ export class ReleasesService {
 
       const secret = await this.secretsService.findById(repoConfig.tokenSecretId);
       const token = secret.value;
-      const result = await this.fetchAndSyncGitlabReleases(projectId, repoConfig, token, idx);
+      const result = await this.fetchAndSyncReleases(projectId, repoConfig, token, idx);
       totalCreated += result.created;
       totalUpdated += result.updated;
       totalSynced += result.synced;
@@ -140,73 +154,50 @@ export class ReleasesService {
         projectId,
         entity: 'release',
         action: 'created',
-        summary: `${totalCreated} neue Releases aus GitLab synchronisiert`,
+        summary: `${totalCreated} neue Releases synchronisiert`,
       });
     }
 
     return { synced: totalSynced, created: totalCreated, updated: totalUpdated };
   }
 
-  private async fetchAndSyncGitlabReleases(
+  private async fetchAndSyncReleases(
     projectId: string,
     repoConfig: any,
     token: string,
     repoIndex: number,
   ): Promise<{ synced: number; created: number; updated: number }> {
-    validateGitBaseUrl(repoConfig.baseUrl, repoConfig.allowPrivateHost);
-    const baseUrl = repoConfig.baseUrl || 'https://gitlab.com';
-    const projectPath = repoConfig.gitlabProjectId
-      ? encodeURIComponent(repoConfig.gitlabProjectId)
-      : encodeURIComponent(`${repoConfig.owner}/${repoConfig.repo}`);
-
-    const headers = { 'PRIVATE-TOKEN': token, 'Content-Type': 'application/json' };
-    const url = `${baseUrl}/api/v4/projects/${projectPath}/releases?per_page=100`;
-
-    const response = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT) });
-
-    if (response.status === 401 || response.status === 403) {
-      throw new BadRequestException(`GitLab auth error: ${response.status}`);
-    }
-    if (!response.ok) {
-      throw new BadRequestException(`GitLab API error: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    if (!Array.isArray(data)) return { synced: 0, created: 0, updated: 0 };
+    const provider = this.registry.get(repoConfig.provider);
+    const releases = await provider.fetchReleases(repoConfig, token);
 
     let created = 0;
     let updated = 0;
 
-    for (const glRelease of data) {
-      const gitlabReleaseId = String(glRelease.tag_name);
-      const assets = (glRelease.assets?.links || []).map((link: any) => ({
-        name: link.name,
-        url: link.direct_asset_url || link.url,
-        format: link.link_type,
-      }));
-
-      // Add source archives
-      for (const source of glRelease.assets?.sources || []) {
-        assets.push({
-          name: `source.${source.format}`,
-          url: source.url,
-          format: source.format,
-        });
-      }
+    for (const rel of releases) {
+      const releaseTypeMap = {
+        github: ReleaseType.GITHUB,
+        gitlab: ReleaseType.GITLAB,
+        gitea: ReleaseType.GITEA,
+      } as const;
 
       const releaseData = {
-        version: glRelease.tag_name,
-        title: glRelease.name || glRelease.tag_name,
-        description: glRelease.description || '',
-        releaseType: ReleaseType.GITLAB,
+        version: rel.tagName,
+        title: rel.name,
+        description: rel.description || '',
+        releaseType: releaseTypeMap[repoConfig.provider as 'github' | 'gitlab' | 'gitea'],
         status: ReleaseStatus.PUBLISHED,
-        gitlabReleaseId,
-        gitlabTagName: glRelease.tag_name,
-        assets,
+        provider: repoConfig.provider,
+        providerReleaseId: rel.providerReleaseId,
+        tagName: rel.tagName,
+        assets: rel.assets,
         repoLabel: repoConfig.label || undefined,
       };
 
-      const existing = await this.findByGitlabReleaseId(projectId, gitlabReleaseId);
+      const existing = await this.releaseModel.findOne({
+        projectId,
+        provider: repoConfig.provider,
+        providerReleaseId: rel.providerReleaseId,
+      }).exec();
 
       if (existing) {
         await this.releaseModel.findByIdAndUpdate(existing._id, releaseData).exec();
@@ -216,10 +207,9 @@ export class ReleasesService {
           await this.releaseModel.create({ projectId, ...releaseData });
           created++;
         } catch (err: any) {
-          // Duplicate key (version already exists) — update instead
           if (err.code === 11000) {
             await this.releaseModel.findOneAndUpdate(
-              { projectId, version: glRelease.tag_name },
+              { projectId, version: rel.tagName },
               releaseData,
             ).exec();
             updated++;
@@ -230,6 +220,6 @@ export class ReleasesService {
       }
     }
 
-    return { synced: data.length, created, updated };
+    return { synced: releases.length, created, updated };
   }
 }

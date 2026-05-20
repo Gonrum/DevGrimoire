@@ -4733,7 +4733,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = { deleted: true, id: requireString(a, 'id') };
           break;
         case 'release_sync_gitlab':
-          result = await releasesService.syncGitlab(
+          result = await releasesService.syncReleases(
             requireString(a, 'projectId'),
             optionalNumber(a, 'repoIndex'),
           );

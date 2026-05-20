@@ -2114,7 +2114,7 @@ export class ChatToolsService {
         }
         case 'release_sync_gitlab': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const result = await this.releases.syncGitlab(
+          const result = await this.releases.syncReleases(
             projectId,
             args.repoIndex as number | undefined,
           );
