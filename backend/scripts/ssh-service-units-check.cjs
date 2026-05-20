@@ -84,6 +84,11 @@ function applyUpdate(doc, update) {
   if (update.$unset) {
     for (const k of Object.keys(update.$unset)) delete doc[k];
   }
+  if (update.$inc) {
+    for (const [k, v] of Object.entries(update.$inc)) {
+      doc[k] = (typeof doc[k] === 'number' ? doc[k] : 0) + v;
+    }
+  }
 }
 
 class FakeQuery {
@@ -109,6 +114,9 @@ function makeModel(name) {
     constructor(data) {
       Object.assign(this, data);
       if (!this._id) this._id = new Types.ObjectId();
+      // Mongoose-style version key default. SshService's update() reads
+      // `doc.__v` and uses it as an optimistic-concurrency-control filter.
+      if (this.__v === undefined) this.__v = 0;
     }
     async save() {
       if (schemaInvariants) schemaInvariants(this);
@@ -688,6 +696,198 @@ const userId = new Types.ObjectId().toString();
       () => svc.findById(new Types.ObjectId().toString()),
       /not found/i,
     );
+  });
+
+  // ----------------------------------------------------------------
+  // update(): metadata-only patch leaves secrets alone
+  // ----------------------------------------------------------------
+  await check('update() with metadata-only patch does not touch secrets', async () => {
+    const { svc, secretModel } = newWorld();
+    const conn = await svc.create(
+      {
+        label: 'meta',
+        slug: 'meta',
+        customerId,
+        host: 'old-host',
+        username: 'u',
+        authMethod: 'key',
+        inlineSecrets: { key: { privateKey: 'PEM', passphrase: 'pp' } },
+      },
+      userId,
+    );
+    const origPk = String(conn.privateKeySecretId);
+    const origPp = String(conn.passphraseSecretId);
+    const secretsBefore = secretModel._store.size;
+
+    const updated = await svc.update(String(conn._id), {
+      label: 'meta-renamed',
+      host: 'new-host',
+      port: 2200,
+    });
+
+    assert.equal(updated.label, 'meta-renamed');
+    assert.equal(updated.host, 'new-host');
+    assert.equal(updated.port, 2200);
+    // Refs unchanged.
+    assert.equal(String(updated.privateKeySecretId), origPk);
+    assert.equal(String(updated.passphraseSecretId), origPp);
+    // Secrets store untouched (no rotation).
+    assert.equal(secretModel._store.size, secretsBefore);
+    // __v incremented exactly once.
+    assert.equal(updated.__v, 1);
+  });
+
+  // ----------------------------------------------------------------
+  // update(): credential rotation deletes old owned secrets, creates new
+  // ones with ownedBy stamp, even when reusing the same key-naming pattern
+  // (verifies Critical #2 fix — delete-first-then-create).
+  // ----------------------------------------------------------------
+  await check('update() with credential rotation swaps owned secrets without key collision', async () => {
+    const { svc, secretModel } = newWorld();
+    const conn = await svc.create(
+      {
+        label: 'rotate',
+        slug: 'rotate',
+        customerId,
+        host: 'h',
+        username: 'u',
+        authMethod: 'key',
+        inlineSecrets: { key: { privateKey: 'OLD-PEM', passphrase: 'OLD-PP' } },
+      },
+      userId,
+    );
+    const oldPk = String(conn.privateKeySecretId);
+    const oldPp = String(conn.passphraseSecretId);
+    // Sanity: 2 owned secrets exist.
+    assert.equal(secretModel._store.size, 2);
+    assert.equal(String(secretModel._store.get(oldPk).ownedBySshConnectionId), String(conn._id));
+
+    const rotated = await svc.update(String(conn._id), {
+      inlineSecrets: { key: { privateKey: 'NEW-PEM', passphrase: 'NEW-PP' } },
+    });
+
+    // Old owned secrets are gone (verifies Critical #2: same key reused).
+    assert.equal(secretModel._store.has(oldPk), false, 'old privatekey secret deleted');
+    assert.equal(secretModel._store.has(oldPp), false, 'old passphrase secret deleted');
+
+    // Refs point at NEW ids.
+    const newPk = String(rotated.privateKeySecretId);
+    const newPp = String(rotated.passphraseSecretId);
+    assert.notEqual(newPk, oldPk);
+    assert.notEqual(newPp, oldPp);
+
+    // New secrets carry the ownership stamp.
+    const newPkDoc = secretModel._store.get(newPk);
+    const newPpDoc = secretModel._store.get(newPp);
+    assert.ok(newPkDoc, 'new privatekey persisted');
+    assert.ok(newPpDoc, 'new passphrase persisted');
+    assert.equal(String(newPkDoc.ownedBySshConnectionId), String(conn._id));
+    assert.equal(String(newPpDoc.ownedBySshConnectionId), String(conn._id));
+    // Encrypted values reflect the rotation.
+    assert.equal(newPkDoc.encryptedValue, 'enc:NEW-PEM');
+    assert.equal(newPpDoc.encryptedValue, 'enc:NEW-PP');
+    // Store still holds exactly 2 owned secrets (no orphans).
+    assert.equal(secretModel._store.size, 2);
+    // __v incremented.
+    assert.equal(rotated.__v, 1);
+  });
+
+  // ----------------------------------------------------------------
+  // update(): credential rotation dropping the passphrase
+  // ----------------------------------------------------------------
+  await check('update() rotation without passphrase deletes the previous passphrase secret', async () => {
+    const { svc, secretModel } = newWorld();
+    const conn = await svc.create(
+      {
+        label: 'pp-drop',
+        slug: 'pp-drop',
+        customerId,
+        host: 'h',
+        username: 'u',
+        authMethod: 'key',
+        inlineSecrets: { key: { privateKey: 'OLD', passphrase: 'gone' } },
+      },
+      userId,
+    );
+    assert.equal(secretModel._store.size, 2);
+    const oldPp = String(conn.passphraseSecretId);
+
+    const rotated = await svc.update(String(conn._id), {
+      inlineSecrets: { key: { privateKey: 'NEW' /* no passphrase */ } },
+    });
+
+    assert.equal(rotated.passphraseSecretId, undefined, 'passphrase ref cleared');
+    assert.equal(secretModel._store.has(oldPp), false, 'old passphrase secret cascade-deleted');
+    assert.equal(secretModel._store.size, 1, 'only the new privatekey survives');
+  });
+
+  // ----------------------------------------------------------------
+  // update(): concurrent-write detection (Critical #1) — __v changed
+  // between findById() and findOneAndUpdate() → ConflictException AND
+  // freshly created secrets are rolled back.
+  // ----------------------------------------------------------------
+  await check('update() rejects concurrent write via __v guard and rolls back new secrets', async () => {
+    const { svc, sshModel, secretModel } = newWorld();
+    const conn = await svc.create(
+      {
+        label: 'race',
+        slug: 'race',
+        customerId,
+        host: 'h',
+        username: 'u',
+        authMethod: 'key',
+        inlineSecrets: { key: { privateKey: 'PEM' } },
+      },
+      userId,
+    );
+    const oldPk = String(conn.privateKeySecretId);
+
+    // Hook into the model: bump __v on the doc right before SshService's
+    // own findOneAndUpdate runs, simulating a concurrent writer that
+    // committed in between our findById() snapshot and our update.
+    const origFindOneAndUpdate = sshModel.findOneAndUpdate.bind(sshModel);
+    let triggered = false;
+    sshModel.findOneAndUpdate = (filter, update, opts) => {
+      if (!triggered && filter && filter.__v !== undefined) {
+        triggered = true;
+        // Simulate "someone else just wrote".
+        const stored = sshModel._store.get(String(filter._id));
+        if (stored) stored.__v = (stored.__v || 0) + 1;
+      }
+      return origFindOneAndUpdate(filter, update, opts);
+    };
+
+    const secretsBeforeAttempt = secretModel._store.size;
+
+    await assert.rejects(
+      () =>
+        svc.update(String(conn._id), {
+          inlineSecrets: { key: { privateKey: 'NEW-PEM' } },
+        }),
+      /modified by another request/i,
+    );
+
+    // The brand-new secret from this losing attempt must be rolled back.
+    // Owned-secret count: old privatekey was deleted-first, then a new
+    // one was created, then conflict detected → rolled back. Net: 0
+    // owned secrets remain in store (old gone, new gone).
+    // Pre-rotation we had 1 owned secret; that has been delete-first'd
+    // and the new one was rolled back ⇒ store is now empty for secrets.
+    assert.equal(
+      secretModel._store.size,
+      secretsBeforeAttempt - 1,
+      'old owned secret was deleted; new owned secret rolled back; net -1',
+    );
+    // Note: the original `oldPk` is irrecoverable here. That's an
+    // acceptable trade-off — the rotation lost a race and the rotator
+    // must retry with the fresh credential material. We don't persist
+    // plaintext to "undo" deletions.
+    assert.equal(secretModel._store.has(oldPk), false, 'old secret was delete-first');
+
+    // The connection itself is unchanged (in-memory `doc` refs were
+    // restored by the catch block; on disk nothing was written either).
+    const stored = sshModel._store.get(String(conn._id));
+    assert.equal(String(stored.privateKeySecretId), oldPk, 'stored ref untouched by losing writer');
   });
 
   // ----------------------------------------------------------------

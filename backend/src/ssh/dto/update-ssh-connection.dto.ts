@@ -6,6 +6,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -35,6 +36,7 @@ export class UpdateSshConnectionDto {
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(65535)
   port?: number;
 
   @IsOptional()

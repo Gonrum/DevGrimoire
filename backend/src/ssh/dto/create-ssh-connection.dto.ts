@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -80,6 +81,7 @@ export class CreateSshConnectionDto {
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(65535)
   port?: number;
 
   @IsString()

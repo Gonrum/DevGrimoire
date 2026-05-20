@@ -197,35 +197,93 @@ export class SshService {
 
   /**
    * Patch metadata only by default. If `inlineSecrets` is provided, we treat
-   * this as a credential rotation: create new owned secrets, swap the refs,
-   * then cascade-delete the previously owned credentials.
+   * this as a credential rotation: cascade-delete the previously owned
+   * credentials FIRST (otherwise the new owned secret would collide on the
+   * partial unique index `(projectId|customerId, environmentId, key)`),
+   * THEN create the new owned secrets, then atomically swap the refs.
+   *
+   * The atomic swap uses optimistic-concurrency-control via Mongoose's `__v`
+   * version key: we read the doc, mutate refs in memory, then conditionally
+   * write back only if `__v` is still the one we read. Concurrent writers
+   * lose with `ConflictException`, and we roll back any new secrets we just
+   * created so the loser doesn't leak orphans.
    */
   async update(id: string, dto: UpdateSshConnectionDto): Promise<SshConnectionDocument> {
     const doc = await this.findById(id);
+    const expectedVersion = (doc as unknown as { __v?: number }).__v ?? 0;
 
-    // Metadata patch.
-    if (dto.label !== undefined) doc.label = dto.label;
-    if (dto.host !== undefined) doc.host = dto.host;
-    if (dto.port !== undefined) doc.port = dto.port;
-    if (dto.username !== undefined) doc.username = dto.username;
-    if (dto.description !== undefined) doc.description = dto.description;
-    if (dto.tags !== undefined) doc.tags = dto.tags;
+    // Snapshot the original credential refs so we can restore them on the
+    // in-memory `doc` if the conditional write fails (Important #4).
+    const origRefs = {
+      privateKeySecretId: doc.privateKeySecretId,
+      passphraseSecretId: doc.passphraseSecretId,
+      passwordSecretId: doc.passwordSecretId,
+    };
+
+    // Metadata patch (in-memory only — actually persisted further down via
+    // findOneAndUpdate so we get the version-guard).
+    const metaPatch: Record<string, unknown> = {};
+    if (dto.label !== undefined) {
+      doc.label = dto.label;
+      metaPatch.label = dto.label;
+    }
+    if (dto.host !== undefined) {
+      doc.host = dto.host;
+      metaPatch.host = dto.host;
+    }
+    if (dto.port !== undefined) {
+      doc.port = dto.port;
+      metaPatch.port = dto.port;
+    }
+    if (dto.username !== undefined) {
+      doc.username = dto.username;
+      metaPatch.username = dto.username;
+    }
+    if (dto.description !== undefined) {
+      doc.description = dto.description;
+      metaPatch.description = dto.description;
+    }
+    if (dto.tags !== undefined) {
+      doc.tags = dto.tags;
+      metaPatch.tags = dto.tags;
+    }
     if (dto.notifyOnAuthFailure !== undefined) {
       doc.notifyOnAuthFailure = dto.notifyOnAuthFailure;
+      metaPatch.notifyOnAuthFailure = dto.notifyOnAuthFailure;
     }
 
     // Credential rotation path.
     if (dto.inlineSecrets) {
-      const oldRefs: Types.ObjectId[] = [];
-      if (doc.privateKeySecretId) oldRefs.push(doc.privateKeySecretId);
-      if (doc.passphraseSecretId) oldRefs.push(doc.passphraseSecretId);
-      if (doc.passwordSecretId) oldRefs.push(doc.passwordSecretId);
+      const oldOwnedIds: Types.ObjectId[] = [];
+      if (origRefs.privateKeySecretId) oldOwnedIds.push(origRefs.privateKeySecretId);
+      if (origRefs.passphraseSecretId) oldOwnedIds.push(origRefs.passphraseSecretId);
+      if (origRefs.passwordSecretId) oldOwnedIds.push(origRefs.passwordSecretId);
 
       const newCreated: CreatedOwnedSecretRef[] = [];
       const scope = {
         customerId: doc.customerId?.toString(),
         projectId: doc.projectId?.toString(),
       };
+
+      // Delete-first-then-create: critical for not violating the unique
+      // partial index on `(scope, environmentId, key)`. We only delete
+      // secrets that are actually owned by THIS connection — pick-existing
+      // refs (no ownedBy stamp) survive.
+      let deletedOwnedIds: Types.ObjectId[] = [];
+      if (oldOwnedIds.length > 0) {
+        const ownedDocs = await this.secretModel
+          .find({
+            _id: { $in: oldOwnedIds },
+            ownedBySshConnectionId: doc._id,
+          })
+          .exec();
+        deletedOwnedIds = ownedDocs.map((s) => s._id as Types.ObjectId);
+        if (deletedOwnedIds.length > 0) {
+          await this.secretModel
+            .deleteMany({ _id: { $in: deletedOwnedIds } })
+            .exec();
+        }
+      }
 
       try {
         if (doc.authMethod === 'key' && dto.inlineSecrets.key) {
@@ -268,26 +326,43 @@ export class SshService {
           );
         }
 
-        await doc.save();
-
-        // Stamp ownedBy on freshly created secrets.
-        await this.secretModel
-          .updateMany(
-            { _id: { $in: newCreated.map((s) => s.id) } },
-            { $set: { ownedBySshConnectionId: doc._id } },
+        // Conditional write guarded by `__v`. If another writer raced in
+        // between our findById() and now, `__v` has advanced and this
+        // returns null → ConflictException + rollback.
+        const updated = await this.sshModel
+          .findOneAndUpdate(
+            { _id: doc._id, __v: expectedVersion },
+            {
+              $set: {
+                ...metaPatch,
+                privateKeySecretId: doc.privateKeySecretId,
+                passphraseSecretId: doc.passphraseSecretId,
+                passwordSecretId: doc.passwordSecretId,
+              },
+              $inc: { __v: 1 },
+            },
+            { new: true },
           )
           .exec();
+        if (!updated) {
+          throw new ConflictException(
+            'SshConnection was modified by another request; please retry',
+          );
+        }
 
-        // Cascade-delete the previously owned (NOT pick-existing) credentials.
-        if (oldRefs.length > 0) {
+        // Stamp ownedBy on freshly created secrets.
+        if (newCreated.length > 0) {
           await this.secretModel
-            .deleteMany({
-              _id: { $in: oldRefs },
-              ownedBySshConnectionId: doc._id,
-            })
+            .updateMany(
+              { _id: { $in: newCreated.map((s) => s.id) } },
+              { $set: { ownedBySshConnectionId: updated._id } },
+            )
             .exec();
         }
+
+        return updated;
       } catch (err) {
+        // Rollback new secrets we just created so we don't leak orphans.
         if (newCreated.length > 0) {
           await this.rollbackCreatedSecrets(newCreated).catch((cleanupErr) => {
             this.logger.error(
@@ -297,13 +372,33 @@ export class SshService {
             );
           });
         }
+        // Restore the in-memory doc so a caller holding the reference sees
+        // the pre-rotation state instead of half-mutated refs.
+        doc.privateKeySecretId = origRefs.privateKeySecretId;
+        doc.passphraseSecretId = origRefs.passphraseSecretId;
+        doc.passwordSecretId = origRefs.passwordSecretId;
         throw err;
       }
-      return doc;
     }
 
-    await doc.save();
-    return doc;
+    // Pure-metadata path: still version-guarded.
+    if (Object.keys(metaPatch).length === 0) {
+      // Nothing to update.
+      return doc;
+    }
+    const updated = await this.sshModel
+      .findOneAndUpdate(
+        { _id: doc._id, __v: expectedVersion },
+        { $set: metaPatch, $inc: { __v: 1 } },
+        { new: true },
+      )
+      .exec();
+    if (!updated) {
+      throw new ConflictException(
+        'SshConnection was modified by another request; please retry',
+      );
+    }
+    return updated;
   }
 
   /**

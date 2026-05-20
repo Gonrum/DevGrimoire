@@ -42,3 +42,6 @@ SecretSchema.index(
   { customerId: 1, environmentId: 1, key: 1 },
   { unique: true, partialFilterExpression: { customerId: { $exists: true } } },
 );
+// Cascade-delete pivot: SshService deletes secrets by ownedBySshConnectionId.
+// Sparse so only owned (i.e. SSH-rotated) secrets are indexed.
+SecretSchema.index({ ownedBySshConnectionId: 1 }, { sparse: true });
