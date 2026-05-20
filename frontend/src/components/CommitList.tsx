@@ -4,6 +4,7 @@ import { api, CommitEntry, GitRepository } from '../api/client';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
 import EmptyState from './ui/EmptyState';
+import { ProviderBadge, type GitProvider } from './icons/ProviderIcon';
 
 function timeAgo(dateStr: string, locale: string): string {
   const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -18,15 +19,6 @@ function timeAgo(dateStr: string, locale: string): string {
   return `${months}mo`;
 }
 
-const PROVIDER_ICONS: Record<string, string> = {
-  github: 'GH',
-  gitlab: 'GL',
-};
-
-const PROVIDER_COLORS: Record<string, string> = {
-  github: 'bg-gray-700 text-white',
-  gitlab: 'bg-orange-900/60 text-orange-300',
-};
 
 interface CommitListProps {
   projectId: string;
@@ -176,9 +168,7 @@ export default function CommitList({ projectId, gitRepositories }: CommitListPro
                   key={commit._id}
                   className="flex items-start gap-3 py-2 px-3 rounded-lg hover:bg-gray-800/50 transition-colors group"
                 >
-                  <Badge color={PROVIDER_COLORS[commit.provider] || 'bg-gray-700 text-gray-300'} rounded="full">
-                    {PROVIDER_ICONS[commit.provider] || commit.provider}
-                  </Badge>
+                  <ProviderBadge provider={commit.provider as GitProvider} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       {commit.url ? (

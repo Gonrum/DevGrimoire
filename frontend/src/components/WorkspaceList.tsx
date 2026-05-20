@@ -30,6 +30,7 @@ const emptyCreate = (): CreateForm => ({
 function gitRepoLabel(repo: GitRepository): string {
   if (repo.label) return repo.label;
   if (repo.provider === 'gitlab' && repo.gitlabProjectId) return repo.gitlabProjectId;
+  if (repo.provider === 'gitea') return `${repo.owner}/${repo.repo}`;
   if (repo.owner && repo.repo) return `${repo.owner}/${repo.repo}`;
   return repo._id ?? repo.provider;
 }
@@ -373,7 +374,7 @@ function CreateWorkspaceForm({
             <option value="">{t('workspaces.formGitRepoDefault')}</option>
             {gitRepos.map((r) => (
               <option key={r._id} value={r._id ?? ''}>
-                [{r.provider === 'gitlab' ? 'GL' : 'GH'}] {gitRepoLabel(r)}
+                [{r.provider === 'gitlab' ? 'GL' : r.provider === 'gitea' ? 'GT' : 'GH'}] {gitRepoLabel(r)}
               </option>
             ))}
           </select>

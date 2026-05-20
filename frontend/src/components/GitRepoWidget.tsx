@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, GitRepository } from '../api/client';
-import Badge from './ui/Badge';
+import { ProviderBadge, type GitProvider } from './icons/ProviderIcon';
 
 interface RepoInfo {
   repo: GitRepository;
@@ -51,9 +51,15 @@ export default function GitRepoWidget({ projectId, gitRepositories, onNavigateTo
   };
 
   const getRepoUrl = (repo: GitRepository): string | null => {
-    const base = repo.baseUrl || (repo.provider === 'github' ? 'https://github.com' : 'https://gitlab.com');
+    const base = repo.baseUrl ||
+      (repo.provider === 'github' ? 'https://github.com' :
+       repo.provider === 'gitlab' ? 'https://gitlab.com' :
+       '');
     if (repo.provider === 'github' && repo.owner && repo.repo) {
       return `${base}/${repo.owner}/${repo.repo}`;
+    }
+    if (repo.provider === 'gitea' && repo.owner && repo.repo) {
+      return base ? `${base}/${repo.owner}/${repo.repo}` : null;
     }
     if (repo.gitlabProjectId) {
       return `${base}/${repo.gitlabProjectId}`;
@@ -63,6 +69,7 @@ export default function GitRepoWidget({ projectId, gitRepositories, onNavigateTo
 
   const getRepoName = (repo: GitRepository): string => {
     if (repo.provider === 'github') return `${repo.owner}/${repo.repo}`;
+    if (repo.provider === 'gitea') return `${repo.owner}/${repo.repo}`;
     return repo.gitlabProjectId || `${repo.owner}/${repo.repo}`;
   };
 
@@ -101,12 +108,7 @@ export default function GitRepoWidget({ projectId, gitRepositories, onNavigateTo
           const repoUrl = getRepoUrl(repo);
           return (
             <div key={repo._id || i} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800/30 transition-colors">
-              <Badge
-                color={repo.provider === 'github' ? 'bg-gray-700 text-white' : 'bg-orange-900/60 text-orange-300'}
-                rounded="full"
-              >
-                {repo.provider === 'github' ? 'GH' : 'GL'}
-              </Badge>
+              <ProviderBadge provider={repo.provider as GitProvider} />
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">

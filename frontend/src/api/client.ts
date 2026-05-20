@@ -1190,7 +1190,7 @@ export interface RecurringTask {
 
 export interface GitRepository {
   _id?: string;
-  provider: 'github' | 'gitlab';
+  provider: 'github' | 'gitlab' | 'gitea';
   label?: string;
   baseUrl?: string;
   owner?: string;
@@ -1201,12 +1201,13 @@ export interface GitRepository {
   syncEnabled?: boolean;
   lastSyncAt?: string;
   lastSyncSha?: string;
+  allowPrivateHost?: boolean;
 }
 
 export interface CommitEntry {
   _id: string;
   projectId: string;
-  provider: 'github' | 'gitlab';
+  provider: 'github' | 'gitlab' | 'gitea';
   sha: string;
   message: string;
   authorName: string;

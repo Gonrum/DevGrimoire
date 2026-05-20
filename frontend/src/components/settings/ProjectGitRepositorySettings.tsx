@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, GitRepository } from '../../api/client';
-import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import { FormInput, SecretInput } from '../ui/FormField';
+import { ProviderBadge, type GitProvider } from '../icons/ProviderIcon';
 
-type Provider = 'github' | 'gitlab';
+type Provider = 'github' | 'gitlab' | 'gitea';
 
 interface Props {
   projectId: string;
@@ -17,7 +17,7 @@ function parseRepoUrl(url: string, provider: Provider): { owner: string; repo: s
   const cleaned = url.replace(/\.git$/, '').replace(/\/$/, '');
   const match = cleaned.match(/(?:https?:\/\/[^/]+)\/(.+)/);
   const pathPart = match ? match[1] : url;
-  if (provider === 'github') {
+  if (provider === 'github' || provider === 'gitea') {
     const parts = pathPart.split('/');
     return { owner: parts[0] || '', repo: parts[1] || '', gitlabProjectId: '' };
   }
@@ -25,9 +25,10 @@ function parseRepoUrl(url: string, provider: Provider): { owner: string; repo: s
 }
 
 function ProviderSegmented({ value, onChange }: { value: Provider; onChange: (next: Provider) => void }) {
+  const labels: Record<Provider, string> = { github: 'GitHub', gitlab: 'GitLab', gitea: 'Gitea' };
   return (
     <div className="flex gap-2">
-      {(['github', 'gitlab'] as const).map((p) => (
+      {(['github', 'gitlab', 'gitea'] as const).map((p) => (
         <button
           key={p}
           type="button"
@@ -36,7 +37,7 @@ function ProviderSegmented({ value, onChange }: { value: Provider; onChange: (ne
             value === p ? 'bg-violet-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
           }`}
         >
-          {p === 'github' ? 'GitHub' : 'GitLab'}
+          {labels[p]}
         </button>
       ))}
     </div>
@@ -54,6 +55,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
   const [newRepoBranch, setNewRepoBranch] = useState('main');
   const [newRepoBaseUrl, setNewRepoBaseUrl] = useState('');
   const [newRepoLabel, setNewRepoLabel] = useState('');
+  const [newAllowPrivateHost, setNewAllowPrivateHost] = useState(false);
   const [validating, setValidating] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
 
@@ -68,8 +70,23 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
   const [editRepoBaseUrl, setEditRepoBaseUrl] = useState('');
   const [editRepoLabel, setEditRepoLabel] = useState('');
   const [editRepoProvider, setEditRepoProvider] = useState<Provider>('github');
+  const [editAllowPrivateHost, setEditAllowPrivateHost] = useState(false);
   const [editValidating, setEditValidating] = useState(false);
   const [editRepoError, setEditRepoError] = useState<string | null>(null);
+
+  const isPrivateLike = (url: string): boolean => {
+    try {
+      const h = new URL(url).hostname.toLowerCase();
+      return (
+        h === 'localhost' ||
+        /^127\./.test(h) ||
+        /^10\./.test(h) ||
+        /^192\.168\./.test(h) ||
+        h.endsWith('.local') ||
+        h.endsWith('.internal')
+      );
+    } catch { return false; }
+  };
 
   const persist = async (next: GitRepository[]) => {
     await api.projects.update(projectId, { gitRepositories: next } as any);
@@ -116,6 +133,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
         defaultBranch: newRepoBranch || 'main',
         tokenSecretId: secret._id,
         syncEnabled: true,
+        allowPrivateHost: newAllowPrivateHost || undefined,
       };
 
       await persist([...gitRepos, newRepo]);
@@ -124,6 +142,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
       setNewRepoBranch('main');
       setNewRepoBaseUrl('');
       setNewRepoLabel('');
+      setNewAllowPrivateHost(false);
       setShowAddRepo(false);
     } catch (err) {
       setRepoError(err instanceof Error ? err.message : t('projectGit.addFailed'));
@@ -174,11 +193,16 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
     const repo = gitRepos[index];
     setEditingRepoIndex(index);
     setEditRepoProvider(repo.provider as Provider);
-    setEditRepoUrl(repo.provider === 'github' ? `${repo.owner}/${repo.repo}` : repo.gitlabProjectId || `${repo.owner}/${repo.repo}`);
+    setEditRepoUrl(
+      repo.provider === 'github' || repo.provider === 'gitea'
+        ? `${repo.owner}/${repo.repo}`
+        : repo.gitlabProjectId || `${repo.owner}/${repo.repo}`,
+    );
     setEditRepoToken('');
     setEditRepoBranch(repo.defaultBranch || 'main');
     setEditRepoBaseUrl(repo.baseUrl || '');
     setEditRepoLabel(repo.label || '');
+    setEditAllowPrivateHost(repo.allowPrivateHost ?? false);
     setEditRepoError(null);
   };
 
@@ -236,6 +260,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
         gitlabProjectId: parsed.gitlabProjectId,
         defaultBranch: editRepoBranch || 'main',
         tokenSecretId,
+        allowPrivateHost: editAllowPrivateHost || undefined,
       };
 
       const updated = gitRepos.map((r, i) => (i === editingRepoIndex ? updatedRepo : r));
@@ -279,16 +304,46 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                   type="text"
                   value={editRepoUrl}
                   onChange={(e) => setEditRepoUrl(e.target.value)}
-                  placeholder={editRepoProvider === 'github' ? 'https://github.com/owner/repo' : 'https://gitlab.com/group/project'}
+                  placeholder={
+                    editRepoProvider === 'github' ? 'https://github.com/owner/repo' :
+                    editRepoProvider === 'gitea' ? 'https://gitea.example.com/owner/repo' :
+                    'https://gitlab.com/group/project'
+                  }
                 />
-                {editRepoProvider === 'gitlab' && (
-                  <FormInput
-                    label={t('projectGit.baseUrl')}
-                    type="text"
-                    value={editRepoBaseUrl}
-                    onChange={(e) => setEditRepoBaseUrl(e.target.value)}
-                    placeholder="https://gitlab.example.com"
-                  />
+                {(editRepoProvider === 'gitlab' || editRepoProvider === 'gitea') && (
+                  <div>
+                    <FormInput
+                      label={t('projectGit.baseUrl')}
+                      type="text"
+                      value={editRepoBaseUrl}
+                      onChange={(e) => setEditRepoBaseUrl(e.target.value)}
+                      placeholder={editRepoProvider === 'gitea' ? 'https://gitea.example.com' : 'https://gitlab.example.com'}
+                    />
+                    {editRepoProvider === 'gitea' && (
+                      <small className="text-amber-300">Gitea hat keinen Default — Base-URL ist Pflicht.</small>
+                    )}
+                    {editRepoBaseUrl && isPrivateLike(editRepoBaseUrl) && (
+                      <label className="flex items-center gap-2 mt-2">
+                        <input
+                          type="checkbox"
+                          checked={editAllowPrivateHost}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              const ok = window.confirm(
+                                'Mit dieser Option wird der SSRF-Schutz für DIESES Repository vollständig deaktiviert. '
+                                + 'Eine baseUrl, die auf 127.0.0.1, 169.254.169.254 (Cloud-Metadata) oder vergleichbare interne '
+                                + 'Endpoints zeigt, wird dann zugelassen. Settings-Schreiber könnten so Cloud-Credentials abgreifen.\n\n'
+                                + 'Wirklich aktivieren?',
+                              );
+                              if (!ok) return;
+                            }
+                            setEditAllowPrivateHost(e.target.checked);
+                          }}
+                        />
+                        <span className="text-xs text-amber-300">Private/interne Adresse erlauben (deaktiviert SSRF-Schutz für dieses Repo)</span>
+                      </label>
+                    )}
+                  </div>
                 )}
                 <FormInput
                   label={t('projectGit.label')}
@@ -325,9 +380,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
               </div>
             ) : (
               <div key={i} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
-                <Badge color={repo.provider === 'github' ? 'bg-gray-700 text-white' : 'bg-orange-900/60 text-orange-300'} rounded="full">
-                  {repo.provider === 'github' ? 'GH' : 'GL'}
-                </Badge>
+                <ProviderBadge provider={repo.provider as GitProvider} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     {repo.label && (
@@ -336,7 +389,9 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                       </span>
                     )}
                     <p className="text-sm text-gray-200 truncate">
-                      {repo.provider === 'github' ? `${repo.owner}/${repo.repo}` : repo.gitlabProjectId || `${repo.owner}/${repo.repo}`}
+                      {repo.provider === 'github' || repo.provider === 'gitea'
+                        ? `${repo.owner}/${repo.repo}`
+                        : repo.gitlabProjectId || `${repo.owner}/${repo.repo}`}
                     </p>
                   </div>
                   <div className="text-xs text-gray-500 flex items-center gap-1">
@@ -408,16 +463,46 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
             type="text"
             value={newRepoUrl}
             onChange={(e) => setNewRepoUrl(e.target.value)}
-            placeholder={newRepoProvider === 'github' ? 'https://github.com/owner/repo' : 'https://gitlab.com/group/project'}
+            placeholder={
+              newRepoProvider === 'github' ? 'https://github.com/owner/repo' :
+              newRepoProvider === 'gitea' ? 'https://gitea.example.com/owner/repo' :
+              'https://gitlab.com/group/project'
+            }
           />
-          {newRepoProvider === 'gitlab' && (
-            <FormInput
-              label={t('projectGit.baseUrl')}
-              type="text"
-              value={newRepoBaseUrl}
-              onChange={(e) => setNewRepoBaseUrl(e.target.value)}
-              placeholder="https://gitlab.example.com"
-            />
+          {(newRepoProvider === 'gitlab' || newRepoProvider === 'gitea') && (
+            <div>
+              <FormInput
+                label={t('projectGit.baseUrl')}
+                type="text"
+                value={newRepoBaseUrl}
+                onChange={(e) => setNewRepoBaseUrl(e.target.value)}
+                placeholder={newRepoProvider === 'gitea' ? 'https://gitea.example.com' : 'https://gitlab.example.com'}
+              />
+              {newRepoProvider === 'gitea' && (
+                <small className="text-amber-300">Gitea hat keinen Default — Base-URL ist Pflicht.</small>
+              )}
+              {newRepoBaseUrl && isPrivateLike(newRepoBaseUrl) && (
+                <label className="flex items-center gap-2 mt-2">
+                  <input
+                    type="checkbox"
+                    checked={newAllowPrivateHost}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        const ok = window.confirm(
+                          'Mit dieser Option wird der SSRF-Schutz für DIESES Repository vollständig deaktiviert. '
+                          + 'Eine baseUrl, die auf 127.0.0.1, 169.254.169.254 (Cloud-Metadata) oder vergleichbare interne '
+                          + 'Endpoints zeigt, wird dann zugelassen. Settings-Schreiber könnten so Cloud-Credentials abgreifen.\n\n'
+                          + 'Wirklich aktivieren?',
+                        );
+                        if (!ok) return;
+                      }
+                      setNewAllowPrivateHost(e.target.checked);
+                    }}
+                  />
+                  <span className="text-xs text-amber-300">Private/interne Adresse erlauben (deaktiviert SSRF-Schutz für dieses Repo)</span>
+                </label>
+              )}
+            </div>
           )}
           <FormInput
             label={t('projectGit.label')}
@@ -432,7 +517,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
               required
               value={newRepoToken}
               onChange={(e) => setNewRepoToken(e.target.value)}
-              placeholder={newRepoProvider === 'github' ? 'ghp_...' : 'glpat-...'}
+              placeholder={newRepoProvider === 'github' ? 'ghp_...' : newRepoProvider === 'gitea' ? 'gitea-token' : 'glpat-...'}
             />
             <FormInput
               label={t('projectGit.defaultBranch')}
