@@ -76,7 +76,7 @@ export default function SshTerminalModal({
     // container element). Without capture xterm would already have sent
     // ESC to the shell by the time we react.
     window.addEventListener('keydown', onKeyDown, { capture: true });
-    return () => window.removeEventListener('keydown', onKeyDown, { capture: true } as EventListenerOptions);
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
   }, [open, confirmOpen, onClose]);
 
   const handleBackdropClick = (ev: React.MouseEvent<HTMLDivElement>) => {

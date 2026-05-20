@@ -98,13 +98,28 @@ export default function SshTerminal({
   const [closeInfo, setCloseInfo] = useState<{ code: number; reason: string } | null>(null);
   const [reconnectKey, setReconnectKey] = useState(0);
 
-  const notifyState = useCallback(
-    (next: TerminalState) => {
-      setState(next);
-      onConnectionStateChange?.(next);
-    },
-    [onConnectionStateChange],
-  );
+  // Option A: hold both the current state and the (potentially changing)
+  // callback in refs so the WS handlers always see the latest values
+  // *without* re-running the connect-effect on every parent re-render.
+  // - `stateRef` lets the `onclose` handler check `prev === 'exited'`
+  //   without resorting to a side-effectful `setState`-updater (which is
+  //   unsafe under React StrictMode double-invoke).
+  // - `onStateChangeRef` decouples the WS handlers from a possibly
+  //   non-stable `onConnectionStateChange` prop → no stale closure even
+  //   if the parent passes a new function on every render.
+  const stateRef = useRef<TerminalState>('connecting');
+  const onStateChangeRef = useRef<typeof onConnectionStateChange>(undefined);
+  useEffect(() => {
+    onStateChangeRef.current = onConnectionStateChange;
+  }, [onConnectionStateChange]);
+
+  // Stable identity (only touches refs + setState which is stable) → safe to
+  // include in effect deps and lets us drop the broad eslint-suppress.
+  const notifyState = useCallback((next: TerminalState) => {
+    stateRef.current = next;
+    setState(next);
+    onStateChangeRef.current?.(next);
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -196,14 +211,13 @@ export default function SshTerminal({
       // react accordingly. WS application-error codes start at 4000+ and
       // 1011 = internal error → all treated as 'error'. 1000/1005/1006 =
       // normal/no-status → 'disconnected'.
-      setState((prev) => {
-        if (prev === 'exited') return 'exited';
-        const isError =
-          (ev.code >= 4000 && ev.code <= 4999) || ev.code === 1011;
-        const next: TerminalState = isError ? 'error' : 'disconnected';
-        onConnectionStateChange?.(next);
-        return next;
-      });
+      // Use `stateRef` (not a setState-updater) so we don't fire a
+      // side-effect inside an updater — that would double-fire under
+      // React StrictMode.
+      if (stateRef.current === 'exited') return;
+      const isError =
+        (ev.code >= 4000 && ev.code <= 4999) || ev.code === 1011;
+      notifyState(isError ? 'error' : 'disconnected');
     };
 
     const onData = term.onData((data) => {
@@ -247,9 +261,10 @@ export default function SshTerminal({
       fitRef.current = null;
     };
     // `reconnectKey` triggers a full re-mount of the effect — that's how the
-    // Reconnect button works (build a fresh WS + Terminal).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionId, authToken, reconnectKey]);
+    // Reconnect button works (build a fresh WS + Terminal). `notifyState` is
+    // referentially stable (empty-deps `useCallback`, all callees are refs),
+    // so listing it here does not re-run the connect logic.
+  }, [connectionId, authToken, reconnectKey, notifyState, t]);
 
   const handleDisconnect = () => {
     try {
