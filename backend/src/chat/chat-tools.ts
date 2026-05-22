@@ -56,6 +56,7 @@ export const TOOL_GROUPS: Record<
   tasks_write: [
     'todo_create', 'todo_update', 'todo_comment',
     'milestone_create', 'milestone_update',
+    'milestone_create_with_todos', 'milestone_import_apply', 'milestone_import_preview',
     'changelog_add',
     'recurring_task_create', 'recurring_task_update',
     'question_answer',
@@ -116,8 +117,10 @@ export const TOOL_GROUPS: Record<
 export const ALL_TOOL_NAMES: string[] = Object.values(TOOL_GROUPS).flat();
 
 /** Tools that mutate state — used by the UI to apply warning styling + confirmation. */
+// milestone_import_preview is read-only but listed in tasks_write for allowlist purposes;
+// it does not mutate state so it is excluded from WRITE_TOOL_NAMES.
 export const WRITE_TOOL_NAMES: Set<string> = new Set([
-  ...TOOL_GROUPS.tasks_write,
+  ...TOOL_GROUPS.tasks_write.filter((t) => t !== 'milestone_import_preview'),
   ...TOOL_GROUPS.knowledge_write,
   ...TOOL_GROUPS.project_write,
   ...TOOL_GROUPS.customer_write,
@@ -519,6 +522,50 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
         changelogId: { type: 'string' },
       },
       required: ['id'],
+    },
+  },
+  milestone_import_preview: {
+    name: 'milestone_import_preview',
+    description: 'Parse a Markdown string (milestone export format) and return the structured ParsedMilestone — no DB write. Use this to inspect what would be imported before calling milestone_import_apply.',
+    parameters: {
+      type: 'object',
+      properties: {
+        markdown: { type: 'string', description: 'Markdown content to parse (e.g. from milestone_export)' },
+      },
+      required: ['markdown'],
+    },
+  },
+  milestone_import_apply: {
+    name: 'milestone_import_apply',
+    description: 'Import a parsed milestone into a project — creates the milestone and all todos. Pass the ParsedMilestone from milestone_import_preview (or a manually crafted object). Returns { milestone, todos, warnings? }.',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        parsed: {
+          type: 'object',
+          description: 'ParsedMilestone object (name, description?, todos[])',
+        },
+      },
+      required: ['parsed'],
+    },
+  },
+  milestone_create_with_todos: {
+    name: 'milestone_create_with_todos',
+    description: 'Create a milestone with todos in one shot. Each todo can carry the new Quest fields (userStories, acceptanceCriteria[{text, done?}], outOfScope, edgeCases, tags, priority). Intended for the Briefing-Mode flow where the agent has interactively gathered structured requirements with the user.',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: PROJECT_ID_PROP,
+        name: { type: 'string', description: 'Milestone name' },
+        description: { type: 'string', description: 'Optional milestone description (markdown)' },
+        todos: {
+          type: 'array',
+          description: 'Array of todo objects. Each may include: title (required), description, priority (low/medium/high/critical), tags[], userStories, acceptanceCriteria ([{text, done?}]), outOfScope, edgeCases.',
+          items: { type: 'object' },
+        },
+      },
+      required: ['name', 'todos'],
     },
   },
   changelog_add: {
@@ -1688,6 +1735,48 @@ export class ChatToolsService {
             changelogId: args.changelogId as string | undefined,
           });
           return { success: true, result: { id: updated._id.toString(), status: updated.status } };
+        }
+        case 'milestone_import_preview': {
+          const markdown = args.markdown as string | undefined;
+          if (!markdown) return { success: false, error: 'markdown required' };
+          const parsed = this.milestones.parseMarkdown(markdown);
+          return { success: true, result: parsed };
+        }
+        case 'milestone_import_apply': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const parsed = args.parsed as { name: string; description?: string; todos: unknown[] } | undefined;
+          if (!parsed || !parsed.name || !Array.isArray(parsed.todos)) {
+            return { success: false, error: 'parsed (with name and todos[]) required' };
+          }
+          const importResult = await this.milestones.importFromParsed(projectId, parsed as never);
+          return {
+            success: true,
+            result: {
+              milestone: { id: importResult.milestone._id.toString(), name: importResult.milestone.name },
+              todos: importResult.todos.map((t) => ({ id: t._id.toString(), title: t.title })),
+              warnings: importResult.warnings,
+            },
+          };
+        }
+        case 'milestone_create_with_todos': {
+          if (!projectId) return { success: false, error: 'projectId required' };
+          const msName = args.name as string | undefined;
+          if (!msName) return { success: false, error: 'name required' };
+          const todos = args.todos as unknown[] | undefined;
+          if (!Array.isArray(todos)) return { success: false, error: 'todos (array) required' };
+          const importResult = await this.milestones.importFromParsed(projectId, {
+            name: msName,
+            description: args.description as string | undefined,
+            todos: todos as never,
+          });
+          return {
+            success: true,
+            result: {
+              milestone: { id: importResult.milestone._id.toString(), name: importResult.milestone.name },
+              todos: importResult.todos.map((t) => ({ id: t._id.toString(), title: t.title })),
+              warnings: importResult.warnings,
+            },
+          };
         }
         case 'changelog_add': {
           if (!projectId) return { success: false, error: 'projectId required' };

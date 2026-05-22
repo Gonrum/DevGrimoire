@@ -863,7 +863,7 @@ export class ChatController {
               continue;
             }
 
-            const result = await this.tools.execute(tc.name, parsedArgs, { projectId: projectId || null }, opts.toolsAllowlist);
+            const result = await this.tools.execute(tc.name, parsedArgs, { projectId: projectId || null }, effectiveAllowlist);
             const resultJson = JSON.stringify(result.success ? result.result : { error: result.error });
             const truncated = resultJson.length > MAX_TOOL_RESULT_CHARS
               ? resultJson.slice(0, MAX_TOOL_RESULT_CHARS) + '…[truncated]'
