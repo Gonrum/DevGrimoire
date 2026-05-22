@@ -801,6 +801,11 @@ const tools = [
         milestoneId: { type: 'string', description: 'Milestone MongoDB ID to associate with' },
         blockedBy: { type: 'array', items: { type: 'string' }, description: 'Array of Todo MongoDB IDs that block this todo' },
         repoLabel: { type: 'string', description: 'Optional: associate todo with a specific repository label (e.g. "API", "Frontend")' },
+        userStories: { type: 'string', description: 'User stories in markdown (As a … I want … so that …).' },
+        acceptanceCriteria: { type: 'array', items: { type: 'object', properties: { text: { type: 'string' }, done: { type: 'boolean' } }, required: ['text'] }, description: 'Definition of done — checklist items with done flag.' },
+        outOfScope: { type: 'string', description: 'Explicit boundaries — what is NOT part of this todo (markdown).' },
+        edgeCases: { type: 'string', description: 'Edge cases / open questions (markdown). For interactive clarification use ask_user with todoId.' },
+        openQuestions: { type: 'array', items: { type: 'string' }, description: 'Question MongoDB IDs linked to this todo. Set via ask_user with todoId rather than manually.' },
       },
       required: ['title'],
     },
@@ -853,6 +858,11 @@ const tools = [
         blockedBy: { type: 'array', items: { type: 'string' }, description: 'Array of Todo MongoDB IDs that block this todo' },
         archived: { type: 'boolean', description: 'Archive or unarchive a todo' },
         repoLabel: { type: 'string', description: 'Optional: associate todo with a specific repository label (e.g. "API", "Frontend")' },
+        userStories: { type: 'string', description: 'User stories in markdown (As a … I want … so that …).' },
+        acceptanceCriteria: { type: 'array', items: { type: 'object', properties: { text: { type: 'string' }, done: { type: 'boolean' } }, required: ['text'] }, description: 'Definition of done — checklist items with done flag.' },
+        outOfScope: { type: 'string', description: 'Explicit boundaries — what is NOT part of this todo (markdown).' },
+        edgeCases: { type: 'string', description: 'Edge cases / open questions (markdown). For interactive clarification use ask_user with todoId.' },
+        openQuestions: { type: 'array', items: { type: 'string' }, description: 'Question MongoDB IDs linked to this todo. Set via ask_user with todoId rather than manually.' },
       },
     },
   },
@@ -3945,6 +3955,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             milestoneId: optionalString(a, 'milestoneId'),
             blockedBy: optionalStringArray(a, 'blockedBy'),
             repoLabel: optionalString(a, 'repoLabel'),
+            userStories: optionalString(a, 'userStories'),
+            acceptanceCriteria: Array.isArray(a.acceptanceCriteria) ? a.acceptanceCriteria : undefined,
+            outOfScope: optionalString(a, 'outOfScope'),
+            edgeCases: optionalString(a, 'edgeCases'),
+            openQuestions: optionalStringArray(a, 'openQuestions'),
           });
           result = compactCreateResult(todo, { displayNumber: (todo as any).displayNumber, title: (todo as any).title });
           break;
@@ -3990,6 +4005,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             blockedBy: optionalStringArray(a, 'blockedBy'),
             archived: optionalBoolean(a, 'archived'),
             repoLabel: optionalString(a, 'repoLabel'),
+            userStories: optionalString(a, 'userStories'),
+            acceptanceCriteria: Array.isArray(a.acceptanceCriteria) ? a.acceptanceCriteria : undefined,
+            outOfScope: optionalString(a, 'outOfScope'),
+            edgeCases: optionalString(a, 'edgeCases'),
+            openQuestions: optionalStringArray(a, 'openQuestions'),
           }));
           break;
         }

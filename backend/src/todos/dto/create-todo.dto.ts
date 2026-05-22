@@ -1,5 +1,6 @@
 import {
   IsString,
+  IsNotEmpty,
   IsOptional,
   IsEnum,
   IsArray,
@@ -13,6 +14,7 @@ import { TodoStatus, TodoPriority } from '../schemas/todo.schema';
 
 export class AcceptanceCriterionDto {
   @IsString()
+  @IsNotEmpty()
   text: string;
 
   @IsBoolean()
