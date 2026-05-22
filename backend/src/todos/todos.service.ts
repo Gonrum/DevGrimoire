@@ -173,7 +173,11 @@ export class TodosService {
 
   async update(id: string, dto: UpdateTodoDto): Promise<TodoDocument> {
     if (dto.status) {
-      const existing = await this.todoModel.findById(id).exec();
+      const existing = await this.todoModel
+        .findById(id)
+        .select('status')
+        .lean()
+        .exec();
       if (!existing) throw new NotFoundException(`Todo ${id} not found`);
       this.validateStatusTransition(existing.status, dto.status);
 

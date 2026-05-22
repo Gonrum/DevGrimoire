@@ -309,19 +309,36 @@ export class QuestionsService implements OnModuleInit {
   /**
    * Returns the count and list of open (pending/expired) questions for a
    * single todo. Used by TodosService to block the review → done transition.
+   *
+   * Short-circuits via `exists()` on the happy path (no open questions) to
+   * avoid the full find+countDocuments round-trip.
    */
   async countOpenForTodo(todoId: string): Promise<{
     count: number;
     items: Array<{ id: string; question: string; status: QuestionStatus }>;
   }> {
-    if (!Types.ObjectId.isValid(todoId)) return { count: 0, items: [] };
-    const { items, total } = await this.findOpen({ todoId });
+    if (!Types.ObjectId.isValid(todoId)) {
+      return { count: 0, items: [] };
+    }
+    const filter = {
+      todoId: new Types.ObjectId(todoId),
+      status: { $in: ['pending', 'expired'] as QuestionStatus[] },
+    };
+    const hasAny = await this.questionModel.exists(filter);
+    if (!hasAny) return { count: 0, items: [] };
+
+    const docs = await this.questionModel
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean()
+      .exec();
     return {
-      count: total,
-      items: items.map((q) => ({
-        id: q._id.toString(),
-        question: q.question,
-        status: q.status,
+      count: docs.length,
+      items: docs.map((d) => ({
+        id: d._id.toString(),
+        question: d.question,
+        status: d.status,
       })),
     };
   }
