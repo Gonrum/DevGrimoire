@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { api, Question } from '../../api/client';
 import Markdown from '../Markdown';
+import MarkdownEditor from '../MarkdownEditor';
 import Button from '../ui/Button';
 import DetailSection from '../ui/DetailSection';
 
@@ -248,10 +249,13 @@ function AnsweredQuestionCard({
     ? t('questions.answeredByAgent')
     : t('questions.answeredByUser');
 
+  const defaultContent = `**Frage:** ${question.question}\n\n**Antwort:** ${question.answer ?? ''}`;
+
   const [showSaveForm, setShowSaveForm] = useState(false);
   const [saveTopic, setSaveTopic] = useState(question.question.slice(0, 80));
   const [saveTags, setSaveTags] = useState('');
   const [saveCategory, setSaveCategory] = useState('');
+  const [saveContent, setSaveContent] = useState(defaultContent);
   const [saving, setSaving] = useState(false);
 
   const handleSaveAsKnowledge = async () => {
@@ -261,9 +265,11 @@ function AnsweredQuestionCard({
         topic: saveTopic.trim() || question.question.slice(0, 80),
         tags: saveTags ? saveTags.split(',').map((t) => t.trim()).filter(Boolean) : undefined,
         category: saveCategory.trim() || undefined,
+        content: saveContent,
         scope: projectId ? 'project' : undefined,
       });
       setShowSaveForm(false);
+      setSaveContent(defaultContent);
       onChanged();
     } catch (err) {
       onError((err as Error).message || t('questions.saveAsKnowledgeFailed'));
@@ -294,7 +300,7 @@ function AnsweredQuestionCard({
 
       <div className="mt-2 flex items-center gap-2">
         {!question.knowledgeId && !showSaveForm && (
-          <Button type="button" size="xs" variant="accent" onClick={() => setShowSaveForm(true)}>
+          <Button type="button" size="xs" variant="accent" onClick={() => { setSaveContent(defaultContent); setShowSaveForm(true); }}>
             {t('questions.saveAsKnowledge')}
           </Button>
         )}
@@ -315,6 +321,15 @@ function AnsweredQuestionCard({
               value={saveTopic}
               onChange={(e) => setSaveTopic(e.target.value)}
               className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-violet-500"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] text-gray-500 mb-0.5">{t('questions.contentLabel')}</label>
+            <MarkdownEditor
+              value={saveContent}
+              onChange={setSaveContent}
+              rows={5}
+              placeholder={t('questions.contentPlaceholder')}
             />
           </div>
           <div>
@@ -341,7 +356,7 @@ function AnsweredQuestionCard({
             <Button type="button" size="xs" variant="primary" disabled={saving || !saveTopic.trim()} onClick={handleSaveAsKnowledge}>
               {saving ? t('questions.saveAsKnowledgeSaving') : t('common.save')}
             </Button>
-            <Button type="button" size="xs" variant="secondary" onClick={() => setShowSaveForm(false)}>
+            <Button type="button" size="xs" variant="secondary" onClick={() => { setShowSaveForm(false); setSaveContent(defaultContent); }}>
               {t('common.cancel')}
             </Button>
           </div>

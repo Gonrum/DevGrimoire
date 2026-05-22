@@ -615,6 +615,8 @@
     "saveAsKnowledgeSaving": "Speichern...",
     "saveAsKnowledgeSuccess": "Wissenseintrag angelegt",
     "saveAsKnowledgeFailed": "Speichern fehlgeschlagen",
+    "contentLabel": "Inhalt",
+    "contentPlaceholder": "Markdown-Inhalt für den Knowledge-Eintrag",
     "openKnowledge": "Wissen anzeigen"
   },
   "milestones": {
