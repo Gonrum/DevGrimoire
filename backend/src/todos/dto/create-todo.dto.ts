@@ -5,8 +5,20 @@ import {
   IsArray,
   IsMongoId,
   ValidateIf,
+  IsBoolean,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { TodoStatus, TodoPriority } from '../schemas/todo.schema';
+
+export class AcceptanceCriterionDto {
+  @IsString()
+  text: string;
+
+  @IsBoolean()
+  @IsOptional()
+  done?: boolean;
+}
 
 export class CreateTodoDto {
   @ValidateIf((o) => !o.customerId)
@@ -49,4 +61,27 @@ export class CreateTodoDto {
   @IsString()
   @IsOptional()
   repoLabel?: string;
+
+  @IsString()
+  @IsOptional()
+  userStories?: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AcceptanceCriterionDto)
+  @IsOptional()
+  acceptanceCriteria?: AcceptanceCriterionDto[];
+
+  @IsString()
+  @IsOptional()
+  outOfScope?: string;
+
+  @IsString()
+  @IsOptional()
+  edgeCases?: string;
+
+  @IsArray()
+  @IsMongoId({ each: true })
+  @IsOptional()
+  openQuestions?: string[];
 }

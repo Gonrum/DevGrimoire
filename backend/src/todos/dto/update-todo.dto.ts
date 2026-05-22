@@ -1,5 +1,7 @@
-import { IsString, IsOptional, IsEnum, IsArray, IsMongoId, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsArray, IsMongoId, IsBoolean, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { TodoStatus, TodoPriority } from '../schemas/todo.schema';
+import { AcceptanceCriterionDto } from './create-todo.dto';
 
 export class UpdateTodoDto {
   @IsString()
@@ -39,4 +41,27 @@ export class UpdateTodoDto {
   @IsString()
   @IsOptional()
   repoLabel?: string;
+
+  @IsString()
+  @IsOptional()
+  userStories?: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AcceptanceCriterionDto)
+  @IsOptional()
+  acceptanceCriteria?: AcceptanceCriterionDto[];
+
+  @IsString()
+  @IsOptional()
+  outOfScope?: string;
+
+  @IsString()
+  @IsOptional()
+  edgeCases?: string;
+
+  @IsArray()
+  @IsMongoId({ each: true })
+  @IsOptional()
+  openQuestions?: string[];
 }

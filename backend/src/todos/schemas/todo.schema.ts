@@ -29,6 +29,15 @@ export class TodoComment {
   createdAt: Date;
 }
 
+@Schema({ _id: false })
+export class AcceptanceCriterion {
+  @Prop({ required: true })
+  text: string;
+
+  @Prop({ default: false })
+  done: boolean;
+}
+
 @Schema({ timestamps: true })
 export class Todo {
   @Prop({ type: Types.ObjectId, ref: 'Project' })
@@ -72,6 +81,21 @@ export class Todo {
 
   @Prop()
   displayNumber: string;
+
+  @Prop()
+  userStories?: string;
+
+  @Prop({ type: [AcceptanceCriterion], default: [] })
+  acceptanceCriteria: AcceptanceCriterion[];
+
+  @Prop()
+  outOfScope?: string;
+
+  @Prop()
+  edgeCases?: string;
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Question' }], default: [] })
+  openQuestions: Types.ObjectId[];
 }
 
 export const TodoSchema = SchemaFactory.createForClass(Todo);
