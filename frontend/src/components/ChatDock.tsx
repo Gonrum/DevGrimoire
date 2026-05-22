@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, matchPath, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Sparkles } from 'lucide-react';
 import {
   api,
   ChatAttachmentRef,
@@ -134,6 +135,7 @@ export default function ChatDock() {
   const [userLlm, setUserLlm] = useState<UserLlmConfig | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
   const [retryDraft, setRetryDraft] = useState<string | null>(null);
+  const [briefingMode, setBriefingMode] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -389,6 +391,7 @@ export default function ChatDock() {
     if (!open) return;
     if (!projectId && !customerId) return;
     setSession(null);
+    setBriefingMode(false);
     const ownerKey = projectId || `c:${customerId}`;
     loadSessions({ projectId, customerId }).then((list) => {
       const lastId = localStorage.getItem(LAST_SESSION_KEY_PREFIX + ownerKey);
@@ -465,6 +468,7 @@ export default function ChatDock() {
       content: string,
       attachmentIds: string[] | undefined,
       abort: AbortController,
+      activeBriefingMode?: boolean,
     ) => {
       await api.chat.streamMessage(
         sessionId,
@@ -534,6 +538,7 @@ export default function ChatDock() {
         },
         abort.signal,
         activeWorkspaceId,
+        activeBriefingMode,
       );
     },
     [activeWorkspaceId],
@@ -546,12 +551,13 @@ export default function ChatDock() {
       attachmentIds: string[] | undefined,
       abort: AbortController,
       llm: UserLlmConfig,
+      activeBriefingMode?: boolean,
     ) => {
       if (!llm.endpoint?.trim() || !llm.model?.trim()) {
         throw new Error(t('chat.browserMissingConfig'));
       }
       setStreaming((s) => s ? { ...s, phase: 'context' } : s);
-      const prep = await api.chat.prepareMessage(sessionId, content, attachmentIds, activeWorkspaceId);
+      const prep = await api.chat.prepareMessage(sessionId, content, attachmentIds, activeWorkspaceId, activeBriefingMode);
       const requestStart = Date.now();
       let firstTokenTs: number | null = null;
       setStreaming((s) => s ? { ...s, contextRefs: prep.contextRefs, phase: 'thinking', browserStartMs: requestStart } : s);
@@ -766,7 +772,7 @@ export default function ChatDock() {
     try {
       if (useBrowserMode && userLlm) {
         try {
-          await runBrowserStream(session._id, content, outgoingAttachmentIds, abort, userLlm);
+          await runBrowserStream(session._id, content, outgoingAttachmentIds, abort, userLlm, briefingMode);
         } catch (err) {
           if ((err as Error).name === 'AbortError' || abort.signal.aborted) {
             throw err;
@@ -778,10 +784,10 @@ export default function ChatDock() {
           const detail = err instanceof Error ? err.message : String(err);
           setFallbackNotice(`${t('chat.browserFallbackUsed')} (${detail})`);
           setStreaming({ content: '', contextRefs: [], toolCalls: [], phase: 'queued', browserStartMs: Date.now() });
-          await runServerStream(session._id, content, outgoingAttachmentIds, abort);
+          await runServerStream(session._id, content, outgoingAttachmentIds, abort, briefingMode);
         }
       } else {
-        await runServerStream(session._id, content, outgoingAttachmentIds, abort);
+        await runServerStream(session._id, content, outgoingAttachmentIds, abort, briefingMode);
       }
       if (projectId || customerId) {
         loadSessions({ projectId, customerId }).catch(() => {});
@@ -795,7 +801,7 @@ export default function ChatDock() {
     } finally {
       if (abortRef.current === abort) abortRef.current = null;
     }
-  }, [session, draft, streaming, projectId, customerId, loadSessions, userLlm, runBrowserStream, runServerStream, pendingAttachments, t]);
+  }, [session, draft, streaming, projectId, customerId, loadSessions, userLlm, runBrowserStream, runServerStream, pendingAttachments, briefingMode, t]);
 
   const stopStream = useCallback(() => {
     abortRef.current?.abort();
@@ -927,7 +933,7 @@ export default function ChatDock() {
                 <label className="text-xs text-gray-500 shrink-0 w-16">{t('chat.session')}</label>
                 <select
                   value={session?._id ?? ''}
-                  onChange={(e) => e.target.value && loadSession(e.target.value)}
+                  onChange={(e) => { if (e.target.value) { setBriefingMode(false); loadSession(e.target.value); } }}
                   disabled={!projectId || loadingSessions}
                   className="flex-1 bg-gray-800 border border-gray-700 text-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
                 >
@@ -1126,6 +1132,11 @@ export default function ChatDock() {
                 </div>
               )}
 
+              {briefingMode && (
+                <div className="mb-2 px-3 py-2 text-xs bg-violet-900/20 border border-violet-800/40 rounded text-violet-300">
+                  {t('chat.briefingMode.banner')}
+                </div>
+              )}
               <div className="flex items-end gap-2">
                 <input
                   ref={fileInputRef}
@@ -1175,6 +1186,20 @@ export default function ChatDock() {
                   rows={2}
                   className="flex-1 bg-gray-800 border border-gray-700 text-gray-200 rounded px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
                 />
+                <button
+                  type="button"
+                  onClick={() => setBriefingMode((v) => !v)}
+                  disabled={!session}
+                  className={`shrink-0 w-9 h-9 flex items-center justify-center rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    briefingMode
+                      ? 'bg-violet-900/40 border-violet-700 text-violet-300'
+                      : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                  }`}
+                  aria-label={t('chat.briefingMode.toggle')}
+                  title={briefingMode ? t('chat.briefingMode.tooltipOn') : t('chat.briefingMode.tooltipOff')}
+                >
+                  <Sparkles className="w-4 h-4" />
+                </button>
                 {streaming ? (
                   <Button variant="danger" size="md" onClick={stopStream}>
                     {t('chat.stop')}

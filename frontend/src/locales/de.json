@@ -1563,7 +1563,13 @@
     "metricsTotal": "gesamt",
     "metricsEstimated": "geschätzt (chars/4)",
     "metricsExact": "exakt aus Provider",
-    "metricsTitle": "{{outputTokens}} Tokens · {{durationMs}} ms · TTF {{firstTokenMs}} ms · {{estimated}}"
+    "metricsTitle": "{{outputTokens}} Tokens · {{durationMs}} ms · TTF {{firstTokenMs}} ms · {{estimated}}",
+    "briefingMode": {
+      "toggle": "Briefing-Modus umschalten",
+      "tooltipOff": "Briefing-Modus starten — Agent fragt nach Anforderungen",
+      "tooltipOn": "Briefing-Modus aktiv (klicken zum Beenden)",
+      "banner": "Briefing-Modus aktiv — beschreibe deine Feature-Idee, der Agent stellt Klärungsfragen und kann am Ende einen Milestone anlegen."
+    }
   },
   "chatLog": {
     "title": "Chat-Aktivität",

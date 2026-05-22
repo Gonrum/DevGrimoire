@@ -1563,7 +1563,13 @@
     "metricsTotal": "total",
     "metricsEstimated": "estimated (chars/4)",
     "metricsExact": "exact from provider",
-    "metricsTitle": "{{outputTokens}} tokens · {{durationMs}} ms · TTF {{firstTokenMs}} ms · {{estimated}}"
+    "metricsTitle": "{{outputTokens}} tokens · {{durationMs}} ms · TTF {{firstTokenMs}} ms · {{estimated}}",
+    "briefingMode": {
+      "toggle": "Toggle briefing mode",
+      "tooltipOff": "Start briefing mode — agent will ask for requirements",
+      "tooltipOn": "Briefing mode active (click to exit)",
+      "banner": "Briefing mode active — describe your feature idea; the agent will ask clarifying questions and can create a milestone."
+    }
   },
   "chatLog": {
     "title": "Chat activity",
