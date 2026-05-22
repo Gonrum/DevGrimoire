@@ -32,10 +32,19 @@ export class Knowledge {
   // entry T-219 for the policy and isExcludedFromRag() helper for the check.
   @Prop({ type: String, enum: ALL_SENSITIVITY_LEVELS, default: Sensitivity.INTERNAL })
   sensitivity: SensitivityLevel;
+
+  /**
+   * Backlink to the Question that was converted into this Knowledge entry.
+   * Set by POST /api/questions/:id/convert-to-knowledge. Optional — not set
+   * for manually created Knowledge entries.
+   */
+  @Prop({ type: Types.ObjectId, ref: 'Question' })
+  sourceQuestionId?: Types.ObjectId;
 }
 
 export const KnowledgeSchema = SchemaFactory.createForClass(Knowledge);
 KnowledgeSchema.index({ projectId: 1 });
 KnowledgeSchema.index({ customerId: 1 });
 KnowledgeSchema.index({ scope: 1 });
+KnowledgeSchema.index({ sourceQuestionId: 1 });
 KnowledgeSchema.index({ topic: 'text', content: 'text', tags: 'text' });

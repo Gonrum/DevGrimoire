@@ -39,4 +39,8 @@ export class CreateKnowledgeDto {
   @IsIn(ALL_SENSITIVITY_LEVELS)
   @IsOptional()
   sensitivity?: SensitivityLevel;
+
+  @IsMongoId()
+  @IsOptional()
+  sourceQuestionId?: string;
 }

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsArray, IsIn } from 'class-validator';
+import { IsString, IsOptional, IsArray, IsIn, IsMongoId } from 'class-validator';
 import { ALL_SENSITIVITY_LEVELS, SensitivityLevel } from '../../common/sensitivity';
 
 export class UpdateKnowledgeDto {
@@ -22,4 +22,8 @@ export class UpdateKnowledgeDto {
   @IsIn(ALL_SENSITIVITY_LEVELS)
   @IsOptional()
   sensitivity?: SensitivityLevel;
+
+  @IsMongoId()
+  @IsOptional()
+  sourceQuestionId?: string;
 }

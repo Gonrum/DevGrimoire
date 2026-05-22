@@ -5,6 +5,7 @@ import { QuestionsService } from './questions.service';
 import { QuestionsController } from './questions.controller';
 import { TodosModule } from '../todos/todos.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { KnowledgeModule } from '../knowledge/knowledge.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ]),
     forwardRef(() => TodosModule),
     NotificationsModule,
+    KnowledgeModule,
   ],
   controllers: [QuestionsController],
   providers: [QuestionsService],

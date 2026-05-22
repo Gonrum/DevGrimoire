@@ -195,6 +195,7 @@ function serializeQuestion(q: unknown): Record<string, unknown> {
     answeredByUserId: obj.answeredByUserId,
     answeredByAgent: obj.answeredByAgent,
     answeredAt: obj.answeredAt,
+    knowledgeId: obj.knowledgeId,
     expiresAt: obj.expiresAt,
     agentRunId: obj.agentRunId,
     agentName: obj.agentName,
@@ -1234,6 +1235,22 @@ const tools = [
         answer: { type: 'string', description: 'The answer text — markdown supported.' },
       },
       required: ['id', 'answer'],
+    },
+  },
+  {
+    name: 'question_convert_to_knowledge',
+    description: 'Convert an answered Question into a Knowledge entry and create a bidirectional link between them. Use this to capture project decisions or clarifications from Q&A conversations as reusable project knowledge. The question must have status "answered". Returns 400 if the question is not yet answered or has already been converted (check existing knowledgeId). Returns the created Knowledge document.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        questionId: { type: 'string', description: 'Question MongoDB ID to convert' },
+        topic: { type: 'string', description: 'Title/topic of the Knowledge entry (required)' },
+        content: { type: 'string', description: 'Body text of the Knowledge entry. Defaults to "**Frage:** <question>\\n\\n**Antwort:** <answer>" if omitted.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags to categorise the knowledge entry' },
+        category: { type: 'string', description: 'Optional free-form category (e.g. "Decision", "Architecture", "Process")' },
+        scope: { type: 'string', enum: ['global', 'project', 'customer'], description: 'Scope for the knowledge entry. Defaults to "project" if the question has a projectId, otherwise "global".' },
+      },
+      required: ['questionId', 'topic'],
     },
   },
   {
@@ -3693,6 +3710,7 @@ const EXPLICIT_WRITE_TOOLS = new Set<string>([
   'oracle_comment_on_todo',
   'customer_template_apply',
   'todo_ask_question',
+  'question_convert_to_knowledge',
 ]);
 
 export function isWriteTool(name: string): boolean {
@@ -4343,6 +4361,20 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             { byAgent: true },
           );
           result = serializeQuestion(updated);
+          break;
+        }
+        case 'question_convert_to_knowledge': {
+          const knowledge = await questionsService.convertToKnowledge(
+            requireString(a, 'questionId'),
+            {
+              topic: requireString(a, 'topic'),
+              content: optionalString(a, 'content'),
+              tags: Array.isArray(a.tags) ? (a.tags as string[]) : undefined,
+              category: optionalString(a, 'category'),
+              scope: optionalString(a, 'scope') as 'global' | 'project' | 'customer' | undefined,
+            },
+          );
+          result = knowledge.toJSON ? knowledge.toJSON() : { ...knowledge };
           break;
         }
         case 'environment_create': {

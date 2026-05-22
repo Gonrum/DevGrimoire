@@ -65,6 +65,14 @@ export class Question {
   answeredAt?: Date;
 
   /**
+   * Set after a successful convert-to-knowledge operation. Points to the
+   * Knowledge entry that was created from this question's Q&A. Bidirectional
+   * link: Knowledge.sourceQuestionId points back here.
+   */
+  @Prop({ type: Types.ObjectId, ref: 'Knowledge' })
+  knowledgeId?: Types.ObjectId;
+
+  /**
    * Soft-timeout. Questions whose `expiresAt` is in the past flip to status
    * 'expired' the next time `waitForAnswer` polls them, but the document is
    * NOT deleted — the user can still answer it from the todo detail view.

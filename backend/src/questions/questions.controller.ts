@@ -12,6 +12,7 @@ import {
 import { QuestionsService } from './questions.service';
 import { AnswerQuestionDto } from './dto/answer-question.dto';
 import { CreateQuestionDto } from './dto/create-question.dto';
+import { ConvertToKnowledgeDto } from './dto/convert-to-knowledge.dto';
 import { QuestionDirection } from './schemas/question.schema';
 
 const VALID_DIRECTIONS: QuestionDirection[] = ['agent_to_user', 'user_to_agent'];
@@ -120,5 +121,20 @@ export class QuestionsController {
   ) {
     const userId = req.user?.userId;
     return this.questionsService.answer(id, dto.answer, { userId });
+  }
+
+  /**
+   * Convert an answered question to a Knowledge entry (T-400).
+   * Returns 400 if the question is not yet answered or has already been
+   * converted. Returns 404 if the question does not exist.
+   * The created Knowledge document is returned.
+   */
+  @Post(':id/convert-to-knowledge')
+  @HttpCode(201)
+  convertToKnowledge(
+    @Param('id') id: string,
+    @Body() dto: ConvertToKnowledgeDto,
+  ) {
+    return this.questionsService.convertToKnowledge(id, dto);
   }
 }

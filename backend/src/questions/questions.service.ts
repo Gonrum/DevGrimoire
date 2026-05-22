@@ -17,8 +17,11 @@ import {
   QuestionStatus,
 } from './schemas/question.schema';
 import { CreateQuestionDto } from './dto/create-question.dto';
+import { ConvertToKnowledgeDto } from './dto/convert-to-knowledge.dto';
 import { TodosService } from '../todos/todos.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { KnowledgeService } from '../knowledge/knowledge.service';
+import { KnowledgeDocument } from '../knowledge/schemas/knowledge.schema';
 
 export const QUESTION_CREATED = 'question.created';
 export const QUESTION_ANSWERED = 'question.answered';
@@ -43,6 +46,7 @@ export class QuestionsService implements OnModuleInit {
     @Inject(forwardRef(() => TodosService))
     private todosService: TodosService,
     private notificationsService: NotificationsService,
+    private knowledgeService: KnowledgeService,
   ) {}
 
   /**
@@ -388,5 +392,59 @@ export class QuestionsService implements OnModuleInit {
       .findByIdAndUpdate(id, { status: 'expired' as QuestionStatus })
       .exec();
     return { answered: false, questionId: id };
+  }
+
+  /**
+   * Convert an answered Question into a Knowledge entry (T-400).
+   *
+   * Idempotency: if the question already has a knowledgeId set, a 400 is
+   * thrown immediately — the caller should use knowledge_get / knowledge_update
+   * to work with the existing entry instead of duplicating it.
+   *
+   * Scope resolution: if the Question has a projectId, scope defaults to
+   * 'project'; otherwise it falls back to 'global'. The caller may override
+   * this via dto.scope.
+   */
+  async convertToKnowledge(
+    questionId: string,
+    dto: ConvertToKnowledgeDto,
+  ): Promise<KnowledgeDocument> {
+    const question = await this.questionModel.findById(questionId).exec();
+    if (!question) throw new NotFoundException(`Question ${questionId} not found`);
+
+    if (question.status !== 'answered') {
+      throw new BadRequestException(
+        `Question must be answered before converting to knowledge (current status: ${question.status})`,
+      );
+    }
+
+    if (question.knowledgeId) {
+      throw new BadRequestException(
+        `Question ${questionId} has already been converted to knowledge (knowledgeId: ${question.knowledgeId})`,
+      );
+    }
+
+    const defaultContent =
+      `**Frage:** ${question.question}\n\n**Antwort:** ${question.answer ?? ''}`;
+
+    const projectIdStr = question.projectId?.toString();
+    const resolvedScope: 'global' | 'project' | 'customer' =
+      dto.scope ?? (projectIdStr ? 'project' : 'global');
+
+    const knowledge = await this.knowledgeService.create({
+      topic: dto.topic,
+      content: dto.content ?? defaultContent,
+      tags: dto.tags,
+      category: dto.category,
+      scope: resolvedScope,
+      projectId: projectIdStr,
+      sourceQuestionId: questionId,
+    });
+
+    // Bidirectional link: stamp the question with the new knowledge entry's ID
+    question.knowledgeId = knowledge._id as Types.ObjectId;
+    await question.save();
+
+    return knowledge;
   }
 }
