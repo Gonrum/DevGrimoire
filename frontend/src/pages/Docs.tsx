@@ -842,8 +842,73 @@ function ProjektarbeitSection() {
           <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Todos (Board / Liste)" />
           <InfoRow label={isDE ? 'Workflow' : 'Workflow'} value={isDE ? 'Start → in_progress, Implementierung, → review (Code-Review!), → done' : 'Start → in_progress, implement, → review (code review!), → done'} />
           <InfoRow label={isDE ? 'Kommentare' : 'Comments'} value="todo_comment" />
-          <InfoRow label="MCP" value="todo_*, validation_report_*, oracle_*" />
+          <InfoRow label="MCP" value="todo_*, todo_ask_question, validation_report_*, oracle_*" />
         </div>
+
+        <h4 className="text-sm font-medium text-gray-300 mt-5 mb-2">
+          {isDE ? 'Strukturierte Quest-Details (M-46)' : 'Structured Quest Details (M-46)'}
+        </h4>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Seit M-46 hat jedes Todo neben Titel/Description vier zusätzliche Felder für agile Strukturierung — alle optional. Das Detail-UI rendert sie in einem eigenen Tab "Beschreibung & Definition".'
+            : 'Since M-46 every todo carries four additional fields beyond title/description for agile structuring — all optional. The detail UI renders them in a dedicated "Description & Definition" tab.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label="userStories" value={isDE ? 'Markdown — "Als [Rolle] möchte ich …"' : 'Markdown — "As a [role] I want …"'} />
+          <InfoRow label="acceptanceCriteria" value={isDE ? 'Array von {text, done} — Checkliste; Fortschritt (x/y) erscheint als Badge in Kanban/Liste' : 'Array of {text, done} — checklist; progress (x/y) shown as badge in board/list'} />
+          <InfoRow label="outOfScope" value={isDE ? 'Markdown — explizite Grenzen' : 'Markdown — explicit boundaries'} />
+          <InfoRow label="edgeCases" value={isDE ? 'Markdown — Randfälle, Stolperfallen' : 'Markdown — edge cases, pitfalls'} />
+          <InfoRow label="openQuestions" value={isDE ? 'Refs auf Question-Docs (denormalisierter Cache)' : 'Refs to Question docs (denormalised cache)'} />
+        </div>
+
+        <h4 className="text-sm font-medium text-gray-300 mt-5 mb-2">
+          {isDE ? 'Open Questions am Todo' : 'Open Questions on a Todo'}
+        </h4>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE ? (
+            <>
+              Agents stellen Klärungsfragen via <Mono>POST /api/todos/:id/questions</Mono> oder das MCP-Tool <Mono>todo_ask_question</Mono> (Direction <Mono>agent_to_user</Mono>).
+              {' '}<Mono>QuestionsService.create()</Mono> pflegt <Mono>todo.openQuestions</Mono> automatisch.
+              Beantwortete Fragen bleiben sichtbar (Versionierung via <Mono>Question.status</Mono>).
+            </>
+          ) : (
+            <>
+              Agents raise clarifying questions via <Mono>POST /api/todos/:id/questions</Mono> or the MCP tool <Mono>todo_ask_question</Mono> (direction <Mono>agent_to_user</Mono>).
+              {' '}<Mono>QuestionsService.create()</Mono> keeps <Mono>todo.openQuestions</Mono> in sync.
+              Answered questions stay visible (versioning via <Mono>Question.status</Mono>).
+            </>
+          )}
+        </p>
+        <Hint>
+          {isDE ? (
+            <>
+              <strong>Done-Blocker:</strong> Der Übergang <Mono>review → done</Mono> wird abgelehnt, wenn Questions mit Status <Mono>pending</Mono> oder <Mono>expired</Mono> am Todo hängen. Fehler-Payload: <Mono>{`{ code: 'OPEN_QUESTIONS_BLOCK_DONE', openQuestions: [...] }`}</Mono>.
+            </>
+          ) : (
+            <>
+              <strong>Done blocker:</strong> The <Mono>review → done</Mono> transition is rejected when questions with status <Mono>pending</Mono> or <Mono>expired</Mono> are linked. Error payload: <Mono>{`{ code: 'OPEN_QUESTIONS_BLOCK_DONE', openQuestions: [...] }`}</Mono>.
+            </>
+          )}
+        </Hint>
+
+        <h4 className="text-sm font-medium text-gray-300 mt-5 mb-2">
+          {isDE ? 'Answer → Knowledge' : 'Answer → Knowledge'}
+        </h4>
+        <p className="text-sm text-gray-400">
+          {isDE ? (
+            <>
+              Beantwortete Fragen können in einen Knowledge-Eintrag konvertiert werden: <Mono>POST /api/questions/:id/convert-to-knowledge</Mono> oder MCP-Tool <Mono>question_convert_to_knowledge</Mono>.
+              Bidirektionaler Link via <Mono>Question.knowledgeId</Mono> und <Mono>Knowledge.sourceQuestionId</Mono>. Idempotent (400 mit existierender knowledgeId im Payload).
+              Scope: <Mono>global</Mono> oder <Mono>project</Mono> (Questions haben kein customerId).
+            </>
+          ) : (
+            <>
+              Answered questions can be converted into a knowledge entry: <Mono>POST /api/questions/:id/convert-to-knowledge</Mono> or MCP tool <Mono>question_convert_to_knowledge</Mono>.
+              Bidirectional link via <Mono>Question.knowledgeId</Mono> and <Mono>Knowledge.sourceQuestionId</Mono>. Idempotent (400 with existing knowledgeId in payload).
+              Scope: <Mono>global</Mono> or <Mono>project</Mono> (questions have no customerId).
+            </>
+          )}
+        </p>
       </Section>
 
       <Section title="Milestones">
