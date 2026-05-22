@@ -894,6 +894,23 @@ const tools = [
     },
   },
   {
+    name: 'todo_ask_question',
+    description: 'Ask the user a question in the context of a specific todo. Creates an agent_to_user Question linked to the todo, shows it in the DevGrimoire UI, and waits for the user\'s answer. The question and answer are recorded as a comment on the todo and the question ID is added to todo.openQuestions. Use this instead of ask_user when you already have a todo context.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        todoId: { type: 'string', description: 'Todo MongoDB ID' },
+        question: { type: 'string', description: 'The question to ask the user' },
+        options: { type: 'array', items: { type: 'string' }, description: 'Answer options (if omitted, user can type free text)' },
+        context: { type: 'string', description: 'Additional context to help the user understand the question' },
+        timeoutSeconds: { type: 'number', description: 'How long to wait for an answer (default: 300, max: 600)' },
+        agentName: { type: 'string', description: 'Name of the requesting agent (for audit trail)' },
+        agentRunId: { type: 'string', description: 'Agent run / task ID for correlation' },
+      },
+      required: ['todoId', 'question'],
+    },
+  },
+  {
     name: 'session_save',
     description: 'Save a work session summary for a project (what was done, next steps, open questions)',
     inputSchema: {
@@ -3675,6 +3692,7 @@ const EXPLICIT_WRITE_TOOLS = new Set<string>([
   'workflow_run_retry',
   'oracle_comment_on_todo',
   'customer_template_apply',
+  'todo_ask_question',
 ]);
 
 export function isWriteTool(name: string): boolean {
@@ -4034,6 +4052,24 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             requireString(a, 'text'),
             optionalString(a, 'author') || 'claude',
           );
+          break;
+        }
+        case 'todo_ask_question': {
+          const todoAskId = requireString(a, 'todoId');
+          const userId = RequestContext.getUser()?.userId;
+          const questionEntry = await questionsService.create({
+            question: requireString(a, 'question'),
+            options: optionalStringArray(a, 'options'),
+            context: optionalString(a, 'context'),
+            todoId: todoAskId,
+            timeoutSeconds: optionalNumber(a, 'timeoutSeconds') ?? 300,
+            agentName: optionalString(a, 'agentName'),
+            agentRunId: optionalString(a, 'agentRunId'),
+            direction: 'agent_to_user',
+          }, userId);
+          const timeoutMs = questionEntry.timeoutMs;
+          const waitResult = await questionsService.waitForAnswer(questionEntry._id.toString(), timeoutMs);
+          result = { ...waitResult, questionId: questionEntry._id.toString() };
           break;
         }
         case 'session_save': {
@@ -6381,7 +6417,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
 
       // Send in-app notification for tool usage (fire-and-forget)
       // notify_user already creates its own notification in the switch case
-      if (name !== 'notify_user' && name !== 'ask_user') {
+      if (name !== 'notify_user' && name !== 'ask_user' && name !== 'todo_ask_question') {
         const toolPrefix = name.split('_')[0];
         const derivedUrl = deriveNotificationUrl(name, a, result);
         notificationsService.create(

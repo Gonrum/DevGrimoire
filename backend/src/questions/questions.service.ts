@@ -1,4 +1,6 @@
 import {
+  forwardRef,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -38,6 +40,7 @@ export class QuestionsService implements OnModuleInit {
     @InjectModel(Question.name)
     private questionModel: Model<QuestionDocument>,
     private eventEmitter: EventEmitter2,
+    @Inject(forwardRef(() => TodosService))
     private todosService: TodosService,
     private notificationsService: NotificationsService,
   ) {}
@@ -100,6 +103,14 @@ export class QuestionsService implements OnModuleInit {
       timeoutMs,
       expiresAt,
     });
+
+    if (dto.todoId) {
+      await this.todosService
+        .linkQuestion(dto.todoId, entry._id.toString())
+        .catch(() => {
+          /* todo might have been deleted — ignore */
+        });
+    }
 
     this.eventEmitter.emit(QUESTION_CREATED, {
       questionId: entry._id.toString(),

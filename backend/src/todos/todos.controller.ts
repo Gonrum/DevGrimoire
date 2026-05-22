@@ -8,16 +8,23 @@ import {
   Param,
   Query,
   HttpCode,
+  NotFoundException,
 } from '@nestjs/common';
+import { isValidObjectId } from 'mongoose';
 import { TodosService } from './todos.service';
+import { QuestionsService } from '../questions/questions.service';
 import { CreateTodoDto } from './dto/create-todo.dto';
 import { UpdateTodoDto } from './dto/update-todo.dto';
+import { CreateTodoQuestionDto } from './dto/create-todo-question.dto';
 import { TodoStatus } from './schemas/todo.schema';
 import { ValidateProjectIdPipe } from '../common/pipes/validate-project-id.pipe';
 
 @Controller('todos')
 export class TodosController {
-  constructor(private readonly todosService: TodosService) {}
+  constructor(
+    private readonly todosService: TodosService,
+    private readonly questionsService: QuestionsService,
+  ) {}
 
   @Post()
   @HttpCode(201)
@@ -59,6 +66,24 @@ export class TodosController {
     @Body() body: { text: string; author?: string },
   ) {
     return this.todosService.addComment(id, body.text, body.author);
+  }
+
+  @Post(':id/questions')
+  @HttpCode(201)
+  async createQuestion(
+    @Param('id') id: string,
+    @Body() dto: CreateTodoQuestionDto,
+  ) {
+    if (!isValidObjectId(id)) {
+      throw new NotFoundException(`Todo ${id} not found`);
+    }
+    // Validates the todo exists (throws 404 if not)
+    await this.todosService.findById(id);
+    return this.questionsService.create({
+      ...dto,
+      todoId: id,
+      direction: 'agent_to_user',
+    });
   }
 
   @Delete(':id')

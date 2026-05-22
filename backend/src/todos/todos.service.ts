@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { isValidObjectId, Model } from 'mongoose';
+import { isValidObjectId, Model, Types } from 'mongoose';
 import { Todo, TodoDocument, TodoStatus } from './schemas/todo.schema';
 import { Project, ProjectDocument } from '../projects/schemas/project.schema';
 import { CreateTodoDto } from './dto/create-todo.dto';
@@ -223,6 +223,14 @@ export class TodosService {
       summary: `Kommentar von ${author} zu "${todo.title}"`,
     });
     return todo;
+  }
+
+  async linkQuestion(todoId: string, questionId: string): Promise<void> {
+    await this.todoModel
+      .findByIdAndUpdate(todoId, {
+        $addToSet: { openQuestions: new Types.ObjectId(questionId) },
+      })
+      .exec();
   }
 
   async removeByProject(projectId: string): Promise<void> {
