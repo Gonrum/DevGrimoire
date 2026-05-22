@@ -923,6 +923,26 @@ function ProjektarbeitSection() {
             ? 'Jeder Changelog darf nur einmal einem Milestone zugeordnet werden. Erledigte Milestones archivieren statt löschen.'
             : 'Each changelog can only be assigned to one milestone. Archive completed milestones instead of deleting them.'}
         </Hint>
+
+        <h4 className="text-sm font-medium text-gray-300 mt-5 mb-2">
+          {isDE ? 'Export / Import / AI-Completion (M-47)' : 'Export / Import / AI Completion (M-47)'}
+        </h4>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Seit M-47 hast du drei Werkzeuge am Milestone-Detail, um mit externer Planung und LLM-Hilfe zu arbeiten.'
+            : 'Since M-47 the milestone detail page offers three tools for external planning and LLM assistance.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Export' : 'Export'} value={<><Mono>GET /api/milestones/:id/export.md</Mono> · MCP <Mono>milestone_export</Mono> — strukturiertes Markdown mit Quest-Feldern (T-420)</>} />
+          <InfoRow label={isDE ? 'Import' : 'Import'} value={<><Mono>POST /api/milestones/import/preview</Mono> + <Mono>/apply</Mono> · MCP <Mono>milestone_import_preview</Mono> + <Mono>milestone_import_apply</Mono> — lenient State-Machine-Parser, DE+EN-Labels (T-421)</>} />
+          <InfoRow label="AI-Completion" value={<><Mono>POST /api/milestones/:id/ai-complete</Mono> · MCP <Mono>milestone_ai_complete</Mono> — LLM-Suggestions {`{suggestedStatus, confidence, reason}`}, kein DB-Write (T-422)</>} />
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value={isDE ? 'MilestoneDetailPage → 3 Action-Buttons (Export / Import / KI-Status)' : 'MilestoneDetailPage → 3 action buttons (Export / Import / AI Status)'} />
+        </div>
+        <Hint>
+          {isDE
+            ? 'AI-Completion benötigt mindestens einen konfigurierten Chat-LLM-Endpoint (Settings → Chat). Summary wird im Code-Fence eingebettet (Prompt-Injection-Mitigation). Content über 30 KB wird automatisch gekürzt.'
+            : 'AI completion requires at least one configured chat LLM endpoint (Settings → Chat). The summary is wrapped in a code fence (prompt injection mitigation). Content above 30 KB is auto-truncated.'}
+        </Hint>
       </Section>
 
       <Section title={isDE ? 'Wiederkehrende Tasks' : 'Recurring Tasks'}>
