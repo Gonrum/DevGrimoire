@@ -528,7 +528,26 @@
     "addDependencyFailed": "Failed to add dependency",
     "comments": "Comments",
     "noComments": "No comments yet",
-    "commentPlaceholder": "Write a comment..."
+    "commentPlaceholder": "Write a comment...",
+    "tabs": {
+      "general": "General",
+      "definition": "Description & Definition",
+      "questions": "Questions",
+      "activities": "Activities"
+    },
+    "userStories": "User Stories",
+    "userStoriesPlaceholder": "Describe the user stories (Markdown)...",
+    "acceptanceCriteria": "Acceptance Criteria",
+    "acceptanceCriteriaEmpty": "No acceptance criteria yet — start with + New Criterion",
+    "addCriterion": "+ New Criterion",
+    "criterionPlaceholder": "Describe the criterion...",
+    "outOfScope": "Out of Scope",
+    "outOfScopePlaceholder": "What is explicitly out of scope (Markdown)...",
+    "edgeCases": "Edge Cases",
+    "edgeCasesPlaceholder": "Relevant edge and corner cases (Markdown)...",
+    "definitionSaved": "Definition saved",
+    "definitionSaveFailed": "Save failed",
+    "activitiesPlaceholder": "Audit trail coming in T-402"
   },
   "validation": {
     "sectionTitle": "Validation",
@@ -587,7 +606,16 @@
     "filterDirectionUserToAgent": "User → Agent",
     "directionAgentToUser": "Agent → User",
     "directionUserToAgent": "User → Agent",
-    "loadFailed": "Failed to load questions."
+    "loadFailed": "Failed to load questions.",
+    "saveAsKnowledge": "Save as Knowledge",
+    "saveAsKnowledgeTitle": "Save as knowledge entry",
+    "saveAsKnowledgeTopic": "Title / Topic",
+    "saveAsKnowledgeTags": "Tags (comma-separated)",
+    "saveAsKnowledgeCategory": "Category (optional)",
+    "saveAsKnowledgeSaving": "Saving...",
+    "saveAsKnowledgeSuccess": "Knowledge entry created",
+    "saveAsKnowledgeFailed": "Save failed",
+    "openKnowledge": "Open knowledge entry"
   },
   "milestones": {
     "newMilestone": "+ New Artifact",

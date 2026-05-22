@@ -399,6 +399,11 @@ export interface TodoComment {
   createdAt: string;
 }
 
+export interface AcceptanceCriterion {
+  text: string;
+  done: boolean;
+}
+
 export interface Todo {
   _id: string;
   projectId?: string;
@@ -415,6 +420,11 @@ export interface Todo {
   comments: TodoComment[];
   number?: number;
   displayNumber?: string;
+  userStories?: string;
+  acceptanceCriteria?: AcceptanceCriterion[];
+  outOfScope?: string;
+  edgeCases?: string;
+  openQuestions?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -1512,6 +1522,14 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ text, author }),
       }),
+    askQuestion: (
+      todoId: string,
+      data: { question: string; options?: string[]; context?: string; timeoutSeconds?: number; agentName?: string },
+    ) =>
+      request<Question>(`/todos/${todoId}/questions`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
   sessions: {
     list: (projectId: string, limit?: number) => {
@@ -1737,6 +1755,14 @@ export const api = {
       options?: string[];
     }) =>
       request<Question>(`/questions/user-to-agent`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    convertToKnowledge: (
+      questionId: string,
+      data: { topic: string; content?: string; tags?: string[]; category?: string; scope?: string },
+    ) =>
+      request<Knowledge>(`/questions/${questionId}/convert-to-knowledge`, {
         method: 'POST',
         body: JSON.stringify(data),
       }),
@@ -2967,6 +2993,7 @@ export interface Question {
   agentName?: string;
   timeoutMs: number;
   expiresAt?: string;
+  knowledgeId?: string;
   createdAt: string;
   updatedAt: string;
 }

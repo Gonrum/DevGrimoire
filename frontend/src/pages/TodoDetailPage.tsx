@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api, Todo, Milestone, Question } from '../api/client';
+import { api, Todo, Milestone, Question, AcceptanceCriterion } from '../api/client';
 import {
   PRIORITY_COLORS, PRIORITY_LABELS,
   STATUS_COLORS, STATUS_LABELS, STATUS_TRANSITIONS, TRANSITION_BUTTON_VARIANT,
@@ -20,7 +20,10 @@ import TodoDependenciesSection from '../components/todo/TodoDependenciesSection'
 import TodoQuestionsSection from '../components/todo/TodoQuestionsSection';
 import TodoValidationSection from '../components/todo/TodoValidationSection';
 import TodoDocProposalsBanner from '../components/todo/TodoDocProposalsBanner';
+import AcceptanceCriteriaEditor from '../components/todo/AcceptanceCriteriaEditor';
 import AttachmentList from '../components/AttachmentList';
+
+type DetailTab = 'general' | 'definition' | 'questions' | 'activities';
 
 function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => void; onCancel: () => void }) {
   const { t } = useTranslation();
@@ -79,11 +82,12 @@ export default function TodoDetailPage() {
   const { id, todoId } = useParams<{ id: string; todoId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isCustomerScope = location.pathname.startsWith('/customers/');
   const basePath = isCustomerScope ? `/customers/${id}` : `/projects/${id}`;
   const backLabelKey = isCustomerScope ? 'todoDetail.backToCustomer' : 'todoDetail.backToProject';
   const { t, i18n } = useTranslation();
-  const { showError } = useToast();
+  const { showError, showSuccess } = useToast();
   const [todo, setTodo] = useState<Todo | null>(null);
   const [allTodos, setAllTodos] = useState<Todo[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
@@ -94,10 +98,37 @@ export default function TodoDetailPage() {
   const [savingComment, setSavingComment] = useState(false);
   const [storageEnabled, setStorageEnabled] = useState(false);
   const [questions, setQuestions] = useState<Question[]>([]);
+
+  // Tab state — synced with ?tab= URL param
+  const tabParam = searchParams.get('tab') as DetailTab | null;
+  const validTabs: DetailTab[] = ['general', 'definition', 'questions', 'activities'];
+  const activeTab: DetailTab = tabParam && validTabs.includes(tabParam) ? tabParam : 'general';
+
+  const setActiveTab = (tab: DetailTab) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', tab);
+      return next;
+    }, { replace: true });
+  };
+
+  // Definition tab local state
+  const [userStories, setUserStories] = useState('');
+  const [acceptanceCriteria, setAcceptanceCriteria] = useState<AcceptanceCriterion[]>([]);
+  const [outOfScope, setOutOfScope] = useState('');
+  const [edgeCases, setEdgeCases] = useState('');
+  const [savingDefinition, setSavingDefinition] = useState(false);
+
   const loadTodo = () => {
     if (!todoId) return;
     api.todos.get(todoId)
-      .then(setTodo)
+      .then((t) => {
+        setTodo(t);
+        setUserStories(t.userStories || '');
+        setAcceptanceCriteria(t.acceptanceCriteria || []);
+        setOutOfScope(t.outOfScope || '');
+        setEdgeCases(t.edgeCases || '');
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   };
@@ -145,6 +176,25 @@ export default function TodoDetailPage() {
     }
   };
 
+  const handleSaveDefinition = async () => {
+    if (!todoId) return;
+    setSavingDefinition(true);
+    try {
+      await api.todos.update(todoId, {
+        userStories: userStories.trim() || undefined,
+        acceptanceCriteria,
+        outOfScope: outOfScope.trim() || undefined,
+        edgeCases: edgeCases.trim() || undefined,
+      } as Partial<Todo>);
+      showSuccess(t('todoDetail.definitionSaved'));
+      loadTodo();
+    } catch (err: any) {
+      showError(err.message || t('todoDetail.definitionSaveFailed'));
+    } finally {
+      setSavingDefinition(false);
+    }
+  };
+
   if (loading) return <LoadingText />;
   if (error || !todo) {
     return (
@@ -159,6 +209,13 @@ export default function TodoDetailPage() {
 
   const comments = todo.comments || [];
 
+  const tabs: { key: DetailTab; label: string }[] = [
+    { key: 'general', label: t('todoDetail.tabs.general') },
+    { key: 'definition', label: t('todoDetail.tabs.definition') },
+    { key: 'questions', label: t('todoDetail.tabs.questions') },
+    { key: 'activities', label: t('todoDetail.tabs.activities') },
+  ];
+
   return (
     <WorkflowPageShell backTo={basePath} backLabel={t(backLabelKey)}>
       {editing ? (
@@ -168,8 +225,11 @@ export default function TodoDetailPage() {
         </div>
       ) : (
         <div>
-          <h1 className="text-xl font-bold mb-3">{todo.displayNumber && <span className="text-gray-500 font-normal mr-2">{todo.displayNumber}</span>}{todo.title}</h1>
-
+          {/* Title block — always visible above tabs */}
+          <h1 className="text-xl font-bold mb-2">
+            {todo.displayNumber && <span className="text-gray-500 font-normal mr-2">{todo.displayNumber}</span>}
+            {todo.title}
+          </h1>
           <div className="flex flex-wrap items-center gap-2 mb-4">
             <Badge color={STATUS_COLORS[todo.status]} rounded="full">
               {STATUS_LABELS[todo.status]()}
@@ -179,150 +239,238 @@ export default function TodoDetailPage() {
             </span>
           </div>
 
-          {todo.description && (
-            <Markdown className="text-gray-400 mb-4">{todo.description}</Markdown>
-          )}
-
-          {todo.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1 mb-4">
-              {todo.tags.map((tag) => (
-                <Badge key={tag} color="bg-gray-800 text-gray-400">{tag}</Badge>
-              ))}
-            </div>
-          )}
-
-          {milestones.length > 0 && (
-            <DetailSection title={t('todoCreate.milestone')} className="mb-5">
-              <FormSelect
-                value={todo.milestoneId || ''}
-                onChange={async (e) => {
-                  try {
-                    await api.todos.update(todo._id, { milestoneId: e.target.value || undefined } as Partial<Todo>);
-                    loadTodo();
-                  } catch (err: any) {
-                    showError(err.message || t('todoDetail.milestoneChangeFailed'));
-                  }
-                }}
+          {/* Sticky tab bar */}
+          <div className="flex gap-1 border-b border-gray-800 mb-5 -mx-1 px-1 overflow-x-auto">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={`px-3 py-2 text-sm whitespace-nowrap transition-colors border-b-2 -mb-px ${
+                  activeTab === tab.key
+                    ? 'border-cyan-400 text-cyan-400 font-medium'
+                    : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-600'
+                }`}
               >
-                <option value="">{t('todoCreate.noMilestone')}</option>
-                {milestones.map((ms) => (
-                  <option key={ms._id} value={ms._id}>{ms.name}</option>
-                ))}
-              </FormSelect>
-            </DetailSection>
-          )}
-
-          {!isCustomerScope && (
-            <TodoDependenciesSection
-              todo={todo}
-              allTodos={allTodos}
-              projectId={id}
-              onChanged={loadTodo}
-              onError={showError}
-              className="mb-5"
-            />
-          )}
-
-          <div className="text-xs text-gray-600 mb-5 space-y-0.5">
-            <p>{t('common.created')}: {new Date(todo.createdAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US')}</p>
-            {todo.updatedAt !== todo.createdAt && (
-              <p>{t('common.updated')}: {new Date(todo.updatedAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US')}</p>
-            )}
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          <DetailSection title={t('common.actions')} className="mb-8">
-            <div className="flex flex-wrap items-center gap-2">
-            {STATUS_TRANSITIONS[todo.status].map((tr) => (
-              <Button key={tr.next} type="button" variant={TRANSITION_BUTTON_VARIANT[tr.next]} size="sm" onClick={() => handleStatusChange(tr.next)}>
-                {tr.label()}
-              </Button>
-            ))}
-            <Button type="button" variant="edit" size="sm" onClick={() => setEditing(true)}>
-              {t('common.edit')}
-            </Button>
-            <Button type="button" variant="neutral" size="sm" onClick={async () => {
-              try {
-                await api.todos.update(todo._id, { archived: !todo.archived } as Partial<Todo>);
-                loadTodo();
-              } catch (err: any) {
-                showError(err.message || t('todos.archiveFailed'));
-              }
-            }}>
-              {todo.archived ? t('common.restore') : t('common.archive')}
-            </Button>
-            <ConfirmButton
-              onConfirm={async () => {
-                try {
-                  await api.todos.delete(todoId!);
-                  navigate(basePath);
-                } catch (err: any) {
-                  showError(err.message || t('todos.deleteFailed'));
-                }
-              }}
-              size="sm"
-              className="sm:ml-auto"
-            />
-            </div>
-          </DetailSection>
+          {/* Tab: General */}
+          {activeTab === 'general' && (
+            <div>
+              {todo.description && (
+                <Markdown className="text-gray-400 mb-4">{todo.description}</Markdown>
+              )}
 
-          <TodoValidationSection
-            todoId={todoId!}
-            projectId={todo.projectId}
-            basePath={basePath}
-            onError={showError}
-          />
-
-          <TodoDocProposalsBanner
-            todoId={todoId!}
-            todoStatus={todo.status}
-            basePath={basePath}
-          />
-
-          <TodoQuestionsSection
-            todoId={todoId!}
-            projectId={todo.projectId}
-            questions={questions}
-            onChanged={() => { loadQuestions(); loadTodo(); }}
-            onError={showError}
-          />
-
-          <DetailSection title={t('todoDetail.comments')} meta={comments.length > 0 ? `(${comments.length})` : undefined}>
-            <div className="space-y-2 mb-3">
-              {comments.length === 0 && <p className="text-xs text-gray-700 italic">{t('todoDetail.noComments')}</p>}
-              {comments.map((c, i) => (
-                <div key={i} className="text-xs bg-gray-900 border border-gray-800 rounded p-2.5">
-                  <div className="flex justify-between text-gray-500 mb-1">
-                    <span className={c.author === 'claude' ? 'text-cyan-400' : 'text-gray-400'}>{c.author}</span>
-                    <span>{new Date(c.createdAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
-                  </div>
-                  <Markdown className="text-gray-300">{c.text}</Markdown>
+              {todo.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-4">
+                  {todo.tags.map((tag) => (
+                    <Badge key={tag} color="bg-gray-800 text-gray-400">{tag}</Badge>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-              <FormInput
-                fieldClassName="flex-1 min-w-0 w-full"
-                type="text"
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                placeholder={t('todoDetail.commentPlaceholder')}
-                onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
-              />
-              <Button type="button" variant="primary" onClick={handleAddComment} disabled={savingComment || !commentText.trim()}>
-                {savingComment ? '...' : t('common.send')}
-              </Button>
-            </div>
-          </DetailSection>
+              )}
 
-          {storageEnabled && (
-            <DetailSection title={t('attachments.attachments')}>
-              <AttachmentList
-                projectId={id!}
-                entityType="todo"
-                entityId={todoId!}
-                showUpload
+              {milestones.length > 0 && (
+                <DetailSection title={t('todoCreate.milestone')} className="mb-5">
+                  <FormSelect
+                    value={todo.milestoneId || ''}
+                    onChange={async (e) => {
+                      try {
+                        await api.todos.update(todo._id, { milestoneId: e.target.value || undefined } as Partial<Todo>);
+                        loadTodo();
+                      } catch (err: any) {
+                        showError(err.message || t('todoDetail.milestoneChangeFailed'));
+                      }
+                    }}
+                  >
+                    <option value="">{t('todoCreate.noMilestone')}</option>
+                    {milestones.map((ms) => (
+                      <option key={ms._id} value={ms._id}>{ms.name}</option>
+                    ))}
+                  </FormSelect>
+                </DetailSection>
+              )}
+
+              {!isCustomerScope && (
+                <TodoDependenciesSection
+                  todo={todo}
+                  allTodos={allTodos}
+                  projectId={id}
+                  onChanged={loadTodo}
+                  onError={showError}
+                  className="mb-5"
+                />
+              )}
+
+              <div className="text-xs text-gray-600 mb-5 space-y-0.5">
+                <p>{t('common.created')}: {new Date(todo.createdAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US')}</p>
+                {todo.updatedAt !== todo.createdAt && (
+                  <p>{t('common.updated')}: {new Date(todo.updatedAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US')}</p>
+                )}
+              </div>
+
+              <DetailSection title={t('common.actions')} className="mb-8">
+                <div className="flex flex-wrap items-center gap-2">
+                  {STATUS_TRANSITIONS[todo.status].map((tr) => (
+                    <Button key={tr.next} type="button" variant={TRANSITION_BUTTON_VARIANT[tr.next]} size="sm" onClick={() => handleStatusChange(tr.next)}>
+                      {tr.label()}
+                    </Button>
+                  ))}
+                  <Button type="button" variant="edit" size="sm" onClick={() => setEditing(true)}>
+                    {t('common.edit')}
+                  </Button>
+                  <Button type="button" variant="neutral" size="sm" onClick={async () => {
+                    try {
+                      await api.todos.update(todo._id, { archived: !todo.archived } as Partial<Todo>);
+                      loadTodo();
+                    } catch (err: any) {
+                      showError(err.message || t('todos.archiveFailed'));
+                    }
+                  }}>
+                    {todo.archived ? t('common.restore') : t('common.archive')}
+                  </Button>
+                  <ConfirmButton
+                    onConfirm={async () => {
+                      try {
+                        await api.todos.delete(todoId!);
+                        navigate(basePath);
+                      } catch (err: any) {
+                        showError(err.message || t('todos.deleteFailed'));
+                      }
+                    }}
+                    size="sm"
+                    className="sm:ml-auto"
+                  />
+                </div>
+              </DetailSection>
+
+              <TodoValidationSection
+                todoId={todoId!}
+                projectId={todo.projectId}
+                basePath={basePath}
+                onError={showError}
               />
-            </DetailSection>
+
+              <TodoDocProposalsBanner
+                todoId={todoId!}
+                todoStatus={todo.status}
+                basePath={basePath}
+              />
+
+              <DetailSection title={t('todoDetail.comments')} meta={comments.length > 0 ? `(${comments.length})` : undefined}>
+                <div className="space-y-2 mb-3">
+                  {comments.length === 0 && <p className="text-xs text-gray-700 italic">{t('todoDetail.noComments')}</p>}
+                  {comments.map((c, i) => (
+                    <div key={i} className="text-xs bg-gray-900 border border-gray-800 rounded p-2.5">
+                      <div className="flex justify-between text-gray-500 mb-1">
+                        <span className={c.author === 'claude' ? 'text-cyan-400' : 'text-gray-400'}>{c.author}</span>
+                        <span>{new Date(c.createdAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                      <Markdown className="text-gray-300">{c.text}</Markdown>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <FormInput
+                    fieldClassName="flex-1 min-w-0 w-full"
+                    type="text"
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    placeholder={t('todoDetail.commentPlaceholder')}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
+                  />
+                  <Button type="button" variant="primary" onClick={handleAddComment} disabled={savingComment || !commentText.trim()}>
+                    {savingComment ? '...' : t('common.send')}
+                  </Button>
+                </div>
+              </DetailSection>
+
+              {storageEnabled && (
+                <DetailSection title={t('attachments.attachments')}>
+                  <AttachmentList
+                    projectId={id!}
+                    entityType="todo"
+                    entityId={todoId!}
+                    showUpload
+                  />
+                </DetailSection>
+              )}
+            </div>
+          )}
+
+          {/* Tab: Description & Definition */}
+          {activeTab === 'definition' && (
+            <div className="space-y-6">
+              <section>
+                <h3 className="text-sm font-medium text-gray-300 mb-2">{t('todoDetail.userStories')}</h3>
+                <MarkdownEditor
+                  value={userStories}
+                  onChange={setUserStories}
+                  rows={5}
+                  placeholder={t('todoDetail.userStoriesPlaceholder')}
+                />
+              </section>
+
+              <section>
+                <h3 className="text-sm font-medium text-gray-300 mb-2">{t('todoDetail.acceptanceCriteria')}</h3>
+                <AcceptanceCriteriaEditor value={acceptanceCriteria} onChange={setAcceptanceCriteria} />
+              </section>
+
+              <section>
+                <h3 className="text-sm font-medium text-gray-300 mb-2">{t('todoDetail.outOfScope')}</h3>
+                <MarkdownEditor
+                  value={outOfScope}
+                  onChange={setOutOfScope}
+                  rows={4}
+                  placeholder={t('todoDetail.outOfScopePlaceholder')}
+                />
+              </section>
+
+              <section>
+                <h3 className="text-sm font-medium text-gray-300 mb-2">{t('todoDetail.edgeCases')}</h3>
+                <MarkdownEditor
+                  value={edgeCases}
+                  onChange={setEdgeCases}
+                  rows={4}
+                  placeholder={t('todoDetail.edgeCasesPlaceholder')}
+                />
+              </section>
+
+              <div className="pt-2">
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={savingDefinition}
+                  onClick={handleSaveDefinition}
+                >
+                  {savingDefinition ? t('common.saving') : t('common.save')}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Tab: Open Questions */}
+          {activeTab === 'questions' && (
+            <TodoQuestionsSection
+              todoId={todoId!}
+              projectId={todo.projectId}
+              questions={questions}
+              onChanged={() => { loadQuestions(); loadTodo(); }}
+              onError={showError}
+              basePath={basePath}
+            />
+          )}
+
+          {/* Tab: Activities (stub for T-402) */}
+          {activeTab === 'activities' && (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <svg className="w-10 h-10 text-gray-700 mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
+              </svg>
+              <p className="text-sm text-gray-500">{t('todoDetail.activitiesPlaceholder')}</p>
+            </div>
           )}
         </div>
       )}

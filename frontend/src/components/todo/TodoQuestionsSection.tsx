@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { api, Question } from '../../api/client';
 import Markdown from '../Markdown';
 import Button from '../ui/Button';
@@ -11,6 +12,7 @@ interface Props {
   questions: Question[];
   onChanged: () => void;
   onError: (message: string) => void;
+  basePath?: string;
 }
 
 /**
@@ -21,7 +23,7 @@ interface Props {
  *   answers via MCP.
  * - Bottom form: user can ask the agent a follow-up — also on `done` todos.
  */
-export default function TodoQuestionsSection({ todoId, projectId, questions, onChanged, onError }: Props) {
+export default function TodoQuestionsSection({ todoId, projectId, questions, onChanged, onError, basePath }: Props) {
   const { t, i18n } = useTranslation();
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
   const [draft, setDraft] = useState('');
@@ -90,7 +92,15 @@ export default function TodoQuestionsSection({ todoId, projectId, questions, onC
             </summary>
             <div className="mt-2 space-y-2">
               {answered.map((q) => (
-                <AnsweredQuestionCard key={q._id} question={q} dateLocale={dateLocale} />
+                <AnsweredQuestionCard
+                  key={q._id}
+                  question={q}
+                  dateLocale={dateLocale}
+                  projectId={projectId}
+                  onChanged={onChanged}
+                  onError={onError}
+                  basePath={basePath}
+                />
               ))}
             </div>
           </details>
@@ -214,14 +224,60 @@ function QuestionCard({
   );
 }
 
-function AnsweredQuestionCard({ question, dateLocale }: { question: Question; dateLocale: string }) {
+function AnsweredQuestionCard({
+  question,
+  dateLocale,
+  projectId,
+  onChanged,
+  onError,
+  basePath,
+}: {
+  question: Question;
+  dateLocale: string;
+  projectId?: string;
+  onChanged: () => void;
+  onError: (message: string) => void;
+  basePath?: string;
+}) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const headerKey = question.direction === 'user_to_agent'
     ? 'questions.headerUserToAgent'
     : 'questions.headerAgentAnswered';
   const answeredByLabel = question.answeredByAgent
     ? t('questions.answeredByAgent')
     : t('questions.answeredByUser');
+
+  const [showSaveForm, setShowSaveForm] = useState(false);
+  const [saveTopic, setSaveTopic] = useState(question.question.slice(0, 80));
+  const [saveTags, setSaveTags] = useState('');
+  const [saveCategory, setSaveCategory] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleSaveAsKnowledge = async () => {
+    setSaving(true);
+    try {
+      await api.questions.convertToKnowledge(question._id, {
+        topic: saveTopic.trim() || question.question.slice(0, 80),
+        tags: saveTags ? saveTags.split(',').map((t) => t.trim()).filter(Boolean) : undefined,
+        category: saveCategory.trim() || undefined,
+        scope: projectId ? 'project' : undefined,
+      });
+      setShowSaveForm(false);
+      onChanged();
+    } catch (err) {
+      onError((err as Error).message || t('questions.saveAsKnowledgeFailed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const knowledgePath = basePath
+    ? basePath.replace(/\/todos\/.*$/, '/knowledge')
+    : projectId
+      ? `/projects/${projectId}/knowledge`
+      : undefined;
+
   return (
     <div className="rounded border border-gray-800 bg-gray-950/40 p-2.5">
       <div className="flex items-center justify-between gap-2 text-[11px] text-gray-500 mb-1">
@@ -233,6 +289,62 @@ function AnsweredQuestionCard({ question, dateLocale }: { question: Question; da
         <div className="mt-2 text-xs">
           <span className="text-gray-500">{answeredByLabel}:</span>
           <Markdown className="text-gray-200 mt-0.5">{question.answer}</Markdown>
+        </div>
+      )}
+
+      <div className="mt-2 flex items-center gap-2">
+        {!question.knowledgeId && !showSaveForm && (
+          <Button type="button" size="xs" variant="accent" onClick={() => setShowSaveForm(true)}>
+            {t('questions.saveAsKnowledge')}
+          </Button>
+        )}
+        {question.knowledgeId && knowledgePath && (
+          <Button type="button" size="xs" variant="ghost-blue" onClick={() => navigate(knowledgePath)}>
+            {t('questions.openKnowledge')}
+          </Button>
+        )}
+      </div>
+
+      {showSaveForm && !question.knowledgeId && (
+        <div className="mt-3 p-3 rounded border border-violet-800/40 bg-violet-950/20 space-y-2">
+          <p className="text-xs font-medium text-violet-300">{t('questions.saveAsKnowledgeTitle')}</p>
+          <div>
+            <label className="block text-[11px] text-gray-500 mb-0.5">{t('questions.saveAsKnowledgeTopic')}</label>
+            <input
+              type="text"
+              value={saveTopic}
+              onChange={(e) => setSaveTopic(e.target.value)}
+              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-violet-500"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] text-gray-500 mb-0.5">{t('questions.saveAsKnowledgeTags')}</label>
+            <input
+              type="text"
+              value={saveTags}
+              onChange={(e) => setSaveTags(e.target.value)}
+              placeholder={t('common.commaSeparated')}
+              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-violet-500"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] text-gray-500 mb-0.5">{t('questions.saveAsKnowledgeCategory')}</label>
+            <input
+              type="text"
+              value={saveCategory}
+              onChange={(e) => setSaveCategory(e.target.value)}
+              placeholder="z.B. Decision"
+              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-violet-500"
+            />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button type="button" size="xs" variant="primary" disabled={saving || !saveTopic.trim()} onClick={handleSaveAsKnowledge}>
+              {saving ? t('questions.saveAsKnowledgeSaving') : t('common.save')}
+            </Button>
+            <Button type="button" size="xs" variant="secondary" onClick={() => setShowSaveForm(false)}>
+              {t('common.cancel')}
+            </Button>
+          </div>
         </div>
       )}
     </div>

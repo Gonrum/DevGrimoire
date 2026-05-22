@@ -528,7 +528,26 @@
     "addDependencyFailed": "Abhängigkeit hinzufügen fehlgeschlagen",
     "comments": "Kommentare",
     "noComments": "Noch keine Kommentare",
-    "commentPlaceholder": "Kommentar schreiben..."
+    "commentPlaceholder": "Kommentar schreiben...",
+    "tabs": {
+      "general": "Allgemein",
+      "definition": "Beschreibung & Definition",
+      "questions": "Rückfragen",
+      "activities": "Aktivitäten"
+    },
+    "userStories": "User Stories",
+    "userStoriesPlaceholder": "Beschreibe die User Stories (Markdown)...",
+    "acceptanceCriteria": "Akzeptanzkriterien",
+    "acceptanceCriteriaEmpty": "Keine Akzeptanzkriterien — leg los mit + Neues Kriterium",
+    "addCriterion": "+ Neues Kriterium",
+    "criterionPlaceholder": "Kriterium beschreiben...",
+    "outOfScope": "Out of Scope",
+    "outOfScopePlaceholder": "Was ist ausdrücklich nicht im Scope (Markdown)...",
+    "edgeCases": "Edge Cases",
+    "edgeCasesPlaceholder": "Relevante Randfälle und Sonderfälle (Markdown)...",
+    "definitionSaved": "Definition gespeichert",
+    "definitionSaveFailed": "Speichern fehlgeschlagen",
+    "activitiesPlaceholder": "Audit-Trail folgt in T-402"
   },
   "validation": {
     "sectionTitle": "Validierung",
@@ -587,7 +606,16 @@
     "filterDirectionUserToAgent": "User → Agent",
     "directionAgentToUser": "Agent → User",
     "directionUserToAgent": "User → Agent",
-    "loadFailed": "Konnte Rückfragen nicht laden."
+    "loadFailed": "Konnte Rückfragen nicht laden.",
+    "saveAsKnowledge": "Als Wissen speichern",
+    "saveAsKnowledgeTitle": "Als Wissenseintrag speichern",
+    "saveAsKnowledgeTopic": "Titel / Topic",
+    "saveAsKnowledgeTags": "Tags (kommagetrennt)",
+    "saveAsKnowledgeCategory": "Kategorie (optional)",
+    "saveAsKnowledgeSaving": "Speichern...",
+    "saveAsKnowledgeSuccess": "Wissenseintrag angelegt",
+    "saveAsKnowledgeFailed": "Speichern fehlgeschlagen",
+    "openKnowledge": "Wissen anzeigen"
   },
   "milestones": {
     "newMilestone": "+ Neues Artefakt",
