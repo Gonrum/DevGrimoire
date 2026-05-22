@@ -16,10 +16,25 @@ import { CreateMilestoneDto } from './dto/create-milestone.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
 import { MilestoneStatus } from './schemas/milestone.schema';
 import { ValidateProjectIdPipe } from '../common/pipes/validate-project-id.pipe';
+import { ImportPreviewDto, ImportApplyDto } from './dto/import-milestone.dto';
 
 @Controller('milestones')
 export class MilestonesController {
   constructor(private readonly milestonesService: MilestonesService) {}
+
+  // ── Import endpoints (must be placed BEFORE `:id` routes) ────────────────
+
+  @Post('import/preview')
+  @HttpCode(200)
+  importPreview(@Body() dto: ImportPreviewDto) {
+    return this.milestonesService.parseMarkdown(dto.markdown);
+  }
+
+  @Post('import/apply')
+  @HttpCode(201)
+  importApply(@Body(ValidateProjectIdPipe) dto: ImportApplyDto) {
+    return this.milestonesService.importFromParsed(dto.projectId, dto.parsed);
+  }
 
   @Post()
   @HttpCode(201)

@@ -1172,6 +1172,38 @@ const tools = [
     },
   },
   {
+    name: 'milestone_import_preview',
+    description: 'Parse a Markdown string (milestone export format) and return the structured ParsedMilestone — no DB write. Use this to inspect what would be imported before calling milestone_import_apply.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        markdown: { type: 'string', description: 'Markdown content to parse (e.g. from milestone_export)' },
+      },
+      required: ['markdown'],
+    },
+  },
+  {
+    name: 'milestone_import_apply',
+    description: 'Import a parsed milestone into a project — creates the milestone and all todos. Pass the ParsedMilestone from milestone_import_preview (or a manually crafted object). Returns { milestone, todos, warnings? }.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Target project MongoDB ID' },
+        parsed: {
+          type: 'object',
+          description: 'ParsedMilestone object (name, description?, todos[])',
+          properties: {
+            name: { type: 'string' },
+            description: { type: 'string' },
+            todos: { type: 'array' },
+          },
+          required: ['name', 'todos'],
+        },
+      },
+      required: ['projectId', 'parsed'],
+    },
+  },
+  {
     name: 'notify_user',
     description: 'Send a push notification to the user via the DevGrimoire PWA. Use this to inform the user about completed tasks, important updates, or when you need their attention.',
     inputSchema: {
@@ -3724,6 +3756,7 @@ const EXPLICIT_WRITE_TOOLS = new Set<string>([
   'customer_template_apply',
   'todo_ask_question',
   'question_convert_to_knowledge',
+  'milestone_import_apply',
 ]);
 
 export function isWriteTool(name: string): boolean {
@@ -4307,6 +4340,17 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           });
           const { content: markdownContent } = await milestonesService.exportAsMarkdown(msExportId);
           return { content: [{ type: 'text' as const, text: markdownContent }] };
+        }
+        case 'milestone_import_preview': {
+          const parsed = milestonesService.parseMarkdown(requireString(a, 'markdown'));
+          return { content: [{ type: 'text' as const, text: JSON.stringify(parsed, null, 2) }] };
+        }
+        case 'milestone_import_apply': {
+          const importResult = await milestonesService.importFromParsed(
+            requireString(a, 'projectId'),
+            a['parsed'] as any,
+          );
+          return { content: [{ type: 'text' as const, text: JSON.stringify(importResult, null, 2) }] };
         }
         case 'notify_user': {
           const nTitle = requireString(a, 'title');

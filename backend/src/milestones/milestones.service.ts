@@ -12,6 +12,38 @@ import { CountersService } from '../counters/counters.service';
 import { formatEntityNumber } from '../common/number-format';
 import { projectIdFilter } from '../common/project-id-filter';
 import { TodosService } from '../todos/todos.service';
+import { TodoDocument } from '../todos/schemas/todo.schema';
+
+// ── Markdown-Import types ─────────────────────────────────────────────────────
+
+export interface ParsedAcceptanceCriterion {
+  text: string;
+  done: boolean;
+}
+
+export interface ParsedTodo {
+  title: string;
+  description?: string;
+  priority?: 'low' | 'medium' | 'high' | 'critical';
+  status?: 'open' | 'in_progress' | 'review' | 'done';
+  tags?: string[];
+  userStories?: string;
+  acceptanceCriteria?: ParsedAcceptanceCriterion[];
+  outOfScope?: string;
+  edgeCases?: string;
+}
+
+export interface ParsedMilestone {
+  name: string;
+  description?: string;
+  todos: ParsedTodo[];
+}
+
+export interface ImportResult {
+  milestone: MilestoneDocument;
+  todos: TodoDocument[];
+  warnings?: string[];
+}
 
 @Injectable()
 export class MilestonesService {
@@ -225,6 +257,332 @@ export class MilestonesService {
     const filename = [slugDisplay, slugName].filter(Boolean).join('-') + '.md';
 
     return { content: lines.join('\n'), filename };
+  }
+
+  // ── Markdown Import ──────────────────────────────────────────────────────────
+
+  /**
+   * Lenient line-based state-machine parser.
+   * Does NOT throw on unknown structures — skips them gracefully.
+   */
+  parseMarkdown(md: string): ParsedMilestone {
+    const lines = md.split('\n');
+
+    // ── helpers ────────────────────────────────────────────────────────────
+    const headingLevel = (line: string): number => {
+      const m = line.match(/^(#{1,6})\s/);
+      return m ? m[1].length : 0;
+    };
+
+    const headingText = (line: string): string => line.replace(/^#{1,6}\s+/, '').trim();
+
+    const stripDisplayNumber = (text: string, prefix: string): string => {
+      // Strip leading "M-3 " / "M-3:" / "T-42 " / "T-42:" patterns
+      const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return text.replace(new RegExp(`^${escaped}-\\d+[:\\s]+`, 'i'), '').trim();
+    };
+
+    const isTodoSectionH2 = (text: string): boolean =>
+      /todo|task|quest/i.test(text);
+
+    const H4_SECTION_MAP: Array<{ keys: RegExp; field: string }> = [
+      { keys: /^(user\s+stor(y|ies))$/i, field: 'userStories' },
+      { keys: /^(acceptance\s*(criteria)?|akzeptanzkriterien|akzeptanz)$/i, field: 'acceptanceCriteria' },
+      { keys: /^(out\s+of\s+scope|oos|nicht\s+im\s+scope)$/i, field: 'outOfScope' },
+      { keys: /^(edge\s+cases?|randf.lle)$/i, field: 'edgeCases' },
+    ];
+
+    const resolveH4Field = (text: string): string | null => {
+      for (const entry of H4_SECTION_MAP) {
+        if (entry.keys.test(text.trim())) return entry.field;
+      }
+      return null;
+    };
+
+    const parseMetaLine = (line: string): { key: string; value: string } | null => {
+      const m = line.match(/^[-*]\s+([\w\s]+?)\s*:\s*`?(.+?)`?\s*$/);
+      if (!m) return null;
+      return { key: m[1].trim().toLowerCase(), value: m[2].trim() };
+    };
+
+    const parsePriority = (v: string): ParsedTodo['priority'] | undefined => {
+      if (/^(low|medium|high|critical)$/i.test(v)) return v.toLowerCase() as ParsedTodo['priority'];
+      return undefined;
+    };
+
+    const parseStatus = (v: string): ParsedTodo['status'] | undefined => {
+      if (/^(open|in_progress|review|done)$/i.test(v)) return v.toLowerCase() as ParsedTodo['status'];
+      return undefined;
+    };
+
+    const parseTags = (v: string): string[] =>
+      v.split(/[,;]+/).map((t) => t.trim()).filter(Boolean);
+
+    const parseCheckbox = (line: string): ParsedAcceptanceCriterion | null => {
+      const m = line.match(/^[-*]\s+\[([xX ])\]\s+(.+)$/);
+      if (!m) return null;
+      return { text: m[2].trim(), done: m[1] !== ' ' };
+    };
+
+    // ── state ──────────────────────────────────────────────────────────────
+    let milestoneName = '';
+    let milestoneDescLines: string[] = [];
+    let todos: ParsedTodo[] = [];
+
+    type State =
+      | 'before_h1'
+      | 'milestone_body'
+      | 'todos_section'
+      | 'todo_body'
+      | 'todo_h4';
+
+    let state: State = 'before_h1';
+    let foundTodoSection = false;
+
+    let currentTodo: ParsedTodo | null = null;
+    let currentTodoBodyLines: string[] = [];
+    let currentH4Field: string | null = null;
+    let currentH4Lines: string[] = [];
+
+    const flushH4 = () => {
+      if (!currentTodo || !currentH4Field || currentH4Lines.length === 0) {
+        currentH4Field = null;
+        currentH4Lines = [];
+        return;
+      }
+      const text = currentH4Lines.join('\n').trim();
+      if (currentH4Field === 'acceptanceCriteria') {
+        const criteria: ParsedAcceptanceCriterion[] = [];
+        for (const l of currentH4Lines) {
+          const cb = parseCheckbox(l);
+          if (cb) criteria.push(cb);
+        }
+        currentTodo.acceptanceCriteria = criteria;
+      } else {
+        (currentTodo as any)[currentH4Field] = text;
+      }
+      currentH4Field = null;
+      currentH4Lines = [];
+    };
+
+    const flushTodoBody = () => {
+      if (!currentTodo) return;
+      const desc = currentTodoBodyLines.join('\n').trim();
+      if (desc) currentTodo.description = desc;
+      currentTodoBodyLines = [];
+    };
+
+    const flushTodo = () => {
+      if (!currentTodo) return;
+      flushH4();
+      flushTodoBody();
+      todos.push(currentTodo);
+      currentTodo = null;
+    };
+
+    const startTodo = (rawTitle: string) => {
+      flushTodo();
+      const title = stripDisplayNumber(rawTitle, 'T');
+      currentTodo = { title };
+      currentTodoBodyLines = [];
+      currentH4Field = null;
+      currentH4Lines = [];
+    };
+
+    // ── line loop ──────────────────────────────────────────────────────────
+    for (const rawLine of lines) {
+      const lvl = headingLevel(rawLine);
+      const line = rawLine; // keep original for content; use rawLine.trim() for checks
+
+      if (state === 'before_h1') {
+        if (lvl === 1) {
+          milestoneName = stripDisplayNumber(headingText(rawLine), 'M');
+          state = 'milestone_body';
+        }
+        continue;
+      }
+
+      if (state === 'milestone_body') {
+        if (lvl === 2) {
+          const h2text = headingText(rawLine);
+          if (isTodoSectionH2(h2text)) {
+            foundTodoSection = true;
+            state = 'todos_section';
+          }
+          // else: another H2 — skip it (part of milestone description is already done)
+        } else if (lvl === 3) {
+          // No todos-section marker found — treat H3s directly as todos
+          state = 'todos_section';
+          startTodo(headingText(rawLine));
+          state = 'todo_body';
+        } else {
+          // Accumulate milestone description
+          milestoneDescLines.push(rawLine);
+        }
+        continue;
+      }
+
+      if (state === 'todos_section') {
+        if (lvl === 3) {
+          startTodo(headingText(rawLine));
+          state = 'todo_body';
+        }
+        // Ignore other content in the todos section header area
+        continue;
+      }
+
+      if (state === 'todo_body') {
+        if (lvl === 1) {
+          // New milestone? Stop parsing todos.
+          flushTodo();
+          break;
+        }
+        if (lvl === 2) {
+          const h2text = headingText(rawLine);
+          if (isTodoSectionH2(h2text)) {
+            // Another todos section — just stay in context
+          } else {
+            flushTodo();
+            state = 'todos_section';
+          }
+          continue;
+        }
+        if (lvl === 3) {
+          // New todo
+          flushTodo();
+          startTodo(headingText(rawLine));
+          continue;
+        }
+        if (lvl === 4) {
+          // H4 inside todo
+          flushTodoBody();
+          flushH4();
+          const h4text = headingText(rawLine);
+          const field = resolveH4Field(h4text);
+          if (field) {
+            currentH4Field = field;
+            currentH4Lines = [];
+            state = 'todo_h4';
+          }
+          // unknown H4: ignore it
+          continue;
+        }
+
+        // Regular body line inside a todo
+        if (!currentH4Field) {
+          // Check for meta line before any description
+          if (currentTodo !== null) {
+            const meta = parseMetaLine(rawLine);
+            if (meta) {
+              // Capture as typed const so TS doesn't narrow through closure calls below
+              const td = currentTodo as ParsedTodo;
+              if (meta.key === 'status') {
+                const s = parseStatus(meta.value);
+                if (s !== undefined) td.status = s;
+              } else if (meta.key === 'priority') {
+                const p = parsePriority(meta.value);
+                if (p !== undefined) td.priority = p;
+              } else if (meta.key === 'tags') {
+                td.tags = parseTags(meta.value);
+              }
+              // flush description only after first meta line
+              if (currentTodoBodyLines.length > 0) flushTodoBody();
+              continue;
+            }
+          }
+          currentTodoBodyLines.push(rawLine);
+        }
+        continue;
+      }
+
+      if (state === 'todo_h4') {
+        if (lvl >= 1) {
+          // Any heading ends the H4 section — go back to todo_body to re-process
+          flushH4();
+          state = 'todo_body';
+          // Re-process this line in todo_body context
+          if (lvl === 1) {
+            flushTodo();
+            break;
+          }
+          if (lvl === 3) {
+            flushTodo();
+            startTodo(headingText(rawLine));
+            state = 'todo_body';
+          } else if (lvl === 4) {
+            const h4text = headingText(rawLine);
+            const field = resolveH4Field(h4text);
+            if (field) {
+              currentH4Field = field;
+              currentH4Lines = [];
+              state = 'todo_h4';
+            }
+          }
+          continue;
+        }
+        currentH4Lines.push(rawLine);
+        continue;
+      }
+    }
+
+    // ── flush remaining ────────────────────────────────────────────────────
+    if (state === 'todo_h4') flushH4();
+    flushTodo();
+
+    const milestoneDesc = milestoneDescLines.join('\n').trim();
+
+    return {
+      name: milestoneName || 'Imported Milestone',
+      ...(milestoneDesc ? { description: milestoneDesc } : {}),
+      todos,
+    };
+  }
+
+  /**
+   * Write a parsed milestone + todos to the DB.
+   * Per-todo failures are collected as warnings — milestone is not rolled back.
+   */
+  async importFromParsed(
+    projectId: string,
+    parsed: ParsedMilestone,
+    _opts?: unknown,
+  ): Promise<ImportResult> {
+    const milestone = await this.create({
+      projectId,
+      name: parsed.name,
+      description: parsed.description,
+    });
+
+    const createdTodos: TodoDocument[] = [];
+    const warnings: string[] = [];
+
+    for (const pt of parsed.todos) {
+      try {
+        const todo = await this.todosService.create({
+          projectId,
+          milestoneId: milestone._id.toString(),
+          title: pt.title,
+          description: pt.description,
+          priority: pt.priority as any,
+          status: pt.status as any,
+          tags: pt.tags,
+          userStories: pt.userStories,
+          acceptanceCriteria: pt.acceptanceCriteria as any,
+          outOfScope: pt.outOfScope,
+          edgeCases: pt.edgeCases,
+        });
+        createdTodos.push(todo);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        warnings.push(`Todo "${pt.title}": ${msg}`);
+      }
+    }
+
+    return {
+      milestone,
+      todos: createdTodos,
+      ...(warnings.length > 0 ? { warnings } : {}),
+    };
   }
 
   async removeByProject(projectId: string): Promise<void> {
