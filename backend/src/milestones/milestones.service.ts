@@ -283,7 +283,7 @@ export class MilestonesService {
     };
 
     const isTodoSectionH2 = (text: string): boolean =>
-      /todo|task|quest/i.test(text);
+      /todo|task|quest|aufgabe/i.test(text);
 
     const H4_SECTION_MAP: Array<{ keys: RegExp; field: string }> = [
       { keys: /^(user\s+stor(y|ies))$/i, field: 'userStories' },
@@ -416,8 +416,10 @@ export class MilestonesService {
           startTodo(headingText(rawLine));
           state = 'todo_body';
         } else {
-          // Accumulate milestone description
-          milestoneDescLines.push(rawLine);
+          // Accumulate milestone description — skip blockquote lines (e.g. "> Status: open")
+          if (!rawLine.startsWith('>')) {
+            milestoneDescLines.push(rawLine);
+          }
         }
         continue;
       }
