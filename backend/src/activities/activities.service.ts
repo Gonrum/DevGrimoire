@@ -28,18 +28,34 @@ export class ActivitiesService {
     });
   }
 
-  async findByProject(projectId: string, limit = 50): Promise<Activity[]> {
+  async findByProject(
+    projectId: string,
+    limit = 50,
+    entityType?: string,
+    entityId?: string,
+  ): Promise<Activity[]> {
+    const filter: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
+    if (entityType) filter['entity'] = entityType;
+    if (entityId) filter['entityId'] = entityId;
     return this.activityModel
-      .find({ projectId: projectIdFilter(projectId) })
+      .find(filter)
       .sort({ createdAt: -1 })
       .limit(limit)
       .lean()
       .exec();
   }
 
-  async findByCustomer(customerId: string, limit = 50): Promise<Activity[]> {
+  async findByCustomer(
+    customerId: string,
+    limit = 50,
+    entityType?: string,
+    entityId?: string,
+  ): Promise<Activity[]> {
+    const filter: Record<string, unknown> = { customerId: projectIdFilter(customerId) };
+    if (entityType) filter['entity'] = entityType;
+    if (entityId) filter['entityId'] = entityId;
     return this.activityModel
-      .find({ customerId: projectIdFilter(customerId) })
+      .find(filter)
       .sort({ createdAt: -1 })
       .limit(limit)
       .lean()

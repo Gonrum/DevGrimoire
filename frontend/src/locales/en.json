@@ -554,7 +554,15 @@
     "edgeCasesPlaceholder": "Relevant edge and corner cases (Markdown)...",
     "definitionSaved": "Definition saved",
     "definitionSaveFailed": "Save failed",
-    "activitiesPlaceholder": "Audit trail coming in T-402"
+    "activities": {
+      "noEvents": "No activity yet",
+      "event": {
+        "commentAdded": "Comment by {{author}}",
+        "questionCreated": "Question asked",
+        "questionAnswered": "Question answered",
+        "knowledgeCreated": "Knowledge created from question"
+      }
+    }
   },
   "validation": {
     "sectionTitle": "Validation",

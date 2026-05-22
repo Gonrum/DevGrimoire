@@ -554,7 +554,15 @@
     "edgeCasesPlaceholder": "Relevante Randfälle und Sonderfälle (Markdown)...",
     "definitionSaved": "Definition gespeichert",
     "definitionSaveFailed": "Speichern fehlgeschlagen",
-    "activitiesPlaceholder": "Audit-Trail folgt in T-402"
+    "activities": {
+      "noEvents": "Keine Aktivitäten",
+      "event": {
+        "commentAdded": "Kommentar von {{author}}",
+        "questionCreated": "Frage gestellt",
+        "questionAnswered": "Frage beantwortet",
+        "knowledgeCreated": "Wissen aus Frage erstellt"
+      }
+    }
   },
   "validation": {
     "sectionTitle": "Validierung",

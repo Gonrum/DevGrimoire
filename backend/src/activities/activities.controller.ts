@@ -10,6 +10,8 @@ export class ActivitiesController {
     @Query('projectId') projectId?: string,
     @Query('customerId') customerId?: string,
     @Query('limit') limit?: string,
+    @Query('entityType') entityType?: string,
+    @Query('entityId') entityId?: string,
   ) {
     if (!projectId && !customerId) {
       throw new BadRequestException('projectId or customerId query parameter is required');
@@ -19,7 +21,7 @@ export class ActivitiesController {
     }
     const max = Math.min(limit ? parseInt(limit, 10) : 100, 200);
     return projectId
-      ? this.activitiesService.findByProject(projectId, max)
-      : this.activitiesService.findByCustomer(customerId!, max);
+      ? this.activitiesService.findByProject(projectId, max, entityType, entityId)
+      : this.activitiesService.findByCustomer(customerId!, max, entityType, entityId);
   }
 }

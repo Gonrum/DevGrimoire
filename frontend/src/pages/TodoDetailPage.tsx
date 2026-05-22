@@ -22,6 +22,7 @@ import TodoValidationSection from '../components/todo/TodoValidationSection';
 import TodoDocProposalsBanner from '../components/todo/TodoDocProposalsBanner';
 import AcceptanceCriteriaEditor from '../components/todo/AcceptanceCriteriaEditor';
 import AttachmentList from '../components/AttachmentList';
+import TodoActivityTimeline from '../components/todo/TodoActivityTimeline';
 
 type DetailTab = 'general' | 'definition' | 'questions' | 'activities';
 
@@ -463,14 +464,14 @@ export default function TodoDetailPage() {
             />
           )}
 
-          {/* Tab: Activities (stub for T-402) */}
+          {/* Tab: Activities */}
           {activeTab === 'activities' && (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <svg className="w-10 h-10 text-gray-700 mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
-              </svg>
-              <p className="text-sm text-gray-500">{t('todoDetail.activitiesPlaceholder')}</p>
-            </div>
+            <TodoActivityTimeline
+              todoId={todoId!}
+              projectId={todo.projectId}
+              comments={todo.comments || []}
+              questions={questions}
+            />
           )}
         </div>
       )}

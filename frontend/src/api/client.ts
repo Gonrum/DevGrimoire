@@ -1589,9 +1589,12 @@ export const api = {
       request<{ ok: boolean }>('/push/subscribe', { method: 'DELETE', body: JSON.stringify({ endpoint }) }),
   },
   activities: {
-    list: (projectId: string, limit?: number) => {
+    list: (projectId: string, opts?: number | { limit?: number; entityType?: string; entityId?: string }) => {
       const params = new URLSearchParams({ projectId });
-      if (limit) params.set('limit', String(limit));
+      const o = typeof opts === 'number' ? { limit: opts } : opts;
+      if (o?.limit) params.set('limit', String(o.limit));
+      if (o?.entityType) params.set('entityType', o.entityType);
+      if (o?.entityId) params.set('entityId', o.entityId);
       return request<Activity[]>(`/activities?${params}`);
     },
     listForCustomer: (customerId: string, limit?: number) => {
