@@ -1917,6 +1917,26 @@ function ChatSection() {
         </p>
       </Section>
 
+      <Section title={isDE ? 'Briefing Mode (M-48)' : 'Briefing Mode (M-48)'}>
+        <p className="text-gray-400 text-sm mb-3">
+          {isDE
+            ? 'Sparkles-Toggle (✨) im ChatDock aktiviert den geführten Anforderungs-Erfassungs-Dialog: der Agent fragt strukturiert nach Ziel, User Stories, Akzeptanzkriterien, Out-of-Scope und Edge Cases. Wenn der User "GO" sagt, ruft der Agent das Tool milestone_create_with_todos auf und legt einen Milestone mit Quest-Todos an.'
+            : 'The Sparkles toggle (✨) in the ChatDock activates a guided requirements-gathering dialog: the agent asks structured questions about goal, user stories, acceptance criteria, out-of-scope and edge cases. When the user says "GO", the agent calls milestone_create_with_todos to materialise the conversation into a milestone with quest-todos.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label="API" value={<><Mono>POST /chat/sessions/:id/message</Mono> mit <Mono>briefingMode: true</Mono></>} />
+          <InfoRow label={isDE ? 'System-Prompt' : 'System prompt'} value={isDE ? 'Briefing-Block wird vor rolePromptBlock prependet' : 'Briefing block prepended before rolePromptBlock'} />
+          <InfoRow label="Tool-Allowlist" value={isDE ? 'Union mit milestone_create_with_todos, milestone_import_apply, milestone_import_preview — agentRole-Caps und Endpoint-Caps bleiben intakt' : 'Union with milestone_create_with_todos, milestone_import_apply, milestone_import_preview — agentRole caps and endpoint caps stay intact'} />
+          <InfoRow label="MCP" value={<>milestone_create_with_todos (write), milestone_import_preview/apply (T-421)</>} />
+          <InfoRow label="UI" value={isDE ? 'Sparkles-Button im ChatDock toggelt; Banner über Input zeigt Aktiv-Zustand; Reset bei Projekt-/Session-Wechsel' : 'Sparkles button in ChatDock toggles; banner above input indicates active state; resets on project/session switch'} />
+        </div>
+        <Hint>
+          {isDE
+            ? 'Wichtig: Der Chat-Layer hat eine eigene Tool-Registry (chat-tools.ts) — neu hinzugefügte MCP-Tools müssen dort separat in TOOL_GROUPS + dispatch() registriert werden, sonst kann der LLM sie nicht aufrufen.'
+            : 'Heads-up: The chat layer has its own tool registry (chat-tools.ts) — newly added MCP tools must be registered separately in TOOL_GROUPS + dispatch(); otherwise the LLM cannot call them.'}
+        </Hint>
+      </Section>
+
       <Section title={isDE ? 'Anhänge (Text & Bild)' : 'Attachments (Text & Image)'}>
         <p className="text-gray-400 text-sm mb-3">
           {isDE
