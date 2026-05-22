@@ -1248,7 +1248,7 @@ const tools = [
         content: { type: 'string', description: 'Body text of the Knowledge entry. Defaults to "**Frage:** <question>\\n\\n**Antwort:** <answer>" if omitted.' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags to categorise the knowledge entry' },
         category: { type: 'string', description: 'Optional free-form category (e.g. "Decision", "Architecture", "Process")' },
-        scope: { type: 'string', enum: ['global', 'project', 'customer'], description: 'Scope for the knowledge entry. Defaults to "project" if the question has a projectId, otherwise "global".' },
+        scope: { type: 'string', enum: ['global', 'project'], description: 'Scope for the knowledge entry. Defaults to "project" if the question has a projectId, otherwise "global".' },
       },
       required: ['questionId', 'topic'],
     },
@@ -3656,7 +3656,8 @@ export function toolGroup(name: string): 'Task-Management' | 'Wissen & Suche' | 
     name.startsWith('doc_update_proposal_') ||
     name.startsWith('knowledge_graph_') ||
     name.startsWith('oracle_') ||
-    name.startsWith('workflow_')
+    name.startsWith('workflow_') ||
+    name.startsWith('question_')
   ) {
     return 'Task-Management';
   }
@@ -4371,7 +4372,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               content: optionalString(a, 'content'),
               tags: Array.isArray(a.tags) ? (a.tags as string[]) : undefined,
               category: optionalString(a, 'category'),
-              scope: optionalString(a, 'scope') as 'global' | 'project' | 'customer' | undefined,
+              scope: optionalString(a, 'scope') as 'global' | 'project' | undefined,
             },
           );
           result = knowledge.toJSON ? knowledge.toJSON() : { ...knowledge };

@@ -17,7 +17,7 @@ export class ConvertToKnowledgeDto {
   @IsOptional()
   category?: string;
 
-  @IsIn(['global', 'project', 'customer'])
+  @IsIn(['global', 'project'])
   @IsOptional()
-  scope?: 'global' | 'project' | 'customer';
+  scope?: 'global' | 'project';
 }

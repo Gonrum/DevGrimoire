@@ -419,16 +419,18 @@ export class QuestionsService implements OnModuleInit {
     }
 
     if (question.knowledgeId) {
-      throw new BadRequestException(
-        `Question ${questionId} has already been converted to knowledge (knowledgeId: ${question.knowledgeId})`,
-      );
+      throw new BadRequestException({
+        message: `Question ${questionId} has already been converted to knowledge`,
+        code: 'QUESTION_ALREADY_CONVERTED',
+        knowledgeId: question.knowledgeId.toString(),
+      });
     }
 
     const defaultContent =
       `**Frage:** ${question.question}\n\n**Antwort:** ${question.answer ?? ''}`;
 
     const projectIdStr = question.projectId?.toString();
-    const resolvedScope: 'global' | 'project' | 'customer' =
+    const resolvedScope: 'global' | 'project' =
       dto.scope ?? (projectIdStr ? 'project' : 'global');
 
     const knowledge = await this.knowledgeService.create({
