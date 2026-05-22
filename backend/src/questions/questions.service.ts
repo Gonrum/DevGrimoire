@@ -307,6 +307,26 @@ export class QuestionsService implements OnModuleInit {
   }
 
   /**
+   * Returns the count and list of open (pending/expired) questions for a
+   * single todo. Used by TodosService to block the review → done transition.
+   */
+  async countOpenForTodo(todoId: string): Promise<{
+    count: number;
+    items: Array<{ id: string; question: string; status: QuestionStatus }>;
+  }> {
+    if (!Types.ObjectId.isValid(todoId)) return { count: 0, items: [] };
+    const { items, total } = await this.findOpen({ todoId });
+    return {
+      count: total,
+      items: items.map((q) => ({
+        id: q._id.toString(),
+        question: q.question,
+        status: q.status,
+      })),
+    };
+  }
+
+  /**
    * Full question history for one todo (open + answered). Used by the todo
    * detail page to render question log + answer form.
    */

@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ForbiddenException,
+  forwardRef,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -14,6 +16,7 @@ import { UpdateTodoDto } from './dto/update-todo.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { CountersService } from '../counters/counters.service';
 import { CustomersService } from '../customers/customers.service';
+import { QuestionsService } from '../questions/questions.service';
 import { projectIdFilter } from '../common/project-id-filter';
 import { formatEntityNumber } from '../common/number-format';
 import { RequestContext } from '../common/request-context';
@@ -38,6 +41,8 @@ export class TodosService {
     private countersService: CountersService,
     private customersService: CustomersService,
     private eventEmitter: EventEmitter2,
+    @Inject(forwardRef(() => QuestionsService))
+    private questionsService: QuestionsService,
   ) {}
 
   private validateStatusTransition(current: TodoStatus, next: TodoStatus): void {
@@ -171,6 +176,21 @@ export class TodosService {
       const existing = await this.todoModel.findById(id).exec();
       if (!existing) throw new NotFoundException(`Todo ${id} not found`);
       this.validateStatusTransition(existing.status, dto.status);
+
+      // Block review → done when there are still open (pending/expired) questions.
+      if (
+        existing.status === TodoStatus.REVIEW &&
+        dto.status === TodoStatus.DONE
+      ) {
+        const { count, items } = await this.questionsService.countOpenForTodo(id);
+        if (count > 0) {
+          throw new BadRequestException({
+            message: 'Cannot mark todo as done: open questions must be answered first',
+            code: 'OPEN_QUESTIONS_BLOCK_DONE',
+            openQuestions: items,
+          });
+        }
+      }
     }
 
     const todo = await this.todoModel
