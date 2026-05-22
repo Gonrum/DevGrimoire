@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
@@ -12,7 +12,27 @@ import { CountersService } from '../counters/counters.service';
 import { formatEntityNumber } from '../common/number-format';
 import { projectIdFilter } from '../common/project-id-filter';
 import { TodosService } from '../todos/todos.service';
-import { TodoDocument } from '../todos/schemas/todo.schema';
+import { TodoDocument, TodoStatus } from '../todos/schemas/todo.schema';
+import { ChatLlmService } from '../chat/chat-llm.service';
+
+// ── AI-Complete types ─────────────────────────────────────────────────────────
+
+export interface AiSuggestion {
+  todoId: string;
+  displayNumber: string;
+  title: string;
+  currentStatus: 'open' | 'in_progress' | 'review' | 'done';
+  suggestedStatus: 'open' | 'in_progress' | 'review' | 'done';
+  confidence: number; // 0..1
+  reason: string;
+}
+
+export interface AiCompleteResult {
+  milestoneId: string;
+  modelUsed?: string;
+  suggestions: AiSuggestion[];
+  warnings?: string[];
+}
 
 // ── Markdown-Import types ─────────────────────────────────────────────────────
 
@@ -47,6 +67,8 @@ export interface ImportResult {
 
 @Injectable()
 export class MilestonesService {
+  private readonly logger = new Logger(MilestonesService.name);
+
   constructor(
     @InjectModel(Milestone.name) private milestoneModel: Model<MilestoneDocument>,
     @InjectModel(Changelog.name) private changelogModel: Model<ChangelogDocument>,
@@ -54,6 +76,7 @@ export class MilestonesService {
     private countersService: CountersService,
     private eventEmitter: EventEmitter2,
     private todosService: TodosService,
+    private chatLlmService: ChatLlmService,
   ) {}
 
   async findByNumber(projectId: string, number: number): Promise<MilestoneDocument> {
@@ -589,5 +612,165 @@ export class MilestonesService {
 
   async removeByProject(projectId: string): Promise<void> {
     await this.milestoneModel.deleteMany({ projectId }).exec();
+  }
+
+  // ── AI-Completion ──────────────────────────────────────────────────────────
+
+  /**
+   * Ask the configured LLM endpoint to evaluate each todo of a milestone based
+   * on the user-supplied work summary. Returns structured suggestions without
+   * writing anything to the DB — the user decides which to apply.
+   */
+  async aiComplete(milestoneId: string, summaryMarkdown: string): Promise<AiCompleteResult> {
+    // 1. Load milestone + todos
+    const milestone = await this.findById(milestoneId);
+    const todos = await this.todosService.findAll({ milestoneId });
+
+    // 2. Resolve LLM endpoint
+    const endpoints = await this.chatLlmService.getEndpoints();
+    if (endpoints.length === 0) {
+      throw new BadRequestException(
+        'No LLM endpoint configured. Configure under Settings → Chat first.',
+      );
+    }
+    const endpoint = endpoints[0];
+
+    // 3. Build prompt
+    const todoLines = todos
+      .map((t) => {
+        const dn = (t as any).displayNumber ?? t._id.toString();
+        const acceptance = Array.isArray((t as any).acceptanceCriteria) && (t as any).acceptanceCriteria.length > 0
+          ? '\n  Acceptance: ' + (t as any).acceptanceCriteria.map((c: any) => `[${c.done ? 'x' : ' '}] ${c.text}`).join('; ')
+          : '';
+        return `- id: ${t._id} | number: ${dn} | title: ${t.title} | status: ${t.status}${acceptance}`;
+      })
+      .join('\n');
+
+    const systemPrompt =
+      'You are a project management assistant. You will receive a milestone description, a list of todos with their current status, and a work summary written by the developer. ' +
+      'Your task: for EACH todo, decide whether its status should be changed based on the summary. ' +
+      'Respond ONLY with a single valid JSON object — no markdown, no explanation outside the JSON. ' +
+      'Required shape:\n' +
+      '{ "suggestions": [ { "todoId": "<id>", "suggestedStatus": "open|in_progress|review|done", "confidence": 0.0..1.0, "reason": "<short explanation>" } ] }\n' +
+      'Include ALL todos in the suggestions array, even if no change is needed (set suggestedStatus = currentStatus, confidence = 0.0). ' +
+      'Valid statuses: open, in_progress, review, done.';
+
+    const userPrompt =
+      `## Milestone\nName: ${milestone.name}\n${milestone.description ? 'Description: ' + milestone.description + '\n' : ''}` +
+      `\n## Todos\n${todoLines || '(no todos)'}` +
+      `\n\n## Work Summary\n${summaryMarkdown}`;
+
+    // 4. Stream + collect response
+    const messages = [
+      { role: 'system' as const, content: systemPrompt },
+      { role: 'user' as const, content: userPrompt },
+    ];
+
+    let raw = '';
+    const warnings: string[] = [];
+
+    try {
+      for await (const chunk of this.chatLlmService.streamChat(messages, {
+        temperature: 0.1,
+        maxTokens: 2048,
+        onEndpointSelected: (ep) => {
+          this.logger.log(`AI-complete using ${ep.provider} @ ${ep.url} (${ep.model})`);
+        },
+      })) {
+        raw += chunk;
+      }
+    } catch (err) {
+      throw new BadRequestException(
+        `LLM call failed: ${(err as Error).message}`,
+      );
+    }
+
+    // 5. Parse JSON from LLM response
+    interface LlmSuggestionRaw {
+      todoId: string;
+      suggestedStatus: string;
+      confidence: number;
+      reason: string;
+    }
+    interface LlmResponse {
+      suggestions: LlmSuggestionRaw[];
+    }
+
+    let llmSuggestions: LlmSuggestionRaw[] = [];
+
+    try {
+      const parsed = JSON.parse(raw.trim()) as LlmResponse;
+      if (Array.isArray(parsed?.suggestions)) {
+        llmSuggestions = parsed.suggestions;
+      }
+    } catch {
+      // Try to extract a JSON block from the raw response
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          const parsed = JSON.parse(match[0]) as LlmResponse;
+          if (Array.isArray(parsed?.suggestions)) {
+            llmSuggestions = parsed.suggestions;
+            warnings.push('JSON extracted from non-pure LLM response');
+          }
+        } catch {
+          warnings.push('Failed to parse LLM response as JSON — no suggestions available');
+        }
+      } else {
+        warnings.push('LLM response contained no parseable JSON');
+      }
+    }
+
+    const VALID_STATUSES = new Set<string>(['open', 'in_progress', 'review', 'done']);
+
+    // 6. Map LLM suggestions back to todos by todoId
+    const llmById = new Map<string, LlmSuggestionRaw>();
+    for (const s of llmSuggestions) {
+      if (s.todoId) llmById.set(s.todoId, s);
+    }
+
+    const suggestions: AiSuggestion[] = todos.map((t) => {
+      const id = t._id.toString();
+      const dn = (t as any).displayNumber ?? id;
+      const currentStatus = t.status as 'open' | 'in_progress' | 'review' | 'done';
+      const llm = llmById.get(id);
+
+      if (!llm) {
+        return {
+          todoId: id,
+          displayNumber: dn,
+          title: t.title,
+          currentStatus,
+          suggestedStatus: currentStatus,
+          confidence: 0,
+          reason: 'No suggestion returned',
+        };
+      }
+
+      const suggestedStatus = VALID_STATUSES.has(llm.suggestedStatus)
+        ? (llm.suggestedStatus as TodoStatus)
+        : currentStatus;
+
+      const confidence = typeof llm.confidence === 'number'
+        ? Math.min(1, Math.max(0, llm.confidence))
+        : 0;
+
+      return {
+        todoId: id,
+        displayNumber: dn,
+        title: t.title,
+        currentStatus,
+        suggestedStatus,
+        confidence,
+        reason: llm.reason || '',
+      };
+    });
+
+    return {
+      milestoneId,
+      modelUsed: `${endpoint.provider}/${endpoint.model}`,
+      suggestions,
+      ...(warnings.length > 0 ? { warnings } : {}),
+    };
   }
 }

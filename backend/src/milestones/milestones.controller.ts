@@ -17,6 +17,7 @@ import { UpdateMilestoneDto } from './dto/update-milestone.dto';
 import { MilestoneStatus } from './schemas/milestone.schema';
 import { ValidateProjectIdPipe } from '../common/pipes/validate-project-id.pipe';
 import { ImportPreviewDto, ImportApplyDto } from './dto/import-milestone.dto';
+import { AiCompleteDto } from './dto/ai-complete.dto';
 
 @Controller('milestones')
 export class MilestonesController {
@@ -49,6 +50,12 @@ export class MilestonesController {
     @Query('includeArchived') includeArchived?: string,
   ) {
     return this.milestonesService.findByProject(projectId, status, includeArchived === 'true');
+  }
+
+  @Post(':id/ai-complete')
+  @HttpCode(200)
+  aiComplete(@Param('id') id: string, @Body() dto: AiCompleteDto) {
+    return this.milestonesService.aiComplete(id, dto.summaryMarkdown);
   }
 
   @Get(':id/export.md')

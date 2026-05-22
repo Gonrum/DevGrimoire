@@ -1204,6 +1204,24 @@ const tools = [
     },
   },
   {
+    name: 'milestone_ai_complete',
+    description: 'Ask the configured Chat-LLM to evaluate all todos of a milestone based on a user-supplied work summary and suggest status updates. Does NOT write to the DB — returns structured suggestions the user can selectively apply. Requires a Chat LLM endpoint to be configured in Settings.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Milestone MongoDB ID' },
+        number: { type: 'string', description: 'Milestone number (e.g. "1" or "M-1") — requires projectId' },
+        projectId: { type: 'string', description: 'Project ID (required when using number)' },
+        summaryMarkdown: {
+          type: 'string',
+          description: 'Markdown-formatted summary of the work done so far (max 50 000 chars)',
+          maxLength: 50000,
+        },
+      },
+      required: ['summaryMarkdown'],
+    },
+  },
+  {
     name: 'notify_user',
     description: 'Send a push notification to the user via the DevGrimoire PWA. Use this to inform the user about completed tasks, important updates, or when you need their attention.',
     inputSchema: {
@@ -4351,6 +4369,15 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             a['parsed'] as any,
           );
           return { content: [{ type: 'text' as const, text: JSON.stringify(importResult, null, 2) }] };
+        }
+        case 'milestone_ai_complete': {
+          const msAiId = await milestonesService.resolveId({
+            id: optionalString(a, 'id'),
+            projectId: optionalString(a, 'projectId'),
+            number: optionalString(a, 'number'),
+          });
+          const aiResult = await milestonesService.aiComplete(msAiId, requireString(a, 'summaryMarkdown'));
+          return { content: [{ type: 'text' as const, text: JSON.stringify(aiResult, null, 2) }] };
         }
         case 'notify_user': {
           const nTitle = requireString(a, 'title');
