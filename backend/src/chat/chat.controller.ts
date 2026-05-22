@@ -703,13 +703,30 @@ export class ChatController {
       images: attachmentImages,
       activeWorkspace,
       agentRoleId: dto.agentRoleId,
+      briefingMode: dto.briefingMode,
     });
 
     // Agent-Rollen schneiden die globale Tool-Allowlist (T-264) — eine Rolle
     // kann nichts freischalten, was der globale Setting nicht ohnehin erlaubt.
-    const effectiveAllowlist = dto.agentRoleId
+    let effectiveAllowlist = dto.agentRoleId
       ? this.agentRoles.intersectAllowedTools(dto.agentRoleId, opts.toolsAllowlist)
       : opts.toolsAllowlist;
+
+    // Briefing-Mode erweitert die Allowlist per Union um milestone-write-Tools
+    // (T-424). Dies ist sicher, weil der User den Briefing-Mode explizit
+    // eingeschaltet hat und die drei Tools gezielt für das Agent-Workflow
+    // verwendet werden. Es ist kein Override — alle anderen Caps bleiben.
+    if (dto.briefingMode) {
+      const briefingExtras = [
+        'milestone_create_with_todos',
+        'milestone_import_apply',
+        'milestone_import_preview',
+      ];
+      effectiveAllowlist = [
+        ...effectiveAllowlist,
+        ...briefingExtras.filter((t) => !effectiveAllowlist.includes(t)),
+      ];
+    }
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');

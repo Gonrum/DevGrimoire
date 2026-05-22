@@ -74,6 +74,8 @@ export class ChatContextService {
       activeWorkspace?: WorkspaceDocument | null;
       /** Optional agent-role id (T-264). Prepends role-prompt block + intersects allowlist downstream. */
       agentRoleId?: string;
+      /** Briefing Mode (T-424). Prepends a Briefing-Block that steers the LLM to elicit requirements iteratively. */
+      briefingMode?: boolean;
     } = {},
   ): Promise<ContextBuildResult> {
     const ownerObj = typeof owner === 'string' ? { projectId: owner } : owner;
@@ -170,7 +172,25 @@ Die \`${ownerIdLabel}\` des aktuellen Kontextes ist: ${ownerIdValue}. Du kannst 
 
     const rolePromptBlock = this.agentRoles.buildRolePromptBlock(options.agentRoleId);
 
-    const systemPrompt = `${rolePromptBlock}Du bist ein technischer Assistent für ${projectId ? `das Softwareprojekt "${ownerName}"` : `den Kunden "${ownerName}"`}.
+    const briefingBlock = options.briefingMode
+      ? `# Briefing Mode
+Du bist im Briefing-Modus. Der User beschreibt eine Feature-Idee — möglicherweise als Markdown, möglicherweise nur in Stichworten.
+
+Vorgehen:
+1. Erfasse das Ziel ("Was soll erreicht werden?").
+2. Strukturiere die Anforderung in User Stories (Format "Als ... möchte ich ...").
+3. Schlage Akzeptanzkriterien als Checkliste vor.
+4. Markiere Out-of-Scope (was NICHT Teil ist).
+5. Identifiziere Edge Cases und offene Fragen.
+
+Stelle gezielte Klärungsfragen. Wiederhole nicht, was der User schon gesagt hat — frage nach dem, was noch fehlt.
+
+Wenn der User dir signalisiert "GO" / "okay" / "erstelle Milestone": Rufe \`milestone_create_with_todos\` auf mit der projectId (sie ist im obigen Projektkontext) und den finalen Todos inkl. aller Quest-Felder. Bestätige danach mit der erzeugten Milestone-Nummer.
+
+`
+      : '';
+
+    const systemPrompt = `${briefingBlock}${rolePromptBlock}Du bist ein technischer Assistent für ${projectId ? `das Softwareprojekt "${ownerName}"` : `den Kunden "${ownerName}"`}.
 Antworte präzise und auf Deutsch. Nutze den bereitgestellten ${projectId ? 'Projektkontext' : 'Kundenkontext'} als Quelle.
 Wenn der Kontext die Frage nicht eindeutig beantwortet, sag das klar statt zu raten.
 Verweise nach Möglichkeit auf konkrete Einträge (z.B. "laut (2) im Kontext").${toolUsageHint}

@@ -58,6 +58,17 @@ export class SendChatMessageDto {
   @IsOptional()
   @IsString()
   agentRoleId?: string;
+
+  /**
+   * Briefing Mode (T-424). Wenn true, wird ein Briefing-System-Prompt-Block
+   * vorangestellt, der den Agenten anweist, Feature-Anforderungen iterativ
+   * zu erfassen. Außerdem werden milestone_create_with_todos,
+   * milestone_import_apply und milestone_import_preview zur Tool-Allowlist
+   * hinzugefügt (Union, kein Override — bestehende Cap bleibt).
+   */
+  @IsOptional()
+  @IsBoolean()
+  briefingMode?: boolean;
 }
 
 export const CHAT_PROVIDERS = [

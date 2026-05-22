@@ -1204,6 +1204,46 @@ const tools = [
     },
   },
   {
+    name: 'milestone_create_with_todos',
+    description: 'Create a milestone with todos in one shot. Each todo can carry the new Quest fields (userStories, acceptanceCriteria[{text, done?}], outOfScope, edgeCases, tags, priority). Intended for the Briefing-Mode flow where the agent has interactively gathered structured requirements with the user.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID' },
+        name: { type: 'string', description: 'Milestone name' },
+        description: { type: 'string', description: 'Optional milestone description (markdown)' },
+        todos: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              description: { type: 'string' },
+              priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+              tags: { type: 'array', items: { type: 'string' } },
+              userStories: { type: 'string' },
+              acceptanceCriteria: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    text: { type: 'string' },
+                    done: { type: 'boolean' },
+                  },
+                  required: ['text'],
+                },
+              },
+              outOfScope: { type: 'string' },
+              edgeCases: { type: 'string' },
+            },
+            required: ['title'],
+          },
+        },
+      },
+      required: ['projectId', 'name', 'todos'],
+    },
+  },
+  {
     name: 'milestone_ai_complete',
     description: 'Ask the configured Chat-LLM to evaluate all todos of a milestone based on a user-supplied work summary and suggest status updates. Does NOT write to the DB — returns structured suggestions the user can selectively apply. Requires a Chat LLM endpoint to be configured in Settings.',
     inputSchema: {
@@ -3775,6 +3815,7 @@ const EXPLICIT_WRITE_TOOLS = new Set<string>([
   'todo_ask_question',
   'question_convert_to_knowledge',
   'milestone_import_apply',
+  'milestone_create_with_todos',
 ]);
 
 export function isWriteTool(name: string): boolean {
@@ -4369,6 +4410,18 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             a['parsed'] as any,
           );
           return { content: [{ type: 'text' as const, text: JSON.stringify(importResult, null, 2) }] };
+        }
+        case 'milestone_create_with_todos': {
+          const cwt_projectId = requireString(a, 'projectId');
+          const cwt_name = requireString(a, 'name');
+          const cwt_description = optionalString(a, 'description');
+          const cwt_todos = (a['todos'] as any[]) ?? [];
+          const cwt_result = await milestonesService.importFromParsed(cwt_projectId, {
+            name: cwt_name,
+            description: cwt_description,
+            todos: cwt_todos,
+          });
+          return { content: [{ type: 'text' as const, text: JSON.stringify(cwt_result, null, 2) }] };
         }
         case 'milestone_ai_complete': {
           const msAiId = await milestonesService.resolveId({
