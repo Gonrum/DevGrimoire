@@ -4305,7 +4305,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             projectId: optionalString(a, 'projectId'),
             number: optionalString(a, 'number'),
           });
-          const markdownContent = await milestonesService.exportAsMarkdown(msExportId);
+          const { content: markdownContent } = await milestonesService.exportAsMarkdown(msExportId);
           return { content: [{ type: 'text' as const, text: markdownContent }] };
         }
         case 'notify_user': {

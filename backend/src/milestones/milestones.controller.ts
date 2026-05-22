@@ -38,16 +38,11 @@ export class MilestonesController {
 
   @Get(':id/export.md')
   async exportMarkdown(@Param('id') id: string, @Res() res: Response) {
-    const milestone = await this.milestonesService.findById(id);
-    const markdown = await this.milestonesService.exportAsMarkdown(id);
-
-    const displayNumber = ((milestone as any).displayNumber ?? '').replace(/[^a-zA-Z0-9_-]/g, '-');
-    const slug = (milestone.name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    const filename = [displayNumber, slug].filter(Boolean).join('-') + '.md';
+    const { content, filename } = await this.milestonesService.exportAsMarkdown(id);
 
     res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(markdown);
+    res.send(content);
   }
 
   @Get(':id')

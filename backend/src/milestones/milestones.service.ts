@@ -1,4 +1,4 @@
-import { forwardRef, Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
@@ -21,7 +21,6 @@ export class MilestonesService {
     @InjectModel(Project.name) private projectModel: Model<ProjectDocument>,
     private countersService: CountersService,
     private eventEmitter: EventEmitter2,
-    @Inject(forwardRef(() => TodosService))
     private todosService: TodosService,
   ) {}
 
@@ -141,24 +140,20 @@ export class MilestonesService {
     });
   }
 
-  async exportAsMarkdown(milestoneId: string): Promise<string> {
+  async exportAsMarkdown(milestoneId: string): Promise<{ content: string; filename: string }> {
     const milestone = await this.findById(milestoneId);
     const todos = await this.todosService.findAll({ milestoneId });
 
     const lines: string[] = [];
 
     // Header
-    const displayNumber = (milestone as any).displayNumber ?? '';
+    const displayNumber = milestone.displayNumber ?? '';
     const name = milestone.name ?? '';
     lines.push(`# ${displayNumber} ${name}`.trim());
     lines.push('');
 
-    // Meta block
-    const tags = (milestone as any).tags;
-    const tagsStr = Array.isArray(tags) && tags.length > 0 ? tags.join(', ') : '';
-    const metaParts = [`Status: ${milestone.status}`];
-    if (tagsStr) metaParts.push(`Tags: ${tagsStr}`);
-    lines.push(`> ${metaParts.join(' · ')}`);
+    // Meta block — Milestone has no tags field
+    lines.push(`> Status: ${milestone.status}`);
     lines.push('');
 
     if (milestone.description) {
@@ -175,14 +170,12 @@ export class MilestonesService {
       lines.push('');
     } else {
       for (const todo of todos) {
-        const todoDisplayNumber = (todo as any).displayNumber ?? '';
-        lines.push(`### ${todoDisplayNumber} ${todo.title}`.trim());
+        lines.push(`### ${todo.displayNumber ?? ''} ${todo.title}`.trim());
         lines.push('');
 
-        const todoTags = (todo as any).tags;
-        const todoTagsStr = Array.isArray(todoTags) && todoTags.length > 0 ? todoTags.join(', ') : '';
+        const todoTagsStr = Array.isArray(todo.tags) && todo.tags.length > 0 ? todo.tags.join(', ') : '';
         lines.push(`- Status: \`${todo.status}\``);
-        lines.push(`- Priority: \`${(todo as any).priority ?? 'medium'}\``);
+        lines.push(`- Priority: \`${todo.priority ?? 'medium'}\``);
         if (todoTagsStr) lines.push(`- Tags: ${todoTagsStr}`);
         lines.push('');
 
@@ -191,14 +184,14 @@ export class MilestonesService {
           lines.push('');
         }
 
-        if ((todo as any).userStories) {
+        if (todo.userStories) {
           lines.push('#### User Stories');
           lines.push('');
-          lines.push((todo as any).userStories);
+          lines.push(todo.userStories);
           lines.push('');
         }
 
-        const criteria: Array<{ text: string; done: boolean }> = (todo as any).acceptanceCriteria ?? [];
+        const criteria = todo.acceptanceCriteria ?? [];
         if (criteria.length > 0) {
           lines.push('#### Acceptance Criteria');
           lines.push('');
@@ -208,17 +201,17 @@ export class MilestonesService {
           lines.push('');
         }
 
-        if ((todo as any).outOfScope) {
+        if (todo.outOfScope) {
           lines.push('#### Out of Scope');
           lines.push('');
-          lines.push((todo as any).outOfScope);
+          lines.push(todo.outOfScope);
           lines.push('');
         }
 
-        if ((todo as any).edgeCases) {
+        if (todo.edgeCases) {
           lines.push('#### Edge Cases');
           lines.push('');
-          lines.push((todo as any).edgeCases);
+          lines.push(todo.edgeCases);
           lines.push('');
         }
 
@@ -227,7 +220,11 @@ export class MilestonesService {
       }
     }
 
-    return lines.join('\n');
+    const slugDisplay = (milestone.displayNumber ?? '').replace(/[^a-zA-Z0-9_-]/g, '-');
+    const slugName = (milestone.name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const filename = [slugDisplay, slugName].filter(Boolean).join('-') + '.md';
+
+    return { content: lines.join('\n'), filename };
   }
 
   async removeByProject(projectId: string): Promise<void> {
