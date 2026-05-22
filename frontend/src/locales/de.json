@@ -483,7 +483,9 @@
     "tableTags": "Tags",
     "tableComments": "Komm.",
     "tableUpdated": "Aktualisiert",
-    "tableActions": "Aktionen"
+    "tableActions": "Aktionen",
+    "acceptanceProgress": "{{done}} von {{total}} erfüllt",
+    "questDefined": "Strukturierte Quest-Definition vorhanden"
   },
   "todoStatus": {
     "open": "Offen",

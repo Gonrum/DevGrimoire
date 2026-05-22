@@ -155,6 +155,46 @@ function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) 
   );
 }
 
+function AcceptanceProgressBadge({ todo }: { todo: Todo }) {
+  const { t } = useTranslation();
+  const criteria = todo.acceptanceCriteria;
+  if (!criteria || criteria.length === 0) return null;
+  const total = criteria.length;
+  const done = criteria.filter((c) => c.done).length;
+  const colorClass = done === total
+    ? 'bg-green-900/40 text-green-300'
+    : done > 0
+      ? 'bg-yellow-900/40 text-yellow-300'
+      : 'bg-gray-800 text-gray-400';
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] ${colorClass}`}
+      title={t('todos.acceptanceProgress', { done, total })}
+    >
+      <span aria-hidden="true">☑</span>
+      <span>{done}/{total}</span>
+    </span>
+  );
+}
+
+function QuestDefinedIcon({ todo }: { todo: Todo }) {
+  const { t } = useTranslation();
+  const hasDef =
+    (todo.userStories?.trim() ?? '') !== '' ||
+    (todo.outOfScope?.trim() ?? '') !== '' ||
+    (todo.edgeCases?.trim() ?? '') !== '';
+  if (!hasDef) return null;
+  return (
+    <span
+      className="text-gray-500 text-[11px] leading-none"
+      title={t('todos.questDefined')}
+      aria-hidden="true"
+    >
+      📋
+    </span>
+  );
+}
+
 function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError, questionSummary }: { todo: Todo; allTodos: Todo[]; basePath: string; onUpdate: () => void; onDragStart?: (todoId: string) => void; showError: (msg: string) => void; questionSummary?: QuestionsByTodoSummary }) {
   const { t, i18n } = useTranslation();
   const [editing, setEditing] = useState(false);
@@ -217,14 +257,18 @@ function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError, 
       onDragEnd={() => onDragStart?.('')}
       className={`block bg-gray-900 border rounded-lg p-3 group transition-colors cursor-grab active:cursor-grabbing ${cardBorder} ${animClass}`}>
       <div className="flex items-start justify-between gap-2">
-        <h4 className="text-sm font-medium">
+        <h4 className="text-sm font-medium flex items-center gap-1 flex-wrap">
           {hasBlockers && <span className="text-red-400 mr-1" title={t('todos.blocked')}>&#x26D4;</span>}
           {todo.displayNumber && <span className="text-gray-500 font-normal mr-1.5">{todo.displayNumber}</span>}
           {todo.title}
+          <QuestDefinedIcon todo={todo} />
         </h4>
-        <span className={`text-xs shrink-0 ${PRIORITY_COLORS[todo.priority]}`}>
-          {PRIORITY_LABELS[todo.priority]()}
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <AcceptanceProgressBadge todo={todo} />
+          <span className={`text-xs ${PRIORITY_COLORS[todo.priority]}`}>
+            {PRIORITY_LABELS[todo.priority]()}
+          </span>
+        </div>
       </div>
       {hasOpenQuestion && <QuestionFlag summary={questionSummary!} className="mt-1.5" />}
       {todo.description && (
@@ -313,7 +357,9 @@ function TodoListRow({ todo, basePath, onUpdate, showError, questionSummary }: {
           <div className="text-sm flex items-center gap-2">
             {todo.displayNumber && <span className="text-gray-500 mr-1">{todo.displayNumber}</span>}
             <span>{todo.title}</span>
+            <QuestDefinedIcon todo={todo} />
             {hasOpenQuestion && <QuestionFlag summary={questionSummary!} compact />}
+            <AcceptanceProgressBadge todo={todo} />
           </div>
           {todo.description && <div className="text-xs text-gray-600 line-clamp-1 mt-0.5">{todo.description}</div>}
         </Link>

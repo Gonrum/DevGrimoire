@@ -483,7 +483,9 @@
     "tableTags": "Tags",
     "tableComments": "Cmts",
     "tableUpdated": "Updated",
-    "tableActions": "Actions"
+    "tableActions": "Actions",
+    "acceptanceProgress": "{{done}} of {{total}} met",
+    "questDefined": "Structured quest definition available"
   },
   "todoStatus": {
     "open": "Open",
