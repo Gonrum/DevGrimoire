@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
@@ -11,6 +11,7 @@ import { PROJECT_CHANGED } from '../events/project-event';
 import { CountersService } from '../counters/counters.service';
 import { formatEntityNumber } from '../common/number-format';
 import { projectIdFilter } from '../common/project-id-filter';
+import { TodosService } from '../todos/todos.service';
 
 @Injectable()
 export class MilestonesService {
@@ -20,6 +21,8 @@ export class MilestonesService {
     @InjectModel(Project.name) private projectModel: Model<ProjectDocument>,
     private countersService: CountersService,
     private eventEmitter: EventEmitter2,
+    @Inject(forwardRef(() => TodosService))
+    private todosService: TodosService,
   ) {}
 
   async findByNumber(projectId: string, number: number): Promise<MilestoneDocument> {
@@ -136,6 +139,95 @@ export class MilestonesService {
       entityId: id,
       summary: `Milestone "${result.name}" gelöscht`,
     });
+  }
+
+  async exportAsMarkdown(milestoneId: string): Promise<string> {
+    const milestone = await this.findById(milestoneId);
+    const todos = await this.todosService.findAll({ milestoneId });
+
+    const lines: string[] = [];
+
+    // Header
+    const displayNumber = (milestone as any).displayNumber ?? '';
+    const name = milestone.name ?? '';
+    lines.push(`# ${displayNumber} ${name}`.trim());
+    lines.push('');
+
+    // Meta block
+    const tags = (milestone as any).tags;
+    const tagsStr = Array.isArray(tags) && tags.length > 0 ? tags.join(', ') : '';
+    const metaParts = [`Status: ${milestone.status}`];
+    if (tagsStr) metaParts.push(`Tags: ${tagsStr}`);
+    lines.push(`> ${metaParts.join(' · ')}`);
+    lines.push('');
+
+    if (milestone.description) {
+      lines.push(milestone.description);
+      lines.push('');
+    }
+
+    // Todos
+    lines.push('## Todos');
+    lines.push('');
+
+    if (todos.length === 0) {
+      lines.push('_No todos linked to this milestone._');
+      lines.push('');
+    } else {
+      for (const todo of todos) {
+        const todoDisplayNumber = (todo as any).displayNumber ?? '';
+        lines.push(`### ${todoDisplayNumber} ${todo.title}`.trim());
+        lines.push('');
+
+        const todoTags = (todo as any).tags;
+        const todoTagsStr = Array.isArray(todoTags) && todoTags.length > 0 ? todoTags.join(', ') : '';
+        lines.push(`- Status: \`${todo.status}\``);
+        lines.push(`- Priority: \`${(todo as any).priority ?? 'medium'}\``);
+        if (todoTagsStr) lines.push(`- Tags: ${todoTagsStr}`);
+        lines.push('');
+
+        if (todo.description) {
+          lines.push(todo.description);
+          lines.push('');
+        }
+
+        if ((todo as any).userStories) {
+          lines.push('#### User Stories');
+          lines.push('');
+          lines.push((todo as any).userStories);
+          lines.push('');
+        }
+
+        const criteria: Array<{ text: string; done: boolean }> = (todo as any).acceptanceCriteria ?? [];
+        if (criteria.length > 0) {
+          lines.push('#### Acceptance Criteria');
+          lines.push('');
+          for (const c of criteria) {
+            lines.push(`- [${c.done ? 'x' : ' '}] ${c.text}`);
+          }
+          lines.push('');
+        }
+
+        if ((todo as any).outOfScope) {
+          lines.push('#### Out of Scope');
+          lines.push('');
+          lines.push((todo as any).outOfScope);
+          lines.push('');
+        }
+
+        if ((todo as any).edgeCases) {
+          lines.push('#### Edge Cases');
+          lines.push('');
+          lines.push((todo as any).edgeCases);
+          lines.push('');
+        }
+
+        lines.push('---');
+        lines.push('');
+      }
+    }
+
+    return lines.join('\n');
   }
 
   async removeByProject(projectId: string): Promise<void> {

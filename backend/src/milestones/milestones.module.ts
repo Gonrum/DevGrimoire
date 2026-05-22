@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Milestone, MilestoneSchema } from './schemas/milestone.schema';
 import { Changelog, ChangelogSchema } from '../changelog/schemas/changelog.schema';
@@ -6,6 +6,7 @@ import { Project, ProjectSchema } from '../projects/schemas/project.schema';
 import { MilestonesService } from './milestones.service';
 import { MilestonesController } from './milestones.controller';
 import { CountersModule } from '../counters/counters.module';
+import { TodosModule } from '../todos/todos.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { CountersModule } from '../counters/counters.module';
       { name: Project.name, schema: ProjectSchema },
     ]),
     CountersModule,
+    forwardRef(() => TodosModule),
   ],
   controllers: [MilestonesController],
   providers: [MilestonesService],

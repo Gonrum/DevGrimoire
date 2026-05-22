@@ -8,7 +8,9 @@ import {
   Param,
   Query,
   HttpCode,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { MilestonesService } from './milestones.service';
 import { CreateMilestoneDto } from './dto/create-milestone.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
@@ -32,6 +34,20 @@ export class MilestonesController {
     @Query('includeArchived') includeArchived?: string,
   ) {
     return this.milestonesService.findByProject(projectId, status, includeArchived === 'true');
+  }
+
+  @Get(':id/export.md')
+  async exportMarkdown(@Param('id') id: string, @Res() res: Response) {
+    const milestone = await this.milestonesService.findById(id);
+    const markdown = await this.milestonesService.exportAsMarkdown(id);
+
+    const displayNumber = ((milestone as any).displayNumber ?? '').replace(/[^a-zA-Z0-9_-]/g, '-');
+    const slug = (milestone.name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const filename = [displayNumber, slug].filter(Boolean).join('-') + '.md';
+
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(markdown);
   }
 
   @Get(':id')

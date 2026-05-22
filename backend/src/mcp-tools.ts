@@ -1160,6 +1160,18 @@ const tools = [
     },
   },
   {
+    name: 'milestone_export',
+    description: 'Export a milestone as Markdown, including all linked todos with their quest fields (User Stories, Acceptance Criteria, Out of Scope, Edge Cases). Provide either id OR number+projectId.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Milestone MongoDB ID' },
+        number: { type: 'string', description: 'Milestone number (e.g. "1" or "M-1") — requires projectId' },
+        projectId: { type: 'string', description: 'Project ID (required when using number)' },
+      },
+    },
+  },
+  {
     name: 'notify_user',
     description: 'Send a push notification to the user via the DevGrimoire PWA. Use this to inform the user about completed tasks, important updates, or when you need their attention.',
     inputSchema: {
@@ -4286,6 +4298,15 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           await milestonesService.remove(msDelId);
           result = { deleted: true, id: msDelId };
           break;
+        }
+        case 'milestone_export': {
+          const msExportId = await milestonesService.resolveId({
+            id: optionalString(a, 'id'),
+            projectId: optionalString(a, 'projectId'),
+            number: optionalString(a, 'number'),
+          });
+          const markdownContent = await milestonesService.exportAsMarkdown(msExportId);
+          return { content: [{ type: 'text' as const, text: markdownContent }] };
         }
         case 'notify_user': {
           const nTitle = requireString(a, 'title');
