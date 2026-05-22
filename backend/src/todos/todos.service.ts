@@ -226,6 +226,7 @@ export class TodosService {
   }
 
   async linkQuestion(todoId: string, questionId: string): Promise<void> {
+    if (!Types.ObjectId.isValid(todoId) || !Types.ObjectId.isValid(questionId)) return;
     await this.todoModel
       .findByIdAndUpdate(todoId, {
         $addToSet: { openQuestions: new Types.ObjectId(questionId) },
