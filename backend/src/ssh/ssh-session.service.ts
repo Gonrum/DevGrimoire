@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -37,6 +37,12 @@ const KEEPALIVE_MS = 30_000;
 const READY_TIMEOUT_MS = 9_500;
 const DEFAULT_EXEC_TIMEOUT_MS = 60_000;
 const MAX_EXEC_TIMEOUT_MS = 600_000;
+// Default "no-output" watchdog: if the remote command produces no stdout or
+// stderr bytes for this long, abort with the same SIGTERM→SIGKILL escalation
+// as the absolute timeoutMs. Catches the case where the SSH channel is alive
+// but the remote command silently went away (T-387: 1-hour silent hang on
+// plugin:install). Callers can override or disable with idleTimeoutMs=0.
+const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
 const STDOUT_LIMIT = 256 * 1024;
 const STDERR_LIMIT = 64 * 1024;
 const SIGKILL_GRACE_MS = 5_000;
@@ -49,11 +55,28 @@ const LIST_RECURSE_MAX_DEPTH = 10;
 const CONCURRENCY_LIMIT = 5;
 const CONCURRENCY_WAIT_MS = 30_000;
 const AUDIT_COMMAND_TRUNC = 500;
+// Async exec job table (T-388). Tail buffers keep the *last N bytes* of each
+// stream so a polling agent can see recent output without us holding the full
+// 256 KB stdout buffer per running job. Job state lingers for JOB_TTL_MS after
+// terminal state so the agent can poll the final result a few times before
+// the entry is reaped.
+const TAIL_STDOUT_BYTES = 4 * 1024;
+const TAIL_STDERR_BYTES = 2 * 1024;
+const JOB_TTL_MS = 10 * 60_000;
 
 export type SshSessionSourceContext = 'mcp' | 'rest' | 'terminal';
 
 export interface SshExecOpts {
   timeoutMs?: number;
+  /**
+   * No-output watchdog (T-387). Abort the command after this many ms have
+   * passed without ANY stdout/stderr bytes — independent from the absolute
+   * `timeoutMs`. Default 30 000 ms. Pass `0` to disable the watchdog (legacy
+   * behaviour for commands that legitimately stay silent for long stretches,
+   * e.g. `sleep 600 && echo done`). Clamped to `[0, timeoutMs]` because a
+   * larger idle window than the absolute timeout would be redundant.
+   */
+  idleTimeoutMs?: number;
   env?: Record<string, string>;
   cwd?: string;
   sourceContext?: SshSessionSourceContext;
@@ -67,6 +90,94 @@ export interface SshExecResult {
   signal?: string;
   durationMs: number;
   truncated: { stdout: boolean; stderr: boolean };
+  /** Total bytes received (BEFORE truncation cap, useful for progress UI). */
+  stdoutBytes: number;
+  stderrBytes: number;
+  /**
+   * Milliseconds between the last stdout/stderr chunk and `close`. `0` when
+   * the command produced no output at all. Lets callers distinguish "ran
+   * cleanly" from "channel went silent before exit".
+   */
+  lastChunkAgeMs: number;
+  /**
+   * Reason finalize() ran via an escalation timer rather than the remote's
+   * own `close`. `undefined` for the happy path. `cancelled` is only set via
+   * the async-exec cancel hook (T-388).
+   */
+  aborted?: 'timeout' | 'idle' | 'cancelled';
+}
+
+// ---------------------------------------------------------------------------
+// Async exec (T-388) — job-table types
+// ---------------------------------------------------------------------------
+
+export type SshExecJobState = 'running' | 'done' | 'aborted';
+
+/**
+ * Snapshot of an async exec job, returned by `getJobStatus()` / the
+ * `ssh_exec_status` MCP tool. While the job is `running` only the live
+ * progress fields are populated; terminal-state fields (`exitCode`, `signal`,
+ * `aborted`, `durationMs`, `truncated`) get filled when the job finalises.
+ *
+ * Tail snippets are utf-8 strings rendered from the rolling byte tail.
+ * Invalid byte sequences are passed through as the U+FFFD replacement
+ * character — terminal stdout is overwhelmingly text, and a polling agent
+ * should not have to deal with a base64 round-trip just to peek at progress.
+ * Binary payloads should be downloaded with `ssh_download` instead.
+ */
+export interface SshExecJobStatus {
+  jobId: string;
+  connectionId: string;
+  command: string;
+  startedAt: string; // ISO timestamp
+  state: SshExecJobState;
+  elapsedMs: number;
+  stdoutTail: string;
+  stderrTail: string;
+  stdoutBytes: number;
+  stderrBytes: number;
+  lastChunkAgeMs: number;
+  exitCode: number | null;
+  signal: string | null;
+  aborted: 'timeout' | 'idle' | 'cancelled' | null;
+  errorMsg: string | null;
+  truncated: { stdout: boolean; stderr: boolean } | null;
+  durationMs: number | null;
+}
+
+/**
+ * Internal job-table entry. Mutated in place by the running runExec hooks
+ * (`onStdout`/`onStderr`) and by finalize-stamping in `runExecForJob`. Kept
+ * private to the service; external callers only ever see `SshExecJobStatus`
+ * snapshots produced by `serialiseJob()`.
+ */
+interface ExecJob {
+  jobId: string;
+  connectionId: string;
+  command: string;          // user-facing command (unwrapped, truncated for audit)
+  wrappedCommand: string;   // actual command sent to remote (with cwd prefix)
+  startedAt: number;        // epoch ms
+  sourceContext: SshSessionSourceContext;
+  userId?: string;
+  // Live progress (mutates while running)
+  state: SshExecJobState;
+  stdoutBytes: number;
+  stderrBytes: number;
+  lastChunkAt: number | null;
+  stdoutTail: Buffer[];
+  stdoutTailBytes: number;
+  stderrTail: Buffer[];
+  stderrTailBytes: number;
+  // Terminal state (filled on finalize)
+  exitCode: number | null;
+  signal?: string;
+  aborted?: 'timeout' | 'idle' | 'cancelled';
+  errorMsg?: string;
+  truncated?: { stdout: boolean; stderr: boolean };
+  durationMs?: number;
+  // Bookkeeping
+  ttlTimer?: NodeJS.Timeout;
+  cancel?: () => void; // populated once runExec is wired up; calls escalate('cancelled')
 }
 
 export interface SshUploadOpts {
@@ -154,6 +265,12 @@ interface ConcurrencyState {
 export class SshSessionService {
   private readonly logger = new Logger(SshSessionService.name);
   private readonly concurrency = new Map<string, ConcurrencyState>();
+  // Async-exec job table (T-388). Keyed by jobId; entries linger for
+  // JOB_TTL_MS after finalize so polling agents get a chance to read the
+  // terminal state before garbage collection. NOT persisted — a backend
+  // restart drops in-flight jobs; the audit row written at finalize is the
+  // durable record.
+  private readonly execJobs = new Map<string, ExecJob>();
 
   constructor(
     private readonly sshService: SshService,
@@ -244,9 +361,31 @@ export class SshSessionService {
         Math.max(1, opts.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS),
         MAX_EXEC_TIMEOUT_MS,
       );
+      // Idle watchdog: derive from caller input, clamp to [0, timeoutMs].
+      // 0 disables the watchdog entirely (legacy behaviour for long-quiet
+      // commands). When `idleTimeoutMs` is omitted we default to 30s but
+      // never larger than the absolute timeout.
+      const rawIdle = opts.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+      const idleTimeoutMs =
+        rawIdle <= 0 ? 0 : Math.min(Math.max(1, rawIdle), timeoutMs);
 
-      const inner = await this.runExec(client, wrappedCommand, opts.env, timeoutMs);
+      const inner = await this.runExec(
+        client,
+        wrappedCommand,
+        opts.env,
+        timeoutMs,
+        idleTimeoutMs,
+      );
       const durationMs = Date.now() - startedAt;
+
+      // Surface aborts in the audit row so ops can spot stalled connections.
+      // errorMsg piggybacks on the existing field; the new SshExecResult
+      // `aborted` flag is the canonical signal for callers.
+      const auditErrorMsg = inner.aborted
+        ? inner.aborted === 'idle'
+          ? `idle_timeout (${idleTimeoutMs}ms without output)`
+          : `timeout (${timeoutMs}ms)`
+        : undefined;
 
       void this.writeAudit({
         connectionId: connection._id as Types.ObjectId,
@@ -256,6 +395,7 @@ export class SshSessionService {
         command: this.truncateCommand(command),
         exitCode: inner.exitCode ?? undefined,
         durationMs,
+        errorMsg: auditErrorMsg,
       });
 
       return { ...inner, durationMs };
@@ -266,6 +406,326 @@ export class SshSessionService {
       }
       this.releaseSlot(connId);
     }
+  }
+
+  // ===========================================================================
+  // Async exec (T-388) — fire-and-poll for long-running operations
+  // ===========================================================================
+  //
+  // Same execution pipeline as `exec()` but the returned promise resolves
+  // with a jobId *immediately* — the actual command runs in the background.
+  // Callers poll `getJobStatus(jobId)` to read live progress and the
+  // eventual terminal state. Useful for ops that exceed sane MCP request
+  // timeouts (deploys, long backups, multi-step pipelines).
+  //
+  // Lifecycle:
+  //   1. acquireSlot — async jobs count against the per-connection limit
+  //      just like sync execs; a flood of `ssh_exec_async` calls is *not*
+  //      a back-door around the concurrency cap.
+  //   2. job entry created in `execJobs`, `state='running'`
+  //   3. background task opens client + invokes runExec with hooks that
+  //      feed the rolling tail buffers
+  //   4. on finalize the job's terminal fields are stamped, audit row
+  //      written, client torn down, slot released, TTL timer armed
+  //   5. polling can read the snapshot until JOB_TTL_MS elapses; after
+  //      that the entry is reaped and status returns `null`
+  //
+  // The audit row is written exactly once per job (at finalize), matching
+  // the sync exec path — replication / dashboards don't see a divergence
+  // between the two surfaces.
+
+  /**
+   * Start a command in the background. Returns metadata for polling.
+   * The full execution (open client, run exec, finalize, audit, cleanup)
+   * is scheduled via `void` so the caller never waits for completion.
+   */
+  async execAsync(
+    connId: string,
+    command: string,
+    opts: SshExecOpts = {},
+  ): Promise<{
+    jobId: string;
+    connectionId: string;
+    command: string;
+    startedAt: string;
+  }> {
+    const sourceContext = opts.sourceContext ?? 'mcp';
+    // Acquire the slot synchronously so a flood of async-execs still
+    // respects CONCURRENCY_LIMIT. The slot is released by the background
+    // task on finalize (or by the catastrophic-error branch).
+    await this.acquireSlot(connId);
+
+    const jobId = `ssh-job-${randomBytes(8).toString('hex')}`;
+    const startedAt = Date.now();
+    const job: ExecJob = {
+      jobId,
+      connectionId: connId,
+      command,
+      // wrappedCommand is computed once we know opts.cwd; placeholder for now.
+      wrappedCommand: command,
+      startedAt,
+      sourceContext,
+      userId: opts.userId,
+      state: 'running',
+      stdoutBytes: 0,
+      stderrBytes: 0,
+      lastChunkAt: null,
+      stdoutTail: [],
+      stdoutTailBytes: 0,
+      stderrTail: [],
+      stderrTailBytes: 0,
+      exitCode: null,
+    };
+    this.execJobs.set(jobId, job);
+
+    // Kick the actual exec into the background. We intentionally do NOT
+    // await — control returns to the caller with the jobId immediately.
+    void this.runJobBackground(job, opts).catch((err) => {
+      // Catastrophic errors (credential_missing, openClient reject, etc.)
+      // land here. Stamp the job as aborted/error and release the slot
+      // we acquired synchronously above.
+      this.logger.warn(`Async exec job ${jobId} failed before runExec: ${(err as Error).message}`);
+      job.state = 'aborted';
+      job.errorMsg = (err as Error).message;
+      job.durationMs = Date.now() - job.startedAt;
+      this.releaseSlot(connId);
+      this.scheduleJobCleanup(job);
+    });
+
+    return {
+      jobId,
+      connectionId: connId,
+      command,
+      startedAt: new Date(startedAt).toISOString(),
+    };
+  }
+
+  /**
+   * Snapshot of the job — safe to call any time. Returns `null` for unknown
+   * or already-reaped jobIds so the MCP layer can map it to a clean
+   * `job_not_found` error.
+   */
+  getJobStatus(jobId: string): SshExecJobStatus | null {
+    const job = this.execJobs.get(jobId);
+    if (!job) return null;
+    return this.serialiseJob(job);
+  }
+
+  /**
+   * Trigger a SIGTERM/SIGKILL cancel on a running async job. Idempotent —
+   * cancelling a done/aborted job returns the existing status without
+   * touching anything. Returns `null` for unknown jobIds.
+   */
+  cancelJob(jobId: string): SshExecJobStatus | null {
+    const job = this.execJobs.get(jobId);
+    if (!job) return null;
+    if (job.state === 'running' && job.cancel) {
+      try { job.cancel(); } catch { /* noop */ }
+    }
+    return this.serialiseJob(job);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Internals — async exec
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Background runner that owns the SSH client lifecycle for an async job.
+   * Mirrors `exec()` but writes finalize state into the job table instead
+   * of resolving a promise. Throws on catastrophic errors (caught by the
+   * caller's `.catch` in `execAsync`).
+   */
+  private async runJobBackground(job: ExecJob, opts: SshExecOpts): Promise<void> {
+    let client: Ssh2Client | null = null;
+    try {
+      const connection = await this.sshService.findById(job.connectionId);
+      let creds: ResolvedCreds;
+      try {
+        creds = await this.resolveCredentials(connection);
+      } catch (err) {
+        await this.recordError(job.connectionId, 'credential_missing', err as Error);
+        void this.writeAudit({
+          connectionId: connection._id as Types.ObjectId,
+          action: 'exec',
+          sourceContext: job.sourceContext,
+          userId: job.userId,
+          command: this.truncateCommand(job.command),
+          durationMs: Date.now() - job.startedAt,
+          errorMsg: 'credential_missing',
+        });
+        throw new Error('credential_missing');
+      }
+
+      client = await this.openClient(connection, creds);
+      const wrappedCommand = opts.cwd
+        ? `cd '${this.shellSingleQuoteEscape(opts.cwd)}' && ${job.command}`
+        : job.command;
+      job.wrappedCommand = wrappedCommand;
+      const timeoutMs = Math.min(
+        Math.max(1, opts.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS),
+        MAX_EXEC_TIMEOUT_MS,
+      );
+      const rawIdle = opts.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+      const idleTimeoutMs =
+        rawIdle <= 0 ? 0 : Math.min(Math.max(1, rawIdle), timeoutMs);
+
+      const inner = await this.runExec(
+        client,
+        wrappedCommand,
+        opts.env,
+        timeoutMs,
+        idleTimeoutMs,
+        {
+          // Mirror the running stdoutBytes/stderrBytes counters into the job
+          // so a polling agent sees live progress while the command is still
+          // running. The internal runExec counters are still the source of
+          // truth for the final result (they reflect bytes ABOVE the
+          // truncation cap correctly).
+          onStdout: (chunk, totalBytes) => {
+            job.stdoutBytes = totalBytes;
+            this.appendTail(job.stdoutTail, chunk, TAIL_STDOUT_BYTES, 'stdout', job);
+          },
+          onStderr: (chunk, totalBytes) => {
+            job.stderrBytes = totalBytes;
+            this.appendTail(job.stderrTail, chunk, TAIL_STDERR_BYTES, 'stderr', job);
+          },
+          onCancelHandleReady: (cancelFn) => { job.cancel = cancelFn; },
+        },
+      );
+      const durationMs = Date.now() - job.startedAt;
+
+      // Stamp terminal state on the job. `state` is `aborted` only if the
+      // escalation pipeline fired (timeout/idle/cancelled) OR the remote
+      // killed us with a signal — a plain non-zero exit is still `done`.
+      job.exitCode = inner.exitCode;
+      job.signal = inner.signal;
+      job.aborted = inner.aborted;
+      job.durationMs = durationMs;
+      job.truncated = inner.truncated;
+      job.stdoutBytes = inner.stdoutBytes;
+      job.stderrBytes = inner.stderrBytes;
+      job.state = inner.aborted || inner.signal ? 'aborted' : 'done';
+
+      const auditErrorMsg = inner.aborted
+        ? inner.aborted === 'idle'
+          ? `idle_timeout (${idleTimeoutMs}ms without output)`
+          : inner.aborted === 'cancelled'
+            ? 'cancelled (ssh_exec_cancel)'
+            : `timeout (${timeoutMs}ms)`
+        : undefined;
+
+      void this.writeAudit({
+        connectionId: connection._id as Types.ObjectId,
+        action: 'exec',
+        sourceContext: job.sourceContext,
+        userId: job.userId,
+        command: this.truncateCommand(job.command),
+        exitCode: inner.exitCode ?? undefined,
+        durationMs,
+        errorMsg: auditErrorMsg,
+      });
+    } finally {
+      if (client) {
+        try { client.end(); } catch { /* noop */ }
+        try { client.destroy(); } catch { /* noop */ }
+      }
+      this.releaseSlot(job.connectionId);
+      this.scheduleJobCleanup(job);
+    }
+  }
+
+  /**
+   * Push a chunk into the rolling tail buffer, trimming from the front
+   * whenever we exceed the cap. The buffer is a list of Buffers (not a
+   * single Buffer.concat per chunk) so we don't pay the O(n) copy on
+   * every byte — at most one O(remainder) subarray per overflow.
+   */
+  private appendTail(
+    tail: Buffer[],
+    chunk: Buffer,
+    cap: number,
+    stream: 'stdout' | 'stderr',
+    job: ExecJob,
+  ): void {
+    tail.push(chunk);
+    if (stream === 'stdout') {
+      job.stdoutTailBytes += chunk.length;
+      while (job.stdoutTailBytes > cap && tail.length > 0) {
+        const first = tail[0]!;
+        if (job.stdoutTailBytes - first.length >= cap) {
+          tail.shift();
+          job.stdoutTailBytes -= first.length;
+        } else {
+          const drop = job.stdoutTailBytes - cap;
+          tail[0] = first.subarray(drop);
+          job.stdoutTailBytes -= drop;
+        }
+      }
+    } else {
+      job.stderrTailBytes += chunk.length;
+      while (job.stderrTailBytes > cap && tail.length > 0) {
+        const first = tail[0]!;
+        if (job.stderrTailBytes - first.length >= cap) {
+          tail.shift();
+          job.stderrTailBytes -= first.length;
+        } else {
+          const drop = job.stderrTailBytes - cap;
+          tail[0] = first.subarray(drop);
+          job.stderrTailBytes -= drop;
+        }
+      }
+    }
+    job.lastChunkAt = Date.now();
+  }
+
+  /**
+   * Render the job into the public snapshot shape. Tail buffers are utf-8
+   * decoded with U+FFFD replacement for invalid sequences (terminal stdout
+   * is overwhelmingly text-shaped; binary payloads should use ssh_download
+   * instead of polling stdout). Live progress fields are pulled directly
+   * from the mutable job state.
+   */
+  private serialiseJob(job: ExecJob): SshExecJobStatus {
+    const elapsedMs = (job.durationMs ?? Date.now() - job.startedAt);
+    const lastChunkAgeMs =
+      job.lastChunkAt === null
+        ? 0
+        : job.state === 'running'
+          ? Math.max(0, Date.now() - job.lastChunkAt)
+          : Math.max(0, (job.startedAt + (job.durationMs ?? 0)) - job.lastChunkAt);
+    return {
+      jobId: job.jobId,
+      connectionId: job.connectionId,
+      command: job.command,
+      startedAt: new Date(job.startedAt).toISOString(),
+      state: job.state,
+      elapsedMs,
+      stdoutTail: Buffer.concat(job.stdoutTail).toString('utf8'),
+      stderrTail: Buffer.concat(job.stderrTail).toString('utf8'),
+      stdoutBytes: job.stdoutBytes,
+      stderrBytes: job.stderrBytes,
+      lastChunkAgeMs,
+      exitCode: job.exitCode,
+      signal: job.signal ?? null,
+      aborted: job.aborted ?? null,
+      errorMsg: job.errorMsg ?? null,
+      truncated: job.truncated ?? null,
+      durationMs: job.durationMs ?? null,
+    };
+  }
+
+  /**
+   * Arm the TTL reaper for a finalised job. Re-armed safely if a status
+   * call extends the window in a future iteration (today we just fire-
+   * and-forget the timeout). Clear-and-rearm is idempotent.
+   */
+  private scheduleJobCleanup(job: ExecJob): void {
+    if (job.ttlTimer) clearTimeout(job.ttlTimer);
+    job.ttlTimer = setTimeout(() => {
+      this.execJobs.delete(job.jobId);
+    }, JOB_TTL_MS);
+    // Don't keep the event loop alive solely for a stale job TTL.
+    if (typeof job.ttlTimer.unref === 'function') job.ttlTimer.unref();
   }
 
   async sftpUpload(
@@ -590,20 +1050,50 @@ export class SshSessionService {
 
   /**
    * Run an `exec` against an already-ready client. Caller owns the client
-   * lifecycle. Handles stdout/stderr truncation and the SIGTERM→SIGKILL
-   * escalation on timeout.
+   * lifecycle. Handles stdout/stderr truncation and TWO independent abort
+   * sources:
+   *   - the absolute `timeoutMs` from spec §6.4 (full command duration cap)
+   *   - the no-output watchdog `idleTimeoutMs` (T-387; catches the case where
+   *     the SSH channel stays alive but the remote command silently went
+   *     away — e.g. wedged php/composer process). Set to 0 to disable.
+   *
+   * Both sources funnel through the same SIGTERM→SIGKILL escalation; the
+   * winning reason is stamped on `result.aborted` so the caller knows whether
+   * the command timed out vs. stalled.
    */
   private runExec(
     client: Ssh2Client,
     command: string,
     env: Record<string, string> | undefined,
     timeoutMs: number,
+    idleTimeoutMs: number,
+    hooks?: {
+      /**
+       * Called for every stdout chunk, BEFORE the internal truncation buffer
+       * decides to keep/drop bytes. `totalBytes` is the running stdoutBytes
+       * counter after this chunk was added. Used by the async-exec job table
+       * (T-388) to feed the rolling tail buffer.
+       */
+      onStdout?: (chunk: Buffer, totalBytes: number) => void;
+      onStderr?: (chunk: Buffer, totalBytes: number) => void;
+      /**
+       * Receives a cancellation hook the moment the runner is wired up. The
+       * callback triggers an `escalate('cancelled')` if the job is still
+       * running; idempotent and a no-op after finalize. Used by the
+       * `ssh_exec_cancel` MCP tool to interrupt long-running async jobs.
+       */
+      onCancelHandleReady?: (cancelFn: () => void) => void;
+    },
   ): Promise<{
     stdout: string;
     stderr: string;
     exitCode: number | null;
     signal?: string;
     truncated: { stdout: boolean; stderr: boolean };
+    stdoutBytes: number;
+    stderrBytes: number;
+    lastChunkAgeMs: number;
+    aborted?: 'timeout' | 'idle' | 'cancelled';
   }> {
     return new Promise((resolve, reject) => {
       let stdoutBytes = 0;
@@ -614,16 +1104,64 @@ export class SshSessionService {
       let stderrTruncated = false;
       let exitCode: number | null = null;
       let signal: string | undefined;
+      let aborted: 'timeout' | 'idle' | 'cancelled' | undefined;
       let channel: ClientChannel | null = null;
       let settled = false;
       let killTimer: NodeJS.Timeout | null = null;
       let timeoutHandle: NodeJS.Timeout | null = null;
+      let idleTimer: NodeJS.Timeout | null = null;
+      let lastChunkAt: number | null = null;
+
+      const clearIdleTimer = () => {
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
+      };
+
+      const armIdleTimer = () => {
+        // idleTimeoutMs === 0 → caller opted out; skip the watchdog entirely.
+        if (idleTimeoutMs <= 0) return;
+        clearIdleTimer();
+        idleTimer = setTimeout(() => {
+          // The watchdog fires whenever the gap since the last byte exceeds
+          // idleTimeoutMs. Same SIGTERM/SIGKILL pipeline as the absolute
+          // timeout; we only flag the `aborted` reason differently.
+          escalate('idle');
+        }, idleTimeoutMs);
+      };
+
+      const escalate = (reason: 'timeout' | 'idle' | 'cancelled') => {
+        if (settled) return;
+        // First escalation wins — both timers can fire in quick succession
+        // (e.g. idleTimeoutMs == timeoutMs in tests) but we only want one
+        // SIGTERM and one killTimer.
+        if (aborted) return;
+        aborted = reason;
+        clearIdleTimer();
+        signal = signal ?? 'SIGTERM';
+        if (channel) {
+          try { channel.signal('TERM'); } catch { /* noop */ }
+        }
+        killTimer = setTimeout(() => {
+          if (settled) return;
+          signal = 'SIGKILL';
+          if (channel) {
+            try { channel.signal('KILL'); } catch { /* noop */ }
+            try { channel.close(); } catch { /* noop */ }
+          }
+          // If the channel never emits 'close' (e.g. fake ssh2 in tests),
+          // settle here so the caller doesn't hang.
+          finalize();
+        }, SIGKILL_GRACE_MS);
+      };
 
       const finalize = () => {
         if (settled) return;
         settled = true;
         if (timeoutHandle) clearTimeout(timeoutHandle);
         if (killTimer) clearTimeout(killTimer);
+        clearIdleTimer();
         let stdout = Buffer.concat(stdoutChunks).toString('utf8');
         let stderr = Buffer.concat(stderrChunks).toString('utf8');
         if (stdoutTruncated) {
@@ -634,16 +1172,44 @@ export class SshSessionService {
           const more = Math.max(0, stderrBytes - STDERR_LIMIT);
           stderr += `\n[truncated: ${more} bytes more]`;
         }
+        const lastChunkAgeMs =
+          lastChunkAt === null ? 0 : Math.max(0, Date.now() - lastChunkAt);
         resolve({
           stdout,
           stderr,
           exitCode,
           signal,
           truncated: { stdout: stdoutTruncated, stderr: stderrTruncated },
+          stdoutBytes,
+          stderrBytes,
+          lastChunkAgeMs,
+          aborted,
         });
       };
 
+      // Surface the cancel hook before any I/O so a caller racing to cancel
+      // (e.g. ssh_exec_cancel arriving before the exec callback fires) can
+      // already trip the escalation pipeline. The cancel function itself
+      // tolerates being called pre-channel-ready — escalate's `if (channel)`
+      // guards the signal call.
+      if (hooks?.onCancelHandleReady) {
+        try { hooks.onCancelHandleReady(() => escalate('cancelled')); } catch { /* noop */ }
+      }
+
       const execOpts = env ? { env } : {};
+      // Arm BOTH watchdogs synchronously before the exec call. This catches
+      // the case where the SSH channel never opens at all (the user's original
+      // bug: command never reached the remote, MCP-bridge stayed silent for
+      // an hour) — without an idle counter pre-armed, a missing data stream
+      // would only be rescued by the absolute timeout. We arm idle first so
+      // that the FIFO-fire test patch picks the idle path deterministically;
+      // production timer order is governed by actual ms values, not arming
+      // sequence.
+      armIdleTimer();
+      timeoutHandle = setTimeout(() => {
+        escalate('timeout');
+      }, timeoutMs);
+
       try {
         client.exec(command, execOpts, (err: Error | undefined, stream: ClientChannel) => {
           if (err) {
@@ -651,43 +1217,53 @@ export class SshSessionService {
             settled = true;
             if (timeoutHandle) clearTimeout(timeoutHandle);
             if (killTimer) clearTimeout(killTimer);
+            clearIdleTimer();
             reject(err);
             return;
           }
           channel = stream;
 
           stream.on('data', (chunk: Buffer) => {
+            lastChunkAt = Date.now();
+            armIdleTimer();
             if (stdoutBytes >= STDOUT_LIMIT) {
               stdoutBytes += chunk.length;
               stdoutTruncated = true;
-              return;
-            }
-            if (stdoutBytes + chunk.length <= STDOUT_LIMIT) {
+            } else if (stdoutBytes + chunk.length <= STDOUT_LIMIT) {
               stdoutChunks.push(chunk);
               stdoutBytes += chunk.length;
-              return;
+            } else {
+              const space = STDOUT_LIMIT - stdoutBytes;
+              if (space > 0) stdoutChunks.push(chunk.subarray(0, space));
+              stdoutBytes += chunk.length;
+              stdoutTruncated = true;
             }
-            const space = STDOUT_LIMIT - stdoutBytes;
-            if (space > 0) stdoutChunks.push(chunk.subarray(0, space));
-            stdoutBytes += chunk.length;
-            stdoutTruncated = true;
+            // Hook fires AFTER stdoutBytes is updated so async-job callers get
+            // the running total alongside the chunk. Wrapped in try so a
+            // throwing hook can't tear down the SSH session.
+            if (hooks?.onStdout) {
+              try { hooks.onStdout(chunk, stdoutBytes); } catch { /* noop */ }
+            }
           });
 
           stream.stderr.on('data', (chunk: Buffer) => {
+            lastChunkAt = Date.now();
+            armIdleTimer();
             if (stderrBytes >= STDERR_LIMIT) {
               stderrBytes += chunk.length;
               stderrTruncated = true;
-              return;
-            }
-            if (stderrBytes + chunk.length <= STDERR_LIMIT) {
+            } else if (stderrBytes + chunk.length <= STDERR_LIMIT) {
               stderrChunks.push(chunk);
               stderrBytes += chunk.length;
-              return;
+            } else {
+              const space = STDERR_LIMIT - stderrBytes;
+              if (space > 0) stderrChunks.push(chunk.subarray(0, space));
+              stderrBytes += chunk.length;
+              stderrTruncated = true;
             }
-            const space = STDERR_LIMIT - stderrBytes;
-            if (space > 0) stderrChunks.push(chunk.subarray(0, space));
-            stderrBytes += chunk.length;
-            stderrTruncated = true;
+            if (hooks?.onStderr) {
+              try { hooks.onStderr(chunk, stderrBytes); } catch { /* noop */ }
+            }
           });
 
           // ssh2 emits 'exit' as (code) for normal exit or (null, signal,
@@ -705,29 +1281,10 @@ export class SshSessionService {
         if (settled) return;
         settled = true;
         if (timeoutHandle) clearTimeout(timeoutHandle);
+        clearIdleTimer();
         reject(err as Error);
         return;
       }
-
-      timeoutHandle = setTimeout(() => {
-        if (settled) return;
-        // SIGTERM, then SIGKILL after the grace window.
-        signal = signal ?? 'SIGTERM';
-        if (channel) {
-          try { channel.signal('TERM'); } catch { /* noop */ }
-        }
-        killTimer = setTimeout(() => {
-          if (settled) return;
-          signal = 'SIGKILL';
-          if (channel) {
-            try { channel.signal('KILL'); } catch { /* noop */ }
-            try { channel.close(); } catch { /* noop */ }
-          }
-          // If the channel never emits 'close' (e.g. fake ssh2 in tests),
-          // settle here so the caller doesn't hang.
-          finalize();
-        }, SIGKILL_GRACE_MS);
-      }, timeoutMs);
     });
   }
 

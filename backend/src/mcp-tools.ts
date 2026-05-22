@@ -2391,7 +2391,7 @@ const tools = [
   },
   {
     name: 'ssh_exec',
-    description: 'Execute a shell command on a remote server that was previously configured in DevGrimoire. Look up available connections with ssh_connection_list first. You never have direct access to SSH keys/passwords — they are resolved server-side. Stdout is truncated at 256 KB, stderr at 64 KB. Default timeout 60s, max 600s. Audit-logged with sourceContext="mcp". Connection lookup: connectionId wins; otherwise slug + (projectId|customerId).',
+    description: 'Execute a shell command on a remote server that was previously configured in DevGrimoire. Look up available connections with ssh_connection_list first. You never have direct access to SSH keys/passwords — they are resolved server-side. Stdout is truncated at 256 KB, stderr at 64 KB. Default timeout 60s, max 600s. The result includes stdoutBytes/stderrBytes/lastChunkAgeMs/aborted so you can recognise stalled vs. running commands. A no-output watchdog (`idleTimeoutMs`, default 30s) aborts commands that produce no stdout/stderr for that long — set 0 to disable (legacy behaviour) for legitimately quiet ops like `sleep 300 && echo done`. RECOMMENDED: split long multi-step pipelines (deploy / migrate / build) into separate ssh_exec calls of < 30s each; use `ssh_exec`-with-`tail -f` against an in-progress log file or poll a status command for long-running async work. Audit-logged with sourceContext="mcp". Connection lookup: connectionId wins; otherwise slug + (projectId|customerId).',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -2400,7 +2400,8 @@ const tools = [
         projectId: { type: 'string', description: 'Required with slug for project-scoped connections' },
         customerId: { type: 'string', description: 'Required with slug for customer-scoped connections' },
         command: { type: 'string', description: 'Shell command to execute on the remote (runs via ssh2.Client.exec, supports pipes/globbing on the remote shell).' },
-        timeoutMs: { type: 'number', description: 'Timeout in milliseconds (default 60000, max 600000). SIGTERM is sent first, then SIGKILL after a 5s grace.' },
+        timeoutMs: { type: 'number', description: 'Absolute timeout in milliseconds (default 60000, max 600000). SIGTERM is sent first, then SIGKILL after a 5s grace. Aborts via this timer surface as `aborted: "timeout"` in the result.' },
+        idleTimeoutMs: { type: 'number', description: 'No-output watchdog in milliseconds (default 30000, clamped to ≤ timeoutMs). The command is aborted with the same SIGTERM/SIGKILL escalation if no stdout or stderr byte arrives for this long — catches silent SSH hangs. Pass `0` to disable for commands that are legitimately quiet for long stretches. Aborts via this timer surface as `aborted: "idle"` in the result.' },
         env: { type: 'object', description: 'Optional environment variables forwarded to the remote command. Server-side may reject these if AcceptEnv is restrictive on the remote.', additionalProperties: { type: 'string' } },
         cwd: { type: 'string', description: 'Optional working directory on the remote. Wrapped as `cd \'...\' && <command>` with POSIX single-quote escaping.' },
       },
@@ -2458,6 +2459,47 @@ const tools = [
         maxEntries: { type: 'number', description: 'Maximum number of entries to return (default 200, max 2000).' },
       },
       required: ['remotePath'],
+    },
+  },
+  {
+    name: 'ssh_exec_async',
+    description: 'Start a shell command on a remote server in the BACKGROUND and return a jobId immediately. Use this for long-running operations (deploys, backups, multi-step pipelines) that would block a single ssh_exec call. Same connection-lookup, command, env, cwd, timeoutMs, idleTimeoutMs as ssh_exec — the only difference is that the response returns *before* the command finishes. Poll the result with ssh_exec_status (or interrupt with ssh_exec_cancel). The job is held in-memory for 10 minutes after it finishes, after which ssh_exec_status returns job_not_found. Backend restart drops in-flight jobs (audit row is still written on finalize). The async job still counts against the per-connection concurrency limit of 5.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        connectionId: { type: 'string', description: 'SshConnection MongoDB ID — wins if given' },
+        slug: { type: 'string', description: 'SshConnection slug (requires projectId or customerId)' },
+        projectId: { type: 'string', description: 'Required with slug for project-scoped connections' },
+        customerId: { type: 'string', description: 'Required with slug for customer-scoped connections' },
+        command: { type: 'string', description: 'Shell command to execute on the remote.' },
+        timeoutMs: { type: 'number', description: 'Absolute timeout in milliseconds (default 60000, max 600000). Aborts surface as `aborted: "timeout"` in the status snapshot.' },
+        idleTimeoutMs: { type: 'number', description: 'No-output watchdog (default 30000, ≤ timeoutMs, 0 = disabled). Aborts surface as `aborted: "idle"`.' },
+        env: { type: 'object', description: 'Optional environment variables forwarded to the remote command.', additionalProperties: { type: 'string' } },
+        cwd: { type: 'string', description: 'Optional working directory on the remote (wrapped as `cd \'...\' && <command>` with POSIX single-quote escaping).' },
+      },
+      required: ['command'],
+    },
+  },
+  {
+    name: 'ssh_exec_status',
+    description: 'Poll an async exec job by jobId. Returns live progress (`state: running` with stdoutBytes/stderrBytes/lastChunkAgeMs/stdoutTail/stderrTail) and the terminal snapshot once done. Tail snippets are the *last 4 KB* of stdout and *last 2 KB* of stderr respectively, utf-8 rendered (invalid bytes become U+FFFD — for binary payloads use ssh_download). `state` is "running" until finalize, then "done" (clean exit, may still be non-zero exitCode) or "aborted" (escalation via timeout/idle/cancelled or remote signal). The job entry is reaped 10 minutes after finalize; later polls return job_not_found.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        jobId: { type: 'string', description: 'The jobId returned by ssh_exec_async.' },
+      },
+      required: ['jobId'],
+    },
+  },
+  {
+    name: 'ssh_exec_cancel',
+    description: 'Cancel an async exec job by jobId. Triggers the SIGTERM→SIGKILL escalation pipeline (same as timeoutMs/idleTimeoutMs aborts) and returns the current status snapshot. Idempotent — cancelling a done/aborted job is a no-op and returns the existing status. Returns job_not_found for unknown or already-reaped jobIds.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        jobId: { type: 'string', description: 'The jobId returned by ssh_exec_async.' },
+      },
+      required: ['jobId'],
     },
   },
   {
@@ -5249,6 +5291,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           });
           const command = requireString(a, 'command');
           const timeoutMs = optionalNumber(a, 'timeoutMs');
+          const idleTimeoutMs = optionalNumber(a, 'idleTimeoutMs');
           const cwd = optionalString(a, 'cwd');
           const envObj = optionalObject(a, 'env');
           let env: Record<string, string> | undefined;
@@ -5264,6 +5307,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const userId = requireUserId();
           result = await sshSessionService.exec(conn._id.toString(), command, {
             timeoutMs,
+            idleTimeoutMs,
             env,
             cwd,
             sourceContext: 'mcp',
@@ -5353,6 +5397,50 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             bytesRead: dl.bytesRead,
             truncated: dl.truncated,
           };
+          break;
+        }
+        case 'ssh_exec_async': {
+          const conn = await resolveSshConnection(sshService, {
+            id: optionalString(a, 'connectionId'),
+            slug: optionalString(a, 'slug'),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
+          });
+          const command = requireString(a, 'command');
+          const timeoutMs = optionalNumber(a, 'timeoutMs');
+          const idleTimeoutMs = optionalNumber(a, 'idleTimeoutMs');
+          const cwd = optionalString(a, 'cwd');
+          const envObj = optionalObject(a, 'env');
+          let env: Record<string, string> | undefined;
+          if (envObj) {
+            env = {};
+            for (const [k, v] of Object.entries(envObj)) {
+              if (typeof v === 'string') env[k] = v;
+            }
+          }
+          const userId = requireUserId();
+          result = await sshSessionService.execAsync(conn._id.toString(), command, {
+            timeoutMs,
+            idleTimeoutMs,
+            env,
+            cwd,
+            sourceContext: 'mcp',
+            userId,
+          });
+          break;
+        }
+        case 'ssh_exec_status': {
+          const jobId = requireString(a, 'jobId');
+          const snap = sshSessionService.getJobStatus(jobId);
+          if (!snap) throw new Error('job_not_found');
+          result = snap;
+          break;
+        }
+        case 'ssh_exec_cancel': {
+          const jobId = requireString(a, 'jobId');
+          const snap = sshSessionService.cancelJob(jobId);
+          if (!snap) throw new Error('job_not_found');
+          result = snap;
           break;
         }
         case 'ssh_list_files': {

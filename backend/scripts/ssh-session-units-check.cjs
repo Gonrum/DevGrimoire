@@ -454,7 +454,9 @@ function makeFakeSftp({
       return realSetTimeout(fn, 0);
     };
     try {
-      const out = await svc.exec(String(conn._id), 'sleep 999', { userId, timeoutMs: 50 });
+      // Disable the idle watchdog so this test exercises the absolute
+       // timeoutMs path exclusively (the watchdog has its own test below).
+      const out = await svc.exec(String(conn._id), 'sleep 999', { userId, timeoutMs: 50, idleTimeoutMs: 0 });
       // At minimum SIGTERM was issued; SIGKILL too because grace=0.
       assert.ok(captured.includes('TERM'), `expected TERM signal, got ${captured.join(',')}`);
       // After the SIGKILL escalation, finalize() ran via the grace timer.
@@ -469,6 +471,259 @@ function makeFakeSftp({
       }
     }
     assert.ok(armed >= 1);
+  });
+
+  // 6a) exec happy-path returns progress metrics + aborted=undefined (T-387)
+  await check('exec() result includes stdoutBytes/stderrBytes/lastChunkAgeMs and aborted is undefined on clean exit', async () => {
+    const conn = makeKeyConnection({ knownHostFingerprint: FAKE_FINGERPRINT });
+    const sshService = makeSshServiceStub({ connection: conn });
+    const secrets = makeSecretsServiceStub();
+    const audit = makeAuditModelStub();
+    const factory = makeClientFactory({
+      onChannel: (stream) => {
+        stream.emit('data', Buffer.from('xyz'));
+        stream.stderr.emit('data', Buffer.from('w'));
+        stream.emit('exit', 0);
+        stream.emit('close');
+      },
+    });
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
+
+    const userId = new Types.ObjectId().toString();
+    const out = await svc.exec(String(conn._id), 'echo xyz', { userId });
+    assert.equal(out.stdoutBytes, 3);
+    assert.equal(out.stderrBytes, 1);
+    assert.ok(typeof out.lastChunkAgeMs === 'number' && out.lastChunkAgeMs >= 0);
+    assert.equal(out.aborted, undefined);
+    // No errorMsg in audit for clean exit.
+    assert.equal(audit._writes[0].errorMsg, undefined);
+  });
+
+  // 6b) idle watchdog fires when no output for idleTimeoutMs (T-387)
+  await check('exec() idle watchdog escalates with aborted="idle" when remote stays silent', async () => {
+    const conn = makeKeyConnection({ knownHostFingerprint: FAKE_FINGERPRINT });
+    const sshService = makeSshServiceStub({ connection: conn });
+    const secrets = makeSecretsServiceStub();
+    const audit = makeAuditModelStub();
+    const captured = [];
+    let stuckStream = null;
+    const factory = makeClientFactory({
+      captureSignals: captured,
+      onChannel: (stream) => {
+        stuckStream = stream;
+        // Channel stays silent — neither emits data nor exit/close. Only the
+        // idle watchdog can break this wait.
+      },
+    });
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
+
+    const userId = new Types.ObjectId().toString();
+    const realSetTimeout = global.setTimeout;
+    global.setTimeout = (fn, _ms) => realSetTimeout(fn, 0);
+    try {
+      // timeoutMs is large (won't fire); idleTimeoutMs is tiny → watchdog
+      // path is what actually terminates.
+      const out = await svc.exec(String(conn._id), 'wedged', {
+        userId,
+        timeoutMs: 30_000,
+        idleTimeoutMs: 50,
+      });
+      assert.equal(out.aborted, 'idle');
+      assert.ok(captured.includes('TERM'), `expected TERM signal, got ${captured.join(',')}`);
+      assert.equal(out.exitCode, null);
+      // Audit row stamps the idle reason so ops can detect stalls.
+      assert.ok(
+        /idle_timeout/.test(String(audit._writes[0].errorMsg || '')),
+        `expected idle_timeout in errorMsg, got ${audit._writes[0].errorMsg}`,
+      );
+    } finally {
+      global.setTimeout = realSetTimeout;
+      if (stuckStream) {
+        try { stuckStream.emit('close'); } catch { /* noop */ }
+      }
+    }
+  });
+
+  // 6c) idleTimeoutMs=0 disables the watchdog (legacy quiet-command path)
+  await check('exec() with idleTimeoutMs=0 disables the watchdog (only absolute timeoutMs aborts)', async () => {
+    const conn = makeKeyConnection({ knownHostFingerprint: FAKE_FINGERPRINT });
+    const sshService = makeSshServiceStub({ connection: conn });
+    const secrets = makeSecretsServiceStub();
+    const audit = makeAuditModelStub();
+    let stuckStream = null;
+    const factory = makeClientFactory({
+      onChannel: (stream) => {
+        stuckStream = stream;
+        // Stay silent forever — without the watchdog, only the absolute
+        // timeoutMs can rescue us.
+      },
+    });
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
+
+    const userId = new Types.ObjectId().toString();
+    const realSetTimeout = global.setTimeout;
+    global.setTimeout = (fn, _ms) => realSetTimeout(fn, 0);
+    try {
+      const out = await svc.exec(String(conn._id), 'long quiet sleep', {
+        userId,
+        timeoutMs: 50,
+        idleTimeoutMs: 0,
+      });
+      // Aborted via absolute timeout, NOT idle.
+      assert.equal(out.aborted, 'timeout');
+      assert.ok(
+        /^timeout/.test(String(audit._writes[0].errorMsg || '')),
+        `expected timeout errorMsg, got ${audit._writes[0].errorMsg}`,
+      );
+    } finally {
+      global.setTimeout = realSetTimeout;
+      if (stuckStream) {
+        try { stuckStream.emit('close'); } catch { /* noop */ }
+      }
+    }
+  });
+
+  // Helper: drain Node's microtask queue until predicate() returns truthy
+  // or `maxTicks` passes. The async-exec background runner traverses ~5
+  // awaits before `client.exec` actually fires onChannel; tests must poll
+  // for that wiring rather than guess a fixed setImmediate count.
+  const waitFor = async (predicate, maxTicks = 25) => {
+    for (let i = 0; i < maxTicks; i += 1) {
+      if (predicate()) return true;
+      await new Promise((r) => setImmediate(r));
+    }
+    return predicate();
+  };
+
+  // 6d) execAsync happy-path: returns jobId, then status transitions
+  // running → done with collected stdout/stderr tails (T-388)
+  await check('execAsync() returns jobId, then status flips to done with collected tails', async () => {
+    const conn = makeKeyConnection({ knownHostFingerprint: FAKE_FINGERPRINT });
+    const sshService = makeSshServiceStub({ connection: conn });
+    const secrets = makeSecretsServiceStub();
+    const audit = makeAuditModelStub();
+    let capturedStream = null;
+    const factory = makeClientFactory({
+      onChannel: (stream) => {
+        capturedStream = stream;
+        // Hold the stream open — we drive close manually below so we can
+        // observe the running state before finalize.
+      },
+    });
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
+
+    const userId = new Types.ObjectId().toString();
+    const started = await svc.execAsync(String(conn._id), 'echo hi', { userId });
+    assert.match(started.jobId, /^ssh-job-/);
+    assert.equal(started.command, 'echo hi');
+    assert.equal(started.connectionId, String(conn._id));
+
+    // Background runJobBackground traverses several awaits (findById,
+    // resolveCredentials, openClient with its 'ready'-nextTick handshake)
+    // before runExec wires up the stream handlers. Poll instead of guessing.
+    await waitFor(() => capturedStream !== null);
+    assert.ok(capturedStream, 'channel handler should be wired up');
+
+    // Emit stdout/stderr while the job is still running — status should
+    // reflect bytes received without `state: done` yet.
+    capturedStream.emit('data', Buffer.from('hello\n'));
+    capturedStream.stderr.emit('data', Buffer.from('warn\n'));
+
+    const mid = svc.getJobStatus(started.jobId);
+    assert.ok(mid, 'status snapshot should exist for running job');
+    assert.equal(mid.state, 'running');
+    assert.equal(mid.stdoutBytes, 6);
+    assert.equal(mid.stderrBytes, 5);
+    assert.match(mid.stdoutTail, /hello/);
+    assert.match(mid.stderrTail, /warn/);
+
+    // Finalise the job and wait for the background task to write the
+    // terminal state into the job table.
+    capturedStream.emit('exit', 0);
+    capturedStream.emit('close');
+    await waitFor(() => svc.getJobStatus(started.jobId)?.state !== 'running');
+
+    const done = svc.getJobStatus(started.jobId);
+    assert.equal(done.state, 'done');
+    assert.equal(done.exitCode, 0);
+    assert.equal(done.aborted, null);
+    assert.equal(audit._writes.length, 1);
+    assert.equal(audit._writes[0].command, 'echo hi');
+  });
+
+  // 6e) cancelJob() interrupts a running async job (T-388)
+  await check('cancelJob() escalates a running job to aborted="cancelled"', async () => {
+    const conn = makeKeyConnection({ knownHostFingerprint: FAKE_FINGERPRINT });
+    const sshService = makeSshServiceStub({ connection: conn });
+    const secrets = makeSecretsServiceStub();
+    const audit = makeAuditModelStub();
+    const captured = [];
+    let stuckStream = null;
+    const factory = makeClientFactory({
+      captureSignals: captured,
+      onChannel: (stream) => {
+        stuckStream = stream;
+        // Stream stays silent — only the cancel hook can break the wait.
+      },
+    });
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
+
+    const userId = new Types.ObjectId().toString();
+    const started = await svc.execAsync(String(conn._id), 'long-runner', {
+      userId,
+      timeoutMs: 30_000,
+      idleTimeoutMs: 0, // disable idle so the cancel is the actual termination cause
+    });
+
+    // Wait until the cancel hook + stream handlers are wired up by runExec.
+    // We arm the patched setTimeout AFTER this so the real-time 30s
+    // timeoutMs setTimeout doesn't get folded into the immediate-fire patch
+    // (which would let it escalate('timeout') before our cancel arrives).
+    await waitFor(() => stuckStream !== null);
+    assert.ok(stuckStream, 'channel handler should be wired up before cancel');
+
+    // Patch ONLY short timeouts (≤ SIGKILL_GRACE_MS + slack). The killTimer
+    // armed by escalate uses SIGKILL_GRACE_MS=5_000 and must fire fast in
+    // the test; but the JOB_TTL_MS=600_000 cleanup timer also goes through
+    // the same global setTimeout — if we shortened that too, the job entry
+    // would disappear during the predicate poll and our state assertion
+    // would race against the reaper. The 10s cutoff is comfortably above
+    // SIGKILL_GRACE_MS and well below JOB_TTL_MS.
+    const realSetTimeout = global.setTimeout;
+    global.setTimeout = (fn, ms) => realSetTimeout(fn, (ms ?? 0) < 10_000 ? 0 : ms);
+    try {
+      const snap = svc.cancelJob(started.jobId);
+      assert.ok(snap, 'cancelJob should return a snapshot');
+      // Give the SIGKILL grace timer a real chunk of wall-clock time to
+      // fire and the post-finalize microtasks (runJobBackground's
+      // continuation that stamps job.state) to settle. setImmediate alone
+      // races against the timer queue under load; a small real-time wait
+      // makes this deterministic.
+      await new Promise((r) => realSetTimeout(r, 50));
+      const after = svc.getJobStatus(started.jobId);
+      assert.equal(after.state, 'aborted', `expected aborted, got ${after.state}; captured=${captured.join(',')}`);
+      assert.equal(after.aborted, 'cancelled');
+      assert.ok(captured.includes('TERM'), `expected TERM signal, got ${captured.join(',')}`);
+      assert.match(String(audit._writes[0].errorMsg || ''), /cancelled/);
+    } finally {
+      global.setTimeout = realSetTimeout;
+      if (stuckStream) {
+        try { stuckStream.emit('close'); } catch { /* noop */ }
+      }
+    }
+  });
+
+  // 6f) getJobStatus/cancelJob with unknown jobId return null (T-388)
+  await check('getJobStatus()/cancelJob() return null for unknown jobIds', async () => {
+    const conn = makeKeyConnection({ knownHostFingerprint: FAKE_FINGERPRINT });
+    const sshService = makeSshServiceStub({ connection: conn });
+    const secrets = makeSecretsServiceStub();
+    const audit = makeAuditModelStub();
+    const factory = makeClientFactory();
+    const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), factory);
+
+    assert.equal(svc.getJobStatus('ssh-job-does-not-exist'), null);
+    assert.equal(svc.cancelJob('ssh-job-does-not-exist'), null);
   });
 
   // 7) exec with cwd → shell-quoted prefix
