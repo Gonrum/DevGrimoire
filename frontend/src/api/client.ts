@@ -608,6 +608,13 @@ export interface Milestone {
   updatedAt: string;
 }
 
+export interface ParsedAcceptanceCriterion { text: string; done: boolean; }
+export interface ParsedTodo { title: string; description?: string; priority?: string; status?: string; tags?: string[]; userStories?: string; acceptanceCriteria?: ParsedAcceptanceCriterion[]; outOfScope?: string; edgeCases?: string; }
+export interface ParsedMilestone { name: string; description?: string; todos: ParsedTodo[]; }
+export interface ImportResult { milestone: Milestone; todos: Todo[]; warnings?: string[]; }
+export interface AiSuggestion { todoId: string; displayNumber: string; title: string; currentStatus: string; suggestedStatus: string; confidence: number; reason: string; }
+export interface AiCompleteResult { milestoneId: string; modelUsed?: string; suggestions: AiSuggestion[]; warnings?: string[]; }
+
 export interface Session {
   _id: string;
   projectId: string;
@@ -1616,6 +1623,41 @@ export const api = {
       request<Milestone>(`/milestones/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/milestones/${id}`, { method: 'DELETE' }),
+    exportRaw: async (id: string) => {
+      const headers: Record<string, string> = {};
+      const token = getAccessToken?.();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`${BASE_URL}/milestones/${id}/export.md`, { headers });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: res.statusText }));
+        throw new Error(err.message || res.statusText);
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="(.+)"/);
+      const filename = match?.[1] || `milestone-${id}.md`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    importPreview: (markdown: string) =>
+      request<ParsedMilestone>('/milestones/import/preview', {
+        method: 'POST',
+        body: JSON.stringify({ markdown }),
+      }),
+    importApply: (projectId: string, parsed: ParsedMilestone) =>
+      request<ImportResult>('/milestones/import/apply', {
+        method: 'POST',
+        body: JSON.stringify({ projectId, parsed }),
+      }),
+    aiComplete: (id: string, summaryMarkdown: string) =>
+      request<AiCompleteResult>(`/milestones/${id}/ai-complete`, {
+        method: 'POST',
+        body: JSON.stringify({ summaryMarkdown }),
+      }),
   },
   environments: {
     list: (projectId: string) =>

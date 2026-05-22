@@ -645,6 +645,28 @@
     "answerLabel": "**Antwort:**",
     "categoryPlaceholder": "z.B. Decision"
   },
+  "milestone": {
+    "actions": {
+      "exportMarkdown": "Export als Markdown",
+      "importMarkdown": "Import aus Markdown",
+      "aiComplete": "KI-Status vorschlagen"
+    },
+    "import": {
+      "pasteOrUpload": "Markdown einfügen oder Datei hochladen",
+      "preview": "Vorschau",
+      "apply": "Importieren",
+      "parsedAs": "Erkannt als"
+    },
+    "ai": {
+      "summaryPrompt": "Beschreibe was du zuletzt gemacht hast — der LLM schlägt Status-Updates vor",
+      "generate": "Vorschläge generieren",
+      "applySelected": "Ausgewählte anwenden",
+      "confidence": "Sicherheit",
+      "reason": "Begründung",
+      "suggestions": "Vorschläge",
+      "noSuggestions": "Keine Vorschläge."
+    }
+  },
   "milestones": {
     "newMilestone": "+ Neues Artefakt",
     "noMilestones": "Noch keine Artefakte. Lege eines über das Formular oder per MCP an.",

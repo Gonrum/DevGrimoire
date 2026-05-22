@@ -1,7 +1,7 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api, Milestone, Todo, ChangelogEntry } from '../api/client';
+import { api, Milestone, Todo, ChangelogEntry, ImportResult } from '../api/client';
 import Markdown from '../components/Markdown';
 import MilestoneForm from '../components/MilestoneForm';
 import TodoForm from '../components/TodoForm';
@@ -13,6 +13,8 @@ import DetailSection from '../components/ui/DetailSection';
 import { FormInput, FormTextarea } from '../components/ui/FormField';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { WorkflowModalShell, WorkflowPageShell } from '../components/ui/WorkflowShell';
+import MilestoneImportDialog from '../components/milestone/MilestoneImportDialog';
+import MilestoneAiCompleteDialog from '../components/milestone/MilestoneAiCompleteDialog';
 
 const STATUS_COLORS: Record<Milestone['status'], string> = {
   open: 'bg-gray-700 text-gray-300',
@@ -177,6 +179,8 @@ export default function MilestoneDetailPage() {
   const [editing, setEditing] = useState(false);
   const [showChangelogForm, setShowChangelogForm] = useState(false);
   const [showCreateTodo, setShowCreateTodo] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [aiDialogOpen, setAiDialogOpen] = useState(false);
 
   const loadMilestone = () => {
     if (!milestoneId) return;
@@ -205,6 +209,20 @@ export default function MilestoneDetailPage() {
     } catch (err: any) {
       showError(err.message || t('milestoneDetail.statusChangeFailed'));
     }
+  };
+
+  const handleExport = async () => {
+    if (!milestoneId) return;
+    try {
+      await api.milestones.exportRaw(milestoneId);
+    } catch (err: any) {
+      showError(err.message || t('common.error', 'Fehler'));
+    }
+  };
+
+  const handleImported = (_result: ImportResult) => {
+    // Import creates a new milestone in the same project; just close dialog
+    setImportDialogOpen(false);
   };
 
   const locale = i18n.language === 'de' ? 'de-DE' : 'en-US';
@@ -391,6 +409,15 @@ export default function MilestoneDetailPage() {
               }}>
               {milestone.archived ? t('common.restore') : t('common.archive')}
             </Button>
+            <Button type="button" variant="neutral" size="sm" onClick={handleExport}>
+              {t('milestone.actions.exportMarkdown')}
+            </Button>
+            <Button type="button" variant="neutral" size="sm" onClick={() => setImportDialogOpen(true)}>
+              {t('milestone.actions.importMarkdown')}
+            </Button>
+            <Button type="button" variant="accent" size="sm" onClick={() => setAiDialogOpen(true)}>
+              {t('milestone.actions.aiComplete')}
+            </Button>
             <ConfirmButton
               onConfirm={async () => {
                 try {
@@ -405,6 +432,26 @@ export default function MilestoneDetailPage() {
             />
             </div>
           </DetailSection>
+
+          {/* Import Dialog */}
+          {id && (
+            <MilestoneImportDialog
+              open={importDialogOpen}
+              projectId={id}
+              onClose={() => setImportDialogOpen(false)}
+              onImported={handleImported}
+            />
+          )}
+
+          {/* AI Complete Dialog */}
+          {milestoneId && (
+            <MilestoneAiCompleteDialog
+              open={aiDialogOpen}
+              milestoneId={milestoneId}
+              onClose={() => setAiDialogOpen(false)}
+              onApplied={() => { loadTodos(); loadMilestone(); }}
+            />
+          )}
         </div>
       )}
     </WorkflowPageShell>

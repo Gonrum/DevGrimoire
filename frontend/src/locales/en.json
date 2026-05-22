@@ -645,6 +645,28 @@
     "answerLabel": "**Answer:**",
     "categoryPlaceholder": "e.g. Decision"
   },
+  "milestone": {
+    "actions": {
+      "exportMarkdown": "Export as Markdown",
+      "importMarkdown": "Import from Markdown",
+      "aiComplete": "AI status suggestions"
+    },
+    "import": {
+      "pasteOrUpload": "Paste markdown or upload a file",
+      "preview": "Preview",
+      "apply": "Import",
+      "parsedAs": "Parsed as"
+    },
+    "ai": {
+      "summaryPrompt": "Describe what you recently did — the LLM will suggest status updates",
+      "generate": "Generate suggestions",
+      "applySelected": "Apply selected",
+      "confidence": "Confidence",
+      "reason": "Reason",
+      "suggestions": "Suggestions",
+      "noSuggestions": "No suggestions."
+    }
+  },
   "milestones": {
     "newMilestone": "+ New Artifact",
     "noMilestones": "No artifacts yet. Create one via the form or MCP.",
