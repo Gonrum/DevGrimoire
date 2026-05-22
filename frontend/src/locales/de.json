@@ -64,7 +64,11 @@
     "unknown": "Unbekannt",
     "saveSuccess": "Gespeichert",
     "selectAll": "Alle auswählen",
-    "deselectAll": "Alle abwählen"
+    "deselectAll": "Alle abwählen",
+    "applied": "angewendet",
+    "errors": "Fehler",
+    "chars": "Zeichen",
+    "uploadFile": "Datei hochladen"
   },
   "nav": {
     "dashboard": "Grimoire",
@@ -655,7 +659,8 @@
       "pasteOrUpload": "Markdown einfügen oder Datei hochladen",
       "preview": "Vorschau",
       "apply": "Importieren",
-      "parsedAs": "Erkannt als"
+      "parsedAs": "Erkannt als",
+      "fileTooLarge": "Datei zu groß (max. {{max}})"
     },
     "ai": {
       "summaryPrompt": "Beschreibe was du zuletzt gemacht hast — der LLM schlägt Status-Updates vor",
@@ -664,7 +669,10 @@
       "confidence": "Sicherheit",
       "reason": "Begründung",
       "suggestions": "Vorschläge",
-      "noSuggestions": "Keine Vorschläge."
+      "noSuggestions": "Keine Vorschläge.",
+      "appliedToast": "{{count}} Status-Updates angewendet",
+      "toggleRow": "Auswahl für {{number}}",
+      "toggleAll": "Alle auswählen"
     }
   },
   "milestones": {

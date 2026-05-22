@@ -24,9 +24,15 @@ export default function MilestoneImportDialog({ open, projectId, onClose, onImpo
 
   if (!open) return null;
 
+  const MAX_IMPORT_SIZE = 5 * 1024 * 1024; // 5 MB
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > MAX_IMPORT_SIZE) {
+      showError(t('milestone.import.fileTooLarge', { max: '5 MB' }));
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (ev) => {
       setMarkdown(ev.target?.result as string ?? '');
@@ -89,7 +95,7 @@ export default function MilestoneImportDialog({ open, projectId, onClose, onImpo
                     onClick={() => fileInputRef.current?.click()}
                     className="text-xs text-violet-400 hover:text-violet-300 underline"
                   >
-                    {t('common.uploadFile', 'Datei hochladen')}
+                    {t('common.uploadFile')}
                   </button>
                   <input
                     ref={fileInputRef}
@@ -99,7 +105,7 @@ export default function MilestoneImportDialog({ open, projectId, onClose, onImpo
                     onChange={handleFileChange}
                   />
                   {markdown && (
-                    <span className="text-xs text-gray-500">({markdown.length} {t('common.chars', 'Zeichen')})</span>
+                    <span className="text-xs text-gray-500">({markdown.length} {t('common.chars')})</span>
                   )}
                 </div>
               </div>

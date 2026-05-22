@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, AiCompleteResult, AiSuggestion, Todo } from '../../api/client';
 import Button from '../ui/Button';
@@ -14,6 +14,7 @@ interface Props {
 }
 
 function ConfidenceBar({ confidence }: { confidence: number }) {
+  const { t } = useTranslation();
   const pct = Math.round(confidence * 100);
   const color =
     confidence >= 0.75 ? 'bg-green-500' :
@@ -21,7 +22,14 @@ function ConfidenceBar({ confidence }: { confidence: number }) {
     'bg-red-500';
   return (
     <div className="flex items-center gap-1.5 min-w-[60px]">
-      <div className="flex-1 bg-gray-700 rounded-full h-1.5 overflow-hidden">
+      <div
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={t('milestone.ai.confidence')}
+        className="flex-1 bg-gray-700 rounded-full h-1.5 overflow-hidden"
+      >
         <div className={`h-1.5 ${color}`} style={{ width: `${pct}%` }} />
       </div>
       <span className="text-xs text-gray-500 w-7 text-right shrink-0">{pct}%</span>
@@ -46,6 +54,7 @@ function SuggestionRow({ suggestion, checked, onToggle }: SuggestionRowProps) {
           type="checkbox"
           checked={checked}
           onChange={onToggle}
+          aria-label={t('milestone.ai.toggleRow', { number: suggestion.displayNumber })}
           className="accent-violet-500"
         />
       </td>
@@ -90,6 +99,13 @@ export default function MilestoneAiCompleteDialog({ open, milestoneId, onClose, 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
+  const allRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (allRef.current && result) {
+      allRef.current.indeterminate = selected.size > 0 && selected.size < result.suggestions.length;
+    }
+  }, [selected, result]);
 
   if (!open) return null;
 
@@ -132,9 +148,9 @@ export default function MilestoneAiCompleteDialog({ open, milestoneId, onClose, 
     setApplying(false);
 
     if (errors.length > 0) {
-      showError(`${successCount} ${t('common.applied', 'angewendet')}, ${errors.length} ${t('common.errors', 'Fehler')}: ${errors[0]}`);
+      showError(`${successCount} ${t('common.applied')}, ${errors.length} ${t('common.errors')}: ${errors[0]}`);
     } else {
-      showSuccess(`${successCount} ${t('common.applied', 'Status-Updates angewendet')}`);
+      showSuccess(t('milestone.ai.appliedToast', { count: successCount }));
     }
 
     onApplied();
@@ -146,15 +162,6 @@ export default function MilestoneAiCompleteDialog({ open, milestoneId, onClose, 
     setResult(null);
     setSelected(new Set());
     onClose();
-  };
-
-  const toggleAll = () => {
-    if (!result) return;
-    if (selected.size === result.suggestions.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(result.suggestions.map((s) => s.todoId)));
-    }
   };
 
   return (
@@ -210,9 +217,11 @@ export default function MilestoneAiCompleteDialog({ open, milestoneId, onClose, 
                       <tr className="text-xs text-gray-500 border-b border-gray-800">
                         <th className="py-1.5 px-2 w-8">
                           <input
+                            ref={allRef}
                             type="checkbox"
                             checked={selected.size === result.suggestions.length && result.suggestions.length > 0}
-                            onChange={toggleAll}
+                            onChange={(e) => setSelected(e.target.checked ? new Set(result.suggestions.map(s => s.todoId)) : new Set())}
+                            aria-label={t('milestone.ai.toggleAll')}
                             className="accent-violet-500"
                           />
                         </th>

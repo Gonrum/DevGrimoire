@@ -64,7 +64,11 @@
     "unknown": "Unknown",
     "saveSuccess": "Saved",
     "selectAll": "Select all",
-    "deselectAll": "Deselect all"
+    "deselectAll": "Deselect all",
+    "applied": "applied",
+    "errors": "errors",
+    "chars": "chars",
+    "uploadFile": "Upload file"
   },
   "researchSessions": {
     "overviewTitle": "Research",
@@ -655,7 +659,8 @@
       "pasteOrUpload": "Paste markdown or upload a file",
       "preview": "Preview",
       "apply": "Import",
-      "parsedAs": "Parsed as"
+      "parsedAs": "Parsed as",
+      "fileTooLarge": "File too large (max {{max}})"
     },
     "ai": {
       "summaryPrompt": "Describe what you recently did — the LLM will suggest status updates",
@@ -664,7 +669,10 @@
       "confidence": "Confidence",
       "reason": "Reason",
       "suggestions": "Suggestions",
-      "noSuggestions": "No suggestions."
+      "noSuggestions": "No suggestions.",
+      "appliedToast": "{{count}} status updates applied",
+      "toggleRow": "Toggle {{number}}",
+      "toggleAll": "Toggle all"
     }
   },
   "milestones": {
