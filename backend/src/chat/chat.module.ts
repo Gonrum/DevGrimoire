@@ -48,7 +48,8 @@ import { AgentRolesModule } from '../agent-roles/agent-roles.module';
     SettingsModule,
     RagModule,
     TodosModule,
-    MilestonesModule,
+    // forwardRef because MilestonesModule imports ChatModule (symmetric with milestones.module.ts)
+    forwardRef(() => MilestonesModule),
     ChangelogModule,
     KnowledgeModule,
     ResearchModule,
