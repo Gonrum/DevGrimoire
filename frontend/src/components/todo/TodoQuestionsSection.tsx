@@ -249,7 +249,7 @@ function AnsweredQuestionCard({
     ? t('questions.answeredByAgent')
     : t('questions.answeredByUser');
 
-  const defaultContent = `**Frage:** ${question.question}\n\n**Antwort:** ${question.answer ?? ''}`;
+  const defaultContent = `${t('questions.frageLabel')} ${question.question}\n\n${t('questions.answerLabel')} ${question.answer ?? ''}`;
 
   const [showSaveForm, setShowSaveForm] = useState(false);
   const [saveTopic, setSaveTopic] = useState(question.question.slice(0, 80));
@@ -348,7 +348,7 @@ function AnsweredQuestionCard({
               type="text"
               value={saveCategory}
               onChange={(e) => setSaveCategory(e.target.value)}
-              placeholder="z.B. Decision"
+              placeholder={t('questions.categoryPlaceholder')}
               className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-violet-500"
             />
           </div>

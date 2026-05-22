@@ -537,7 +537,12 @@
     },
     "userStories": "User Stories",
     "userStoriesPlaceholder": "Beschreibe die User Stories (Markdown)...",
-    "acceptanceCriteria": "Akzeptanzkriterien",
+    "acceptanceCriteria": {
+      "label": "Akzeptanzkriterien",
+      "markComplete": "Als erledigt markieren",
+      "markIncomplete": "Als offen markieren",
+      "removeAria": "Kriterium entfernen"
+    },
     "acceptanceCriteriaEmpty": "Keine Akzeptanzkriterien — leg los mit + Neues Kriterium",
     "addCriterion": "+ Neues Kriterium",
     "criterionPlaceholder": "Kriterium beschreiben...",
@@ -617,7 +622,10 @@
     "saveAsKnowledgeFailed": "Speichern fehlgeschlagen",
     "contentLabel": "Inhalt",
     "contentPlaceholder": "Markdown-Inhalt für den Knowledge-Eintrag",
-    "openKnowledge": "Wissen anzeigen"
+    "openKnowledge": "Wissen anzeigen",
+    "frageLabel": "**Frage:**",
+    "answerLabel": "**Antwort:**",
+    "categoryPlaceholder": "z.B. Decision"
   },
   "milestones": {
     "newMilestone": "+ Neues Artefakt",

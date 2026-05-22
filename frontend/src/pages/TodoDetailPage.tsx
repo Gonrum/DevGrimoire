@@ -414,7 +414,7 @@ export default function TodoDetailPage() {
               </section>
 
               <section>
-                <h3 className="text-sm font-medium text-gray-300 mb-2">{t('todoDetail.acceptanceCriteria')}</h3>
+                <h3 className="text-sm font-medium text-gray-300 mb-2">{t('todoDetail.acceptanceCriteria.label')}</h3>
                 <AcceptanceCriteriaEditor value={acceptanceCriteria} onChange={setAcceptanceCriteria} />
               </section>
 

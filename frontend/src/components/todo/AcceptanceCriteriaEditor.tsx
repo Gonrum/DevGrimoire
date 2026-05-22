@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AcceptanceCriterion } from '../../api/client';
 import Button from '../ui/Button';
@@ -9,13 +10,23 @@ interface Props {
 
 export default function AcceptanceCriteriaEditor({ value, onChange }: Props) {
   const { t } = useTranslation();
+  const [keys, setKeys] = useState<string[]>(() => value.map(() => crypto.randomUUID()));
+
+  // Sync keys when value length changes externally (e.g. todo reloads)
+  useEffect(() => {
+    if (keys.length !== value.length) {
+      setKeys(value.map(() => crypto.randomUUID()));
+    }
+  }, [value.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const add = () => {
     onChange([...value, { text: '', done: false }]);
+    setKeys((prev) => [...prev, crypto.randomUUID()]);
   };
 
   const remove = (index: number) => {
     onChange(value.filter((_, i) => i !== index));
+    setKeys((prev) => prev.filter((_, i) => i !== index));
   };
 
   const toggle = (index: number) => {
@@ -40,7 +51,7 @@ export default function AcceptanceCriteriaEditor({ value, onChange }: Props) {
   return (
     <div className="space-y-2">
       {value.map((criterion, index) => (
-        <div key={index} className="flex items-start gap-2">
+        <div key={keys[index]} className="flex items-start gap-2">
           <button
             type="button"
             onClick={() => toggle(index)}
@@ -49,7 +60,7 @@ export default function AcceptanceCriteriaEditor({ value, onChange }: Props) {
                 ? 'bg-green-600 border-green-500'
                 : 'bg-gray-900 border-gray-600 hover:border-gray-400'
             }`}
-            aria-label={criterion.done ? 'Mark incomplete' : 'Mark complete'}
+            aria-label={criterion.done ? t('todoDetail.acceptanceCriteria.markIncomplete') : t('todoDetail.acceptanceCriteria.markComplete')}
           >
             {criterion.done && (
               <svg className="w-4 h-4 text-white" viewBox="0 0 16 16" fill="none">
@@ -70,7 +81,7 @@ export default function AcceptanceCriteriaEditor({ value, onChange }: Props) {
             type="button"
             onClick={() => remove(index)}
             className="mt-1 text-gray-600 hover:text-red-400 transition-colors shrink-0"
-            aria-label="Remove"
+            aria-label={t('todoDetail.acceptanceCriteria.removeAria')}
           >
             <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
               <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />

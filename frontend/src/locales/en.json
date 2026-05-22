@@ -537,7 +537,12 @@
     },
     "userStories": "User Stories",
     "userStoriesPlaceholder": "Describe the user stories (Markdown)...",
-    "acceptanceCriteria": "Acceptance Criteria",
+    "acceptanceCriteria": {
+      "label": "Acceptance Criteria",
+      "markComplete": "Mark complete",
+      "markIncomplete": "Mark incomplete",
+      "removeAria": "Remove criterion"
+    },
     "acceptanceCriteriaEmpty": "No acceptance criteria yet — start with + New Criterion",
     "addCriterion": "+ New Criterion",
     "criterionPlaceholder": "Describe the criterion...",
@@ -617,7 +622,10 @@
     "saveAsKnowledgeFailed": "Save failed",
     "contentLabel": "Content",
     "contentPlaceholder": "Markdown content for the knowledge entry",
-    "openKnowledge": "Open knowledge entry"
+    "openKnowledge": "Open knowledge entry",
+    "frageLabel": "**Question:**",
+    "answerLabel": "**Answer:**",
+    "categoryPlaceholder": "e.g. Decision"
   },
   "milestones": {
     "newMilestone": "+ New Artifact",
