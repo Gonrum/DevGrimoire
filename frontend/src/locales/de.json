@@ -560,7 +560,15 @@
         "commentAdded": "Kommentar von {{author}}",
         "questionCreated": "Frage gestellt",
         "questionAnswered": "Frage beantwortet",
-        "knowledgeCreated": "Wissen aus Frage erstellt"
+        "knowledgeCreated": "Wissen aus Frage erstellt",
+        "knowledgeCreatedDetail": "Antwort wurde als Wissenseintrag gespeichert"
+      },
+      "typeLabel": {
+        "activity": "Aktivität",
+        "comment": "Kommentar",
+        "question": "Frage",
+        "answer": "Antwort",
+        "knowledge": "Wissen"
       }
     }
   },

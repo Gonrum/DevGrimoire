@@ -27,10 +27,19 @@ type TimelineEntryType =
   | 'question_answered'
   | 'knowledge_created';
 
+const SORT_RANK: Record<TimelineEntryType, number> = {
+  question_created: 1,
+  comment: 2,
+  question_answered: 3,
+  knowledge_created: 4,
+  activity: 5,
+};
+
 interface TimelineEntry {
   id: string;
   type: TimelineEntryType;
   timestamp: string;
+  sortRank: number;
   label: string;
   subLabel?: string;
   author?: string;
@@ -65,6 +74,7 @@ export default function TodoActivityTimeline({ todoId, projectId, comments, ques
     entries.push({
       id: `act-${a._id}`,
       type: 'activity',
+      sortRank: SORT_RANK['activity'],
       timestamp: a.createdAt,
       label: a.summary || `${a.entity} ${a.action}`,
       author: a.username,
@@ -79,6 +89,7 @@ export default function TodoActivityTimeline({ todoId, projectId, comments, ques
     entries.push({
       id: `comment-${i}-${c.createdAt}`,
       type: 'comment',
+      sortRank: SORT_RANK['comment'],
       timestamp: c.createdAt,
       label: t('todoDetail.activities.event.commentAdded', { author: c.author }),
       subLabel: c.text.length > 120 ? `${c.text.slice(0, 120)}…` : c.text,
@@ -91,6 +102,7 @@ export default function TodoActivityTimeline({ todoId, projectId, comments, ques
     entries.push({
       id: `q-created-${q._id}`,
       type: 'question_created',
+      sortRank: SORT_RANK['question_created'],
       timestamp: q.createdAt,
       label: t('todoDetail.activities.event.questionCreated'),
       subLabel: q.question.length > 100 ? `${q.question.slice(0, 100)}…` : q.question,
@@ -100,6 +112,7 @@ export default function TodoActivityTimeline({ todoId, projectId, comments, ques
       entries.push({
         id: `q-answered-${q._id}`,
         type: 'question_answered',
+        sortRank: SORT_RANK['question_answered'],
         timestamp: q.answeredAt,
         label: t('todoDetail.activities.event.questionAnswered'),
         author: q.answeredByAgent ? q.agentName : undefined,
@@ -109,16 +122,21 @@ export default function TodoActivityTimeline({ todoId, projectId, comments, ques
         entries.push({
           id: `q-knowledge-${q._id}`,
           type: 'knowledge_created',
+          sortRank: SORT_RANK['knowledge_created'],
           timestamp: q.answeredAt,
           label: t('todoDetail.activities.event.knowledgeCreated'),
-          subLabel: q.knowledgeId,
+          subLabel: t('todoDetail.activities.event.knowledgeCreatedDetail'),
         });
       }
     }
   }
 
-  // Sort newest first
-  entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  // Sort newest first; use sortRank as deterministic tiebreaker for identical timestamps
+  entries.sort(
+    (a, b) =>
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime() ||
+      b.sortRank - a.sortRank,
+  );
 
   if (entries.length === 0) {
     return (
@@ -147,7 +165,7 @@ export default function TodoActivityTimeline({ todoId, projectId, comments, ques
               )}
               <div className="flex items-center gap-2 mt-0.5">
                 <span className={`text-xs ${actionColor}`}>
-                  {entryTypeLabel(entry.type)}
+                  {entryTypeLabel(entry.type, t)}
                 </span>
                 {entry.author && (
                   <span className="text-xs text-gray-500">{entry.author}</span>
@@ -185,13 +203,13 @@ function typeColor(type: TimelineEntryType): string {
   }
 }
 
-function entryTypeLabel(type: TimelineEntryType): string {
+function entryTypeLabel(type: TimelineEntryType, t: (key: string) => string): string {
   switch (type) {
-    case 'activity': return 'activity';
-    case 'comment': return 'comment';
-    case 'question_created': return 'question';
-    case 'question_answered': return 'answer';
-    case 'knowledge_created': return 'knowledge';
+    case 'activity': return t('todoDetail.activities.typeLabel.activity');
+    case 'comment': return t('todoDetail.activities.typeLabel.comment');
+    case 'question_created': return t('todoDetail.activities.typeLabel.question');
+    case 'question_answered': return t('todoDetail.activities.typeLabel.answer');
+    case 'knowledge_created': return t('todoDetail.activities.typeLabel.knowledge');
     default: return type;
   }
 }
