@@ -3,11 +3,12 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import i18n from '../i18n';
 
-type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'ui' | 'rag' | 'chat' | 'workflows' | 'replication' | 'api' | 'logs' | 'git' | 'architecture';
+type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'ui' | 'projektarbeit' | 'wissen' | 'crm' | 'ops' | 'rag' | 'chat' | 'workflows' | 'replication' | 'api' | 'logs' | 'git' | 'architecture';
 
 export default function Docs() {
   const [active, setActive] = useState<DocsSection>('overview');
   const { t } = useTranslation();
+  const isDE = i18n.language === 'de';
 
   const sections: { key: DocsSection; label: string }[] = [
     { key: 'overview', label: t('docs.navOverview') },
@@ -15,6 +16,10 @@ export default function Docs() {
     { key: 'auth', label: t('docs.navAuth') },
     { key: 'mcp', label: t('docs.navMcp') },
     { key: 'ui', label: 'UI' },
+    { key: 'projektarbeit', label: isDE ? 'Projektarbeit' : 'Project Work' },
+    { key: 'wissen', label: isDE ? 'Wissen' : 'Knowledge' },
+    { key: 'crm', label: 'CRM' },
+    { key: 'ops', label: 'Ops' },
     { key: 'rag', label: 'RAG' },
     { key: 'chat', label: 'Chat' },
     { key: 'workflows', label: t('docs.navWorkflows', { defaultValue: 'Workflows' }) },
@@ -75,6 +80,10 @@ export default function Docs() {
         {active === 'auth' && <AuthSection />}
         {active === 'mcp' && <McpSection />}
         {active === 'ui' && <UiSection />}
+        {active === 'projektarbeit' && <ProjektarbeitSection />}
+        {active === 'wissen' && <WissenSection />}
+        {active === 'crm' && <CrmSection />}
+        {active === 'ops' && <OpsSection />}
         {active === 'rag' && <RagSection />}
         {active === 'chat' && <ChatSection />}
         {active === 'workflows' && <WorkflowDocsSection />}
@@ -377,44 +386,81 @@ claude mcp add --transport sse devgrimoire "http://[server]/sse?apiKey=cv_..."`}
         </div>
       </Section>
 
-      <Section title={isDE ? 'Lokale Anbindung (stdio)' : 'Local Connection (stdio)'}>
+      <Section title={isDE ? 'Bridge via mcp-remote (LM Studio, Claude Desktop, ...)' : 'Bridge via mcp-remote (LM Studio, Claude Desktop, ...)'}>
         <p className="text-gray-400 text-sm mb-4">
-          {isDE
-            ? 'Alternativ kann der MCP-Server lokal per stdio gestartet werden. Node.js und MongoDB m\u00fcssen erreichbar sein.'
-            : 'Alternatively, the MCP server can be started locally via stdio. Node.js and MongoDB must be reachable.'}
+          {isDE ? (
+            <>
+              Clients ohne native MCP-HTTP-Unterst&uuml;tzung (LM Studio, Claude Desktop, Cursor &hellip;) sprechen den Server &uuml;ber{' '}
+              <Mono>mcp-remote</Mono> an &mdash; eine kleine Node-Bridge, die als <Mono>command</Mono> in der Client-Config gestartet wird
+              und intern zu <Mono>/sse</Mono> verbindet. Node.js auf dem Client-Rechner ist die einzige Voraussetzung &mdash;
+              kein direkter MongoDB-Zugriff n&ouml;tig.
+            </>
+          ) : (
+            <>
+              Clients without native MCP-HTTP support (LM Studio, Claude Desktop, Cursor &hellip;) reach the server via{' '}
+              <Mono>mcp-remote</Mono> &mdash; a small Node bridge launched as <Mono>command</Mono> in the client config that
+              internally connects to <Mono>/sse</Mono>. Node.js on the client machine is the only prerequisite &mdash;
+              no direct MongoDB access required.
+            </>
+          )}
         </p>
 
-        <Step n={1} title={isDE ? 'Backend lokal bauen' : 'Build backend locally'}>
-          <Code>{`cd backend
-npm install
-NODE_OPTIONS="--max-old-space-size=8192" npm run build`}</Code>
-        </Step>
-
-        <Step n={2} title={isDE ? 'MCP-Config einrichten' : 'Configure MCP'}>
-          <Code>{isDE
-            ? `{
+        <Step n={1} title="LM Studio">
+          <p className="text-gray-400 text-sm mb-2">
+            {isDE
+              ? (<>In den LM Studio MCP-Einstellungen (<Mono>mcp.json</Mono>):</>)
+              : (<>In LM Studio's MCP settings (<Mono>mcp.json</Mono>):</>)}
+          </p>
+          <Code>{`{
   "mcpServers": {
-    "devgrimoire": {
-      "command": "node",
-      "args": ["/pfad/zu/DevGrimoire/backend/dist/mcp-server.js"],
-      "env": {
-        "MONGODB_URI": "mongodb://user:pass@localhost:27017/devgrimoire?authSource=admin&directConnection=true"
-      }
-    }
-  }
-}`
-            : `{
-  "mcpServers": {
-    "devgrimoire": {
-      "command": "node",
-      "args": ["/path/to/DevGrimoire/backend/dist/mcp-server.js"],
-      "env": {
-        "MONGODB_URI": "mongodb://user:pass@localhost:27017/devgrimoire?authSource=admin&directConnection=true"
-      }
+    "devGrimoire": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "http://[server]/sse?apiKey=cv_...",
+        "--allow-http"
+      ]
     }
   }
 }`}</Code>
         </Step>
+
+        <Step n={2} title="Claude Desktop">
+          <p className="text-gray-400 text-sm mb-2">
+            {isDE
+              ? (<>In <Mono>claude_desktop_config.json</Mono>:</>)
+              : (<>In <Mono>claude_desktop_config.json</Mono>:</>)}
+          </p>
+          <Code>{`{
+  "mcpServers": {
+    "devgrimoire": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://[server]/sse?apiKey=cv_...", "--allow-http"]
+    }
+  }
+}`}</Code>
+        </Step>
+
+        <Hint>
+          {isDE ? (
+            <>
+              <Mono>--allow-http</Mono> ist n&ouml;tig, da <Mono>mcp-remote</Mono> standardm&auml;&szlig;ig nur HTTPS akzeptiert.
+              Hinter einem HTTPS-Reverse-Proxy kann das Flag weg.
+              Config-Pfade Claude Desktop:
+              macOS <Mono>~/Library/Application Support/Claude/claude_desktop_config.json</Mono>,
+              Linux <Mono>~/.config/Claude/claude_desktop_config.json</Mono>.
+            </>
+          ) : (
+            <>
+              <Mono>--allow-http</Mono> is required because <Mono>mcp-remote</Mono> only accepts HTTPS by default.
+              Behind an HTTPS reverse proxy, the flag can be dropped.
+              Claude Desktop config paths:
+              macOS <Mono>~/Library/Application Support/Claude/claude_desktop_config.json</Mono>,
+              Linux <Mono>~/.config/Claude/claude_desktop_config.json</Mono>.
+            </>
+          )}
+        </Hint>
       </Section>
     </>
   );
@@ -681,217 +727,27 @@ curl http://[server]/api/projects?apiKey=cv_...`}</Code>
 
 function McpSection() {
   const isDE = i18n.language === 'de';
-  const [toolCount, setToolCount] = useState<number | null>(null);
+  const [tools, setTools] = useState<{ name: string; description: string; group: string; isWrite: boolean }[]>([]);
   useEffect(() => {
     let cancelled = false;
-    api.mcp.tools().then((tools) => { if (!cancelled) setToolCount(tools.length); }).catch(() => {});
+    api.mcp.tools().then((list) => { if (!cancelled) setTools(list); }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
-  const countLabel = toolCount ?? '\u2026';
+  const countLabel = tools.length || '\u2026';
   return (
     <>
       <Section title={isDE ? `MCP-Tools (${countLabel})` : `MCP Tools (${countLabel})`}>
         <p className="text-gray-400 text-sm mb-4">
           {isDE
-            ? `Nach dem Anbinden stehen Claude ${countLabel} Tools zur Verf\u00fcgung, gruppiert nach Entit\u00e4t. List-Tools liefern kompakte \u00dcbersichten (nur Metadaten), Details holst du \u00fcber _get-Tools \u2014 das schont den Context.`
-            : `After connecting, Claude has access to ${countLabel} tools, grouped by entity. List tools return compact overviews (metadata only), details fetched via _get tools \u2014 this keeps the context lean.`}
+            ? `Nach dem Anbinden stehen Claude ${countLabel} Tools zur Verf\u00fcgung, hier live aus dem Server geladen und nach Gruppe sortiert. Read-Tools sind gr\u00fcn, Write-Tools orange. List-Tools liefern kompakte Metadaten, Details holst du \u00fcber _get-Tools \u2014 das schont den Context.`
+            : `After connecting, Claude has access to ${countLabel} tools, listed here live from the server grouped by category. Read tools are green, write tools orange. List tools return compact metadata; details are fetched via _get tools \u2014 keeping context lean.`}
         </p>
-
-        <ToolGroup title={isDE ? 'Projekte' : 'Projects'} tools={[
-          { name: 'project_create', desc: isDE ? 'Neues Projekt anlegen' : 'Create new project' },
-          { name: 'project_list', desc: isDE ? 'Alle Projekte auflisten' : 'List all projects' },
-          { name: 'project_get', desc: isDE ? 'Projekt per ID oder Name abrufen' : 'Get project by ID or name' },
-          { name: 'project_update', desc: isDE ? 'Projekt aktualisieren' : 'Update project' },
-          { name: 'project_delete', desc: isDE ? 'Projekt und alle Daten l\u00f6schen' : 'Delete project and all data' },
-        ]} />
-
-        <ToolGroup title="Todos" tools={[
-          { name: 'todo_create', desc: isDE ? 'Todo anlegen (Status, Priorit\u00e4t, Tags, Milestone)' : 'Create todo (status, priority, tags, milestone)' },
-          { name: 'todo_list', desc: isDE ? 'Todos filtern nach Projekt/Status/Priorit\u00e4t' : 'Filter todos by project/status/priority' },
-          { name: 'todo_get', desc: isDE ? 'Einzelnes Todo mit Details und Kommentaren' : 'Single todo with details and comments' },
-          { name: 'todo_update', desc: isDE ? 'Status, Priorit\u00e4t, Dependencies \u00e4ndern' : 'Change status, priority, dependencies' },
-          { name: 'todo_delete', desc: isDE ? 'Todo l\u00f6schen' : 'Delete todo' },
-          { name: 'todo_comment', desc: isDE ? 'Kommentar an ein Todo anh\u00e4ngen' : 'Add comment to a todo' },
-        ]} />
-
-        <ToolGroup title="Milestones" tools={[
-          { name: 'milestone_create', desc: isDE ? 'Milestone/Epic anlegen' : 'Create milestone/epic' },
-          { name: 'milestone_list', desc: isDE ? 'Milestones eines Projekts auflisten' : 'List milestones for a project' },
-          { name: 'milestone_get', desc: isDE ? 'Einzelnen Milestone abrufen' : 'Get single milestone' },
-          { name: 'milestone_update', desc: isDE ? 'Milestone aktualisieren' : 'Update milestone' },
-          { name: 'milestone_delete', desc: isDE ? 'Milestone l\u00f6schen' : 'Delete milestone' },
-        ]} />
-
-        <ToolGroup title="Sessions" tools={[
-          { name: 'session_save', desc: isDE ? 'Arbeitssession speichern (Zusammenfassung, Dateien, n\u00e4chste Schritte)' : 'Save work session (summary, files, next steps)' },
-          { name: 'session_get', desc: isDE ? 'Letzte Session(s) eines Projekts abrufen' : 'Get latest session(s) for a project' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Wissen' : 'Knowledge'} tools={[
-          { name: 'knowledge_save', desc: isDE ? 'Wissenseintrag speichern (Architektur, Patterns, Notizen)' : 'Save knowledge entry (architecture, patterns, notes)' },
-          { name: 'knowledge_search', desc: isDE ? 'Volltextsuche in der Wissensbasis' : 'Full-text search in knowledge base' },
-          { name: 'knowledge_list', desc: isDE ? 'Alle Eintr\u00e4ge eines Projekts auflisten' : 'List all entries for a project' },
-          { name: 'knowledge_get', desc: isDE ? 'Einzelnen Wissenseintrag mit vollem Inhalt' : 'Get single knowledge entry with full content' },
-          { name: 'knowledge_update', desc: isDE ? 'Eintrag aktualisieren' : 'Update entry' },
-          { name: 'knowledge_delete', desc: isDE ? 'Eintrag l\u00f6schen' : 'Delete entry' },
-        ]} />
-
-        <ToolGroup title="Changelog" tools={[
-          { name: 'changelog_add', desc: isDE ? 'Eintrag hinzuf\u00fcgen (Version, Changes, Component)' : 'Add entry (version, changes, component)' },
-          { name: 'changelog_list', desc: isDE ? 'Changelog eines Projekts auflisten' : 'List changelog for a project' },
-          { name: 'changelog_get', desc: isDE ? 'Einzelnen Eintrag abrufen' : 'Get single entry' },
-          { name: 'changelog_update', desc: isDE ? 'Eintrag aktualisieren' : 'Update entry' },
-          { name: 'changelog_delete', desc: isDE ? 'Eintrag l\u00f6schen' : 'Delete entry' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Handbuch' : 'Manual'} tools={[
-          { name: 'manual_create', desc: isDE ? 'Handbuch-Eintrag anlegen (Titel, Markdown, Kategorie)' : 'Create manual entry (title, Markdown, category)' },
-          { name: 'manual_list', desc: isDE ? 'Eintr\u00e4ge eines Projekts auflisten (mit Filter nach Kategorie)' : 'List entries for a project (filterable by category)' },
-          { name: 'manual_get', desc: isDE ? 'Einzelnen Eintrag mit vollem Inhalt' : 'Get single entry with full content' },
-          { name: 'manual_update', desc: isDE ? 'Eintrag aktualisieren' : 'Update entry' },
-          { name: 'manual_delete', desc: isDE ? 'Eintrag l\u00f6schen' : 'Delete entry' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Recherche' : 'Research'} tools={[
-          { name: 'research_save', desc: isDE ? 'Recherche-Eintrag speichern (Quellen, Erkenntnisse)' : 'Save research entry (sources, findings)' },
-          { name: 'research_search', desc: isDE ? 'Volltextsuche in Recherche-Eintr\u00e4gen' : 'Full-text search in research entries' },
-          { name: 'research_list', desc: isDE ? 'Eintr\u00e4ge eines Projekts auflisten' : 'List entries for a project' },
-          { name: 'research_get', desc: isDE ? 'Einzelnen Eintrag abrufen' : 'Get single entry' },
-          { name: 'research_update', desc: isDE ? 'Eintrag aktualisieren' : 'Update entry' },
-          { name: 'research_delete', desc: isDE ? 'Eintrag l\u00f6schen' : 'Delete entry' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Umgebungen & Secrets' : 'Environments & Secrets'} tools={[
-          { name: 'environment_create', desc: isDE ? 'Umgebung anlegen (dev, staging, prod) mit Variablen' : 'Create environment (dev, staging, prod) with variables' },
-          { name: 'environment_list', desc: isDE ? 'Umgebungen eines Projekts auflisten' : 'List environments for a project' },
-          { name: 'environment_get', desc: isDE ? 'Einzelne Umgebung mit Variablen' : 'Get single environment with variables' },
-          { name: 'environment_update', desc: isDE ? 'Umgebung aktualisieren' : 'Update environment' },
-          { name: 'environment_delete', desc: isDE ? 'Umgebung l\u00f6schen' : 'Delete environment' },
-          { name: 'environment_export', desc: isDE ? 'Variablen + Secrets als .env exportieren' : 'Export variables + secrets as .env' },
-          { name: 'secret_set', desc: isDE ? 'Secret anlegen/aktualisieren (AES-256-GCM)' : 'Create/update secret (AES-256-GCM)' },
-          { name: 'secret_get', desc: isDE ? 'Secret entschl\u00fcsselt abrufen' : 'Get decrypted secret' },
-          { name: 'secret_list', desc: isDE ? 'Secrets auflisten (nur Keys, keine Werte)' : 'List secrets (keys only, no values)' },
-          { name: 'secret_delete', desc: isDE ? 'Secret l\u00f6schen' : 'Delete secret' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Schemas (DB-Dokumentation)' : 'Schemas (DB Documentation)'} tools={[
-          { name: 'schema_create', desc: isDE ? 'DB-Schema anlegen (Tabelle/Collection mit Feldern, Indizes)' : 'Create DB schema (table/collection with fields, indexes)' },
-          { name: 'schema_list', desc: isDE ? 'Schemas eines Projekts auflisten (Filter: dbType, tags)' : 'List schemas for a project (filter: dbType, tags)' },
-          { name: 'schema_get', desc: isDE ? 'Vollst\u00e4ndiges Schema mit Feldern und Indizes' : 'Full schema with fields and indexes' },
-          { name: 'schema_update', desc: isDE ? 'Aktualisieren \u2014 erstellt automatisch Versions-Snapshot' : 'Update \u2014 auto-creates version snapshot' },
-          { name: 'schema_delete', desc: isDE ? 'Schema und alle Versionen l\u00f6schen' : 'Delete schema and all versions' },
-          { name: 'schema_versions', desc: isDE ? 'Versionshistorie eines Schemas' : 'Version history of a schema' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Features' : 'Features'} tools={[
-          { name: 'feature_create', desc: isDE ? 'Feature/Funktion anlegen (Status, Priorit\u00e4t, Version)' : 'Create feature (status, priority, version)' },
-          { name: 'feature_list', desc: isDE ? 'Features filtern nach Status/Kategorie' : 'Filter features by status/category' },
-          { name: 'feature_get', desc: isDE ? 'Einzelnes Feature mit Details' : 'Single feature with details' },
-          { name: 'feature_update', desc: isDE ? 'Feature aktualisieren (Status, Version)' : 'Update feature (status, version)' },
-          { name: 'feature_delete', desc: isDE ? 'Feature l\u00f6schen' : 'Delete feature' },
-        ]} />
-
-        <ToolGroup title="Snippets" tools={[
-          { name: 'snippet_save', desc: isDE ? 'Code-Snippet speichern (Sprache, Kategorie, Tags)' : 'Save code snippet (language, category, tags)' },
-          { name: 'snippet_list', desc: isDE ? 'Snippets filtern' : 'Filter snippets' },
-          { name: 'snippet_get', desc: isDE ? 'Snippet mit vollem Code' : 'Snippet with full code' },
-          { name: 'snippet_update', desc: isDE ? 'Snippet aktualisieren' : 'Update snippet' },
-          { name: 'snippet_delete', desc: isDE ? 'Snippet l\u00f6schen' : 'Delete snippet' },
-          { name: 'snippet_search', desc: isDE ? 'Volltextsuche \u00fcber Snippets' : 'Full-text search across snippets' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Abh\u00e4ngigkeiten' : 'Dependencies'} tools={[
-          { name: 'dependency_add', desc: isDE ? 'Einzelne Abh\u00e4ngigkeit anlegen (npm/composer/pip/cargo/go/maven/nuget/gem)' : 'Add single dependency (npm/composer/pip/cargo/go/maven/nuget/gem)' },
-          { name: 'dependency_list', desc: isDE ? 'Abh\u00e4ngigkeiten auflisten' : 'List dependencies' },
-          { name: 'dependency_get', desc: isDE ? 'Einzelne Abh\u00e4ngigkeit' : 'Single dependency' },
-          { name: 'dependency_update', desc: isDE ? 'Abh\u00e4ngigkeit aktualisieren' : 'Update dependency' },
-          { name: 'dependency_delete', desc: isDE ? 'Abh\u00e4ngigkeit l\u00f6schen' : 'Delete dependency' },
-          { name: 'dependency_scan', desc: isDE ? 'Bulk-Import aus package.json/composer.json/etc.' : 'Bulk import from package.json/composer.json/etc.' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Releases' : 'Releases'} tools={[
-          { name: 'release_create', desc: isDE ? 'Release anlegen (Version, Beschreibung, Plattform, Status)' : 'Create release (version, description, platform, status)' },
-          { name: 'release_list', desc: isDE ? 'Releases filtern' : 'Filter releases' },
-          { name: 'release_get', desc: isDE ? 'Release mit Assets' : 'Release with assets' },
-          { name: 'release_update', desc: isDE ? 'Release aktualisieren' : 'Update release' },
-          { name: 'release_delete', desc: isDE ? 'Release l\u00f6schen' : 'Delete release' },
-          { name: 'release_sync_gitlab', desc: isDE ? 'Releases aus GitLab-Repo synchronisieren (inkl. Assets)' : 'Sync releases from GitLab repo (incl. assets)' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Anh\u00e4nge' : 'Attachments'} tools={[
-          { name: 'attachment_upload', desc: isDE ? 'Datei hochladen (base64), optional an Todo/Entity geh\u00e4ngt' : 'Upload file (base64), optionally attached to todo/entity' },
-          { name: 'attachment_list', desc: isDE ? 'Anh\u00e4nge auflisten (Filter: entityType, entityId)' : 'List attachments (filter: entityType, entityId)' },
-          { name: 'attachment_get', desc: isDE ? 'Metadaten einer Datei' : 'File metadata' },
-          { name: 'attachment_download', desc: isDE ? 'Dateiinhalt laden (Text plain, bin\u00e4r base64)' : 'Load file content (text plain, binary base64)' },
-          { name: 'attachment_delete', desc: isDE ? 'Datei l\u00f6schen (Storage + DB)' : 'Delete file (storage + DB)' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Wiederkehrende Tasks' : 'Recurring Tasks'} tools={[
-          { name: 'recurring_task_create', desc: isDE ? 'Wiederkehrenden Task planen (Cron oder Intervall)' : 'Schedule recurring task (cron or interval)' },
-          { name: 'recurring_task_list', desc: isDE ? 'Geplante Tasks auflisten' : 'List scheduled tasks' },
-          { name: 'recurring_task_get', desc: isDE ? 'Einzelnen Plan abrufen' : 'Get single schedule' },
-          { name: 'recurring_task_update', desc: isDE ? 'Plan aktualisieren' : 'Update schedule' },
-          { name: 'recurring_task_delete', desc: isDE ? 'Plan l\u00f6schen' : 'Delete schedule' },
-        ]} />
-
-        <ToolGroup title="Commits" tools={[
-          { name: 'commit_list', desc: isDE ? 'Git-Commits eines Projekts (Filter: branch, author, date)' : 'Git commits for a project (filter: branch, author, date)' },
-          { name: 'commit_search', desc: isDE ? 'Suche in Commit-Messages' : 'Search in commit messages' },
-          { name: 'commit_sync', desc: isDE ? 'Manueller Sync mit GitHub/GitLab' : 'Manual sync with GitHub/GitLab' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Logs' : 'Logs'} tools={[
-          { name: 'log_list', desc: isDE ? 'Per-Projekt Log-Eintr\u00e4ge (Filter: level, service, search)' : 'Per-project log entries (filter: level, service, search)' },
-          { name: 'log_search', desc: isDE ? 'Volltextsuche in Logs' : 'Full-text search in logs' },
-          { name: 'log_stats', desc: isDE ? 'Aggregierte Statistik (count by level, service, time)' : 'Aggregated stats (count by level, service, time)' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Souls (Projekt-Pers\u00f6nlichkeit)' : 'Souls (Project Personality)'} tools={[
-          { name: 'soul_get', desc: isDE ? 'Projekt-Soul abrufen (Pers\u00f6nlichkeit, Stimme, Prinzipien)' : 'Get project soul (personality, voice, principles)' },
-          { name: 'soul_update', desc: isDE ? 'Projekt-Soul aktualisieren' : 'Update project soul' },
-        ]} />
-
-        <ToolGroup title="RAG" tools={[
-          { name: 'rag_search', desc: isDE ? 'Semantische Suche \u00fcber alle indizierten Eintr\u00e4ge' : 'Semantic search across all indexed entries' },
-          { name: 'rag_reindex', desc: isDE ? 'Vektor-Index neu aufbauen (alle/ein Projekt)' : 'Rebuild vector index (all/single project)' },
-          { name: 'rag_status', desc: isDE ? 'Index-Statistik, aktiver Embedding-Endpoint' : 'Index stats, active embedding endpoint' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Web-Suche' : 'Web Search'} tools={[
-          { name: 'web_search', desc: isDE ? 'Externe Websuche \u00fcber SearXNG' : 'External web search via SearXNG' },
-          { name: 'web_fetch', desc: isDE ? 'URL abrufen und lesbaren Text extrahieren' : 'Fetch URL and extract readable text' },
-        ]} />
-
-        <ToolGroup title="Workspaces" tools={[
-          { name: 'workspace_create', desc: isDE ? 'Projektgebundenen Code-Workspace anlegen' : 'Create project-bound code workspace' },
-          { name: 'workspace_clone', desc: isDE ? 'Repository in den Workspace klonen' : 'Clone repository into workspace' },
-          { name: 'workspace_read', desc: isDE ? 'Datei im Workspace lesen' : 'Read a workspace file' },
-          { name: 'workspace_search', desc: isDE ? 'Workspace mit ripgrep durchsuchen' : 'Search workspace with ripgrep' },
-          { name: 'workspace_exec', desc: isDE ? 'Begrenzten Build-/Test-Befehl im Sidecar ausf\u00fchren' : 'Run bounded build/test command in sidecar' },
-          { name: 'workspace_attachment_save', desc: isDE ? 'Workspace-Artefakt als Attachment speichern' : 'Save workspace artifact as attachment' },
-        ]} />
-
-        <ToolGroup title="Chat" tools={[
-          { name: 'chat_create', desc: isDE ? 'Projekt-Chat-Session anlegen' : 'Create project chat session' },
-          { name: 'chat_list', desc: isDE ? 'Chat-Sessions eines Projekts auflisten' : 'List chat sessions for a project' },
-          { name: 'chat_get', desc: isDE ? 'Chat-Session mit Nachrichten laden' : 'Load chat session with messages' },
-          { name: 'chat_send', desc: isDE ? 'Nachricht an eine Chat-Session senden' : 'Send message to a chat session' },
-          { name: 'chat_delete', desc: isDE ? 'Chat-Session l\u00f6schen' : 'Delete chat session' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Dialog' : 'Dialog'} tools={[
-          { name: 'notify_user', desc: isDE ? 'Push-Notification an den User senden' : 'Send push notification to user' },
-          { name: 'ask_user', desc: isDE ? 'Interaktive Frage stellen (yes/no/text), wartet auf Antwort' : 'Ask interactive question (yes/no/text), waits for reply' },
-        ]} />
-
-        <ToolGroup title={isDE ? 'Sonstiges' : 'Other'} tools={[
-          { name: 'system_instructions_get', desc: isDE ? 'Globale + projekt-spezifische Agent-Instruktionen abrufen' : 'Get global + project-specific agent instructions' },
-          { name: 'system_instructions_set', desc: isDE ? 'Globale Agent-Instruktionen setzen' : 'Set global agent instructions' },
-        ]} />
+        <McpToolsLive tools={tools} isDE={isDE} />
       </Section>
     </>
   );
 }
+
 
 function UiSection() {
   const isDE = i18n.language === 'de';
@@ -951,6 +807,403 @@ function UiSection() {
           <li>{isDE ? 'Mobile Layouts wurden auf Wrapping und Overflow geprüft.' : 'Mobile layouts were checked for wrapping and overflow.'}</li>
         </ul>
       </Section>
+    </>
+  );
+}
+
+function ProjektarbeitSection() {
+  const isDE = i18n.language === 'de';
+  return (
+    <>
+      <Section title={isDE ? 'Überblick' : 'Overview'}>
+        <p className="text-sm text-gray-400 leading-relaxed">
+          {isDE
+            ? 'Alle projektzentrierten Datentypen für tägliche Arbeit: Projekte als Container, Todos mit State-Machine, Milestones zum Bündeln, Recurring-Tasks für wiederkehrende Arbeit, Releases für Versionierung, Dependencies und Changelog für Historie.'
+            : 'All project-centric data types for daily work: projects as containers, todos with a state machine, milestones for grouping, recurring tasks for repeated work, releases for versioning, dependencies and changelog for history.'}
+        </p>
+      </Section>
+
+      <Section title={isDE ? 'Projekte' : 'Projects'}>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Projects · Projects → Detail" />
+          <InfoRow label={isDE ? 'Konzepte' : 'Concepts'} value={isDE ? 'aktiv/archiviert, Favoriten, Projekt-Tags, Customer-Verknüpfung' : 'active/archived, favorites, project tags, customer link'} />
+          <InfoRow label="MCP" value={<>project_*, project_customer_links, project_tag_*</>} />
+        </div>
+      </Section>
+
+      <Section title="Todos">
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'State-Machine mit strikter Reihenfolge — Sprünge werden abgelehnt. Identifiziert per ID oder kurze Schlüssel wie T-3 (Projekt-Nummer).'
+            : 'State machine with strict ordering — jumps are rejected. Identified by ID or short keys like T-3 (project-scoped number).'}
+        </p>
+        <Code>{`open  →  in_progress  →  review  →  done`}</Code>
+        <div className="space-y-2 text-sm text-gray-400 mt-3">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Todos (Board / Liste)" />
+          <InfoRow label={isDE ? 'Workflow' : 'Workflow'} value={isDE ? 'Start → in_progress, Implementierung, → review (Code-Review!), → done' : 'Start → in_progress, implement, → review (code review!), → done'} />
+          <InfoRow label={isDE ? 'Kommentare' : 'Comments'} value="todo_comment" />
+          <InfoRow label="MCP" value="todo_*, validation_report_*, oracle_*" />
+        </div>
+      </Section>
+
+      <Section title="Milestones">
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Bündeln zusammengehörige Todos und schließen mit Changelog-Eintrag ab. Abschluss verlangt eine changelogId. Identifiziert per ID oder M-1 (Projekt-Nummer).'
+            : 'Bundle related todos and close out with a changelog entry. Closing requires a changelogId. Identified by ID or M-1 (project-scoped number).'}
+        </p>
+        <Code>{`open  →  in_progress  →  done  (changelogId required)`}</Code>
+        <Hint>
+          {isDE
+            ? 'Jeder Changelog darf nur einmal einem Milestone zugeordnet werden. Erledigte Milestones archivieren statt löschen.'
+            : 'Each changelog can only be assigned to one milestone. Archive completed milestones instead of deleting them.'}
+        </Hint>
+      </Section>
+
+      <Section title={isDE ? 'Wiederkehrende Tasks' : 'Recurring Tasks'}>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Was' : 'What'} value={isDE ? 'Cron- oder Intervall-Plan, erzeugt automatisch Todos' : 'Cron or interval schedule that auto-creates todos'} />
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Recurring" />
+          <InfoRow label="MCP" value="recurring_task_*" />
+        </div>
+      </Section>
+
+      <Section title="Releases">
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Was' : 'What'} value={isDE ? 'Versions-Tracking pro Projekt mit Assets, Plattform, Status-Workflow' : 'Per-project version tracking with assets, platform, status workflow'} />
+          <InfoRow label="GitLab-Sync" value={isDE ? 'release_sync_gitlab importiert Releases inkl. Assets aus dem verbundenen Repo' : 'release_sync_gitlab imports releases incl. assets from the connected repo'} />
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Releases" />
+          <InfoRow label="MCP" value="release_*" />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Abhängigkeiten' : 'Dependencies'}>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Was' : 'What'} value={isDE ? 'Paket-Abhängigkeiten pro Projekt (Name, Version, Manager)' : 'Per-project package dependencies (name, version, manager)'} />
+          <InfoRow label="Scan" value={isDE ? 'dependency_scan importiert package.json, composer.json, requirements.txt, Cargo.toml, go.mod, pom.xml, *.csproj, Gemfile' : 'dependency_scan imports package.json, composer.json, requirements.txt, Cargo.toml, go.mod, pom.xml, *.csproj, Gemfile'} />
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Dependencies" />
+          <InfoRow label="MCP" value="dependency_*" />
+        </div>
+      </Section>
+
+      <Section title="Changelog">
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Was' : 'What'} value={isDE ? 'Versionierte Änderungshistorie pro Projekt mit Komponente, Typ (added/changed/fixed/removed)' : 'Versioned change history per project with component, type (added/changed/fixed/removed)'} />
+          <InfoRow label={isDE ? 'Verknüpfung' : 'Linkage'} value={isDE ? 'Pflicht-Verknüpfung beim Milestone-Done' : 'Required link when closing a milestone'} />
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Changelog" />
+          <InfoRow label="MCP" value="changelog_*" />
+        </div>
+      </Section>
+    </>
+  );
+}
+
+function WissenSection() {
+  const isDE = i18n.language === 'de';
+  return (
+    <>
+      <Section title={isDE ? 'Überblick' : 'Overview'}>
+        <p className="text-sm text-gray-400 leading-relaxed">
+          {isDE
+            ? 'Alle Datentypen für die langlebige Projekt-Wissensbasis. Knowledge ist der zentrale Ort; spezialisierte Typen ergänzen ihn: Research für zeitpunktbezogene Quellen, Manuals als kategorisiertes Handbuch, Schemas für DB-Strukturen, Snippets für Code, der Graph für Beziehungen.'
+            : 'All data types feeding the long-lived project knowledge base. Knowledge is the central place; specialized types extend it: research for time-stamped sources, manuals as a categorized handbook, schemas for DB structures, snippets for code, the graph for relations.'}
+        </p>
+      </Section>
+
+      <Section title="Knowledge">
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Volltext-durchsuchbare Wissenseinträge. Scopes: project (Default, projectId Pflicht) oder global (projektübergreifend). Mit projectId + global-Scope sieht man projekt-spezifische + globale Treffer kombiniert.'
+            : 'Full-text searchable knowledge entries. Scopes: project (default, projectId required) or global (cross-project). With projectId + global scope you see project-specific and global hits combined.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Knowledge" />
+          <InfoRow label={isDE ? 'Suche' : 'Search'} value={isDE ? 'knowledge_search (Keyword) · rag_search (semantisch, entity-übergreifend)' : 'knowledge_search (keyword) · rag_search (semantic, cross-entity)'} />
+          <InfoRow label="MCP" value="knowledge_*" />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Recherche' : 'Research'}>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Zeitpunktbezogene Recherchen mit Quellenangaben. Optional in Research-Sessions gruppiert (mehrere Steps mit Frage/Antwort/Quellen).'
+            : 'Time-stamped research with source citations. Optionally grouped into research sessions (multi-step question/answer/sources).'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Research · Research-Sessions" />
+          <InfoRow label="MCP" value="research_*, research_session_*, research_step_*" />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Manual / Handbuch' : 'Manual'}>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Kategorisiertes Markdown-Handbuch pro Projekt — gut für stabile Anleitungen, die nicht in Knowledge gehören. Einträge mit Kategorie und Titel.'
+            : 'Categorized Markdown handbook per project — best for stable how-tos that do not belong in Knowledge. Entries have category and title.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Manual" />
+          <InfoRow label="MCP" value="manual_*" />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Schemas (DB-Dokumentation)' : 'Schemas (DB Documentation)'}>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'DB-Tabellen / Collections mit Feldern, Typen, Indizes. Jedes schema_update legt automatisch einen Versions-Snapshot mit changeNote an (schema_versions zeigt die Historie).'
+            : 'DB tables / collections with fields, types, indexes. Every schema_update auto-creates a version snapshot with changeNote (schema_versions returns history).'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Schemas" />
+          <InfoRow label="MCP" value="schema_*, schema_versions" />
+        </div>
+      </Section>
+
+      <Section title="Snippets">
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Wiederverwendbare Code-Snippets mit Sprache, Tags und Kategorie. Volltextsuche über Inhalt und Titel.'
+            : 'Reusable code snippets with language, tags, and category. Full-text search across content and title.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Snippets" />
+          <InfoRow label="MCP" value="snippet_*" />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Knowledge-Graph' : 'Knowledge Graph'}>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Typisierte Beziehungen zwischen Entities (Knowledge, Todo, Milestone, Schema, ...). knowledge_graph_link verbindet, _neighbors zeigt direkte Nachbarn, _discover & _impact propagieren entlang der Kanten.'
+            : 'Typed relations between entities (Knowledge, Todo, Milestone, Schema, ...). knowledge_graph_link connects, _neighbors shows direct neighbors, _discover & _impact propagate along edges.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Knowledge Graph" />
+          <InfoRow label="MCP" value="knowledge_graph_*" />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Doc-Health & Update-Proposals' : 'Doc Health & Update Proposals'}>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Vorschläge, wo Doku veraltet ist oder fehlt. Lassen sich in Todos konvertieren (doc_update_proposal_convert_to_todo).'
+            : 'Proposals where documentation is stale or missing. Can be converted into todos (doc_update_proposal_convert_to_todo).'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Doc Health" />
+          <InfoRow label="MCP" value="doc_update_proposal_*" />
+        </div>
+      </Section>
+
+      <Section title="Sessions">
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Arbeitssitzungen mit Zusammenfassung, geänderten Dateien und nächsten Schritten — gedacht für nahtlosen Kontext-Wechsel zwischen Sessions.'
+            : 'Work sessions with summary, changed files, and next steps — designed for seamless context handoff between sessions.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Sessions" />
+          <InfoRow label="MCP" value="session_save, session_get" />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Souls (Projekt-Persönlichkeit)' : 'Souls (Project Personality)'}>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Persönlichkeit, Stimme und Prinzipien eines Projekts — fließt in den Chat-System-Prompt ein und gibt jedem Projekt Charakter.'
+            : 'Personality, voice, and principles of a project — fed into the chat system prompt to give each project character.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Soul" />
+          <InfoRow label="MCP" value="soul_get, soul_update" />
+        </div>
+      </Section>
+    </>
+  );
+}
+
+function CrmSection() {
+  const isDE = i18n.language === 'de';
+  return (
+    <>
+      <Section title={isDE ? 'Überblick' : 'Overview'}>
+        <p className="text-sm text-gray-400 leading-relaxed">
+          {isDE
+            ? 'DevGrimoire enthält ein leichtes CRM für Kunden und Kontakte. Projekte können mit Customers verknüpft werden (1:n), Customers haben Contacts, Templates beschleunigen das Anlegen neuer Kunden mit Standard-Setup.'
+            : 'DevGrimoire includes a light CRM for customers and contacts. Projects can link to customers (1:n), customers have contacts, templates speed up onboarding with a standard setup.'}
+        </p>
+      </Section>
+
+      <Section title={isDE ? 'Kunden' : 'Customers'}>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Kunden-Stammdaten mit Status (aktiv/archiviert), Adressen, Notizen. Healthchecks werden pro Kunde gepflegt (siehe Ops → Monitoring).'
+            : 'Customer master data with status (active/archived), addresses, notes. Healthchecks live per customer (see Ops → Monitoring).'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Customers · Customers → Detail" />
+          <InfoRow label="MCP" value="customer_*" />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Kontakte' : 'Contacts'}>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Ansprechpartner pro Kunde mit Rolle, E-Mail, Telefon, Notizen.'
+            : 'Per-customer contacts with role, email, phone, notes.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Customer-Detail → Kontakte" />
+          <InfoRow label="MCP" value="contact_*" />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Projekt-Kunden-Verknüpfung' : 'Project-Customer Links'}>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Ein Projekt kann mit mehreren Kunden verknüpft sein (z.B. White-Label-Lösungen). Die Verknüpfung trägt eigene Metadaten wie Auftragsnummer oder Vertragsstart.'
+            : 'A project can link to multiple customers (e.g. white-label solutions). The link itself carries metadata such as contract number or start date.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Customer-Links · Customer → Projects" />
+          <InfoRow label="MCP" value="customer_project_link, customer_project_list, customer_project_unlink, customer_project_update, project_customer_links" />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Kunden-Templates' : 'Customer Templates'}>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Vordefiniertes Standard-Setup für neue Kunden — z.B. Default-Tags, Monitor-Konfiguration, initiale Notizen. customer_template_preview zeigt was angewendet würde, customer_template_apply führt es aus.'
+            : 'Predefined setup for new customers — default tags, monitor configuration, initial notes. customer_template_preview previews; customer_template_apply executes.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Settings → Customer-Templates" />
+          <InfoRow label="MCP" value="customer_template_*" />
+        </div>
+      </Section>
+    </>
+  );
+}
+
+function OpsSection() {
+  const isDE = i18n.language === 'de';
+  return (
+    <>
+      <Section title={isDE ? 'Überblick' : 'Overview'}>
+        <p className="text-sm text-gray-400 leading-relaxed">
+          {isDE
+            ? 'Operative Werkzeuge für laufenden Betrieb: Monitoring von Kunden-Endpunkten, SSH für entfernte Hosts, projektgebundene Code-Workspaces, Datei-Anhänge in MinIO, Push-Benachrichtigungen und der Audit-Log.'
+            : 'Operational tooling for day-to-day work: monitoring of customer endpoints, SSH for remote hosts, project-bound code workspaces, file attachments in MinIO, push notifications, and the audit log.'}
+        </p>
+      </Section>
+
+      <Section title={isDE ? 'Monitoring / Observatorium' : 'Monitoring / Observatory'}>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'HTTP-Healthchecks pro Kunde. Status-Modell: unknown → healthy / degraded / unhealthy / paused. Ein Scheduler läuft jede Minute, in-memory Lock verhindert Doppelausführungen.'
+            : 'HTTP healthchecks per customer. Status model: unknown → healthy / degraded / unhealthy / paused. A scheduler runs every minute, an in-memory lock prevents double execution.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Sensible Header' : 'Sensitive headers'} value={isDE ? 'secretHeaders [{name, secretId}] werden zur Laufzeit aus dem Secret-Store aufgelöst, niemals persistiert' : 'secretHeaders [{name, secretId}] resolved from secret store at runtime, never persisted'} />
+          <InfoRow label={isDE ? 'Failure-Notification' : 'Failure notification'} value={isDE ? 'consecutiveFailures ≥ failureThreshold → UNHEALTHY + einmalige Push-Notification (debounced via lastNotifiedStatus)' : 'consecutiveFailures ≥ failureThreshold → UNHEALTHY + single push notification (debounced via lastNotifiedStatus)'} />
+          <InfoRow label="History TTL" value={isDE ? '30 Tage via MongoDB-TTL-Index' : '30 days via MongoDB TTL index'} />
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Customer-Detail → Observatorium" />
+          <InfoRow label="MCP" value="monitor_*" />
+        </div>
+      </Section>
+
+      <Section title="SSH">
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Pro Projekt definierte SSH-Verbindungen für Wartung und Deploy. Auth via Passwort oder Key (verschlüsselt gespeichert). Kommandos synchron oder asynchron, Datei-Operationen (list, upload, download), Session-Tracking inkl. Audit.'
+            : 'Per-project SSH connections for maintenance and deploy. Auth via password or key (stored encrypted). Commands sync or async, file ops (list, upload, download), session tracking incl. audit.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → SSH (Connections, Terminal, Audit)" />
+          <InfoRow label={isDE ? 'Schlüssel-Tools' : 'Key tools'} value="ssh_exec, ssh_exec_async, ssh_list_files, ssh_upload, ssh_download" />
+          <InfoRow label="MCP" value="ssh_connection_*, ssh_*" />
+        </div>
+      </Section>
+
+      <Section title="Workspaces">
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Projektgebundene Code-Workspaces im Sidecar-Container. workspace_clone holt ein Repo, workspace_read/_search/_tree lesen, workspace_exec führt begrenzte Build-/Test-Befehle aus. Artefakte landen als Attachments.'
+            : 'Project-bound code workspaces in the sidecar container. workspace_clone fetches a repo, workspace_read/_search/_tree read, workspace_exec runs bounded build/test commands. Artifacts are saved as attachments.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Voraussetzung' : 'Prerequisite'} value={<>WORKSPACE_API_TOKEN (Backend ↔ Sidecar)</>} />
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Workspaces" />
+          <InfoRow label="MCP" value="workspace_*" />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Anhänge (Attachments)' : 'Attachments'}>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Optional — nur aktiv, wenn MinIO konfiguriert ist. Anhänge an Todos oder standalone. Text-Dateien und PDFs werden serverseitig extrahiert und in den RAG-Index aufgenommen. Große Binärdateien per REST downloaden, nicht per MCP.'
+            : 'Optional — only active if MinIO is configured. Attachments on todos or standalone. Text files and PDFs are extracted server-side and indexed in RAG. Download large binaries via REST, not via MCP.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label="REST" value={<><Mono>GET /api/attachments/:id/download</Mono></>} />
+          <InfoRow label="MCP" value="attachment_*, workspace_attachment_save" />
+          <InfoRow label="env" value="MINIO_ENDPOINT, MINIO_BUCKET, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_USE_SSL, MINIO_MAX_FILE_SIZE" />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Benachrichtigungen' : 'Notifications'}>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'In-App Inbox (Glocke oben rechts) plus optional Web-Push (VAPID). notify_user als MCP-Tool sendet aktiv eine Notification, ask_user fragt interaktiv und wartet auf eine Antwort.'
+            : 'In-app inbox (bell, top-right) plus optional web push (VAPID). notify_user as an MCP tool actively pushes; ask_user asks interactively and waits for a reply.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value={isDE ? 'Glocke (Topbar) · Profil → Push abonnieren' : 'Bell (topbar) · Profile → subscribe to push'} />
+          <InfoRow label="MCP" value="notify_user, ask_user, question_*" />
+        </div>
+      </Section>
+
+      <Section title="Audit-Log">
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Aufzeichnung von User-Aktionen, Logins/Logouts und Schreib-Tool-Aufrufen aus dem Chat (mit User, Session, Tool, gekürzten Args).'
+            : 'Record of user actions, logins/logouts, and write-tool calls from chat (with user, session, tool, truncated args).'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Audit Log (Admin-Menü)" />
+        </div>
+      </Section>
+    </>
+  );
+}
+
+function McpToolsLive({ tools, isDE }: { tools: { name: string; description: string; group: string; isWrite: boolean }[]; isDE: boolean }) {
+  if (!tools.length) {
+    return <p className="text-sm text-gray-500">{isDE ? 'Tools werden geladen …' : 'Loading tools …'}</p>;
+  }
+  const grouped: Record<string, typeof tools> = {};
+  for (const t of tools) {
+    if (!grouped[t.group]) grouped[t.group] = [];
+    grouped[t.group].push(t);
+  }
+  return (
+    <>
+      {Object.entries(grouped).map(([group, items]) => (
+        <div key={group} className="mb-5">
+          <h3 className="text-sm font-medium text-gray-300 mb-2">
+            {group}
+            <span className="ml-2 text-xs text-gray-500">({items.length})</span>
+          </h3>
+          <div className="space-y-1">
+            {items.map((t) => (
+              <div key={t.name} className="flex gap-3 text-sm items-baseline">
+                <code className={`shrink-0 w-52 truncate ${t.isWrite ? 'text-orange-400' : 'text-green-400'}`} title={t.name}>{t.name}</code>
+                <span className="text-gray-500 text-xs leading-snug">{t.description}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </>
   );
 }
