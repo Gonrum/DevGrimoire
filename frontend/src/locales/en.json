@@ -651,7 +651,12 @@
     "openKnowledge": "Open knowledge entry",
     "frageLabel": "**Question:**",
     "answerLabel": "**Answer:**",
-    "categoryPlaceholder": "e.g. Decision"
+    "categoryPlaceholder": "e.g. Decision",
+    "answerDialogTitle": "Answer agent question",
+    "openAnswerDialog": "Open answer dialog",
+    "openInTodo": "Open in quest",
+    "answeredToast": "Answer sent",
+    "answerFailed": "Could not send answer"
   },
   "milestone": {
     "actions": {

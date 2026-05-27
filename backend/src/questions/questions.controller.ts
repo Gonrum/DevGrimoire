@@ -34,7 +34,12 @@ export class QuestionsController {
     if (direction && !VALID_DIRECTIONS.includes(direction as QuestionDirection)) {
       throw new BadRequestException(`Invalid direction: ${direction}`);
     }
-    return this.questionsService.findPending(userId, direction as QuestionDirection | undefined);
+    // Default to agent_to_user: the global "Agent-Rückfrage"-Modal must only
+    // surface questions the user is meant to answer. user_to_agent questions
+    // belong to the agent-side inbox (or the todo detail view) and must not
+    // pop up the answer dialog for the asker themselves.
+    const effectiveDirection = (direction as QuestionDirection | undefined) ?? 'agent_to_user';
+    return this.questionsService.findPending(userId, effectiveDirection);
   }
 
   /**

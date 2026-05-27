@@ -651,7 +651,12 @@
     "openKnowledge": "Wissen anzeigen",
     "frageLabel": "**Frage:**",
     "answerLabel": "**Antwort:**",
-    "categoryPlaceholder": "z.B. Decision"
+    "categoryPlaceholder": "z.B. Decision",
+    "answerDialogTitle": "Agent-Rückfrage beantworten",
+    "openAnswerDialog": "Antwort-Dialog öffnen",
+    "openInTodo": "Im Quest öffnen",
+    "answeredToast": "Antwort gesendet",
+    "answerFailed": "Antwort konnte nicht gesendet werden"
   },
   "milestone": {
     "actions": {
