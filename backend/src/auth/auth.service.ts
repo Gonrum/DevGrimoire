@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { RefreshToken, RefreshTokenDocument } from './schemas/refresh-token.schema';
@@ -165,6 +165,26 @@ export class AuthService {
   async findUserById(id: string): Promise<UserDocument | null> {
     const user = await this.userModel.findById(id).select('-passwordHash').exec();
     return user ? this.maskUserSecrets(user) : null;
+  }
+
+  /**
+   * T-337: reverse lookup — which users can access this project? Matches
+   * `projectScopeMode === 'all'` (admins/default) OR allowedProjectIds
+   * contains the id. Returns lean docs without passwordHash.
+   */
+  async findUsersByProjectAccess(projectId: string): Promise<UserDocument[]> {
+    if (!Types.ObjectId.isValid(projectId)) return [];
+    const pid = new Types.ObjectId(projectId);
+    return this.userModel
+      .find({
+        $or: [
+          { projectScopeMode: 'all' },
+          { allowedProjectIds: pid },
+        ],
+      })
+      .select('-passwordHash')
+      .sort({ username: 1 })
+      .exec();
   }
 
   async findByUsername(username: string): Promise<UserDocument | null> {

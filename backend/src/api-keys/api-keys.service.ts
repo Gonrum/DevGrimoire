@@ -162,6 +162,74 @@ export class ApiKeysService {
       .exec();
   }
 
+  /**
+   * T-337: admin-only "all keys" view. Augments each row with the owner's
+   * username via $lookup so the Settings UI can render an Owner column
+   * without N+1 calls.
+   */
+  async findAllWithOwners(): Promise<Array<Record<string, unknown> & { ownerUsername?: string }>> {
+    const rows = await this.apiKeyModel.aggregate([
+      { $sort: { createdAt: -1 } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'owner',
+          pipeline: [{ $project: { username: 1 } }],
+        },
+      },
+      {
+        $addFields: {
+          ownerUsername: { $arrayElemAt: ['$owner.username', 0] },
+        },
+      },
+      { $project: { keyHash: 0, owner: 0 } },
+    ]).exec();
+    return rows;
+  }
+
+  /**
+   * T-337: reverse lookup — which API keys can access the given project?
+   * Match `projectScopeMode === 'all'` (broad) OR allowedProjectIds includes
+   * the id (narrow allowlist). Includes owner usernames.
+   */
+  async findByProjectAccess(
+    projectId: string,
+  ): Promise<Array<Record<string, unknown> & { ownerUsername?: string }>> {
+    if (!Types.ObjectId.isValid(projectId)) {
+      throw new BadRequestException(`Invalid projectId: ${projectId}`);
+    }
+    const pid = new Types.ObjectId(projectId);
+    const rows = await this.apiKeyModel.aggregate([
+      {
+        $match: {
+          $or: [
+            { projectScopeMode: 'all' },
+            { allowedProjectIds: pid },
+          ],
+        },
+      },
+      { $sort: { createdAt: -1 } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'owner',
+          pipeline: [{ $project: { username: 1 } }],
+        },
+      },
+      {
+        $addFields: {
+          ownerUsername: { $arrayElemAt: ['$owner.username', 0] },
+        },
+      },
+      { $project: { keyHash: 0, owner: 0 } },
+    ]).exec();
+    return rows;
+  }
+
   async update(
     id: string,
     userId: string,

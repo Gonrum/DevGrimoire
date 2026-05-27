@@ -927,7 +927,8 @@
       "ssh": "Servers",
       "recurringTasks": "Rites",
       "commits": "Inscriptions",
-      "logs": "Oracles"
+      "logs": "Oracles",
+      "access": "Access"
     },
     "tabDesc": {
       "todos": "Active quests, boards and backlog for this project.",
@@ -954,8 +955,29 @@
       "docsHealth": "Lore Health — proposals for stale manuals and knowledge entries.",
       "graph": "Knowledge graph — relationships between todos, manuals, knowledge, validations, commits and more.",
       "oracle": "Oracle — predictive risks from stagnation, deadline pressure, bug hotspots and blocker chains.",
-      "soul": "Vision, principles and conventions of this project."
+      "soul": "Vision, principles and conventions of this project.",
+      "access": "Who and which API keys can access this project."
     }
+  },
+  "projectAccess": {
+    "adminOnly": "This view is admin-only.",
+    "intro": "Users and API keys whose scope covers this project (mode=all, or allowlist containing the project id).",
+    "usersHeading": "Users",
+    "usersEmpty": "No users with access (shouldn't happen — at least one admin should be listed).",
+    "keysHeading": "API keys",
+    "keysEmpty": "No API keys have access to this project.",
+    "user": "User",
+    "role": "Role",
+    "scope": "Scope",
+    "keyName": "Name",
+    "owner": "Owner",
+    "prefix": "Prefix",
+    "tools": "Tools",
+    "toolsAll": "all",
+    "toolsScoped": "{{count}} allowed",
+    "scopeAll": "all projects",
+    "scopeAllowlist": "{{count}} in allowlist",
+    "scopeNone": "none"
   },
   "oracle": {
     "openCount": "Open risks",
@@ -1331,6 +1353,7 @@
     "apiKeyTableCreated": "Created",
     "apiKeyTableLastUsed": "Last used",
     "apiKeyTableExpiry": "Expiry",
+    "apiKeyTableOwner": "Owner",
     "apiKeyUsageTitle": "Usage",
     "apiKeyUsageText": "API Keys can be used for MCP server and REST API access:",
     "apiKeyToolScoping": "Tool access",

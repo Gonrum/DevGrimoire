@@ -977,6 +977,21 @@ export interface ApiKeyInfo {
   allowedCustomerIds?: string[];
   createdAt: string;
   updatedAt: string;
+  /** T-337: only set on admin-list endpoint (`listAll`) and project-access lookup. */
+  ownerUsername?: string;
+  /** T-337: only set on admin-list endpoint. */
+  userId?: string;
+}
+
+export interface ProjectAccess {
+  apiKeys: ApiKeyInfo[];
+  users: Array<{
+    _id: string;
+    username: string;
+    role: string;
+    projectScopeMode?: ScopeMode;
+    allowedProjectIds?: string[];
+  }>;
 }
 
 export interface ApiKeyCreateResponse extends ApiKeyInfo {
@@ -1396,6 +1411,8 @@ export const api = {
       request<{ modified: number }>(`/projects/tags/${encodeURIComponent(name)}`, {
         method: 'DELETE',
       }),
+    // T-337: admin-only reverse-lookup — who can access this project?
+    access: (id: string) => request<ProjectAccess>(`/projects/${id}/access`),
   },
   customers: {
     dashboard: () =>
@@ -1998,6 +2015,8 @@ export const api = {
   },
   apiKeys: {
     list: () => request<ApiKeyInfo[]>('/api-keys'),
+    // T-337: admin-only listing across all users, with ownerUsername.
+    listAll: () => request<ApiKeyInfo[]>('/api-keys/all'),
     create: (data: ApiKeyCreatePayload) =>
       request<ApiKeyCreateResponse>('/api-keys', { method: 'POST', body: JSON.stringify(data) }),
     update: (id: string, data: ApiKeyUpdatePayload) =>

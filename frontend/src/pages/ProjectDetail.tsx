@@ -35,12 +35,16 @@ import { LoadingText } from '../components/ui/LoadingSpinner';
 import ProjectTabShell from '../components/ui/ProjectTabShell';
 import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
 import SshConnectionsTab from '../components/ssh/SshConnectionsTab';
+import ProjectAccessTab from '../components/projects/ProjectAccessTab';
+import { useAuth } from '../hooks/useAuth';
 
-type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces' | 'workflows' | 'ssh' | 'docs-health' | 'graph' | 'oracle';
+type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces' | 'workflows' | 'ssh' | 'docs-health' | 'graph' | 'oracle' | 'access';
 
 export default function ProjectDetail() {
   const { t, i18n } = useTranslation();
   const { id } = useParams<{ id: string }>();
+  const { user, authEnabled } = useAuth();
+  const isAdmin = authEnabled && user?.role === 'admin';
   const [searchParams, setSearchParams] = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -261,6 +265,8 @@ export default function ProjectDetail() {
         { key: 'workflows', label: t('nav.workflows'), count: 0 },
         { key: 'commits', label: t('projectDetail.tab.commits'), count: commitCount },
         { key: 'logs', label: t('projectDetail.tab.logs'), count: logStats?.total || 0 },
+        // T-337: admin-only "who can access this" view.
+        ...(isAdmin ? [{ key: 'access' as Tab, label: t('projectDetail.tab.access'), count: 0 }] : []),
       ],
     },
   ];
@@ -480,6 +486,7 @@ export default function ProjectDetail() {
             {tab === 'releases' && <ReleaseList entries={releases} projectId={id!} />}
             {tab === 'logs' && <LogList key={logsKey} projectId={id!} />}
             {tab === 'activity' && <ActivityList activities={activities} />}
+            {tab === 'access' && isAdmin && <ProjectAccessTab projectId={id!} />}
           </ProjectTabShell>
         </div>
       </div>

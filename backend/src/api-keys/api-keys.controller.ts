@@ -7,10 +7,14 @@ import {
   Body,
   Param,
   Req,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiKeysService } from './api-keys.service';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { UpdateApiKeyDto } from './dto/update-api-key.dto';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { UserRole } from '../auth/schemas/user.schema';
 
 @Controller('api-keys')
 export class ApiKeysController {
@@ -52,6 +56,14 @@ export class ApiKeysController {
   @Get()
   async list(@Req() req: any) {
     return this.apiKeysService.list(req.user.userId);
+  }
+
+  // T-337: admin-only "all keys + ownerUsername" view for the Settings table.
+  @Get('all')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async listAll() {
+    return this.apiKeysService.findAllWithOwners();
   }
 
   @Put(':id')

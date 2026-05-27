@@ -9,14 +9,24 @@ import {
   Query,
   HttpCode,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { ApiKeysService } from '../api-keys/api-keys.service';
+import { AuthService } from '../auth/auth.service';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { UserRole } from '../auth/schemas/user.schema';
 
 @Controller('projects')
 export class ProjectsController {
-  constructor(private readonly projectsService: ProjectsService) {}
+  constructor(
+    private readonly projectsService: ProjectsService,
+    private readonly apiKeysService: ApiKeysService,
+    private readonly authService: AuthService,
+  ) {}
 
   @Post()
   @HttpCode(201)
@@ -76,6 +86,28 @@ export class ProjectsController {
   ) {
     const parsedLimit = limit ? Math.max(1, Math.min(50, parseInt(limit, 10) || 20)) : 20;
     return this.projectsService.searchSemantic(q ?? '', customerId || undefined, parsedLimit);
+  }
+
+  // T-337: reverse access lookup — admin-only. Returns API-Keys and Users
+  // whose scope covers this project (projectScopeMode='all' OR allowlist).
+  @Get(':id/access')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async access(@Param('id') id: string) {
+    const [apiKeys, users] = await Promise.all([
+      this.apiKeysService.findByProjectAccess(id),
+      this.authService.findUsersByProjectAccess(id),
+    ]);
+    return {
+      apiKeys,
+      users: users.map((u) => ({
+        _id: u._id.toString(),
+        username: u.username,
+        role: u.role,
+        projectScopeMode: u.projectScopeMode,
+        allowedProjectIds: (u.allowedProjectIds ?? []).map(String),
+      })),
+    };
   }
 
   @Get(':id')

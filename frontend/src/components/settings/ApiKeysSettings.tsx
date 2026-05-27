@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, ApiKeyInfo } from '../../api/client';
+import { useAuth } from '../../hooks/useAuth';
 import ApiKeyToolEditor from '../ApiKeyToolEditor';
 import ApiKeyScopeEditor from '../ApiKeyScopeEditor';
 import Button from '../ui/Button';
@@ -11,6 +12,8 @@ import { SettingsSection, SettingsTabHeader } from '../ui/SettingsShell';
 export default function ApiKeysSettings() {
   const { t, i18n } = useTranslation();
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
+  const { user, authEnabled } = useAuth();
+  const isAdmin = authEnabled && user?.role === 'admin';
 
   const [apiKeys, setApiKeys] = useState<ApiKeyInfo[]>([]);
   const [apiKeysLoading, setApiKeysLoading] = useState(false);
@@ -26,14 +29,16 @@ export default function ApiKeysSettings() {
   const loadApiKeys = useCallback(async () => {
     setApiKeysLoading(true);
     try {
-      const keys = await api.apiKeys.list();
+      // T-337: admins see ALL keys + owner column; non-admins keep the
+      // per-user view (they only see their own).
+      const keys = isAdmin ? await api.apiKeys.listAll() : await api.apiKeys.list();
       setApiKeys(keys);
     } catch (e) {
       setApiKeyError(e instanceof Error ? e.message : t('common.errorLoading', { error: '' }));
     } finally {
       setApiKeysLoading(false);
     }
-  }, [t]);
+  }, [t, isAdmin]);
 
   useEffect(() => { loadApiKeys(); }, [loadApiKeys]);
 
@@ -168,6 +173,9 @@ export default function ApiKeysSettings() {
               <thead>
                 <tr className="border-b border-gray-800 bg-gray-800/50">
                   <th className="px-4 py-2 text-left font-medium text-gray-400">{t('settings.apiKeyTableName')}</th>
+                  {isAdmin && (
+                    <th className="px-4 py-2 text-left font-medium text-gray-400">{t('settings.apiKeyTableOwner')}</th>
+                  )}
                   <th className="px-4 py-2 text-left font-medium text-gray-400">Key</th>
                   <th className="px-4 py-2 text-left font-medium text-gray-400">{t('settings.apiKeyTableCreated')}</th>
                   <th className="px-4 py-2 text-left font-medium text-gray-400">{t('settings.apiKeyTableLastUsed')}</th>
@@ -194,6 +202,9 @@ export default function ApiKeysSettings() {
                           {key.name}
                         </div>
                       </td>
+                      {isAdmin && (
+                        <td className="px-4 py-3 text-gray-400">{key.ownerUsername ?? '—'}</td>
+                      )}
                       <td className="px-4 py-3">
                         <code className="font-mono text-xs text-gray-400">{key.prefix}...</code>
                       </td>

@@ -927,7 +927,8 @@
       "ssh": "Server",
       "recurringTasks": "Riten",
       "commits": "Vermerke",
-      "logs": "Orakel"
+      "logs": "Orakel",
+      "access": "Zugriff"
     },
     "tabDesc": {
       "todos": "Aktive Quests, Boards und Backlog dieses Projekts.",
@@ -954,8 +955,29 @@
       "docsHealth": "Lore-Gesundheit — Vorschläge für veraltete Manuals und Knowledge-Einträge.",
       "graph": "Wissensgraph — Beziehungen zwischen Todos, Manuals, Knowledge, Validierungen, Commits und mehr.",
       "oracle": "Orakel — prädiktive Risiken aus Stagnation, Deadline-Druck, Bug-Hotspots und Blocker-Ketten.",
-      "soul": "Vision, Prinzipien und Konventionen dieses Projekts."
+      "soul": "Vision, Prinzipien und Konventionen dieses Projekts.",
+      "access": "Wer und welche API-Keys haben Zugriff auf dieses Projekt."
     }
+  },
+  "projectAccess": {
+    "adminOnly": "Diese Übersicht ist Admins vorbehalten.",
+    "intro": "User und API-Keys deren Scope dieses Projekt enthält (mode=all oder allowlist mit der Project-ID).",
+    "usersHeading": "User",
+    "usersEmpty": "Keine User mit Zugriff (sollte nicht passieren — mindestens ein Admin sollte sichtbar sein).",
+    "keysHeading": "API-Keys",
+    "keysEmpty": "Keine API-Keys haben Zugriff auf dieses Projekt.",
+    "user": "User",
+    "role": "Rolle",
+    "scope": "Scope",
+    "keyName": "Name",
+    "owner": "Besitzer",
+    "prefix": "Prefix",
+    "tools": "Tools",
+    "toolsAll": "alle",
+    "toolsScoped": "{{count}} erlaubt",
+    "scopeAll": "alle Projekte",
+    "scopeAllowlist": "{{count}} in Allowlist",
+    "scopeNone": "keine"
   },
   "oracle": {
     "openCount": "Offene Risiken",
@@ -1331,6 +1353,7 @@
     "apiKeyTableCreated": "Erstellt",
     "apiKeyTableLastUsed": "Zuletzt genutzt",
     "apiKeyTableExpiry": "Ablauf",
+    "apiKeyTableOwner": "Besitzer",
     "apiKeyUsageTitle": "Verwendung",
     "apiKeyUsageText": "API Keys können für MCP-Server und REST API Zugriff verwendet werden:",
     "apiKeyToolScoping": "Tool-Zugriff",
