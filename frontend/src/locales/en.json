@@ -656,7 +656,18 @@
     "openAnswerDialog": "Open answer dialog",
     "openInTodo": "Open in quest",
     "answeredToast": "Answer sent",
-    "answerFailed": "Could not send answer"
+    "answerFailed": "Could not send answer",
+    "audienceUser": "Asked: @{{username}}",
+    "audienceUserUnknown": "Asked: single user",
+    "audienceRole": "Asked: role {{role}} ({{count}})",
+    "audienceBroadcast": "Broadcast ({{count}})",
+    "audienceResolved": "{{count}} recipients",
+    "audienceLegacy": "Visible to everyone",
+    "escalationStepTitle": "Escalation step {{step}} active",
+    "responsesHeading": "Responses ({{count}})",
+    "responseByAgent": "Answer from agent",
+    "responseByUser": "Answer from @{{username}}",
+    "responseByUnknownUser": "Answer from unknown user"
   },
   "milestone": {
     "actions": {

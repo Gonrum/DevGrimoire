@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { api, Question } from '../../api/client';
+import { api, Question, UserInfo } from '../../api/client';
 import Markdown from '../Markdown';
 import MarkdownEditor from '../MarkdownEditor';
 import Button from '../ui/Button';
 import DetailSection from '../ui/DetailSection';
+import { QuestionAudienceBadge, QuestionResponsesList } from '../questions/QuestionAudience';
 
 interface Props {
   todoId: string;
@@ -29,6 +30,17 @@ export default function TodoQuestionsSection({ todoId, projectId, questions, onC
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
   const [draft, setDraft] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [usersById, setUsersById] = useState<Record<string, UserInfo>>({});
+
+  useEffect(() => {
+    api.users.list()
+      .then((users) => {
+        const map: Record<string, UserInfo> = {};
+        for (const u of users) map[u._id] = u;
+        setUsersById(map);
+      })
+      .catch(() => setUsersById({}));
+  }, []);
 
   const open = useMemo(() => questions.filter((q) => q.status !== 'answered'), [questions]);
   const answered = useMemo(() => questions.filter((q) => q.status === 'answered'), [questions]);
@@ -76,6 +88,7 @@ export default function TodoQuestionsSection({ todoId, projectId, questions, onC
             key={q._id}
             question={q}
             dateLocale={dateLocale}
+            usersById={usersById}
             onAnswer={async (answer) => {
               try {
                 await api.questions.answer(q._id, answer);
@@ -97,6 +110,7 @@ export default function TodoQuestionsSection({ todoId, projectId, questions, onC
                   key={q._id}
                   question={q}
                   dateLocale={dateLocale}
+                  usersById={usersById}
                   projectId={projectId}
                   onChanged={onChanged}
                   onError={onError}
@@ -121,10 +135,12 @@ export default function TodoQuestionsSection({ todoId, projectId, questions, onC
 function QuestionCard({
   question,
   dateLocale,
+  usersById,
   onAnswer,
 }: {
   question: Question;
   dateLocale: string;
+  usersById: Record<string, UserInfo>;
   onAnswer: (answer: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -159,11 +175,16 @@ function QuestionCard({
   return (
     <div className={`rounded border p-3 ${accent}`}>
       <div className="flex items-center justify-between gap-2 text-[11px] text-gray-500 mb-1.5">
-        <span className="font-medium tracking-wide uppercase">
-          {t(headerKey)}
-          {question.agentName ? ` · ${question.agentName}` : ''}
-        </span>
-        <span>{new Date(question.createdAt).toLocaleString(dateLocale, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-medium tracking-wide uppercase">
+            {t(headerKey)}
+            {question.agentName ? ` · ${question.agentName}` : ''}
+          </span>
+          {!isUserToAgent && (
+            <QuestionAudienceBadge question={question} usersById={usersById} />
+          )}
+        </div>
+        <span className="shrink-0">{new Date(question.createdAt).toLocaleString(dateLocale, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
       </div>
       <Markdown className="text-sm text-gray-200">{question.question}</Markdown>
       {question.context && (
@@ -228,6 +249,7 @@ function QuestionCard({
 function AnsweredQuestionCard({
   question,
   dateLocale,
+  usersById,
   projectId,
   onChanged,
   onError,
@@ -235,6 +257,7 @@ function AnsweredQuestionCard({
 }: {
   question: Question;
   dateLocale: string;
+  usersById: Record<string, UserInfo>;
   projectId?: string;
   onChanged: () => void;
   onError: (message: string) => void;
@@ -284,17 +307,29 @@ function AnsweredQuestionCard({
       ? `/projects/${projectId}/knowledge`
       : undefined;
 
+  const hasMultipleResponses = (question.responses?.length ?? 0) > 1;
+
   return (
     <div className="rounded border border-gray-800 bg-gray-950/40 p-2.5">
       <div className="flex items-center justify-between gap-2 text-[11px] text-gray-500 mb-1">
-        <span className="font-medium tracking-wide uppercase">{t(headerKey)}</span>
-        <span>{question.answeredAt ? new Date(question.answeredAt).toLocaleString(dateLocale, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</span>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-medium tracking-wide uppercase">{t(headerKey)}</span>
+          {question.direction !== 'user_to_agent' && (
+            <QuestionAudienceBadge question={question} usersById={usersById} />
+          )}
+        </div>
+        <span className="shrink-0">{question.answeredAt ? new Date(question.answeredAt).toLocaleString(dateLocale, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</span>
       </div>
       <Markdown className="text-sm text-gray-300">{question.question}</Markdown>
-      {question.answer && (
+      {question.answer && !hasMultipleResponses && (
         <div className="mt-2 text-xs">
           <span className="text-gray-500">{answeredByLabel}:</span>
           <Markdown className="text-gray-200 mt-0.5">{question.answer}</Markdown>
+        </div>
+      )}
+      {hasMultipleResponses && (
+        <div className="mt-2">
+          <QuestionResponsesList responses={question.responses} dateLocale={dateLocale} />
         </div>
       )}
 

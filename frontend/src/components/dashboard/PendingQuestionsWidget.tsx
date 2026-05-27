@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api, Project, Question, QuestionDirection } from '../../api/client';
+import { api, Project, Question, QuestionDirection, UserInfo } from '../../api/client';
 import { wsEventBus, isQuestionEvent } from '../../api/wsEventBus';
 import Markdown from '../Markdown';
 import Button from '../ui/Button';
 import { Dialog, Portal } from '../ui/Dialog';
 import { useToast } from '../Toast';
+import { QuestionAudienceBadge, QuestionResponsesList } from '../questions/QuestionAudience';
 
 interface Props {
   /** When set, restrict to this project. Otherwise widget aggregates across all accessible projects. */
@@ -32,6 +33,7 @@ export default function PendingQuestionsWidget({ projectId, initialDirection, cl
   const [loading, setLoading] = useState(true);
   const [direction, setDirection] = useState<QuestionDirection | ''>(initialDirection ?? '');
   const [projectsById, setProjectsById] = useState<Record<string, Project>>({});
+  const [usersById, setUsersById] = useState<Record<string, UserInfo>>({});
   const [activeQuestion, setActiveQuestion] = useState<Question | null>(null);
 
   useEffect(() => {
@@ -44,6 +46,16 @@ export default function PendingQuestionsWidget({ projectId, initialDirection, cl
       })
       .catch(() => setProjectsById({}));
   }, [projectId]);
+
+  useEffect(() => {
+    api.users.list()
+      .then((users) => {
+        const map: Record<string, UserInfo> = {};
+        for (const u of users) map[u._id] = u;
+        setUsersById(map);
+      })
+      .catch(() => setUsersById({}));
+  }, []);
 
   const load = () => {
     setLoading(true);
@@ -145,6 +157,7 @@ export default function PendingQuestionsWidget({ projectId, initialDirection, cl
                 question={q}
                 projectName={!projectId && q.projectId ? projectsById[q.projectId]?.name ?? null : null}
                 dateLocale={dateLocale}
+                usersById={usersById}
                 onAnswer={() => setActiveQuestion(q)}
               />
             </li>
@@ -160,6 +173,8 @@ export default function PendingQuestionsWidget({ projectId, initialDirection, cl
         <Portal>
           <AnswerQuestionModal
             question={activeQuestion}
+            usersById={usersById}
+            dateLocale={dateLocale}
             onSubmit={(answer) => handleAnswered(activeQuestion._id, answer)}
             onClose={() => setActiveQuestion(null)}
           />
@@ -173,11 +188,13 @@ function QuestionRow({
   question,
   projectName,
   dateLocale,
+  usersById,
   onAnswer,
 }: {
   question: Question;
   projectName: string | null;
   dateLocale: string;
+  usersById: Record<string, UserInfo>;
   onAnswer: () => void;
 }) {
   const { t } = useTranslation();
@@ -195,10 +212,13 @@ function QuestionRow({
   const inner = (
     <>
       <div className="flex items-center justify-between gap-2 mb-0.5">
-        <span className={`inline-flex items-center text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded border ${directionAccent}`}>
-          {directionLabel}
-        </span>
-        <span className="text-[11px] text-gray-600">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className={`inline-flex items-center text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded border ${directionAccent}`}>
+            {directionLabel}
+          </span>
+          <QuestionAudienceBadge question={question} usersById={usersById} />
+        </div>
+        <span className="text-[11px] text-gray-600 shrink-0">
           {new Date(question.createdAt).toLocaleString(dateLocale, {
             day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
           })}
@@ -249,10 +269,14 @@ function QuestionRow({
 
 function AnswerQuestionModal({
   question,
+  usersById,
+  dateLocale,
   onSubmit,
   onClose,
 }: {
   question: Question;
+  usersById: Record<string, UserInfo>;
+  dateLocale: string;
   onSubmit: (answer: string) => Promise<boolean>;
   onClose: () => void;
 }) {
@@ -276,6 +300,7 @@ function AnswerQuestionModal({
   return (
     <Dialog title={t('questions.answerDialogTitle')} onClose={onClose}>
       <div className="px-5 py-4 space-y-3">
+        <QuestionAudienceBadge question={question} usersById={usersById} />
         {question.context && (
           <div className="text-xs text-gray-500 border-l-2 border-gray-700 pl-2">
             <Markdown>{question.context}</Markdown>
@@ -284,6 +309,7 @@ function AnswerQuestionModal({
         <div className="text-gray-200">
           <Markdown>{question.question}</Markdown>
         </div>
+        <QuestionResponsesList responses={question.responses} dateLocale={dateLocale} />
         {isExpired && (
           <p className="text-[11px] text-amber-400/70">{t('questions.expiredHint')}</p>
         )}

@@ -22,6 +22,7 @@ import { TodosService } from '../todos/todos.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { KnowledgeDocument } from '../knowledge/schemas/knowledge.schema';
+import { AuthService } from '../auth/auth.service';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 
 export const QUESTION_CREATED = 'question.created';
@@ -48,6 +49,8 @@ export class QuestionsService implements OnModuleInit {
     private todosService: TodosService,
     private notificationsService: NotificationsService,
     private knowledgeService: KnowledgeService,
+    @Inject(forwardRef(() => AuthService))
+    private authService: AuthService,
   ) {}
 
   /**
@@ -94,6 +97,19 @@ export class QuestionsService implements OnModuleInit {
     const timeoutMs = isAgentAsking ? (dto.timeoutSeconds || 300) * 1000 : 0;
     const expiresAt = isAgentAsking ? new Date(Date.now() + timeoutMs) : undefined;
 
+    // T-393: resolve initial targets so findPending and notifications know
+    // exactly who is on the hook. Empty array = implicit broadcast.
+    let resolvedTargetUserIds: Types.ObjectId[] = [];
+    if (isAgentAsking) {
+      const resolved = await this.authService.resolveQuestionTargets({
+        targetUserId: dto.targetUserId,
+        targetRole: dto.targetRole,
+        broadcast: dto.broadcast,
+        projectId,
+      });
+      resolvedTargetUserIds = resolved.userIds.map((id) => new Types.ObjectId(id));
+    }
+
     const entry = await this.questionModel.create({
       question: dto.question,
       options: dto.options || [],
@@ -101,12 +117,19 @@ export class QuestionsService implements OnModuleInit {
       todoId: dto.todoId ? new Types.ObjectId(dto.todoId) : undefined,
       projectId: projectId ? new Types.ObjectId(projectId) : undefined,
       targetUserId: dto.targetUserId ? new Types.ObjectId(dto.targetUserId) : undefined,
+      targetRole: dto.targetRole,
+      broadcast: dto.broadcast ?? false,
+      resolvedTargetUserIds,
       createdByUserId: userId ? new Types.ObjectId(userId) : undefined,
       direction,
       agentRunId: dto.agentRunId,
       agentName: dto.agentName,
       timeoutMs,
       expiresAt,
+      escalationChain: dto.escalationChain ?? [],
+      escalationStep: 0,
+      escalationHistory: [],
+      responses: [],
     });
 
     if (dto.todoId) {
@@ -126,6 +149,9 @@ export class QuestionsService implements OnModuleInit {
       todoId: entry.todoId?.toString() || null,
       projectId: entry.projectId?.toString() || null,
       targetUserId: entry.targetUserId?.toString() || null,
+      targetRole: entry.targetRole ?? null,
+      broadcast: entry.broadcast,
+      resolvedTargetUserIds: resolvedTargetUserIds.map((id) => id.toString()),
       expiresAt: entry.expiresAt?.toISOString() ?? null,
     });
 
@@ -152,6 +178,11 @@ export class QuestionsService implements OnModuleInit {
    * Answer a question. Allowed even on `expired` ones (M-30): timeouts only
    * stop the agent from blocking, but the user retains the right to respond
    * later from the todo detail view.
+   *
+   * Multi-target behaviour (T-393): when the question has more than one
+   * resolved target (role/broadcast) additional users may still respond after
+   * the first answer landed. The first response wins (`answer`/`answeredByUserId`
+   * stay frozen); every additional reply is appended to `responses` for audit.
    */
   async answer(
     id: string,
@@ -160,10 +191,6 @@ export class QuestionsService implements OnModuleInit {
   ): Promise<QuestionDocument> {
     const entry = await this.questionModel.findById(id).exec();
     if (!entry) throw new NotFoundException(`Question ${id} not found`);
-
-    if (entry.status === 'answered') {
-      throw new BadRequestException('Question already answered');
-    }
 
     if (options.byAgent && entry.direction !== 'user_to_agent') {
       // Agents may only answer follow-up questions the user asked them.
@@ -178,13 +205,57 @@ export class QuestionsService implements OnModuleInit {
       );
     }
 
-    entry.answer = answer;
-    entry.status = 'answered';
-    entry.answeredAt = new Date();
-    entry.answeredByAgent = options.byAgent === true;
-    if (options.userId) {
-      entry.answeredByUserId = new Types.ObjectId(options.userId);
+    const targets = entry.resolvedTargetUserIds ?? [];
+    const isMultiTarget = targets.length > 1 || entry.broadcast === true || !!entry.targetRole;
+
+    // T-393 permission check (only for human responses): the user must be in
+    // the resolved-target list or the question must be legacy (no targets).
+    if (!options.byAgent && options.userId && targets.length > 0) {
+      const userIdStr = options.userId;
+      const eligible = targets.some((t) => t.toString() === userIdStr);
+      if (!eligible) {
+        throw new BadRequestException(
+          'You are not addressed by this question and cannot answer it.',
+        );
+      }
     }
+
+    const alreadyAnswered = entry.status === 'answered';
+    if (alreadyAnswered && !isMultiTarget) {
+      throw new BadRequestException('Question already answered');
+    }
+
+    // Prevent the same user from answering twice on a multi-target question.
+    if (alreadyAnswered && options.userId && (entry.responses ?? []).some((r) => r.userId === options.userId)) {
+      throw new BadRequestException('You have already answered this question.');
+    }
+
+    let username: string | undefined;
+    if (options.userId) {
+      const u = await this.authService.findUserById(options.userId).catch(() => null);
+      username = u?.username;
+    }
+
+    const response = {
+      userId: options.userId,
+      username,
+      byAgent: options.byAgent === true,
+      answer,
+      at: new Date(),
+    };
+    entry.responses = [...(entry.responses ?? []), response];
+
+    if (!alreadyAnswered) {
+      // First response wins — freeze the legacy answer fields.
+      entry.answer = answer;
+      entry.status = 'answered';
+      entry.answeredAt = response.at;
+      entry.answeredByAgent = options.byAgent === true;
+      if (options.userId) {
+        entry.answeredByUserId = new Types.ObjectId(options.userId);
+      }
+    }
+
     await entry.save();
 
     if (entry.todoId) {
@@ -192,7 +263,12 @@ export class QuestionsService implements OnModuleInit {
         ? '**User-Folgefrage:**'
         : '**Agent-Rückfrage:**';
       const author = options.byAgent ? 'agent' : 'user';
-      const commentText = `${heading} ${entry.question}\n**Antwort:** ${answer}`;
+      const attribution = !options.byAgent && username
+        ? ` _(${username})_`
+        : '';
+      const commentText = alreadyAnswered
+        ? `${heading} ${entry.question}\n**Zusätzliche Antwort${attribution}:** ${answer}`
+        : `${heading} ${entry.question}\n**Antwort${attribution}:** ${answer}`;
       await this.todosService
         .addComment(entry.todoId.toString(), commentText, author)
         .catch(() => {
@@ -208,6 +284,7 @@ export class QuestionsService implements OnModuleInit {
       projectId: entry.projectId?.toString() || null,
       answeredByUserId: options.userId || null,
       byAgent: options.byAgent === true,
+      additional: alreadyAnswered,
     });
 
     return entry;
@@ -219,15 +296,25 @@ export class QuestionsService implements OnModuleInit {
     return entry;
   }
 
-  /** Pending (not yet expired) questions — used by SSE / agent-side UI. */
+  /**
+   * Pending (not yet expired) questions — used by SSE / agent-side UI and by
+   * the global QuestionDialog modal.
+   *
+   * Permission filter (T-393): a user only sees questions they are on the hook
+   * for — either a snapshot resolved target (explicit user, role-match, or
+   * broadcast in their project scope) or a legacy question without resolved
+   * targets (visible to everyone, as before).
+   */
   async findPending(userId?: string, direction?: QuestionDirection): Promise<QuestionDocument[]> {
     const filter: FilterQuery<QuestionDocument> = { status: 'pending' };
     if (direction) filter.direction = direction;
     if (userId) {
       filter.$or = [
-        { targetUserId: new Types.ObjectId(userId) },
-        { targetUserId: { $exists: false } },
-        { targetUserId: null },
+        { resolvedTargetUserIds: new Types.ObjectId(userId) },
+        { resolvedTargetUserIds: { $size: 0 } },
+        // Pre-T-393 documents have neither resolvedTargetUserIds nor the new
+        // broadcast flag — keep them visible to every authenticated user.
+        { resolvedTargetUserIds: { $exists: false } },
       ];
     }
     const now = new Date();
@@ -450,6 +537,99 @@ export class QuestionsService implements OnModuleInit {
     await question.save();
 
     return knowledge;
+  }
+
+  /**
+   * Walk all due agent_to_user questions one escalation step forward. Called
+   * by QuestionsScheduler every minute. Returns a summary of what happened
+   * so the scheduler can log it.
+   *
+   * Steps:
+   *   1. Find all pending agent_to_user questions with expiresAt <= now.
+   *   2. If there is a next escalation step → re-resolve targets, reset the
+   *      deadline, append to escalationHistory, send notifications, and
+   *      emit a `question.escalated` event.
+   *   3. Otherwise → mark the question as expired (same as the legacy
+   *      waitForAnswer path, but unblocks role/broadcast questions that did
+   *      not go through a wait loop).
+   */
+  async escalateDueQuestions(): Promise<{
+    checked: number;
+    escalated: number;
+    expired: number;
+  }> {
+    const now = new Date();
+    const due = await this.questionModel
+      .find({
+        status: 'pending',
+        direction: 'agent_to_user',
+        expiresAt: { $lte: now },
+      })
+      .limit(50)
+      .exec();
+
+    let escalated = 0;
+    let expired = 0;
+    for (const entry of due) {
+      const chain = entry.escalationChain ?? [];
+      const nextStepIdx = (entry.escalationStep ?? 0) + 1;
+      const stepConfig = chain[nextStepIdx - 1];
+      if (!stepConfig) {
+        entry.status = 'expired';
+        await entry.save();
+        expired += 1;
+        continue;
+      }
+
+      const resolved = await this.authService.resolveQuestionTargets({
+        targetUserId: stepConfig.kind === 'user' ? stepConfig.userId : undefined,
+        targetRole: stepConfig.kind === 'role' ? stepConfig.role : undefined,
+        broadcast: stepConfig.kind === 'broadcast',
+        projectId: entry.projectId?.toString(),
+      });
+      const newTargetIds = resolved.userIds.map((id) => new Types.ObjectId(id));
+
+      entry.resolvedTargetUserIds = newTargetIds;
+      entry.targetUserId = stepConfig.kind === 'user' && stepConfig.userId
+        ? new Types.ObjectId(stepConfig.userId)
+        : undefined;
+      entry.targetRole = stepConfig.kind === 'role' ? stepConfig.role : undefined;
+      entry.broadcast = stepConfig.kind === 'broadcast';
+      entry.escalationStep = nextStepIdx;
+      entry.expiresAt = new Date(Date.now() + stepConfig.afterMs);
+      entry.timeoutMs = stepConfig.afterMs;
+      entry.escalationHistory = [
+        ...(entry.escalationHistory ?? []),
+        {
+          step: nextStepIdx,
+          appliedAt: now,
+          resolvedTargetUserIds: resolved.userIds,
+        },
+      ];
+      await entry.save();
+      escalated += 1;
+
+      const title = 'Agent-Rückfrage (eskaliert)';
+      const body = entry.question.length > 100 ? entry.question.slice(0, 97) + '...' : entry.question;
+      const url = entry.todoId
+        ? `/projects/${entry.projectId?.toString()}/todos/${entry.todoId}`
+        : undefined;
+      await this.notificationsService
+        .create(title, body, url, 'ask_user')
+        .catch(() => {
+          /* push not available — ignore */
+        });
+
+      this.eventEmitter.emit('question.escalated', {
+        questionId: entry._id.toString(),
+        step: nextStepIdx,
+        kind: stepConfig.kind,
+        resolvedTargetUserIds: resolved.userIds,
+        expiresAt: entry.expiresAt?.toISOString() ?? null,
+      });
+    }
+
+    return { checked: due.length, escalated, expired };
   }
 
   /**

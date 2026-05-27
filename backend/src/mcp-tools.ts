@@ -191,14 +191,21 @@ function serializeQuestion(q: unknown): Record<string, unknown> {
     todoId: obj.todoId,
     projectId: obj.projectId,
     targetUserId: obj.targetUserId,
+    targetRole: obj.targetRole,
+    broadcast: obj.broadcast,
+    resolvedTargetUserIds: obj.resolvedTargetUserIds,
     createdByUserId: obj.createdByUserId,
     answeredByUserId: obj.answeredByUserId,
     answeredByAgent: obj.answeredByAgent,
     answeredAt: obj.answeredAt,
+    responses: obj.responses,
     knowledgeId: obj.knowledgeId,
     expiresAt: obj.expiresAt,
     agentRunId: obj.agentRunId,
     agentName: obj.agentName,
+    escalationChain: obj.escalationChain,
+    escalationStep: obj.escalationStep,
+    escalationHistory: obj.escalationHistory,
     createdAt: obj.createdAt,
     updatedAt: obj.updatedAt,
   };
@@ -1286,7 +1293,7 @@ const tools = [
   },
   {
     name: 'ask_user',
-    description: 'Ask users a question and wait for an answer. By default this is broadcast to all users. Set targetUsername (preferred) or targetUserId to ask one specific user. The question is shown in the DevGrimoire UI (via SSE + push notification). If todoId is provided, the question and answer are documented as a comment on the todo.',
+    description: 'Ask users a question and wait for an answer. By default this is broadcast to every user with project access (T-393). Use targetUsername/targetUserId to address one specific user, targetRole to address every user with that role, or broadcast=true to make the broadcast intent explicit. Optionally pass escalationChain to walk through escalating audiences as deadlines lapse (e.g. first your lead dev, then all developers, then everyone). The question is shown in the DevGrimoire UI (via SSE + push notification). If todoId is provided, the question and answer are documented as a comment on the todo.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -1297,7 +1304,23 @@ const tools = [
         projectId: { type: 'string', description: 'Project MongoDB ID (auto-derived from todoId if set)' },
         targetUsername: { type: 'string', description: 'Username to target. Takes precedence over targetUserId. Omit for broadcast.' },
         targetUserId: { type: 'string', description: 'User MongoDB ID to target. Omit for broadcast.' },
+        targetRole: { type: 'string', description: 'Role to target (T-393). Every active user with this role and project access sees the question.', enum: ['admin', 'user'] },
+        broadcast: { type: 'boolean', description: 'Explicit broadcast — every active user with project access sees the question. Default false. When neither user nor role nor broadcast is set, the question still surfaces for every project-scoped user (legacy implicit broadcast).' },
         timeoutSeconds: { type: 'number', description: 'How long to wait for an answer (default: 300, max: 600)' },
+        escalationChain: {
+          type: 'array',
+          description: 'Optional T-393 escalation chain. Each step re-targets the question and arms a fresh deadline once the previous wait window lapses without an answer. Example: [{ "kind": "role", "role": "admin", "afterMs": 600000 }, { "kind": "broadcast", "afterMs": 1800000 }] — first wait 5 min on the initial target, then escalate to admins for 10 min, then broadcast for 30 min.',
+          items: {
+            type: 'object',
+            properties: {
+              kind: { type: 'string', enum: ['user', 'role', 'broadcast'] },
+              userId: { type: 'string', description: 'Required when kind = user' },
+              role: { type: 'string', description: 'Required when kind = role' },
+              afterMs: { type: 'number', description: 'Wait window for this step in milliseconds (min 10_000, max 3_600_000)' },
+            },
+            required: ['kind', 'afterMs'],
+          },
+        },
       },
       required: ['question'],
     },
@@ -4456,6 +4479,36 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             }
             targetUserId = targetUser._id.toString();
           }
+          const targetRole = optionalString(a, 'targetRole');
+          if (targetRole && targetRole !== 'admin' && targetRole !== 'user') {
+            throw new Error(`Invalid targetRole: ${targetRole}`);
+          }
+          const broadcast = optionalBoolean(a, 'broadcast') ?? undefined;
+          const escalationChainRaw = (a as Record<string, unknown>)?.['escalationChain'];
+          const escalationChain = Array.isArray(escalationChainRaw)
+            ? (escalationChainRaw as Array<Record<string, unknown>>).map((step) => ({
+                kind: step.kind as 'user' | 'role' | 'broadcast',
+                userId: typeof step.userId === 'string' ? step.userId : undefined,
+                role: typeof step.role === 'string' ? step.role : undefined,
+                afterMs: Number(step.afterMs),
+              }))
+            : undefined;
+          if (escalationChain) {
+            for (const [idx, step] of escalationChain.entries()) {
+              if (!['user', 'role', 'broadcast'].includes(step.kind)) {
+                throw new Error(`escalationChain[${idx}].kind invalid`);
+              }
+              if (step.kind === 'user' && !step.userId) {
+                throw new Error(`escalationChain[${idx}].userId required when kind=user`);
+              }
+              if (step.kind === 'role' && !step.role) {
+                throw new Error(`escalationChain[${idx}].role required when kind=role`);
+              }
+              if (!Number.isFinite(step.afterMs) || step.afterMs < 10000 || step.afterMs > 3600000) {
+                throw new Error(`escalationChain[${idx}].afterMs must be between 10000 and 3600000`);
+              }
+            }
+          }
           const questionEntry = await questionsService.create({
             question: requireString(a, 'question'),
             options: optionalStringArray(a, 'options'),
@@ -4463,7 +4516,10 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             todoId: optionalString(a, 'todoId'),
             projectId: optionalString(a, 'projectId'),
             targetUserId,
+            targetRole,
+            broadcast,
             timeoutSeconds: optionalNumber(a, 'timeoutSeconds'),
+            escalationChain,
           }, userId);
           const timeoutMs = questionEntry.timeoutMs;
           const waitResult = await questionsService.waitForAnswer(questionEntry._id.toString(), timeoutMs);

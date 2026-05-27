@@ -175,6 +175,79 @@ export class AuthService {
     return user ? this.maskUserSecrets(user) : null;
   }
 
+  /**
+   * Resolve a Question's targeting (T-393) into concrete active user ids.
+   *
+   * - `userId`  → returns [userId] if the user is active and may see the project
+   * - `role`    → returns every active user with that role and project access
+   * - `broadcast` (implicit when neither user nor role is set, or explicit)
+   *               → returns every active user with project access
+   *
+   * Project-scope check honours `projectScopeMode` (all / allowlist / none).
+   * When `projectId` is omitted the result is unfiltered (global question).
+   */
+  async resolveQuestionTargets(opts: {
+    targetUserId?: string;
+    targetRole?: string;
+    broadcast?: boolean;
+    projectId?: string;
+    customerId?: string;
+  }): Promise<{ userIds: string[]; usernames: Record<string, string> }> {
+    const filter: Record<string, unknown> = { active: true };
+
+    if (opts.targetUserId) {
+      filter._id = opts.targetUserId;
+    } else if (opts.targetRole) {
+      filter.role = opts.targetRole;
+    }
+    // broadcast = no extra role/user filter — every active user qualifies.
+
+    const users = await this.userModel
+      .find(filter)
+      .select('_id username role projectScopeMode allowedProjectIds customerScopeMode allowedCustomerIds')
+      .lean<Array<{
+        _id: unknown;
+        username: string;
+        role: UserRole;
+        projectScopeMode: 'all' | 'allowlist' | 'none';
+        allowedProjectIds?: unknown[];
+        customerScopeMode: 'all' | 'allowlist' | 'none';
+        allowedCustomerIds?: unknown[];
+      }>>()
+      .exec();
+
+    const userIds: string[] = [];
+    const usernames: Record<string, string> = {};
+    for (const u of users) {
+      const id = String(u._id);
+      if (opts.projectId && !this.userCanSeeProject(u, opts.projectId)) continue;
+      if (opts.customerId && !this.userCanSeeCustomer(u, opts.customerId)) continue;
+      userIds.push(id);
+      usernames[id] = u.username;
+    }
+    return { userIds, usernames };
+  }
+
+  private userCanSeeProject(
+    user: { projectScopeMode: string; allowedProjectIds?: unknown[] },
+    projectId: string,
+  ): boolean {
+    if (user.projectScopeMode === 'all') return true;
+    if (user.projectScopeMode === 'none') return false;
+    const allowed = (user.allowedProjectIds ?? []).map((id) => String(id));
+    return allowed.includes(projectId);
+  }
+
+  private userCanSeeCustomer(
+    user: { customerScopeMode: string; allowedCustomerIds?: unknown[] },
+    customerId: string,
+  ): boolean {
+    if (user.customerScopeMode === 'all') return true;
+    if (user.customerScopeMode === 'none') return false;
+    const allowed = (user.allowedCustomerIds ?? []).map((id) => String(id));
+    return allowed.includes(customerId);
+  }
+
   async findActiveUsers(windowMinutes = 15): Promise<ActiveUserSummary[]> {
     const clampedWindowMinutes = Math.min(Math.max(Math.floor(windowMinutes), 1), 120);
     const since = new Date(Date.now() - clampedWindowMinutes * 60 * 1000);

@@ -7,7 +7,28 @@ import {
   Min,
   Max,
   IsIn,
+  IsBoolean,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class EscalationStepDto {
+  @IsIn(['user', 'role', 'broadcast'])
+  kind: 'user' | 'role' | 'broadcast';
+
+  @IsOptional()
+  @IsMongoId()
+  userId?: string;
+
+  @IsOptional()
+  @IsString()
+  role?: string;
+
+  @IsNumber()
+  @Min(10000)
+  @Max(60 * 60 * 1000)
+  afterMs: number;
+}
 
 export class CreateQuestionDto {
   @IsString()
@@ -34,6 +55,14 @@ export class CreateQuestionDto {
   @IsOptional()
   targetUserId?: string;
 
+  @IsOptional()
+  @IsString()
+  targetRole?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  broadcast?: boolean;
+
   @IsNumber()
   @Min(10)
   @Max(600)
@@ -56,4 +85,15 @@ export class CreateQuestionDto {
   @IsOptional()
   @IsString()
   agentName?: string;
+
+  /**
+   * Optional escalation chain (T-393). Each step re-targets the question and
+   * arms a fresh deadline once the previous wait window lapses without an
+   * answer. Empty / omitted → no auto-escalation (legacy behaviour).
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EscalationStepDto)
+  escalationChain?: EscalationStepDto[];
 }

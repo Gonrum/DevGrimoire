@@ -3020,6 +3020,29 @@ export interface ChatToolExecutionResult {
 export type QuestionDirection = 'agent_to_user' | 'user_to_agent';
 export type QuestionStatus = 'pending' | 'answered' | 'expired';
 
+export type EscalationTargetKind = 'user' | 'role' | 'broadcast';
+
+export interface EscalationStep {
+  kind: EscalationTargetKind;
+  userId?: string;
+  role?: string;
+  afterMs: number;
+}
+
+export interface EscalationHistoryEntry {
+  step: number;
+  appliedAt: string;
+  resolvedTargetUserIds: string[];
+}
+
+export interface QuestionResponse {
+  userId?: string;
+  username?: string;
+  byAgent: boolean;
+  answer: string;
+  at: string;
+}
+
 export interface Question {
   _id: string;
   question: string;
@@ -3028,6 +3051,12 @@ export interface Question {
   todoId?: string;
   projectId?: string;
   targetUserId?: string;
+  /** T-393: role-based audience snapshot at create-time. */
+  targetRole?: string;
+  /** T-393: explicit "every project-scoped user" flag. */
+  broadcast?: boolean;
+  /** T-393: snapshot of resolved user ids at create or escalation time. */
+  resolvedTargetUserIds?: string[];
   createdByUserId?: string;
   direction: QuestionDirection;
   status: QuestionStatus;
@@ -3035,11 +3064,16 @@ export interface Question {
   answeredByUserId?: string;
   answeredByAgent?: boolean;
   answeredAt?: string;
+  /** T-393: per-recipient response log. First entry wins for the legacy fields. */
+  responses?: QuestionResponse[];
   agentRunId?: string;
   agentName?: string;
   timeoutMs: number;
   expiresAt?: string;
   knowledgeId?: string;
+  escalationChain?: EscalationStep[];
+  escalationStep?: number;
+  escalationHistory?: EscalationHistoryEntry[];
   createdAt: string;
   updatedAt: string;
 }

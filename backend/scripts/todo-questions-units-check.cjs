@@ -66,6 +66,8 @@ function applyFilter(docs, filter) {
         if (!matchesStatusFilter(doc.status, v)) return false;
       } else if (k === '_id' || k === 'todoId' || k === 'projectId' || k === 'knowledgeId') {
         if (!matchesObjectIdField(doc[k], v)) return false;
+      } else if (k === 'expiresAt' && v && typeof v === 'object' && '$lte' in v) {
+        if (!doc.expiresAt || new Date(doc.expiresAt) > new Date(v.$lte)) return false;
       } else if (v === undefined || v === null) {
         if (doc[k] !== v) return false;
       } else {
@@ -80,6 +82,24 @@ function applyFilter(docs, filter) {
  * Minimal Mongoose model surrogate. Captures the surface QuestionsService uses
  * for the methods exercised here.
  */
+/**
+ * Returns a hand-shaped Mongoose-document surrogate: mutations on the returned
+ * object are flushed back to the in-memory store via save(), so a service call
+ * that does `await entry.save()` actually persists in the test world.
+ */
+function makeLiveDoc(store, source) {
+  const live = { ...source };
+  live.save = async () => {
+    const idx = store.findIndex((d) => String(d._id) === String(live._id));
+    if (idx >= 0) {
+      store[idx] = { ...live };
+      delete store[idx].save;
+    }
+    return live;
+  };
+  return live;
+}
+
 function makeQuestionModel(initialDocs = []) {
   const docs = initialDocs.map((d) => ({ ...d }));
   const model = {
@@ -91,25 +111,32 @@ function makeQuestionModel(initialDocs = []) {
 
     find(filter) {
       const matched = applyFilter(docs, filter);
+      const wrapLiveDocs = (limit) => {
+        const slice = (limit ? matched.slice(0, limit) : matched).map((d) => makeLiveDoc(docs, d));
+        return slice;
+      };
       return {
         sort: () => ({
           limit: () => ({
             lean: () => ({ exec: async () => matched.map((d) => ({ ...d })) }),
-            exec: async () => matched.map((d) => ({ ...d })),
+            exec: async () => wrapLiveDocs(),
           }),
           skip: () => ({
-            limit: () => ({ exec: async () => matched.map((d) => ({ ...d })) }),
+            limit: () => ({ exec: async () => wrapLiveDocs() }),
           }),
-          exec: async () => matched.map((d) => ({ ...d })),
+          exec: async () => wrapLiveDocs(),
+        }),
+        limit: (n) => ({
+          exec: async () => wrapLiveDocs(n),
         }),
         lean: () => ({ exec: async () => matched.map((d) => ({ ...d })) }),
-        exec: async () => matched.map((d) => ({ ...d })),
+        exec: async () => wrapLiveDocs(),
       };
     },
 
     findById(id) {
       const doc = docs.find((d) => String(d._id) === String(id));
-      return { exec: async () => (doc ? { ...doc, save: async () => doc } : null) };
+      return { exec: async () => (doc ? makeLiveDoc(docs, doc) : null) };
     },
 
     countDocuments(filter) {
@@ -147,6 +174,10 @@ function instantiateService(questionModel, overrides = {}) {
   };
   const notificationsService = { create: async () => {} };
   const knowledgeService = { create: async () => ({ _id: new Types.ObjectId() }) };
+  const authService = {
+    findUserById: async () => null,
+    resolveQuestionTargets: async () => ({ userIds: [], usernames: {} }),
+  };
 
   return new QuestionsService(
     questionModel,
@@ -154,6 +185,7 @@ function instantiateService(questionModel, overrides = {}) {
     overrides.todosService ?? todosService,
     overrides.notificationsService ?? notificationsService,
     overrides.knowledgeService ?? knowledgeService,
+    overrides.authService ?? authService,
   );
 }
 
@@ -310,6 +342,165 @@ check('handleProjectChange: ignores invalid entityId', async () => {
     entityId: 'not-a-valid-objectid',
   });
   assert.equal(model._lastUpdateMany, null, 'updateMany must not be called for invalid IDs');
+});
+
+// ------------------------------------------------------------------
+// T-393 multi-target / answer / escalation
+// ------------------------------------------------------------------
+
+check('answer: multi-target appends to responses without blocking', async () => {
+  const questionId = new Types.ObjectId();
+  const userA = new Types.ObjectId();
+  const userB = new Types.ObjectId();
+  const model = makeQuestionModel([
+    {
+      _id: questionId,
+      question: 'q',
+      options: [],
+      direction: 'agent_to_user',
+      status: 'pending',
+      broadcast: true,
+      targetRole: undefined,
+      resolvedTargetUserIds: [userA, userB],
+      responses: [],
+    },
+  ]);
+  const svc = instantiateService(model, {
+    authService: {
+      findUserById: async (id) => ({ username: `user_${String(id).slice(0, 4)}` }),
+      resolveQuestionTargets: async () => ({ userIds: [], usernames: {} }),
+    },
+  });
+  const after1 = await svc.answer(questionId.toString(), 'first', { userId: userA.toString() });
+  assert.equal(after1.status, 'answered', 'first answer flips status to answered');
+  assert.equal(after1.answer, 'first', 'legacy answer field stamps winning reply');
+  assert.equal(after1.responses.length, 1);
+
+  const after2 = await svc.answer(questionId.toString(), 'second', { userId: userB.toString() });
+  assert.equal(after2.status, 'answered', 'status stays answered');
+  assert.equal(after2.answer, 'first', 'legacy answer field stays at first response');
+  assert.equal(after2.responses.length, 2, 'second response appended');
+  assert.equal(after2.responses[1].answer, 'second');
+});
+
+check('answer: single-target rejects double-answer', async () => {
+  const questionId = new Types.ObjectId();
+  const userA = new Types.ObjectId();
+  const model = makeQuestionModel([
+    {
+      _id: questionId,
+      question: 'q',
+      options: [],
+      direction: 'agent_to_user',
+      status: 'pending',
+      broadcast: false,
+      targetRole: undefined,
+      resolvedTargetUserIds: [userA],
+      responses: [],
+    },
+  ]);
+  const svc = instantiateService(model);
+  await svc.answer(questionId.toString(), 'first', { userId: userA.toString() });
+  await assert.rejects(
+    () => svc.answer(questionId.toString(), 'second', { userId: userA.toString() }),
+    /already answered/,
+    'single-target question must reject the second answer',
+  );
+});
+
+check('answer: permission filter blocks non-target users', async () => {
+  const questionId = new Types.ObjectId();
+  const userA = new Types.ObjectId();
+  const intruder = new Types.ObjectId();
+  const model = makeQuestionModel([
+    {
+      _id: questionId,
+      question: 'q',
+      options: [],
+      direction: 'agent_to_user',
+      status: 'pending',
+      broadcast: false,
+      resolvedTargetUserIds: [userA],
+      responses: [],
+    },
+  ]);
+  const svc = instantiateService(model);
+  await assert.rejects(
+    () => svc.answer(questionId.toString(), 'nope', { userId: intruder.toString() }),
+    /not addressed/,
+    'a user not in resolvedTargetUserIds must not be allowed to answer',
+  );
+});
+
+check('escalateDueQuestions: no due questions → noop', async () => {
+  const model = makeQuestionModel([]);
+  const svc = instantiateService(model);
+  const summary = await svc.escalateDueQuestions();
+  assert.deepEqual(summary, { checked: 0, escalated: 0, expired: 0 });
+});
+
+check('escalateDueQuestions: due question without chain → expired', async () => {
+  const questionId = new Types.ObjectId();
+  const model = makeQuestionModel([
+    {
+      _id: questionId,
+      question: 'q',
+      direction: 'agent_to_user',
+      status: 'pending',
+      expiresAt: new Date(Date.now() - 60_000),
+      escalationChain: [],
+      escalationStep: 0,
+      escalationHistory: [],
+      resolvedTargetUserIds: [],
+    },
+  ]);
+  const svc = instantiateService(model);
+  const summary = await svc.escalateDueQuestions();
+  assert.equal(summary.checked, 1);
+  assert.equal(summary.expired, 1);
+  assert.equal(summary.escalated, 0);
+  const stored = model._docs.find((d) => String(d._id) === String(questionId));
+  assert.equal(stored.status, 'expired');
+});
+
+check('escalateDueQuestions: due question with chain → walks one step', async () => {
+  const questionId = new Types.ObjectId();
+  const target = new Types.ObjectId();
+  const model = makeQuestionModel([
+    {
+      _id: questionId,
+      question: 'q',
+      direction: 'agent_to_user',
+      status: 'pending',
+      expiresAt: new Date(Date.now() - 60_000),
+      escalationChain: [
+        { kind: 'role', role: 'admin', afterMs: 60_000 },
+        { kind: 'broadcast', afterMs: 120_000 },
+      ],
+      escalationStep: 0,
+      escalationHistory: [],
+      resolvedTargetUserIds: [],
+    },
+  ]);
+  const svc = instantiateService(model, {
+    authService: {
+      findUserById: async () => null,
+      resolveQuestionTargets: async () => ({
+        userIds: [target.toString()],
+        usernames: { [target.toString()]: 'admin' },
+      }),
+    },
+  });
+  const summary = await svc.escalateDueQuestions();
+  assert.equal(summary.checked, 1);
+  assert.equal(summary.escalated, 1);
+  assert.equal(summary.expired, 0);
+  const stored = model._docs.find((d) => String(d._id) === String(questionId));
+  assert.equal(stored.status, 'pending', 'question stays pending after escalation');
+  assert.equal(stored.escalationStep, 1, 'escalationStep advanced');
+  assert.equal(stored.targetRole, 'admin');
+  assert.equal(stored.escalationHistory.length, 1);
+  assert.ok(stored.expiresAt > new Date(), 'expiresAt re-armed into the future');
 });
 
 // ------------------------------------------------------------------
