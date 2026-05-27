@@ -79,8 +79,36 @@ Recommended fields:
 | `condition` | object? | Safe expression/condition descriptor, not arbitrary code |
 | `label` | string? | UI label |
 | `ui` | object? | Non-runtime visual metadata |
+| `payloadMapping` | `Record<string,string>?` | Per-edge filter/rename of source output exposed to the target via `ctx.incoming.*` |
 
 Conditions should use a constrained expression format such as `{ left, operator, right }` or JSONLogic-like descriptors. Do not execute user-provided JavaScript.
+
+#### Payload-Mapping per Edge (T-325)
+
+By default a target node has full access to every upstream node's output via templates like `{{nodes.<sourceId>.<key>}}`. When an edge sets `payloadMapping`, the engine additionally evaluates `{ targetKey: sourcePath }` against the source node's output and stashes the result under `ctx.fromEdges[<edgeId>]`. The target node then sees a merged `ctx.incoming` populated from every incoming edge's mapping.
+
+The original `{{nodes.X.foo}}` access is **not** affected by mapping — it's purely additive. Use mapping when you want a node to:
+
+- consume a stable, renamed shape (e.g. `incoming.ticketId` instead of `nodes.todoCreate.todoId`)
+- restrict what flows from upstream so a later refactor of the source node can't break the receiver
+
+Example:
+
+```json
+{
+  "id": "e1",
+  "source": "todoCreate",
+  "target": "agentTask",
+  "payloadMapping": {
+    "ticketId": "todoId",
+    "ticketTitle": "title"
+  }
+}
+```
+
+In the `agentTask` node config you'd then reference `{{incoming.ticketId}}` / `{{incoming.ticketTitle}}`. Multiple incoming edges with mappings get shallow-merged; on key conflicts the later-evaluated edge wins.
+
+Pass-through (no `payloadMapping` or empty object) is the default and matches pre-T-325 behavior.
 
 ### WorkflowRun
 

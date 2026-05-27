@@ -80,6 +80,11 @@ export class WorkflowEdgeDto {
   @IsOptional()
   @IsObject()
   ui?: Record<string, unknown>;
+
+  // T-325: per-edge mapping — key=target-side name, value=source-side path.
+  @IsOptional()
+  @IsObject()
+  payloadMapping?: Record<string, string>;
 }
 
 export class CreateWorkflowDefinitionDto {

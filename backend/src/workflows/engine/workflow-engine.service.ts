@@ -12,8 +12,10 @@ import { ModuleRef } from '@nestjs/core';
 import {
   WorkflowDefinition,
   WorkflowDefinitionDocument,
+  WorkflowEdge,
   WorkflowNode,
 } from '../schemas/workflow-definition.schema';
+import { lookupPath } from '../nodes/template';
 import {
   WorkflowRun,
   WorkflowRunDocument,
@@ -401,13 +403,28 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       logs.push(entry);
       while (logs.length > NODE_LOG_CAP) logs.shift();
     };
+    // T-325: build the per-target `incoming` bag from edges that landed on
+    // this node and carry a payloadMapping. Templates can use
+    // `{{incoming.foo}}` instead of (or alongside) `{{nodes.X.foo}}`.
+    const baseContext = (run.context as {
+      nodes?: Record<string, unknown>;
+      fromEdges?: Record<string, Record<string, unknown>>;
+    }) ?? { nodes: {} };
+    const snapshot = run.definitionSnapshot as { edges?: WorkflowEdge[] };
+    const incoming: Record<string, unknown> = {};
+    for (const edge of snapshot.edges ?? []) {
+      if (edge.target !== node.id) continue;
+      const fromEdge = baseContext.fromEdges?.[edge.id];
+      if (fromEdge) Object.assign(incoming, fromEdge);
+    }
+
     return {
       run: run.toObject() as never,
       nodeRun: nodeRun.toObject() as never,
       node,
       config: (node.config as Record<string, unknown>) ?? {},
       secretRefs: node.secretRefs ?? [],
-      runContext: run.context ?? { nodes: {} },
+      runContext: { ...baseContext, incoming },
       logger: {
         info: (m: string, d?: Record<string, unknown>) => append('info', m, d),
         warn: (m: string, d?: Record<string, unknown>) => append('warn', m, d),
@@ -437,16 +454,36 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
   ): Promise<void> {
     if (result.status === 'success') {
       await this.completeNodeRun(nodeRun, result);
-      const ctx = (run.context as { nodes: Record<string, unknown> }) ?? { nodes: {} };
+      const ctx = (run.context as {
+        nodes: Record<string, unknown>;
+        fromEdges?: Record<string, Record<string, unknown>>;
+      }) ?? { nodes: {} };
       ctx.nodes = ctx.nodes ?? {};
       // Persist redacted output to run.context so downstream nodes can read
       // upstream output without re-leaking secrets via the context object.
-      ctx.nodes[node.id] = redactValue(result.output ?? {});
+      const redactedOutput = redactValue(result.output ?? {}) as Record<string, unknown>;
+      ctx.nodes[node.id] = redactedOutput;
+
+      const snapshot = run.definitionSnapshot as { nodes: WorkflowNode[]; edges: WorkflowEdge[] };
+
+      // T-325: evaluate payloadMapping for outgoing edges and persist the
+      // mapped value per edge. Target nodes pick it up in buildContext.
+      for (const edge of snapshot.edges ?? []) {
+        if (edge.source !== node.id) continue;
+        const mapping = edge.payloadMapping;
+        if (!mapping || Object.keys(mapping).length === 0) continue;
+        const mapped: Record<string, unknown> = {};
+        for (const [targetKey, sourcePath] of Object.entries(mapping)) {
+          mapped[targetKey] = lookupPath(sourcePath, redactedOutput);
+        }
+        ctx.fromEdges = ctx.fromEdges ?? {};
+        ctx.fromEdges[edge.id] = mapped;
+      }
+
       run.context = ctx;
       run.markModified('context');
       await run.save();
 
-      const snapshot = run.definitionSnapshot as { nodes: WorkflowNode[]; edges: unknown[] };
       const succs = nextNodes(
         node.id,
         result.branch ?? 'success',

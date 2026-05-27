@@ -81,6 +81,17 @@ export class WorkflowEdge {
 
   @Prop({ type: Object })
   ui?: Record<string, unknown>;
+
+  /**
+   * T-325: per-edge payload mapping. When set, the target node receives ONLY
+   * the listed keys from this source via `ctx.incoming[<targetKey>]` —
+   * everything else from the source is hidden. Key = target-side name,
+   * value = source-side property path (e.g. `todoId` or `result.items.0.id`).
+   * Missing/empty means pass-through; existing `${nodes.X.foo}` template
+   * access is unaffected either way.
+   */
+  @Prop({ type: Object })
+  payloadMapping?: Record<string, string>;
 }
 
 export const WorkflowEdgeSchema = SchemaFactory.createForClass(WorkflowEdge);

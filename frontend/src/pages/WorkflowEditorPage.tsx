@@ -306,6 +306,24 @@ function EditorInner() {
     return map;
   }, [edges, selectedNodeId]);
 
+  // T-325: outgoing edges of the selected node — feed the new "Ausgabe an
+  // nächste Nodes" summary section in the inspector.
+  const outgoingEdgesForSelected = useMemo<WfEdge[]>(() => {
+    if (!selectedNodeId) return [];
+    return edges.filter((e) => e.source === selectedNodeId).map(edgeToWf);
+  }, [edges, selectedNodeId]);
+
+  // T-325: id → minimal node info for label rendering in the edge summary
+  // and source-output lookup in the EdgeInspector.
+  const nodesById = useMemo<Record<string, { id: string; type: string; label?: string }>>(() => {
+    const out: Record<string, { id: string; type: string; label?: string }> = {};
+    for (const n of nodes) {
+      const d = n.data as { type: string; label?: string };
+      out[n.id] = { id: n.id, type: d.type, label: d.label };
+    }
+    return out;
+  }, [nodes]);
+
   const localIssues = useMemo(() => {
     if (!selectedNode) return [];
     const d = selectedNode.data as { type: string; config?: Record<string, unknown> };
@@ -436,6 +454,8 @@ function EditorInner() {
               catalog={catalog}
               upstreamNodes={upstreamNodes}
               outgoingEdgeCountByBranch={outgoingByBranch}
+              outgoingEdges={outgoingEdgesForSelected}
+              nodesById={nodesById}
               localIssues={localIssues}
               onChangeConfig={(cfg) => {
                 if (!selectedNodeId) return;
@@ -459,6 +479,14 @@ function EditorInner() {
                 setDirty(true);
               }}
               onDeleteEdge={() => selectedEdgeId && handleDeleteEdge(selectedEdgeId)}
+              onSelectEdge={(eid) => {
+                setSelectedNodeId(null);
+                setSelectedEdgeId(eid);
+              }}
+              onChangeEdgePayloadMapping={(eid, mapping) => {
+                setEdges((es) => es.map((e) => e.id === eid ? { ...e, data: { ...e.data, payloadMapping: mapping } } : e));
+                setDirty(true);
+              }}
             />
           </aside>
         ) : (
@@ -504,7 +532,7 @@ function toReactFlowEdge(e: WfEdge): Edge {
     sourceHandle: e.sourcePort ?? (e.branch && e.branch !== 'always' ? e.branch : null),
     targetHandle: e.targetPort ?? null,
     type: 'workflowEdge',
-    data: { branch: e.branch ?? 'always', condition: e.condition },
+    data: { branch: e.branch ?? 'always', condition: e.condition, payloadMapping: e.payloadMapping },
   };
 }
 
@@ -517,6 +545,7 @@ function edgeToWf(e: Edge): WfEdge {
     targetPort: e.targetHandle ?? undefined,
     branch: ((e.data as { branch?: WfEdge['branch'] })?.branch ?? 'always') as WfEdge['branch'],
     condition: (e.data as { condition?: Record<string, unknown> })?.condition,
+    payloadMapping: (e.data as { payloadMapping?: Record<string, string> })?.payloadMapping,
   };
 }
 

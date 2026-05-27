@@ -33,6 +33,8 @@ export interface WorkflowEdge {
   condition?: Record<string, unknown>;
   label?: string;
   ui?: Record<string, unknown>;
+  /** T-325: per-edge payload mapping (target-key → source-side property path). */
+  payloadMapping?: Record<string, string>;
 }
 
 export interface WorkflowDefinition {
