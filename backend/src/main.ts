@@ -74,7 +74,12 @@ import { Subscription } from 'rxjs';
 function createMcpServer(services: McpServices): Server {
   const server = new Server(
     { name: 'DevGrimoire', version: '1.0.0' },
-    { capabilities: { tools: {} } },
+    // M-35: declare `resources` capability so registerMcpTools can install
+    // the ListResources/ReadResource handlers for the MCP Apps extension
+    // (io.modelcontextprotocol/ui). Without this the SDK throws
+    // "Server does not support resources" at handler-registration time
+    // and the per-session SSE bootstrap dies with HTTP 500.
+    { capabilities: { tools: {}, resources: {} } },
   );
   registerMcpTools(server, services);
   return server;
