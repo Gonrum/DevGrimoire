@@ -34,6 +34,7 @@ import { TestWorkflowNodeDto } from '../dto/workflow.dto';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { WORKFLOW_RUN_PROGRESS } from '../../events/project-event';
 import { redact, redactLogs, redactValue } from '../workflow-redaction';
 import {
   checkRunBudget,
@@ -242,6 +243,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       nodeType: node.type,
       attempt: nodeRun.attempt,
     });
+    this.eventEmitter.emit(WORKFLOW_RUN_PROGRESS, { runId: (run._id as Types.ObjectId).toString() });
 
     const timeoutMs = Number(((node.config ?? {}) as Record<string, unknown>).timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const ctx = this.buildContext(run, nodeRun, node);
@@ -462,6 +464,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       const isTimer = result.waitingFor?.type === 'delay';
       run.status = isTimer ? WorkflowRunStatus.WAITING_FOR_TIMER : WorkflowRunStatus.WAITING_FOR_USER;
       await run.save();
+      this.eventEmitter.emit(WORKFLOW_RUN_PROGRESS, { runId: (run._id as Types.ObjectId).toString() });
       return;
     }
 
@@ -517,6 +520,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       durationMs: nodeRun.durationMs,
       ...(result.error ? { errorCode: result.error.code } : {}),
     });
+    this.eventEmitter.emit(WORKFLOW_RUN_PROGRESS, { runId: nodeRun.runId.toString() });
   }
 
   private async maybeFinishRun(run: WorkflowRunDocument): Promise<void> {

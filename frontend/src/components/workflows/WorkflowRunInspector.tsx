@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { workflowsApi, WorkflowRun, WorkflowNodeRun, WorkflowRunStatus } from '../../api/workflows';
+import { wsEventBus, isProjectChangeEvent } from '../../api/wsEventBus';
 import { runStatusStyles } from './runStatusStyles';
 
 interface Props {
@@ -16,9 +17,16 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
   const [selected, setSelected] = useState<WorkflowNodeRun | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // T-353: Live-Updates über WS statt 1s-Polling. Backend emittet bei
+  // jedem Node-Start/Node-Ende/Run-Start/Run-Ende ein `workflow-run`-Event
+  // mit entityId=runId. Wir filtern darauf und re-fetchen mit 250ms-Throttle.
+  // Fallback: visibilitychange → einmaliger fetch beim Tab-Re-Focus
+  // (fängt verpasste Events nach WS-Reconnect-Gap ab).
+  const refetchTimer = useRef<number | null>(null);
   useEffect(() => {
     let cancelled = false;
-    const tick = async () => {
+
+    const refetch = async () => {
       try {
         const [r, nrs] = await Promise.all([
           workflowsApi.getRun(runId),
@@ -27,14 +35,42 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
         if (cancelled) return;
         setRun(r);
         setNodeRuns(nrs);
-        if (TERMINAL.includes(r.status)) return;
-        setTimeout(tick, 1000);
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
       }
     };
-    void tick();
-    return () => { cancelled = true; };
+
+    const scheduleRefetch = () => {
+      if (refetchTimer.current !== null) return;
+      refetchTimer.current = window.setTimeout(() => {
+        refetchTimer.current = null;
+        void refetch();
+      }, 250);
+    };
+
+    // Initialload sofort
+    void refetch();
+
+    const unsub = wsEventBus.subscribe({ kind: 'global' }, (event) => {
+      if (!isProjectChangeEvent(event)) return;
+      if (event.entity !== 'workflow-run' || event.entityId !== runId) return;
+      scheduleRefetch();
+    });
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refetch();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      cancelled = true;
+      unsub();
+      document.removeEventListener('visibilitychange', onVisible);
+      if (refetchTimer.current !== null) {
+        window.clearTimeout(refetchTimer.current);
+        refetchTimer.current = null;
+      }
+    };
   }, [runId]);
 
   const onCancel = async () => {

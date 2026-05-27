@@ -3,7 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 import { Observable, Subject } from 'rxjs';
-import { PROJECT_CHANGED, REPLICATION_STATUS_CHANGED, ProjectChangeEvent } from './project-event';
+import { PROJECT_CHANGED, REPLICATION_STATUS_CHANGED, WORKFLOW_RUN_PROGRESS, ProjectChangeEvent } from './project-event';
 import { NOTIFICATION_CREATED } from '../notifications/notifications.service';
 import { QUESTION_CREATED, QUESTION_ANSWERED } from '../questions/questions.service';
 
@@ -273,6 +273,23 @@ export class EventsBusService implements OnModuleInit, OnModuleDestroy {
       projectId: null,
       entity: 'replication-status',
       action: 'updated',
+    });
+  }
+
+  // T-353: route all run-lifecycle signals from the workflow engine into the
+  // WS bus as a single `workflow-run` entity. queued/finished are the existing
+  // engine signals; progress is the new per-node trigger. Frontend filters by
+  // entityId to scope to a single run-inspector window.
+  @OnEvent(WORKFLOW_RUN_PROGRESS)
+  @OnEvent('workflow.run.queued')
+  @OnEvent('workflow.run.finished')
+  handleWorkflowRunProgress(payload: { runId?: string }) {
+    if (!payload?.runId) return;
+    this.events$$.next({
+      projectId: null,
+      entity: 'workflow-run',
+      action: 'updated',
+      entityId: payload.runId,
     });
   }
 }
