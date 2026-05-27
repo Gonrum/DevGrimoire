@@ -1811,6 +1811,70 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+    listAll: (filters: {
+      status?: QuestionStatus[];
+      direction?: QuestionDirection;
+      projectId?: string;
+      customerId?: string;
+      todoId?: string;
+      milestoneId?: string;
+      researchSessionId?: string;
+      chatSessionId?: string;
+      targetUserId?: string;
+      createdByUserId?: string;
+      agentName?: string;
+      createdAfter?: string;
+      createdBefore?: string;
+      q?: string;
+      limit?: number;
+      offset?: number;
+    } = {}) => {
+      const qs = new URLSearchParams();
+      if (filters.status && filters.status.length > 0) qs.set('status', filters.status.join(','));
+      if (filters.direction) qs.set('direction', filters.direction);
+      if (filters.projectId) qs.set('projectId', filters.projectId);
+      if (filters.customerId) qs.set('customerId', filters.customerId);
+      if (filters.todoId) qs.set('todoId', filters.todoId);
+      if (filters.milestoneId) qs.set('milestoneId', filters.milestoneId);
+      if (filters.researchSessionId) qs.set('researchSessionId', filters.researchSessionId);
+      if (filters.chatSessionId) qs.set('chatSessionId', filters.chatSessionId);
+      if (filters.targetUserId) qs.set('targetUserId', filters.targetUserId);
+      if (filters.createdByUserId) qs.set('createdByUserId', filters.createdByUserId);
+      if (filters.agentName) qs.set('agentName', filters.agentName);
+      if (filters.createdAfter) qs.set('createdAfter', filters.createdAfter);
+      if (filters.createdBefore) qs.set('createdBefore', filters.createdBefore);
+      if (filters.q) qs.set('q', filters.q);
+      if (filters.limit !== undefined) qs.set('limit', String(filters.limit));
+      if (filters.offset !== undefined) qs.set('offset', String(filters.offset));
+      const suffix = qs.toString() ? `?${qs.toString()}` : '';
+      return request<{ items: Question[]; total: number }>(`/questions${suffix}`);
+    },
+    cancel: (id: string, reason?: string) =>
+      request<Question>(`/questions/${id}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      }),
+    snooze: (id: string, snoozeUntil: string) =>
+      request<Question>(`/questions/${id}/snooze`, {
+        method: 'POST',
+        body: JSON.stringify({ snoozeUntil }),
+      }),
+    createFollowupTodo: (
+      id: string,
+      data: { title?: string; description?: string; priority?: 'low' | 'medium' | 'high' | 'critical' } = {},
+    ) =>
+      request<{ todoId: string; question: Question }>(`/questions/${id}/create-followup-todo`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    markAsDecision: (
+      id: string,
+      data: { decision: string; rationale?: string; scope?: string; tags?: string[] },
+    ) =>
+      request<{ knowledgeId: string; question: Question }>(`/questions/${id}/mark-as-decision`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
   settings: {
     get: (key: string) =>
@@ -3018,7 +3082,13 @@ export interface ChatToolExecutionResult {
 }
 
 export type QuestionDirection = 'agent_to_user' | 'user_to_agent';
-export type QuestionStatus = 'pending' | 'answered' | 'expired';
+export type QuestionStatus =
+  | 'pending'
+  | 'answered'
+  | 'expired'
+  | 'snoozed'
+  | 'cancelled'
+  | 'superseded';
 
 export type EscalationTargetKind = 'user' | 'role' | 'broadcast';
 
@@ -3050,6 +3120,14 @@ export interface Question {
   context?: string;
   todoId?: string;
   projectId?: string;
+  /** T-390: customer-scoped questions */
+  customerId?: string;
+  /** T-390: originating Research Session */
+  researchSessionId?: string;
+  /** T-390: originating Chat Session */
+  chatSessionId?: string;
+  /** T-390: milestone-level decisions */
+  milestoneId?: string;
   targetUserId?: string;
   /** T-393: role-based audience snapshot at create-time. */
   targetRole?: string;
@@ -3071,6 +3149,16 @@ export interface Question {
   timeoutMs: number;
   expiresAt?: string;
   knowledgeId?: string;
+  /** T-391: Knowledge entry created via markAsDecision */
+  decisionKnowledgeId?: string;
+  /** T-391: Todo created via createFollowupTodo */
+  followupTodoId?: string;
+  /** T-394: when a snoozed question should wake up */
+  snoozeUntil?: string;
+  /** T-394: cancellation or supersede reason */
+  closeReason?: string;
+  /** T-394: replacement Question id when status=superseded */
+  supersededByQuestionId?: string;
   escalationChain?: EscalationStep[];
   escalationStep?: number;
   escalationHistory?: EscalationHistoryEntry[];

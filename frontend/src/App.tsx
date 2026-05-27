@@ -17,6 +17,7 @@ import ProjectSettings from './pages/ProjectSettings';
 import TagManagement from './pages/TagManagement';
 import ResearchOverview from './pages/ResearchOverview';
 import ResearchSessionPage from './pages/ResearchSessionPage';
+import QuestionsOverview from './pages/QuestionsOverview';
 import TodoDetailPage from './pages/TodoDetailPage';
 import TodoCreatePage from './pages/TodoCreatePage';
 import MilestoneCreatePage from './pages/MilestoneCreatePage';
@@ -241,6 +242,14 @@ function AppShell() {
               {t('nav.research')}
             </NavLink>
             <NavLink
+              to="/questions"
+              className={({ isActive }) =>
+                isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'
+              }
+            >
+              {t('nav.questions')}
+            </NavLink>
+            <NavLink
               to="/docs"
               className={({ isActive }) =>
                 isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'
@@ -327,6 +336,15 @@ function AppShell() {
               {t('nav.research')}
             </NavLink>
             <NavLink
+              to="/questions"
+              onClick={() => setMobileMenuOpen(false)}
+              className={({ isActive }) =>
+                `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
+              }
+            >
+              {t('nav.questions')}
+            </NavLink>
+            <NavLink
               to="/docs"
               onClick={() => setMobileMenuOpen(false)}
               className={({ isActive }) =>
@@ -355,6 +373,7 @@ function AppShell() {
           <Route path="/projects/tags" element={<TagManagement />} />
           <Route path="/research" element={<ResearchOverview />} />
           <Route path="/research/:id" element={<ResearchSessionPage />} />
+          <Route path="/questions" element={<QuestionsOverview />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route path="/customers" element={<CustomersOverview />} />
           <Route path="/customers/new" element={<CustomerCreatePage />} />

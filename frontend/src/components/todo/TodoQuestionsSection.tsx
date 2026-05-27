@@ -333,7 +333,7 @@ function AnsweredQuestionCard({
         </div>
       )}
 
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 flex items-center gap-2 flex-wrap">
         {!question.knowledgeId && !showSaveForm && (
           <Button type="button" size="xs" variant="accent" onClick={() => { setSaveContent(defaultContent); setShowSaveForm(true); }}>
             {t('questions.saveAsKnowledge')}
@@ -342,6 +342,54 @@ function AnsweredQuestionCard({
         {question.knowledgeId && knowledgePath && (
           <Button type="button" size="xs" variant="ghost-blue" onClick={() => navigate(knowledgePath)}>
             {t('questions.openKnowledge')}
+          </Button>
+        )}
+        {!question.followupTodoId && (
+          <Button
+            type="button"
+            size="xs"
+            variant="secondary"
+            onClick={async () => {
+              try {
+                const out = await api.questions.createFollowupTodo(question._id);
+                onChanged();
+                navigate(`/projects/${projectId}/todos/${out.todoId}`);
+              } catch (err) {
+                onError((err as Error).message || t('questionsPage.followupCreatedToast'));
+              }
+            }}
+          >
+            {t('questionsPage.createFollowup')}
+          </Button>
+        )}
+        {question.followupTodoId && projectId && (
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost-blue"
+            onClick={() => navigate(`/projects/${projectId}/todos/${question.followupTodoId}`)}
+          >
+            {t('questionsPage.linkFollowup')}
+          </Button>
+        )}
+        {!question.decisionKnowledgeId && (
+          <Button
+            type="button"
+            size="xs"
+            variant="secondary"
+            onClick={async () => {
+              const decision = window.prompt(t('questionsPage.decisionPlaceholder'));
+              if (!decision || !decision.trim()) return;
+              const rationale = window.prompt(t('questionsPage.decisionRationalePlaceholder')) || undefined;
+              try {
+                await api.questions.markAsDecision(question._id, { decision: decision.trim(), rationale });
+                onChanged();
+              } catch (err) {
+                onError((err as Error).message || t('questionsPage.decisionRecordedToast'));
+              }
+            }}
+          >
+            {t('questionsPage.recordDecision')}
           </Button>
         )}
       </div>
