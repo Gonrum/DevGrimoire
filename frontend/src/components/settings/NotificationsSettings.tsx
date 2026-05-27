@@ -40,6 +40,9 @@ const PUSH_CATEGORIES: PushCategory[] = [
   { key: 'mcp_system', default: false, group: 'mcp' },
 ];
 
+// T-340: quiet-hours defaults mirror backend DEFAULT_QUIET_HOURS_OVERRIDES.
+const DEFAULT_QUIET_OVERRIDES = ['monitoring_unhealthy', 'workflow_failure', 'backup_failed', 'replication_failed'];
+
 export default function NotificationsSettings() {
   const { t } = useTranslation();
   const [pushCategories, setPushCategories] = useState<Record<string, boolean>>({});
@@ -48,6 +51,12 @@ export default function NotificationsSettings() {
   const [dictationEnabled, setDictationEnabled] = useState(
     () => localStorage.getItem('dg_dictation_enabled') !== 'false',
   );
+  // T-340: quiet-hours state
+  const [quietEnabled, setQuietEnabled] = useState(false);
+  const [quietFrom, setQuietFrom] = useState('22:00');
+  const [quietTo, setQuietTo] = useState('07:00');
+  const [quietOverrides, setQuietOverrides] = useState<string[]>(DEFAULT_QUIET_OVERRIDES);
+  const [quietSaving, setQuietSaving] = useState(false);
 
   const loadPushCategories = useCallback(async () => {
     setPushLoading(true);
@@ -69,6 +78,56 @@ export default function NotificationsSettings() {
   }, []);
 
   useEffect(() => { loadPushCategories(); }, [loadPushCategories]);
+
+  // T-340: load quiet-hours settings on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const [enabled, from, to, overrides] = await Promise.all([
+          api.settings.get('notification_quiet_hours_enabled'),
+          api.settings.get('notification_quiet_hours_from'),
+          api.settings.get('notification_quiet_hours_to'),
+          api.settings.get('notification_quiet_hours_overrides'),
+        ]);
+        if (enabled.value === 'true') setQuietEnabled(true);
+        if (from.value) setQuietFrom(from.value);
+        if (to.value) setQuietTo(to.value);
+        if (overrides.value !== null && overrides.value !== undefined) {
+          setQuietOverrides(overrides.value.split(',').map((s) => s.trim()).filter(Boolean));
+        }
+      } catch { /* ignore */ }
+    })();
+  }, []);
+
+  const saveQuietHours = async (patch: Partial<{ enabled: boolean; from: string; to: string; overrides: string[] }>) => {
+    setQuietSaving(true);
+    try {
+      if (patch.enabled !== undefined) {
+        setQuietEnabled(patch.enabled);
+        await api.settings.set('notification_quiet_hours_enabled', patch.enabled ? 'true' : 'false');
+      }
+      if (patch.from !== undefined) {
+        setQuietFrom(patch.from);
+        await api.settings.set('notification_quiet_hours_from', patch.from);
+      }
+      if (patch.to !== undefined) {
+        setQuietTo(patch.to);
+        await api.settings.set('notification_quiet_hours_to', patch.to);
+      }
+      if (patch.overrides !== undefined) {
+        setQuietOverrides(patch.overrides);
+        await api.settings.set('notification_quiet_hours_overrides', patch.overrides.join(','));
+      }
+    } catch { /* ignore */ }
+    setQuietSaving(false);
+  };
+
+  const toggleQuietOverride = (key: string) => {
+    const next = quietOverrides.includes(key)
+      ? quietOverrides.filter((k) => k !== key)
+      : [...quietOverrides, key];
+    saveQuietHours({ overrides: next });
+  };
 
   const savePushCategories = async (updated: Record<string, boolean>) => {
     setPushCategories(updated);
@@ -171,6 +230,70 @@ export default function NotificationsSettings() {
                 {t('settings.dictationResetConsent')}
               </Button>
             </div>
+          </div>
+        </SettingsSection>
+
+        {/* T-340: Quiet Hours */}
+        <SettingsSection
+          title={t('settings.quietHoursTitle')}
+          description={t('settings.quietHoursDescription')}
+        >
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="text-sm text-gray-300">{t('settings.quietHoursEnabled')}</div>
+              <Switch
+                checked={quietEnabled}
+                onChange={(next) => saveQuietHours({ enabled: next })}
+                disabled={quietSaving}
+              />
+            </div>
+            {quietEnabled && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="text-xs text-gray-500">
+                    {t('settings.quietHoursFrom')}
+                    <input
+                      type="time"
+                      value={quietFrom}
+                      onChange={(e) => saveQuietHours({ from: e.target.value })}
+                      disabled={quietSaving}
+                      className="mt-1 block w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+                    />
+                  </label>
+                  <label className="text-xs text-gray-500">
+                    {t('settings.quietHoursTo')}
+                    <input
+                      type="time"
+                      value={quietTo}
+                      onChange={(e) => saveQuietHours({ to: e.target.value })}
+                      disabled={quietSaving}
+                      className="mt-1 block w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+                    />
+                  </label>
+                </div>
+                <div>
+                  <div className="mb-2 text-xs text-gray-500">{t('settings.quietHoursOverrideHint')}</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PUSH_CATEGORIES.map((cat) => {
+                      const sel = quietOverrides.includes(cat.key);
+                      return (
+                        <button
+                          key={cat.key}
+                          type="button"
+                          onClick={() => toggleQuietOverride(cat.key)}
+                          disabled={quietSaving}
+                          className={`text-xs rounded-full px-2 py-0.5 ${
+                            sel ? 'bg-amber-700/60 text-amber-100' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'
+                          }`}
+                        >
+                          {t(`settings.pushCategory_${cat.key}`)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </SettingsSection>
 

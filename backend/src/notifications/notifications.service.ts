@@ -8,6 +8,15 @@ import { SettingsService } from '../settings/settings.service';
 
 export const NOTIFICATION_CREATED = 'notification.created';
 export const NOTIFICATION_PUSH_CATEGORIES_KEY = 'notification_push_categories';
+// T-340: Quiet-Hours stored as instance-wide settings (matches the existing
+// per-category opt-in pattern — per-user infra doesn't exist yet, single-user
+// dev instance in practice). When `enabled`, pushes inside [from, to) are
+// suppressed UNLESS the category is in `overrides`. The notification doc is
+// still created so the in-app bell renders it.
+export const NOTIFICATION_QUIET_HOURS_ENABLED_KEY = 'notification_quiet_hours_enabled';
+export const NOTIFICATION_QUIET_HOURS_FROM_KEY = 'notification_quiet_hours_from';
+export const NOTIFICATION_QUIET_HOURS_TO_KEY = 'notification_quiet_hours_to';
+export const NOTIFICATION_QUIET_HOURS_OVERRIDES_KEY = 'notification_quiet_hours_overrides';
 // Default: high-signal system events + notify_user/ask_user. All mcp_* disabled.
 // Users can opt-in/out per category in NotificationsSettings.
 export const DEFAULT_PUSH_CATEGORIES = [
@@ -18,6 +27,13 @@ export const DEFAULT_PUSH_CATEGORIES = [
   'replication_failed',
   'backup_failed',
   'ssh_auth_failure',
+].join(',');
+// Sensible quiet-hours override defaults — failures and explicit pings always come through.
+export const DEFAULT_QUIET_HOURS_OVERRIDES = [
+  'monitoring_unhealthy',
+  'workflow_failure',
+  'backup_failed',
+  'replication_failed',
 ].join(',');
 
 @Injectable()
@@ -44,13 +60,62 @@ export class NotificationsService {
         DEFAULT_PUSH_CATEGORIES,
       );
       const categories = enabled.split(',').map((c) => c.trim()).filter(Boolean);
-      if (categories.includes(category)) {
+      if (categories.includes(category) && !(await this.isPushSuppressedByQuietHours(category))) {
         this.pushService.sendNotification(title, body, url).catch(() => {});
       }
-    } else {
+    } else if (!(await this.isPushSuppressedByQuietHours(undefined))) {
       this.pushService.sendNotification(title, body, url).catch(() => {});
     }
     return notification;
+  }
+
+  /**
+   * T-340: returns true when the current server time falls inside the
+   * configured quiet-hours window AND the category is not on the override
+   * allowlist. Categories without an explicit category param are treated as
+   * non-override (still suppressed during quiet hours).
+   *
+   * Failure mode is fail-open: any parse error or missing setting → return
+   * false (notification gets pushed). Silently swallowing pushes is worse
+   * than letting one slip through during configuration mishaps.
+   */
+  private async isPushSuppressedByQuietHours(category: string | undefined): Promise<boolean> {
+    try {
+      const enabledStr = await this.settingsService.get(NOTIFICATION_QUIET_HOURS_ENABLED_KEY);
+      if (enabledStr !== 'true') return false;
+      const overrides = (
+        await this.settingsService.getOrDefault(NOTIFICATION_QUIET_HOURS_OVERRIDES_KEY, DEFAULT_QUIET_HOURS_OVERRIDES)
+      )
+        .split(',')
+        .map((c) => c.trim())
+        .filter(Boolean);
+      if (category && overrides.includes(category)) return false;
+
+      const from = await this.settingsService.get(NOTIFICATION_QUIET_HOURS_FROM_KEY);
+      const to = await this.settingsService.get(NOTIFICATION_QUIET_HOURS_TO_KEY);
+      if (!from || !to) return false;
+      const fromMin = this.parseHHMM(from);
+      const toMin = this.parseHHMM(to);
+      if (fromMin === null || toMin === null) return false;
+
+      const now = new Date();
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+      // Window wraps midnight when from > to (e.g. 22:00 → 07:00).
+      return fromMin <= toMin
+        ? nowMin >= fromMin && nowMin < toMin
+        : nowMin >= fromMin || nowMin < toMin;
+    } catch {
+      return false;
+    }
+  }
+
+  private parseHHMM(value: string): number | null {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+    if (!m) return null;
+    const h = parseInt(m[1], 10);
+    const mm = parseInt(m[2], 10);
+    if (h < 0 || h > 23 || mm < 0 || mm > 59) return null;
+    return h * 60 + mm;
   }
 
   async findAll(limit = 30, unreadOnly = false): Promise<NotificationDocument[]> {
