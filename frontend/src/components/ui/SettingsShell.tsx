@@ -21,7 +21,7 @@ export function SettingsShell<T extends string>({
   activeTab,
   onTabChange,
   children,
-  maxWidth = 'max-w-5xl',
+  maxWidth = 'max-w-7xl',
 }: SettingsShellProps<T>) {
   const showSidebar = tabs.length > 1 && activeTab !== undefined && onTabChange !== undefined;
 
