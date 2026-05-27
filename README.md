@@ -214,31 +214,27 @@ To smoke-test registry-readiness and catch accidental metadata leaks, run from `
 DEVGRIMOIRE_BASE_URL=http://localhost:3200 npm run check:mcp-registry
 ```
 
-### Local Connection (stdio)
+### stdio-only clients (Claude Desktop, others without native SSE)
 
-Alternatively, the MCP server can be started locally via stdio. This requires the backend to be built locally and MongoDB to be reachable.
-
-```bash
-cd backend
-npm install
-NODE_OPTIONS="--max-old-space-size=8192" npm run build
-```
-
-In `~/.claude.json`:
+For MCP clients that do not speak HTTP/SSE directly, proxy the running HTTP MCP transport through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote). No local backend build, no path-juggling, no duplicated MongoDB credentials -- the proxy just forwards stdio ⇄ SSE:
 
 ```json
 {
   "mcpServers": {
     "devgrimoire": {
-      "command": "node",
-      "args": ["/path/to/DevGrimoire/backend/dist/mcp-server.js"],
-      "env": {
-        "MONGODB_URI": "mongodb://user:pass@localhost:27017/devgrimoire?authSource=admin&directConnection=true"
-      }
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://<hostname>/sse?apiKey=cv_...",
+        "--allow-http"
+      ]
     }
   }
 }
 ```
+
+Drop `--allow-http` when the endpoint is served over HTTPS. Generate the API key via the DevGrimoire UI (Settings → API Keys) and scope it explicitly -- the key is what authorises the MCP session.
 
 > **Note:** When authentication is enabled, the HTTP MCP transports require a DevGrimoire API key (`Authorization: Bearer cv_...` or `?apiKey=cv_...`). When authentication is disabled, all endpoints including MCP are open and must be restricted via firewall or VPN.
 
