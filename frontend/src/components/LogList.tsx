@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { api, LogEntry, LogStats } from '../api/client';
+import { Link } from 'react-router-dom';
+import { api, LogEntry, LogStats, Project } from '../api/client';
 import EmptyState from './ui/EmptyState';
 import Badge from './ui/Badge';
 import Card from './ui/Card';
@@ -38,8 +39,16 @@ function formatTime(dateStr: string, locale: string): string {
   });
 }
 
-export default function LogList({ projectId }: { projectId: string }) {
+interface LogListProps {
+  /** Per-project mode. When undefined, the component runs in global mode. */
+  projectId?: string;
+  /** T-338: required in global mode — for project filter + per-row project label. */
+  projects?: Project[];
+}
+
+export default function LogList({ projectId, projects }: LogListProps) {
   const { i18n } = useTranslation();
+  const globalMode = !projectId;
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [stats, setStats] = useState<LogStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,28 +56,45 @@ export default function LogList({ projectId }: { projectId: string }) {
   const [serviceFilter, setServiceFilter] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [searchActive, setSearchActive] = useState('');
+  // T-338: multi-project filter for global mode.
+  const [projectFilter, setProjectFilter] = useState<string[]>([]);
+  const projectsById = useMemo(() => {
+    const map: Record<string, Project> = {};
+    for (const p of projects ?? []) map[p._id] = p;
+    return map;
+  }, [projects]);
 
   const loadLogs = () => {
     setLoading(true);
-    api.logs
-      .list(projectId, {
-        level: levelFilter || undefined,
-        service: serviceFilter || undefined,
-        search: searchActive || undefined,
-        limit: 100,
-      })
+    const fetch = globalMode
+      ? api.logs.listGlobal({
+          projectIds: projectFilter.length > 0 ? projectFilter : undefined,
+          level: levelFilter || undefined,
+          service: serviceFilter || undefined,
+          search: searchActive || undefined,
+          limit: 100,
+        })
+      : api.logs.list(projectId!, {
+          level: levelFilter || undefined,
+          service: serviceFilter || undefined,
+          search: searchActive || undefined,
+          limit: 100,
+        });
+    fetch
       .then(setLogs)
       .catch(() => {})
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    api.logs.stats(projectId).then(setStats).catch(() => {});
-  }, [projectId]);
+    // Stats are per-project only — skip in global mode.
+    if (globalMode) { setStats(null); return; }
+    api.logs.stats(projectId!).then(setStats).catch(() => {});
+  }, [projectId, globalMode]);
 
   useEffect(() => {
     loadLogs();
-  }, [projectId, levelFilter, serviceFilter, searchActive]);
+  }, [projectId, levelFilter, serviceFilter, searchActive, projectFilter.join(',')]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,7 +139,7 @@ export default function LogList({ projectId }: { projectId: string }) {
             className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-violet-600"
           />
         </form>
-        {stats && stats.byService.length > 0 && (
+        {!globalMode && stats && stats.byService.length > 0 && (
           <select
             value={serviceFilter || ''}
             onChange={(e) => setServiceFilter(e.target.value || null)}
@@ -127,16 +153,61 @@ export default function LogList({ projectId }: { projectId: string }) {
             ))}
           </select>
         )}
-        {(levelFilter || serviceFilter || searchActive) && (
+        {globalMode && (
+          <input
+            type="text"
+            value={serviceFilter || ''}
+            onChange={(e) => setServiceFilter(e.target.value || null)}
+            placeholder={de ? 'Service-Name' : 'Service name'}
+            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-violet-600"
+            style={{ width: '160px' }}
+          />
+        )}
+        {(['error', 'warn', 'info', 'debug'] as const).map((level) => (
+          <button
+            key={level}
+            type="button"
+            onClick={() => setLevelFilter(levelFilter === level ? null : level)}
+            className={`rounded px-2 py-1 text-xs uppercase tracking-wide ${
+              levelFilter === level ? `${LEVEL_COLORS[level]} ring-1 ring-cyan-500` : 'bg-gray-800 text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            {level}
+          </button>
+        ))}
+        {(levelFilter || serviceFilter || searchActive || projectFilter.length > 0) && (
           <button
             type="button"
-            onClick={() => { setLevelFilter(null); setServiceFilter(null); setSearch(''); setSearchActive(''); }}
+            onClick={() => { setLevelFilter(null); setServiceFilter(null); setSearch(''); setSearchActive(''); setProjectFilter([]); }}
             className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1"
           >
             {de ? 'Filter zurücksetzen' : 'Clear filters'}
           </button>
         )}
       </div>
+
+      {/* T-338: project multi-select for global mode */}
+      {globalMode && projects && projects.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-gray-500 mr-1">{de ? 'Projekte:' : 'Projects:'}</span>
+          {projects.map((p) => {
+            const sel = projectFilter.includes(p._id);
+            return (
+              <button
+                key={p._id}
+                type="button"
+                onClick={() => setProjectFilter((prev) => sel ? prev.filter((id) => id !== p._id) : [...prev, p._id])}
+                className={`text-xs rounded-full px-2 py-0.5 transition-colors ${sel ? 'bg-cyan-700 text-cyan-100' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+              >
+                {p.name}
+              </button>
+            );
+          })}
+          {projectFilter.length > 0 && (
+            <span className="text-xs text-gray-500">({projectFilter.length} {de ? 'aktiv' : 'active'})</span>
+          )}
+        </div>
+      )}
 
       {/* Log entries */}
       {loading ? (
@@ -184,6 +255,14 @@ export default function LogList({ projectId }: { projectId: string }) {
                           {tag}
                         </Badge>
                       ))}
+                      {globalMode && log.projectId && projectsById[log.projectId] && (
+                        <Link
+                          to={`/projects/${log.projectId}?tab=logs`}
+                          className="text-xs text-cyan-400 hover:text-cyan-300"
+                        >
+                          {projectsById[log.projectId].name}
+                        </Link>
+                      )}
                       <span className="text-xs text-gray-600 ml-auto shrink-0">
                         {formatTime(log.createdAt, i18n.language)}
                       </span>

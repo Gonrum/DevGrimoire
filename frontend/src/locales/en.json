@@ -70,6 +70,10 @@
     "chars": "chars",
     "uploadFile": "Upload file"
   },
+  "globalLogs": {
+    "title": "Cross-project logs",
+    "subtitle": "Application logs across all projects (admin view). Filter by project, service or level."
+  },
   "researchSessions": {
     "overviewTitle": "Research",
     "newSession": "+ New research",
@@ -117,6 +121,7 @@
     "workflows": "Workflows",
     "research": "Research",
     "questions": "Questions",
+    "logs": "Logs",
     "settings": "Settings",
     "profile": "Profile",
     "logout": "Logout"

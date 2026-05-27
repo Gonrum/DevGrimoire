@@ -79,9 +79,14 @@
     "workflows": "Workflows",
     "research": "Recherche",
     "questions": "Fragen",
+    "logs": "Logs",
     "settings": "Einstellungen",
     "profile": "Profil",
     "logout": "Abmelden"
+  },
+  "globalLogs": {
+    "title": "Cross-Project Logs",
+    "subtitle": "Eingehende Application-Logs aller Projekte (Admin-Sicht). Filtere per Projekt, Service oder Level."
   },
   "researchSessions": {
     "overviewTitle": "Recherche",

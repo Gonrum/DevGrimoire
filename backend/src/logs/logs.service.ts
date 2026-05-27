@@ -3,6 +3,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types, FilterQuery } from 'mongoose';
 import { LogEntry, LogEntryDocument } from './schemas/log-entry.schema';
 import { CreateLogDto } from './dto/create-log.dto';
+import { RequestContext } from '../common/request-context';
+import { actorCanAccessProject } from '../common/permissions';
 
 const LOG_TTL_DAYS = parseInt(process.env.LOG_TTL_DAYS || '5', 10);
 
@@ -67,6 +69,61 @@ export class LogsService {
       .limit(limit)
       .lean()
       .exec();
+  }
+
+  /**
+   * T-338: global cross-project view. When `projectIds` is set, restrict
+   * to that allowlist. Always applies a per-row visibility filter via the
+   * actor in RequestContext, so a narrow-scope API key can't widen its
+   * view by dropping the projectId param.
+   */
+  async findGlobal(options?: {
+    projectIds?: string[];
+    level?: string;
+    service?: string;
+    search?: string;
+    startDate?: string;
+    endDate?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<any[]> {
+    const filter: FilterQuery<LogEntry> = {};
+
+    if (options?.projectIds && options.projectIds.length > 0) {
+      filter.projectId = { $in: options.projectIds.map((id) => new Types.ObjectId(id)) };
+    }
+    if (options?.level) filter.level = options.level;
+    if (options?.service) filter.service = options.service;
+    if (options?.search) filter.$text = { $search: options.search };
+    if (options?.startDate || options?.endDate) {
+      filter.createdAt = {};
+      if (options?.startDate) filter.createdAt.$gte = new Date(options.startDate);
+      if (options?.endDate) filter.createdAt.$lte = new Date(options.endDate);
+    }
+
+    const limit = options?.limit || 50;
+    const offset = options?.offset || 0;
+
+    // Oversample so the post-filter result still reaches `limit` when the
+    // actor can only see a subset of projects.
+    const actor = RequestContext.getUser();
+    const oversample = Math.min(limit * 3, 500);
+    const candidates = await this.logModel
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .skip(offset)
+      .limit(oversample)
+      .lean()
+      .exec();
+
+    const visible: LogEntryDocument[] = [];
+    for (const doc of candidates) {
+      if (actorCanAccessProject(actor, String(doc.projectId))) {
+        visible.push(doc as unknown as LogEntryDocument);
+      }
+      if (visible.length >= limit) break;
+    }
+    return visible;
   }
 
   async stats(projectId: string): Promise<{

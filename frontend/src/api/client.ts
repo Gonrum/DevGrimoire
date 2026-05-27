@@ -2456,6 +2456,20 @@ export const api = {
       if (filters?.offset) params.set('offset', String(filters.offset));
       return request<LogEntry[]>(`/logs?${params}`);
     },
+    // T-338: admin-only cross-project view.
+    listGlobal: (filters?: { projectIds?: string[]; level?: string; service?: string; search?: string; startDate?: string; endDate?: string; limit?: number; offset?: number }) => {
+      const params = new URLSearchParams();
+      if (filters?.projectIds && filters.projectIds.length > 0) params.set('projectIds', filters.projectIds.join(','));
+      if (filters?.level) params.set('level', filters.level);
+      if (filters?.service) params.set('service', filters.service);
+      if (filters?.search) params.set('search', filters.search);
+      if (filters?.startDate) params.set('startDate', filters.startDate);
+      if (filters?.endDate) params.set('endDate', filters.endDate);
+      if (filters?.limit) params.set('limit', String(filters.limit));
+      if (filters?.offset) params.set('offset', String(filters.offset));
+      const qs = params.toString();
+      return request<LogEntry[]>(qs ? `/logs/global?${qs}` : '/logs/global');
+    },
     stats: (projectId: string) =>
       request<LogStats>(`/logs/stats?projectId=${projectId}`),
   },

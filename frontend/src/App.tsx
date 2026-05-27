@@ -18,6 +18,7 @@ import TagManagement from './pages/TagManagement';
 import ResearchOverview from './pages/ResearchOverview';
 import ResearchSessionPage from './pages/ResearchSessionPage';
 import QuestionsOverview from './pages/QuestionsOverview';
+import GlobalLogsView from './pages/GlobalLogsView';
 import TodoDetailPage from './pages/TodoDetailPage';
 import TodoCreatePage from './pages/TodoCreatePage';
 import MilestoneCreatePage from './pages/MilestoneCreatePage';
@@ -140,6 +141,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
 function AppShell() {
   const { t } = useTranslation();
+  const { user, authEnabled } = useAuth();
+  const isAdmin = authEnabled && user?.role === 'admin';
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isSlaveMode, setIsSlaveMode] = useState(false);
   const location = useLocation();
@@ -249,6 +252,16 @@ function AppShell() {
             >
               {t('nav.questions')}
             </NavLink>
+            {isAdmin && (
+              <NavLink
+                to="/logs"
+                className={({ isActive }) =>
+                  isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'
+                }
+              >
+                {t('nav.logs')}
+              </NavLink>
+            )}
             <NavLink
               to="/docs"
               className={({ isActive }) =>
@@ -344,6 +357,17 @@ function AppShell() {
             >
               {t('nav.questions')}
             </NavLink>
+            {isAdmin && (
+              <NavLink
+                to="/logs"
+                onClick={() => setMobileMenuOpen(false)}
+                className={({ isActive }) =>
+                  `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
+                }
+              >
+                {t('nav.logs')}
+              </NavLink>
+            )}
             <NavLink
               to="/docs"
               onClick={() => setMobileMenuOpen(false)}
@@ -374,6 +398,7 @@ function AppShell() {
           <Route path="/research" element={<ResearchOverview />} />
           <Route path="/research/:id" element={<ResearchSessionPage />} />
           <Route path="/questions" element={<QuestionsOverview />} />
+          <Route path="/logs" element={<GlobalLogsView />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route path="/customers" element={<CustomersOverview />} />
           <Route path="/customers/new" element={<CustomerCreatePage />} />
