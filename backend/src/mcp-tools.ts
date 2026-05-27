@@ -1311,7 +1311,7 @@ const tools = [
         todoId: { type: 'string', description: 'Filter by Todo MongoDB ID (single todo). Use this to find user follow-ups before resuming work on a task.' },
         projectId: { type: 'string', description: 'Filter by Project MongoDB ID' },
         direction: { type: 'string', enum: ['agent_to_user', 'user_to_agent'], description: 'Direction filter. Defaults to all directions.' },
-        includeAnswered: { type: 'boolean', description: 'Include already-answered questions (default false — only open ones)' },
+        includeAnswered: { type: 'boolean', description: 'Include already-answered questions (default false — only open ones). Works for both todo-scoped and project-scoped queries.' },
         limit: { type: 'number', description: 'Max items (default 50, max 200)' },
       },
     },
@@ -4490,6 +4490,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               projectId: optionalString(a, 'projectId'),
               direction,
               limit,
+              includeAnswered,
             });
             result = { items: open.items.map(serializeQuestion), total: open.total };
           }

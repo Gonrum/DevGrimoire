@@ -8,7 +8,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { FilterQuery, Model, Types } from 'mongoose';
 import {
   Question,
@@ -22,6 +22,7 @@ import { TodosService } from '../todos/todos.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { KnowledgeDocument } from '../knowledge/schemas/knowledge.schema';
+import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 
 export const QUESTION_CREATED = 'question.created';
 export const QUESTION_ANSWERED = 'question.answered';
@@ -248,10 +249,11 @@ export class QuestionsService implements OnModuleInit {
     todoId?: string;
     limit?: number;
     offset?: number;
+    includeAnswered?: boolean;
   } = {}): Promise<{ items: QuestionDocument[]; total: number }> {
-    const q: FilterQuery<QuestionDocument> = {
-      status: { $in: ['pending', 'expired'] },
-    };
+    const q: FilterQuery<QuestionDocument> = filter.includeAnswered
+      ? {}
+      : { status: { $in: ['pending', 'expired'] } };
     if (filter.projectId) q.projectId = new Types.ObjectId(filter.projectId);
     if (filter.direction) q.direction = filter.direction;
     if (filter.todoId) q.todoId = new Types.ObjectId(filter.todoId);
@@ -448,5 +450,31 @@ export class QuestionsService implements OnModuleInit {
     await question.save();
 
     return knowledge;
+  }
+
+  /**
+   * Wenn ein Knowledge-Eintrag gelöscht wird, klemmt sonst die Question im
+   * "Wissen anzeigen"-Button mit einer toten Referenz fest. Listener clearet
+   * den Verweis, damit eine erneute Konversion möglich ist und das UI nicht
+   * ins Leere verlinkt.
+   */
+  @OnEvent(PROJECT_CHANGED)
+  async handleProjectChange(event: ProjectChangeEvent): Promise<void> {
+    if (event.entity !== 'knowledge' || event.action !== 'deleted') return;
+    if (!event.entityId || !Types.ObjectId.isValid(event.entityId)) return;
+
+    const knowledgeObjectId = new Types.ObjectId(event.entityId);
+    const result = await this.questionModel
+      .updateMany(
+        { knowledgeId: knowledgeObjectId },
+        { $unset: { knowledgeId: '' } },
+      )
+      .exec();
+
+    if (result.modifiedCount > 0) {
+      this.logger.log(
+        `Cleared knowledgeId on ${result.modifiedCount} question(s) after knowledge ${event.entityId} was deleted`,
+      );
+    }
   }
 }
