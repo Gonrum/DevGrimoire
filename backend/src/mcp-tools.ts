@@ -2,7 +2,10 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { UI_RESOURCES, findUiResource, TODO_UI_RESOURCE_URI } from './mcp-apps/resources';
 import { ProjectsService } from './projects/projects.service';
 import { TodosService } from './todos/todos.service';
 import { SessionsService } from './sessions/sessions.service';
@@ -854,6 +857,16 @@ const tools = [
         id: { type: 'string', description: 'Todo MongoDB ID' },
         number: { type: 'string', description: 'Todo number (e.g. "3" or "T-3") — requires projectId' },
         projectId: { type: 'string', description: 'Project ID (required when using number)' },
+      },
+    },
+    // M-35: MCP Apps Extension (io.modelcontextprotocol/ui). Apps-aware hosts
+    // render the JSON result inside the linked HTML view (`ui://devgrimoire/todo`)
+    // and pipe the structured payload via `ui/notifications/tool-result` to the
+    // sandboxed iframe. Hosts without Apps support ignore this metadata —
+    // fallback to plain JSON is automatic. See docs/mcp-apps.md.
+    _meta: {
+      ui: {
+        resourceUri: TODO_UI_RESOURCE_URI,
       },
     },
   },
@@ -3949,6 +3962,39 @@ export function registerMcpTools(server: Server, services: McpServices): void {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
     return { tools: filteredTools };
+  });
+
+  // M-35: MCP Apps Extension (io.modelcontextprotocol/ui).
+  //
+  // We always advertise UI-resources unconditionally. Hosts that do not
+  // implement the Apps extension simply never call `resources/read` for
+  // the `ui://` URIs and ignore the `_meta.ui.resourceUri` annotation on
+  // tools — fallback to the classic JSON tool result is automatic.
+  // See docs/mcp-apps.md for the full mapping and security model.
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    return {
+      resources: UI_RESOURCES.map((r) => ({
+        uri: r.uri,
+        name: r.name,
+        description: r.description,
+        mimeType: r.mimeType,
+      })),
+    };
+  });
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
+    const uri = req.params?.uri as string | undefined;
+    if (!uri) throw new Error('resources/read requires a uri parameter');
+    const resource = findUiResource(uri);
+    if (!resource) throw new Error(`Unknown resource: ${uri}`);
+    return {
+      contents: [{
+        uri: resource.uri,
+        mimeType: resource.mimeType,
+        text: resource.html,
+        _meta: resource.meta ? { ui: resource.meta } : undefined,
+      }],
+    };
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {

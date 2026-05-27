@@ -240,6 +240,12 @@ Drop `--allow-http` when the endpoint is served over HTTPS. Generate the API key
 
 For GitHub Copilot Cloud Agent, use a dedicated scoped API key and explicit `tools` allowlist. See [GitHub Copilot Cloud Agent MCP Preset](docs/copilot-cloud-agent-mcp.md).
 
+### MCP Apps Extension (`io.modelcontextprotocol/ui`)
+
+DevGrimoire announces UI resources (`ui://devgrimoire/todo`) for the [MCP Apps SEP-1865](https://github.com/modelcontextprotocol/ext-apps) extension. Apps-aware hosts (e.g. recent Claude Desktop builds) render `todo_get` results inside a sandboxed iframe with status quick-actions; hosts without Apps support get the classic JSON response and never see the iframe — fallback is automatic and requires no flag flip.
+
+See [docs/mcp-apps.md](docs/mcp-apps.md) for the full spec mapping, security model (default-restrictive CSP, no external origins, no permission elevation) and the list of currently supported entity views.
+
 ## Authentication
 
 DevGrimoire supports multi-user authentication with roles:

@@ -103,7 +103,10 @@ async function bootstrap() {
 
   const server = new Server(
     { name: 'DevGrimoire', version: '1.0.0' },
-    { capabilities: { tools: {} } },
+    // M-35: declare `resources` capability so hosts query us via
+    // `resources/list`. UI-resources for the MCP Apps extension
+    // (io.modelcontextprotocol/ui) live alongside the tool catalog.
+    { capabilities: { tools: {}, resources: {} } },
   );
 
   registerMcpTools(server, {
