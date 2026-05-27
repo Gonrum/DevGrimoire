@@ -13,9 +13,12 @@ import { QuestionsService } from './questions.service';
 import { AnswerQuestionDto } from './dto/answer-question.dto';
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { ConvertToKnowledgeDto } from './dto/convert-to-knowledge.dto';
-import { QuestionDirection } from './schemas/question.schema';
+import { QuestionDirection, QuestionStatus } from './schemas/question.schema';
 
 const VALID_DIRECTIONS: QuestionDirection[] = ['agent_to_user', 'user_to_agent'];
+const VALID_STATUSES: QuestionStatus[] = [
+  'pending', 'answered', 'expired', 'snoozed', 'cancelled', 'superseded',
+];
 
 interface AuthRequest {
   user?: { userId?: string };
@@ -24,6 +27,56 @@ interface AuthRequest {
 @Controller('questions')
 export class QuestionsController {
   constructor(private readonly questionsService: QuestionsService) {}
+
+  /**
+   * T-389: Full searchable list for the Questions overview page. Status can
+   * be a comma-separated list (e.g. `?status=pending,snoozed`). Default
+   * returns every status so the overview can show the full history.
+   */
+  @Get()
+  findAll(
+    @Query('status') statusParam?: string,
+    @Query('direction') direction?: string,
+    @Query('projectId') projectId?: string,
+    @Query('customerId') customerId?: string,
+    @Query('todoId') todoId?: string,
+    @Query('milestoneId') milestoneId?: string,
+    @Query('researchSessionId') researchSessionId?: string,
+    @Query('chatSessionId') chatSessionId?: string,
+    @Query('targetUserId') targetUserId?: string,
+    @Query('createdByUserId') createdByUserId?: string,
+    @Query('agentName') agentName?: string,
+    @Query('createdAfter') createdAfter?: string,
+    @Query('createdBefore') createdBefore?: string,
+    @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    if (direction && !VALID_DIRECTIONS.includes(direction as QuestionDirection)) {
+      throw new BadRequestException(`Invalid direction: ${direction}`);
+    }
+    const statuses = statusParam
+      ? statusParam.split(',').map((s) => s.trim()).filter((s) => VALID_STATUSES.includes(s as QuestionStatus)) as QuestionStatus[]
+      : undefined;
+    return this.questionsService.findAll({
+      statuses,
+      direction: direction as QuestionDirection | undefined,
+      projectId,
+      customerId,
+      todoId,
+      milestoneId,
+      researchSessionId,
+      chatSessionId,
+      targetUserId,
+      createdByUserId,
+      agentName,
+      createdAfter: createdAfter ? new Date(createdAfter) : undefined,
+      createdBefore: createdBefore ? new Date(createdBefore) : undefined,
+      q,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
+  }
 
   @Get('pending')
   findPending(
@@ -141,5 +194,48 @@ export class QuestionsController {
     @Body() dto: ConvertToKnowledgeDto,
   ) {
     return this.questionsService.convertToKnowledge(id, dto);
+  }
+
+  /** T-394: Cancel a pending or snoozed question with an optional reason. */
+  @Post(':id/cancel')
+  @HttpCode(200)
+  cancel(
+    @Param('id') id: string,
+    @Body() body: { reason?: string },
+    @Req() req: AuthRequest,
+  ) {
+    return this.questionsService.cancel(id, body?.reason, req.user?.userId);
+  }
+
+  /** T-394: Snooze a question until a future date — wakes via scheduler. */
+  @Post(':id/snooze')
+  @HttpCode(200)
+  snooze(
+    @Param('id') id: string,
+    @Body() body: { snoozeUntil: string },
+    @Req() req: AuthRequest,
+  ) {
+    const until = body?.snoozeUntil ? new Date(body.snoozeUntil) : new Date('invalid');
+    return this.questionsService.snooze(id, until, req.user?.userId);
+  }
+
+  /** T-391: Derive a follow-up Todo from an answered question. */
+  @Post(':id/create-followup-todo')
+  @HttpCode(201)
+  createFollowupTodo(
+    @Param('id') id: string,
+    @Body() body: { title?: string; description?: string; priority?: 'low' | 'medium' | 'high' | 'critical' },
+  ) {
+    return this.questionsService.createFollowupTodo(id, body || {});
+  }
+
+  /** T-391: Stamp an answered question as a structured decision in Knowledge. */
+  @Post(':id/mark-as-decision')
+  @HttpCode(201)
+  markAsDecision(
+    @Param('id') id: string,
+    @Body() body: { decision: string; rationale?: string; scope?: string; tags?: string[] },
+  ) {
+    return this.questionsService.markAsDecision(id, body);
   }
 }

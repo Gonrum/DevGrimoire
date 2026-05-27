@@ -23,6 +23,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { KnowledgeDocument } from '../knowledge/schemas/knowledge.schema';
 import { AuthService } from '../auth/auth.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 
 export const QUESTION_CREATED = 'question.created';
@@ -51,7 +52,31 @@ export class QuestionsService implements OnModuleInit {
     private knowledgeService: KnowledgeService,
     @Inject(forwardRef(() => AuthService))
     private authService: AuthService,
+    private auditLog: AuditLogService,
   ) {}
+
+  private auditQuestion(
+    action: string,
+    entry: QuestionDocument,
+    meta?: Record<string, unknown>,
+    userId?: string,
+  ): void {
+    this.auditLog.record({
+      action,
+      entityType: 'question',
+      entityId: entry._id.toString(),
+      actor: userId ? { userId } : undefined,
+      meta: {
+        direction: entry.direction,
+        status: entry.status,
+        projectId: entry.projectId?.toString() ?? null,
+        customerId: entry.customerId?.toString() ?? null,
+        todoId: entry.todoId?.toString() ?? null,
+        agentName: entry.agentName ?? null,
+        ...(meta ?? {}),
+      },
+    }).catch(() => { /* audit failures must not break callers */ });
+  }
 
   /**
    * Drop the legacy TTL index on `expiresAt` (M-30): with TTL, expired
@@ -106,6 +131,7 @@ export class QuestionsService implements OnModuleInit {
         targetRole: dto.targetRole,
         broadcast: dto.broadcast,
         projectId,
+        customerId: dto.customerId,
       });
       resolvedTargetUserIds = resolved.userIds.map((id) => new Types.ObjectId(id));
     }
@@ -116,6 +142,10 @@ export class QuestionsService implements OnModuleInit {
       context: dto.context,
       todoId: dto.todoId ? new Types.ObjectId(dto.todoId) : undefined,
       projectId: projectId ? new Types.ObjectId(projectId) : undefined,
+      customerId: dto.customerId ? new Types.ObjectId(dto.customerId) : undefined,
+      researchSessionId: dto.researchSessionId ? new Types.ObjectId(dto.researchSessionId) : undefined,
+      chatSessionId: dto.chatSessionId ? new Types.ObjectId(dto.chatSessionId) : undefined,
+      milestoneId: dto.milestoneId ? new Types.ObjectId(dto.milestoneId) : undefined,
       targetUserId: dto.targetUserId ? new Types.ObjectId(dto.targetUserId) : undefined,
       targetRole: dto.targetRole,
       broadcast: dto.broadcast ?? false,
@@ -170,6 +200,13 @@ export class QuestionsService implements OnModuleInit {
           /* push not available — ignore */
         });
     }
+
+    this.emitProjectChange('created', entry, `Agent-Frage angelegt`);
+    this.auditQuestion('question.created', entry, {
+      escalationStepsConfigured: (dto.escalationChain ?? []).length,
+      broadcast: entry.broadcast,
+      resolvedTargets: resolvedTargetUserIds.length,
+    }, userId);
 
     return entry;
   }
@@ -287,6 +324,15 @@ export class QuestionsService implements OnModuleInit {
       additional: alreadyAnswered,
     });
 
+    // T-392: surface as PROJECT_CHANGED so the RAG indexer picks the now-
+    // answered question up for embedding.
+    this.emitProjectChange('updated', entry, 'Frage beantwortet');
+    this.auditQuestion('question.answered', entry, {
+      byAgent: options.byAgent === true,
+      additionalResponse: alreadyAnswered,
+      totalResponses: entry.responses?.length ?? 0,
+    }, options.userId);
+
     return entry;
   }
 
@@ -346,6 +392,73 @@ export class QuestionsService implements OnModuleInit {
     if (filter.todoId) q.todoId = new Types.ObjectId(filter.todoId);
 
     const limit = Math.max(1, Math.min(filter.limit ?? 100, 500));
+    const offset = Math.max(0, filter.offset ?? 0);
+
+    const [items, total] = await Promise.all([
+      this.questionModel.find(q).sort({ createdAt: -1 }).skip(offset).limit(limit).exec(),
+      this.questionModel.countDocuments(q).exec(),
+    ]);
+    return { items, total };
+  }
+
+  /**
+   * T-389: Full searchable list for the Questions overview page. Supports
+   * status/scope filters and a case-insensitive substring query across the
+   * question/context/answer text. Results are sorted by createdAt desc.
+   */
+  async findAll(filter: {
+    statuses?: QuestionStatus[];
+    direction?: QuestionDirection;
+    projectId?: string;
+    customerId?: string;
+    todoId?: string;
+    milestoneId?: string;
+    researchSessionId?: string;
+    chatSessionId?: string;
+    targetUserId?: string;
+    createdByUserId?: string;
+    agentName?: string;
+    createdAfter?: Date;
+    createdBefore?: Date;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<{ items: QuestionDocument[]; total: number }> {
+    const q: FilterQuery<QuestionDocument> = {};
+
+    if (filter.statuses && filter.statuses.length > 0) {
+      q.status = { $in: filter.statuses };
+    }
+    if (filter.direction) q.direction = filter.direction;
+    if (filter.projectId) q.projectId = new Types.ObjectId(filter.projectId);
+    if (filter.customerId) q.customerId = new Types.ObjectId(filter.customerId);
+    if (filter.todoId) q.todoId = new Types.ObjectId(filter.todoId);
+    if (filter.milestoneId) q.milestoneId = new Types.ObjectId(filter.milestoneId);
+    if (filter.researchSessionId) q.researchSessionId = new Types.ObjectId(filter.researchSessionId);
+    if (filter.chatSessionId) q.chatSessionId = new Types.ObjectId(filter.chatSessionId);
+    if (filter.targetUserId) q.targetUserId = new Types.ObjectId(filter.targetUserId);
+    if (filter.createdByUserId) q.createdByUserId = new Types.ObjectId(filter.createdByUserId);
+    if (filter.agentName) q.agentName = filter.agentName;
+
+    if (filter.createdAfter || filter.createdBefore) {
+      const range: Record<string, Date> = {};
+      if (filter.createdAfter) range.$gte = filter.createdAfter;
+      if (filter.createdBefore) range.$lte = filter.createdBefore;
+      (q as Record<string, unknown>).createdAt = range;
+    }
+
+    if (filter.q && filter.q.trim()) {
+      const needle = filter.q.trim();
+      const safe = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(safe, 'i');
+      q.$or = [
+        { question: regex },
+        { context: regex },
+        { answer: regex },
+      ];
+    }
+
+    const limit = Math.max(1, Math.min(filter.limit ?? 50, 200));
     const offset = Math.max(0, filter.offset ?? 0);
 
     const [items, total] = await Promise.all([
@@ -540,6 +653,247 @@ export class QuestionsService implements OnModuleInit {
   }
 
   /**
+   * T-391: Create a follow-up Todo derived from an answered question.
+   * The new Todo inherits the project/customer scope of the question, links
+   * back via `sourceQuestionId` in its description, and the question stamps
+   * `followupTodoId` for the reverse link.
+   *
+   * Callers may pass title/description overrides; otherwise sensible defaults
+   * are derived from the question text.
+   */
+  async createFollowupTodo(
+    questionId: string,
+    overrides: { title?: string; description?: string; priority?: 'low' | 'medium' | 'high' | 'critical' } = {},
+  ): Promise<{ todoId: string; question: QuestionDocument }> {
+    const entry = await this.questionModel.findById(questionId).exec();
+    if (!entry) throw new NotFoundException(`Question ${questionId} not found`);
+    if (entry.status !== 'answered') {
+      throw new BadRequestException('Question must be answered before deriving a follow-up todo');
+    }
+    if (entry.followupTodoId) {
+      throw new BadRequestException({
+        message: 'A follow-up todo already exists for this question',
+        code: 'FOLLOWUP_ALREADY_EXISTS',
+        todoId: entry.followupTodoId.toString(),
+      });
+    }
+
+    const projectIdStr = entry.projectId?.toString();
+    const customerIdStr = entry.customerId?.toString();
+    if (!projectIdStr && !customerIdStr) {
+      throw new BadRequestException('Cannot create a follow-up todo for a question without project or customer scope');
+    }
+
+    const defaultTitle = `Follow-up: ${entry.question.slice(0, 80)}${entry.question.length > 80 ? '…' : ''}`;
+    const description = overrides.description
+      ?? `**Aus Frage:** ${entry.question}\n\n**Antwort:** ${entry.answer ?? '(siehe Frage-Detail)'}\n\n_Erzeugt aus Question ${entry._id.toString()}._`;
+
+    const todo = await this.todosService.create({
+      title: overrides.title || defaultTitle,
+      description,
+      projectId: projectIdStr,
+      customerId: !projectIdStr ? customerIdStr : undefined,
+      priority: overrides.priority ?? 'medium',
+    } as Parameters<TodosService['create']>[0]);
+
+    entry.followupTodoId = todo._id as Types.ObjectId;
+    await entry.save();
+
+    this.eventEmitter.emit('question.followup_created', {
+      questionId,
+      todoId: todo._id.toString(),
+      projectId: projectIdStr ?? null,
+    });
+    this.auditQuestion('question.followup_created', entry, { todoId: todo._id.toString() });
+
+    return { todoId: todo._id.toString(), question: entry };
+  }
+
+  /**
+   * T-391: Stamp an answered question as a "decision". Creates a Knowledge
+   * entry with category='decision' containing structured fields (decision,
+   * rationale, scope) and writes back the knowledgeId.
+   *
+   * Conceptually a `convertToKnowledge` variant with a stronger, structured
+   * template — separated so the UI can offer "Save as Knowledge" vs. "Mark as
+   * Decision" as distinct actions.
+   */
+  async markAsDecision(
+    questionId: string,
+    dto: { decision: string; rationale?: string; scope?: string; tags?: string[] },
+  ): Promise<{ knowledgeId: string; question: QuestionDocument }> {
+    if (!dto.decision || !dto.decision.trim()) {
+      throw new BadRequestException('decision is required');
+    }
+
+    const entry = await this.questionModel.findById(questionId).exec();
+    if (!entry) throw new NotFoundException(`Question ${questionId} not found`);
+    if (entry.status !== 'answered') {
+      throw new BadRequestException('Question must be answered before being marked as a decision');
+    }
+    if (entry.decisionKnowledgeId) {
+      throw new BadRequestException({
+        message: 'A decision already exists for this question',
+        code: 'DECISION_ALREADY_EXISTS',
+        knowledgeId: entry.decisionKnowledgeId.toString(),
+      });
+    }
+
+    const projectIdStr = entry.projectId?.toString();
+    const customerIdStr = entry.customerId?.toString();
+    const knowledgeScope: 'project' | 'global' = projectIdStr ? 'project' : 'global';
+
+    const content = [
+      `**Entscheidung:** ${dto.decision.trim()}`,
+      dto.rationale ? `**Begründung:** ${dto.rationale.trim()}` : null,
+      dto.scope ? `**Gültigkeitsbereich:** ${dto.scope.trim()}` : null,
+      '',
+      `**Ursprüngliche Frage:** ${entry.question}`,
+      entry.answer ? `**Antwort:** ${entry.answer}` : null,
+      '',
+      `_Erzeugt aus Question ${entry._id.toString()}._`,
+    ].filter(Boolean).join('\n\n');
+
+    const knowledge = await this.knowledgeService.create({
+      topic: `Decision: ${dto.decision.slice(0, 80)}${dto.decision.length > 80 ? '…' : ''}`,
+      content,
+      category: 'decision',
+      scope: knowledgeScope,
+      projectId: projectIdStr,
+      customerId: !projectIdStr ? customerIdStr : undefined,
+      tags: dto.tags,
+      sourceQuestionId: questionId,
+    } as Parameters<KnowledgeService['create']>[0]);
+
+    entry.decisionKnowledgeId = knowledge._id as Types.ObjectId;
+    await entry.save();
+
+    this.eventEmitter.emit('question.decision_recorded', {
+      questionId,
+      knowledgeId: knowledge._id.toString(),
+      projectId: projectIdStr ?? null,
+    });
+    this.auditQuestion('question.decision_recorded', entry, {
+      knowledgeId: knowledge._id.toString(),
+      scope: knowledgeScope,
+    });
+
+    return { knowledgeId: knowledge._id.toString(), question: entry };
+  }
+
+  /**
+   * Cancel a pending or snoozed question. Cancelled questions stay in the
+   * audit trail but are removed from the pending list and skipped by the
+   * escalation scheduler.
+   */
+  async cancel(id: string, reason?: string, userId?: string): Promise<QuestionDocument> {
+    const entry = await this.questionModel.findById(id).exec();
+    if (!entry) throw new NotFoundException(`Question ${id} not found`);
+    if (entry.status === 'answered') {
+      throw new BadRequestException('Cannot cancel an already-answered question');
+    }
+    entry.status = 'cancelled';
+    entry.closeReason = reason;
+    await entry.save();
+    this.eventEmitter.emit('question.cancelled', {
+      questionId: id,
+      userId: userId ?? null,
+      reason: reason ?? null,
+      projectId: entry.projectId?.toString() ?? null,
+      todoId: entry.todoId?.toString() ?? null,
+    });
+    this.auditQuestion('question.cancelled', entry, { reason: reason ?? null }, userId);
+    return entry;
+  }
+
+  /**
+   * Snooze a pending question until a future date. Scheduler resumes it
+   * automatically once the snoozeUntil deadline passes by flipping back to
+   * `pending` and rearming expiresAt.
+   */
+  async snooze(id: string, until: Date, userId?: string): Promise<QuestionDocument> {
+    if (!until || isNaN(until.getTime()) || until.getTime() <= Date.now()) {
+      throw new BadRequestException('snoozeUntil must be a future date');
+    }
+    const entry = await this.questionModel.findById(id).exec();
+    if (!entry) throw new NotFoundException(`Question ${id} not found`);
+    if (entry.status !== 'pending' && entry.status !== 'expired') {
+      throw new BadRequestException(`Cannot snooze a question in status ${entry.status}`);
+    }
+    entry.status = 'snoozed';
+    entry.snoozeUntil = until;
+    await entry.save();
+    this.eventEmitter.emit('question.snoozed', {
+      questionId: id,
+      userId: userId ?? null,
+      snoozeUntil: until.toISOString(),
+      projectId: entry.projectId?.toString() ?? null,
+    });
+    this.auditQuestion('question.snoozed', entry, { snoozeUntil: until.toISOString() }, userId);
+    return entry;
+  }
+
+  /**
+   * Mark this question as superseded by a newer one. Used when a clarifying
+   * follow-up replaces the original. The replacement Question doc is created
+   * by the caller before this is invoked.
+   */
+  async supersede(id: string, supersededByQuestionId: string, reason?: string): Promise<QuestionDocument> {
+    if (!Types.ObjectId.isValid(supersededByQuestionId)) {
+      throw new BadRequestException('Invalid supersededByQuestionId');
+    }
+    const entry = await this.questionModel.findById(id).exec();
+    if (!entry) throw new NotFoundException(`Question ${id} not found`);
+    entry.status = 'superseded';
+    entry.supersededByQuestionId = new Types.ObjectId(supersededByQuestionId);
+    entry.closeReason = reason;
+    await entry.save();
+    this.eventEmitter.emit('question.superseded', {
+      questionId: id,
+      supersededByQuestionId,
+      reason: reason ?? null,
+    });
+    this.auditQuestion('question.superseded', entry, {
+      supersededByQuestionId,
+      reason: reason ?? null,
+    });
+    return entry;
+  }
+
+  /**
+   * Scheduler companion to escalateDueQuestions: wake any snoozed questions
+   * whose snoozeUntil has passed back into the pending pool with a fresh
+   * deadline (or no deadline if there's no wait window).
+   */
+  async wakeSnoozedQuestions(): Promise<{ checked: number; woken: number }> {
+    const now = new Date();
+    const due = await this.questionModel
+      .find({ status: 'snoozed', snoozeUntil: { $lte: now } })
+      .limit(100)
+      .exec();
+
+    let woken = 0;
+    for (const entry of due) {
+      entry.status = 'pending';
+      entry.snoozeUntil = undefined;
+      // Rearm expiresAt only if the question originally had a wait window —
+      // user_to_agent questions stay open-ended.
+      if (entry.direction === 'agent_to_user' && entry.timeoutMs > 0) {
+        entry.expiresAt = new Date(Date.now() + entry.timeoutMs);
+      }
+      await entry.save();
+      woken += 1;
+      this.eventEmitter.emit('question.woken', {
+        questionId: entry._id.toString(),
+        projectId: entry.projectId?.toString() ?? null,
+        todoId: entry.todoId?.toString() ?? null,
+      });
+      this.auditQuestion('question.woken', entry);
+    }
+    return { checked: due.length, woken };
+  }
+
+  /**
    * Walk all due agent_to_user questions one escalation step forward. Called
    * by QuestionsScheduler every minute. Returns a summary of what happened
    * so the scheduler can log it.
@@ -578,6 +932,7 @@ export class QuestionsService implements OnModuleInit {
         entry.status = 'expired';
         await entry.save();
         expired += 1;
+        this.auditQuestion('question.expired', entry);
         continue;
       }
 
@@ -627,6 +982,11 @@ export class QuestionsService implements OnModuleInit {
         resolvedTargetUserIds: resolved.userIds,
         expiresAt: entry.expiresAt?.toISOString() ?? null,
       });
+      this.auditQuestion('question.escalated', entry, {
+        step: nextStepIdx,
+        kind: stepConfig.kind,
+        resolvedTargets: resolved.userIds.length,
+      });
     }
 
     return { checked: due.length, escalated, expired };
@@ -638,6 +998,26 @@ export class QuestionsService implements OnModuleInit {
    * den Verweis, damit eine erneute Konversion möglich ist und das UI nicht
    * ins Leere verlinkt.
    */
+  /**
+   * Emit a PROJECT_CHANGED event so cross-cutting subscribers (RAG indexer,
+   * WS event bus, audit log) get notified about Question lifecycle changes
+   * without depending on QuestionsService directly.
+   */
+  private emitProjectChange(
+    action: 'created' | 'updated' | 'deleted',
+    entry: QuestionDocument,
+    summary?: string,
+  ): void {
+    this.eventEmitter.emit(PROJECT_CHANGED, {
+      projectId: entry.projectId?.toString() ?? null,
+      customerId: entry.customerId?.toString() ?? null,
+      entity: 'question',
+      action,
+      entityId: entry._id.toString(),
+      summary,
+    } as ProjectChangeEvent);
+  }
+
   @OnEvent(PROJECT_CHANGED)
   async handleProjectChange(event: ProjectChangeEvent): Promise<void> {
     if (event.entity !== 'knowledge' || event.action !== 'deleted') return;

@@ -21,14 +21,20 @@ export class QuestionsScheduler {
     if (this.running) return;
     this.running = true;
     try {
-      const summary = await this.questionsService.escalateDueQuestions();
-      if (summary.checked > 0) {
+      // Wake snoozed questions first so the same tick can immediately escalate
+      // them if their original wait window also lapsed.
+      const wakeSummary = await this.questionsService.wakeSnoozedQuestions();
+      if (wakeSummary.woken > 0) {
+        this.logger.log(`Wake tick: woken=${wakeSummary.woken} of ${wakeSummary.checked} snoozed`);
+      }
+      const escalationSummary = await this.questionsService.escalateDueQuestions();
+      if (escalationSummary.checked > 0) {
         this.logger.log(
-          `Escalation tick: checked=${summary.checked} escalated=${summary.escalated} expired=${summary.expired}`,
+          `Escalation tick: checked=${escalationSummary.checked} escalated=${escalationSummary.escalated} expired=${escalationSummary.expired}`,
         );
       }
     } catch (err) {
-      this.logger.warn(`Escalation tick failed: ${(err as Error).message}`);
+      this.logger.warn(`Scheduler tick failed: ${(err as Error).message}`);
     } finally {
       this.running = false;
     }

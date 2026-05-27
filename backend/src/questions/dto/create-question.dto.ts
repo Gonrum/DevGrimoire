@@ -53,6 +53,22 @@ export class CreateQuestionDto {
 
   @IsMongoId()
   @IsOptional()
+  customerId?: string;
+
+  @IsMongoId()
+  @IsOptional()
+  researchSessionId?: string;
+
+  @IsMongoId()
+  @IsOptional()
+  chatSessionId?: string;
+
+  @IsMongoId()
+  @IsOptional()
+  milestoneId?: string;
+
+  @IsMongoId()
+  @IsOptional()
   targetUserId?: string;
 
   @IsOptional()

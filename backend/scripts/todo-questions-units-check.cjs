@@ -62,12 +62,21 @@ function matchesStatusFilter(docStatus, filterStatus) {
 function applyFilter(docs, filter) {
   return docs.filter((doc) => {
     for (const [k, v] of Object.entries(filter || {})) {
-      if (k === 'status') {
+      if (k === '$or' && Array.isArray(v)) {
+        const matched = v.some((sub) => applyFilter([doc], sub).length === 1);
+        if (!matched) return false;
+      } else if (k === 'status') {
         if (!matchesStatusFilter(doc.status, v)) return false;
       } else if (k === '_id' || k === 'todoId' || k === 'projectId' || k === 'knowledgeId') {
         if (!matchesObjectIdField(doc[k], v)) return false;
       } else if (k === 'expiresAt' && v && typeof v === 'object' && '$lte' in v) {
         if (!doc.expiresAt || new Date(doc.expiresAt) > new Date(v.$lte)) return false;
+      } else if (k === 'snoozeUntil' && v && typeof v === 'object' && '$lte' in v) {
+        if (!doc.snoozeUntil || new Date(doc.snoozeUntil) > new Date(v.$lte)) return false;
+      } else if (v instanceof RegExp) {
+        const fieldValue = doc[k];
+        if (typeof fieldValue !== 'string') return false;
+        if (!v.test(fieldValue)) return false;
       } else if (v === undefined || v === null) {
         if (doc[k] !== v) return false;
       } else {
@@ -171,22 +180,36 @@ function instantiateService(questionModel, overrides = {}) {
     findById: async () => ({ projectId: new Types.ObjectId() }),
     linkQuestion: async () => {},
     addComment: async () => {},
+    create: async (dto) => ({ _id: new Types.ObjectId(), ...dto }),
   };
   const notificationsService = { create: async () => {} };
-  const knowledgeService = { create: async () => ({ _id: new Types.ObjectId() }) };
+  const knowledgeService = {
+    create: async (dto) => ({ _id: new Types.ObjectId(), ...dto }),
+  };
   const authService = {
     findUserById: async () => null,
     resolveQuestionTargets: async () => ({ userIds: [], usernames: {} }),
   };
+  const auditLog = {
+    records: [],
+    record: async (entry) => {
+      auditLog.records.push(entry);
+    },
+  };
 
-  return new QuestionsService(
+  const service = new QuestionsService(
     questionModel,
     overrides.eventEmitter ?? eventEmitter,
     overrides.todosService ?? todosService,
     overrides.notificationsService ?? notificationsService,
     overrides.knowledgeService ?? knowledgeService,
     overrides.authService ?? authService,
+    overrides.auditLog ?? auditLog,
   );
+  service._auditLog = overrides.auditLog ?? auditLog;
+  service._todosService = overrides.todosService ?? todosService;
+  service._knowledgeService = overrides.knowledgeService ?? knowledgeService;
+  return service;
 }
 
 // ------------------------------------------------------------------
@@ -501,6 +524,198 @@ check('escalateDueQuestions: due question with chain → walks one step', async 
   assert.equal(stored.targetRole, 'admin');
   assert.equal(stored.escalationHistory.length, 1);
   assert.ok(stored.expiresAt > new Date(), 'expiresAt re-armed into the future');
+});
+
+// ------------------------------------------------------------------
+// T-394 lifecycle (cancel / snooze / supersede / wake) + audit
+// ------------------------------------------------------------------
+
+check('cancel: pending → cancelled, audit recorded', async () => {
+  const questionId = new Types.ObjectId();
+  const model = makeQuestionModel([
+    { _id: questionId, question: 'q', status: 'pending', direction: 'agent_to_user' },
+  ]);
+  const svc = instantiateService(model);
+  const after = await svc.cancel(questionId.toString(), 'no longer needed', 'user-abc');
+  assert.equal(after.status, 'cancelled');
+  assert.equal(after.closeReason, 'no longer needed');
+  const audit = svc._auditLog.records.find((r) => r.action === 'question.cancelled');
+  assert.ok(audit, 'audit entry question.cancelled emitted');
+  assert.equal(audit.entityType, 'question');
+  assert.equal(audit.actor.userId, 'user-abc');
+});
+
+check('cancel: answered question is rejected', async () => {
+  const questionId = new Types.ObjectId();
+  const model = makeQuestionModel([
+    { _id: questionId, question: 'q', status: 'answered' },
+  ]);
+  const svc = instantiateService(model);
+  await assert.rejects(() => svc.cancel(questionId.toString()), /already-answered/);
+});
+
+check('snooze: rejects past dates', async () => {
+  const questionId = new Types.ObjectId();
+  const model = makeQuestionModel([
+    { _id: questionId, question: 'q', status: 'pending' },
+  ]);
+  const svc = instantiateService(model);
+  await assert.rejects(
+    () => svc.snooze(questionId.toString(), new Date(Date.now() - 60_000)),
+    /future date/,
+  );
+});
+
+check('snooze + wake roundtrip', async () => {
+  const questionId = new Types.ObjectId();
+  const model = makeQuestionModel([
+    {
+      _id: questionId,
+      question: 'q',
+      status: 'pending',
+      direction: 'agent_to_user',
+      timeoutMs: 300_000,
+    },
+  ]);
+  const svc = instantiateService(model);
+  const future = new Date(Date.now() + 1_000);
+  await svc.snooze(questionId.toString(), future);
+  // Simulate the snooze elapsing by manually backdating the stored snoozeUntil.
+  const stored = model._docs.find((d) => String(d._id) === String(questionId));
+  stored.snoozeUntil = new Date(Date.now() - 1_000);
+  const summary = await svc.wakeSnoozedQuestions();
+  assert.equal(summary.woken, 1);
+  const fresh = model._docs.find((d) => String(d._id) === String(questionId));
+  assert.equal(fresh.status, 'pending', 'wake flips status back to pending');
+  assert.ok(fresh.expiresAt > new Date(), 'expiresAt re-armed into the future');
+});
+
+check('supersede: rejects invalid replacement id', async () => {
+  const questionId = new Types.ObjectId();
+  const model = makeQuestionModel([
+    { _id: questionId, question: 'q', status: 'pending' },
+  ]);
+  const svc = instantiateService(model);
+  await assert.rejects(() => svc.supersede(questionId.toString(), 'not-an-objectid'), /Invalid/);
+});
+
+// ------------------------------------------------------------------
+// T-391 follow-up actions
+// ------------------------------------------------------------------
+
+check('createFollowupTodo: persists backlink + audit', async () => {
+  const questionId = new Types.ObjectId();
+  const projectId = new Types.ObjectId();
+  const model = makeQuestionModel([
+    {
+      _id: questionId,
+      question: 'should we cache the results?',
+      answer: 'yes — TTL 30s',
+      status: 'answered',
+      direction: 'agent_to_user',
+      projectId,
+    },
+  ]);
+  const svc = instantiateService(model);
+  const { todoId, question } = await svc.createFollowupTodo(questionId.toString());
+  assert.ok(todoId);
+  assert.equal(String(question.followupTodoId), todoId);
+  const audit = svc._auditLog.records.find((r) => r.action === 'question.followup_created');
+  assert.ok(audit, 'audit entry emitted');
+});
+
+check('createFollowupTodo: rejects when already exists', async () => {
+  const questionId = new Types.ObjectId();
+  const projectId = new Types.ObjectId();
+  const model = makeQuestionModel([
+    {
+      _id: questionId,
+      question: 'q',
+      answer: 'a',
+      status: 'answered',
+      direction: 'agent_to_user',
+      projectId,
+      followupTodoId: new Types.ObjectId(),
+    },
+  ]);
+  const svc = instantiateService(model);
+  await assert.rejects(
+    () => svc.createFollowupTodo(questionId.toString()),
+    (err) => err?.response?.code === 'FOLLOWUP_ALREADY_EXISTS',
+  );
+});
+
+check('markAsDecision: creates knowledge with decision category', async () => {
+  const questionId = new Types.ObjectId();
+  const projectId = new Types.ObjectId();
+  const captured = [];
+  const knowledgeService = {
+    create: async (dto) => {
+      captured.push(dto);
+      return { _id: new Types.ObjectId(), ...dto };
+    },
+  };
+  const model = makeQuestionModel([
+    {
+      _id: questionId,
+      question: 'q',
+      answer: 'a',
+      status: 'answered',
+      direction: 'agent_to_user',
+      projectId,
+    },
+  ]);
+  const svc = instantiateService(model, { knowledgeService });
+  const { knowledgeId, question } = await svc.markAsDecision(questionId.toString(), {
+    decision: 'use cache',
+    rationale: 'latency requirement',
+    scope: 'Frontend',
+  });
+  assert.ok(knowledgeId);
+  assert.equal(String(question.decisionKnowledgeId), knowledgeId);
+  assert.equal(captured[0].category, 'decision');
+  assert.equal(captured[0].sourceQuestionId, questionId.toString());
+});
+
+check('markAsDecision: rejects when already decided', async () => {
+  const questionId = new Types.ObjectId();
+  const projectId = new Types.ObjectId();
+  const model = makeQuestionModel([
+    {
+      _id: questionId,
+      question: 'q',
+      answer: 'a',
+      status: 'answered',
+      direction: 'agent_to_user',
+      projectId,
+      decisionKnowledgeId: new Types.ObjectId(),
+    },
+  ]);
+  const svc = instantiateService(model);
+  await assert.rejects(
+    () => svc.markAsDecision(questionId.toString(), { decision: 'x' }),
+    (err) => err?.response?.code === 'DECISION_ALREADY_EXISTS',
+  );
+});
+
+// ------------------------------------------------------------------
+// T-389 findAll filter
+// ------------------------------------------------------------------
+
+check('findAll: status + q text filter narrows results', async () => {
+  const projectId = new Types.ObjectId();
+  const model = makeQuestionModel([
+    { _id: new Types.ObjectId(), projectId, status: 'pending', question: 'do we cache?', context: '', answer: undefined, createdAt: new Date() },
+    { _id: new Types.ObjectId(), projectId, status: 'answered', question: 'database engine?', context: 'pgsql vs mongo', answer: 'mongo', createdAt: new Date() },
+    { _id: new Types.ObjectId(), projectId, status: 'cancelled', question: 'unrelated', context: '', answer: undefined, createdAt: new Date() },
+  ]);
+  const svc = instantiateService(model);
+  const allOpen = await svc.findAll({ statuses: ['pending', 'answered'] });
+  assert.equal(allOpen.total, 2);
+  const cached = await svc.findAll({ q: 'cache' });
+  assert.equal(cached.total, 1);
+  const mongoText = await svc.findAll({ q: 'mongo' });
+  assert.equal(mongoText.total, 1, 'matches inside answer field');
 });
 
 // ------------------------------------------------------------------

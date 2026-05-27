@@ -8,6 +8,7 @@ import { TodosModule } from '../todos/todos.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { AuthModule } from '../auth/auth.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AuthModule } from '../auth/auth.module';
     NotificationsModule,
     KnowledgeModule,
     forwardRef(() => AuthModule),
+    AuditLogModule,
   ],
   controllers: [QuestionsController],
   providers: [QuestionsService, QuestionsScheduler],

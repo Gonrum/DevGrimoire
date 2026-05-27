@@ -190,6 +190,10 @@ function serializeQuestion(q: unknown): Record<string, unknown> {
     answer: obj.answer,
     todoId: obj.todoId,
     projectId: obj.projectId,
+    customerId: obj.customerId,
+    researchSessionId: obj.researchSessionId,
+    chatSessionId: obj.chatSessionId,
+    milestoneId: obj.milestoneId,
     targetUserId: obj.targetUserId,
     targetRole: obj.targetRole,
     broadcast: obj.broadcast,
@@ -200,6 +204,11 @@ function serializeQuestion(q: unknown): Record<string, unknown> {
     answeredAt: obj.answeredAt,
     responses: obj.responses,
     knowledgeId: obj.knowledgeId,
+    decisionKnowledgeId: obj.decisionKnowledgeId,
+    followupTodoId: obj.followupTodoId,
+    snoozeUntil: obj.snoozeUntil,
+    closeReason: obj.closeReason,
+    supersededByQuestionId: obj.supersededByQuestionId,
     expiresAt: obj.expiresAt,
     agentRunId: obj.agentRunId,
     agentName: obj.agentName,
@@ -1293,7 +1302,7 @@ const tools = [
   },
   {
     name: 'ask_user',
-    description: 'Ask users a question and wait for an answer. By default this is broadcast to every user with project access (T-393). Use targetUsername/targetUserId to address one specific user, targetRole to address every user with that role, or broadcast=true to make the broadcast intent explicit. Optionally pass escalationChain to walk through escalating audiences as deadlines lapse (e.g. first your lead dev, then all developers, then everyone). The question is shown in the DevGrimoire UI (via SSE + push notification). If todoId is provided, the question and answer are documented as a comment on the todo.',
+    description: 'Ask users a question and wait for an answer. By default this is broadcast to every user with project access (T-393). Use targetUsername/targetUserId to address one specific user, targetRole to address every user with that role, or broadcast=true to make the broadcast intent explicit. Optionally pass escalationChain to walk through escalating audiences as deadlines lapse (e.g. first your lead dev, then all developers, then everyone). The question is shown in the DevGrimoire UI (via SSE + push notification). If todoId is provided, the question and answer are documented as a comment on the todo.\n\n**T-392 BEFORE ASKING:** call `question_search` (or `rag_search` with entity=question) first to find prior answered questions covering the same topic. If you find a strong match, prefer reusing that answer (cite it in your response or ask the user only for confirmation) rather than re-prompting them. Setting `checkSimilar:true` runs that search automatically and returns the top matches under `priorMatches` in the result — useful as a fail-safe.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -1306,6 +1315,11 @@ const tools = [
         targetUserId: { type: 'string', description: 'User MongoDB ID to target. Omit for broadcast.' },
         targetRole: { type: 'string', description: 'Role to target (T-393). Every active user with this role and project access sees the question.', enum: ['admin', 'user'] },
         broadcast: { type: 'boolean', description: 'Explicit broadcast — every active user with project access sees the question. Default false. When neither user nor role nor broadcast is set, the question still surfaces for every project-scoped user (legacy implicit broadcast).' },
+        customerId: { type: 'string', description: 'Customer scope (T-390). Mutually exclusive with projectId in practice.' },
+        researchSessionId: { type: 'string', description: 'T-390: link the question back to a Research Session for traceability.' },
+        chatSessionId: { type: 'string', description: 'T-390: link the question back to a Chat Session for traceability.' },
+        milestoneId: { type: 'string', description: 'T-390: link the question to a Milestone (decision-level questions).' },
+        checkSimilar: { type: 'boolean', description: 'T-392: when true, run question_search before creating and include the top matches under `priorMatches` in the result. Use this as a fail-safe — prefer calling question_search explicitly so you can decide BEFORE asking.' },
         timeoutSeconds: { type: 'number', description: 'How long to wait for an answer (default: 300, max: 600)' },
         escalationChain: {
           type: 'array',
@@ -1376,6 +1390,73 @@ const tools = [
         scope: { type: 'string', enum: ['global', 'project'], description: 'Scope for the knowledge entry. Defaults to "project" if the question has a projectId, otherwise "global".' },
       },
       required: ['questionId', 'topic'],
+    },
+  },
+  {
+    name: 'question_search',
+    description: 'T-392: Semantic search over previously ANSWERED questions and their responses. Use BEFORE calling ask_user to check whether the same (or a very similar) question has already been answered, so the agent can reuse the prior decision instead of bothering the user again. Returns matches with title (question), content (Q+A), scope and similarity score. Combine with question_get for the full record.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'Natural language search query (typically the question you are about to ask)' },
+        projectId: { type: 'string', description: 'Restrict to this project' },
+        customerId: { type: 'string', description: 'Restrict to this customer' },
+        limit: { type: 'number', description: 'Max results (default 5, max 20)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'question_cancel',
+    description: 'T-394: Cancel a pending or snoozed question (no answer needed anymore). Cancelled questions stay in the audit trail but are removed from the pending list and skipped by the escalation scheduler.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Question MongoDB ID' },
+        reason: { type: 'string', description: 'Optional cancellation reason (audit trail)' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'question_snooze',
+    description: 'T-394: Defer a pending question until a future date. The scheduler wakes it up at snoozeUntil by flipping the status back to pending with a fresh wait window.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Question MongoDB ID' },
+        snoozeUntil: { type: 'string', description: 'ISO 8601 wake-up timestamp (must be in the future)' },
+      },
+      required: ['id', 'snoozeUntil'],
+    },
+  },
+  {
+    name: 'question_create_followup_todo',
+    description: 'T-391: Derive a follow-up Todo from an answered question. The new Todo inherits the project/customer scope of the question and is linked back via Question.followupTodoId. Returns 400 if the question is not yet answered or a follow-up already exists.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Question MongoDB ID' },
+        title: { type: 'string', description: 'Override the auto-generated title' },
+        description: { type: 'string', description: 'Override the auto-generated description (Markdown supported)' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Todo priority (default medium)' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'question_mark_as_decision',
+    description: 'T-391: Stamp an answered question as a structured decision in Knowledge. Creates a Knowledge entry with category="decision" capturing the decision, rationale and scope, and writes back Question.decisionKnowledgeId. Stronger semantic than question_convert_to_knowledge — use for binding architectural / governance choices.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Question MongoDB ID' },
+        decision: { type: 'string', description: 'The decision text in one sentence (required)' },
+        rationale: { type: 'string', description: 'Why this decision was made (optional)' },
+        scope: { type: 'string', description: 'Where the decision applies (optional, e.g. "Frontend", "Mobile App", "All services")' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags for the decision' },
+      },
+      required: ['id', 'decision'],
     },
   },
   {
@@ -4509,12 +4590,33 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               }
             }
           }
+          const checkSimilar = optionalBoolean(a, 'checkSimilar') ?? false;
+          let priorMatches: Array<Record<string, unknown>> | undefined;
+          if (checkSimilar) {
+            try {
+              priorMatches = await ragService.search(
+                requireString(a, 'question'),
+                optionalString(a, 'projectId'),
+                'question',
+                3,
+                optionalString(a, 'customerId'),
+              );
+            } catch (err) {
+              // RAG offline shouldn't break ask_user — just skip the hint.
+              priorMatches = undefined;
+            }
+          }
+
           const questionEntry = await questionsService.create({
             question: requireString(a, 'question'),
             options: optionalStringArray(a, 'options'),
             context: optionalString(a, 'context'),
             todoId: optionalString(a, 'todoId'),
             projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
+            researchSessionId: optionalString(a, 'researchSessionId'),
+            chatSessionId: optionalString(a, 'chatSessionId'),
+            milestoneId: optionalString(a, 'milestoneId'),
             targetUserId,
             targetRole,
             broadcast,
@@ -4526,7 +4628,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           // Surface the questionId so an agent that later wants to check or
           // answer a still-open question can find it back. M-30: a timed-out
           // question stays answerable by the user via the todo detail view.
-          result = { ...waitResult, questionId: questionEntry._id.toString() };
+          result = {
+            ...waitResult,
+            questionId: questionEntry._id.toString(),
+            ...(priorMatches && priorMatches.length > 0 ? { priorMatches } : {}),
+          };
           break;
         }
         case 'question_list': {
@@ -4578,6 +4684,54 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             },
           );
           result = knowledge.toJSON ? knowledge.toJSON() : { ...knowledge };
+          break;
+        }
+        case 'question_search': {
+          const limit = Math.max(1, Math.min(optionalNumber(a, 'limit') ?? 5, 20));
+          const hits = await ragService.search(
+            requireString(a, 'query'),
+            optionalString(a, 'projectId'),
+            'question',
+            limit,
+            optionalString(a, 'customerId'),
+          );
+          result = { items: hits, total: hits.length };
+          break;
+        }
+        case 'question_cancel': {
+          const userId = RequestContext.getUser()?.userId;
+          const updated = await questionsService.cancel(
+            requireString(a, 'id'),
+            optionalString(a, 'reason'),
+            userId,
+          );
+          result = serializeQuestion(updated);
+          break;
+        }
+        case 'question_snooze': {
+          const userId = RequestContext.getUser()?.userId;
+          const until = new Date(requireString(a, 'snoozeUntil'));
+          const updated = await questionsService.snooze(requireString(a, 'id'), until, userId);
+          result = serializeQuestion(updated);
+          break;
+        }
+        case 'question_create_followup_todo': {
+          const out = await questionsService.createFollowupTodo(requireString(a, 'id'), {
+            title: optionalString(a, 'title'),
+            description: optionalString(a, 'description'),
+            priority: optionalString(a, 'priority') as 'low' | 'medium' | 'high' | 'critical' | undefined,
+          });
+          result = { todoId: out.todoId, question: serializeQuestion(out.question) };
+          break;
+        }
+        case 'question_mark_as_decision': {
+          const out = await questionsService.markAsDecision(requireString(a, 'id'), {
+            decision: requireString(a, 'decision'),
+            rationale: optionalString(a, 'rationale'),
+            scope: optionalString(a, 'scope'),
+            tags: Array.isArray(a.tags) ? (a.tags as string[]) : undefined,
+          });
+          result = { knowledgeId: out.knowledgeId, question: serializeQuestion(out.question) };
           break;
         }
         case 'environment_create': {

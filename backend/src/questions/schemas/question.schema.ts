@@ -4,7 +4,19 @@ import { HydratedDocument, Types } from 'mongoose';
 export type QuestionDocument = HydratedDocument<Question>;
 
 export type QuestionDirection = 'agent_to_user' | 'user_to_agent';
-export type QuestionStatus = 'pending' | 'answered' | 'expired';
+/**
+ * Lifecycle status (T-394 extends the original three with):
+ *  - `snoozed`    user deferred the question; scheduler wakes it up at snoozeUntil
+ *  - `cancelled`  user / agent explicitly killed it (no answer needed)
+ *  - `superseded` a newer question replaced this one (e.g. follow-up clarification)
+ */
+export type QuestionStatus =
+  | 'pending'
+  | 'answered'
+  | 'expired'
+  | 'snoozed'
+  | 'cancelled'
+  | 'superseded';
 
 /**
  * Step in an escalation chain. When a question's wait window lapses the
@@ -61,6 +73,26 @@ export class Question {
   @Prop({ type: Types.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
+  /**
+   * Customer-scoped questions (M-45 / T-390). Mutually exclusive with
+   * projectId in practice but stored independently so role/scope filters can
+   * see customer-side traffic.
+   */
+  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  customerId?: Types.ObjectId;
+
+  /** Originating research session (M-45 / T-390). */
+  @Prop({ type: Types.ObjectId, ref: 'ResearchSession' })
+  researchSessionId?: Types.ObjectId;
+
+  /** Originating chat session (M-45 / T-390). */
+  @Prop({ type: Types.ObjectId, ref: 'ChatSession' })
+  chatSessionId?: Types.ObjectId;
+
+  /** Owning milestone if the question is tied to a milestone-level decision. */
+  @Prop({ type: Types.ObjectId, ref: 'Milestone' })
+  milestoneId?: Types.ObjectId;
+
   @Prop({ type: Types.ObjectId, ref: 'User' })
   targetUserId?: Types.ObjectId;
 
@@ -86,8 +118,32 @@ export class Question {
   @Prop()
   agentName?: string;
 
-  @Prop({ type: String, enum: ['pending', 'answered', 'expired'], default: 'pending' })
+  @Prop({
+    type: String,
+    enum: ['pending', 'answered', 'expired', 'snoozed', 'cancelled', 'superseded'],
+    default: 'pending',
+  })
   status: QuestionStatus;
+
+  /** When a snoozed question should reappear in the pending list. */
+  @Prop()
+  snoozeUntil?: Date;
+
+  /** Optional reason captured when cancelling or superseding. */
+  @Prop()
+  closeReason?: string;
+
+  /** When superseded → points at the replacement Question. */
+  @Prop({ type: Types.ObjectId, ref: 'Question' })
+  supersededByQuestionId?: Types.ObjectId;
+
+  /** Knowledge entry that captured the answer as a decision (T-391). */
+  @Prop({ type: Types.ObjectId, ref: 'Knowledge' })
+  decisionKnowledgeId?: Types.ObjectId;
+
+  /** Todo created as a follow-up after this question was answered (T-391). */
+  @Prop({ type: Types.ObjectId, ref: 'Todo' })
+  followupTodoId?: Types.ObjectId;
 
   @Prop()
   answer?: string;
@@ -212,3 +268,8 @@ QuestionSchema.index({ projectId: 1, status: 1 });
 QuestionSchema.index({ direction: 1, status: 1, createdAt: -1 });
 QuestionSchema.index({ resolvedTargetUserIds: 1, status: 1 });
 QuestionSchema.index({ targetRole: 1, status: 1 });
+QuestionSchema.index({ status: 1, snoozeUntil: 1 });
+QuestionSchema.index({ customerId: 1, status: 1 });
+QuestionSchema.index({ researchSessionId: 1, status: 1 });
+QuestionSchema.index({ chatSessionId: 1, status: 1 });
+QuestionSchema.index({ milestoneId: 1, status: 1 });

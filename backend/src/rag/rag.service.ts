@@ -31,6 +31,7 @@ const INDEXABLE_ENTITIES = [
   'attachment',
   'schema',
   'project',
+  'question',
 ] as const;
 
 type IndexableEntity = (typeof INDEXABLE_ENTITIES)[number];
@@ -47,6 +48,7 @@ const ENTITY_COLLECTION_MAP: Record<IndexableEntity, string> = {
   attachment: 'attachments',
   schema: 'dbschemas',
   project: 'projects',
+  question: 'questions',
 };
 
 interface RagDocument {
@@ -593,6 +595,21 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         }
         if (doc.instructions) parts.push(String(doc.instructions));
         return { title: String(doc.name || ''), content: parts.join('\n') };
+      }
+      case 'question': {
+        // T-392: only answered questions belong in the index — pending ones
+        // would pollute results with unresolved noise and create privacy
+        // issues for user-targeted asks.
+        if (doc.status !== 'answered') return null;
+        const titlePrefix = doc.direction === 'user_to_agent' ? 'Q→Agent: ' : 'Q→User: ';
+        const parts: string[] = [];
+        parts.push(`Frage: ${String(doc.question || '')}`);
+        if (doc.context) parts.push(`Kontext: ${String(doc.context)}`);
+        if (doc.answer) parts.push(`Antwort: ${String(doc.answer)}`);
+        return {
+          title: titlePrefix + String(doc.question || '').slice(0, 120),
+          content: parts.join('\n\n'),
+        };
       }
       default:
         return null;
