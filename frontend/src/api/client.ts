@@ -994,6 +994,48 @@ export interface ProjectAccess {
   }>;
 }
 
+// T-339: shared filter + item types for audit-log list and export endpoints.
+export interface AuditLogFilters {
+  action?: string;
+  actionPrefix?: string;
+  actorUserId?: string;
+  actorType?: 'user' | 'apikey' | 'system';
+  entityType?: string;
+  entityId?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AuditLogItem {
+  _id: string;
+  action: string;
+  actorUserId?: string;
+  actorUsername?: string;
+  actorRole?: string;
+  actorApiKeyId?: string;
+  entityType?: string;
+  entityId?: string;
+  meta?: Record<string, unknown>;
+  ipAddress?: string;
+  userAgent?: string;
+  timestamp: string;
+}
+
+function auditLogParams(filters?: AuditLogFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  if (filters?.action) params.set('action', filters.action);
+  if (filters?.actionPrefix) params.set('actionPrefix', filters.actionPrefix);
+  if (filters?.actorUserId) params.set('actorUserId', filters.actorUserId);
+  if (filters?.actorType) params.set('actorType', filters.actorType);
+  if (filters?.entityType) params.set('entityType', filters.entityType);
+  if (filters?.entityId) params.set('entityId', filters.entityId);
+  if (filters?.since) params.set('since', filters.since);
+  if (filters?.until) params.set('until', filters.until);
+  return params;
+}
+
 export interface ApiKeyCreateResponse extends ApiKeyInfo {
   key: string;
 }
@@ -2301,43 +2343,23 @@ export const api = {
     },
   },
   auditLog: {
-    list: (filters?: {
-      action?: string;
-      actorUserId?: string;
-      entityType?: string;
-      entityId?: string;
-      since?: string;
-      until?: string;
-      limit?: number;
-      offset?: number;
-    }) => {
-      const params = new URLSearchParams();
-      if (filters?.action) params.set('action', filters.action);
-      if (filters?.actorUserId) params.set('actorUserId', filters.actorUserId);
-      if (filters?.entityType) params.set('entityType', filters.entityType);
-      if (filters?.entityId) params.set('entityId', filters.entityId);
-      if (filters?.since) params.set('since', filters.since);
-      if (filters?.until) params.set('until', filters.until);
+    list: (filters?: AuditLogFilters) => {
+      const params = auditLogParams(filters);
       if (filters?.limit) params.set('limit', String(filters.limit));
       if (filters?.offset) params.set('offset', String(filters.offset));
       const qs = params.toString();
       return request<{
-        items: Array<{
-          _id: string;
-          action: string;
-          actorUserId?: string;
-          actorUsername?: string;
-          actorRole?: string;
-          actorApiKeyId?: string;
-          entityType?: string;
-          entityId?: string;
-          meta?: Record<string, unknown>;
-          ipAddress?: string;
-          userAgent?: string;
-          timestamp: string;
-        }>;
+        items: AuditLogItem[];
         total: number;
       }>(`/audit-log${qs ? `?${qs}` : ''}`);
+    },
+    // T-339: server-side filtered JSON export, max 10k rows.
+    exportAll: (filters?: AuditLogFilters) => {
+      const params = auditLogParams(filters);
+      const qs = params.toString();
+      return request<{ items: AuditLogItem[]; truncated: boolean }>(
+        `/audit-log/export${qs ? `?${qs}` : ''}`,
+      );
     },
     actions: () => request<string[]>('/audit-log/actions'),
   },

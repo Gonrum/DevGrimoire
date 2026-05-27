@@ -18,7 +18,9 @@ export class AuditLogController {
   @Get()
   async list(
     @Query('action') action?: string,
+    @Query('actionPrefix') actionPrefix?: string,
     @Query('actorUserId') actorUserId?: string,
+    @Query('actorType') actorType?: 'user' | 'apikey' | 'system',
     @Query('entityType') entityType?: string,
     @Query('entityId') entityId?: string,
     @Query('since') since?: string,
@@ -28,13 +30,40 @@ export class AuditLogController {
   ) {
     return this.auditLogService.findAll({
       action,
+      actionPrefix,
       actorUserId,
+      actorType,
       entityType,
       entityId,
       since: since ? new Date(since) : undefined,
       until: until ? new Date(until) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
+    });
+  }
+
+  // T-339: JSON export with 10k cap — same filters as list(). Frontend
+  // serialises the response to a downloadable file.
+  @Get('export')
+  async exportAll(
+    @Query('action') action?: string,
+    @Query('actionPrefix') actionPrefix?: string,
+    @Query('actorUserId') actorUserId?: string,
+    @Query('actorType') actorType?: 'user' | 'apikey' | 'system',
+    @Query('entityType') entityType?: string,
+    @Query('entityId') entityId?: string,
+    @Query('since') since?: string,
+    @Query('until') until?: string,
+  ) {
+    return this.auditLogService.exportAll({
+      action,
+      actionPrefix,
+      actorUserId,
+      actorType,
+      entityType,
+      entityId,
+      since: since ? new Date(since) : undefined,
+      until: until ? new Date(until) : undefined,
     });
   }
 
