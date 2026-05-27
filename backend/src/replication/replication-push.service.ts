@@ -2,10 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, Model } from 'mongoose';
-import { OnEvent } from '@nestjs/event-emitter';
+import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
-import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
+import { PROJECT_CHANGED, REPLICATION_STATUS_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { SettingsService } from '../settings/settings.service';
 import { MinioService } from '../minio/minio.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -73,6 +73,7 @@ export class ReplicationPushService {
     private projectsService: ProjectsService,
     private httpService: HttpService,
     private notificationsService: NotificationsService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -211,6 +212,7 @@ export class ReplicationPushService {
         }),
       );
       await this.settingsService.set(REPL_LAST_SYNC, new Date().toISOString());
+      this.eventEmitter.emit(REPLICATION_STATUS_CHANGED);
       return true;
     } catch {
       return false;
@@ -233,6 +235,7 @@ export class ReplicationPushService {
       attachmentData: payload.attachmentData,
       status: 'pending',
     });
+    this.eventEmitter.emit(REPLICATION_STATUS_CHANGED);
   }
 
   /** Process queued items — called by scheduler */
@@ -282,6 +285,7 @@ export class ReplicationPushService {
 
     await this.maybeNotifyOnFailures();
 
+    if (items.length > 0) this.eventEmitter.emit(REPLICATION_STATUS_CHANGED);
     return sent;
   }
 
@@ -325,6 +329,7 @@ export class ReplicationPushService {
 
   async clearFailed(): Promise<number> {
     const result = await this.queueModel.deleteMany({ status: 'failed' }).exec();
+    if (result.deletedCount > 0) this.eventEmitter.emit(REPLICATION_STATUS_CHANGED);
     return result.deletedCount;
   }
 

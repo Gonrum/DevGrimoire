@@ -44,7 +44,8 @@ export interface ProjectChangeEvent {
     | 'knowledge-graph'
     | 'oracle'
     | 'ssh-connection'
-    | 'ssh-audit';
+    | 'ssh-audit'
+    | 'replication-status';
   action: 'created' | 'updated' | 'deleted';
   entityId?: string;
 }

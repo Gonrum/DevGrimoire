@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, ReplicationConfig, ReplicationStatus, ReplicationProjectEntry, RemoteProjectEntry } from '../api/client';
+import { wsEventBus, isProjectChangeEvent } from '../api/wsEventBus';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
 
@@ -77,15 +78,46 @@ export default function ReplicationSettings() {
     }
   }, [role, loadProjects]);
 
-  // Poll status every 5s when actively replicating, so the queue counter and
-  // lastSync timestamp tick down/up live without forcing a manual refresh.
+  // T-351: Live-Push statt 5s-Polling. Backend emittet `replication-status`
+  // bei Statuswechsel (push/pull/full-sync, Queue-Mutation, Config-Save).
+  // Tab-visible-Refresh fängt verpasste Events ab (Reconnect-Gap, kalter Start).
+  const refetchTimer = useRef<number | null>(null);
   useEffect(() => {
     if (role === 'standalone') return;
-    const tick = () => {
+
+    const refetch = () => {
       api.replication.getStatus().then(setStatus).catch(() => {});
     };
-    const id = window.setInterval(tick, 5000);
-    return () => window.clearInterval(id);
+    // Debounce auf 300ms — Backend kann während Push/Pull-Bursts mehrere
+    // Events feuern (Enqueue + processQueue + lastSync). Ein einziger
+    // /status-Call reicht.
+    const scheduleRefetch = () => {
+      if (refetchTimer.current !== null) return;
+      refetchTimer.current = window.setTimeout(() => {
+        refetchTimer.current = null;
+        refetch();
+      }, 300);
+    };
+
+    const unsub = wsEventBus.subscribe({ kind: 'global' }, (event) => {
+      if (isProjectChangeEvent(event) && event.entity === 'replication-status') {
+        scheduleRefetch();
+      }
+    });
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refetch();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      unsub();
+      document.removeEventListener('visibilitychange', onVisible);
+      if (refetchTimer.current !== null) {
+        window.clearTimeout(refetchTimer.current);
+        refetchTimer.current = null;
+      }
+    };
   }, [role]);
 
   const save = async () => {

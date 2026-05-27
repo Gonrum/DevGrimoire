@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { REPLICATION_STATUS_CHANGED } from '../events/project-event';
 import { SettingsService } from '../settings/settings.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ReplicationReceiveService } from './replication-receive.service';
@@ -34,6 +36,7 @@ export class ReplicationPullService {
     private projectsService: ProjectsService,
     private receiveService: ReplicationReceiveService,
     private httpService: HttpService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   /** True while a pull is in flight — used by scheduler to avoid overlap. */
@@ -121,6 +124,7 @@ export class ReplicationPullService {
         if (response.until) {
           await this.settingsService.set(REPL_LAST_PULL, response.until);
           since = response.until;
+          this.eventEmitter.emit(REPLICATION_STATUS_CHANGED);
         }
 
         // If the server returned fewer than its hard limit, we're caught up.

@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { REPLICATION_STATUS_CHANGED } from '../events/project-event';
 import { SettingsService } from '../settings/settings.service';
 import { MinioService } from '../minio/minio.service';
 import {
@@ -47,6 +49,7 @@ export class ReplicationFullSyncService {
     private settingsService: SettingsService,
     private minioService: MinioService,
     private httpService: HttpService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -177,6 +180,7 @@ export class ReplicationFullSyncService {
       }
 
       await this.settingsService.set(REPL_LAST_FULL_SYNC, new Date().toISOString());
+      this.eventEmitter.emit(REPLICATION_STATUS_CHANGED);
       this.logger.log(`Full sync completed: ${totalProjects} projects, ${totalEntities} entities, ${totalSkipped} LWW-skipped, ${totalErrors} errors`);
     } catch (err) {
       this.logger.error(`Full sync failed: ${(err as Error).message}`);

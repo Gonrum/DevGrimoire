@@ -3,7 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 import { Observable, Subject } from 'rxjs';
-import { PROJECT_CHANGED, ProjectChangeEvent } from './project-event';
+import { PROJECT_CHANGED, REPLICATION_STATUS_CHANGED, ProjectChangeEvent } from './project-event';
 import { NOTIFICATION_CREATED } from '../notifications/notifications.service';
 import { QUESTION_CREATED, QUESTION_ANSWERED } from '../questions/questions.service';
 
@@ -261,6 +261,18 @@ export class EventsBusService implements OnModuleInit, OnModuleDestroy {
       questionId: event.questionId,
       answer: event.answer,
       answeredByUserId: event.answeredByUserId,
+    });
+  }
+
+  @OnEvent(REPLICATION_STATUS_CHANGED)
+  handleReplicationStatusChanged() {
+    // Broadcast trigger — frontend re-fetches /api/replication/status on hit.
+    // No payload: queueSize, lastSync etc. are pulled fresh so we don't have
+    // to keep WS event shape in sync with the status DTO.
+    this.events$$.next({
+      projectId: null,
+      entity: 'replication-status',
+      action: 'updated',
     });
   }
 }

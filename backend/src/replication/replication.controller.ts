@@ -4,8 +4,10 @@ import {
 } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { REPLICATION_STATUS_CHANGED } from '../events/project-event';
 import { SettingsService } from '../settings/settings.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ReplicationReceiveService } from './replication-receive.service';
@@ -64,6 +66,7 @@ export class ReplicationController {
     private projectsService: ProjectsService,
     private httpService: HttpService,
     @InjectConnection() private connection: Connection,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   // ── Per-project replication opt-in ─────────────
@@ -272,6 +275,7 @@ export class ReplicationController {
       await this.settingsService.set(REPL_PULL_CRON, body.pullCron);
     }
 
+    this.eventEmitter.emit(REPLICATION_STATUS_CHANGED);
     return this.getConfig();
   }
 
@@ -508,6 +512,7 @@ export class ReplicationController {
       throw new BadRequestException('Only a slave can be promoted');
     }
     await this.settingsService.set(REPL_ROLE, 'master');
+    this.eventEmitter.emit(REPLICATION_STATUS_CHANGED);
     return { role: 'master', message: 'Instance promoted to master' };
   }
 
