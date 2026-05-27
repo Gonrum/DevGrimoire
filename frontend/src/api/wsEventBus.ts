@@ -45,6 +45,7 @@ export interface ProjectChangeEvent {
     | 'oracle'
     | 'ssh-connection'
     | 'ssh-audit'
+    | 'healthcheck'
     | 'replication-status';
   action: 'created' | 'updated' | 'deleted';
   entityId?: string;

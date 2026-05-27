@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Healthcheck,
@@ -11,6 +11,7 @@ import {
   SecretListItem,
   api,
 } from '../api/client';
+import { wsEventBus, isProjectChangeEvent } from '../api/wsEventBus';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
@@ -67,6 +68,34 @@ export default function MonitoringTab({
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // T-352: Live-Update bei Status-Wechsel. Backend emittet healthcheck-Events
+  // (entity: 'healthcheck', mit customerId) bei jedem Status-Transition im
+  // executeCheck. Wir reloaden mit 300ms-Throttle, damit ein Scheduler-Cycle
+  // der mehrere Checks parallel flippt nicht N list-Calls absetzt.
+  const refetchTimer = useRef<number | null>(null);
+  useEffect(() => {
+    const scheduleReload = () => {
+      if (refetchTimer.current !== null) return;
+      refetchTimer.current = window.setTimeout(() => {
+        refetchTimer.current = null;
+        api.monitoring.list(customerId).then(setChecks).catch(() => {});
+      }, 300);
+    };
+    const unsub = wsEventBus.subscribe({ kind: 'global' }, (event) => {
+      if (!isProjectChangeEvent(event)) return;
+      if (event.entity !== 'healthcheck') return;
+      if (event.customerId && event.customerId !== customerId) return;
+      scheduleReload();
+    });
+    return () => {
+      unsub();
+      if (refetchTimer.current !== null) {
+        window.clearTimeout(refetchTimer.current);
+        refetchTimer.current = null;
+      }
+    };
+  }, [customerId]);
 
   // Load secrets reachable for this customer (customer-owned + project-owned of linked projects).
   useEffect(() => {
