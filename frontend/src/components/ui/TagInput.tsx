@@ -1,4 +1,5 @@
 import { useId, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 interface TagInputProps {
@@ -127,6 +128,13 @@ export default function TagInput({
             setFocused(true);
           }}
           onBlur={() => {
+            // Commit pending tag text on blur — otherwise a "Save" click drops
+            // it (click triggers blur first, then onClick runs with the stale
+            // tags array). flushSync forces the parent re-render before the
+            // following click handler fires, so handleSave sees the new tag.
+            if (input.trim()) {
+              flushSync(() => addTag(input));
+            }
             blurTimer.current = setTimeout(() => setFocused(false), 120);
           }}
           placeholder={value.length === 0 ? placeholder : ''}
