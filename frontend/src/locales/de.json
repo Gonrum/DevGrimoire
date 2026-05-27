@@ -114,7 +114,11 @@
     "autoSaved": "Schritt wurde automatisch als Research-Eintrag gespeichert.",
     "tabSteps": "Schritte",
     "tabChat": "Chat",
-    "tabContext": "Kontext"
+    "tabContext": "Kontext",
+    "delete": "Recherche löschen",
+    "deleteConfirm": "Recherche \"{{title}}\" wirklich löschen? Alle Schritte und gespeicherten Erkenntnisse gehen verloren.",
+    "deleted": "Recherche gelöscht",
+    "deleteFailed": "Recherche konnte nicht gelöscht werden"
   },
   "auth": {
     "loginTitle": "DevGrimoire",

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Trash2 } from 'lucide-react';
 import {
   api,
   Project,
@@ -23,6 +24,7 @@ const SELECTED_STEP_KEY_PREFIX = 'research.lastSelectedStep:';
 
 export default function ResearchSessionPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { showError, showSuccess } = useToast();
   const [detail, setDetail] = useState<ResearchSessionDetail | null>(null);
@@ -33,6 +35,7 @@ export default function ResearchSessionPage() {
   const [titleDraft, setTitleDraft] = useState('');
   const [newStepTitle, setNewStepTitle] = useState('');
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
+  const [deleting, setDeleting] = useState(false);
 
   const projectsById = useMemo(() => new Map(projects.map((p) => [p._id, p])), [projects]);
 
@@ -162,6 +165,20 @@ export default function ResearchSessionPage() {
     }
   };
 
+  const deleteSession = async () => {
+    if (!id) return;
+    if (!window.confirm(t('researchSessions.deleteConfirm', { title: session.title }))) return;
+    setDeleting(true);
+    try {
+      await api.researchSessions.delete(id);
+      showSuccess(t('researchSessions.deleted'));
+      navigate('/research');
+    } catch (err: unknown) {
+      showError(err instanceof Error ? err.message : t('researchSessions.deleteFailed'));
+      setDeleting(false);
+    }
+  };
+
   const onMessageAppended = (
     stepId: string,
     userMsg: ResearchStepMessage,
@@ -225,6 +242,16 @@ export default function ResearchSessionPage() {
           <Button variant="secondary" size="sm" onClick={() => cycleStatus(session.status, 1)}>
             ▶
           </Button>
+          <button
+            type="button"
+            onClick={deleteSession}
+            disabled={deleting}
+            aria-label={t('researchSessions.delete')}
+            title={t('researchSessions.delete')}
+            className="ml-1 p-1.5 rounded text-gray-500 hover:bg-red-500/10 hover:text-red-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         </div>
       </div>
 

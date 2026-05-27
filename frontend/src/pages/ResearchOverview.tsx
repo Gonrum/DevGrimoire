@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Trash2 } from 'lucide-react';
 import {
   api,
   Project,
@@ -16,13 +17,14 @@ import { LoadingText } from '../components/ui/LoadingSpinner';
 export default function ResearchOverview() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { showError } = useToast();
+  const { showError, showSuccess } = useToast();
   const [sessions, setSessions] = useState<ResearchSessionEntry[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<ResearchSessionStatus | ''>('');
   const [q, setQ] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const projectsById = useMemo(() => new Map(projects.map((p) => [p._id, p])), [projects]);
 
@@ -48,6 +50,20 @@ export default function ResearchOverview() {
   useEffect(() => {
     load();
   }, [statusFilter]);
+
+  const handleDelete = async (session: ResearchSessionEntry) => {
+    if (!window.confirm(t('researchSessions.deleteConfirm', { title: session.title }))) return;
+    setDeletingId(session._id);
+    try {
+      await api.researchSessions.delete(session._id);
+      setSessions((prev) => prev.filter((s) => s._id !== session._id));
+      showSuccess(t('researchSessions.deleted'));
+    } catch (err: unknown) {
+      showError(err instanceof Error ? err.message : t('researchSessions.deleteFailed'));
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   if (loading) return <LoadingText />;
 
@@ -88,34 +104,49 @@ export default function ResearchOverview() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {sessions.map((s) => (
-            <Link
+            <div
               key={s._id}
-              to={`/research/${s._id}`}
-              className="block bg-gray-900 border border-gray-800 rounded-lg p-5 hover:border-violet-500 transition-colors"
+              className="group relative bg-gray-900 border border-gray-800 rounded-lg hover:border-violet-500 transition-colors"
             >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-gray-500 font-mono">{s.displayNumber}</span>
-                <Badge color={statusColor(s.status)} rounded="full">
-                  {t(`researchSessions.status${capitalize(s.status)}` as never)}
-                </Badge>
-              </div>
-              <h2 className="text-lg font-semibold mb-3">{s.title}</h2>
-              {s.projectIds.length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-2">
-                  {s.projectIds.map((pid) => {
-                    const p = projectsById.get(pid);
-                    return (
-                      <Badge key={pid} color="bg-violet-900/40 text-violet-300">
-                        {p ? p.name : t('researchSessions.unknownProject')}
-                      </Badge>
-                    );
-                  })}
+              <Link to={`/research/${s._id}`} className="block p-5">
+                <div className="flex items-center justify-between mb-2 pr-7">
+                  <span className="text-xs text-gray-500 font-mono">{s.displayNumber}</span>
+                  <Badge color={statusColor(s.status)} rounded="full">
+                    {t(`researchSessions.status${capitalize(s.status)}` as never)}
+                  </Badge>
                 </div>
-              )}
-              <p className="text-xs text-gray-600 mt-3">
-                {t('common.updated')}: {new Date(s.updatedAt).toLocaleString()}
-              </p>
-            </Link>
+                <h2 className="text-lg font-semibold mb-3">{s.title}</h2>
+                {s.projectIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {s.projectIds.map((pid) => {
+                      const p = projectsById.get(pid);
+                      return (
+                        <Badge key={pid} color="bg-violet-900/40 text-violet-300">
+                          {p ? p.name : t('researchSessions.unknownProject')}
+                        </Badge>
+                      );
+                    })}
+                  </div>
+                )}
+                <p className="text-xs text-gray-600 mt-3">
+                  {t('common.updated')}: {new Date(s.updatedAt).toLocaleString()}
+                </p>
+              </Link>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleDelete(s);
+                }}
+                disabled={deletingId === s._id}
+                aria-label={t('researchSessions.delete')}
+                title={t('researchSessions.delete')}
+                className="absolute top-3 right-3 p-1.5 rounded text-gray-500 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-red-500/10 hover:text-red-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
           ))}
         </div>
       )}
