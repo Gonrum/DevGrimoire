@@ -138,7 +138,9 @@
     "activeTasks": "Active Quests",
     "noActiveTasks": "No quests in progress or review.",
     "removeFavorite": "Remove favorite",
-    "favoriteError": "Could not change favorite"
+    "favoriteError": "Could not change favorite",
+    "activity": "Activity",
+    "activityCustomerScope": "Customer record"
   },
   "projects": {
     "overview": "Chapter Overview",

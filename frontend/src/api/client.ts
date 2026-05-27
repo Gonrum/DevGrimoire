@@ -1609,6 +1609,15 @@ export const api = {
       if (limit) params.set('limit', String(limit));
       return request<Activity[]>(`/activities?${params}`);
     },
+    // T-335: global feed across everything the user can see.
+    listGlobal: (opts?: { limit?: number; entityType?: string; entityId?: string }) => {
+      const params = new URLSearchParams();
+      if (opts?.limit) params.set('limit', String(opts.limit));
+      if (opts?.entityType) params.set('entityType', opts.entityType);
+      if (opts?.entityId) params.set('entityId', opts.entityId);
+      const qs = params.toString();
+      return request<Activity[]>(qs ? `/activities?${qs}` : '/activities');
+    },
   },
   milestones: {
     list: (projectId: string, status?: string) => {

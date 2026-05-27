@@ -8,6 +8,7 @@ import { STATUS_LABELS, STATUS_COLORS, PRIORITY_COLORS, PRIORITY_LABELS } from '
 import Badge from '../components/ui/Badge';
 import Markdown from '../components/Markdown';
 import PendingQuestionsWidget from '../components/dashboard/PendingQuestionsWidget';
+import ActivityFeed from '../components/dashboard/ActivityFeed';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
 export default function Dashboard() {
@@ -15,6 +16,7 @@ export default function Dashboard() {
   const [favorites, setFavorites] = useState<Project[]>([]);
   const [activeTodos, setActiveTodos] = useState<Todo[]>([]);
   const [projectMap, setProjectMap] = useState<Record<string, string>>({});
+  const [projectsById, setProjectsById] = useState<Record<string, Project>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { showError } = useToast();
@@ -29,8 +31,13 @@ export default function Dashboard() {
       setFavorites(favProjects);
       // Build project name map for todo display
       const map: Record<string, string> = {};
-      for (const p of allProjects) map[p._id] = p.name;
+      const byId: Record<string, Project> = {};
+      for (const p of allProjects) {
+        map[p._id] = p.name;
+        byId[p._id] = p;
+      }
       setProjectMap(map);
+      setProjectsById(byId);
       setActiveTodos(todos);
     } catch (err: any) {
       setError(err.message);
@@ -141,6 +148,9 @@ export default function Dashboard() {
 
       {/* Offene Rückfragen */}
       <PendingQuestionsWidget className="mb-8" />
+
+      {/* Aktivität (T-335) */}
+      <ActivityFeed projectsById={projectsById} />
 
       {/* Aktive Tasks */}
       <div>

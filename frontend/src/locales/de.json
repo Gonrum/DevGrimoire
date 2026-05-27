@@ -138,7 +138,9 @@
     "activeTasks": "Aktive Quests",
     "noActiveTasks": "Keine Quests in Bearbeitung oder Review.",
     "removeFavorite": "Favorit entfernen",
-    "favoriteError": "Favorit konnte nicht geändert werden"
+    "favoriteError": "Favorit konnte nicht geändert werden",
+    "activity": "Aktivität",
+    "activityCustomerScope": "Kunden-Akte"
   },
   "projects": {
     "overview": "Kapitelübersicht",
