@@ -807,7 +807,7 @@ const tools = [
   },
   {
     name: 'todo_create',
-    description: 'Create a new todo/task. Belongs to either a project (projectId) or a customer (customerId) — exactly one of the two is required.',
+    description: 'Create a new todo/task. Belongs to either a project (projectId) or a customer (customerId) — exactly one of the two is required. When the todo is derived from a spec, plan or detailed requirement, do NOT create it title-only: carry the substance into the structured Quest fields (userStories, acceptanceCriteria, outOfScope, edgeCases) and set blockedBy for dependencies. Copy measurable constraints from the source verbatim into acceptanceCriteria.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -1234,7 +1234,7 @@ const tools = [
   },
   {
     name: 'milestone_create_with_todos',
-    description: 'Create a milestone with todos in one shot. Each todo can carry the new Quest fields (userStories, acceptanceCriteria[{text, done?}], outOfScope, edgeCases, tags, priority). Intended for the Briefing-Mode flow where the agent has interactively gathered structured requirements with the user.',
+    description: 'Create a milestone with todos in one shot. Each todo SHOULD carry the structured Quest fields (userStories, acceptanceCriteria[{text, done?}], outOfScope, edgeCases, tags, priority) — only title is technically required, but when decomposing a spec or phase-plan a title-only backlog is wrong: transfer the source detail into the fields rather than discarding it. Intended for the Briefing-Mode flow where the agent has interactively gathered structured requirements with the user.',
     inputSchema: {
       type: 'object' as const,
       properties: {

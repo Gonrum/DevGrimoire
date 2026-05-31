@@ -38,12 +38,23 @@ Rufe **immer** \`system_instructions_get\` am Anfang jeder Session auf, um die a
 
 | Tool | Wann verwenden |
 |------|----------------|
-| \`todo_create\` | Neuen Task anlegen. Pflicht: \`projectId\`, \`title\`. Optional: Beschreibung, Status, Priorität, Tags, \`milestoneId\`, \`blockedBy\` (Abhängigkeiten) |
+| \`todo_create\` | Neuen Task anlegen. Pflicht: \`projectId\`, \`title\`. Optional: \`description\`, Status, Priorität, Tags, \`milestoneId\`, \`blockedBy\` (Abhängigkeiten) **sowie die strukturierten Quest-Felder** \`userStories\`, \`acceptanceCriteria\` (\`[{text, done?}]\`), \`outOfScope\`, \`edgeCases\` |
 | \`todo_list\` | Kompakte Liste (id, title, status, priority, tags, milestoneId). Archivierte sind standardmäßig ausgeblendet. Filter: status, priority, milestoneId, tag. Pagination: limit/offset |
 | \`todo_get\` | Volle Details inkl. Beschreibung, Kommentare, blockedBy. Lookup über \`id\` ODER \`number\`+\`projectId\` (z.B. "T-3") |
 | \`todo_update\` | Status, Titel, Beschreibung, Priorität, Tags, Milestone, Abhängigkeiten, Archivierung ändern. Lookup über \`id\` ODER \`number\`+\`projectId\` |
 | \`todo_delete\` | Task löschen. Lookup über \`id\` ODER \`number\`+\`projectId\` |
 | \`todo_comment\` | Kommentar an Task anhängen (Fortschritt, Entscheidungen, Review-Ergebnisse). Lookup über \`id\` ODER \`number\`+\`projectId\` |
+
+**Strukturierte Quest-Felder (PFLICHT bei Spec-/Plan-basierten Todos)**:
+
+Wenn ein Todo aus einer Spezifikation, einem Konzept, einem Phasenplan oder einer detaillierten User-Vorgabe entsteht, lege es **niemals nur mit Titel** an. Übertrage die fachliche Substanz in die strukturierten Felder:
+- \`userStories\` — Wer will was und warum (Markdown, \`Als … möchte ich … damit …\`)
+- \`acceptanceCriteria\` — Definition of Done als Checkliste (\`[{ text, done? }]\`). Konkrete, prüfbare Kriterien — übernimm messbare Vorgaben aus der Spec wörtlich (z.B. "Meta Title ≤ 60 Zeichen")
+- \`outOfScope\` — Was explizit **nicht** Teil des Todos ist (Abgrenzung)
+- \`edgeCases\` — Randfälle, Risiken, offene Fragen
+- \`blockedBy\` — Abhängigkeiten zu anderen Todos
+
+Das gilt auch für \`milestone_create_with_todos\`: jedes Element im \`todos\`-Array trägt dieselben Felder. Ein title-only-Backlog aus einer reichhaltigen Spec ist ein Fehler — die Detailtiefe der Quelle muss in den Feldern landen, nicht verloren gehen. Für interaktive Klärung von Edge Cases \`ask_user\`/\`todo_ask_question\` mit \`todoId\` nutzen.
 
 **Tipps**:
 - Nutze \`blockedBy\` um Abhängigkeiten zwischen Tasks zu definieren
