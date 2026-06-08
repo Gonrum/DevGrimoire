@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AcceptanceCriterion } from '../../api/client';
+import { safeRandomUUID } from '../../utils/randomId';
 import Button from '../ui/Button';
 
 interface Props {
@@ -10,18 +11,18 @@ interface Props {
 
 export default function AcceptanceCriteriaEditor({ value, onChange }: Props) {
   const { t } = useTranslation();
-  const [keys, setKeys] = useState<string[]>(() => value.map(() => crypto.randomUUID()));
+  const [keys, setKeys] = useState<string[]>(() => value.map(() => safeRandomUUID()));
 
   // Sync keys when value length changes externally (e.g. todo reloads)
   useEffect(() => {
     if (keys.length !== value.length) {
-      setKeys(value.map(() => crypto.randomUUID()));
+      setKeys(value.map(() => safeRandomUUID()));
     }
   }, [value.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const add = () => {
     onChange([...value, { text: '', done: false }]);
-    setKeys((prev) => [...prev, crypto.randomUUID()]);
+    setKeys((prev) => [...prev, safeRandomUUID()]);
   };
 
   const remove = (index: number) => {

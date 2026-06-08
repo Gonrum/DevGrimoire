@@ -4,6 +4,7 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 import { Workspace, getCurrentAccessToken } from '../api/client';
+import { safeRandomUUID } from '../utils/randomId';
 import Button from './ui/Button';
 
 interface Props {
@@ -15,28 +16,10 @@ const BASE_URL =
   (typeof window !== 'undefined' && (window as unknown as { __DG_API_URL__?: string }).__DG_API_URL__) ||
   '/api';
 
-// crypto.randomUUID() is only available in secure contexts (https or
-// localhost). DevGrimoire is often self-hosted over plain HTTP on a LAN
-// IP, so fall back to getRandomValues — the value is just a per-tab map
-// key on the sidecar, no cryptographic property required.
-function makeSessionId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    try {
-      return crypto.randomUUID();
-    } catch {
-      // some old Safari throws when not in a secure context — fall through
-    }
-  }
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-    const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
-    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10
-    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-  }
-  return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
+// Session id for the per-tab terminal map key on the sidecar. Uses the
+// secure-context-safe UUID helper so it also works over plain HTTP, where
+// crypto.randomUUID is undefined.
+const makeSessionId = safeRandomUUID;
 
 function buildWsUrl(workspaceId: string, sessionId: string): string {
   const token = getCurrentAccessToken();
