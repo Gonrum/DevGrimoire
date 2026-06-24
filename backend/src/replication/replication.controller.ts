@@ -15,6 +15,8 @@ import { ReplicationPushService } from './replication-push.service';
 import { ReplicationFullSyncService } from './replication-full-sync.service';
 import { ReplicationPullService } from './replication-pull.service';
 import { ReplicationScheduler } from './replication.scheduler';
+import { ReplicationSyncService } from './replication-sync.service';
+import { SyncReceiveRequest, SyncReceiveResponse, SyncPullResponse } from './replication-sync.types';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/schemas/user.schema';
 import {
@@ -67,6 +69,7 @@ export class ReplicationController {
     private httpService: HttpService,
     @InjectConnection() private connection: Connection,
     private eventEmitter: EventEmitter2,
+    private syncService: ReplicationSyncService,
   ) {}
 
   // ── Per-project replication opt-in ─────────────
@@ -440,6 +443,33 @@ export class ReplicationController {
       until: until.toISOString(),
       count: changes.length,
     };
+  }
+
+  /** Inbound push batch (log-based sync engine). Mirrors /receive but for the
+   *  new replication_log wire format. Guarded by the global JwtAuthGuard. */
+  @Post('sync/receive')
+  @HttpCode(200)
+  async syncReceive(@Body() body: SyncReceiveRequest): Promise<SyncReceiveResponse> {
+    if (!body || !Array.isArray(body.entries)) {
+      throw new BadRequestException('entries[] required');
+    }
+    const result = await this.syncService.receiveBatch(body);
+    this.eventEmitter.emit(REPLICATION_STATUS_CHANGED);
+    return result;
+  }
+
+  /** Serve a page of the local replication_log to a pulling peer. */
+  @Get('sync/pull')
+  async syncPull(
+    @Query('since') since?: string,
+    @Query('limit') limit?: string,
+  ): Promise<SyncPullResponse> {
+    const sinceN = Number(since ?? '0');
+    const limitN = Number(limit ?? '500');
+    if (!Number.isFinite(sinceN) || sinceN < 0) {
+      throw new BadRequestException('Invalid `since`');
+    }
+    return this.syncService.servePull(sinceN, Number.isFinite(limitN) ? limitN : 500);
   }
 
   /** Trigger an inbound pull from the configured peer (manual UI button). */
