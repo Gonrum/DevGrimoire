@@ -11,7 +11,7 @@ export type ReplicationAppliedDocument = HydratedDocument<ReplicationApplied>;
 @Schema({ timestamps: true, collection: 'replication_applied' })
 export class ReplicationApplied {
   /** `collection:_id:updatedAtMs` — matches the exact write being applied. */
-  @Prop({ required: true, unique: true })
+  @Prop({ required: true })
   appliedKey: string;
 
   @Prop({ required: true })

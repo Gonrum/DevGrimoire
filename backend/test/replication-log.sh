@@ -68,6 +68,14 @@ wait_for "db.replication_log.countDocuments({documentId:'$AA2'})" 1 || { echo "F
 echo "PASS — window #1 closed"
 $MONGO "db.todos.deleteOne({_id: ObjectId('$AA2')}); db.replication_log.deleteMany({documentId:'$AA2'})" >/dev/null
 
+echo "== 6. burst: 10 rapid writes are all captured, strictly increasing seq =="
+BIDS=""
+for i in $(seq 1 10); do BID=$(printf '000000000000000000000b%02d' $i); BIDS="$BIDS $BID"; $MONGO "db.todos.insertOne({_id: ObjectId('$BID'), projectId:'p-e2e', title:'burst-$i', updatedAt:new Date()})" >/dev/null; done
+wait_for "db.replication_log.countDocuments({documentId: {\$regex: '^000000000000000000000b'}})" 10 || { echo "FAIL: not all 10 burst writes captured"; exit 1; }
+BSEQS=$($MONGO "db.replication_log.find({documentId: {\$regex: '^000000000000000000000b'}}).sort({seq:1}).toArray().map(d=>d.seq).join(',')" | tr -d '\r')
+python3 -c "s=[int(x) for x in '$BSEQS'.split(',') if x]; assert len(s)>=10, 'expected>=10 got '+str(s); assert s==sorted(s) and len(set(s))==len(s), 'not strictly increasing: '+str(s); print('PASS')"
+for BID in $BIDS; do $MONGO "db.todos.deleteOne({_id: ObjectId('$BID')}); db.replication_log.deleteMany({documentId:'$BID'})" >/dev/null; done
+
 echo "== cleanup =="
 $MONGO "db.replication_log.deleteMany({documentId: '$TID'}); db.replication_applied.deleteMany({appliedKey: /:$TID:/})" >/dev/null
 echo "ALL PASS"

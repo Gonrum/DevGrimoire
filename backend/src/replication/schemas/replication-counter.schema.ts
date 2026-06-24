@@ -9,7 +9,7 @@ export type ReplicationCounterDocument = HydratedDocument<ReplicationCounter>;
 @Schema({ collection: 'replication_counters' })
 export class ReplicationCounter {
   /** Fixed counter key, e.g. 'replication_log'. */
-  @Prop({ type: String, required: true, unique: true })
+  @Prop({ type: String, required: true })
   key: string;
 
   @Prop({ required: true, default: 0 })

@@ -88,19 +88,32 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
 
     try {
       this.changeStream = db.watch(pipeline, options);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.changeStream.on('change', (change: any) => {
-        void this.handleChange(change);
-      });
-      this.changeStream.on('error', (err: Error) => {
-        // ChangeStreamHistoryLost (resume token aged out of oplog) is handled
-        // by Plan 3 (auto full-sync). For now: log prominently and stop — a
-        // reconciliation is required before the gap is closed.
-        this.logger.error(`Replication change stream error: ${err.message}`);
-      });
       this.logger.log(`Replication log writer watching: ${watched.join(', ')}`);
+      // Drive the stream with an async iterator (NOT fire-and-forget .on('change')):
+      // for-await pulls the next event only after the current handleChange resolves,
+      // so each log entry is durable AND its resume token persisted before the next
+      // event — strict order + back-pressure. A concurrent handler would let a fast
+      // event advance the token past a slow event still mid-write, losing it on crash.
+      void this.consume();
     } catch (err) {
       this.logger.warn(`Change streams unavailable — log writer inactive: ${(err as Error).message}`);
+    }
+  }
+
+  /** Serial consumer loop. One handleChange at a time, in oplog order. */
+  private async consume(): Promise<void> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for await (const change of this.changeStream as AsyncIterable<any>) {
+        if (this.closing) break;
+        await this.handleChange(change);
+      }
+    } catch (err) {
+      // ChangeStreamHistoryLost (resume token aged out of oplog) → Plan 3 auto full-sync.
+      // For now: log prominently; suppress noise during shutdown.
+      if (!this.closing) {
+        this.logger.error(`Replication change stream error: ${(err as Error).message}`);
+      }
     }
   }
 
@@ -118,7 +131,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
       if (!documentId) return;
 
       // clusterTime is a BSON Timestamp {t, i}; use seconds*1000 for ms epoch.
-      const clusterTimeMs = (change.clusterTime?.t ?? Math.floor(Date.now() / 1000)) * 1000;
+      const clusterTimeMs = (Number(change.clusterTime?.t) || Math.floor(Date.now() / 1000)) * 1000;
       // The resume token `_data` is globally unique per change event and stable
       // across crash-resume re-delivery → the ideal idempotency key. We fall
       // back to clusterTime only if it is somehow absent. (clusterTimeMs alone
@@ -138,6 +151,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
       // Origin tagging via loopback-suppression lookup.
       const self = await this.getSelfInstanceId();
       let origin = self;
+      // Deletes are always tagged origin=self (no applied-record for deletes); per spec §7.2 LWW+origin-filter on the receiver guarantees loop termination regardless — at most one redundant round-trip.
       if (op === 'upsert' && updatedAtMs != null) {
         const appliedKey = makeAppliedKey(coll, documentId, updatedAtMs);
         const hit = await this.appliedModel.findOne({ appliedKey }).lean().exec();
