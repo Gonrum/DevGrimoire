@@ -13,6 +13,7 @@ import { ReplicationController } from './replication.controller';
 import { ReplicationScheduler } from './replication.scheduler';
 import { ReplicationReadonlyGuard } from './replication-readonly.guard';
 import { ReplicationCounterService } from './replication-counter.service';
+import { ReplicationLogWriterService } from './replication-log-writer.service';
 import { SettingsModule } from '../settings/settings.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -42,6 +43,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ReplicationScheduler,
     ReplicationReadonlyGuard,
     ReplicationCounterService,
+    ReplicationLogWriterService,
   ],
   exports: [ReplicationReadonlyGuard],
 })
