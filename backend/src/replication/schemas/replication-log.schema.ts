@@ -3,7 +3,7 @@ import { HydratedDocument, Schema as MongooseSchema } from 'mongoose';
 
 export type ReplicationLogDocument = HydratedDocument<ReplicationLog>;
 
-@Schema({ timestamps: true })
+@Schema({ timestamps: true, collection: 'replication_log' })
 export class ReplicationLog {
   /** Monotonic cursor key (from ReplicationCounter). Strictly increasing; rare gaps are possible when an idempotent crash-resume replay discards a number — harmless, the cursor walk is `seq > cursor` and never assumes compactness. */
   @Prop({ required: true, unique: true })

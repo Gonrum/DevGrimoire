@@ -8,7 +8,7 @@ export type ReplicationAppliedDocument = HydratedDocument<ReplicationApplied>;
  * BEFORE a remote change is written locally; read by the log writer to tag the
  * resulting change event with the remote origin instead of self. TTL auto-GCs.
  */
-@Schema({ timestamps: true })
+@Schema({ timestamps: true, collection: 'replication_applied' })
 export class ReplicationApplied {
   /** `collection:_id:updatedAtMs` — matches the exact write being applied. */
   @Prop({ required: true, unique: true })
