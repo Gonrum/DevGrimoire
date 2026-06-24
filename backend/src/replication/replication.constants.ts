@@ -12,6 +12,22 @@ export const REPL_FULL_SYNC_CRON = 'replication.fullSyncCron';
 export const REPL_PULL_CRON = 'replication.pullCron';
 export const REPL_INSTANCE_ID = 'replication.instanceId';
 
+// --- Fault-tolerant replication engine (Plan 1+) ---
+/** Persisted MongoDB change-stream resume token (JSON-stringified). */
+export const REPL_WATCHER_RESUME_TOKEN = 'replication.watcher.resumeToken';
+/** Highest local log seq the remote has acknowledged (push progress). */
+export const REPL_CURSOR_OUTBOUND = 'replication.cursor.outbound';
+/** Highest remote log seq received via pull (becomes `since`). */
+export const REPL_CURSOR_INBOUND = 'replication.cursor.inbound';
+/** 'active' (drives push+pull, e.g. home) | 'passive' (serves endpoints, e.g. office). */
+export const REPL_SYNC_DRIVER = 'replication.syncDriver';
+/** Sync cycle interval in seconds (default 20). */
+export const REPL_SYNC_INTERVAL_SEC = 'replication.syncIntervalSec';
+/** Replication-log retention in days (default 14). Must exceed longest offline window. */
+export const REPL_LOG_RETENTION_DAYS = 'replication.log.retentionDays';
+/** Engine selector: 'legacy' (fire-on-emit) | 'log' (change-stream log). Migration flag. */
+export const REPL_ENGINE = 'replication.engine';
+
 export type ReplicationRole = 'standalone' | 'master' | 'slave' | 'peer';
 
 /** Roles that PUSH local changes to a remote (master to slave, peer to peer). */
