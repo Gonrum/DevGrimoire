@@ -24,7 +24,8 @@
     "check:ssh-mcp": "node scripts/ssh-mcp-units-check.cjs",
     "check:gitea-provider": "node scripts/gitea-provider-units-check.cjs",
     "check:release-migration": "node scripts/release-migration-units-check.cjs",
-    "check:todo-questions-units": "node scripts/todo-questions-units-check.cjs"
+    "check:todo-questions-units": "node scripts/todo-questions-units-check.cjs",
+    "check:replication-collections": "node scripts/replication-collections-units-check.cjs"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.0",
