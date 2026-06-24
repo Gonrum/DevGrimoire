@@ -19,6 +19,7 @@ function loadCompiled(rel) {
 }
 
 const reg = loadCompiled('replication/replication-collections.js');
+const h = loadCompiled('replication/replication-log.helpers.js');
 
 let failures = 0;
 let total = 0;
@@ -76,6 +77,43 @@ check('keine Überschneidung registriert vs. exkludiert', () => {
     assert.ok(!inc.has(e.className), `${e.className} ist registriert UND exkludiert`);
     assert.ok(e.reason && e.reason.length > 0, `Grund fehlt für ${e.className}`);
   }
+});
+
+check('mapOperation mappt korrekt', () => {
+  assert.equal(h.mapOperation('insert'), 'upsert');
+  assert.equal(h.mapOperation('update'), 'upsert');
+  assert.equal(h.mapOperation('replace'), 'upsert');
+  assert.equal(h.mapOperation('delete'), 'delete');
+  assert.equal(h.mapOperation('drop'), null);
+  assert.equal(h.mapOperation('invalidate'), null);
+});
+
+check('deriveEventId ist stabil + disambiguiert', () => {
+  assert.equal(h.deriveEventId('todos', 'abc', 1000), 'todos:abc:1000');
+  assert.notEqual(h.deriveEventId('todos', 'abc', 1000), h.deriveEventId('todos', 'abc', 1001));
+});
+
+check('makeAppliedKey enthält updatedAt', () => {
+  assert.equal(h.makeAppliedKey('todos', 'abc', 555), 'todos:abc:555');
+  assert.notEqual(h.makeAppliedKey('todos', 'abc', 555), h.makeAppliedKey('todos', 'abc', 556));
+});
+
+check('compareLww: lokal neuer => skip', () => {
+  assert.equal(h.compareLww(2000, 1000), 'skip');
+});
+
+check('compareLww: incoming neuer => apply', () => {
+  assert.equal(h.compareLww(1000, 2000), 'apply');
+});
+
+check('compareLww: gleiche timestamps => apply (incoming gewinnt bei tie)', () => {
+  assert.equal(h.compareLww(1000, 1000), 'apply');
+});
+
+check('compareLww: fehlender lokaler/incoming timestamp => apply', () => {
+  assert.equal(h.compareLww(null, 1000), 'apply');
+  assert.equal(h.compareLww(2000, null), 'apply');
+  assert.equal(h.compareLww(null, null), 'apply');
 });
 
 console.log(`\n${total - failures}/${total} passed`);
