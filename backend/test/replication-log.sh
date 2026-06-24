@@ -3,7 +3,14 @@
 # Requires the dev stack running: docker compose up -d --build backend mongodb
 set -euo pipefail
 
-MONGO="docker compose exec -T mongodb mongosh -u claudevault -p claudevault_secret --authenticationDatabase admin claudevault --quiet --eval"
+# Credentials are read from .env (run from repo root) — never hardcoded.
+ENV_FILE="${ENV_FILE:-.env}"
+[[ -f "$ENV_FILE" ]] || { echo "FAIL: no $ENV_FILE found — run from repo root"; exit 1; }
+MONGO_USER=$(grep -E '^MONGO_USER=' "$ENV_FILE" | cut -d= -f2-)
+MONGO_PASS=$(grep -E '^MONGO_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
+MONGO_DB=$(grep -E '^MONGO_DB=' "$ENV_FILE" | cut -d= -f2-)
+[[ -n "$MONGO_DB" ]] || { echo "FAIL: MONGO_DB not set in $ENV_FILE"; exit 1; }
+MONGO="docker compose exec -T mongodb mongosh -u $MONGO_USER -p $MONGO_PASS --authenticationDatabase admin $MONGO_DB --quiet --eval"
 
 echo "== 1. local write produces an origin=self log entry, monotonic seq =="
 TID="000000000000000000000aa1"
