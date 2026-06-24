@@ -5,7 +5,7 @@ export type ReplicationLogDocument = HydratedDocument<ReplicationLog>;
 
 @Schema({ timestamps: true })
 export class ReplicationLog {
-  /** Monotonic, gap-free cursor key (from ReplicationCounter). */
+  /** Monotonic cursor key (from ReplicationCounter). Strictly increasing; rare gaps are possible when an idempotent crash-resume replay discards a number — harmless, the cursor walk is `seq > cursor` and never assumes compactness. */
   @Prop({ required: true, unique: true })
   seq: number;
 

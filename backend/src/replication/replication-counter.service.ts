@@ -14,7 +14,9 @@ export class ReplicationCounterService {
 
   /**
    * Atomically increment and return the next sequence. Single writer (the log
-   * writer) → contention-free and gap-free. upsert seeds the doc on first call.
+   * writer) → contention-free and strictly increasing (rare gaps on idempotent
+   * replay are harmless — see replication-log.schema.ts). upsert seeds the doc
+   * on first call.
    */
   async nextSeq(): Promise<number> {
     const doc = await this.counterModel

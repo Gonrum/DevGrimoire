@@ -144,6 +144,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
         if (hit) origin = hit.originInstanceId;
       }
 
+      // seq assigned before insert; a duplicate eventId (11000, resume replay) discards this number — harmless gap, see schema.
       const seq = await this.counter.nextSeq();
 
       try {
