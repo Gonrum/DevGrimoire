@@ -2,6 +2,9 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { HttpModule } from '@nestjs/axios';
 import { ReplicationQueue, ReplicationQueueSchema } from './schemas/replication-queue.schema';
+import { ReplicationLog, ReplicationLogSchema } from './schemas/replication-log.schema';
+import { ReplicationCounter, ReplicationCounterSchema } from './schemas/replication-counter.schema';
+import { ReplicationApplied, ReplicationAppliedSchema } from './schemas/replication-applied.schema';
 import { ReplicationPushService } from './replication-push.service';
 import { ReplicationReceiveService } from './replication-receive.service';
 import { ReplicationFullSyncService } from './replication-full-sync.service';
@@ -17,6 +20,9 @@ import { NotificationsModule } from '../notifications/notifications.module';
   imports: [
     MongooseModule.forFeature([
       { name: ReplicationQueue.name, schema: ReplicationQueueSchema },
+      { name: ReplicationLog.name, schema: ReplicationLogSchema },
+      { name: ReplicationCounter.name, schema: ReplicationCounterSchema },
+      { name: ReplicationApplied.name, schema: ReplicationAppliedSchema },
     ]),
     HttpModule.register({
       timeout: 30000,

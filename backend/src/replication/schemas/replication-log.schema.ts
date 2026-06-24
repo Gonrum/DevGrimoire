@@ -1,0 +1,48 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument, Schema as MongooseSchema } from 'mongoose';
+
+export type ReplicationLogDocument = HydratedDocument<ReplicationLog>;
+
+@Schema({ timestamps: true })
+export class ReplicationLog {
+  /** Monotonic, gap-free cursor key (from ReplicationCounter). */
+  @Prop({ required: true, unique: true })
+  seq: number;
+
+  /** Idempotency key `collection:_id:clusterTimeMs` — dedups crash-resume. */
+  @Prop({ required: true, unique: true })
+  eventId: string;
+
+  @Prop({ required: true, enum: ['upsert', 'delete'] })
+  op: string;
+
+  @Prop({ required: true })
+  collection: string;
+
+  @Prop({ required: true })
+  documentId: string;
+
+  @Prop({ type: String, default: null })
+  projectId: string | null;
+
+  @Prop({ type: MongooseSchema.Types.Mixed, default: null })
+  document: Record<string, unknown> | null;
+
+  /** For LWW on the receiver (ms epoch). null when unknown. */
+  @Prop({ type: Number, default: null })
+  updatedAtMs: number | null;
+
+  /** Delete timestamp for LWW on delete ops (ms epoch). null for upserts. */
+  @Prop({ type: Number, default: null })
+  deletedAtMs: number | null;
+
+  /** Originating instance id: self for local writes, remote for applied changes. */
+  @Prop({ required: true })
+  originInstanceId: string;
+}
+
+export const ReplicationLogSchema = SchemaFactory.createForClass(ReplicationLog);
+ReplicationLogSchema.index({ seq: 1 }, { unique: true });
+ReplicationLogSchema.index({ eventId: 1 }, { unique: true });
+ReplicationLogSchema.index({ createdAt: 1 });
+ReplicationLogSchema.index({ originInstanceId: 1, seq: 1 });
