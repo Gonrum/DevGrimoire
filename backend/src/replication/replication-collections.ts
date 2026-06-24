@@ -41,7 +41,6 @@ export const REPLICATED_COLLECTIONS: ReplicatedCollection[] = [
   { className: 'Question', entity: 'question', collection: 'questions', appendOnly: false },
   { className: 'OracleSuggestion', entity: 'oracle', collection: 'oraclesuggestions', appendOnly: false },
   { className: 'ValidationReport', entity: 'validation-report', collection: 'validationreports', appendOnly: false },
-  { className: 'ResearchSession', entity: 'research-session', collection: 'researchsessions', appendOnly: false },
   { className: 'DocUpdateProposal', entity: 'doc-update-proposal', collection: 'docupdateproposals', appendOnly: false },
   { className: 'KnowledgeGraphEdge', entity: 'knowledge-graph-edge', collection: 'knowledgegraphedges', appendOnly: false },
 ];
@@ -59,6 +58,7 @@ export const EXCLUDED_COLLECTIONS: { className: string; reason: string }[] = [
   { className: 'Healthcheck', reason: 'Customer-skopiertes Monitoring, kein Projekt-Inhalt' },
   { className: 'LogEntry', reason: 'Hochvolumige lokale Diagnose-Logs — nicht projekt-inhaltlich' },
   { className: 'ReplicationQueue', reason: 'Internes Legacy-Outbox — instanzlokal' },
+  { className: 'ResearchSession', reason: 'Multi-projekt-skopiert via projectIds[] (kein singuläres projectId) — braucht dedizierte Opt-in-/projectId-Behandlung, auf Plan 2 verschoben' },
   { className: 'SshConnection', reason: 'Infra-Zugangsdaten, instanz-/umgebungsspezifisch (Home vs Firma erreichen andere Hosts)' },
   { className: 'WorkflowDefinition', reason: 'Referenziert instanzgebundene Secrets/Endpoints' },
   { className: 'WorkflowRun', reason: 'Workflow-Run-State, instanzgebunden' },

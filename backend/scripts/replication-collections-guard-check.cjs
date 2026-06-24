@@ -28,9 +28,7 @@ const SRC = path.resolve(__dirname, '..', 'src');
 // The projects collection is the replication root — scoped by its own _id, not
 // a projectId field — so it never appears in the source scan. Exempt it from
 // the stale-registration check.
-// ResearchSession uses `projectIds` (plural array field), so the `\bprojectId\b`
-// heuristic does not match it — exempt from stale check as well.
-const STALE_EXEMPT = new Set(['Project', 'ResearchSession']);
+const STALE_EXEMPT = new Set(['Project']);
 
 /** Recursively collect all *.schema.ts files under src/. */
 function schemaFiles(dir) {
