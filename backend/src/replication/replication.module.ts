@@ -14,6 +14,7 @@ import { ReplicationScheduler } from './replication.scheduler';
 import { ReplicationReadonlyGuard } from './replication-readonly.guard';
 import { ReplicationCounterService } from './replication-counter.service';
 import { ReplicationLogWriterService } from './replication-log-writer.service';
+import { ReplicationSyncApplyService } from './replication-sync-apply.service';
 import { SettingsModule } from '../settings/settings.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -44,6 +45,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ReplicationReadonlyGuard,
     ReplicationCounterService,
     ReplicationLogWriterService,
+    ReplicationSyncApplyService,
   ],
   exports: [ReplicationReadonlyGuard],
 })
