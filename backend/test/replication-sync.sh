@@ -62,22 +62,36 @@ BLOCKED=$($MONGO "db.todos.countDocuments({_id:ObjectId('$TID3')})" | tr -d '\r'
 $MONGO "db.projects.updateOne({_id:ObjectId('$PID')},{\$set:{'replicationConfig.enabled':true}})" >/dev/null
 echo "PASS"
 
-echo "== 4. GET /sync/pull serves only origin==self entries with nextSince =="
-# The local log already contains an origin=self entry from the upsert in step 1
-# (the change stream tagged it origin=REMOTE-PEER via replication_applied, so it
-# is NOT served). Create a genuine local write to get an origin=self log entry.
+echo "== 4. GET /sync/pull serves only origin==self entries; an IN-range peer entry is excluded by the origin filter =="
 TID4="000000000000000000000c04"
-# Anchor `since` to just before the local write so pull only needs one small page
-# even on a busy dev DB with thousands of existing log entries.
-SINCE_BASE=$($MONGO "const r=db.replication_log.find().sort({seq:-1}).limit(1).toArray(); print(r.length?r[0].seq:0)" | tr -d '\r')
+TID5="000000000000000000000c05"
+# Anchor `since` to just before BOTH writes so both a local (origin=self) and a
+# peer (origin=REMOTE-PEER) log entry land ABOVE the cursor and are in-range for pull.
+SINCE_BASE=$($MONGO "db.replication_log.find().sort({seq:-1}).limit(1).toArray()[0]?.seq || 0" | tr -d '\r')
+# (a) LOCAL write -> origin=self log entry above the cursor.
 $MONGO "db.todos.insertOne({_id:ObjectId('$TID4'), projectId:ObjectId('$PID'), title:'local-write', updatedAt:new Date()})" >/dev/null
-sleep 2
+# (b) PEER write via the endpoint -> applies TID5 AND writes replication_applied, so
+#     the change stream tags TID5's log entry origin=REMOTE-PEER, seq > SINCE_BASE.
+UMS5=$(python3 -c "import time;print(int(time.time()*1000))")
+$MONGO "db.todos.deleteOne({_id:ObjectId('$TID5')}); db.replication_applied.deleteMany({appliedKey:/:$TID5:/})" >/dev/null
+BODY5=$(cat <<JSON
+{"sourceInstanceId":"REMOTE-PEER","entries":[{"seq":105,"eventId":"e:$TID5:1","op":"upsert","collection":"todos","documentId":"$TID5","projectId":"$PID","document":{"_id":"$TID5","projectId":"$PID","title":"peer-in-range","updatedAt":"$(python3 -c "import datetime;print(datetime.datetime.utcfromtimestamp($UMS5/1000).isoformat()+'Z')")"},"updatedAtMs":$UMS5,"deletedAtMs":null,"originInstanceId":"REMOTE-PEER"}]}
+JSON
+)
+RESP5=$(eval curl -s -X POST "$BASE/api/replication/sync/receive" $AUTH -H "'Content-Type: application/json'" -d "'$BODY5'")
+echo "peer receive resp: $RESP5"
+echo "$RESP5" | grep -q '"appliedThrough":105' || { echo "FAIL: peer entry not applied (appliedThrough!=105)"; exit 1; }
+# Poll until BOTH log entries exist above the cursor (change stream is async).
+for i in $(seq 1 40); do n=$($MONGO "db.replication_log.countDocuments({seq:{\$gt:$SINCE_BASE}, documentId:{\$in:['$TID4','$TID5']}})" | tr -d '\r'); [ "${n:-0}" -ge 2 ] && break; sleep 0.5; done
+[ "${n:-0}" -ge 2 ] || { echo "FAIL: log entries not captured"; exit 1; }
+SELF=$($MONGO "db.settings.findOne({key:'replication.instanceId'})?.value" | tr -d '\r')
+[ -n "$SELF" ] || { echo "FAIL: instanceId not set"; exit 1; }
 PULL=$(eval curl -s '"'"$BASE/api/replication/sync/pull?since=$SINCE_BASE&limit=500"'"' $AUTH)
 echo "pull nextSince/hasMore: $(echo "$PULL" | python3 -c "import sys,json;d=json.load(sys.stdin);print('nextSince=%s hasMore=%s entries=%s'%(d['nextSince'],d['hasMore'],len(d['entries'])))")"
-SELF=$($MONGO "db.settings.findOne({key:'replication.instanceId'})?.value" | tr -d '\r')
-# Every served entry must be origin==self; the REMOTE-PEER-applied entry must NOT appear.
-echo "$PULL" | python3 -c "import sys,json;d=json.load(sys.stdin);assert all(e['originInstanceId']=='$SELF' for e in d['entries']),'served a non-self entry';assert any(e['documentId']=='$TID4' for e in d['entries']),'local write not served';assert not any(e['documentId']=='$TID' for e in d['entries']),'peer-applied entry leaked into pull';print('PASS')"
+# Meaningful filter assertion: TID5 (peer, IN-range) must be EXCLUDED by the origin filter,
+# TID4 (local) must be served, and nothing non-self may leak through.
+echo "$PULL" | python3 -c "import sys,json;d=json.load(sys.stdin);assert any(e['documentId']=='$TID4' for e in d['entries']),'local not served';assert not any(e['documentId']=='$TID5' for e in d['entries']),'peer entry leaked into pull (origin filter broken)';assert all(e['originInstanceId']=='$SELF' for e in d['entries']),'served a non-self entry';print('PASS')"
 
 echo "== cleanup =="
-$MONGO "db.todos.deleteMany({_id:{\$in:[ObjectId('$TID'),ObjectId('$TID3'),ObjectId('$TID4')]}}); db.projects.deleteOne({_id:ObjectId('$PID')}); db.replication_log.deleteMany({documentId:{\$in:['$TID','$TID4']}}); db.replication_applied.deleteMany({appliedKey:/:(c0|0000)/})" >/dev/null || true
+$MONGO "db.todos.deleteMany({_id:{\$in:[ObjectId('$TID'),ObjectId('$TID3'),ObjectId('$TID4'),ObjectId('$TID5')]}}); db.projects.deleteOne({_id:ObjectId('$PID')}); db.replication_log.deleteMany({documentId:{\$in:['$TID','$TID4','$TID5']}}); db.replication_applied.deleteMany({appliedKey:/:(c0|0000)/})" >/dev/null || true
 echo "ALL PASS"
