@@ -16,7 +16,7 @@ import {
   isTerminalSkip,
   InboundResult,
 } from './replication-sync-cursor.helpers';
-import { SyncCycleResult, SyncStatus } from './replication-sync.types';
+import { SyncCycleResult, SyncStatus, SyncLogEntry } from './replication-sync.types';
 import {
   REPL_INSTANCE_ID,
   REPL_SYNC_DRIVER,
@@ -156,10 +156,16 @@ export class ReplicationSyncDriverService {
         let appliedThrough: number;
         try {
           const resp = await this.client.pushReceive(self, sendSet);
-          appliedThrough = resp.appliedThrough;
+          appliedThrough = Number(resp.appliedThrough);
         } catch (err) {
           this.logger.warn(`Push failed at cursor ${cursor}: ${(err as Error).message}`);
           break; // transient — cursor stays, retry next cycle
+        }
+        if (!Number.isFinite(appliedThrough)) {
+          // Malformed peer ack — treat as transient, leave the cursor so we
+          // never advance on a NaN (which would otherwise persist as "NaN").
+          this.logger.warn(`Push got non-numeric appliedThrough at cursor ${cursor} — skipping advance`);
+          break;
         }
         newCursor = advanceOutbound(windowMaxSeq, maxSentSeq, appliedThrough, cursor);
         pushed += sendSet.length;
@@ -187,7 +193,7 @@ export class ReplicationSyncDriverService {
     let skipped = 0;
 
     for (let round = 0; round < MAX_BATCHES_PER_CYCLE; round++) {
-      let entries;
+      let entries: SyncLogEntry[];
       let nextSince: number;
       let hasMore: boolean;
       try {
@@ -198,6 +204,11 @@ export class ReplicationSyncDriverService {
       } catch (err) {
         this.logger.warn(`Pull failed at since ${cursor}: ${(err as Error).message}`);
         break; // transient — cursor stays, retry next cycle
+      }
+      if (!Number.isFinite(nextSince)) {
+        // Malformed peer response — treat as transient, leave the inbound cursor.
+        this.logger.warn(`Pull got non-numeric nextSince at since ${cursor} — skipping advance`);
+        break;
       }
       pulled += entries.length;
 

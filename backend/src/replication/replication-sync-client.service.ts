@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { SettingsService } from '../settings/settings.service';
@@ -18,8 +18,6 @@ import { REPL_PEER_URL, REPL_PEER_API_KEY } from './replication.constants';
  */
 @Injectable()
 export class ReplicationSyncClientService {
-  private readonly logger = new Logger(ReplicationSyncClientService.name);
-
   constructor(
     private settingsService: SettingsService,
     private httpService: HttpService,
