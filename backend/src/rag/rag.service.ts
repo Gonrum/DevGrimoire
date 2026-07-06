@@ -9,6 +9,7 @@ import { SettingsService } from '../settings/settings.service';
 import { EncryptionService } from '../common/encryption.service';
 import { RequestContext } from '../common/request-context';
 import { isExcludedFromRag, SensitivityLevel } from '../common/sensitivity';
+import { BalancerGateway } from '../balancer/balancer-gateway.service';
 
 const SETTING_RAG_ENDPOINTS_V1 = 'rag_embedding_endpoints_v1';
 
@@ -113,6 +114,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     @InjectConnection() private readonly connection: Connection,
     private readonly settings: SettingsService,
     private readonly encryption: EncryptionService,
+    private readonly gateway: BalancerGateway,
   ) {}
 
   async onModuleInit() {
@@ -483,37 +485,14 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return chunks;
   }
 
-  /** Get embedding with logging and automatic fallback */
+  /** Get embedding with logging, routed through the balancer queue */
   private async getEmbedding(text: string): Promise<number[]> {
     const preview = text.slice(0, 80).replace(/\n/g, ' ');
     this.logger.log(`Embedding: "${preview}${text.length > 80 ? '…' : ''}" (${text.length} chars)`);
     const start = Date.now();
-
-    const active = this.activeEndpoint() ?? this.endpoints[0];
-    try {
-      const vector = await this.embedWithEndpoint(active, text);
-      this.logger.log(`Embedded in ${Date.now() - start}ms (${vector.length} dims, ${active.provider})`);
-      return vector;
-    } catch (err) {
-      // Try fallback to next endpoint
-      const currentIdx = this.endpoints.indexOf(active);
-      for (let i = 0; i < this.endpoints.length; i++) {
-        if (i === currentIdx) continue;
-        const fallback = this.endpoints[i];
-        try {
-          this.logger.warn(`Primary embedding failed, trying fallback: ${fallback.provider} @ ${fallback.url}`);
-          const vector = await this.embedWithEndpoint(fallback, text);
-          this.embeddingProvider = fallback.provider;
-          this.embeddingUrl = fallback.url;
-          this.embeddingModel = fallback.model;
-          this.logger.log(`Fallback succeeded: ${fallback.provider} in ${Date.now() - start}ms`);
-          return vector;
-        } catch {
-          this.logger.warn(`Fallback ${fallback.provider} also failed`);
-        }
-      }
-      throw err; // All endpoints failed
-    }
+    const vector = await this.gateway.runEmbed({ text });
+    this.logger.log(`Embedded in ${Date.now() - start}ms (${vector.length} dims via balancer)`);
+    return vector;
   }
 
   /** Serialize a schema document into stable RAG text. */
