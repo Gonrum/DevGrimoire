@@ -52,10 +52,20 @@ export class BalancerGateway {
    * callback pushes into a buffer and wakes a pending resolver; this generator
    * awaits that resolver whenever the buffer is empty.
    *
+   * Idle deadline: the empty-buffer wait also races an idle timer
+   * (`POOL_WAIT_TIMEOUT_MS`, default 120s), re-armed on each wait. If NO relay
+   * event arrives within the window — e.g. zero/unhealthy chat endpoints or a
+   * `requireVision` request with no vision endpoint, where the processor
+   * re-delays the job forever without emitting anything — the generator throws
+   * instead of suspending forever, so the controller's `for await` unwinds and
+   * its `finally` (heartbeat/subscription cleanup) runs. An active stream keeps
+   * resetting the timer, so a long healthy turn is never killed.
+   *
    * Cancellation: if `input.signal` aborts (client disconnect) we call
-   * `relay.cancel(jobId)`, which the worker checks between chunks to stop
-   * iterating. If the consumer breaks early (before `done`/`error`), the
-   * `finally` also cancels so the worker doesn't keep streaming into the void.
+   * `relay.cancel(jobId)` AND wake the suspended generator so it returns (not
+   * throws) and its `finally` runs promptly. The worker checks `relay.isCancelled`
+   * between chunks to stop iterating. If the consumer breaks early (before
+   * `done`/`error`), the `finally` also cancels so the worker stops streaming.
    */
   async *runChat(input: ChatRunInput): AsyncIterable<ChatStreamEvent> {
     const jobId = await this.queue.enqueue({
@@ -72,21 +82,25 @@ export class BalancerGateway {
       requireVision: input.requireVision,
     });
 
-    const onAbort = () => this.relay.cancel(jobId);
-    if (input.signal) {
-      if (input.signal.aborted) this.relay.cancel(jobId);
-      else input.signal.addEventListener('abort', onAbort, { once: true });
-    }
-
-    // Observable → AsyncIterable bridge (buffered push).
+    // Bridge state.
     const buffer: RelayEvent[] = [];
     let wake: (() => void) | null = null;
     let completed = false;
     let observableError: Error | null = null;
+    let aborted = false;
 
     const wakeUp = (): void => {
       if (wake) { const w = wake; wake = null; w(); }
     };
+
+    // Client disconnect: cancel the job AND wake the (possibly suspended)
+    // generator so its finally runs and the controller's for-await exits
+    // promptly instead of hanging on the pending wait.
+    const onAbort = (): void => { aborted = true; this.relay.cancel(jobId); wakeUp(); };
+    if (input.signal) {
+      if (input.signal.aborted) { aborted = true; this.relay.cancel(jobId); }
+      else input.signal.addEventListener('abort', onAbort, { once: true });
+    }
 
     const sub = this.relay.subscribe(jobId).subscribe({
       next: (ev) => { buffer.push(ev); wakeUp(); },
@@ -94,13 +108,30 @@ export class BalancerGateway {
       complete: () => { completed = true; wakeUp(); },
     });
 
+    const waitMs = Number(process.env.POOL_WAIT_TIMEOUT_MS || 120_000);
     let endedNormally = false;
     try {
       while (true) {
+        // Client aborted → stop yielding and return normally (finally cancels + tears down).
+        if (aborted) return;
         if (buffer.length === 0) {
           if (observableError) throw observableError;
           if (completed) { endedNormally = true; return; }
-          await new Promise<void>((resolve) => { wake = resolve; });
+          // Wait for the next event, an abort, or an idle deadline. The timer is
+          // an IDLE timeout (re-armed on every wait, cleared as soon as anything
+          // wakes us), so a long but actively-streaming turn is never killed —
+          // only a total stall (no endpoint available, all busy/unhealthy, so the
+          // processor re-delays the job forever without ever emitting an event).
+          let idleTimer: ReturnType<typeof setTimeout> | undefined;
+          const outcome = await new Promise<'event' | 'timeout'>((resolve) => {
+            wake = () => resolve('event');
+            idleTimer = setTimeout(() => { wake = null; resolve('timeout'); }, waitMs);
+            idleTimer.unref?.();
+          });
+          if (idleTimer) clearTimeout(idleTimer);
+          if (outcome === 'timeout') {
+            throw new Error('chat pool wait timeout — no endpoint available or all busy/unhealthy');
+          }
           continue;
         }
         const ev = buffer.shift() as RelayEvent;
@@ -117,7 +148,7 @@ export class BalancerGateway {
     } finally {
       sub.unsubscribe();
       if (input.signal) input.signal.removeEventListener('abort', onAbort);
-      // Consumer broke early (no done/error) → tell the worker to stop streaming.
+      // Idle-timeout, early consumer break, or abort (no done/error) → stop the worker.
       if (!endedNormally) this.relay.cancel(jobId);
     }
   }
