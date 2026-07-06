@@ -47,8 +47,13 @@ export class BalancerGateway {
     fn: (endpoint: { provider: LlmProviderKind; baseUrl: string; model: string; apiKey: string | null }) => Promise<T>,
   ): Promise<T> {
     const slot = await this.leaseWorkflowSlot();
-    const apiKey = await this.endpoints.getDecryptedApiKey(slot.id);
+    // getDecryptedApiKey runs a Mongoose findById().exec() that can throw on a
+    // DB hiccup/failover — it MUST live inside the try so the finally release
+    // always runs. Otherwise a throw here leaks the slot permanently (inUse is a
+    // process-lifetime in-memory Map), and a few transient blips exhaust the
+    // low-concurrency workflow pool until backend restart.
     try {
+      const apiKey = await this.endpoints.getDecryptedApiKey(slot.id);
       const result = await fn({ provider: slot.provider, baseUrl: slot.baseUrl, model: slot.model, apiKey });
       this.health.recordSuccess(slot.id);
       return result;
