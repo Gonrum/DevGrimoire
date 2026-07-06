@@ -37,6 +37,7 @@ import { CustomersModule } from '../customers/customers.module';
 import { ContactsModule } from '../contacts/contacts.module';
 import { QuestionsModule } from '../questions/questions.module';
 import { AgentRolesModule } from '../agent-roles/agent-roles.module';
+import { BalancerModule } from '../balancer/balancer.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { AgentRolesModule } from '../agent-roles/agent-roles.module';
       { name: User.name, schema: UserSchema },
     ]),
     SettingsModule,
+    BalancerModule,
     RagModule,
     TodosModule,
     // forwardRef because MilestonesModule imports ChatModule (symmetric with milestones.module.ts)
