@@ -45,3 +45,26 @@ export interface SyncPullResponse {
   nextSince: number;
   hasMore: boolean;
 }
+
+/** Outcome of one sync cycle (push+pull). `skippedReason` set iff the cycle
+ *  was a no-op (driver not active / no peer / already running). */
+export interface SyncCycleResult {
+  pushed: number;
+  pulled: number;
+  applied: number;
+  skipped: number;
+  outboundCursor: number;
+  inboundCursor: number;
+  skippedReason?: string;
+}
+
+/** Cursor/lag snapshot for GET /sync/status (drives the Plan 5 UI). */
+export interface SyncStatus {
+  driver: string;
+  outboundCursor: number;
+  inboundCursor: number;
+  localMaxSeq: number;
+  outboundLag: number;
+  lastCycleAt: string | null;
+  running: boolean;
+}

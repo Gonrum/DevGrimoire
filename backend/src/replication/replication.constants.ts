@@ -27,6 +27,8 @@ export const REPL_SYNC_INTERVAL_SEC = 'replication.syncIntervalSec';
 export const REPL_LOG_RETENTION_DAYS = 'replication.log.retentionDays';
 /** Engine selector: 'legacy' (fire-on-emit) | 'log' (change-stream log). Migration flag. */
 export const REPL_ENGINE = 'replication.engine';
+/** ISO timestamp of the last completed sync cycle (status/heartbeat). */
+export const REPL_LAST_SYNC_CYCLE = 'replication.lastSyncCycle';
 
 export type ReplicationRole = 'standalone' | 'master' | 'slave' | 'peer';
 
