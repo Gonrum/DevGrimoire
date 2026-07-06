@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { DelayedError, Job } from 'bullmq';
 import { BALANCER_QUEUE, GatewayJobData, ZERO_USAGE } from './balancer.types';
@@ -19,6 +20,17 @@ export class GatewayProcessor extends WorkerHost {
     private readonly relay: StreamRelay,
   ) { super(); }
 
+  private readonly logger = new Logger(GatewayProcessor.name);
+
+  /** Persist a usage record without ever letting a monitoring-write failure escape into the request/health path. */
+  private async safeRecord(rec: Parameters<LlmUsageService['record']>[0]): Promise<void> {
+    try {
+      await this.usage.record(rec);
+    } catch (err) {
+      this.logger.warn(`usage.record failed (non-fatal): ${(err as Error).message}`);
+    }
+  }
+
   async process(job: Job<GatewayJobData>): Promise<void> {
     const jobId = String(job.id);
     const { purpose, requireVision } = job.data;
@@ -38,7 +50,7 @@ export class GatewayProcessor extends WorkerHost {
         });
         this.health.recordSuccess(slot.id);
         this.relay.publish(jobId, { type: 'result', data: { embedding }, usage: { ...ZERO_USAGE } });
-        await this.usage.record({
+        await this.safeRecord({
           purpose, endpointId: slot.id, model: slot.model,
           ...ZERO_USAGE,
           durationMs: Date.now() - startedAt, status: 'ok',
@@ -50,7 +62,7 @@ export class GatewayProcessor extends WorkerHost {
     } catch (err) {
       this.health.recordFailure(slot.id);
       this.relay.publish(jobId, { type: 'error', status: 502, message: (err as Error).message });
-      await this.usage.record({
+      await this.safeRecord({
         purpose, endpointId: slot.id, model: slot.model,
         ...ZERO_USAGE,
         durationMs: Date.now() - startedAt, status: 'error', error: (err as Error).message,
