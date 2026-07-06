@@ -5,6 +5,7 @@ import { EncryptionService } from '../common/encryption.service';
 import { SettingsModule } from '../settings/settings.module';
 import { LlmEndpointsService } from './llm-endpoints.service';
 import { LlmEndpointsController } from './llm-endpoints.controller';
+import { LlmHealthService } from './llm-health.service';
 
 @Module({
   imports: [
@@ -12,7 +13,7 @@ import { LlmEndpointsController } from './llm-endpoints.controller';
     SettingsModule,
   ],
   controllers: [LlmEndpointsController],
-  providers: [EncryptionService, LlmEndpointsService],
-  exports: [LlmEndpointsService],
+  providers: [EncryptionService, LlmEndpointsService, LlmHealthService],
+  exports: [LlmEndpointsService, LlmHealthService],
 })
 export class BalancerModule {}

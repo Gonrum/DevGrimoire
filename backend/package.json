@@ -31,7 +31,8 @@
     "check:replication-sync-cursor": "node scripts/replication-sync-cursor-units-check.cjs",
     "check:http-requests-template": "node scripts/http-requests-template-check.cjs",
     "check:http-requests-curl": "node scripts/http-requests-curl-check.cjs",
-    "check:llm-endpoints-merge": "node scripts/llm-endpoints-merge-check.cjs"
+    "check:llm-endpoints-merge": "node scripts/llm-endpoints-merge-check.cjs",
+    "check:llm-health": "node scripts/llm-health-check.cjs"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.0",
