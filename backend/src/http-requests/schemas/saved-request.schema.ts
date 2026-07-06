@@ -66,7 +66,11 @@ export class SavedRequest {
   @Prop({ type: String, enum: HttpRequestMethod, default: HttpRequestMethod.GET })
   method: HttpRequestMethod;
 
-  @Prop({ required: true, trim: true })
+  // Not `required`: a freshly created request legitimately starts with an empty
+  // URL that the user fills in. Mongoose treats '' as missing for required
+  // String props, so `required: true` would 500 on new drafts. Send-time
+  // validation rejects an empty/invalid URL instead.
+  @Prop({ trim: true, default: '' })
   url: string;
 
   @Prop({ type: [RequestKeyValueSchema], default: [] })
