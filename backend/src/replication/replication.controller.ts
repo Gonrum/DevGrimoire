@@ -16,7 +16,10 @@ import { ReplicationFullSyncService } from './replication-full-sync.service';
 import { ReplicationPullService } from './replication-pull.service';
 import { ReplicationScheduler } from './replication.scheduler';
 import { ReplicationSyncService } from './replication-sync.service';
-import { SyncReceiveRequest, SyncReceiveResponse, SyncPullResponse } from './replication-sync.types';
+import { ReplicationSyncDriverService } from './replication-sync-driver.service';
+import {
+  SyncReceiveRequest, SyncReceiveResponse, SyncPullResponse, SyncCycleResult, SyncStatus,
+} from './replication-sync.types';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/schemas/user.schema';
 import {
@@ -70,6 +73,7 @@ export class ReplicationController {
     @InjectConnection() private connection: Connection,
     private eventEmitter: EventEmitter2,
     private syncService: ReplicationSyncService,
+    private syncDriver: ReplicationSyncDriverService,
   ) {}
 
   // ── Per-project replication opt-in ─────────────
@@ -470,6 +474,20 @@ export class ReplicationController {
       throw new BadRequestException('Invalid `since`');
     }
     return this.syncService.servePull(sinceN, Number.isFinite(limitN) ? limitN : 500);
+  }
+
+  /** Manually trigger one sync cycle (UI button). No-op unless this instance is
+   *  the active driver with a configured peer — returns skippedReason then. */
+  @Post('sync/now')
+  @HttpCode(200)
+  async syncNow(): Promise<SyncCycleResult> {
+    return this.syncDriver.runCycle('manual');
+  }
+
+  /** Cursor/lag snapshot for the sync engine (status dashboard). */
+  @Get('sync/status')
+  async syncStatus(): Promise<SyncStatus> {
+    return this.syncDriver.getSyncStatus();
   }
 
   /** Trigger an inbound pull from the configured peer (manual UI button). */

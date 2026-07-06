@@ -5,18 +5,22 @@ import { ReplicationPushService } from './replication-push.service';
 import { ReplicationFullSyncService } from './replication-full-sync.service';
 import { ReplicationPullService } from './replication-pull.service';
 import { SettingsService } from '../settings/settings.service';
+import { ReplicationSyncDriverService } from './replication-sync-driver.service';
 import {
   REPL_ROLE,
   REPL_FULL_SYNC_CRON,
   REPL_PULL_CRON,
   PUSHING_ROLES,
   ReplicationRole,
+  REPL_SYNC_INTERVAL_SEC,
 } from './replication.constants';
 
 const FULL_SYNC_JOB = 'replication.fullSync';
 const PULL_JOB = 'replication.pull';
 const DEFAULT_FULL_SYNC_CRON = '0 3 * * *';
 const DEFAULT_PULL_CRON = '0 * * * *';
+const SYNC_DRIVER_JOB = 'replication.syncDriver';
+const DEFAULT_SYNC_INTERVAL_SEC = 20;
 
 @Injectable()
 export class ReplicationScheduler implements OnModuleInit {
@@ -28,6 +32,7 @@ export class ReplicationScheduler implements OnModuleInit {
     private pullService: ReplicationPullService,
     private settingsService: SettingsService,
     private scheduler: SchedulerRegistry,
+    private syncDriver: ReplicationSyncDriverService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -38,6 +43,11 @@ export class ReplicationScheduler implements OnModuleInit {
     const pullCron = (await this.settingsService.get(REPL_PULL_CRON)) || DEFAULT_PULL_CRON;
     this.registerCronJob(FULL_SYNC_JOB, fullSyncCron, () => this.runScheduledFullSync());
     this.registerCronJob(PULL_JOB, pullCron, () => this.runScheduledPull());
+
+    const rawInterval = Number(await this.settingsService.get(REPL_SYNC_INTERVAL_SEC));
+    const intervalSec =
+      Number.isFinite(rawInterval) && rawInterval > 0 ? rawInterval : DEFAULT_SYNC_INTERVAL_SEC;
+    this.registerSyncDriverInterval(intervalSec);
   }
 
   /** Process replication queue every 30 seconds (master + peer push backlog). */
@@ -119,6 +129,27 @@ export class ReplicationScheduler implements OnModuleInit {
       }
     } catch (err) {
       this.logger.error(`Scheduled pull failed: ${(err as Error).message}`);
+    }
+  }
+
+  /** (Re)register the sync-driver tick at the given interval. The driver itself
+   *  gates on syncDriver==='active' + a configured peer, so a passive instance's
+   *  tick is a cheap no-op. Min 5s floor guards against a misconfigured 0. */
+  registerSyncDriverInterval(seconds: number): void {
+    const ms = Math.max(5, seconds) * 1000;
+    if (this.scheduler.doesExist('interval', SYNC_DRIVER_JOB)) {
+      this.scheduler.deleteInterval(SYNC_DRIVER_JOB);
+    }
+    const handle = setInterval(() => void this.runSyncCycle(), ms);
+    this.scheduler.addInterval(SYNC_DRIVER_JOB, handle);
+    this.logger.log(`Sync driver tick registered at ${Math.max(5, seconds)}s`);
+  }
+
+  private async runSyncCycle(): Promise<void> {
+    try {
+      await this.syncDriver.runCycle('scheduled');
+    } catch (err) {
+      this.logger.error(`Sync cycle failed: ${(err as Error).message}`);
     }
   }
 }
