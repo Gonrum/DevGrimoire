@@ -22,5 +22,20 @@ const alloc = new EndpointAllocator(endpoints, health);
   alloc.release('A');
   const s5 = await alloc.acquire('chat'); assert.strictEqual(s5.id, 'A', 'released slot reused');
 
+  // In-request failover: exclude set skips endpoints already tried this request.
+  const pool2 = [
+    { id: 'A', provider: 'openai-compatible', baseUrl: 'http://a', model: 'm', concurrency: 2, timeoutMs: 0, visionCapable: false },
+    { id: 'B', provider: 'openai-compatible', baseUrl: 'http://b', model: 'm', concurrency: 1, timeoutMs: 0, visionCapable: false },
+  ];
+  const endpoints2 = { listForPool: async () => pool2 };
+  const health2 = { isHealthy: () => true };
+  const alloc2 = new EndpointAllocator(endpoints2, health2);
+
+  const s6 = await alloc2.acquire('chat', { exclude: new Set(['A']) });
+  assert.strictEqual(s6.id, 'B', 'exclude(A) skips A, returns B');
+
+  const s7 = await alloc2.acquire('chat', { exclude: new Set(['A', 'B']) });
+  assert.strictEqual(s7, null, 'exclude(A,B) → null, only A/B exist');
+
   console.log('endpoint-allocator-check OK');
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -32,41 +32,54 @@ export class ChatRunner {
   ) {}
 
   async run(jobId: string, slot: Slot, apiKey: string | null, payload: ChatJobPayload): Promise<void> {
-    if (payload.withTools) {
-      const opts: ChatToolCallOpts = {
-        provider: slot.provider,
-        baseUrl: slot.baseUrl,
-        model: slot.model,
-        apiKey,
-        messages: (payload.messages as LlmMessageWithTools[]) ?? [],
-        tools: payload.tools ?? [],
-        temperature: payload.temperature,
-        maxTokens: payload.maxTokens,
-        images: payload.images,
-      };
-      const iter = slot.provider === 'anthropic'
-        ? this.client.chatStreamAnthropicTools(opts)
-        : this.client.chatStreamOpenAiTools(opts);
-      for await (const event of iter) {
-        if (this.relay.isCancelled(jobId)) break;
-        this.relay.publish(jobId, { type: 'chat_event', event: event as unknown as Record<string, unknown> });
+    // Tracks whether the client has already received at least one chat_event
+    // for this turn. Set the moment we publish the first one; the processor
+    // reads it off a thrown error to decide whether failover would duplicate
+    // output (unsafe once true) or is still safe (connect/first-fetch failed).
+    let published = false;
+    try {
+      if (payload.withTools) {
+        const opts: ChatToolCallOpts = {
+          provider: slot.provider,
+          baseUrl: slot.baseUrl,
+          model: slot.model,
+          apiKey,
+          messages: (payload.messages as LlmMessageWithTools[]) ?? [],
+          tools: payload.tools ?? [],
+          temperature: payload.temperature,
+          maxTokens: payload.maxTokens,
+          images: payload.images,
+        };
+        const iter = slot.provider === 'anthropic'
+          ? this.client.chatStreamAnthropicTools(opts)
+          : this.client.chatStreamOpenAiTools(opts);
+        for await (const event of iter) {
+          if (this.relay.isCancelled(jobId)) break;
+          this.relay.publish(jobId, { type: 'chat_event', event: event as unknown as Record<string, unknown> });
+          published = true;
+        }
+      } else {
+        const opts: ChatCallOpts = {
+          provider: slot.provider,
+          baseUrl: slot.baseUrl,
+          model: slot.model,
+          apiKey,
+          messages: (payload.messages as ChatMessage[]) ?? [],
+          temperature: payload.temperature,
+          maxTokens: payload.maxTokens,
+          images: payload.images,
+        };
+        for await (const token of this.client.chatStream(opts)) {
+          if (this.relay.isCancelled(jobId)) break;
+          this.relay.publish(jobId, { type: 'chat_event', event: { type: 'content', delta: token } });
+          published = true;
+        }
       }
-    } else {
-      const opts: ChatCallOpts = {
-        provider: slot.provider,
-        baseUrl: slot.baseUrl,
-        model: slot.model,
-        apiKey,
-        messages: (payload.messages as ChatMessage[]) ?? [],
-        temperature: payload.temperature,
-        maxTokens: payload.maxTokens,
-        images: payload.images,
-      };
-      for await (const token of this.client.chatStream(opts)) {
-        if (this.relay.isCancelled(jobId)) break;
-        this.relay.publish(jobId, { type: 'chat_event', event: { type: 'content', delta: token } });
-      }
+      this.relay.publish(jobId, { type: 'done', usage: { ...ZERO_USAGE } });
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      (e as Error & { committed?: boolean }).committed = published;
+      throw e;
     }
-    this.relay.publish(jobId, { type: 'done', usage: { ...ZERO_USAGE } });
   }
 }
