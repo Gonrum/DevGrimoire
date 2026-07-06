@@ -38,6 +38,9 @@ PID="000000000000000000000d01"
 EV_PREFIX="cycle-e2e"
 
 cleanup() {
+  set +e  # disable errexit for the whole trap body: every restore below must run
+          # even if an earlier one fails, or we risk leaving replication.peer.*
+          # pointed at the loopback address.
   # Remove synthetic log entries + test project, restore all touched settings.
   $MONGO "db.replication_log.deleteMany({eventId:/^${EV_PREFIX}:/}); db.projects.deleteOne({_id:ObjectId('$PID')})" >/dev/null || true
   restore() { if [ -n "$2" ]; then set_setting "$1" "$2"; else del_setting "$1"; fi; }
@@ -51,6 +54,13 @@ trap cleanup EXIT
 
 SELF=$(get_setting 'replication.instanceId')
 [ -n "$SELF" ] || { echo "FAIL: no replication.instanceId (log writer not seeded?)"; exit 1; }
+
+# ── Pre-flight: legacy push-queue must be empty before we repoint replication.peer.* ──
+# On a role=peer box, the legacy @Cron('*/30s') processQueue() reads the SAME
+# replication.peer.url/apiKey keys this test overwrites. If pending items exist,
+# a tick during the ~10s test window could POST them to the loopback address.
+PENDING=$($MONGO "db.replicationqueues.countDocuments({status:'pending'})" | tr -d '\r')
+[ "$PENDING" = "0" ] || { echo "FAIL: legacy replication queue has $PENDING pending item(s) — aborting to avoid misdirecting them to the loopback peer during the test window. Drain the legacy queue (or run on a non-peer box) and retry."; exit 1; }
 
 # ── Seed: opted-in project + a synthetic block ABOVE live traffic ─────────────
 $MONGO "db.projects.updateOne({_id:ObjectId('$PID')},{\$set:{name:'cycle-e2e',replicationConfig:{enabled:true},updatedAt:new Date()}},{upsert:true})" >/dev/null
