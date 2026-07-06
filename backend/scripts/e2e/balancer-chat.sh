@@ -41,19 +41,25 @@ http.createServer((req,res)=>{
   res.statusCode=404;res.end();
 }).listen(PORT,()=>console.error("mock chat up on "+PORT));
 ' &
-MOCK=$!; trap "kill $MOCK 2>/dev/null || true" EXIT
+MOCK=$!
+cleanup() {
+  kill "$MOCK" 2>/dev/null || true
+  [ -n "${SESSION_ID:-}" ] && curl -s -X DELETE "$BASE/api/chat/sessions/$SESSION_ID" -H "Authorization: Bearer $KEY" >/dev/null 2>&1 || true
+  [ -n "${EP_ID:-}" ] && curl -s -X DELETE "$BASE/api/llm-endpoints/$EP_ID" -H "Authorization: Bearer $KEY" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 sleep 1
 
 # Register a chat endpoint pointing at the mock.
 EP_ID=$(curl -s -X POST "$BASE/api/llm-endpoints" -H "Authorization: Bearer $KEY" \
   -H "content-type: application/json" \
   -d "{\"label\":\"mock-chat\",\"provider\":\"openai-compatible\",\"baseUrl\":\"http://$MOCK_HOST:$MOCK_PORT\",\"model\":\"mock-chat\",\"purposes\":[\"chat\"],\"concurrency\":2}" \
-  | node -e 'process.stdin.on("data",d=>console.log(JSON.parse(d).id))')
+  | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>console.log(JSON.parse(s).id))')
 echo "endpoint=$EP_ID"
 
 # Pick a project (first one) to scope the chat session.
 PROJECT_ID="${PROJECT_ID:-$(curl -s "$BASE/api/projects" -H "Authorization: Bearer $KEY" \
-  | node -e 'process.stdin.on("data",d=>{const a=JSON.parse(d);const p=Array.isArray(a)?a:(a.items||a.data||[]);console.log(p[0]&&(p[0].id||p[0]._id)||"")})')}"
+  | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const a=JSON.parse(s);const p=Array.isArray(a)?a:(a.items||a.data||[]);console.log(p[0]&&(p[0].id||p[0]._id)||"")})')}"
 [ -n "$PROJECT_ID" ] || { echo "FAIL: no project available (set PROJECT_ID)"; exit 1; }
 echo "project=$PROJECT_ID"
 
@@ -61,7 +67,7 @@ echo "project=$PROJECT_ID"
 SESSION_ID=$(curl -s -X POST "$BASE/api/chat/sessions" -H "Authorization: Bearer $KEY" \
   -H "content-type: application/json" \
   -d "{\"projectId\":\"$PROJECT_ID\",\"title\":\"balancer-chat-e2e\"}" \
-  | node -e 'process.stdin.on("data",d=>console.log(JSON.parse(d).id||JSON.parse(d)._id))')
+  | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const o=JSON.parse(s);console.log(o.id||o._id)})')
 [ -n "$SESSION_ID" ] || { echo "FAIL: session not created"; exit 1; }
 echo "session=$SESSION_ID"
 

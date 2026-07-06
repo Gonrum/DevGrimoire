@@ -59,25 +59,30 @@ http.createServer((req,res)=>{
 }).listen(PORT,()=>console.error("mock workflow-llm up on "+PORT));
 ' &
 MOCK=$!
-trap "kill $MOCK 2>/dev/null || true" EXIT
+cleanup() {
+  kill "$MOCK" 2>/dev/null || true
+  [ -n "${DEF_ID:-}" ] && curl -s -X DELETE "$BASE/api/workflows/$DEF_ID" "${auth[@]}" >/dev/null 2>&1 || true
+  [ -n "${EP_ID:-}" ] && curl -s -X DELETE "$BASE/api/llm-endpoints/$EP_ID" "${auth[@]}" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 sleep 1
 
 # Register a `workflow`-pool endpoint pointing at the mock.
 EP_ID=$(curl -s -X POST "$BASE/api/llm-endpoints" "${auth[@]}" "${json[@]}" \
-  -d "{\"label\":\"mock-workflow\",\"provider\":\"openai-compatible\",\"baseUrl\":\"http://$MOCK_HOST:$MOCK_PORT\",\"model\":\"mock-workflow\",\"purposes\":[\"workflow\"],\"concurrency\":2}" \
-  | node -e 'process.stdin.on("data",d=>console.log(JSON.parse(d).id))')
+  -d "{\"label\":\"mock-workflow\",\"provider\":\"openai-compatible\",\"baseUrl\":\"http://$MOCK_HOST:$MOCK_PORT\",\"model\":\"mock-workflow\",\"purposes\":[\"workflow\"],\"concurrency\":2,\"priority\":0}" \
+  | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>console.log(JSON.parse(s).id))')
 [ -n "$EP_ID" ] || { echo "FAIL: endpoint not created"; exit 1; }
 echo "endpoint=$EP_ID"
 
 # Pick a project (first one) to scope the workflow.
 PROJECT_ID="${PROJECT_ID:-$(curl -s "$BASE/api/projects" "${auth[@]}" \
-  | node -e 'process.stdin.on("data",d=>{const a=JSON.parse(d);const p=Array.isArray(a)?a:(a.items||a.data||[]);console.log(p[0]&&(p[0].id||p[0]._id)||"")})')}"
+  | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const a=JSON.parse(s);const p=Array.isArray(a)?a:(a.items||a.data||[]);console.log(p[0]&&(p[0].id||p[0]._id)||"")})')}"
 [ -n "$PROJECT_ID" ] || { echo "FAIL: no project available (set PROJECT_ID)"; exit 1; }
 echo "project=$PROJECT_ID"
 
 # Create a minimal workflow: manual trigger → agent.task (no tools needed —
 # the mock never returns tool_calls, so the loop finishes after one turn).
-DEF_ID=$(curl -s -X POST "$BASE/api/workflows" "${auth[@]}" "${json[@]}" -d @- <<EOF | node -e 'process.stdin.on("data",d=>console.log(JSON.parse(d).id||JSON.parse(d)._id))'
+DEF_ID=$(curl -s -X POST "$BASE/api/workflows" "${auth[@]}" "${json[@]}" -d @- <<EOF | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const o=JSON.parse(s);console.log(o.id||o._id)})'
 {
   "scope": "project",
   "projectId": "$PROJECT_ID",
@@ -113,7 +118,7 @@ curl -s -X PUT "$BASE/api/workflows/$DEF_ID" "${auth[@]}" "${json[@]}" \
 # Start a run.
 RUN_ID=$(curl -s -X POST "$BASE/api/workflows/runs" "${auth[@]}" "${json[@]}" \
   -d "{\"definitionId\":\"$DEF_ID\"}" \
-  | node -e 'process.stdin.on("data",d=>console.log(JSON.parse(d).id||JSON.parse(d)._id))')
+  | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const o=JSON.parse(s);console.log(o.id||o._id)})')
 [ -n "$RUN_ID" ] || { echo "FAIL: run not started"; exit 1; }
 echo "run=$RUN_ID"
 
@@ -122,7 +127,7 @@ echo "run=$RUN_ID"
 STATUS=""
 for _ in $(seq 1 30); do
   STATUS=$(curl -s "$BASE/api/workflows/runs/$RUN_ID/inspection" "${auth[@]}" \
-    | node -e 'process.stdin.on("data",d=>console.log(JSON.parse(d).run.status))')
+    | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const o=JSON.parse(s);console.log((o.run&&o.run.status)||"")})')
   [ "$STATUS" = "succeeded" ] || [ "$STATUS" = "failed" ] && break
   sleep 1
 done
