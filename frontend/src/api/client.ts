@@ -1412,6 +1412,39 @@ export interface Release {
   updatedAt: string;
 }
 
+export type WerkbankMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
+export interface WkKeyValue { key: string; value: string; enabled?: boolean }
+export interface WkHeader { name: string; value: string; enabled?: boolean }
+export interface WkAuth { type: 'none' | 'basic' | 'bearer'; username?: string; password?: string; token?: string }
+export interface WkBody { mode: 'none' | 'raw' | 'form-urlencoded' | 'multipart'; raw?: string; contentType?: string; formFields?: WkKeyValue[] }
+
+export interface RequestCollection {
+  _id: string; projectId: string; name: string; description?: string; order: number;
+  createdAt: string; updatedAt: string;
+}
+export interface SavedRequest {
+  _id: string; projectId: string; collectionId: string; name: string; description?: string; order: number;
+  method: WerkbankMethod; url: string; queryParams: WkKeyValue[]; headers: WkHeader[];
+  auth: WkAuth; body: WkBody; timeoutMs: number; followRedirects: boolean;
+  createdAt: string; updatedAt: string;
+}
+export interface SendResult {
+  historyId: string; ok: boolean; status?: number; statusText?: string; durationMs: number;
+  responseHeaders: { name: string; value: string }[]; body: string; truncated: boolean;
+  bodySize: number; contentType?: string; error?: string; unresolvedVariables: string[];
+}
+export interface WerkbankHistoryEntry {
+  _id: string; requestId: string; sentAt: string; durationMs: number; ok: boolean;
+  method: string; url: string; requestHeaders: { name: string; value: string }[]; requestBody?: string;
+  environmentName?: string; status?: number; statusText?: string;
+  responseHeaders: { name: string; value: string }[]; bodyText: string; truncated: boolean;
+  bodySize: number; contentType?: string; error?: string;
+}
+export interface ParsedCurlRequest {
+  method: WerkbankMethod; url: string; queryParams: WkKeyValue[]; headers: WkHeader[];
+  auth: WkAuth; body: WkBody; followRedirects: boolean; warnings: string[];
+}
+
 export const api = {
   projects: {
     list: (filters?: { active?: boolean; favorite?: boolean; customerId?: string }) => {
@@ -1546,6 +1579,31 @@ export const api = {
       request<HealthcheckHistoryEntry[]>(
         `/healthchecks/${id}/history?limit=${limit}&offset=${offset}`,
       ),
+  },
+  httpRequests: {
+    listCollections: (projectId: string) =>
+      request<RequestCollection[]>(`/projects/${projectId}/request-collections`),
+    createCollection: (projectId: string, data: { name: string; description?: string }) =>
+      request<RequestCollection>(`/projects/${projectId}/request-collections`, { method: 'POST', body: JSON.stringify(data) }),
+    updateCollection: (id: string, data: Partial<Pick<RequestCollection, 'name' | 'description' | 'order'>>) =>
+      request<RequestCollection>(`/request-collections/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteCollection: (id: string) =>
+      request<void>(`/request-collections/${id}`, { method: 'DELETE' }),
+    listRequests: (projectId: string) =>
+      request<SavedRequest[]>(`/projects/${projectId}/requests`),
+    createRequest: (collectionId: string, data: Partial<SavedRequest>) =>
+      request<SavedRequest>(`/request-collections/${collectionId}/requests`, { method: 'POST', body: JSON.stringify(data) }),
+    getRequest: (id: string) => request<SavedRequest>(`/requests/${id}`),
+    updateRequest: (id: string, data: Partial<SavedRequest>) =>
+      request<SavedRequest>(`/requests/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteRequest: (id: string) =>
+      request<void>(`/requests/${id}`, { method: 'DELETE' }),
+    send: (id: string, data: { environmentId?: string } & Partial<SavedRequest>) =>
+      request<SendResult>(`/requests/${id}/send`, { method: 'POST', body: JSON.stringify(data) }),
+    history: (id: string, limit = 50) =>
+      request<WerkbankHistoryEntry[]>(`/requests/${id}/history?limit=${limit}`),
+    parseCurl: (curl: string) =>
+      request<ParsedCurlRequest>(`/http-requests/parse-curl`, { method: 'POST', body: JSON.stringify({ curl }) }),
   },
   contacts: {
     list: (customerId: string) =>
