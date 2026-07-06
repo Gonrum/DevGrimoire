@@ -2955,6 +2955,22 @@ export const api = {
         body: JSON.stringify(data),
       }),
   },
+  llmEndpoints: {
+    list: () => request<LlmEndpoint[]>('/llm-endpoints'),
+    create: (data: LlmEndpointInput) =>
+      request<LlmEndpoint>('/llm-endpoints', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: LlmEndpointInput) =>
+      request<LlmEndpoint>(`/llm-endpoints/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    remove: (id: string) =>
+      request<{ ok: true }>(`/llm-endpoints/${id}`, { method: 'DELETE' }),
+    test: (id: string) =>
+      request<{ ok: boolean; latencyMs?: number; error?: string }>(`/llm-endpoints/${id}/test`, {
+        method: 'POST',
+      }),
+  },
+  balancer: {
+    status: () => request<BalancerStatus>('/balancer/status'),
+  },
 };
 
 export type WorkflowAgentProvider = 'lmstudio' | 'openai-compatible' | 'openai' | 'anthropic';
@@ -3037,6 +3053,84 @@ export interface ChatConfig {
   toolGroups?: Record<string, string[]>;
   /** Names of tools that mutate state — UI styles them with a warning. */
   writeTools?: string[];
+}
+
+export type LlmEndpointProvider = 'openai-compatible' | 'anthropic' | 'openai' | 'ollama';
+
+export type LlmEndpointPurpose = 'chat' | 'embedding' | 'workflow';
+
+export interface LlmEndpoint {
+  id: string;
+  label: string;
+  provider: LlmEndpointProvider;
+  baseUrl: string;
+  model: string;
+  hasApiKey: boolean;
+  purposes: LlmEndpointPurpose[];
+  visionCapable: boolean;
+  concurrency: number;
+  priority: number;
+  timeoutMs: number;
+  enabled: boolean;
+}
+
+export interface LlmEndpointInput {
+  label: string;
+  provider: LlmEndpointProvider;
+  baseUrl: string;
+  model: string;
+  /** Klartext-Key nur beim Schreiben. undefined = unverändert, '' = löschen, Wert = setzen. */
+  apiKey?: string;
+  purposes: LlmEndpointPurpose[];
+  visionCapable: boolean;
+  concurrency: number;
+  priority: number;
+  timeoutMs: number;
+  enabled: boolean;
+}
+
+export interface BalancerPoolStatus {
+  purpose: string;
+  capacity: number;
+  waiting: number;
+  active: number;
+}
+
+export interface BalancerEndpointStatus {
+  id: string;
+  label: string;
+  purposes: string[];
+  enabled: boolean;
+  concurrency: number;
+  inFlight: number;
+  healthy: boolean;
+}
+
+export interface BalancerQueueStatus {
+  waiting: number;
+  active: number;
+  delayed: number;
+  completed: number;
+  failed: number;
+  paused?: number;
+}
+
+export interface BalancerEndpointUsage {
+  endpointId: string;
+  totalTokens: number;
+  errors: number;
+  count: number;
+}
+
+export interface BalancerUsage {
+  perEndpoint: BalancerEndpointUsage[];
+}
+
+export interface BalancerStatus {
+  pools: BalancerPoolStatus[];
+  endpoints: BalancerEndpointStatus[];
+  queue: BalancerQueueStatus;
+  usage: BalancerUsage;
 }
 
 export interface ChatContextRef {
