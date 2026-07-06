@@ -2,14 +2,17 @@
 # E2E: API-Werkbank — beweist (1) Secret wird in den ausgehenden Request injiziert
 # und (2) in der gespeicherten History maskiert.
 # Voraussetzungen: laufender Server, SECRETS_ENCRYPTION_KEY gesetzt, jq installiert.
+# Auth: entweder DEVGRIMOIRE_API_KEY (Bearer, falls die Instanz API-Keys für REST
+# akzeptiert) ODER JWT-Login via AUTH_USERNAME/AUTH_PASSWORD.
 # Usage:
-#   API_BASE=http://localhost:3200/api AUTH_USERNAME=admin AUTH_PASSWORD=admin123 \
-#     bash backend/test/http-requests-e2e.sh
+#   API_BASE=http://localhost:3200/api DEVGRIMOIRE_API_KEY=cv_... bash backend/test/http-requests-e2e.sh
+#   API_BASE=http://localhost:3200/api AUTH_USERNAME=admin AUTH_PASSWORD=admin123 bash backend/test/http-requests-e2e.sh
 set -uo pipefail
 
 API_BASE="${API_BASE:-http://localhost:3200/api}"
 USER="${AUTH_USERNAME:-admin}"
 PASS_PW="${AUTH_PASSWORD:-admin123}"
+API_KEY="${DEVGRIMOIRE_API_KEY:-}"
 ECHO_URL="${ECHO_URL:-https://postman-echo.com/post}"
 SECRET_VALUE="s3cr3t-$RANDOM$RANDOM"
 FAILS=0
@@ -20,13 +23,18 @@ need curl; need jq
 pass() { echo "✓ $1"; }
 fail() { echo "✗ $1"; FAILS=$((FAILS+1)); }
 
-echo "== Login =="
-JWT=$(curl -sS -X POST "$API_BASE/auth/login" -H 'Content-Type: application/json' \
-  -d "{\"username\":\"$USER\",\"password\":\"$PASS_PW\"}" | jq -r '.access_token // .accessToken // empty')
-[ -n "$JWT" ] || { echo "Login fehlgeschlagen"; exit 1; }
-AUTH="Authorization: Bearer $JWT"
+echo "== Auth =="
+if [ -n "$API_KEY" ]; then
+  TOKEN="$API_KEY"
+  pass "API-Key verwendet"
+else
+  TOKEN=$(curl -sS -X POST "$API_BASE/auth/login" -H 'Content-Type: application/json' \
+    -d "{\"username\":\"$USER\",\"password\":\"$PASS_PW\"}" | jq -r '.access_token // .accessToken // empty')
+  [ -n "$TOKEN" ] || { echo "Login fehlgeschlagen (und kein DEVGRIMOIRE_API_KEY gesetzt)"; exit 1; }
+  pass "JWT erhalten"
+fi
+AUTH="Authorization: Bearer $TOKEN"
 api() { curl -s -H "$AUTH" -H "Content-Type: application/json" "$@"; }
-pass "JWT erhalten"
 
 echo "== Setup =="
 PROJECT_ID=$(api -X POST "$API_BASE/projects" -d "{\"name\":\"e2e-werkbank-$RANDOM\"}" | jq -r '._id // empty')
