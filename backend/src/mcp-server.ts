@@ -52,6 +52,7 @@ import { AuthService } from './auth/auth.service';
 import { CustomersService } from './customers/customers.service';
 import { ContactsService } from './contacts/contacts.service';
 import { MonitoringService } from './monitoring/monitoring.service';
+import { HttpRequestsService } from './http-requests/http-requests.service';
 import { SshService } from './ssh/ssh.service';
 import { SshSessionService } from './ssh/ssh-session.service';
 import { UserRole } from './auth/schemas/user.schema';
@@ -147,6 +148,7 @@ async function bootstrap() {
     customersService: app.get(CustomersService),
     contactsService: app.get(ContactsService),
     monitoringService: app.get(MonitoringService),
+    httpRequestsService: app.get(HttpRequestsService),
     logsService: app.get(LogsService),
     releasesService: app.get(ReleasesService),
     chatService: app.get(ChatService),

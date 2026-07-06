@@ -60,6 +60,7 @@ import { Types as MongoTypes } from 'mongoose';
 import { CustomersService } from './customers/customers.service';
 import { ContactsService } from './contacts/contacts.service';
 import { MonitoringService } from './monitoring/monitoring.service';
+import { HttpRequestsService } from './http-requests/http-requests.service';
 import { getToolCatalog, registerMcpTools, McpServices } from './mcp-tools';
 import { ApiKey } from './api-keys/schemas/api-key.schema';
 import { ApiKeysService } from './api-keys/api-keys.service';
@@ -136,6 +137,7 @@ async function bootstrap() {
     customersService: app.get(CustomersService),
     contactsService: app.get(ContactsService),
     monitoringService: app.get(MonitoringService),
+    httpRequestsService: app.get(HttpRequestsService),
     logsService: app.get(LogsService),
     releasesService: app.get(ReleasesService),
     chatService: app.get(ChatService),

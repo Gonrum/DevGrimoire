@@ -66,6 +66,7 @@ import { AuthService } from './auth/auth.service';
 import { CustomersService } from './customers/customers.service';
 import { ContactsService } from './contacts/contacts.service';
 import { MonitoringService } from './monitoring/monitoring.service';
+import { HttpRequestsService } from './http-requests/http-requests.service';
 import { SshService } from './ssh/ssh.service';
 import { SshSessionService } from './ssh/ssh-session.service';
 import { SshConnectionDocument } from './ssh/schemas/ssh-connection.schema';
@@ -464,6 +465,7 @@ export interface McpServices {
   customersService: CustomersService;
   contactsService: ContactsService;
   monitoringService: MonitoringService;
+  httpRequestsService: HttpRequestsService;
   logsService: LogsService;
   releasesService: ReleasesService;
   chatService: ChatService;
@@ -3857,6 +3859,145 @@ const tools = [
       required: ['customerId'],
     },
   },
+  // ---- API-Werkbank / HTTP-Requests -----------------------------------------
+  {
+    name: 'request_collection_create',
+    description: 'Create a named request collection inside a project (groups saved HTTP requests).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Owning project ID' },
+        name: { type: 'string', description: 'Collection name' },
+        description: { type: 'string' },
+        order: { type: 'number' },
+      },
+      required: ['projectId', 'name'],
+    },
+  },
+  {
+    name: 'request_collection_list',
+    description: 'List request collections of a project.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { projectId: { type: 'string' } },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'request_collection_update',
+    description: 'Update a request collection (name/description/order).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' }, name: { type: 'string' },
+        description: { type: 'string' }, order: { type: 'number' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'request_collection_delete',
+    description: 'Delete a request collection and all its requests and history.',
+    inputSchema: { type: 'object' as const, properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  {
+    name: 'request_create',
+    description: 'Create a saved HTTP request in a collection. URL, header values, query and body may contain {{key}} placeholders that resolve from the chosen environment (variables + secrets) at send time. Never store plaintext secrets — reference them as {{SECRET_KEY}}.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        collectionId: { type: 'string' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] },
+        url: { type: 'string', description: 'Target URL, may contain {{placeholders}}' },
+        queryParams: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, value: { type: 'string' }, enabled: { type: 'boolean' } }, required: ['key'] } },
+        headers: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, value: { type: 'string' }, enabled: { type: 'boolean' } }, required: ['name'] } },
+        auth: { type: 'object', properties: { type: { type: 'string', enum: ['none', 'basic', 'bearer'] }, username: { type: 'string' }, password: { type: 'string' }, token: { type: 'string' } } },
+        body: { type: 'object', properties: { mode: { type: 'string', enum: ['none', 'raw', 'form-urlencoded', 'multipart'] }, raw: { type: 'string' }, contentType: { type: 'string' }, formFields: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, value: { type: 'string' }, enabled: { type: 'boolean' } }, required: ['key'] } } } },
+        timeoutMs: { type: 'number' },
+        followRedirects: { type: 'boolean' },
+      },
+      required: ['collectionId', 'name', 'url'],
+    },
+  },
+  {
+    name: 'request_list',
+    description: 'List saved requests of a collection or a whole project (metadata only).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { collectionId: { type: 'string' }, projectId: { type: 'string' } },
+    },
+  },
+  {
+    name: 'request_get',
+    description: 'Get a saved request with full configuration.',
+    inputSchema: { type: 'object' as const, properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  {
+    name: 'request_update',
+    description: 'Update a saved request. Same fields as request_create (all optional).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' }, description: { type: 'string' },
+        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] },
+        url: { type: 'string' },
+        queryParams: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, value: { type: 'string' }, enabled: { type: 'boolean' } }, required: ['key'] } },
+        headers: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, value: { type: 'string' }, enabled: { type: 'boolean' } }, required: ['name'] } },
+        auth: { type: 'object', properties: { type: { type: 'string', enum: ['none', 'basic', 'bearer'] }, username: { type: 'string' }, password: { type: 'string' }, token: { type: 'string' } } },
+        body: { type: 'object', properties: { mode: { type: 'string', enum: ['none', 'raw', 'form-urlencoded', 'multipart'] }, raw: { type: 'string' }, contentType: { type: 'string' }, formFields: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, value: { type: 'string' }, enabled: { type: 'boolean' } }, required: ['key'] } } } },
+        timeoutMs: { type: 'number' },
+        followRedirects: { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'request_delete',
+    description: 'Delete a saved request and its history.',
+    inputSchema: { type: 'object' as const, properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  {
+    name: 'request_send',
+    description: 'Send a saved request via the backend proxy and return status, timing and a truncated response body. Resolves {{placeholders}} server-side from the chosen environment; secrets are never returned in plaintext beyond the live response you triggered. Performs an outbound HTTP request — treat as a write tool.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Saved request ID' },
+        environmentId: { type: 'string', description: 'Optional environment whose variables + secrets fill the placeholders' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'request_history_list',
+    description: 'List recent send results for a saved request (secret values are masked). Auto-pruned after 30 days.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string' }, limit: { type: 'number' }, offset: { type: 'number' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'request_history_get',
+    description: 'Get a single send-history entry (masked request snapshot + response).',
+    inputSchema: { type: 'object' as const, properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  {
+    name: 'request_import_curl',
+    description: 'Parse a curl command and create a saved request from it in the given collection. Imports values verbatim (does not auto-detect secrets).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        collectionId: { type: 'string' },
+        curl: { type: 'string', description: 'The curl command text' },
+        name: { type: 'string', description: 'Optional name; defaults to "METHOD url"' },
+      },
+      required: ['collectionId', 'curl'],
+    },
+  },
 ];
 
 function isToolAllowed(toolName: string): boolean {
@@ -3933,6 +4074,7 @@ const EXPLICIT_WRITE_TOOLS = new Set<string>([
   'question_convert_to_knowledge',
   'milestone_import_apply',
   'milestone_create_with_todos',
+  'request_import_curl',
 ]);
 
 export function isWriteTool(name: string): boolean {
@@ -3957,7 +4099,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, researchSessionsService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, researchSessionsService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -6846,6 +6988,120 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'monitor_summary':
           result = await monitoringService.getCustomerSummary(requireString(a, 'customerId'));
           break;
+        case 'request_collection_create': {
+          const col = await httpRequestsService.createCollection({
+            projectId: requireString(a, 'projectId'),
+            name: requireString(a, 'name'),
+            description: optionalString(a, 'description'),
+            order: optionalNumber(a, 'order'),
+          });
+          result = compactCreateResult(col, { name: (col as any).name });
+          break;
+        }
+        case 'request_collection_list':
+          result = compactList(
+            (await httpRequestsService.listCollections(requireString(a, 'projectId'))) as any,
+            ['__v'],
+          );
+          break;
+        case 'request_collection_update':
+          result = compactUpdateResult(await httpRequestsService.updateCollection(requireString(a, 'id'), {
+            name: optionalString(a, 'name'),
+            description: optionalString(a, 'description'),
+            order: optionalNumber(a, 'order'),
+          }));
+          break;
+        case 'request_collection_delete':
+          await httpRequestsService.deleteCollection(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
+          break;
+        case 'request_create': {
+          const req = await httpRequestsService.createRequest({
+            collectionId: requireString(a, 'collectionId'),
+            name: requireString(a, 'name'),
+            description: optionalString(a, 'description'),
+            method: optionalString(a, 'method') as any,
+            url: requireString(a, 'url'),
+            queryParams: a.queryParams as any,
+            headers: a.headers as any,
+            auth: a.auth as any,
+            body: a.body as any,
+            timeoutMs: optionalNumber(a, 'timeoutMs'),
+            followRedirects: optionalBoolean(a, 'followRedirects'),
+          });
+          result = compactCreateResult(req, { name: (req as any).name });
+          break;
+        }
+        case 'request_list':
+          result = compactList(
+            (await httpRequestsService.listRequests({
+              collectionId: optionalString(a, 'collectionId'),
+              projectId: optionalString(a, 'projectId'),
+            })) as any,
+            ['__v', 'headers', 'queryParams', 'body', 'auth'],
+          );
+          break;
+        case 'request_get':
+          result = await httpRequestsService.getRequest(requireString(a, 'id'));
+          break;
+        case 'request_update':
+          result = compactUpdateResult(await httpRequestsService.updateRequest(requireString(a, 'id'), {
+            name: optionalString(a, 'name'),
+            description: optionalString(a, 'description'),
+            method: optionalString(a, 'method') as any,
+            url: optionalString(a, 'url'),
+            queryParams: a.queryParams as any,
+            headers: a.headers as any,
+            auth: a.auth as any,
+            body: a.body as any,
+            timeoutMs: optionalNumber(a, 'timeoutMs'),
+            followRedirects: optionalBoolean(a, 'followRedirects'),
+          }));
+          break;
+        case 'request_delete':
+          await httpRequestsService.deleteRequest(requireString(a, 'id'));
+          result = { deleted: true, id: a.id };
+          break;
+        case 'request_send': {
+          const r = await httpRequestsService.send(requireString(a, 'id'), {
+            environmentId: optionalString(a, 'environmentId'),
+          });
+          result = {
+            historyId: r.historyId,
+            ok: r.ok,
+            status: r.status,
+            durationMs: r.durationMs,
+            contentType: r.contentType,
+            bodySize: r.bodySize,
+            truncated: r.truncated,
+            body: r.body.length > 4000 ? r.body.slice(0, 4000) + '…' : r.body,
+            error: r.error,
+            unresolvedVariables: r.unresolvedVariables,
+          };
+          break;
+        }
+        case 'request_history_list':
+          result = compactList(
+            (await httpRequestsService.listHistory(
+              requireString(a, 'id'),
+              optionalNumber(a, 'limit'),
+              optionalNumber(a, 'offset'),
+            )) as any,
+            ['__v'],
+          );
+          break;
+        case 'request_history_get':
+          result = await httpRequestsService.getHistoryEntry(requireString(a, 'id'));
+          break;
+        case 'request_import_curl': {
+          const req = await httpRequestsService.importCurl(
+            requireString(a, 'collectionId'),
+            requireString(a, 'curl'),
+            optionalString(a, 'name'),
+          );
+          result = compactCreateResult(req, { name: (req as any).name });
+          break;
+        }
         default:
           return errorResult(`Unknown tool: ${name}`);
       }
