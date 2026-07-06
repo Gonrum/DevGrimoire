@@ -102,6 +102,19 @@ services:
       - SETUID         # node runtime
       - SETGID
 
+  redis:
+    image: redis:7-alpine
+    container_name: devgrimoire-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./backend
@@ -150,6 +163,10 @@ services:
       BACKUP_DAILY_ENABLED: ${BACKUP_DAILY_ENABLED:-true}
       BACKUP_CRON: ${BACKUP_CRON:-0 6 * * *}
       BACKUP_MINIO_BUCKET: ${BACKUP_MINIO_BUCKET:-devgrimoire-backups}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      POOL_WAIT_TIMEOUT_MS: ${POOL_WAIT_TIMEOUT_MS:-120000}
+      DEFAULT_LLM_TIMEOUT_MS: ${DEFAULT_LLM_TIMEOUT_MS:-1800000}
     volumes:
       - lancedb_data:/app/data/lancedb
     depends_on:
@@ -157,6 +174,8 @@ services:
         condition: service_completed_successfully
       searxng:
         condition: service_started
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/auth/status').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
       interval: 10s
@@ -202,6 +221,7 @@ volumes:
   mongodb_keyfile:
   lancedb_data:
   workspace_data:
+  redis_data:
   # minio_data:
 
 networks:

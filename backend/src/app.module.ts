@@ -4,6 +4,8 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
+import { BullModule } from '@nestjs/bullmq';
+import { BalancerModule } from './balancer/balancer.module';
 import { ProjectsModule } from './projects/projects.module';
 import { TodosModule } from './todos/todos.module';
 import { SessionsModule } from './sessions/sessions.module';
@@ -74,6 +76,12 @@ if (!MONGODB_URI) {
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
+    BullModule.forRoot({
+      connection: {
+        host: process.env.REDIS_HOST || 'localhost',
+        port: Number(process.env.REDIS_PORT || 6379),
+      },
+    }),
     ProjectsModule,
     TodosModule,
     SessionsModule,
@@ -128,6 +136,7 @@ if (!MONGODB_URI) {
     AgentRolesModule,
     NotesModule,
     SshModule,
+    BalancerModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
