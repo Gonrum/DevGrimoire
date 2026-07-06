@@ -7,6 +7,7 @@ import { EncryptionService } from '../common/encryption.service';
 import { SettingsModule } from '../settings/settings.module';
 import { LlmEndpointsService } from './llm-endpoints.service';
 import { LlmEndpointsController } from './llm-endpoints.controller';
+import { BalancerController } from './balancer.controller';
 import { LlmHealthService } from './llm-health.service';
 import { EndpointAllocator } from './endpoint-allocator.service';
 import { StreamRelay } from './stream-relay.service';
@@ -28,7 +29,7 @@ import { BALANCER_QUEUE } from './balancer.types';
     SettingsModule,
     BullModule.registerQueue({ name: BALANCER_QUEUE }),
   ],
-  controllers: [LlmEndpointsController],
+  controllers: [LlmEndpointsController, BalancerController],
   providers: [
     EncryptionService, LlmEndpointsService, LlmHealthService, EndpointAllocator, StreamRelay, LlmClient,
     LlmUsageService, LlmQueueService, GatewayProcessor, BalancerGateway, ChatRunner, LlmRegistryMigrator,
