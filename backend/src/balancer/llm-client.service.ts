@@ -86,26 +86,34 @@ export class LlmClient {
     }
   }
 
-  /** Non-streaming chat call (used by Task 13's workflow purpose). */
-  async chatNonStream(o: ChatCallOpts): Promise<{ json: Record<string, unknown>; usage: TokenUsage }> {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (o.apiKey) headers.Authorization = `Bearer ${o.apiKey}`;
-    const res = await fetch(`${o.baseUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model: o.model,
-        messages: this.buildOpenAiMessages(o.messages, o.images),
-        temperature: o.temperature,
-        max_tokens: o.maxTokens,
-        stream: false,
-      }),
-      signal: o.signal,
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`OpenAI-protocol API failed (${res.status}): ${text.slice(0, 200)}`);
+  /**
+   * Provider-aware, transport-only non-streaming call (used by Task 13's workflow
+   * purpose). The caller builds the provider-specific request `body` (OpenAI
+   * messages+tools, or Anthropic messages+system+tools+max_tokens) and parses the
+   * response. Anthropic → `/v1/messages` (x-api-key), else → `/v1/chat/completions`
+   * (Bearer). `parseUsage` returns zero-usage for Anthropic's
+   * `input_tokens`/`output_tokens` shape — the caller reads `json.usage` directly then.
+   */
+  async chatNonStream(o: {
+    provider: LlmProviderKind;
+    baseUrl: string;
+    apiKey: string | null;
+    body: Record<string, unknown>;
+  }): Promise<{ json: Record<string, unknown>; usage: TokenUsage }> {
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    let url: string;
+    if (o.provider === 'anthropic') {
+      if (!o.apiKey) throw new Error('Anthropic-Provider benötigt einen API-Key');
+      url = `${o.baseUrl}/v1/messages`;
+      headers['x-api-key'] = o.apiKey;
+      headers['anthropic-version'] = ANTHROPIC_VERSION;
+    } else {
+      if (o.provider === 'openai' && !o.apiKey) throw new Error('OpenAI-Provider benötigt einen API-Key');
+      url = `${o.baseUrl}/v1/chat/completions`;
+      if (o.apiKey) headers['authorization'] = `Bearer ${o.apiKey}`;
     }
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(o.body) });
+    if (!res.ok) throw new Error(`upstream HTTP ${res.status}: ${await res.text().catch(() => '')}`);
     const json = (await res.json()) as Record<string, unknown>;
     return { json, usage: parseUsage(json.usage) };
   }
