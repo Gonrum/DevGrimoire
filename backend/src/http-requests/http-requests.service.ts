@@ -17,7 +17,27 @@ import { EnvironmentsService } from '../environments/environments.service';
 import { projectIdFilter } from '../common/project-id-filter';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { parseCurl } from './curl-parser';
-import { ParsedCurlRequest } from './http-requests.types';
+import { ParsedCurlRequest, RequestDefinition } from './http-requests.types';
+import { SendRequestDto } from './dto/send-request.dto';
+import { buildResolutionContext, resolveRequest, maskSecrets } from './template-resolver';
+
+const HISTORY_TTL_DAYS = 30;
+const MAX_RESPONSE_BODY = 1_000_000; // 1 MB, wie in der Spec
+
+export interface SendResult {
+  historyId: string;
+  ok: boolean;
+  status?: number;
+  statusText?: string;
+  durationMs: number;
+  responseHeaders: { name: string; value: string }[];
+  body: string;        // live, UNMASKIERT — an den Absender
+  truncated: boolean;
+  bodySize: number;
+  contentType?: string;
+  error?: string;
+  unresolvedVariables: string[];
+}
 
 @Injectable()
 export class HttpRequestsService {
@@ -158,6 +178,192 @@ export class HttpRequestsService {
       body: parsed.body as unknown as CreateRequestDto['body'],
       followRedirects: parsed.followRedirects,
     });
+  }
+
+  // ---- Send (Backend-Proxy) -----------------------------------------------
+  async send(id: string, opts: SendRequestDto = {}): Promise<SendResult> {
+    const base = await this.getRequest(id);
+
+    // 1) Request-Definition aus gespeichertem Request + optionalen Overrides.
+    // Ein einziger Cast überbrückt Mongoose-Enums (base) ↔ String-Union-Typen
+    // (RequestDefinition); der Resolver arbeitet nur mit den String-Unions.
+    const def = {
+      method: opts.method ?? base.method,
+      url: opts.url ?? base.url,
+      queryParams: opts.queryParams ?? base.queryParams,
+      headers: opts.headers ?? base.headers,
+      auth: opts.auth ?? base.auth,
+      body: opts.body ?? base.body,
+      timeoutMs: opts.timeoutMs ?? base.timeoutMs,
+      followRedirects: opts.followRedirects ?? base.followRedirects,
+    } as unknown as RequestDefinition;
+
+    // 2) Auflösungskontext (global secrets immer; env-scoped nur bei gewähltem Env).
+    const projectId = base.projectId.toString();
+    const globalSecrets = await this.secretsService.getDecryptedForEnvironment({ projectId }, '');
+    let variables: { key: string; value: string }[] = [];
+    let envSecrets: { key: string; value: string }[] = [];
+    let environmentName: string | undefined;
+    let environmentOid: Types.ObjectId | undefined;
+    if (opts.environmentId) {
+      const env = await this.environmentsService.findById(opts.environmentId);
+      const envProj = (env as unknown as { projectId?: { toString(): string } }).projectId?.toString();
+      if (envProj && envProj !== projectId) {
+        throw new BadRequestException('Environment gehört nicht zu diesem Projekt');
+      }
+      variables = (env.variables ?? []).map((v) => ({ key: v.key, value: v.value }));
+      envSecrets = await this.secretsService.getDecryptedForEnvironment({ projectId }, opts.environmentId);
+      environmentName = env.name;
+      environmentOid = this.objectId(opts.environmentId, 'environmentId');
+    }
+    const ctx = buildResolutionContext({ variables, globalSecrets, envSecrets });
+
+    // 3) Templating.
+    const resolved = resolveRequest(def, ctx);
+
+    // 4) Ausgehenden Request bauen.
+    const method = resolved.method;
+    const isBodyless = method === 'GET' || method === 'HEAD';
+
+    let target: URL;
+    try { target = new URL(resolved.url); }
+    catch { throw new BadRequestException(`Ungültige URL: ${resolved.url}`); }
+    for (const q of resolved.queryParams ?? []) {
+      if (q.enabled !== false && q.key) target.searchParams.append(q.key, q.value ?? '');
+    }
+
+    const headers: Record<string, string> = {};
+    const hasHeader = (name: string) => Object.keys(headers).some((k) => k.toLowerCase() === name.toLowerCase());
+    for (const h of resolved.headers ?? []) {
+      if (h.enabled !== false && h.name) headers[h.name] = h.value ?? '';
+    }
+    // Auth-Header (Auth-Block gewinnt gegen etwaigen manuellen Authorization-Header).
+    if (resolved.auth && resolved.auth.type === 'basic') {
+      const cred = Buffer.from(`${resolved.auth.username ?? ''}:${resolved.auth.password ?? ''}`).toString('base64');
+      headers['Authorization'] = `Basic ${cred}`;
+    } else if (resolved.auth && resolved.auth.type === 'bearer') {
+      headers['Authorization'] = `Bearer ${resolved.auth.token ?? ''}`;
+    }
+
+    // Body kodieren + menschenlesbaren (unkodierten) Snapshot für die History.
+    let bodyInit: BodyInit | undefined;
+    let bodySnapshot = '';
+    if (!isBodyless && resolved.body && resolved.body.mode !== 'none') {
+      const b = resolved.body;
+      const enabledFields = (b.formFields ?? []).filter((f) => f.enabled !== false && f.key);
+      if (b.mode === 'raw') {
+        bodyInit = b.raw ?? '';
+        bodySnapshot = b.raw ?? '';
+        if (b.contentType && !hasHeader('content-type')) headers['Content-Type'] = b.contentType;
+      } else if (b.mode === 'form-urlencoded') {
+        const usp = new URLSearchParams();
+        for (const f of enabledFields) usp.append(f.key, f.value ?? '');
+        bodyInit = usp.toString();
+        bodySnapshot = enabledFields.map((f) => `${f.key}=${f.value ?? ''}`).join('&');
+        if (!hasHeader('content-type')) headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      } else if (b.mode === 'multipart') {
+        const fd = new FormData();
+        for (const f of enabledFields) fd.append(f.key, f.value ?? '');
+        bodyInit = fd;
+        bodySnapshot = enabledFields.map((f) => `${f.key}=${f.value ?? ''}`).join('&');
+        // Content-Type inkl. boundary setzt fetch selbst — nicht manuell setzen.
+      }
+    }
+
+    // 5) Ausführen.
+    const controller = new AbortController();
+    const timeoutMs = Math.min(resolved.timeoutMs ?? 30000, 120000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const sentAt = new Date();
+    const t0 = Date.now();
+
+    let status: number | undefined;
+    let statusText: string | undefined;
+    const responseHeaders: { name: string; value: string }[] = [];
+    let liveBody = '';
+    let truncated = false;
+    let bodySize = 0;
+    let contentType: string | undefined;
+    let error: string | undefined;
+    let ok = false;
+
+    try {
+      const init: RequestInit = {
+        method,
+        headers,
+        signal: controller.signal,
+        redirect: resolved.followRedirects ? 'follow' : 'manual',
+      };
+      if (bodyInit !== undefined) init.body = bodyInit;
+      const res = await fetch(target.toString(), init);
+      status = res.status;
+      statusText = res.statusText;
+      ok = res.ok;
+      contentType = res.headers.get('content-type') ?? undefined;
+      res.headers.forEach((value, name) => responseHeaders.push({ name, value }));
+      const rawText = await res.text();
+      bodySize = Buffer.byteLength(rawText);
+      truncated = rawText.length > MAX_RESPONSE_BODY;
+      liveBody = truncated ? rawText.slice(0, MAX_RESPONSE_BODY) : rawText;
+    } catch (err: unknown) {
+      const e = err as { name?: string; message?: string };
+      error = e?.name === 'AbortError' ? `Timeout nach ${timeoutMs}ms` : (e?.message || 'Unbekannter Fehler');
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const durationMs = Date.now() - t0;
+
+    // 6) Maskierter History-Snapshot.
+    const secretValues = ctx.secretValues;
+    const rawQueryStr = (resolved.queryParams ?? [])
+      .filter((q) => q.enabled !== false && q.key)
+      .map((q) => `${q.key}=${q.value ?? ''}`)
+      .join('&');
+    const urlForSnapshot = rawQueryStr ? `${resolved.url}?${rawQueryStr}` : resolved.url;
+
+    const historyDoc = await this.historyModel.create({
+      requestId: base._id,
+      collectionId: base.collectionId,
+      projectId: base.projectId,
+      sentAt,
+      durationMs,
+      ok,
+      method,
+      url: maskSecrets(urlForSnapshot, secretValues),
+      requestHeaders: Object.entries(headers).map(([name, value]) => ({
+        name,
+        value: name.toLowerCase() === 'authorization' ? '***' : maskSecrets(value, secretValues),
+      })),
+      requestBody: maskSecrets(bodySnapshot, secretValues),
+      environmentId: environmentOid,
+      environmentName,
+      status,
+      statusText,
+      responseHeaders: responseHeaders.map((h) => ({ name: h.name, value: maskSecrets(h.value, secretValues) })),
+      bodyText: maskSecrets(liveBody, secretValues),
+      truncated,
+      bodySize,
+      contentType,
+      error,
+      expiresAt: new Date(sentAt.getTime() + HISTORY_TTL_DAYS * 24 * 60 * 60 * 1000),
+    });
+
+    // 7) Live-Response (unmaskiert) an den Absender.
+    return {
+      historyId: historyDoc._id.toString(),
+      ok,
+      status,
+      statusText,
+      durationMs,
+      responseHeaders,
+      body: liveBody,
+      truncated,
+      bodySize,
+      contentType,
+      error,
+      unresolvedVariables: resolved.unresolved,
+    };
   }
 
   // ---- Cascade cleanup ----------------------------------------------------
