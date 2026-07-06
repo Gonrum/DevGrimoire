@@ -8,6 +8,7 @@ import { LlmEndpointsController } from './llm-endpoints.controller';
 import { LlmHealthService } from './llm-health.service';
 import { EndpointAllocator } from './endpoint-allocator.service';
 import { StreamRelay } from './stream-relay.service';
+import { LlmClient } from './llm-client.service';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { StreamRelay } from './stream-relay.service';
     SettingsModule,
   ],
   controllers: [LlmEndpointsController],
-  providers: [EncryptionService, LlmEndpointsService, LlmHealthService, EndpointAllocator, StreamRelay],
-  exports: [LlmEndpointsService, LlmHealthService, EndpointAllocator, StreamRelay],
+  providers: [EncryptionService, LlmEndpointsService, LlmHealthService, EndpointAllocator, StreamRelay, LlmClient],
+  exports: [LlmEndpointsService, LlmHealthService, EndpointAllocator, StreamRelay, LlmClient],
 })
 export class BalancerModule {}
