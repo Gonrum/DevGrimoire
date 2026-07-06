@@ -81,10 +81,15 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
   }
 
   async function addRequest(collectionId: string) {
-    const created = await api.httpRequests.createRequest(collectionId, toPayload(emptyDraft(collectionId)));
-    await reload();
-    setDraft(created);
-    setResponse(null);
+    setError(null);
+    try {
+      const created = await api.httpRequests.createRequest(collectionId, toPayload(emptyDraft(collectionId)));
+      await reload();
+      setDraft(created);
+      setResponse(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }
 
   async function selectRequest(id: string) {
@@ -165,12 +170,23 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
   // ---- Sidebar: Collections → Requests ----
   const sidebar = (
     <div className="w-64 shrink-0 border-r border-gray-700 pr-3 space-y-4 overflow-y-auto">
-      <button onClick={addCollection} className="text-xs text-indigo-400 hover:text-indigo-300">+ Collection</button>
+      <button
+        onClick={addCollection}
+        className="w-full text-xs px-2 py-1.5 rounded border border-gray-600 text-gray-200 hover:bg-gray-800 hover:border-indigo-500"
+      >
+        + Neue Collection
+      </button>
       {collections.map((col) => (
         <div key={col._id}>
-          <div className="flex items-center justify-between group">
-            <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">{col.name}</span>
-            <button onClick={() => addRequest(col._id)} className="text-xs text-gray-500 hover:text-indigo-300">+</button>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 truncate">{col.name}</span>
+            <button
+              onClick={() => addRequest(col._id)}
+              title="Request hinzufügen"
+              className="shrink-0 text-[11px] px-1.5 py-0.5 rounded border border-gray-600 text-gray-300 hover:bg-gray-800 hover:border-indigo-500 hover:text-indigo-300"
+            >
+              + Request
+            </button>
           </div>
           <ul className="mt-1 space-y-0.5">
             {requests.filter((r) => r.collectionId === col._id).map((r) => (
@@ -195,6 +211,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
       {sidebar}
 
       <div className="flex-1 min-w-0">
+        {error && <div className="mb-3 text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-3 py-2">{error}</div>}
         {!draft ? (
           <p className="text-gray-500 text-sm">Wähle links einen Request oder lege einen neuen an.</p>
         ) : (
@@ -235,8 +252,6 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
               Löst Projekt-Secrets & Environment-Variablen serverseitig auf.
               {availableKeys.length > 0 && <> Verfügbar: {availableKeys.map((k) => <code key={k} className="mx-1 text-gray-400">{'{{'}{k}{'}}'}</code>)}</>}
             </p>
-
-            {error && <div className="text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-3 py-2">{error}</div>}
 
             {/* Editor-Untertabs */}
             <div className="border border-gray-700 rounded">
