@@ -8,17 +8,15 @@ import WebSearchSettings from '../components/WebSearchSettings';
 import NotificationsSettings from '../components/settings/NotificationsSettings';
 import BackupSettings from '../components/settings/BackupSettings';
 import CustomerTemplatesSettings from '../components/settings/CustomerTemplatesSettings';
-import RagSettings from '../components/settings/RagSettings';
 import ChatLogSettings from '../components/settings/ChatLogSettings';
 import InstructionsSettings from '../components/settings/InstructionsSettings';
 import ApiKeysSettings from '../components/settings/ApiKeysSettings';
-import ChatLlmSettings from '../components/settings/ChatLlmSettings';
 import MyLlmSettings from '../components/settings/MyLlmSettings';
-import WorkflowAgentSettings from '../components/settings/WorkflowAgentSettings';
+import LlmEndpointsSettings from '../components/settings/LlmEndpointsSettings';
 import OnboardingBanner from '../components/settings/OnboardingBanner';
 import { SettingsShell } from '../components/ui/SettingsShell';
 
-type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'chat' | 'chatlog' | 'rag' | 'websearch' | 'users' | 'auditlog' | 'replication' | 'backups' | 'customerTemplates' | 'workflowAgent';
+type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'llmEndpoints' | 'chatlog' | 'websearch' | 'users' | 'auditlog' | 'replication' | 'backups' | 'customerTemplates';
 
 export default function Settings() {
   const { t } = useTranslation();
@@ -33,9 +31,7 @@ export default function Settings() {
   const tabs: { key: SettingsTab; label: string; group?: string; adminOnly?: boolean }[] = [
     { key: 'instructions', label: t('settings.tabInstructions'), group: t('settings.groupAgentStack') },
     { key: 'myllm', label: t('settings.tabMyLlm'), group: t('settings.groupAgentStack') },
-    { key: 'chat', label: t('settings.tabChat'), group: t('settings.groupAgentStack'), adminOnly: true },
-    { key: 'workflowAgent', label: t('settings.tabWorkflowAgent'), group: t('settings.groupAgentStack'), adminOnly: true },
-    { key: 'rag', label: t('settings.tabRag'), group: t('settings.groupAgentStack'), adminOnly: true },
+    { key: 'llmEndpoints', label: t('settings.tabLlmEndpoints'), group: t('settings.groupAgentStack'), adminOnly: true },
     { key: 'websearch', label: t('settings.tabWebSearch'), group: t('settings.groupAgentStack'), adminOnly: true },
 
     { key: 'apikeys', label: t('settings.tabApiKeys'), group: t('settings.groupAccess') },
@@ -58,12 +54,10 @@ export default function Settings() {
       {tab === 'instructions' && <InstructionsSettings />}
       {tab === 'apikeys' && <ApiKeysSettings />}
       {tab === 'notifications' && <NotificationsSettings />}
-      {tab === 'chat' && isAdmin && <ChatLlmSettings />}
       {tab === 'myllm' && <MyLlmSettings />}
-      {tab === 'workflowAgent' && isAdmin && <WorkflowAgentSettings />}
+      {tab === 'llmEndpoints' && isAdmin && <LlmEndpointsSettings />}
       {tab === 'users' && isAdmin && <UserManagement />}
       {tab === 'auditlog' && isAdmin && <AuditLog />}
-      {tab === 'rag' && isAdmin && <RagSettings />}
       {tab === 'chatlog' && isAdmin && <ChatLogSettings />}
       {tab === 'websearch' && isAdmin && <WebSearchSettings />}
       {tab === 'backups' && isAdmin && <BackupSettings />}

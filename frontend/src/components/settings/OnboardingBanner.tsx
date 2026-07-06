@@ -26,12 +26,16 @@ export default function OnboardingBanner({ onJumpTo }: OnboardingBannerProps) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [chat, rag, repl] = await Promise.all([
-        api.chat.getConfig().then((c) => c.endpoints.length > 0).catch(() => null),
-        api.rag.getConfig().then((r) => r.endpoints.length > 0).catch(() => null),
+      // T-Task17: chat/RAG endpoints now live in the central LLM-Endpoints
+      // registry (purposes 'chat' / 'embedding') rather than the legacy
+      // per-feature config endpoints, which the runtime no longer reads.
+      const [endpoints, repl] = await Promise.all([
+        api.llmEndpoints.list().catch(() => null),
         api.replication.getConfig().then((r) => r.role !== 'standalone').catch(() => null),
       ]);
       if (cancelled) return;
+      const chat = endpoints ? endpoints.some((e) => e.purposes.includes('chat')) : null;
+      const rag = endpoints ? endpoints.some((e) => e.purposes.includes('embedding')) : null;
       setStatus({ chatLlm: chat, rag, replication: repl });
     })();
     return () => { cancelled = true; };
@@ -47,8 +51,8 @@ export default function OnboardingBanner({ onJumpTo }: OnboardingBannerProps) {
   if (status.chatLlm === null || status.rag === null) return null;
 
   const rows: Array<{ key: keyof Status; tab: string; label: string; ok: boolean | null }> = [
-    { key: 'chatLlm', tab: 'chat', label: t('settings.onboardingChatLlm'), ok: status.chatLlm },
-    { key: 'rag', tab: 'rag', label: t('settings.onboardingRag'), ok: status.rag },
+    { key: 'chatLlm', tab: 'llmEndpoints', label: t('settings.onboardingChatLlm'), ok: status.chatLlm },
+    { key: 'rag', tab: 'llmEndpoints', label: t('settings.onboardingRag'), ok: status.rag },
     { key: 'replication', tab: 'replication', label: t('settings.onboardingReplication'), ok: status.replication },
   ];
 

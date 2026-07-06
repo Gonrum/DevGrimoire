@@ -11,6 +11,9 @@ import {
 import Button from '../ui/Button';
 import { FormInput, FormSelect, SecretInput } from '../ui/FormField';
 import { SettingsActions, SettingsSection, SettingsTabHeader } from '../ui/SettingsShell';
+import ChatLlmSettings from './ChatLlmSettings';
+import RagSettings from './RagSettings';
+import WorkflowAgentSettings from './WorkflowAgentSettings';
 
 const PROVIDERS: LlmEndpointProvider[] = ['openai-compatible', 'anthropic', 'openai', 'ollama'];
 const PURPOSES: LlmEndpointPurpose[] = ['chat', 'embedding', 'workflow'];
@@ -661,6 +664,18 @@ export default function LlmEndpointsSettings() {
             </div>
           )}
         </SettingsSection>
+
+        <div className="border-t border-gray-800 pt-6">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-cyan-400">{t('settings.llmBehaviorOptionsTitle')}</h2>
+            <p className="mt-1 text-sm text-gray-500">{t('settings.llmBehaviorOptionsDescription')}</p>
+          </div>
+          <div className="space-y-6">
+            <ChatLlmSettings />
+            <RagSettings />
+            <WorkflowAgentSettings />
+          </div>
+        </div>
       </div>
     </>
   );
