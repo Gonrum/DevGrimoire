@@ -6,6 +6,7 @@ import { RequestHistoryEntry, RequestHistorySchema } from './schemas/request-his
 import { SecretsModule } from '../secrets/secrets.module';
 import { EnvironmentsModule } from '../environments/environments.module';
 import { HttpRequestsService } from './http-requests.service';
+import { HttpRequestsController } from './http-requests.controller';
 
 @Module({
   imports: [
@@ -17,8 +18,8 @@ import { HttpRequestsService } from './http-requests.service';
     SecretsModule,
     EnvironmentsModule,
   ],
+  controllers: [HttpRequestsController],
   providers: [HttpRequestsService],
   exports: [HttpRequestsService],
-  // controller wird in Task 7 ergänzt.
 })
 export class HttpRequestsModule {}
