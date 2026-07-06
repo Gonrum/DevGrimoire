@@ -52,6 +52,7 @@ import { CustomersModule } from './customers/customers.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { BackupsModule } from './backups/backups.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
+import { HttpRequestsModule } from './http-requests/http-requests.module';
 import { AgentRolesModule } from './agent-roles/agent-roles.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { ValidationReportsModule } from './validation-reports/validation-reports.module';
@@ -123,6 +124,7 @@ if (!MONGODB_URI) {
     ContactsModule,
     BackupsModule,
     MonitoringModule,
+    HttpRequestsModule,
     AgentRolesModule,
     NotesModule,
     SshModule,
