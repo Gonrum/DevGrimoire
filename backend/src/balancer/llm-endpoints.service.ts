@@ -161,6 +161,12 @@ export class LlmEndpointsService {
     return this.model.countDocuments().exec();
   }
 
+  async existsByIdentity(provider: string, baseUrl: string, model: string): Promise<boolean> {
+    const normUrl = baseUrl.replace(/\/$/, '');
+    const doc = await this.model.findOne({ provider, baseUrl: normUrl, model }).exec();
+    return !!doc;
+  }
+
   /** Connectivity probe only — no inference, so it never touches the queue. */
   async testConnection(id: string): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
     const doc = await this.model.findById(id).exec();

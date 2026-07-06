@@ -77,11 +77,13 @@ export class LlmRegistryMigrator implements OnModuleInit {
       let migrated = mergeMigrated(chat, embed, workflow);
       if (migrated.length === 0) migrated = this.seedFromEnv();
 
-      const existing = await this.endpoints.count();
-      if (existing === 0) {
-        for (const ep of migrated) await this.endpoints.create(ep);
-        this.logger.log(`Migrated ${migrated.length} LLM endpoint(s) into registry.`);
+      let created = 0;
+      for (const ep of migrated) {
+        if (await this.endpoints.existsByIdentity(ep.provider, ep.baseUrl, ep.model)) continue;
+        await this.endpoints.create(ep);
+        created++;
       }
+      this.logger.log(`LLM registry migration: created ${created} new endpoint(s) (${migrated.length} resolved).`);
       await this.settings.set(MIGRATED_FLAG, 'true');
     } catch (err) {
       this.logger.error(`LLM registry migration failed: ${(err as Error).message}`);
@@ -95,7 +97,7 @@ export class LlmRegistryMigrator implements OnModuleInit {
     try { parsed = JSON.parse(raw); } catch { return []; }
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
+      .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object' && !!e.url && !!e.model)
       .map((e) => ({
         provider: String(e.provider), url: String(e.url), model: String(e.model),
         apiKey: e.apiKeyEnc ? this.tryDecrypt(String(e.apiKeyEnc)) : undefined,
