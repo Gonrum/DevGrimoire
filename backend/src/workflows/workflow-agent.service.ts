@@ -7,8 +7,21 @@ import {
   WorkflowAgentProvider,
 } from './dto/workflow-agent.dto';
 import { ChatToolsService, ALL_TOOL_NAMES, TOOL_DEFINITIONS } from '../chat/chat-tools';
+import { BalancerGateway } from '../balancer/balancer-gateway.service';
+import { LlmClient } from '../balancer/llm-client.service';
+import { LlmProviderKind } from '../balancer/balancer.types';
 
 const SETTING_KEY = 'workflow_agent_endpoint_v1';
+/** Fallback tool-loop cap when no stored config exists yet (mirrors the frontend's default). */
+const DEFAULT_MAX_TOOL_ITERATIONS = 5;
+
+/** Endpoint leased from the balancer's `workflow` pool for one agent run (registry-backed, no stored behavior options). */
+interface LeasedEndpoint {
+  provider: LlmProviderKind;
+  baseUrl: string;
+  model: string;
+  apiKey: string | null;
+}
 
 interface StoredEndpoint {
   provider: WorkflowAgentProvider;
@@ -36,6 +49,8 @@ export class WorkflowAgentService {
     private readonly settings: SettingsService,
     private readonly encryption: EncryptionService,
     @Inject(forwardRef(() => ChatToolsService)) private readonly chatTools: ChatToolsService,
+    private readonly gateway: BalancerGateway,
+    private readonly llm: LlmClient,
   ) {}
 
   async getConfig(): Promise<WorkflowAgentConfigPublic | null> {
@@ -113,20 +128,24 @@ export class WorkflowAgentService {
     tokensOut?: number;
     model: string;
   }> {
-    const endpoint = await this.loadEndpoint();
-    if (!endpoint) throw new Error('no_agent_endpoint');
+    // Behavior options (tools-enabled / iteration cap) still come from the stored
+    // setting; the endpoint itself now comes from the balancer's `workflow` pool
+    // registry, so a missing/never-configured setting no longer aborts the run —
+    // it just falls back to tools-disabled / the default iteration cap.
+    const cfg = await this.loadEndpoint();
+    const toolsEnabled = cfg?.toolsEnabled ?? false;
+    const allowlist = toolsEnabled ? this.effectiveAllowlist(input.allowedTools) : [];
+    const maxIter = input.maxToolIterations ?? cfg?.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
 
-    const allowlist = endpoint.toolsEnabled ? this.effectiveAllowlist(input.allowedTools) : [];
-    const maxIter = input.maxToolIterations ?? endpoint.maxToolIterations;
-
-    if (endpoint.provider === 'anthropic') {
-      return this.runAnthropic(endpoint, input, allowlist, maxIter);
-    }
-    return this.runOpenAI(endpoint, input, allowlist, maxIter);
+    return this.gateway.runAgent((endpoint) =>
+      endpoint.provider === 'anthropic'
+        ? this.runAnthropic(endpoint, input, allowlist, maxIter)
+        : this.runOpenAI(endpoint, input, allowlist, maxIter),
+    );
   }
 
   private async runOpenAI(
-    endpoint: WorkflowAgentEndpoint,
+    endpoint: LeasedEndpoint,
     input: Parameters<WorkflowAgentService['run']>[0],
     allowlist: string[],
     maxIter: number,
@@ -154,19 +173,27 @@ export class WorkflowAgentService {
       };
       if (toolsForLlm.length > 0) body.tools = toolsForLlm;
 
-      const url = endpoint.url.replace(/\/$/, '') + '/v1/chat/completions';
-      const headers: Record<string, string> = { 'content-type': 'application/json' };
-      if (endpoint.apiKey) headers.authorization = `Bearer ${endpoint.apiKey}`;
-
-      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-      if (!res.ok) throw new Error(`llm_error_${res.status}: ${await res.text().catch(() => '')}`);
-      const json = (await res.json()) as {
+      let json: {
         choices?: Array<{
           message?: { content?: string; tool_calls?: Array<{ id?: string; function?: { name: string; arguments: string } }> };
           finish_reason?: string;
         }>;
         usage?: { prompt_tokens?: number; completion_tokens?: number };
       };
+      try {
+        const resp = await this.llm.chatNonStream({
+          provider: endpoint.provider,
+          baseUrl: endpoint.baseUrl,
+          apiKey: endpoint.apiKey,
+          body,
+        });
+        json = resp.json as typeof json;
+      } catch (e) {
+        // Prefix preserved as `llm_error_...` (not just `llm_error:`) so
+        // agent-task.executor.ts's `msg.startsWith('llm_error_')` categorization
+        // still matches after moving off the inline fetch.
+        throw new Error(`llm_error_upstream: ${(e as Error).message}`);
+      }
       const choice = json.choices?.[0]?.message;
       if (json.usage?.prompt_tokens) totalIn += json.usage.prompt_tokens;
       if (json.usage?.completion_tokens) totalOut += json.usage.completion_tokens;
@@ -226,7 +253,7 @@ export class WorkflowAgentService {
   }
 
   private async runAnthropic(
-    endpoint: WorkflowAgentEndpoint,
+    endpoint: LeasedEndpoint,
     input: Parameters<WorkflowAgentService['run']>[0],
     allowlist: string[],
     maxIter: number,
@@ -257,23 +284,25 @@ export class WorkflowAgentService {
       if (input.systemPrompt) body.system = input.systemPrompt;
       if (tools.length > 0) body.tools = tools;
 
-      const headers: Record<string, string> = {
-        'content-type': 'application/json',
-        'anthropic-version': '2023-06-01',
-      };
-      if (endpoint.apiKey) headers['x-api-key'] = endpoint.apiKey;
-
-      const res = await fetch(`${endpoint.url.replace(/\/$/, '')}/v1/messages`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(`llm_error_${res.status}: ${await res.text().catch(() => '')}`);
-      const json = (await res.json()) as {
+      let json: {
         content?: Array<{ type: 'text' | 'tool_use'; text?: string; id?: string; name?: string; input?: unknown }>;
         usage?: { input_tokens?: number; output_tokens?: number };
         stop_reason?: string;
       };
+      try {
+        // Anthropic's usage shape (input_tokens/output_tokens) isn't the openai
+        // total_tokens shape chatNonStream's `usage` return parses, so we read
+        // it straight off the raw `json` below instead of the parsed `usage`.
+        const resp = await this.llm.chatNonStream({
+          provider: endpoint.provider,
+          baseUrl: endpoint.baseUrl,
+          apiKey: endpoint.apiKey,
+          body,
+        });
+        json = resp.json as typeof json;
+      } catch (e) {
+        throw new Error(`llm_error_upstream: ${(e as Error).message}`);
+      }
       if (json.usage?.input_tokens) totalIn += json.usage.input_tokens;
       if (json.usage?.output_tokens) totalOut += json.usage.output_tokens;
 

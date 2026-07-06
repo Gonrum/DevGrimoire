@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { firstValueFrom, filter, timeout } from 'rxjs';
 import { LlmQueueService } from './llm-queue.service';
 import { StreamRelay } from './stream-relay.service';
-import { RelayEvent } from './balancer.types';
+import { RelayEvent, Slot, LlmProviderKind } from './balancer.types';
+import { EndpointAllocator } from './endpoint-allocator.service';
+import { LlmEndpointsService } from './llm-endpoints.service';
+import { LlmHealthService } from './llm-health.service';
 import type { ChatStreamEvent, OpenAiToolDef } from '../chat/chat-llm.service';
 
 /** Input for a single chat turn routed through the balancer queue. */
@@ -25,7 +28,52 @@ export interface ChatRunInput {
 
 @Injectable()
 export class BalancerGateway {
-  constructor(private readonly queue: LlmQueueService, private readonly relay: StreamRelay) {}
+  constructor(
+    private readonly queue: LlmQueueService,
+    private readonly relay: StreamRelay,
+    private readonly allocator: EndpointAllocator,
+    private readonly endpoints: LlmEndpointsService,
+    private readonly health: LlmHealthService,
+  ) {}
+
+  /**
+   * Lease ONE endpoint from the `workflow` pool for the whole duration of `fn`
+   * (a direct allocator lease, not a queued job — the workflow agent's tool
+   * loop needs a persistent connection across multiple LLM turns, unlike the
+   * single-turn `chat`/`embedding` jobs above). Records health success/failure
+   * and always releases the slot back to the allocator.
+   */
+  async runAgent<T>(
+    fn: (endpoint: { provider: LlmProviderKind; baseUrl: string; model: string; apiKey: string | null }) => Promise<T>,
+  ): Promise<T> {
+    const slot = await this.leaseWorkflowSlot();
+    const apiKey = await this.endpoints.getDecryptedApiKey(slot.id);
+    try {
+      const result = await fn({ provider: slot.provider, baseUrl: slot.baseUrl, model: slot.model, apiKey });
+      this.health.recordSuccess(slot.id);
+      return result;
+    } catch (e) {
+      this.health.recordFailure(slot.id);
+      throw e;
+    } finally {
+      this.allocator.release(slot.id);
+    }
+  }
+
+  private async leaseWorkflowSlot(): Promise<Slot> {
+    const deadline = Date.now() + Number(process.env.POOL_WAIT_TIMEOUT_MS || 120000);
+    for (;;) {
+      const s = await this.allocator.acquire('workflow');
+      if (s) return s;
+      if (Date.now() >= deadline) {
+        throw new Error('workflow pool wait timeout — no workflow endpoint available or all busy/unhealthy');
+      }
+      await new Promise<void>((r) => {
+        const t = setTimeout(r, 500);
+        t.unref();
+      });
+    }
+  }
 
   async runEmbed(input: { text: string }): Promise<number[]> {
     const jobId = await this.queue.enqueue({ purpose: 'embedding', stream: false, payload: { text: input.text } });

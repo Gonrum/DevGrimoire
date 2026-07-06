@@ -41,6 +41,7 @@ import { ChangelogModule } from '../changelog/changelog.module';
 import { ChatModule } from '../chat/chat.module';
 import { SettingsModule } from '../settings/settings.module';
 import { CommonModule } from '../common/common.module';
+import { BalancerModule } from '../balancer/balancer.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { CommonModule } from '../common/common.module';
     forwardRef(() => ChatModule),
     SettingsModule,
     CommonModule,
+    BalancerModule,
   ],
   controllers: [WorkflowsController, WorkflowNodeTypesController, WorkflowAgentController],
   providers: [
