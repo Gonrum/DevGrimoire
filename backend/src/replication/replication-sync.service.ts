@@ -6,6 +6,7 @@ import { SettingsService } from '../settings/settings.service';
 import { ReplicationLog, ReplicationLogDocument } from './schemas/replication-log.schema';
 import { ReplicationSyncApplyService } from './replication-sync-apply.service';
 import { toSyncEntry, pullPage } from './replication-sync.helpers';
+import { isTerminalSkip } from './replication-sync-cursor.helpers';
 import { SyncReceiveRequest, SyncReceiveResponse, SyncPullResponse, SyncEntryResult } from './replication-sync.types';
 import { REPL_INSTANCE_ID } from './replication.constants';
 
@@ -53,7 +54,7 @@ export class ReplicationSyncService {
       // "Handled" = applied, or skipped for a terminal reason (LWW/opt-in/echo/
       // not-replicated/invalid id). Only a genuine apply error (db/throw) is
       // non-terminal and breaks the contiguous ack.
-      const terminal = result.applied || this.isTerminalSkip(result.reason);
+      const terminal = result.applied || isTerminalSkip(result.reason);
       if (contiguous && terminal) {
         appliedThrough = entry.seq;
       } else if (!terminal) {
@@ -61,22 +62,6 @@ export class ReplicationSyncService {
       }
     }
     return { appliedThrough, results };
-  }
-
-  /** Skips that are final (the sender should advance past them), vs transient
-   *  apply errors that should stop the contiguous ack. */
-  private isTerminalSkip(reason?: string): boolean {
-    if (!reason) return false;
-    return (
-      reason.startsWith('LWW') ||
-      reason.includes('not replication-enabled') ||
-      reason.includes('bootstrap required') ||
-      reason.includes('own origin') ||
-      reason.includes('not a replicated collection') ||
-      reason.includes('no projectId') ||
-      reason.includes('invalid documentId') ||
-      reason.includes('no document')
-    );
   }
 
   /** Set of locally replication-enabled projectIds (stringified). Spec §6.2:
