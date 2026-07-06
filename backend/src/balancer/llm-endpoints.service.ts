@@ -160,4 +160,31 @@ export class LlmEndpointsService {
   async count(): Promise<number> {
     return this.model.countDocuments().exec();
   }
+
+  /** Connectivity probe only — no inference, so it never touches the queue. */
+  async testConnection(id: string): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
+    const doc = await this.model.findById(id).exec();
+    if (!doc) return { ok: false, error: 'endpoint_not_found' };
+    const apiKey = doc.apiKeyEnc ? await this.getDecryptedApiKey(id) : null;
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    const provider = doc.provider as LlmProviderKind;
+    let url: string;
+    if (provider === 'anthropic') {
+      url = `${doc.baseUrl}/v1/models`;
+      if (apiKey) { headers['x-api-key'] = apiKey; headers['anthropic-version'] = '2023-06-01'; }
+    } else if (provider === 'ollama') {
+      url = `${doc.baseUrl}/api/tags`;
+    } else {
+      url = `${doc.baseUrl}/v1/models`;
+      if (apiKey) headers['authorization'] = `Bearer ${apiKey}`;
+    }
+    const start = Date.now();
+    try {
+      const res = await fetch(url, { method: 'GET', headers, signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) return { ok: false, latencyMs: Date.now() - start, error: `HTTP ${res.status}` };
+      return { ok: true, latencyMs: Date.now() - start };
+    } catch (err) {
+      return { ok: false, latencyMs: Date.now() - start, error: (err as Error).message };
+    }
+  }
 }
