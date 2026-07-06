@@ -8,6 +8,7 @@ import { LlmClient } from './llm-client.service';
 import { LlmHealthService } from './llm-health.service';
 import { LlmUsageService } from './llm-usage.service';
 import { StreamRelay } from './stream-relay.service';
+import { ChatRunner, ChatJobPayload } from './chat-runner.service';
 
 @Processor(BALANCER_QUEUE, { concurrency: 16 })
 export class GatewayProcessor extends WorkerHost {
@@ -18,6 +19,7 @@ export class GatewayProcessor extends WorkerHost {
     private readonly health: LlmHealthService,
     private readonly usage: LlmUsageService,
     private readonly relay: StreamRelay,
+    private readonly chatRunner: ChatRunner,
   ) { super(); }
 
   private readonly logger = new Logger(GatewayProcessor.name);
@@ -57,7 +59,19 @@ export class GatewayProcessor extends WorkerHost {
         });
         return;
       }
-      // chat/workflow branches added in Task 12/13
+      if (purpose === 'chat') {
+        // The runner streams one turn and relays each event (and the terminal
+        // `done`) itself; tool execution stays in the chat controller loop.
+        await this.chatRunner.run(jobId, slot, apiKey, job.data.payload as unknown as ChatJobPayload);
+        this.health.recordSuccess(slot.id);
+        await this.safeRecord({
+          purpose, endpointId: slot.id, model: slot.model,
+          ...ZERO_USAGE,
+          durationMs: Date.now() - startedAt, status: 'ok',
+        });
+        return;
+      }
+      // workflow branch added in Task 13
       throw new Error(`purpose_not_implemented:${purpose}`);
     } catch (err) {
       this.health.recordFailure(slot.id);

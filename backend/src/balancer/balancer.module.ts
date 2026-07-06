@@ -15,6 +15,7 @@ import { LlmUsageService } from './llm-usage.service';
 import { LlmQueueService } from './llm-queue.service';
 import { GatewayProcessor } from './gateway.processor';
 import { BalancerGateway } from './balancer-gateway.service';
+import { ChatRunner } from './chat-runner.service';
 import { BALANCER_QUEUE } from './balancer.types';
 
 @Module({
@@ -29,7 +30,7 @@ import { BALANCER_QUEUE } from './balancer.types';
   controllers: [LlmEndpointsController],
   providers: [
     EncryptionService, LlmEndpointsService, LlmHealthService, EndpointAllocator, StreamRelay, LlmClient,
-    LlmUsageService, LlmQueueService, GatewayProcessor, BalancerGateway,
+    LlmUsageService, LlmQueueService, GatewayProcessor, BalancerGateway, ChatRunner,
   ],
   exports: [
     LlmEndpointsService, LlmHealthService, EndpointAllocator, StreamRelay, LlmClient, LlmUsageService,
