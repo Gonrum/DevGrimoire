@@ -130,6 +130,13 @@ export class BalancerGateway {
           });
           if (idleTimer) clearTimeout(idleTimer);
           if (outcome === 'timeout') {
+            // A real event / completion / error / abort may have landed in the
+            // SAME tick the idle timer fired (its callback nulled `wake` first,
+            // so that wakeUp() no-op'd). Let real state win instead of spuriously
+            // timing out — the loop top re-drains buffer / handles done/error/abort.
+            if (buffer.length > 0 || completed || observableError || aborted) {
+              continue;
+            }
             throw new Error('chat pool wait timeout — no endpoint available or all busy/unhealthy');
           }
           continue;
