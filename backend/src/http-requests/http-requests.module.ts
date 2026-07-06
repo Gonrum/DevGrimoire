@@ -5,6 +5,7 @@ import { SavedRequest, SavedRequestSchema } from './schemas/saved-request.schema
 import { RequestHistoryEntry, RequestHistorySchema } from './schemas/request-history.schema';
 import { SecretsModule } from '../secrets/secrets.module';
 import { EnvironmentsModule } from '../environments/environments.module';
+import { HttpRequestsService } from './http-requests.service';
 
 @Module({
   imports: [
@@ -16,6 +17,8 @@ import { EnvironmentsModule } from '../environments/environments.module';
     SecretsModule,
     EnvironmentsModule,
   ],
-  // providers/controllers/exports werden in Task 5 & 7 ergänzt.
+  providers: [HttpRequestsService],
+  exports: [HttpRequestsService],
+  // controller wird in Task 7 ergänzt.
 })
 export class HttpRequestsModule {}
