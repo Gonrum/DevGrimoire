@@ -26,23 +26,20 @@ import ReleaseList from '../components/ReleaseList';
 import DocsHealthList from '../components/DocsHealthList';
 import KnowledgeGraphView from '../components/knowledge-graph/KnowledgeGraphView';
 import OracleView from '../components/OracleView';
-import GitRepoWidget from '../components/GitRepoWidget';
-import ProjectCustomerLinks from '../components/ProjectCustomerLinks';
-import Markdown from '../components/Markdown';
 import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents';
-import Badge from '../components/ui/Badge';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import ProjectTabShell from '../components/ui/ProjectTabShell';
 import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
 import SshConnectionsTab from '../components/ssh/SshConnectionsTab';
 import ProjectAccessTab from '../components/projects/ProjectAccessTab';
+import ProjectHeader from '../components/projects/ProjectHeader';
 import HttpRequestsTab from '../components/HttpRequestsTab';
 import ProjectOverview from '../components/projects/overview/ProjectOverview';
 import { useAuth } from '../hooks/useAuth';
 import type { Tab, NavGroup } from '../components/projects/tabs';
 
 export default function ProjectDetail() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const { user, authEnabled } = useAuth();
   const isAdmin = authEnabled && user?.role === 'admin';
@@ -208,8 +205,6 @@ export default function ProjectDetail() {
 
   useProjectEvents(id, handleSSEEvent);
 
-  const dateFmtLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
-
   if (loading) return <LoadingText />;
   if (error) {
     return (
@@ -350,62 +345,7 @@ export default function ProjectDetail() {
 
   return (
     <div>
-      <Link to="/" className="text-sm text-gray-500 hover:text-gray-300 mb-4 inline-block">
-        &larr; {t('common.allProjects')}
-      </Link>
-
-      <div className="mb-6">
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
-          <h1 className="text-xl sm:text-2xl font-bold font-grimoire">{project.name}</h1>
-          <Badge color={project.active ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500'} rounded="full">
-            {project.active ? t('common.active') : t('common.inactive')}
-          </Badge>
-          <Link
-            to={`/projects/${id}/settings`}
-            className="text-xs px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded-full transition-colors"
-          >
-            {t('nav.settings')}
-          </Link>
-        </div>
-        {project.description && (
-          <div className="mb-2 text-gray-400">
-            <Markdown>{project.description}</Markdown>
-          </div>
-        )}
-        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs sm:text-sm text-gray-500">
-          {project.path && <span>{t('projects.path')}: {project.path}</span>}
-          {project.repository && <span>{t('projects.repo')}: {project.repository}</span>}
-          <span>{t('common.created')}: {new Date(project.createdAt).toLocaleDateString(dateFmtLocale)}</span>
-          <span>{t('common.updated')}: {new Date(project.updatedAt).toLocaleDateString(dateFmtLocale)}</span>
-        </div>
-        {project.techStack.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-2">
-            {project.techStack.map((t) => (
-              <Badge key={t} color="bg-violet-900/40 text-cyan-300">
-                {t}
-              </Badge>
-            ))}
-          </div>
-        )}
-        {project.components && project.components.length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-2">
-            {project.components.map((c) => (
-              <Badge key={c.name} color="bg-purple-900/40 text-purple-300">
-                {c.name} <span className="text-purple-400 font-mono">v{c.version}</span>
-                {c.path && <span className="text-purple-500 ml-1">({c.path})</span>}
-              </Badge>
-            ))}
-          </div>
-        )}
-        {project.gitRepositories && project.gitRepositories.length > 0 && (
-          <GitRepoWidget
-            projectId={id!}
-            gitRepositories={project.gitRepositories}
-            onNavigateToCommits={() => setTab('commits')}
-          />
-        )}
-        <ProjectCustomerLinks projectId={id!} environments={environments} />
-      </div>
+      <ProjectHeader project={project} id={id!} />
 
       {/* Mobile: Sidebar toggle */}
       <button
