@@ -32,6 +32,7 @@ OLD_DRIVER=$(get_setting 'replication.syncDriver')
 OLD_PEER_URL=$(get_setting 'replication.peer.url')
 OLD_PEER_KEY=$(get_setting 'replication.peer.apiKey')
 OLD_OUT=$(get_setting 'replication.cursor.outbound')
+OLD_IN=$(get_setting 'replication.cursor.inbound')
 PID="000000000000000000000e01"
 EV="dl-e2e:poison"
 
@@ -45,6 +46,7 @@ cleanup() {
   restore 'replication.peer.url' "$OLD_PEER_URL"
   restore 'replication.peer.apiKey' "$OLD_PEER_KEY"
   restore 'replication.cursor.outbound' "$OLD_OUT"
+  restore 'replication.cursor.inbound' "$OLD_IN"
 }
 trap cleanup EXIT
 
@@ -56,11 +58,11 @@ SELF=$(get_setting 'replication.instanceId')
 [ -n "$SELF" ] || { echo "FAIL: no instanceId"; exit 1; }
 $MONGO "db.projects.updateOne({_id:ObjectId('$PID')},{\$set:{name:'dl-e2e',replicationConfig:{enabled:true},updatedAt:new Date()}},{upsert:true})" >/dev/null
 
-echo "== 1. A retrying record at threshold-1 promotes to pending on the next failure =="
-# Seed a retrying record with attempts = MAX-1 (=2). Then a real recordFailure would
-# push it to 3 → pending. We simulate the final failing attempt by inserting the
-# already-promoted state the driver would produce, then assert the store treats it
-# as final. (Direct promotion via mongo mirrors recordFailure's terminal write.)
+echo "== 1. A pending outbound deadletter is recognized by the store =="
+# Seed an already-pending deadletter directly (recordFailure's increment→promotion
+# isn't HTTP-triggerable, so it's covered separately by review + the Task-1 unit
+# check). This exercises the DOWNSTREAM behavior: list / status count / send-set
+# exclusion / discard.
 MAXSEQ=$($MONGO "var d=db.replication_log.findOne({},{seq:1},{sort:{seq:-1}}); print(d?d.seq:0)" | tr -d '\r')
 POISON_SEQ=$((MAXSEQ + 2000))
 $MONGO "db.replication_deadletter.deleteMany({eventId:'$EV'});
@@ -92,6 +94,7 @@ $MONGO "db.replication_log.deleteMany({eventId:/^dl-e2e:/});
     {seq:$NEXT_SEQ,eventId:'dl-e2e:ok',op:'upsert',collection:'todos',documentId:'$PID',projectId:'$PID',document:{_id:'$PID'},updatedAtMs:$NEXT_SEQ,deletedAtMs:null,originInstanceId:'$SELF',createdAt:new Date()}
   ])" >/dev/null
 set_setting 'replication.cursor.outbound' "$((POISON_SEQ - 1))"
+set_setting 'replication.cursor.inbound' "$((POISON_SEQ - 1))"
 set_setting 'replication.peer.url' "$PEER_INTERNAL"
 set_setting 'replication.peer.apiKey' "$API_KEY"
 set_setting 'replication.syncDriver' 'active'
