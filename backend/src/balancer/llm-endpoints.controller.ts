@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common'
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/schemas/user.schema';
 import { LlmEndpointsService } from './llm-endpoints.service';
-import { LlmEndpointDto } from './dto/llm-endpoint.dto';
+import { LlmEndpointDto, ProbeEndpointDto } from './dto/llm-endpoint.dto';
 
 /**
  * Admin-managed registry of LLM backends for the balancer (T-… Phase 1).
@@ -35,4 +35,9 @@ export class LlmEndpointsController {
   @Post(':id/test')
   @Roles(UserRole.ADMIN)
   test(@Param('id') id: string) { return this.service.testConnection(id); }
+
+  /** Probe an unsaved endpoint from the add/edit form + list its models. */
+  @Post('test')
+  @Roles(UserRole.ADMIN)
+  probe(@Body() dto: ProbeEndpointDto) { return this.service.probeModels(dto); }
 }

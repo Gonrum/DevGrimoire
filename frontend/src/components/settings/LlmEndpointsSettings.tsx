@@ -117,7 +117,7 @@ function buildInput(form: FormState): LlmEndpointInput {
   };
 }
 
-type TestResult = { ok: boolean; latencyMs?: number; error?: string; testing?: boolean };
+type TestResult = { ok: boolean; latencyMs?: number; error?: string; testing?: boolean; models?: string[] };
 
 export default function LlmEndpointsSettings() {
   const { t } = useTranslation();
@@ -131,6 +131,7 @@ export default function LlmEndpointsSettings() {
   const [editingId, setEditingId] = useState<string | 'new' | null>(null);
   const [form, setForm] = useState<FormState>(blankForm());
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
+  const [formProbe, setFormProbe] = useState<TestResult | null>(null);
 
   const [balancer, setBalancer] = useState<BalancerStatus | null>(null);
   const [balancerLoading, setBalancerLoading] = useState(false);
@@ -175,6 +176,7 @@ export default function LlmEndpointsSettings() {
     setEditingId('new');
     setError(null);
     setSuccess(null);
+    setFormProbe(null);
   };
 
   const startEdit = (endpoint: LlmEndpoint) => {
@@ -182,10 +184,12 @@ export default function LlmEndpointsSettings() {
     setEditingId(endpoint.id);
     setError(null);
     setSuccess(null);
+    setFormProbe(null);
   };
 
   const cancelEdit = () => {
     setEditingId(null);
+    setFormProbe(null);
   };
 
   const updateForm = (patch: Partial<FormState>) => {
@@ -272,6 +276,28 @@ export default function LlmEndpointsSettings() {
     }
   };
 
+  /** Probe the endpoint currently in the add/edit form (works before saving) and list its models. */
+  const probeForm = async () => {
+    if (!form.baseUrl.trim()) {
+      setFormProbe({ ok: false, error: t('settings.llmProbeNoUrl') });
+      return;
+    }
+    setFormProbe({ ok: false, testing: true });
+    const existing = editingId && editingId !== 'new' ? endpoints.find((e) => e.id === editingId) : undefined;
+    try {
+      const result = await api.llmEndpoints.probe({
+        provider: form.provider,
+        baseUrl: form.baseUrl,
+        // undefined = fall back to the stored key (edit); '' = no key; value = use it.
+        apiKey: form.apiKey,
+        id: existing?.id,
+      });
+      setFormProbe(result);
+    } catch (e) {
+      setFormProbe({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
   const groupedByPurpose = useMemo(() => {
     const groups = {} as Record<LlmEndpointPurpose, LlmEndpoint[]>;
     for (const purpose of PURPOSES) {
@@ -289,7 +315,6 @@ export default function LlmEndpointsSettings() {
     const isNew = editingId === 'new';
     const existing = !isNew && editingId ? endpoints.find((e) => e.id === editingId) : undefined;
     const hasApiKey = !!existing?.hasApiKey;
-    const test = existing ? testResults[existing.id] : undefined;
 
     return (
       <div className="rounded-lg border border-violet-500/50 bg-gray-900/80 p-4 space-y-3">
@@ -415,22 +440,46 @@ export default function LlmEndpointsSettings() {
 
         {error && <div className="rounded border border-red-700 bg-red-900/50 px-3 py-2 text-xs text-red-300">{error}</div>}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="primary" size="sm" onClick={saveForm} disabled={saving}>
-            {saving ? t('common.saving') : t('common.save')}
-          </Button>
-          <Button variant="ghost" size="sm" onClick={cancelEdit}>{t('common.cancel')}</Button>
-          {existing && (
-            <>
-              <Button size="sm" onClick={() => testEndpoint(existing.id)} disabled={test?.testing === true}>
-                {test?.testing ? t('settings.llmTesting') : t('settings.llmTest')}
-              </Button>
-              {test && !test.testing && (
-                <span className={`text-xs ${test.ok ? 'text-green-300' : 'text-red-300'}`}>
-                  {test.ok ? t('settings.llmTestOk', { latency: test.latencyMs }) : t('settings.llmTestFail', { error: test.error })}
-                </span>
-              )}
-            </>
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="primary" size="sm" onClick={saveForm} disabled={saving}>
+              {saving ? t('common.saving') : t('common.save')}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={cancelEdit}>{t('common.cancel')}</Button>
+            <Button size="sm" onClick={probeForm} disabled={formProbe?.testing === true}>
+              {formProbe?.testing ? t('settings.llmProbing') : t('settings.llmProbe')}
+            </Button>
+            {formProbe && !formProbe.testing && (
+              <span className={`text-xs ${formProbe.ok ? 'text-green-300' : 'text-red-300'}`}>
+                {formProbe.ok
+                  ? t('settings.llmProbeOk', { latency: formProbe.latencyMs ?? 0, count: formProbe.models?.length ?? 0 })
+                  : t('settings.llmTestFail', { error: formProbe.error })}
+              </span>
+            )}
+          </div>
+          {formProbe?.ok && (formProbe.models?.length ?? 0) > 0 && (
+            <div>
+              <div className="mb-1 text-xs text-gray-500">{t('settings.llmProbeModelsHint')}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {formProbe.models!.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => updateForm({ model: m })}
+                    className={
+                      form.model === m
+                        ? 'rounded border border-violet-400 bg-violet-600/30 px-2 py-0.5 text-xs text-violet-100'
+                        : 'rounded border border-gray-700 bg-gray-800 px-2 py-0.5 text-xs text-gray-300 hover:border-violet-500 hover:text-violet-200'
+                    }
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {formProbe?.ok && (formProbe.models?.length ?? 0) === 0 && (
+            <div className="text-xs text-gray-500">{t('settings.llmProbeNoModels')}</div>
           )}
         </div>
       </div>

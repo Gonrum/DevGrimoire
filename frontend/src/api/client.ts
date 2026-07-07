@@ -2969,8 +2969,14 @@ export const api = {
     remove: (id: string) =>
       request<{ ok: true }>(`/llm-endpoints/${id}`, { method: 'DELETE' }),
     test: (id: string) =>
-      request<{ ok: boolean; latencyMs?: number; error?: string }>(`/llm-endpoints/${id}/test`, {
+      request<{ ok: boolean; latencyMs?: number; error?: string; models?: string[] }>(`/llm-endpoints/${id}/test`, {
         method: 'POST',
+      }),
+    /** Probe an unsaved (add/edit form) endpoint + list its models. */
+    probe: (data: { provider: string; baseUrl: string; apiKey?: string; id?: string }) =>
+      request<{ ok: boolean; latencyMs?: number; error?: string; models?: string[] }>('/llm-endpoints/test', {
+        method: 'POST',
+        body: JSON.stringify(data),
       }),
   },
   balancer: {

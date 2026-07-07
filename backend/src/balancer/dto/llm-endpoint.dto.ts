@@ -16,3 +16,16 @@ export class LlmEndpointDto {
   @IsOptional() @IsInt() @Min(0) timeoutMs?: number;
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
+
+/**
+ * Probe an endpoint that may not be saved yet (add-form) — tests connectivity
+ * and lists the models the upstream advertises. `apiKey` undefined + `id` set
+ * falls back to the stored key so editing an existing endpoint can be probed
+ * without re-entering the key.
+ */
+export class ProbeEndpointDto {
+  @IsIn(LLM_PROVIDER_KINDS as unknown as string[]) provider: LlmProviderKind;
+  @IsString() baseUrl: string;
+  @IsOptional() @IsString() apiKey?: string;
+  @IsOptional() @IsString() id?: string;
+}

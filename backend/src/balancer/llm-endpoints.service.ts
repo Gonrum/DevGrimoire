@@ -51,6 +51,20 @@ export function resolveApiKeyEnc(
   return enc.encrypt(incoming);
 }
 
+/** Parse model ids from an upstream models-listing response, per provider. */
+function extractModelIds(provider: LlmProviderKind, json: unknown): string[] {
+  const o = json as Record<string, unknown> | null;
+  if (!o || typeof o !== 'object') return [];
+  if (provider === 'ollama') {
+    // Ollama /api/tags → { models: [{ name: "llama3:8b" }] }
+    const arr = Array.isArray(o.models) ? o.models : [];
+    return arr.map((m) => (m as Record<string, unknown>)?.name).filter((n): n is string => typeof n === 'string');
+  }
+  // OpenAI-compatible / OpenAI / Anthropic /v1/models → { data: [{ id: "..." }] }
+  const arr = Array.isArray(o.data) ? o.data : [];
+  return arr.map((m) => (m as Record<string, unknown>)?.id).filter((n): n is string => typeof n === 'string');
+}
+
 function clampConcurrency(n: number | undefined): number {
   const v = typeof n === 'number' && Number.isFinite(n) ? Math.floor(n) : 1;
   return Math.min(16, Math.max(1, v || 1));
@@ -167,30 +181,54 @@ export class LlmEndpointsService {
     return !!doc;
   }
 
-  /** Connectivity probe only — no inference, so it never touches the queue. */
-  async testConnection(id: string): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
-    const doc = await this.model.findById(id).exec();
-    if (!doc) return { ok: false, error: 'endpoint_not_found' };
-    const apiKey = doc.apiKeyEnc ? await this.getDecryptedApiKey(id) : null;
+  /**
+   * Connectivity probe + model listing — no inference, so it never touches the
+   * queue. Works on an unsaved endpoint (add-form) via provider/baseUrl/apiKey.
+   * `apiKey`: a non-empty value is used as-is; `''` means "no key"; `undefined`
+   * with an `id` falls back to that endpoint's stored key.
+   */
+  async probeModels(input: {
+    provider: LlmProviderKind; baseUrl: string; apiKey?: string; id?: string;
+  }): Promise<{ ok: boolean; latencyMs?: number; error?: string; models?: string[] }> {
+    const provider = input.provider;
+    if (!LLM_PROVIDER_KINDS.includes(provider)) return { ok: false, error: `invalid provider: ${provider}` };
+    const baseUrl = (input.baseUrl || '').trim().replace(/\/$/, '');
+    if (!baseUrl) return { ok: false, error: 'baseUrl required' };
+
+    let apiKey: string | null = null;
+    if (input.apiKey !== undefined && input.apiKey !== '') apiKey = input.apiKey;
+    else if (input.apiKey === undefined && input.id) apiKey = await this.getDecryptedApiKey(input.id);
+
     const headers: Record<string, string> = { 'content-type': 'application/json' };
-    const provider = doc.provider as LlmProviderKind;
     let url: string;
     if (provider === 'anthropic') {
-      url = `${doc.baseUrl}/v1/models`;
+      url = `${baseUrl}/v1/models`;
       if (apiKey) { headers['x-api-key'] = apiKey; headers['anthropic-version'] = '2023-06-01'; }
     } else if (provider === 'ollama') {
-      url = `${doc.baseUrl}/api/tags`;
+      url = `${baseUrl}/api/tags`;
+      if (apiKey) headers['authorization'] = `Bearer ${apiKey}`;
     } else {
-      url = `${doc.baseUrl}/v1/models`;
+      url = `${baseUrl}/v1/models`;
       if (apiKey) headers['authorization'] = `Bearer ${apiKey}`;
     }
+
     const start = Date.now();
     try {
       const res = await fetch(url, { method: 'GET', headers, signal: AbortSignal.timeout(10_000) });
-      if (!res.ok) return { ok: false, latencyMs: Date.now() - start, error: `HTTP ${res.status}` };
-      return { ok: true, latencyMs: Date.now() - start };
+      const latencyMs = Date.now() - start;
+      if (!res.ok) return { ok: false, latencyMs, error: `HTTP ${res.status}` };
+      const json = (await res.json().catch(() => null)) as unknown;
+      const models = extractModelIds(provider, json);
+      return { ok: true, latencyMs, models };
     } catch (err) {
       return { ok: false, latencyMs: Date.now() - start, error: (err as Error).message };
     }
+  }
+
+  /** Connectivity probe for a saved endpoint (reuses probeModels). */
+  async testConnection(id: string): Promise<{ ok: boolean; latencyMs?: number; error?: string; models?: string[] }> {
+    const doc = await this.model.findById(id).exec();
+    if (!doc) return { ok: false, error: 'endpoint_not_found' };
+    return this.probeModels({ provider: doc.provider as LlmProviderKind, baseUrl: doc.baseUrl, id });
   }
 }
