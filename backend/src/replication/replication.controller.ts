@@ -17,6 +17,7 @@ import { ReplicationPullService } from './replication-pull.service';
 import { ReplicationScheduler } from './replication.scheduler';
 import { ReplicationSyncService } from './replication-sync.service';
 import { ReplicationSyncDriverService } from './replication-sync-driver.service';
+import { ReplicationDeadletterService } from './replication-deadletter.service';
 import {
   SyncReceiveRequest, SyncReceiveResponse, SyncPullResponse, SyncCycleResult, SyncStatus,
 } from './replication-sync.types';
@@ -74,6 +75,7 @@ export class ReplicationController {
     private eventEmitter: EventEmitter2,
     private syncService: ReplicationSyncService,
     private syncDriver: ReplicationSyncDriverService,
+    private deadletterService: ReplicationDeadletterService,
   ) {}
 
   // ── Per-project replication opt-in ─────────────
@@ -488,6 +490,27 @@ export class ReplicationController {
   @Get('sync/status')
   async syncStatus(): Promise<SyncStatus> {
     return this.syncDriver.getSyncStatus();
+  }
+
+  /** List final (pending) deadletters for the admin UI. */
+  @Get('deadletter')
+  async listDeadletters() {
+    const rows = await this.deadletterService.listPending();
+    return { count: rows.length, items: rows };
+  }
+
+  /** Re-apply a deadletter's stored payload via the idempotent apply path. */
+  @Post('deadletter/:id/replay')
+  @HttpCode(200)
+  async replayDeadletter(@Param('id') id: string) {
+    return this.deadletterService.replay(id);
+  }
+
+  /** Permanently discard a deadletter (admin decided it's obsolete). */
+  @Post('deadletter/:id/discard')
+  @HttpCode(200)
+  async discardDeadletter(@Param('id') id: string) {
+    return this.deadletterService.discard(id);
   }
 
   /** Trigger an inbound pull from the configured peer (manual UI button). */

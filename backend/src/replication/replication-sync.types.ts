@@ -81,4 +81,5 @@ export interface SyncStatus {
   outboundLag: number;
   lastCycleAt: string | null;
   running: boolean;
+  deadletterCount: number;
 }

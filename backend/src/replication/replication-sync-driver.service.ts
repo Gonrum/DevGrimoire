@@ -283,11 +283,12 @@ export class ReplicationSyncDriverService {
 
   /** Cursor/lag snapshot for the status endpoint + UI (Plan 5). */
   async getSyncStatus(): Promise<SyncStatus> {
-    const [driver, outboundCursor, inboundCursor, lastCycleAt] = await Promise.all([
+    const [driver, outboundCursor, inboundCursor, lastCycleAt, deadletterCount] = await Promise.all([
       this.settingsService.get(REPL_SYNC_DRIVER),
       this.getCursor(REPL_CURSOR_OUTBOUND),
       this.getCursor(REPL_CURSOR_INBOUND),
       this.settingsService.get(REPL_LAST_SYNC_CYCLE),
+      this.deadletter.count(),
     ]);
     const top = await this.logModel.findOne().sort({ seq: -1 }).select('seq').lean().exec();
     const localMaxSeq = top ? Number((top as { seq: number }).seq) : 0;
@@ -299,6 +300,7 @@ export class ReplicationSyncDriverService {
       outboundLag: Math.max(0, localMaxSeq - outboundCursor),
       lastCycleAt: lastCycleAt ?? null,
       running: this.running,
+      deadletterCount,
     };
   }
 }
