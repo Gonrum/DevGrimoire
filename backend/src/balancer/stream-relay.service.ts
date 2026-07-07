@@ -16,7 +16,12 @@ export class StreamRelay {
   publish(jobId: string, event: RelayEvent): void {
     const s = this.subjectFor(jobId);
     s.next(event);
-    if (event.type === 'done' || event.type === 'error') {
+    // Terminal events: chat streams end with `done`, the embed path ends with a
+    // single atomic `result`, and any path can end with `error`. All three
+    // complete the subject and schedule its removal — otherwise the per-job
+    // ReplaySubject (embed's holds the full vector) leaks for the process
+    // lifetime, and the hot RAG reindex/sync path grows memory unbounded.
+    if (event.type === 'done' || event.type === 'error' || event.type === 'result') {
       s.complete();
       setTimeout(() => { this.subjects.delete(jobId); this.cancelled.delete(jobId); }, 30_000).unref();
     }
