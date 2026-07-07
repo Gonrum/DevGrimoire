@@ -37,7 +37,7 @@ export default function ProjectSidebar({ groups, activeTab, onSelect, variant = 
   }, [groupState]);
 
   const q = search.trim().toLowerCase();
-  const searching = q.length > 0;
+  const searching = q.length > 0 && !collapsed;
 
   const toggleGroup = (label: string) =>
     setGroupState((s) => ({ ...s, [label]: !s[label] }));

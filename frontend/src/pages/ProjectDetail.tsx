@@ -226,7 +226,7 @@ export default function ProjectDetail() {
       label: t('sidebar.core'),
       items: [
         { key: 'overview', label: t('projectDetail.tab.overview') },
-        { key: 'todos', label: t('projectDetail.tab.todos'), count: todos.filter((t) => t.status !== 'done').length },
+        { key: 'todos', label: t('projectDetail.tab.todos'), count: todos.filter((t) => t.status !== 'done' && !t.archived).length },
         { key: 'milestones', label: t('projectDetail.tab.milestones'), count: milestones.filter((m) => m.status !== 'done' && !m.archived).length },
         { key: 'sessions', label: t('projectDetail.tab.sessions'), count: sessions.length },
         { key: 'activity', label: t('projectDetail.tab.activity'), count: activities.length },
