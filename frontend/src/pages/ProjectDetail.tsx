@@ -37,6 +37,7 @@ import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
 import SshConnectionsTab from '../components/ssh/SshConnectionsTab';
 import ProjectAccessTab from '../components/projects/ProjectAccessTab';
 import HttpRequestsTab from '../components/HttpRequestsTab';
+import ProjectOverview from '../components/projects/overview/ProjectOverview';
 import { useAuth } from '../hooks/useAuth';
 import type { Tab, NavGroup } from '../components/projects/tabs';
 
@@ -76,7 +77,7 @@ export default function ProjectDetail() {
   const [envKey, setEnvKey] = useState(0);
   const [commitsKey, setCommitsKey] = useState(0);
   const [secretsKey, setSecretsKey] = useState(0);
-  const [tab, setTab] = useState<Tab>(() => (searchParams.get('tab') as Tab) || 'todos');
+  const [tab, setTab] = useState<Tab>(() => (searchParams.get('tab') as Tab) || 'overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   useEffect(() => {
     if (searchParams.has('tab')) {
@@ -228,6 +229,7 @@ export default function ProjectDetail() {
     {
       label: t('sidebar.core'),
       items: [
+        { key: 'overview', label: t('projectDetail.tab.overview') },
         { key: 'todos', label: t('projectDetail.tab.todos'), count: todos.filter((t) => t.status !== 'done').length },
         { key: 'milestones', label: t('projectDetail.tab.milestones'), count: milestones.filter((m) => m.status !== 'done' && !m.archived).length },
         { key: 'sessions', label: t('projectDetail.tab.sessions'), count: sessions.length },
@@ -282,6 +284,7 @@ export default function ProjectDetail() {
   const currentTabCount = currentTab?.count;
 
   const TAB_DESCRIPTIONS: Partial<Record<Tab, string>> = {
+    overview: t('projectDetail.tabDesc.overview'),
     todos: t('projectDetail.tabDesc.todos'),
     milestones: t('projectDetail.tabDesc.milestones'),
     sessions: t('projectDetail.tabDesc.sessions'),
@@ -447,6 +450,20 @@ export default function ProjectDetail() {
         {/* Content area */}
         <div className="flex-1 min-w-0">
           <ProjectTabShell title={currentTabLabel} description={currentTabDescription} count={currentTabCount}>
+            {tab === 'overview' && (
+              <ProjectOverview
+                project={project}
+                id={id!}
+                todos={todos}
+                milestones={milestones}
+                activities={activities}
+                sessions={sessions}
+                environments={environments}
+                openOracleCount={openOracleCount}
+                openDocProposalsCount={openDocProposalsCount}
+                onNavigate={setTab}
+              />
+            )}
             {tab === 'todos' && (
               <>
                 <PendingQuestionsWidget projectId={id!} className="mb-4" />
