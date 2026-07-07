@@ -39,6 +39,31 @@ export interface SendResult {
   unresolvedVariables: string[];
 }
 
+interface PreparedRequest {
+  method: string;
+  target: URL;
+  headers: Record<string, string>;
+  bodyInit?: BodyInit;
+  bodySnapshot: string;
+  resolved: ReturnType<typeof resolveRequest>;
+  secretValues: Set<string>;
+  environmentName?: string;
+  environmentOid?: Types.ObjectId;
+}
+
+function sanitizeFilename(name: string): string {
+  const cleaned = name.replace(/[\r\n"]/g, '').replace(/[/\\]/g, '_').trim();
+  return cleaned.length ? cleaned.slice(0, 200) : 'download';
+}
+
+function deriveFilename(upstream: Response, base: { name?: string }): string {
+  const cd = upstream.headers.get('content-disposition');
+  const m = cd ? /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd) : null;
+  let raw = base.name || 'download';
+  if (m) { try { raw = decodeURIComponent(m[1]); } catch { raw = m[1]; } }
+  return sanitizeFilename(raw);
+}
+
 @Injectable()
 export class HttpRequestsService {
   protected readonly logger = new Logger(HttpRequestsService.name);
@@ -181,12 +206,10 @@ export class HttpRequestsService {
   }
 
   // ---- Send (Backend-Proxy) -----------------------------------------------
-  async send(id: string, opts: SendRequestDto = {}): Promise<SendResult> {
-    const base = await this.getRequest(id);
 
-    // 1) Request-Definition aus gespeichertem Request + optionalen Overrides.
-    // Ein einziger Cast überbrückt Mongoose-Enums (base) ↔ String-Union-Typen
-    // (RequestDefinition); der Resolver arbeitet nur mit den String-Unions.
+  // Gemeinsame Auflösung für send() und openStream() (Templating + Secrets +
+  // ausgehender Request). Kein fetch, kein read.
+  private async prepareOutgoing(base: SavedRequestDocument, opts: SendRequestDto): Promise<PreparedRequest> {
     const def = {
       method: opts.method ?? base.method,
       url: opts.url ?? base.url,
@@ -198,7 +221,6 @@ export class HttpRequestsService {
       followRedirects: opts.followRedirects ?? base.followRedirects,
     } as unknown as RequestDefinition;
 
-    // 2) Auflösungskontext (global secrets immer; env-scoped nur bei gewähltem Env).
     const projectId = base.projectId.toString();
     const globalSecrets = await this.secretsService.getDecryptedForEnvironment({ projectId }, '');
     let variables: { key: string; value: string }[] = [];
@@ -217,11 +239,8 @@ export class HttpRequestsService {
       environmentOid = this.objectId(opts.environmentId, 'environmentId');
     }
     const ctx = buildResolutionContext({ variables, globalSecrets, envSecrets });
-
-    // 3) Templating.
     const resolved = resolveRequest(def, ctx);
 
-    // 4) Ausgehenden Request bauen.
     const method = resolved.method;
     const isBodyless = method === 'GET' || method === 'HEAD';
 
@@ -237,7 +256,6 @@ export class HttpRequestsService {
     for (const h of resolved.headers ?? []) {
       if (h.enabled !== false && h.name) headers[h.name] = h.value ?? '';
     }
-    // Auth-Header (Auth-Block gewinnt gegen etwaigen manuellen Authorization-Header).
     if (resolved.auth && resolved.auth.type === 'basic') {
       const cred = Buffer.from(`${resolved.auth.username ?? ''}:${resolved.auth.password ?? ''}`).toString('base64');
       headers['Authorization'] = `Basic ${cred}`;
@@ -245,7 +263,6 @@ export class HttpRequestsService {
       headers['Authorization'] = `Bearer ${resolved.auth.token ?? ''}`;
     }
 
-    // Body kodieren + menschenlesbaren (unkodierten) Snapshot für die History.
     let bodyInit: BodyInit | undefined;
     let bodySnapshot = '';
     if (!isBodyless && resolved.body && resolved.body.mode !== 'none') {
@@ -266,11 +283,17 @@ export class HttpRequestsService {
         for (const f of enabledFields) fd.append(f.key, f.value ?? '');
         bodyInit = fd;
         bodySnapshot = enabledFields.map((f) => `${f.key}=${f.value ?? ''}`).join('&');
-        // Content-Type inkl. boundary setzt fetch selbst — nicht manuell setzen.
       }
     }
 
-    // 5) Ausführen.
+    return { method, target, headers, bodyInit, bodySnapshot, resolved, secretValues: ctx.secretValues, environmentName, environmentOid };
+  }
+
+  async send(id: string, opts: SendRequestDto = {}): Promise<SendResult> {
+    const base = await this.getRequest(id);
+    const prep = await this.prepareOutgoing(base, opts);
+    const { method, target, headers, bodyInit, bodySnapshot, resolved, secretValues, environmentName, environmentOid } = prep;
+
     const controller = new AbortController();
     const timeoutMs = Math.min(resolved.timeoutMs ?? 30000, 120000);
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -314,8 +337,6 @@ export class HttpRequestsService {
 
     const durationMs = Date.now() - t0;
 
-    // 6) Maskierter History-Snapshot.
-    const secretValues = ctx.secretValues;
     const rawQueryStr = (resolved.queryParams ?? [])
       .filter((q) => q.enabled !== false && q.key)
       .map((q) => `${q.key}=${q.value ?? ''}`)
@@ -349,7 +370,6 @@ export class HttpRequestsService {
       expiresAt: new Date(sentAt.getTime() + HISTORY_TTL_DAYS * 24 * 60 * 60 * 1000),
     });
 
-    // 7) Live-Response (unmaskiert) an den Absender.
     return {
       historyId: historyDoc._id.toString(),
       ok,
@@ -364,6 +384,25 @@ export class HttpRequestsService {
       error,
       unresolvedVariables: resolved.unresolved,
     };
+  }
+
+  // Streaming-Pfad: löst den Request auf, macht fetch OHNE den Body zu lesen und
+  // gibt die rohe Response zum Durchpipen zurück. Kein Cap, kein Timeout-Abort
+  // (der Download darf beliebig lange laufen).
+  async openStream(
+    id: string,
+    opts: { environmentId?: string } = {},
+  ): Promise<{ upstream: Response; filename: string; environmentName?: string }> {
+    const base = await this.getRequest(id);
+    const prep = await this.prepareOutgoing(base, opts);
+    const init: RequestInit = {
+      method: prep.method,
+      headers: prep.headers,
+      redirect: prep.resolved.followRedirects ? 'follow' : 'manual',
+    };
+    if (prep.bodyInit !== undefined) init.body = prep.bodyInit;
+    const upstream = await fetch(prep.target.toString(), init);
+    return { upstream, filename: deriveFilename(upstream, base), environmentName: prep.environmentName };
   }
 
   // ---- Cascade cleanup ----------------------------------------------------
