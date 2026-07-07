@@ -41,7 +41,7 @@ export class DownloadTicketService {
     if (payload.purpose !== 'wk-download' || payload.requestId !== requestId) {
       throw new UnauthorizedException('Download-Ticket passt nicht zu diesem Request');
     }
-    if (typeof payload.exp !== 'number' || Date.now() > payload.exp) {
+    if (typeof payload.jti !== 'string' || !Number.isFinite(payload.exp) || Date.now() > payload.exp) {
       throw new UnauthorizedException('Download-Ticket abgelaufen');
     }
     if (this.consumed.has(payload.jti)) {

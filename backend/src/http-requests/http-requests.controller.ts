@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { Readable } from 'stream';
+import { pipeline } from 'node:stream';
 import { HttpRequestsService } from './http-requests.service';
 import { CreateCollectionDto } from './dto/create-collection.dto';
 import { UpdateCollectionDto } from './dto/update-collection.dto';
@@ -103,7 +104,7 @@ export class HttpRequestsController {
   @Post('requests/:id/download-ticket')
   @HttpCode(200)
   async downloadTicket(@Param('id') id: string, @Body() dto: DownloadTicketDto, @Req() req: any) {
-    await this.svc.getRequest(id); // Existenz/Scope-Check
+    await this.svc.getRequest(id); // Existenz-Check (wirft NotFound, wenn der Request nicht existiert)
     const userId = req.user?.userId ?? 'anonymous';
     const ticket = this.tickets.mint({ requestId: id, environmentId: dto.environmentId, userId });
     return { ticket, url: `/api/requests/${id}/download?ticket=${encodeURIComponent(ticket)}` };
@@ -120,10 +121,14 @@ export class HttpRequestsController {
       const ct = upstream.headers.get('content-type');
       if (ct) res.setHeader('Content-Type', ct);
       const cl = upstream.headers.get('content-length');
-      if (cl) res.setHeader('Content-Length', cl);
+      if (cl && !upstream.headers.get('content-encoding')) res.setHeader('Content-Length', cl);
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       if (!upstream.body) { res.end(); return; }
-      Readable.fromWeb(upstream.body as any).pipe(res);
+      pipeline(Readable.fromWeb(upstream.body as any), res, (err) => {
+        if (err && !res.headersSent) {
+          res.status(502).json({ message: 'Stream-Fehler: ' + err.message });
+        }
+      });
     } catch (err) {
       if (!res.headersSent) {
         res.status(502).json({ message: 'Upstream nicht erreichbar: ' + (err as Error).message });
