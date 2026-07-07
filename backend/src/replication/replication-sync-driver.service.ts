@@ -17,7 +17,7 @@ import {
   isTerminalOutcome,
   InboundResult,
 } from './replication-sync-cursor.helpers';
-import { SyncCycleResult, SyncStatus, SyncLogEntry } from './replication-sync.types';
+import { SyncCycleResult, SyncStatus, SyncLogEntry, SyncReceiveResponse } from './replication-sync.types';
 import {
   REPL_INSTANCE_ID,
   REPL_SYNC_DRIVER,
@@ -133,6 +133,7 @@ export class ReplicationSyncDriverService {
   private async pushPhase(): Promise<{ pushed: number; cursor: number }> {
     const self = await this.getSelfInstanceId();
     const enabled = await this.getEnabledProjectIds();
+    const excluded = await this.deadletter.pendingEventIds('outbound');
     let cursor = await this.getCursor(REPL_CURSOR_OUTBOUND);
     let pushed = 0;
 
@@ -147,7 +148,7 @@ export class ReplicationSyncDriverService {
 
       const windowMaxSeq = Number(window[window.length - 1].seq);
       const entries = window.map((d) => toSyncEntry(d as unknown as Record<string, unknown>));
-      const sendSet = selectSendSet(entries, self, enabled);
+      const sendSet = selectSendSet(entries, self, enabled, excluded);
 
       let newCursor: number;
       if (sendSet.length === 0) {
@@ -155,22 +156,38 @@ export class ReplicationSyncDriverService {
         newCursor = advanceOutbound(windowMaxSeq, null, 0, cursor);
       } else {
         const maxSentSeq = sendSet[sendSet.length - 1].seq;
-        let appliedThrough: number;
+        let resp: SyncReceiveResponse;
         try {
-          const resp = await this.client.pushReceive(self, sendSet);
-          appliedThrough = Number(resp.appliedThrough);
+          resp = await this.client.pushReceive(self, sendSet);
         } catch (err) {
           this.logger.warn(`Push failed at cursor ${cursor}: ${(err as Error).message}`);
           break; // transient — cursor stays, retry next cycle
         }
+        const appliedThrough = Number(resp.appliedThrough);
         if (!Number.isFinite(appliedThrough)) {
           // Malformed peer ack — treat as transient, leave the cursor so we
           // never advance on a NaN (which would otherwise persist as "NaN").
           this.logger.warn(`Push got non-numeric appliedThrough at cursor ${cursor} — skipping advance`);
           break;
         }
-        newCursor = advanceOutbound(windowMaxSeq, maxSentSeq, appliedThrough, cursor);
         pushed += sendSet.length;
+
+        // Contiguity resolution (spec §8.2.4): if the receiver stopped short,
+        // the first sent entry with seq > appliedThrough whose outcome is
+        // transient is the blocker. Count it; once it reaches MAX it is
+        // deadlettered → next cycle `excluded` drops it from the send-set →
+        // appliedThrough passes it → the cursor advances past it.
+        if (appliedThrough < maxSentSeq) {
+          const blocker = this.findBlocker(sendSet, resp.results, appliedThrough);
+          if (blocker) {
+            await this.deadletter.recordFailure('outbound', blocker.entry, blocker.reason);
+          }
+        } else {
+          // Everything sent was handled — clear stale retry records below the ack.
+          await this.deadletter.clearRetriesUpTo('outbound', appliedThrough);
+        }
+
+        newCursor = advanceOutbound(windowMaxSeq, maxSentSeq, appliedThrough, cursor);
       }
 
       if (newCursor <= cursor) break; // no progress (poison frontier) — stop
@@ -179,6 +196,25 @@ export class ReplicationSyncDriverService {
       if (window.length < PUSH_BATCH_LIMIT) break; // window not full → drained
     }
     return { pushed, cursor };
+  }
+
+  /** The first sent entry the receiver did NOT handle: lowest seq > appliedThrough
+   *  whose per-entry outcome is transient. Returns the entry + a reason, or null
+   *  if the shortfall isn't attributable to a specific transient result. */
+  private findBlocker(
+    sendSet: SyncLogEntry[],
+    results: SyncReceiveResponse['results'],
+    appliedThrough: number,
+  ): { entry: SyncLogEntry; reason: string } | null {
+    const bySeq = new Map(sendSet.map((e) => [e.seq, e]));
+    const failed = results
+      .filter((r) => r.seq > appliedThrough && r.outcome === 'error_transient')
+      .sort((a, b) => a.seq - b.seq);
+    for (const r of failed) {
+      const entry = bySeq.get(r.seq);
+      if (entry) return { entry, reason: r.reason ?? 'receiver apply error' };
+    }
+    return null;
   }
 
   /** PULL: fetch the peer's changes and apply them locally (origin-tagged by
