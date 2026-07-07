@@ -904,10 +904,14 @@
     "core": "Abenteuer",
     "knowledge": "Bibliothek",
     "catalog": "Inventar",
-    "system": "Kammer"
+    "system": "Kammer",
+    "search": "Tabs durchsuchen…",
+    "collapse": "Einklappen",
+    "expand": "Ausklappen"
   },
   "projectDetail": {
     "tab": {
+      "overview": "Kompendium",
       "todos": "Quests",
       "milestones": "Artefakte",
       "sessions": "Rituale",
@@ -937,6 +941,7 @@
       "access": "Zugriff"
     },
     "tabDesc": {
+      "overview": "Überblick über offene Quests, Artefakte, Spuren und den Projekt-Steckbrief",
       "todos": "Aktive Quests, Boards und Backlog dieses Projekts.",
       "milestones": "Verlaufsmarken — gruppieren Quests zu Releases.",
       "sessions": "Gespeicherte Arbeitssitzungen mit Zusammenfassung und nächsten Schritten.",
@@ -964,6 +969,13 @@
       "oracle": "Orakel — prädiktive Risiken aus Stagnation, Deadline-Druck, Bug-Hotspots und Blocker-Ketten.",
       "soul": "Vision, Prinzipien und Konventionen dieses Projekts.",
       "access": "Wer und welche API-Keys haben Zugriff auf dieses Projekt."
+    },
+    "overview": {
+      "profile": "Steckbrief",
+      "viewAll": "Alle anzeigen",
+      "noOpenTodos": "Keine offenen Quests",
+      "noActiveMilestones": "Keine aktiven Artefakte",
+      "lastSessionNever": "—"
     }
   },
   "projectAccess": {

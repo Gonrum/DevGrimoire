@@ -904,10 +904,14 @@
     "core": "Adventure",
     "knowledge": "Library",
     "catalog": "Inventory",
-    "system": "Chamber"
+    "system": "Chamber",
+    "search": "Search tabs…",
+    "collapse": "Collapse",
+    "expand": "Expand"
   },
   "projectDetail": {
     "tab": {
+      "overview": "Overview",
       "todos": "Quests",
       "milestones": "Artifacts",
       "sessions": "Rituals",
@@ -937,6 +941,7 @@
       "access": "Access"
     },
     "tabDesc": {
+      "overview": "At-a-glance view of open todos, milestones, activity and project profile",
       "todos": "Active quests, boards and backlog for this project.",
       "milestones": "Progress markers — group quests into releases.",
       "sessions": "Saved working sessions with summary and next steps.",
@@ -964,6 +969,13 @@
       "oracle": "Oracle — predictive risks from stagnation, deadline pressure, bug hotspots and blocker chains.",
       "soul": "Vision, principles and conventions of this project.",
       "access": "Who and which API keys can access this project."
+    },
+    "overview": {
+      "profile": "Project Profile",
+      "viewAll": "View all",
+      "noOpenTodos": "No open todos",
+      "noActiveMilestones": "No active milestones",
+      "lastSessionNever": "—"
     }
   },
   "projectAccess": {

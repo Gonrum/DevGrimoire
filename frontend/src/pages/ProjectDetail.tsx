@@ -38,8 +38,7 @@ import SshConnectionsTab from '../components/ssh/SshConnectionsTab';
 import ProjectAccessTab from '../components/projects/ProjectAccessTab';
 import HttpRequestsTab from '../components/HttpRequestsTab';
 import { useAuth } from '../hooks/useAuth';
-
-type Tab = 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog' | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies' | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases' | 'workspaces' | 'workflows' | 'ssh' | 'http-requests' | 'docs-health' | 'graph' | 'oracle' | 'access';
+import type { Tab, NavGroup } from '../components/projects/tabs';
 
 export default function ProjectDetail() {
   const { t, i18n } = useTranslation();
@@ -225,7 +224,7 @@ export default function ProjectDetail() {
   }
   if (!project) return <p className="text-red-400">{t('projects.notFound')}</p>;
 
-  const navGroups: { label: string; items: { key: Tab; label: string; count: number }[] }[] = [
+  const navGroups: NavGroup[] = [
     {
       label: t('sidebar.core'),
       items: [
