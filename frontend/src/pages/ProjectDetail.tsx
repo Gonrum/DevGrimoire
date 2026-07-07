@@ -37,6 +37,7 @@ import HttpRequestsTab from '../components/HttpRequestsTab';
 import ProjectOverview from '../components/projects/overview/ProjectOverview';
 import { useAuth } from '../hooks/useAuth';
 import type { Tab, NavGroup } from '../components/projects/tabs';
+import ProjectSidebar from '../components/projects/ProjectSidebar';
 
 export default function ProjectDetail() {
   const { t } = useTranslation();
@@ -309,40 +310,6 @@ export default function ProjectDetail() {
   };
   const currentTabDescription = TAB_DESCRIPTIONS[tab];
 
-  const sidebarNav = (onSelect?: () => void) => (
-    <nav className="space-y-5">
-      {navGroups.map((group) => (
-        <div key={group.label}>
-          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-gray-600 px-3 mb-1.5">
-            {group.label}
-          </h3>
-          <ul className="space-y-0.5">
-            {group.items.map((item) => (
-              <li key={item.key}>
-                <button
-                  type="button"
-                  onClick={() => { setTab(item.key); onSelect?.(); }}
-                  className={`w-full text-left px-3 py-1.5 text-sm rounded-lg flex justify-between items-center transition-colors ${
-                    tab === item.key
-                      ? 'bg-gray-800 text-cyan-400 font-medium'
-                      : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
-                  }`}
-                >
-                  <span className="truncate">{item.label}</span>
-                  <span className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ml-2 ${
-                    tab === item.key ? 'bg-gray-700 text-cyan-400' : 'bg-gray-800/80 text-gray-500'
-                  }`}>
-                    {item.count}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </nav>
-  );
-
   return (
     <div>
       <ProjectHeader project={project} id={id!} />
@@ -376,15 +343,20 @@ export default function ProjectDetail() {
                 </svg>
               </button>
             </div>
-            {sidebarNav(() => setSidebarOpen(false))}
+            <ProjectSidebar
+              groups={navGroups}
+              activeTab={tab}
+              onSelect={(k) => { setTab(k); setSidebarOpen(false); }}
+              variant="drawer"
+            />
           </div>
         </>
       )}
 
       <div className="flex gap-6">
         {/* Desktop: Fixed sidebar */}
-        <div className="hidden lg:block shrink-0 w-52 sticky top-4 self-start max-h-[calc(100vh-2rem)] overflow-y-auto">
-          {sidebarNav()}
+        <div className="hidden lg:block shrink-0 sticky top-4 self-start max-h-[calc(100vh-2rem)] overflow-y-auto">
+          <ProjectSidebar groups={navGroups} activeTab={tab} onSelect={setTab} />
         </div>
 
         {/* Content area */}
