@@ -57,6 +57,7 @@ export const EXCLUDED_COLLECTIONS: { className: string; reason: string }[] = [
   { className: 'CustomerProjectLink', reason: 'Customer-Domäne, separate Replikations-Entscheidung außerhalb dieses Features' },
   { className: 'Healthcheck', reason: 'Customer-skopiertes Monitoring, kein Projekt-Inhalt' },
   { className: 'LogEntry', reason: 'Hochvolumige lokale Diagnose-Logs — nicht projekt-inhaltlich' },
+  { className: 'ReplicationDeadletter', reason: 'Interne Engine-Collection (Deadletter-Store) — darf sich nicht selbst replizieren' },
   { className: 'ReplicationLog', reason: 'Das Replikations-Log selbst (trägt projectId für Opt-in-Filterung) — interne Engine-Collection, darf sich nicht selbst replizieren (Rekursion)' },
   { className: 'ReplicationQueue', reason: 'Internes Legacy-Outbox — instanzlokal' },
   { className: 'ResearchSession', reason: 'Multi-projekt-skopiert via projectIds[] (kein singuläres projectId) — braucht dedizierte Opt-in-/projectId-Behandlung, auf Plan 2 verschoben' },

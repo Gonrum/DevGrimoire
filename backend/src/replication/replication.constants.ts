@@ -30,6 +30,10 @@ export const REPL_ENGINE = 'replication.engine';
 /** ISO timestamp of the last completed sync cycle (status/heartbeat). */
 export const REPL_LAST_SYNC_CYCLE = 'replication.lastSyncCycle';
 
+/** How many sync cycles an entry may fail to apply (error_transient) before it
+ *  is deadlettered and the cursor advances past it (spec §8.2). */
+export const MAX_APPLY_ATTEMPTS = 3;
+
 export type ReplicationRole = 'standalone' | 'master' | 'slave' | 'peer';
 
 /** Roles that PUSH local changes to a remote (master to slave, peer to peer). */

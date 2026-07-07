@@ -5,6 +5,7 @@ import { ReplicationQueue, ReplicationQueueSchema } from './schemas/replication-
 import { ReplicationLog, ReplicationLogSchema } from './schemas/replication-log.schema';
 import { ReplicationCounter, ReplicationCounterSchema } from './schemas/replication-counter.schema';
 import { ReplicationApplied, ReplicationAppliedSchema } from './schemas/replication-applied.schema';
+import { ReplicationDeadletter, ReplicationDeadletterSchema } from './schemas/replication-deadletter.schema';
 import { ReplicationPushService } from './replication-push.service';
 import { ReplicationReceiveService } from './replication-receive.service';
 import { ReplicationFullSyncService } from './replication-full-sync.service';
@@ -18,6 +19,7 @@ import { ReplicationSyncApplyService } from './replication-sync-apply.service';
 import { ReplicationSyncService } from './replication-sync.service';
 import { ReplicationSyncClientService } from './replication-sync-client.service';
 import { ReplicationSyncDriverService } from './replication-sync-driver.service';
+import { ReplicationDeadletterService } from './replication-deadletter.service';
 import { SettingsModule } from '../settings/settings.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -29,6 +31,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: ReplicationLog.name, schema: ReplicationLogSchema },
       { name: ReplicationCounter.name, schema: ReplicationCounterSchema },
       { name: ReplicationApplied.name, schema: ReplicationAppliedSchema },
+      { name: ReplicationDeadletter.name, schema: ReplicationDeadletterSchema },
     ]),
     HttpModule.register({
       timeout: 30000,
@@ -52,6 +55,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ReplicationSyncService,
     ReplicationSyncClientService,
     ReplicationSyncDriverService,
+    ReplicationDeadletterService,
   ],
   exports: [ReplicationReadonlyGuard],
 })
