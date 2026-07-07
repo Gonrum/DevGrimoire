@@ -1,4 +1,4 @@
-import { SyncLogEntry } from './replication-sync.types';
+import { SyncLogEntry, ApplyOutcome } from './replication-sync.types';
 
 /**
  * Push send-set selection (2-instance echo filter, spec §6.1). An entry is
@@ -7,17 +7,21 @@ import { SyncLogEntry } from './replication-sync.types';
  * replication_applied) are excluded → no echo. Entries with no projectId or a
  * non-enabled project are excluded (confidentiality). For fan-out (>2
  * instances) switch the origin test to `origin !== recipient`.
+ * `excludeEventIds` — Einträge, die push-seitig deadlettert wurden
+ * (Kontiguitäts-Auflösung, Plan 3a) → nicht erneut senden.
  */
 export function selectSendSet(
   entries: SyncLogEntry[],
   selfInstanceId: string,
   enabledProjectIds: Set<string>,
+  excludeEventIds?: Set<string>,
 ): SyncLogEntry[] {
   return entries.filter(
     (e) =>
       e.originInstanceId === selfInstanceId &&
       e.projectId != null &&
-      enabledProjectIds.has(e.projectId),
+      enabledProjectIds.has(e.projectId) &&
+      !(excludeEventIds && excludeEventIds.has(e.eventId)),
   );
 }
 
@@ -74,24 +78,12 @@ export function advanceInbound(
 }
 
 /**
- * Whether an apply skip-reason is TERMINAL (the entry is permanently handled;
- * the cursor may advance past it) vs a transient apply error (db/throw — the
- * cursor must stop so the entry is retried). Shared by the receive endpoint
- * (appliedThrough) and the pull-side driver (inbound cursor). The matched
- * substrings mirror the reason strings produced by
- * replication-sync-apply.service.ts. (Plan 3 replaces this string heuristic
- * with structured result codes.)
+ * Whether an apply outcome is TERMINAL — the entry is permanently handled and
+ * the cursor may advance past it. Only `error_transient` (a db throw / transient
+ * apply failure) is non-terminal → the cursor must stop so the entry is retried
+ * (and eventually deadlettered after MAX_APPLY_ATTEMPTS). Replaces the earlier
+ * reason-string substring heuristic.
  */
-export function isTerminalSkip(reason?: string): boolean {
-  if (!reason) return false;
-  return (
-    reason.startsWith('LWW') ||
-    reason.includes('not replication-enabled') ||
-    reason.includes('bootstrap required') ||
-    reason.includes('own origin') ||
-    reason.includes('not a replicated collection') ||
-    reason.includes('no projectId') ||
-    reason.includes('invalid documentId') ||
-    reason.includes('no document')
-  );
+export function isTerminalOutcome(outcome: ApplyOutcome): boolean {
+  return outcome !== 'error_transient';
 }

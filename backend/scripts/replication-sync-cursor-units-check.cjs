@@ -6,7 +6,6 @@ const {
   selectSendSet,
   advanceOutbound,
   advanceInbound,
-  isTerminalSkip,
 } = require('../dist/replication/replication-sync-cursor.helpers');
 
 let passed = 0;
@@ -39,6 +38,14 @@ check('selectSendSet keeps self-origin opted-in', () => {
 check('selectSendSet empty when no self-origin opted-in', () => {
   const out = selectSendSet([entry(1, PEER, 'p1'), entry(2, SELF, 'p2')], SELF, new Set(['p1']));
   assert.deepEqual(out, []);
+});
+check('selectSendSet excludes deadlettered eventIds', () => {
+  const en = new Set(['p1']);
+  const out = selectSendSet([
+    entry(1, SELF, 'p1'),
+    entry(2, SELF, 'p1'),
+  ], SELF, en, new Set(['e1']));  // e1 = entry(1)'s eventId
+  assert.deepEqual(out.map((e) => e.seq), [2]);
 });
 
 // advanceOutbound
@@ -76,21 +83,6 @@ check('advanceInbound first entry poison keeps current cursor', () => {
 });
 check('advanceInbound never moves below current cursor', () => {
   assert.equal(advanceInbound([{ seq: 5, handled: true }], 6, 40), 40);
-});
-
-// isTerminalSkip — matches the reason strings produced by replication-sync-apply.service.ts
-check('isTerminalSkip true for LWW / opt-in / echo / structural reasons', () => {
-  for (const r of [
-    'LWW: local newer', 'LWW: local newer than delete',
-    'project not replication-enabled', 'project not found locally — bootstrap required',
-    'own origin — skipped', 'not a replicated collection: foo',
-    'no projectId', 'invalid documentId', 'no document for upsert',
-  ]) assert.equal(isTerminalSkip(r), true, r);
-});
-check('isTerminalSkip false for transient/db errors and undefined', () => {
-  assert.equal(isTerminalSkip('db unavailable'), false);
-  assert.equal(isTerminalSkip('connection reset'), false);
-  assert.equal(isTerminalSkip(undefined), false);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

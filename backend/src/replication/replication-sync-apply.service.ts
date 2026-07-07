@@ -56,22 +56,22 @@ export class ReplicationSyncApplyService {
     // misconfigured peer could still send it).
     const self = await this.getSelfInstanceId();
     if (self && entry.originInstanceId === self) {
-      return { seq, applied: false, reason: 'own origin — skipped' };
+      return { seq, applied: false, outcome: 'skipped_echo', reason: 'own origin — skipped' };
     }
     if (!isReplicatedCollection(entry.collection)) {
-      return { seq, applied: false, reason: `not a replicated collection: ${entry.collection}` };
+      return { seq, applied: false, outcome: 'skipped_notreplicated', reason: `not a replicated collection: ${entry.collection}` };
     }
     const allowed = await this.isAllowed(entry);
-    if (!allowed.ok) return { seq, applied: false, reason: allowed.reason };
+    if (!allowed.ok) return { seq, applied: false, outcome: 'skipped_optin', reason: allowed.reason };
 
     const db = this.connection.db;
-    if (!db) return { seq, applied: false, reason: 'db unavailable' };
+    if (!db) return { seq, applied: false, outcome: 'error_transient', reason: 'db unavailable' };
     const { ObjectId } = await import('mongodb');
     const coll = db.collection(entry.collection);
 
     let oid: InstanceType<typeof ObjectId>;
     try { oid = new ObjectId(entry.documentId); }
-    catch { return { seq, applied: false, reason: 'invalid documentId' }; }
+    catch { return { seq, applied: false, outcome: 'skipped_invalid', reason: 'invalid documentId' }; }
 
     try {
       // LWW: read the local doc's updatedAt once.
@@ -80,15 +80,15 @@ export class ReplicationSyncApplyService {
 
       if (entry.op === 'delete') {
         if (compareLww(localMs, entry.deletedAtMs) === 'skip') {
-          return { seq, applied: false, reason: 'LWW: local newer than delete' };
+          return { seq, applied: false, outcome: 'skipped_lww', reason: 'LWW: local newer than delete' };
         }
         await coll.deleteOne({ _id: oid });
-        return { seq, applied: true };
+        return { seq, applied: true, outcome: 'applied' };
       }
 
-      if (!entry.document) return { seq, applied: false, reason: 'no document for upsert' };
+      if (!entry.document) return { seq, applied: false, outcome: 'skipped_invalid', reason: 'no document for upsert' };
       if (compareLww(localMs, entry.updatedAtMs) === 'skip') {
-        return { seq, applied: false, reason: 'LWW: local newer' };
+        return { seq, applied: false, outcome: 'skipped_lww', reason: 'LWW: local newer' };
       }
 
       // Origin tagging: write the applied-record BEFORE the upsert so the local
@@ -118,10 +118,10 @@ export class ReplicationSyncApplyService {
       this.normalizeTimestamps(doc);
 
       await coll.replaceOne({ _id: oid }, doc, { upsert: true });
-      return { seq, applied: true };
+      return { seq, applied: true, outcome: 'applied' };
     } catch (err) {
       this.logger.error(`Sync apply failed (${entry.collection}/${entry.documentId}): ${(err as Error).message}`);
-      return { seq, applied: false, reason: (err as Error).message };
+      return { seq, applied: false, outcome: 'error_transient', reason: (err as Error).message };
     }
   }
 

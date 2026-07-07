@@ -6,7 +6,7 @@ import { SettingsService } from '../settings/settings.service';
 import { ReplicationLog, ReplicationLogDocument } from './schemas/replication-log.schema';
 import { ReplicationSyncApplyService } from './replication-sync-apply.service';
 import { toSyncEntry, pullPage } from './replication-sync.helpers';
-import { isTerminalSkip } from './replication-sync-cursor.helpers';
+import { isTerminalOutcome } from './replication-sync-cursor.helpers';
 import { SyncReceiveRequest, SyncReceiveResponse, SyncPullResponse, SyncEntryResult } from './replication-sync.types';
 import { REPL_INSTANCE_ID } from './replication.constants';
 
@@ -54,7 +54,7 @@ export class ReplicationSyncService {
       // "Handled" = applied, or skipped for a terminal reason (LWW/opt-in/echo/
       // not-replicated/invalid id). Only a genuine apply error (db/throw) is
       // non-terminal and breaks the contiguous ack.
-      const terminal = result.applied || isTerminalSkip(result.reason);
+      const terminal = isTerminalOutcome(result.outcome);
       if (contiguous && terminal) {
         appliedThrough = entry.seq;
       } else if (!terminal) {

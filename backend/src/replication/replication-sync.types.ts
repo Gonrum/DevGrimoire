@@ -23,10 +23,24 @@ export interface SyncReceiveRequest {
   entries: SyncLogEntry[];
 }
 
-/** Per-entry apply outcome (drives appliedThrough + the sender's deadletter in Plan 3). */
+/** Structured apply outcome. Only `error_transient` is non-terminal (the entry
+ *  should be retried); every other value is terminal (cursor may advance). */
+export type ApplyOutcome =
+  | 'applied'
+  | 'skipped_lww'
+  | 'skipped_optin'
+  | 'skipped_echo'
+  | 'skipped_notreplicated'
+  | 'skipped_invalid'
+  | 'error_transient';
+
+/** Per-entry apply outcome (drives appliedThrough on the receiver + the
+ *  pull-side inbound cursor + deadletter retry counting). `reason` is a
+ *  human-readable detail; `outcome` is the machine-readable classification. */
 export interface SyncEntryResult {
   seq: number;
   applied: boolean;
+  outcome: ApplyOutcome;
   reason?: string;
 }
 

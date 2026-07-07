@@ -13,7 +13,7 @@ import {
   selectSendSet,
   advanceOutbound,
   advanceInbound,
-  isTerminalSkip,
+  isTerminalOutcome,
   InboundResult,
 } from './replication-sync-cursor.helpers';
 import { SyncCycleResult, SyncStatus, SyncLogEntry } from './replication-sync.types';
@@ -217,7 +217,7 @@ export class ReplicationSyncDriverService {
         const r = await this.applyService.applyEntry(entry);
         if (r.applied) applied++;
         else skipped++;
-        results.push({ seq: entry.seq, handled: r.applied || isTerminalSkip(r.reason) });
+        results.push({ seq: entry.seq, handled: isTerminalOutcome(r.outcome) });
       }
 
       const newCursor = advanceInbound(results, nextSince, cursor);
