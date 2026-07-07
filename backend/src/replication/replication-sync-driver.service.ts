@@ -8,6 +8,7 @@ import { SettingsService } from '../settings/settings.service';
 import { ReplicationLog, ReplicationLogDocument } from './schemas/replication-log.schema';
 import { ReplicationSyncClientService } from './replication-sync-client.service';
 import { ReplicationSyncApplyService } from './replication-sync-apply.service';
+import { ReplicationDeadletterService } from './replication-deadletter.service';
 import { toSyncEntry } from './replication-sync.helpers';
 import {
   selectSendSet,
@@ -53,6 +54,7 @@ export class ReplicationSyncDriverService {
     private client: ReplicationSyncClientService,
     private applyService: ReplicationSyncApplyService,
     private eventEmitter: EventEmitter2,
+    private deadletter: ReplicationDeadletterService,
   ) {}
 
   isRunning(): boolean {
@@ -217,7 +219,21 @@ export class ReplicationSyncDriverService {
         const r = await this.applyService.applyEntry(entry);
         if (r.applied) applied++;
         else skipped++;
-        results.push({ seq: entry.seq, handled: isTerminalOutcome(r.outcome) });
+
+        let handled = isTerminalOutcome(r.outcome);
+        if (r.outcome === 'error_transient') {
+          // Count the failure; deadletter (and treat as handled → advance past)
+          // once it has failed MAX_APPLY_ATTEMPTS cycles. Otherwise leave it
+          // unhandled so the inbound cursor blocks and the next cycle retries.
+          const { deadlettered } = await this.deadletter.recordFailure(
+            'inbound', entry, r.reason ?? 'apply error',
+          );
+          handled = deadlettered;
+        } else if (r.applied) {
+          // Succeeded — drop any stale retry record for this entry.
+          await this.deadletter.clearRetry('inbound', entry.eventId);
+        }
+        results.push({ seq: entry.seq, handled });
       }
 
       const newCursor = advanceInbound(results, nextSince, cursor);
