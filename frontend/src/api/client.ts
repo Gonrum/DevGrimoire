@@ -1604,6 +1604,11 @@ export const api = {
       request<WerkbankHistoryEntry[]>(`/requests/${id}/history?limit=${limit}`),
     parseCurl: (curl: string) =>
       request<ParsedCurlRequest>(`/http-requests/parse-curl`, { method: 'POST', body: JSON.stringify({ curl }) }),
+    downloadTicket: (id: string, environmentId?: string) =>
+      request<{ ticket: string; url: string }>(`/requests/${id}/download-ticket`, {
+        method: 'POST',
+        body: JSON.stringify({ environmentId }),
+      }),
   },
   contacts: {
     list: (customerId: string) =>

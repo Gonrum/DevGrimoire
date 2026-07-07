@@ -167,6 +167,37 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
     }
   }
 
+  async function streamDownload() {
+    if (!draft?._id) return;
+    setError(null);
+    try {
+      const { url } = await api.httpRequests.downloadTicket(draft._id, envId || undefined);
+      // url enthält bereits /api + ticket. Content-Disposition:attachment erzwingt
+      // den Download; kein `download`-Attribut, damit der Server-Dateiname greift.
+      const a = document.createElement('a');
+      a.href = url;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      setError('Download fehlgeschlagen: ' + (e as Error).message);
+    }
+  }
+
+  function blobDownload() {
+    if (!response) return;
+    const blob = new Blob([response.body], { type: response.contentType || 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (draft?.name || 'response').replace(/[^\w.-]+/g, '_') + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   // ---- Sidebar: Collections → Requests ----
   const sidebar = (
     <div className="w-64 shrink-0 border-r border-gray-700 pr-3 space-y-4 overflow-y-auto">
@@ -225,6 +256,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
               />
               <button onClick={() => setShowCurl(true)} className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">curl importieren</button>
               <button onClick={saveDraft} className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">Speichern</button>
+              {draft._id && <button onClick={streamDownload} title="Antwort ohne Größenlimit auf die Platte streamen" className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">Als Datei streamen</button>}
               {draft._id && <button onClick={loadHistory} className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">History</button>}
               {draft._id && <button onClick={() => deleteRequest(draft._id)} className="text-xs px-2 py-1 rounded border border-red-800 text-red-400 hover:bg-red-900/30">Löschen</button>}
             </div>
@@ -291,6 +323,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
                   {response.unresolvedVariables.length > 0 && (
                     <span className="text-amber-400">⚠ unaufgelöst: {response.unresolvedVariables.join(', ')}</span>
                   )}
+                  <button onClick={blobDownload} className="ml-auto text-xs px-2 py-0.5 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">Herunterladen</button>
                 </div>
                 <div className="flex gap-1 px-2 py-1 border-b border-gray-700">
                   {(['body', 'headers'] as const).map((t) => (
