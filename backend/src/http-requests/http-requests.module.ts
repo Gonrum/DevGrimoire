@@ -7,6 +7,7 @@ import { SecretsModule } from '../secrets/secrets.module';
 import { EnvironmentsModule } from '../environments/environments.module';
 import { HttpRequestsService } from './http-requests.service';
 import { HttpRequestsController } from './http-requests.controller';
+import { DownloadTicketService } from './download-ticket.service';
 
 @Module({
   imports: [
@@ -19,7 +20,7 @@ import { HttpRequestsController } from './http-requests.controller';
     EnvironmentsModule,
   ],
   controllers: [HttpRequestsController],
-  providers: [HttpRequestsService],
+  providers: [HttpRequestsService, DownloadTicketService],
   exports: [HttpRequestsService],
 })
 export class HttpRequestsModule {}
