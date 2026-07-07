@@ -181,6 +181,14 @@ export class ReplicationSyncDriverService {
           const blocker = this.findBlocker(sendSet, resp.results, appliedThrough);
           if (blocker) {
             await this.deadletter.recordFailure('outbound', blocker.entry, blocker.reason);
+          } else {
+            // Shortfall with no attributable transient result — only reachable
+            // against a version-skewed/malformed peer (results missing `outcome`).
+            // No deadletter fires, so make the otherwise-invisible retry loop
+            // visible instead of silently sticking this direction forever.
+            this.logger.warn(
+              `Push shortfall at cursor ${cursor} (appliedThrough=${appliedThrough} < maxSentSeq=${maxSentSeq}) with no attributable transient result — peer may be version-skewed; retrying without deadletter.`,
+            );
           }
         } else {
           // Everything sent was handled — clear stale retry records below the ack.
