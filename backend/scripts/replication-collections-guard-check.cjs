@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * Completeness guard: every projectId-bearing @Schema class under
+ * Completeness guard: every projectId/projectIds-bearing @Schema class under
  * backend/src must be either in REPLICATED_COLLECTIONS or in
  * EXCLUDED_COLLECTIONS (with a reason). Scans SOURCE (not dist) so a newly
  * added schema with a projectId prop breaks the build until classified.
@@ -71,7 +71,8 @@ function projectIdClasses(source) {
     const start = marks[i].idx;
     const end = i + 1 < marks.length ? marks[i + 1].idx : source.length;
     const block = source.slice(start, end);
-    if (/\bprojectId\b/.test(block) && !embedded.has(marks[i].name)) classes.push(marks[i].name);
+    // matches `projectId` AND `projectIds` (multi-project entities like ResearchSession)
+    if (/\bprojectIds?\b/.test(block) && !embedded.has(marks[i].name)) classes.push(marks[i].name);
   }
   return classes;
 }

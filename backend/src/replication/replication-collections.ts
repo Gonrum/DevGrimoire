@@ -15,6 +15,10 @@ export interface ReplicatedCollection {
   entity: string;
   collection: string;
   appendOnly: boolean;
+  /** Multi-project entity keyed by `projectIds: ObjectId[]` (not a singular
+   *  `projectId`). The log-writer populates the log entry's `projectIds`, and
+   *  opt-in is "any of them enabled" (spec: "alles was ein Projekt enthält"). */
+  multiProject?: boolean;
 }
 
 export const REPLICATED_COLLECTIONS: ReplicatedCollection[] = [
@@ -43,6 +47,7 @@ export const REPLICATED_COLLECTIONS: ReplicatedCollection[] = [
   { className: 'ValidationReport', entity: 'validation-report', collection: 'validationreports', appendOnly: false },
   { className: 'DocUpdateProposal', entity: 'doc-update-proposal', collection: 'docupdateproposals', appendOnly: false },
   { className: 'KnowledgeGraphEdge', entity: 'knowledge-graph-edge', collection: 'knowledgegraphedges', appendOnly: false },
+  { className: 'ResearchSession', entity: 'research-session', collection: 'researchsessions', appendOnly: false, multiProject: true },
 ];
 
 /**
@@ -60,7 +65,6 @@ export const EXCLUDED_COLLECTIONS: { className: string; reason: string }[] = [
   { className: 'ReplicationDeadletter', reason: 'Interne Engine-Collection (Deadletter-Store) — darf sich nicht selbst replizieren' },
   { className: 'ReplicationLog', reason: 'Das Replikations-Log selbst (trägt projectId für Opt-in-Filterung) — interne Engine-Collection, darf sich nicht selbst replizieren (Rekursion)' },
   { className: 'ReplicationQueue', reason: 'Internes Legacy-Outbox — instanzlokal' },
-  { className: 'ResearchSession', reason: 'Multi-projekt-skopiert via projectIds[] (kein singuläres projectId) — braucht dedizierte Opt-in-/projectId-Behandlung, auf Plan 2 verschoben' },
   { className: 'SshConnection', reason: 'Infra-Zugangsdaten, instanz-/umgebungsspezifisch (Home vs Firma erreichen andere Hosts)' },
   { className: 'WorkflowDefinition', reason: 'Referenziert instanzgebundene Secrets/Endpoints' },
   { className: 'WorkflowRun', reason: 'Workflow-Run-State, instanzgebunden' },
