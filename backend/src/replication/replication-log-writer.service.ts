@@ -144,7 +144,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
         : deriveEventId(coll, documentId, clusterTimeMs);
 
       const fullDoc = change.fullDocument ?? null;
-      const projectId = this.extractProjectId(coll, fullDoc, documentId);
+      const { projectId, projectIds } = this.extractProjectRefs(coll, fullDoc, documentId);
       const updatedAtMs = this.toMs(fullDoc?.updatedAt);
       const deletedAtMs = op === 'delete' ? clusterTimeMs : null;
 
@@ -169,6 +169,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
           collection: coll,
           documentId,
           projectId,
+          projectIds,
           document: op === 'upsert' ? fullDoc : null,
           updatedAtMs,
           deletedAtMs,
@@ -192,13 +193,23 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
     }
   }
 
-  /** projectId is the doc's _id for the projects collection, else the projectId field. */
+  /** Project references for the log entry. Single-project: `projectId` set,
+   *  `projectIds` null. Multi-project (multiProject registry flag): `projectId`
+   *  null, `projectIds` = the doc's projectIds array. The projects collection
+   *  itself uses its own _id as projectId. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private extractProjectId(coll: string, doc: any, documentId: string): string | null {
+  private extractProjectRefs(coll: string, doc: any, documentId: string): {
+    projectId: string | null;
+    projectIds: string[] | null;
+  } {
     const entry = getReplicatedByCollection(coll);
-    if (entry?.entity === 'project') return documentId;
+    if (entry?.entity === 'project') return { projectId: documentId, projectIds: null };
+    if (entry?.multiProject) {
+      const arr = Array.isArray(doc?.projectIds) ? doc.projectIds : [];
+      return { projectId: null, projectIds: arr.map((p: unknown) => String(p)) };
+    }
     const pid = doc?.projectId;
-    return pid != null ? pid.toString() : null;
+    return { projectId: pid != null ? pid.toString() : null, projectIds: null };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
