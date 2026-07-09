@@ -11,6 +11,7 @@ import { ResearchTopicService } from './research-topic.service';
 import { ResearchArtifactService } from './research-artifact.service';
 import { ResearchRunService } from './research-run.service';
 import { ResearchAgentService } from './research-agent.service';
+import { ResearchAgentController } from './research-agent.controller';
 import { CountersModule } from '../counters/counters.module';
 import { SettingsModule } from '../settings/settings.module';
 import { BalancerModule } from '../balancer/balancer.module';
@@ -44,7 +45,7 @@ import { EncryptionService } from '../common/encryption.service';
     CustomersModule,
     NotificationsModule,
   ],
-  controllers: [],
+  controllers: [ResearchAgentController],
   providers: [
     ResearchTopicService,
     ResearchArtifactService,
