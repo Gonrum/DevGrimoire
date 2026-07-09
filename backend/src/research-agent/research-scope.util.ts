@@ -74,7 +74,9 @@ export function scopeFrom(topic: ResearchTopicDocument): RagScope {
  *   what that user can see), then caps the COMBINED count at `maxScopes`
  *   (projects kept first, customers filling the remainder). If capping
  *   actually dropped any id, `note` carries the caller-facing message the
- *   brief requires: "Scope auf N Projekte begrenzt (von M)".
+ *   brief requires: "Scope auf N Quellen begrenzt (von M)" — N/M count
+ *   projects AND customers combined, so "Quellen" (not "Projekte") is the
+ *   accurate noun.
  */
 export function resolveRequestScope(
   topic: ResearchTopicDocument,
@@ -105,6 +107,6 @@ export function resolveRequestScope(
 
   return {
     scope: { projectIds: boundedProjectIds, customerIds: boundedCustomerIds, includeGlobal },
-    note: `Scope auf ${kept} Projekte begrenzt (von ${totalAvailable})`,
+    note: `Scope auf ${kept} Quellen begrenzt (von ${totalAvailable})`,
   };
 }

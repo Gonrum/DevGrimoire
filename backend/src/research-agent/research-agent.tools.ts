@@ -27,7 +27,15 @@ export interface ToolDef {
   };
 }
 
-/** Scope tuple `RagService.searchScopes` expects — see `deriveScope` below. */
+/**
+ * Scope tuple `RagService.searchScopes` expects. Resolution (topic scope →
+ * concrete, cost-bounded project/customer ids) happens entirely on the
+ * service side (see `ResearchAgentService.resolveScope` / `research-scope
+ * .util.ts`) — this module never sees a scope value at all; `ctx.rag
+ * .searchScopes` below is `(query, limit)` only, with the bounded scope
+ * baked into the closure the caller provides. Kept here only as the shared
+ * type other modules (`research-scope.util.ts`) import.
+ */
 export interface RagScope {
   projectIds: string[];
   customerIds: string[];
@@ -46,7 +54,14 @@ export interface RagScope {
 export interface ResearchToolContext {
   topic: ResearchTopicDocument;
   rag: {
-    searchScopes: (query: string, scope: RagScope, limit?: number) => Promise<RagSearchHit[]>;
+    /**
+     * Deliberately scope-less at this boundary: the ctx the service builds
+     * already has the resolved + cost-bounded `RagScope` baked into its own
+     * closure (see `ResearchAgentService.buildToolContext`). There is no
+     * scope parameter here for a caller to (re)supply or ignore — the
+     * `MAX_SCOPES` cap can therefore never be bypassed by this module.
+     */
+    searchScopes: (query: string, limit: number) => Promise<RagSearchHit[]>;
   };
   web: {
     search: (query: string) => Promise<SearchResult[]>;
@@ -76,30 +91,6 @@ const STEP_SUMMARY_CHARS = 400;
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}… [gekürzt, ${text.length} Zeichen gesamt]`;
-}
-
-function toIdStrings(ids: unknown): string[] {
-  if (!Array.isArray(ids)) return [];
-  return ids.map((id) => String(id));
-}
-
-/**
- * Derives the `RagService.searchScopes` scope tuple directly from the
- * topic's own `ResearchScope` (projectIds/customerIds as ObjectIds →
- * strings, includeGlobal passed through). This is a placeholder for a
- * shared `scopeFrom(topic)` helper planned for a later task once the
- * research-topic service's "mode: all" resolution (turning "all projects"
- * into a concrete id list per the caller's access) lands; until then this
- * inline mapping is intentionally the simplest thing that satisfies the
- * guarded-dispatch contract without pulling in that service.
- */
-function deriveScope(topic: ResearchTopicDocument): RagScope {
-  const scope = topic.scope;
-  return {
-    projectIds: toIdStrings(scope?.projectIds),
-    customerIds: toIdStrings(scope?.customerIds),
-    includeGlobal: scope?.includeGlobal !== false,
-  };
 }
 
 function topicId(topic: ResearchTopicDocument): string {
@@ -285,7 +276,7 @@ export function buildResearchTools(ctx: ResearchToolContext): {
     const requestedLimit = typeof requested === 'number' && Number.isFinite(requested) ? requested : RAG_SEARCH_DEFAULT_LIMIT;
     const limit = Math.max(1, Math.min(Math.trunc(requestedLimit), RAG_SEARCH_MAX_LIMIT));
 
-    const hits = await ctx.rag.searchScopes(query, deriveScope(ctx.topic), limit);
+    const hits = await ctx.rag.searchScopes(query, limit);
     return JSON.stringify(
       hits.map((h) => ({
         title: h.title,

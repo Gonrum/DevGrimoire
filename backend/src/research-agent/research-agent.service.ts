@@ -73,6 +73,16 @@ export interface RunToolLoopOptions {
    * tool_call/tool_result, the loop owns its own 'note' events).
    */
   onStep?: (step: RunStep) => Promise<void> | void;
+  /**
+   * Optional externally-owned accumulator. When provided, the loop collects
+   * `artifact_write` slugs into THESE sets instead of private ones — so a
+   * caller racing this function's returned promise against a timeout/abort
+   * (see `ResearchAgentService.raceGuardrails`) can still read whatever the
+   * loop accumulated so far even if this promise itself never resolves in
+   * time to matter. The returned `artifactsCreated`/`artifactsUpdated`
+   * arrays and these sets always reflect the same underlying data.
+   */
+  partialArtifacts?: { created: Set<string>; updated: Set<string> };
 }
 
 export interface RunToolLoopResult {
@@ -105,9 +115,9 @@ function collectArtifactAction(
 }
 
 export async function runToolLoop(opts: RunToolLoopOptions): Promise<RunToolLoopResult> {
-  const { llm, dispatch, maxIterations, onStep } = opts;
-  const artifactsCreated = new Set<string>();
-  const artifactsUpdated = new Set<string>();
+  const { llm, dispatch, maxIterations, onStep, partialArtifacts } = opts;
+  const artifactsCreated = partialArtifacts?.created ?? new Set<string>();
+  const artifactsUpdated = partialArtifacts?.updated ?? new Set<string>();
   let priorResults: ToolLoopToolResult[] = [];
   let lastText = '';
   let iterations = 0;
@@ -248,11 +258,17 @@ export class ResearchAgentService {
 
       const controller = new AbortController();
       const llm = this.buildLlmAdapter(this.buildSystemPrompt(topic), topic.brief, defs, controller.signal);
+      // Owned by THIS scope (not the loop) so it can still be read after a
+      // timeout/abort races the loop promise away below — a run that wrote
+      // artifacts before timing out should still report them (see the
+      // failure branch's finalizeOnce call).
+      const partialArtifacts = { created: new Set<string>(), updated: new Set<string>() };
       const loopPromise = runToolLoop({
         llm,
         dispatch,
         maxIterations: topic.guardrails.maxIterations,
         onStep,
+        partialArtifacts,
       });
 
       const raced = await this.raceGuardrails(loopPromise, topic.guardrails.timeoutMs, controller, signal);
@@ -266,7 +282,12 @@ export class ResearchAgentService {
         });
       } else {
         const status = raced.failure === 'cancelled' ? ResearchRunStatus.CANCELLED : ResearchRunStatus.ERROR;
-        await finalizeOnce({ status, error: raced.error?.message ?? 'unknown error' });
+        await finalizeOnce({
+          status,
+          error: raced.error?.message ?? 'unknown error',
+          artifactsCreated: [...partialArtifacts.created],
+          artifactsUpdated: [...partialArtifacts.updated],
+        });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -290,6 +311,15 @@ export class ResearchAgentService {
    * TERMINAL status (`done`/`error`/`cancelled` — never `running`/`queued`,
    * per the T10 review note) and at most once per run (a second call is
    * logged and ignored rather than double-writing/double-publishing).
+   *
+   * `called` is set only AFTER `runService.finalize` resolves successfully —
+   * not before the `await`. If the DB write throws, the guard must NOT have
+   * latched yet, or the fallback `finalizeOnce` call in `runInContext`'s
+   * `catch` block would see `called === true` and silently no-op, leaving
+   * the run stuck in `RUNNING` forever. The check at entry (`if (called)`)
+   * still makes repeated SEQUENTIAL calls idempotent, which is the only
+   * calling pattern `runInContext` actually has (never two concurrent
+   * `finalizeOnce` calls in flight at once).
    */
   private makeFinalizeGuard(runId: string): (patch: FinalizeRunPatch) => Promise<void> {
     const TERMINAL = new Set<ResearchRunStatus>([
@@ -306,8 +336,8 @@ export class ResearchAgentService {
         this.logger.warn(`finalize() called more than once for run ${runId} — ignoring status "${patch.status}"`);
         return;
       }
-      called = true;
       await this.runService.finalize(runId, patch);
+      called = true;
     };
   }
 
@@ -338,14 +368,15 @@ export class ResearchAgentService {
   /**
    * Builds the `ResearchToolContext` Task 12's `buildResearchTools` expects.
    *
-   * Two deliberate wiring decisions, both called out in the task-13 brief's
+   * One deliberate wiring decision, called out in the task-13 brief's
    * review-note wire-ups:
-   *  - `rag.searchScopes` IGNORES the `scope` argument the inline
-   *    `deriveScope(topic)` helper in research-agent.tools.ts computes and
-   *    passes in, using the pre-resolved + bounded `scope` (from
-   *    `resolveScope`/`resolveRequestScope`) instead. This is how the cost
-   *    bound actually reaches `RagService.searchScopes` without touching
-   *    research-agent.tools.ts.
+   *  - `ResearchToolContext.rag.searchScopes` has NO scope parameter at all
+   *    (see research-agent.tools.ts) — the pre-resolved + bounded `scope`
+   *    (from `resolveScope`/`resolveRequestScope`) is baked into this
+   *    closure instead. This is how the `MAX_SCOPES` cost bound actually and
+   *    STRUCTURALLY reaches `RagService.searchScopes`: there is no scope
+   *    argument at the tool→ctx boundary for a future caller to (re)supply,
+   *    honor, or accidentally widen.
    *  - `artifacts.write` stamps the CURRENT run's `runId` onto every write —
    *    `artifact_write`'s tool schema intentionally does not accept a
    *    caller-supplied `runId` from the LLM, so it has to be added one layer
@@ -360,7 +391,7 @@ export class ResearchAgentService {
     return {
       topic,
       rag: {
-        searchScopes: (query, _ignoredScope, limit) => this.rag.searchScopes(query, scope, limit),
+        searchScopes: (query, limit) => this.rag.searchScopes(query, scope, limit),
       },
       web: {
         search: async (query) => {

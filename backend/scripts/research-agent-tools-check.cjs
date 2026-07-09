@@ -20,8 +20,9 @@
  *  (d) every `dispatch` call — success, limit-hit, or error — must invoke
  *      `ctx.onStep` at least once;
  *  plus the rag_search cost guard (requested `limit` is clamped, never
- *  passed through unbounded) and the inline `topic.scope` → RagService
- *  scope derivation (projectIds/customerIds stringified, includeGlobal).
+ *  passed through unbounded) and the fact that NO scope argument crosses the
+ *  tool->ctx boundary at all — `ctx.rag.searchScopes(query, limit)` — the
+ *  service bakes the resolved, cost-bounded scope into its own closure.
  *
  * Loads compiled output from dist/. Run via
  * `npm run check:research-agent-tools` from backend/ after a build.
@@ -81,8 +82,8 @@ function makeCtx(overrides = {}) {
   };
   const rag = {
     searchScopesCalls: [],
-    async searchScopes(query, scope, limit) {
-      rag.searchScopesCalls.push({ query, scope, limit });
+    async searchScopes(query, limit) {
+      rag.searchScopesCalls.push({ query, limit });
       return [{ id: 's1', projectId: 'p1', customerId: '', entity: 'knowledge', title: 'T', content: 'c'.repeat(500), score: 0.9 }];
     },
   };
@@ -235,8 +236,10 @@ function makeCtx(overrides = {}) {
   assert.ok(steps.length > before, 'onStep must fire even when dispatch hits an error');
 }
 
-// rag_search: scope is derived inline from topic.scope, and the requested
-// limit is clamped server-side (cost guard) — never passed through unbounded.
+// rag_search: no scope argument crosses the tool->ctx boundary at all (the
+// bounded scope is baked into the ctx.rag.searchScopes closure by the
+// service — see research-agent.service.ts) and the requested limit is
+// clamped server-side (cost guard) — never passed through unbounded.
 {
   const { ctx, rag } = makeCtx();
   const { dispatch } = buildResearchTools(ctx);
@@ -244,7 +247,7 @@ function makeCtx(overrides = {}) {
   assert.equal(rag.searchScopesCalls.length, 1);
   const call = rag.searchScopesCalls[0];
   assert.equal(call.query, 'lancedb');
-  assert.deepEqual(call.scope, { projectIds: ['p1'], customerIds: ['c1'], includeGlobal: true });
+  assert.equal(call.scope, undefined, 'ctx.rag.searchScopes must be called with (query, limit) only — no scope arg');
   assert.ok(call.limit <= 8, `limit must be capped (got ${call.limit})`);
   const parsed = JSON.parse(result);
   assert.ok(Array.isArray(parsed));
