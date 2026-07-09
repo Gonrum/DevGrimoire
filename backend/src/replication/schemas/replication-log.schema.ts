@@ -25,7 +25,7 @@ export class ReplicationLog {
   @Prop({ type: String, default: null })
   projectId: string | null;
 
-  /** Multi-project entities (ResearchSession) carry their project array here;
+  /** Multi-project entities (e.g. ResearchTopic) carry their project array here;
    *  `projectId` stays null for them. null for single-project entities. */
   @Prop({ type: [String], default: null })
   projectIds: string[] | null;

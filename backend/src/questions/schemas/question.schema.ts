@@ -81,8 +81,9 @@ export class Question {
   @Prop({ type: Types.ObjectId, ref: 'Customer' })
   customerId?: Types.ObjectId;
 
-  /** Originating research session (M-45 / T-390). */
-  @Prop({ type: Types.ObjectId, ref: 'ResearchSession' })
+  /** Originating research session (M-45 / T-390). Legacy research-sessions
+   *  module was removed (T-22); field kept inert for existing data. */
+  @Prop({ type: Types.ObjectId })
   researchSessionId?: Types.ObjectId;
 
   /** Originating chat session (M-45 / T-390). */

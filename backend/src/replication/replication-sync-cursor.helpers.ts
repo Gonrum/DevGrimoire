@@ -11,7 +11,7 @@ import { SyncLogEntry, ApplyOutcome } from './replication-sync.types';
  * (Kontiguitäts-Auflösung, Plan 3a) → nicht erneut senden.
  */
 /** Effective project references of a log entry: the single `projectId` if set,
- *  else the multi-project `projectIds` array (ResearchSession), else empty. */
+ *  else the multi-project `projectIds` array (e.g. ResearchTopic), else empty. */
 export function entryProjectIds(entry: {
   projectId: string | null;
   projectIds?: string[] | null;

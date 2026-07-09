@@ -22,7 +22,6 @@ import { EnvironmentsModule } from './environments/environments.module';
 import { SecretsModule } from './secrets/secrets.module';
 import { ManualsModule } from './manuals/manuals.module';
 import { ResearchModule } from './research/research.module';
-import { ResearchSessionsModule } from './research-sessions/research-sessions.module';
 import { ResearchAgentModule } from './research-agent/research-agent.module';
 import { SettingsModule } from './settings/settings.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -97,7 +96,6 @@ if (!MONGODB_URI) {
     SecretsModule,
     ManualsModule,
     ResearchModule,
-    ResearchSessionsModule,
     ResearchAgentModule,
     SettingsModule,
     NotificationsModule,

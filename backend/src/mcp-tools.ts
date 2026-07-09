@@ -18,7 +18,6 @@ import { EnvironmentsService } from './environments/environments.service';
 import { SecretsService } from './secrets/secrets.service';
 import { ManualsService } from './manuals/manuals.service';
 import { ResearchService } from './research/research.service';
-import { ResearchSessionsService } from './research-sessions/research-sessions.service';
 import { ResearchTopicService } from './research-agent/research-topic.service';
 import { ResearchRunService } from './research-agent/research-run.service';
 import { ResearchArtifactService } from './research-agent/research-artifact.service';
@@ -444,7 +443,6 @@ export interface McpServices {
   secretsService: SecretsService;
   manualsService: ManualsService;
   researchService: ResearchService;
-  researchSessionsService: ResearchSessionsService;
   researchTopicService: ResearchTopicService;
   researchRunService: ResearchRunService;
   researchArtifactService: ResearchArtifactService;
@@ -4228,7 +4226,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, researchSessionsService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));

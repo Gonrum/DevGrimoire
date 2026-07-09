@@ -64,10 +64,10 @@ function terminalEventFrom(run: {
  * logical resource prefix in one controller rather than fragmenting a small
  * module across several controller classes.
  *
- * SSE handlers (`startRun`, `attachToRun`) mirror
- * `research-sessions.controller.ts`'s `sendMessage` EXACTLY: raw Express
- * `@Res()`, the same four headers + `flushHeaders()`, a guarded `send()`, a
- * 15s `: ping` heartbeat, and an `AbortController` wired to `req.on('close')`.
+ * SSE handlers (`startRun`, `attachToRun`) follow the project's established
+ * SSE-over-REST pattern EXACTLY: raw Express `@Res()`, the same four headers
+ * + `flushHeaders()`, a guarded `send()`, a 15s `: ping` heartbeat, and an
+ * `AbortController` wired to `req.on('close')`.
  */
 @Controller()
 export class ResearchAgentController {

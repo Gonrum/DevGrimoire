@@ -122,7 +122,7 @@ export class ResearchTopicService {
     // ResearchTopicSchema's `{number:1}` index is a non-partial unique index
     // (no partialFilterExpression) — a document inserted without `number`
     // set would be treated as `number: null` and collide (E11000) with the
-    // second such document. Mirrors research-sessions.service.ts:87-96.
+    // second such document.
     const seq = await this.counters.getNextSequence({}, 'research');
     const displayNumber = `R-${seq}`;
 

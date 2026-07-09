@@ -47,7 +47,6 @@ export const REPLICATED_COLLECTIONS: ReplicatedCollection[] = [
   { className: 'ValidationReport', entity: 'validation-report', collection: 'validationreports', appendOnly: false },
   { className: 'DocUpdateProposal', entity: 'doc-update-proposal', collection: 'docupdateproposals', appendOnly: false },
   { className: 'KnowledgeGraphEdge', entity: 'knowledge-graph-edge', collection: 'knowledgegraphedges', appendOnly: false },
-  { className: 'ResearchSession', entity: 'research-session', collection: 'researchsessions', appendOnly: false, multiProject: true },
   { className: 'ResearchArtifact', entity: 'research-artifact', collection: 'researchartifacts', appendOnly: false, multiProject: false },
   { className: 'ResearchTopic', entity: 'research-topic', collection: 'researchtopics', appendOnly: false, multiProject: true },
 ];

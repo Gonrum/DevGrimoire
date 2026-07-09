@@ -22,7 +22,6 @@ import { EnvironmentsService } from './environments/environments.service';
 import { SecretsService } from './secrets/secrets.service';
 import { ManualsService } from './manuals/manuals.service';
 import { ResearchService } from './research/research.service';
-import { ResearchSessionsService } from './research-sessions/research-sessions.service';
 import { ResearchTopicService } from './research-agent/research-topic.service';
 import { ResearchRunService } from './research-agent/research-run.service';
 import { ResearchArtifactService } from './research-agent/research-artifact.service';
@@ -116,7 +115,6 @@ async function bootstrap() {
     secretsService: app.get(SecretsService),
     manualsService: app.get(ManualsService),
     researchService: app.get(ResearchService),
-    researchSessionsService: app.get(ResearchSessionsService),
     researchTopicService: app.get(ResearchTopicService),
     researchRunService: app.get(ResearchRunService),
     researchArtifactService: app.get(ResearchArtifactService),
