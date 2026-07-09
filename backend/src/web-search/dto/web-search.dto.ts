@@ -1,3 +1,5 @@
+import { SearchProviderType } from './web-search-config.dto';
+
 export type SearchCategory = 'general' | 'news' | 'science' | 'it' | 'files';
 export type SearchTimeRange = 'day' | 'week' | 'month' | 'year';
 
@@ -7,6 +9,8 @@ export interface WebSearchQuery {
   categories?: SearchCategory[];
   timeRange?: SearchTimeRange;
   limit?: number;
+  /** Override the configured active provider for this one query. */
+  provider?: SearchProviderType;
 }
 
 export interface WebSearchHit {

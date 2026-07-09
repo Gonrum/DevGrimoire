@@ -5,7 +5,8 @@ import { Model } from 'mongoose';
 import { createHash } from 'crypto';
 import { SettingsService } from '../../settings/settings.service';
 import { WebSearchRateLimiterService } from './web-search-rate-limiter.service';
-import { SearxngProvider } from '../providers/searxng.provider';
+import { WebSearchConfigService } from './web-search-config.service';
+import { resolveSearxngUrl } from './searxng-url.util';
 import { WebSearchCache, WebSearchCacheDocument } from '../schemas/web-search-cache.schema';
 import {
   WebSearchQuery,
@@ -15,7 +16,6 @@ import {
 } from '../dto/web-search.dto';
 
 export const SETTING_ENABLED = 'web_search_enabled';
-export const SETTING_SEARXNG_URL = 'web_search_searxng_url';
 export const SETTING_DEFAULT_LANG = 'web_search_default_language';
 export const SETTING_CACHE_TTL_HOURS = 'web_search_cache_ttl_hours';
 export const SETTING_CONTENT_CACHE_TTL_DAYS = 'web_search_content_cache_ttl_days';
@@ -32,13 +32,12 @@ const VALID_CATEGORIES: ReadonlySet<SearchCategory> = new Set([
 @Injectable()
 export class WebSearchService {
   private readonly logger = new Logger(WebSearchService.name);
-  private readonly envUrl = process.env.SEARXNG_URL || 'http://searxng:8080';
 
   constructor(
     private readonly http: HttpService,
     private readonly settings: SettingsService,
     private readonly rateLimiter: WebSearchRateLimiterService,
-    private readonly provider: SearxngProvider,
+    private readonly configService: WebSearchConfigService,
     @InjectModel(WebSearchCache.name)
     private readonly cacheModel: Model<WebSearchCacheDocument>,
   ) {}
@@ -48,9 +47,9 @@ export class WebSearchService {
     return value.toLowerCase() === 'true';
   }
 
+  /** SearXNG base URL — kept for the health probe (`ping()`), which always targets SearXNG directly. */
   async getSearxngUrl(): Promise<string> {
-    const value = await this.settings.getOrDefault(SETTING_SEARXNG_URL, this.envUrl);
-    return value.replace(/\/$/, '');
+    return resolveSearxngUrl(this.settings);
   }
 
   async getDefaultLanguage(): Promise<string> {
@@ -112,7 +111,8 @@ export class WebSearchService {
     // Rate-limit only on cache miss — cached responses are free.
     this.rateLimiter.consume('search');
 
-    const results = await this.provider.search(query, {
+    const provider = await this.configService.resolveActiveProvider(input.provider);
+    const results = await provider.search(query, {
       limit,
       language,
       categories: categories.length ? categories.join(',') : undefined,

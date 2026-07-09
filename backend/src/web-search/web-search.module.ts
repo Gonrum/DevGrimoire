@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
-import { HttpModule, HttpService } from '@nestjs/axios';
+import { HttpModule } from '@nestjs/axios';
 import { MongooseModule } from '@nestjs/mongoose';
-import { WebSearchService, SETTING_SEARXNG_URL } from './services/web-search.service';
+import { WebSearchService } from './services/web-search.service';
+import { WebSearchConfigService } from './services/web-search-config.service';
 import { ReadabilityService } from './services/readability.service';
 import { WebSearchRateLimiterService } from './services/web-search-rate-limiter.service';
-import { SearxngProvider } from './providers/searxng.provider';
 import { WebSearchController } from './web-search.controller';
 import { SettingsModule } from '../settings/settings.module';
-import { SettingsService } from '../settings/settings.service';
+import { EncryptionService } from '../common/encryption.service';
 import { WebSearchCache, WebSearchCacheSchema } from './schemas/web-search-cache.schema';
 import { WebFetchCache, WebFetchCacheSchema } from './schemas/web-fetch-cache.schema';
 
@@ -26,21 +26,11 @@ import { WebFetchCache, WebFetchCacheSchema } from './schemas/web-fetch-cache.sc
   controllers: [WebSearchController],
   providers: [
     WebSearchService,
+    WebSearchConfigService,
     ReadabilityService,
     WebSearchRateLimiterService,
-    {
-      provide: SearxngProvider,
-      useFactory: (http: HttpService, settings: SettingsService) => {
-        const envUrl = process.env.SEARXNG_URL || 'http://searxng:8080';
-        const getUrl = async () => {
-          const value = await settings.getOrDefault(SETTING_SEARXNG_URL, envUrl);
-          return value.replace(/\/$/, '');
-        };
-        return new SearxngProvider(http, getUrl);
-      },
-      inject: [HttpService, SettingsService],
-    },
+    EncryptionService,
   ],
-  exports: [WebSearchService, ReadabilityService, WebSearchRateLimiterService],
+  exports: [WebSearchService, WebSearchConfigService, ReadabilityService, WebSearchRateLimiterService],
 })
 export class WebSearchModule {}

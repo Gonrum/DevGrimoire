@@ -1,17 +1,25 @@
-import { Controller, Get, Post, UseGuards, Query, Body, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Put, Post, UseGuards, Query, Body, BadRequestException, HttpCode } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { WebSearchService } from './services/web-search.service';
+import { WebSearchConfigService } from './services/web-search-config.service';
 import { ReadabilityService } from './services/readability.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../auth/schemas/user.schema';
 import { SearchCategory, SearchTimeRange } from './dto/web-search.dto';
+import {
+  SearchProviderType,
+  SEARCH_PROVIDER_TYPES,
+  UpdateWebSearchConfigDto,
+  TestProviderConfigDto,
+} from './dto/web-search-config.dto';
 
 @Controller('web-search')
 export class WebSearchController {
   constructor(
     private readonly webSearchService: WebSearchService,
     private readonly readabilityService: ReadabilityService,
+    private readonly configService: WebSearchConfigService,
   ) {}
 
   @Get('health')
@@ -51,11 +59,15 @@ export class WebSearchController {
     @Query('categories') categories?: string,
     @Query('timeRange') timeRange?: SearchTimeRange,
     @Query('limit') limit?: string,
+    @Query('provider') provider?: string,
   ) {
     if (!q) throw new BadRequestException('Query parameter "q" is required');
     const parsedLimit = limit ? parseInt(limit, 10) : undefined;
     const parsedCategories = categories
       ? (categories.split(',').map((c) => c.trim()).filter(Boolean) as SearchCategory[])
+      : undefined;
+    const parsedProvider = provider && (SEARCH_PROVIDER_TYPES as readonly string[]).includes(provider)
+      ? (provider as SearchProviderType)
       : undefined;
     return this.webSearchService.search({
       query: q,
@@ -63,7 +75,30 @@ export class WebSearchController {
       categories: parsedCategories,
       timeRange,
       limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+      provider: parsedProvider,
     });
+  }
+
+  // ---------- Provider configuration ----------
+
+  @Get('config')
+  async getConfig() {
+    return this.configService.getConfig();
+  }
+
+  @Put('config')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async setConfig(@Body() dto: UpdateWebSearchConfigDto) {
+    return this.configService.setConfig(dto);
+  }
+
+  @Post('config/test')
+  @HttpCode(200)
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async testConfig(@Body() dto: TestProviderConfigDto) {
+    return this.configService.testProvider(dto);
   }
 
   @Post('fetch')
