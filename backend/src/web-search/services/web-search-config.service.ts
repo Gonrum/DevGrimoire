@@ -20,6 +20,27 @@ export const SETTING_WEB_SEARCH_CONFIG = 'web_search_config';
 
 const DEFAULT_ACTIVE_PROVIDER: SearchProviderType = 'searxng';
 
+/**
+ * Resolve which API key the `POST /web-search/config/test` probe should use.
+ *
+ * Mirrors the "omitted = keep existing" semantics already used by
+ * `setConfig`/`toStoredProvider`: a non-empty key in the request is a
+ * candidate the admin wants to test; if none is provided (e.g. the admin
+ * left an already-configured provider's masked key untouched), fall back to
+ * the stored encrypted key for that provider so "Test" validates the config
+ * that would actually be used, not a blank key. If neither is present the
+ * probe proceeds keyless (fine for providers like searxng).
+ */
+export function resolveTestApiKey(
+  providedKey: string | undefined,
+  storedEncKey: string | undefined,
+  decrypt: (encrypted: string) => string,
+): string {
+  if (providedKey) return providedKey;
+  if (storedEncKey) return decrypt(storedEncKey);
+  return '';
+}
+
 interface StoredWebSearchConfig {
   activeProvider: SearchProviderType;
   providers: StoredProviderConfig[];
@@ -96,7 +117,12 @@ export class WebSearchConfigService {
    */
   async testProvider(cfg: ProviderConfig): Promise<{ ok: boolean; count: number; error?: string }> {
     try {
-      const provider = this.instantiateProvider(cfg.type, cfg.apiKey ?? '', cfg.baseUrl);
+      const stored = await this.getStoredConfig();
+      const storedEntry = stored.providers.find((p) => p.type === cfg.type);
+      const apiKey = resolveTestApiKey(cfg.apiKey, storedEntry?.apiKeyEnc, (enc) =>
+        this.decryptKey(enc, cfg.type),
+      );
+      const provider = this.instantiateProvider(cfg.type, apiKey, cfg.baseUrl);
       const hits = await provider.search('test', { limit: 1 });
       return { ok: true, count: hits.length };
     } catch (err) {
