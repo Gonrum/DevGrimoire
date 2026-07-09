@@ -205,7 +205,12 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
     const entry = getReplicatedByCollection(coll);
     if (entry?.entity === 'project') return { projectId: documentId, projectIds: null };
     if (entry?.multiProject) {
-      const arr = Array.isArray(doc?.projectIds) ? doc.projectIds : [];
+      // ResearchTopic nests its opt-in project list under `scope.projectIds[]`
+      // (part of the run-scope object), unlike ResearchSession which keeps a
+      // top-level `projectIds[]`. Entity-specific so the ResearchSession path
+      // (and any future top-level multiProject entity) stays unchanged.
+      const raw = entry.entity === 'research-topic' ? doc?.scope?.projectIds : doc?.projectIds;
+      const arr = Array.isArray(raw) ? raw : [];
       return { projectId: null, projectIds: arr.map((p: unknown) => String(p)) };
     }
     const pid = doc?.projectId;
