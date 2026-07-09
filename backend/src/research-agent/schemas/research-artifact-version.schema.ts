@@ -8,10 +8,10 @@ export class ResearchArtifactVersion {
   @Prop({ type: Types.ObjectId, ref: 'ResearchArtifact', required: true })
   artifactId: Types.ObjectId;
 
-  @Prop()
+  @Prop({ required: true })
   version: number;
 
-  @Prop()
+  @Prop({ required: true })
   content: string;
 
   @Prop()

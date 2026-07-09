@@ -46,7 +46,7 @@ export class ResearchArtifact {
   @Prop({ default: false })
   isGlobal: boolean;
 
-  @Prop({ type: Types.ObjectId })
+  @Prop({ type: Types.ObjectId, ref: 'ResearchRun' })
   lastRunId?: Types.ObjectId;
 }
 

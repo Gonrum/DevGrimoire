@@ -8,6 +8,7 @@ import {
 } from './schemas/research-artifact-version.schema';
 import { ResearchRun, ResearchRunSchema } from './schemas/research-run.schema';
 import { ResearchTopicService } from './research-topic.service';
+import { ResearchArtifactService } from './research-artifact.service';
 import { CountersModule } from '../counters/counters.module';
 
 @Module({
@@ -21,7 +22,7 @@ import { CountersModule } from '../counters/counters.module';
     CountersModule,
   ],
   controllers: [],
-  providers: [ResearchTopicService],
-  exports: [ResearchTopicService],
+  providers: [ResearchTopicService, ResearchArtifactService],
+  exports: [ResearchTopicService, ResearchArtifactService],
 })
 export class ResearchAgentModule {}
