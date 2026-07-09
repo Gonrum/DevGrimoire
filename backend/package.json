@@ -11,6 +11,7 @@
     "start:prod": "node dist/main",
     "start:mcp": "node dist/mcp-server",
     "check:rag-schema": "node scripts/rag-schema-regression-check.cjs",
+    "check:rag-searchscopes": "node scripts/rag-searchscopes-check.cjs",
     "check:mcp-registry": "node scripts/mcp-registry-readiness-check.cjs",
     "check:workspace-roots-guard": "node scripts/workspace-roots-guard-check.cjs",
     "check:workflow-runner-units": "node scripts/workflow-runner-units-check.cjs",

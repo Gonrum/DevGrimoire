@@ -33,6 +33,7 @@ const INDEXABLE_ENTITIES = [
   'schema',
   'project',
   'question',
+  'research_artifact',
 ] as const;
 
 type IndexableEntity = (typeof INDEXABLE_ENTITIES)[number];
@@ -50,6 +51,7 @@ const ENTITY_COLLECTION_MAP: Record<IndexableEntity, string> = {
   schema: 'dbschemas',
   project: 'projects',
   question: 'questions',
+  research_artifact: 'researchartifacts',
 };
 
 interface RagDocument {
@@ -63,6 +65,38 @@ interface RagDocument {
   title: string;
   content: string;
   vector: number[];
+}
+
+/** A single deduplicated (per source document) semantic search result. */
+export interface RagSearchHit {
+  id: string;
+  projectId: string;
+  customerId: string;
+  entity: string;
+  title: string;
+  content: string;
+  score: number;
+}
+
+/**
+ * Pure merge helper for `searchScopes`: takes one hit list per scope (project,
+ * customer, global), dedupes by source document id (keeping the highest
+ * score per id), sorts by score descending, and truncates to `limit`.
+ * Kept free of LanceDB/Mongo dependencies so it can be unit-tested directly.
+ */
+export function mergeScopeHits(hitLists: RagSearchHit[][], limit: number): RagSearchHit[] {
+  const seen = new Map<string, RagSearchHit>();
+  for (const hits of hitLists) {
+    for (const hit of hits) {
+      const existing = seen.get(hit.id);
+      if (!existing || hit.score > existing.score) {
+        seen.set(hit.id, hit);
+      }
+    }
+  }
+  return Array.from(seen.values())
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
 }
 
 type EmbeddingProvider = 'ollama' | 'openai-compatible';
@@ -590,6 +624,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
           content: parts.join('\n\n'),
         };
       }
+      case 'research_artifact':
+        return { title: String(doc.title || ''), content: String(doc.summary || doc.content || '') };
       default:
         return null;
     }
@@ -764,6 +800,38 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         content: row.content as string,
         score,
       }));
+  }
+
+  /**
+   * Multi-scope semantic search: runs the existing scoped `search()` once per
+   * projectId, once per customerId, and (if requested) once unscoped for
+   * global reach, then merges everything through `mergeScopeHits`. Each
+   * per-scope call still goes through `search()`'s own post-hoc scope
+   * enforcement (the caller's api-key/user scope), so this cannot widen
+   * access beyond what a single `search()` call already allows.
+   */
+  async searchScopes(
+    query: string,
+    scope: { projectIds: string[]; customerIds: string[]; includeGlobal: boolean },
+    limit?: number,
+  ): Promise<RagSearchHit[]> {
+    const effectiveLimit = limit ?? 8;
+
+    const searches: Promise<RagSearchHit[]>[] = [];
+    for (const projectId of scope.projectIds) {
+      searches.push(this.search(query, projectId, undefined, effectiveLimit));
+    }
+    for (const customerId of scope.customerIds) {
+      searches.push(this.search(query, undefined, undefined, effectiveLimit, customerId));
+    }
+    if (scope.includeGlobal) {
+      searches.push(this.search(query, undefined, undefined, effectiveLimit));
+    }
+
+    if (searches.length === 0) return [];
+
+    const hitLists = await Promise.all(searches);
+    return mergeScopeHits(hitLists, effectiveLimit);
   }
 
   /** Full reindex of all indexable entities (optionally scoped to a project or customer) */
