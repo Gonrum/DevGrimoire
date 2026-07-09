@@ -6,6 +6,8 @@ const {
   selectSendSet,
   advanceOutbound,
   advanceInbound,
+  entryProjectIds,
+  isEntryOptedIn,
 } = require('../dist/replication/replication-sync-cursor.helpers');
 
 let passed = 0;
@@ -21,6 +23,9 @@ function entry(seq, origin, projectId) {
   return { seq, eventId: `e${seq}`, op: 'upsert', collection: 'todos',
     documentId: `d${seq}`, projectId, document: {}, updatedAtMs: seq, deletedAtMs: null,
     originInstanceId: origin };
+}
+function multiEntry(seq, origin, projectIds) {
+  return { ...entry(seq, origin, null), projectIds };
 }
 
 // selectSendSet: keep only self-origin AND opted-in
@@ -83,6 +88,39 @@ check('advanceInbound first entry poison keeps current cursor', () => {
 });
 check('advanceInbound never moves below current cursor', () => {
   assert.equal(advanceInbound([{ seq: 5, handled: true }], 6, 40), 40);
+});
+
+check('entryProjectIds: single projectId → [pid]', () => {
+  assert.deepEqual(entryProjectIds({ projectId: 'p1', projectIds: null }), ['p1']);
+});
+check('entryProjectIds: multi projectIds → the array', () => {
+  assert.deepEqual(entryProjectIds({ projectId: null, projectIds: ['p1', 'p2'] }), ['p1', 'p2']);
+});
+check('entryProjectIds: neither → []', () => {
+  assert.deepEqual(entryProjectIds({ projectId: null, projectIds: null }), []);
+});
+check('isEntryOptedIn: single enabled', () => {
+  assert.equal(isEntryOptedIn({ projectId: 'p1', projectIds: null }, new Set(['p1'])), true);
+});
+check('isEntryOptedIn: single not enabled', () => {
+  assert.equal(isEntryOptedIn({ projectId: 'p2', projectIds: null }, new Set(['p1'])), false);
+});
+check('isEntryOptedIn: multi, ANY enabled → true', () => {
+  assert.equal(isEntryOptedIn({ projectId: null, projectIds: ['p2', 'p1'] }, new Set(['p1'])), true);
+});
+check('isEntryOptedIn: multi, none enabled → false', () => {
+  assert.equal(isEntryOptedIn({ projectId: null, projectIds: ['p2', 'p3'] }, new Set(['p1'])), false);
+});
+check('isEntryOptedIn: empty → false', () => {
+  assert.equal(isEntryOptedIn({ projectId: null, projectIds: [] }, new Set(['p1'])), false);
+});
+check('selectSendSet: multi-project entry opted-in via one enabled project', () => {
+  const out = selectSendSet([multiEntry(1, SELF, ['pX', 'p1'])], SELF, new Set(['p1']));
+  assert.deepEqual(out.map((e) => e.seq), [1]);
+});
+check('selectSendSet: multi-project entry with no enabled project is dropped', () => {
+  const out = selectSendSet([multiEntry(1, SELF, ['pX'])], SELF, new Set(['p1']));
+  assert.deepEqual(out, []);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

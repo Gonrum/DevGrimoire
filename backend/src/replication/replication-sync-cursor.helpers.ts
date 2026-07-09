@@ -10,6 +10,26 @@ import { SyncLogEntry, ApplyOutcome } from './replication-sync.types';
  * `excludeEventIds` — Einträge, die push-seitig deadlettert wurden
  * (Kontiguitäts-Auflösung, Plan 3a) → nicht erneut senden.
  */
+/** Effective project references of a log entry: the single `projectId` if set,
+ *  else the multi-project `projectIds` array (ResearchSession), else empty. */
+export function entryProjectIds(entry: {
+  projectId: string | null;
+  projectIds?: string[] | null;
+}): string[] {
+  if (entry.projectId != null) return [entry.projectId];
+  return entry.projectIds ?? [];
+}
+
+/** Opt-in test: an entry is replicated iff AT LEAST ONE of its projects is
+ *  locally enabled. Multi-project entities touching one enabled project sync
+ *  even if they also reference disabled ones. No projects → never replicated. */
+export function isEntryOptedIn(
+  entry: { projectId: string | null; projectIds?: string[] | null },
+  enabledProjectIds: Set<string>,
+): boolean {
+  return entryProjectIds(entry).some((p) => enabledProjectIds.has(p));
+}
+
 export function selectSendSet(
   entries: SyncLogEntry[],
   selfInstanceId: string,
@@ -19,8 +39,7 @@ export function selectSendSet(
   return entries.filter(
     (e) =>
       e.originInstanceId === selfInstanceId &&
-      e.projectId != null &&
-      enabledProjectIds.has(e.projectId) &&
+      isEntryOptedIn(e, enabledProjectIds) &&
       !(excludeEventIds && excludeEventIds.has(e.eventId)),
   );
 }

@@ -7,6 +7,7 @@ import { ReplicationApplied, ReplicationAppliedDocument } from './schemas/replic
 import { isReplicatedCollection } from './replication-collections';
 import { compareLww, makeAppliedKey } from './replication-log.helpers';
 import { toMs } from './replication-sync.helpers';
+import { entryProjectIds } from './replication-sync-cursor.helpers';
 import { SyncLogEntry, SyncEntryResult } from './replication-sync.types';
 import { REPL_INSTANCE_ID } from './replication.constants';
 
@@ -36,17 +37,23 @@ export class ReplicationSyncApplyService {
    *  replicationConfig.enabled === true is allowed (the project may not exist
    *  locally yet). */
   private async isAllowed(entry: SyncLogEntry): Promise<{ ok: boolean; reason?: string }> {
-    if (!entry.projectId) return { ok: false, reason: 'no projectId' };
+    // Bootstrap: an incoming `projects` upsert enabling itself (project may not
+    // exist locally yet).
     if (entry.collection === 'projects' && entry.op === 'upsert') {
-      const cfg = (entry.document?.replicationConfig as { enabled?: boolean } | undefined);
+      const cfg = entry.document?.replicationConfig as { enabled?: boolean } | undefined;
       if (cfg?.enabled === true) return { ok: true };
     }
-    try {
-      const enabled = await this.projectsService.isReplicationEnabled(entry.projectId);
-      return enabled ? { ok: true } : { ok: false, reason: 'project not replication-enabled' };
-    } catch {
-      return { ok: false, reason: 'project not found locally — bootstrap required' };
+    const pids = entryProjectIds(entry);
+    if (pids.length === 0) return { ok: false, reason: 'no projectId' };
+    // Opted-in if ANY of the entry's projects exists locally AND is enabled.
+    for (const pid of pids) {
+      try {
+        if (await this.projectsService.isReplicationEnabled(pid)) return { ok: true };
+      } catch {
+        // project not found locally — try the next one
+      }
     }
+    return { ok: false, reason: 'no enabled project locally — bootstrap required' };
   }
 
   async applyEntry(entry: SyncLogEntry): Promise<SyncEntryResult> {
@@ -112,6 +119,11 @@ export class ReplicationSyncApplyService {
       }
       if (Array.isArray(doc.blockedBy)) {
         doc.blockedBy = (doc.blockedBy as string[]).map((id) => {
+          try { return new ObjectId(id); } catch { return id; }
+        });
+      }
+      if (Array.isArray(doc.projectIds)) {
+        doc.projectIds = (doc.projectIds as string[]).map((id) => {
           try { return new ObjectId(id); } catch { return id; }
         });
       }

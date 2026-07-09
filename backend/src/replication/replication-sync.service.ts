@@ -6,7 +6,7 @@ import { SettingsService } from '../settings/settings.service';
 import { ReplicationLog, ReplicationLogDocument } from './schemas/replication-log.schema';
 import { ReplicationSyncApplyService } from './replication-sync-apply.service';
 import { toSyncEntry, pullPage } from './replication-sync.helpers';
-import { isTerminalOutcome } from './replication-sync-cursor.helpers';
+import { isTerminalOutcome, isEntryOptedIn } from './replication-sync-cursor.helpers';
 import { SyncReceiveRequest, SyncReceiveResponse, SyncPullResponse, SyncEntryResult } from './replication-sync.types';
 import { REPL_INSTANCE_ID } from './replication.constants';
 
@@ -97,7 +97,7 @@ export class ReplicationSyncService {
     const entries = docs.map((d) => toSyncEntry(d as unknown as Record<string, unknown>));
     const { page: originPage, nextSince, hasMore } = pullPage(entries, self, cap);
     const enabled = await this.getEnabledProjectIds();
-    const page = originPage.filter((e) => e.projectId != null && enabled.has(e.projectId));
+    const page = originPage.filter((e) => isEntryOptedIn(e, enabled));
     return { entries: page, nextSince: nextSince || since, hasMore };
   }
 }
