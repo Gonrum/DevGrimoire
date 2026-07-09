@@ -19,6 +19,10 @@ import { SecretsService } from './secrets/secrets.service';
 import { ManualsService } from './manuals/manuals.service';
 import { ResearchService } from './research/research.service';
 import { ResearchSessionsService } from './research-sessions/research-sessions.service';
+import { ResearchTopicService } from './research-agent/research-topic.service';
+import { ResearchRunService } from './research-agent/research-run.service';
+import { ResearchArtifactService } from './research-agent/research-artifact.service';
+import { ResearchAgentService } from './research-agent/research-agent.service';
 import { SettingsService } from './settings/settings.service';
 import { NotificationsService } from './notifications/notifications.service';
 import { SchemasService } from './schemas/schemas.service';
@@ -441,6 +445,10 @@ export interface McpServices {
   manualsService: ManualsService;
   researchService: ResearchService;
   researchSessionsService: ResearchSessionsService;
+  researchTopicService: ResearchTopicService;
+  researchRunService: ResearchRunService;
+  researchArtifactService: ResearchArtifactService;
+  researchAgentService: ResearchAgentService;
   settingsService: SettingsService;
   notificationsService: NotificationsService;
   schemasService: SchemasService;
@@ -1757,112 +1765,232 @@ const tools = [
     },
   },
   {
-    name: 'research_session_create',
-    description: 'Create a multi-project research session for step-by-step Q&A across one or more projects.',
+    name: 'research_topic_create',
+    description: 'Create a scheduled autonomous research topic. A background agent runs on the configured schedule (or on-demand via research_topic_run), searches rag_search/web, and maintains a per-topic wiki of research artifacts. The owner is always the calling user (resolved from the MCP request context) — the scheduled agent later runs with that user\'s read scope/permissions, so it can never be impersonated via this tool.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        title: { type: 'string', description: 'Research session title' },
-        projectIds: { type: 'array', items: { type: 'string' }, description: 'Project IDs the session scopes to' },
+        title: { type: 'string', description: 'Topic title' },
+        brief: { type: 'string', description: 'What the agent should research/maintain — its brief/mandate' },
+        scope: {
+          type: 'object',
+          description: 'What the agent may read via rag_search. Defaults to mode=all (everything the owner can see).',
+          properties: {
+            mode: { type: 'string', enum: ['all', 'selected'] },
+            projectIds: { type: 'array', items: { type: 'string' } },
+            customerIds: { type: 'array', items: { type: 'string' } },
+            includeGlobal: { type: 'boolean' },
+          },
+        },
+        webSearch: {
+          type: 'object',
+          description: 'Whether the agent may use web search/fetch tools in addition to rag_search.',
+          properties: {
+            enabled: { type: 'boolean' },
+            provider: { type: 'string' },
+          },
+        },
+        schedule: {
+          type: 'object',
+          description: 'When the agent runs automatically.',
+          properties: {
+            frequency: { type: 'string', enum: ['daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'] },
+            hour: { type: 'number', description: '0-23' },
+            dayOfWeek: { type: 'number', description: '0=Sun..6=Sat, for weekly/biweekly' },
+            dayOfMonth: { type: 'number', description: '1-31, for monthly/quarterly/yearly' },
+            month: { type: 'number', description: '1-12, for quarterly/yearly' },
+            active: { type: 'boolean', description: 'Default true' },
+          },
+          required: ['frequency', 'hour'],
+        },
+        guardrails: {
+          type: 'object',
+          description: 'Per-run cost/safety bounds. Defaults: maxIterations=12, maxWebSearches=6, maxWebFetches=8, timeoutMs=300000.',
+          properties: {
+            maxIterations: { type: 'number' },
+            maxWebSearches: { type: 'number' },
+            maxWebFetches: { type: 'number' },
+            timeoutMs: { type: 'number' },
+          },
+        },
+        notifyOnComplete: { type: 'boolean', description: 'Send a notification when a run finishes' },
       },
-      required: ['title'],
+      required: ['title', 'brief', 'schedule'],
     },
   },
   {
-    name: 'research_session_list',
-    description: 'List research sessions (compact). Filter by status, optionally limit to sessions referencing a project.',
+    name: 'research_topic_list',
+    description: 'List research topics (compact: title, brief snippet, schedule status). Use research_topic_get for full detail.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        status: { type: 'string', enum: ['open', 'in_progress', 'done'] },
+        active: { type: 'boolean', description: 'Filter by schedule.active' },
         q: { type: 'string', description: 'Title substring filter' },
+        limit: { type: 'number', description: 'Max items to return' },
+        offset: { type: 'number', description: 'Skip first N items' },
       },
     },
   },
   {
-    name: 'research_session_get',
-    description: 'Get a research session with its steps (no embedded message content in lists).',
+    name: 'research_topic_get',
+    description: 'Get a research topic by ID with full details (scope, schedule, guardrails).',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        id: { type: 'string', description: 'ResearchSession MongoDB ID' },
+        id: { type: 'string', description: 'ResearchTopic MongoDB ID' },
       },
       required: ['id'],
     },
   },
   {
-    name: 'research_session_update',
-    description: 'Update title, projectIds, or status. Status transitions: open → in_progress → done (one step at a time). Done requires all steps to be done.',
+    name: 'research_topic_update',
+    description: 'Update a research topic. Only supplied top-level fields change. When provided, "schedule" and "guardrails" are merged field-by-field with the existing values; "scope" and "webSearch", when provided, REPLACE the entire nested object (missing sub-fields fall back to defaults, not the existing value) — supply the full object for those two.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        id: { type: 'string', description: 'ResearchSession MongoDB ID' },
+        id: { type: 'string', description: 'ResearchTopic MongoDB ID' },
         title: { type: 'string' },
-        projectIds: { type: 'array', items: { type: 'string' } },
-        status: { type: 'string', enum: ['open', 'in_progress', 'done'] },
+        brief: { type: 'string' },
+        scope: {
+          type: 'object',
+          properties: {
+            mode: { type: 'string', enum: ['all', 'selected'] },
+            projectIds: { type: 'array', items: { type: 'string' } },
+            customerIds: { type: 'array', items: { type: 'string' } },
+            includeGlobal: { type: 'boolean' },
+          },
+        },
+        webSearch: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            provider: { type: 'string' },
+          },
+        },
+        schedule: {
+          type: 'object',
+          properties: {
+            frequency: { type: 'string', enum: ['daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'] },
+            hour: { type: 'number' },
+            dayOfWeek: { type: 'number' },
+            dayOfMonth: { type: 'number' },
+            month: { type: 'number' },
+            active: { type: 'boolean' },
+          },
+        },
+        guardrails: {
+          type: 'object',
+          properties: {
+            maxIterations: { type: 'number' },
+            maxWebSearches: { type: 'number' },
+            maxWebFetches: { type: 'number' },
+            timeoutMs: { type: 'number' },
+          },
+        },
+        notifyOnComplete: { type: 'boolean' },
       },
       required: ['id'],
     },
   },
   {
-    name: 'research_session_delete',
-    description: 'Delete a research session and all its steps + embedded messages.',
+    name: 'research_topic_delete',
+    description: 'Delete a research topic and cascade-delete its artifacts, artifact versions, and runs.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        id: { type: 'string', description: 'ResearchSession MongoDB ID' },
+        id: { type: 'string', description: 'ResearchTopic MongoDB ID' },
       },
       required: ['id'],
     },
   },
   {
-    name: 'research_step_create',
-    description: 'Add a step (sub-question) to a research session.',
+    name: 'research_topic_run',
+    description: 'Trigger a manual research run for a topic in the background. Returns immediately with the new run\'s id — the run itself keeps executing after this tool call returns. Poll research_run_get with that id for progress/completion.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        sessionId: { type: 'string', description: 'Parent ResearchSession ID' },
-        title: { type: 'string', description: 'Step title (the sub-question)' },
-        order: { type: 'number', description: 'Optional explicit order (default: append)' },
+        id: { type: 'string', description: 'ResearchTopic MongoDB ID' },
       },
-      required: ['sessionId', 'title'],
+      required: ['id'],
     },
   },
   {
-    name: 'research_step_update',
-    description: 'Update a research step. Status → done triggers auto-conversion to a research_* entry (Phase 4).',
+    name: 'research_run_list',
+    description: 'List runs for a research topic (compact: status, trigger, timestamps, artifact counts — without the step-by-step audit trail). Use research_run_get for full detail including steps.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        id: { type: 'string', description: 'ResearchStep MongoDB ID' },
+        topicId: { type: 'string', description: 'ResearchTopic MongoDB ID' },
+        limit: { type: 'number', description: 'Max items to return' },
+        offset: { type: 'number', description: 'Skip first N items' },
+      },
+      required: ['topicId'],
+    },
+  },
+  {
+    name: 'research_run_get',
+    description: 'Get a research run by ID with full details, including its step-by-step tool-call audit trail.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'ResearchRun MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'research_artifact_list',
+    description: 'List artifacts (the research agent\'s per-topic wiki pages) for a topic (compact: slug, title, summary snippet, version). Use research_artifact_get for full content.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        topicId: { type: 'string', description: 'ResearchTopic MongoDB ID' },
+        limit: { type: 'number', description: 'Max items to return' },
+        offset: { type: 'number', description: 'Skip first N items' },
+      },
+      required: ['topicId'],
+    },
+  },
+  {
+    name: 'research_artifact_get',
+    description: 'Get a research artifact\'s full content by topic + slug.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        topicId: { type: 'string', description: 'ResearchTopic MongoDB ID' },
+        slug: { type: 'string', description: 'Artifact slug' },
+      },
+      required: ['topicId', 'slug'],
+    },
+  },
+  {
+    name: 'research_artifact_update',
+    description: 'Create-or-fully-replace an artifact by topic + slug (upsert). This is a FULL overwrite of title/content/summary/tags/sources, not a partial patch — omitted tags/sources are cleared, not preserved. The previous version is snapshotted before being overwritten.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        topicId: { type: 'string', description: 'ResearchTopic MongoDB ID' },
+        slug: { type: 'string', description: 'Artifact slug (normalized to lowercase a-z0-9- automatically)' },
         title: { type: 'string' },
-        status: { type: 'string', enum: ['open', 'in_progress', 'done'] },
-        order: { type: 'number' },
+        content: { type: 'string' },
+        summary: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+        sources: { type: 'array', items: { type: 'string' } },
+        changeNote: { type: 'string', description: 'Note recorded on the snapshotted previous version' },
       },
-      required: ['id'],
+      required: ['topicId', 'slug', 'title', 'content'],
     },
   },
   {
-    name: 'research_step_delete',
-    description: 'Delete a research step and its embedded conversation.',
+    name: 'research_artifact_delete',
+    description: 'Delete an artifact and all its version snapshots.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        id: { type: 'string', description: 'ResearchStep MongoDB ID' },
+        topicId: { type: 'string', description: 'ResearchTopic MongoDB ID' },
+        slug: { type: 'string', description: 'Artifact slug' },
       },
-      required: ['id'],
-    },
-  },
-  {
-    name: 'research_step_ask',
-    description: 'Send a question to a research step and get the assistant answer + sources (blocking, no streaming). Persists both messages in the step conversation. Use this for programmatic agent workflows; the UI uses the SSE endpoint instead.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {
-        stepId: { type: 'string', description: 'ResearchStep MongoDB ID' },
-        question: { type: 'string', description: 'The question to ask' },
-      },
-      required: ['stepId', 'question'],
+      required: ['topicId', 'slug'],
     },
   },
   {
@@ -4065,6 +4193,7 @@ const EXPLICIT_WRITE_TOOLS = new Set<string>([
   'release_sync_gitlab',
   'workspace_attachment_save',
   'monitor_run',
+  'research_topic_run',
   'workflow_run_start',
   'workflow_run_cancel',
   'workflow_run_retry',
@@ -4099,7 +4228,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, researchSessionsService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, researchSessionsService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -5159,54 +5288,138 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           await researchService.remove(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
           break;
-        case 'research_session_create':
-          result = await researchSessionsService.createSession({
-            title: requireString(a, 'title'),
-            projectIds: optionalStringArray(a, 'projectIds'),
+        case 'research_topic_create': {
+          const topic = await researchTopicService.create(
+            {
+              title: requireString(a, 'title'),
+              brief: requireString(a, 'brief'),
+              scope: optionalObject(a, 'scope') as any,
+              webSearch: optionalObject(a, 'webSearch') as any,
+              schedule: requireObject(a, 'schedule') as any,
+              guardrails: optionalObject(a, 'guardrails') as any,
+              notifyOnComplete: optionalBoolean(a, 'notifyOnComplete'),
+            },
+            requireUserId(),
+          );
+          result = compactCreateResult(topic, {
+            displayNumber: (topic as any).displayNumber,
+            title: (topic as any).title,
           });
           break;
-        case 'research_session_list':
-          result = await researchSessionsService.listSessions({
-            status: optionalString(a, 'status') as any,
+        }
+        case 'research_topic_list': {
+          const topics = await researchTopicService.list({
+            active: optionalBoolean(a, 'active'),
             q: optionalString(a, 'q'),
           });
-          break;
-        case 'research_session_get':
-          result = await researchSessionsService.getSessionWithSteps(requireString(a, 'id'));
-          break;
-        case 'research_session_update':
-          result = await researchSessionsService.updateSession(requireString(a, 'id'), {
-            title: optionalString(a, 'title'),
-            projectIds: optionalStringArray(a, 'projectIds'),
-            status: optionalString(a, 'status') as any,
+          const compactTopics = topics.map((t: any) => {
+            const obj = typeof t.toJSON === 'function' ? t.toJSON() : t;
+            return {
+              _id: idToString(obj._id),
+              displayNumber: obj.displayNumber,
+              title: obj.title,
+              briefSnippet: snippet(obj.brief),
+              ownerUserId: idToString(obj.ownerUserId),
+              scheduleActive: obj.schedule?.active,
+              frequency: obj.schedule?.frequency,
+              nextRun: obj.schedule?.nextRun,
+              lastRun: obj.schedule?.lastRun,
+              lastRunStatus: obj.schedule?.lastRunStatus,
+              webSearchEnabled: obj.webSearch?.enabled,
+              notifyOnComplete: obj.notifyOnComplete,
+            };
           });
+          result = applyPagination(compactTopics, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
           break;
-        case 'research_session_delete':
-          await researchSessionsService.deleteSession(requireString(a, 'id'));
+        }
+        case 'research_topic_get':
+          result = await researchTopicService.get(requireString(a, 'id'));
+          break;
+        case 'research_topic_update': {
+          const updatedTopic = await researchTopicService.update(requireString(a, 'id'), {
+            title: optionalString(a, 'title'),
+            brief: optionalString(a, 'brief'),
+            scope: optionalObject(a, 'scope') as any,
+            webSearch: optionalObject(a, 'webSearch') as any,
+            schedule: optionalObject(a, 'schedule') as any,
+            guardrails: optionalObject(a, 'guardrails') as any,
+            notifyOnComplete: optionalBoolean(a, 'notifyOnComplete'),
+          });
+          result = compactUpdateResult(updatedTopic);
+          break;
+        }
+        case 'research_topic_delete':
+          await researchTopicService.remove(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
           break;
-        case 'research_step_create':
-          result = await researchSessionsService.createStep(requireString(a, 'sessionId'), {
-            title: requireString(a, 'title'),
-            order: typeof a.order === 'number' ? (a.order as number) : undefined,
+        case 'research_topic_run': {
+          const runTopicId = requireString(a, 'id');
+          let runAlreadyCreated = false;
+          result = await new Promise<{ runId: string }>((resolve, reject) => {
+            researchAgentService
+              .run(runTopicId, 'manual', undefined, (runId) => {
+                runAlreadyCreated = true;
+                resolve({ runId });
+              })
+              .catch((err) => {
+                // Only reject the tool call itself if the run was never even
+                // created (e.g. topic/owner not found) — ResearchAgentService.run
+                // never rejects for a run-local failure once onRunCreated has
+                // fired (those are recorded on the run via finalize()), so this
+                // branch is purely to avoid an unhandled rejection for that
+                // already-settled background promise.
+                if (!runAlreadyCreated) reject(err);
+              });
           });
           break;
-        case 'research_step_update':
-          result = await researchSessionsService.updateStep(requireString(a, 'id'), {
-            title: optionalString(a, 'title'),
-            status: optionalString(a, 'status') as any,
-            order: typeof a.order === 'number' ? (a.order as number) : undefined,
-          });
+        }
+        case 'research_run_list': {
+          const runs = await researchRunService.listByTopic(requireString(a, 'topicId'));
+          const compactRuns = compactList(runs as any[], ['steps']);
+          result = applyPagination(compactRuns, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
           break;
-        case 'research_step_delete':
-          await researchSessionsService.deleteStep(requireString(a, 'id'));
-          result = { deleted: true, id: a.id };
+        }
+        case 'research_run_get':
+          result = await researchRunService.getRun(requireString(a, 'id'));
           break;
-        case 'research_step_ask':
-          result = await researchSessionsService.askStep(
-            requireString(a, 'stepId'),
-            requireString(a, 'question'),
+        case 'research_artifact_list': {
+          const artifacts = await researchArtifactService.listByTopic(requireString(a, 'topicId'));
+          const compactArtifacts = artifacts.map((art) => ({ ...art, summary: snippet(art.summary) }));
+          result = applyPagination(compactArtifacts, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
+          break;
+        }
+        case 'research_artifact_get': {
+          const artifact = await researchArtifactService.getBySlug(requireString(a, 'topicId'), requireString(a, 'slug'));
+          if (!artifact) throw new Error(`Artifact "${a.slug}" not found for topic ${a.topicId}`);
+          result = artifact;
+          break;
+        }
+        case 'research_artifact_update': {
+          const artifactTopicId = requireString(a, 'topicId');
+          const artifactTopic = await researchTopicService.get(artifactTopicId);
+          const artifact = await researchArtifactService.write(
+            artifactTopicId,
+            {
+              slug: requireString(a, 'slug'),
+              title: requireString(a, 'title'),
+              content: requireString(a, 'content'),
+              summary: optionalString(a, 'summary'),
+              tags: optionalStringArray(a, 'tags'),
+              sources: optionalStringArray(a, 'sources'),
+              changeNote: optionalString(a, 'changeNote'),
+            },
+            artifactTopic.scope,
           );
+          result = {
+            ...compactUpdateResult(artifact),
+            slug: (artifact as any).slug,
+            version: (artifact as any).version,
+          };
+          break;
+        }
+        case 'research_artifact_delete':
+          await researchArtifactService.remove(requireString(a, 'topicId'), requireString(a, 'slug'));
+          result = { deleted: true, topicId: a.topicId, slug: a.slug };
           break;
         case 'system_instructions_get': {
           const instructions = await settingsService.getOrDefault(

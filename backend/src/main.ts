@@ -23,6 +23,10 @@ import { SecretsService } from './secrets/secrets.service';
 import { ManualsService } from './manuals/manuals.service';
 import { ResearchService } from './research/research.service';
 import { ResearchSessionsService } from './research-sessions/research-sessions.service';
+import { ResearchTopicService } from './research-agent/research-topic.service';
+import { ResearchRunService } from './research-agent/research-run.service';
+import { ResearchArtifactService } from './research-agent/research-artifact.service';
+import { ResearchAgentService } from './research-agent/research-agent.service';
 import { SettingsService } from './settings/settings.service';
 import { NotificationsService } from './notifications/notifications.service';
 import { SchemasService } from './schemas/schemas.service';
@@ -113,6 +117,10 @@ async function bootstrap() {
     manualsService: app.get(ManualsService),
     researchService: app.get(ResearchService),
     researchSessionsService: app.get(ResearchSessionsService),
+    researchTopicService: app.get(ResearchTopicService),
+    researchRunService: app.get(ResearchRunService),
+    researchArtifactService: app.get(ResearchArtifactService),
+    researchAgentService: app.get(ResearchAgentService),
     settingsService: app.get(SettingsService),
     notificationsService: app.get(NotificationsService),
     schemasService: app.get(SchemasService),
