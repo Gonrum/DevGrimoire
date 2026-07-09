@@ -44,7 +44,8 @@
     "check:research-artifact-schema": "node scripts/research-artifact-schema-check.cjs",
     "check:research-run-schema": "node scripts/research-run-schema-check.cjs",
     "check:research-schedule": "node scripts/research-schedule-check.cjs",
-    "check:research-slug": "node scripts/research-slug-check.cjs"
+    "check:research-slug": "node scripts/research-slug-check.cjs",
+    "check:research-run-bus": "node scripts/research-run-bus-check.cjs"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.0",

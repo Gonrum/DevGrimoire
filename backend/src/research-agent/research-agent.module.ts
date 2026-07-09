@@ -9,6 +9,7 @@ import {
 import { ResearchRun, ResearchRunSchema } from './schemas/research-run.schema';
 import { ResearchTopicService } from './research-topic.service';
 import { ResearchArtifactService } from './research-artifact.service';
+import { ResearchRunService } from './research-run.service';
 import { CountersModule } from '../counters/counters.module';
 
 @Module({
@@ -22,7 +23,7 @@ import { CountersModule } from '../counters/counters.module';
     CountersModule,
   ],
   controllers: [],
-  providers: [ResearchTopicService, ResearchArtifactService],
-  exports: [ResearchTopicService, ResearchArtifactService],
+  providers: [ResearchTopicService, ResearchArtifactService, ResearchRunService],
+  exports: [ResearchTopicService, ResearchArtifactService, ResearchRunService],
 })
 export class ResearchAgentModule {}
