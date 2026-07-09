@@ -59,11 +59,9 @@ export default function ArtifactList({ topicId, refreshToken }: ArtifactListProp
   };
 
   const handleDeleted = (slug: string) => {
-    setArtifacts((prev) => {
-      const next = prev.filter((a) => a.slug !== slug);
-      setSelectedSlug(next[0]?.slug ?? null);
-      return next;
-    });
+    const next = artifacts.filter((a) => a.slug !== slug);
+    setArtifacts(next);
+    setSelectedSlug(next[0]?.slug ?? null);
   };
 
   if (loading) return <LoadingText />;

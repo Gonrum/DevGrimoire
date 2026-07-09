@@ -85,6 +85,7 @@ export default function ResearchTopicPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
 
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -124,6 +125,7 @@ export default function ResearchTopicPage() {
       setCustomers(c);
     } catch (err: unknown) {
       showError(err instanceof Error ? err.message : String(err));
+      setNotFound(true);
     } finally {
       setLoading(false);
     }
@@ -135,7 +137,19 @@ export default function ResearchTopicPage() {
   }, [id]);
 
   if (!id) return null;
-  if (loading || !topic) return <LoadingText />;
+  if (loading) return <LoadingText />;
+  if (notFound || !topic) {
+    return (
+      <div>
+        <Link to="/research" className="text-sm text-gray-500 hover:text-gray-300 mb-4 inline-block">
+          &larr; {t('researchTopics.backToOverview')}
+        </Link>
+        <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
+          <p className="text-red-400">{t('researchTopics.notFound')}</p>
+        </div>
+      </div>
+    );
+  }
 
   const saveTitle = async () => {
     if (!titleDraft.trim() || titleDraft === topic.title) {
