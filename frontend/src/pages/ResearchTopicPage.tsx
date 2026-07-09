@@ -114,6 +114,7 @@ export default function ResearchTopicPage() {
   const load = async () => {
     if (!id) return;
     setLoading(true);
+    setNotFound(false);
     try {
       const [t0, p, c] = await Promise.all([
         api.researchTopics.get(id),

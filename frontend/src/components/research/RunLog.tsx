@@ -41,10 +41,9 @@ function authHeaders(): Record<string, string> {
 /**
  * Reads one fetch `Response.body` as an SSE stream (`data: {...}\n\n`
  * frames), invoking `onEvent` for each parsed JSON payload. Mirrors the
- * fetch+ReadableStream parser in the OLD `ResearchSessionPage.tsx`'s
- * `ResearchStepChat` (and `notepad/PromotionDialog.tsx`, which the API
- * client explicitly documents as the reference pattern for these two
- * un-wrapped research-agent SSE endpoints): split on `\n\n`, find the
+ * fetch+ReadableStream parser in `notepad/PromotionDialog.tsx`, which the
+ * API client explicitly documents as the reference pattern for these two
+ * un-wrapped research-agent SSE endpoints: split on `\n\n`, find the
  * `data:` line, `JSON.parse` it, ignore anything that fails to parse
  * (`: ping` heartbeats included — they never start with `data:`).
  */
