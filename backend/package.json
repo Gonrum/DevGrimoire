@@ -42,7 +42,8 @@
     "check:web-search-config": "node scripts/web-search-config-check.cjs",
     "check:research-topic-schema": "node scripts/research-topic-schema-check.cjs",
     "check:research-artifact-schema": "node scripts/research-artifact-schema-check.cjs",
-    "check:research-run-schema": "node scripts/research-run-schema-check.cjs"
+    "check:research-run-schema": "node scripts/research-run-schema-check.cjs",
+    "check:research-schedule": "node scripts/research-schedule-check.cjs"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.0",
