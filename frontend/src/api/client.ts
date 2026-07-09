@@ -742,6 +742,213 @@ export interface ResearchSessionDetail {
   steps: ResearchStepEntry[];
 }
 
+// ---------------------------------------------------------------------------
+// Research Agent: topics/runs/artifacts (Task 14 backend, Phase 7)
+// ---------------------------------------------------------------------------
+
+export type ResearchFrequency =
+  | 'daily'
+  | 'weekly'
+  | 'biweekly'
+  | 'monthly'
+  | 'quarterly'
+  | 'yearly';
+
+export interface ResearchScope {
+  mode: 'all' | 'selected';
+  projectIds: string[];
+  customerIds: string[];
+  includeGlobal: boolean;
+}
+
+export interface ResearchWebSearchConfig {
+  enabled: boolean;
+  provider?: string;
+}
+
+export interface ResearchSchedule {
+  frequency: ResearchFrequency;
+  hour: number;
+  dayOfWeek?: number;
+  dayOfMonth?: number;
+  month?: number;
+  active: boolean;
+  nextRun?: string;
+  lastRun?: string;
+  lastRunStatus?: string;
+}
+
+export interface ResearchGuardrails {
+  maxIterations: number;
+  maxWebSearches: number;
+  maxWebFetches: number;
+  timeoutMs: number;
+}
+
+export interface ResearchTopic {
+  _id: string;
+  number: number;
+  displayNumber: string;
+  title: string;
+  brief: string;
+  scope: ResearchScope;
+  webSearch: ResearchWebSearchConfig;
+  schedule: ResearchSchedule;
+  guardrails: ResearchGuardrails;
+  ownerUserId: string;
+  notifyOnComplete: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * `GET /research-topics/:id` currently returns the exact same shape as a
+ * list entry (no extra nested composition) — kept as a distinct alias (not
+ * merged into `ResearchTopic`) so call sites can be typed by intent, and so
+ * the detail endpoint can grow extra fields later without a call-site churn.
+ */
+export type ResearchTopicDetail = ResearchTopic;
+
+// Payload shapes mirror `CreateResearchTopicDto`/`UpdateResearchTopicDto`
+// (backend `research-topic.dto.ts`) — `ownerUserId` is deliberately absent:
+// it is always the authenticated caller, set server-side.
+
+export interface ResearchScopeInput {
+  mode: 'all' | 'selected';
+  projectIds?: string[];
+  customerIds?: string[];
+  includeGlobal?: boolean;
+}
+
+export interface ResearchWebSearchConfigInput {
+  enabled: boolean;
+  provider?: string;
+}
+
+export interface ResearchScheduleInput {
+  frequency: ResearchFrequency;
+  hour: number;
+  dayOfWeek?: number;
+  dayOfMonth?: number;
+  month?: number;
+  active?: boolean;
+}
+
+export interface ResearchGuardrailsInput {
+  maxIterations?: number;
+  maxWebSearches?: number;
+  maxWebFetches?: number;
+  timeoutMs?: number;
+}
+
+export interface CreateResearchTopicPayload {
+  title: string;
+  brief: string;
+  scope?: ResearchScopeInput;
+  webSearch?: ResearchWebSearchConfigInput;
+  schedule: ResearchScheduleInput;
+  guardrails?: ResearchGuardrailsInput;
+  notifyOnComplete?: boolean;
+}
+
+export type UpdateResearchTopicPayload = Partial<CreateResearchTopicPayload>;
+
+export type ResearchArtifactSensitivity =
+  | 'public'
+  | 'internal'
+  | 'confidential'
+  | 'personal'
+  | 'secret';
+
+export interface ResearchArtifact {
+  _id: string;
+  topicId: string;
+  slug: string;
+  title: string;
+  content: string;
+  summary?: string;
+  tags: string[];
+  sources: string[];
+  version: number;
+  sensitivity: ResearchArtifactSensitivity;
+  projectId?: string;
+  customerId?: string;
+  isGlobal: boolean;
+  lastRunId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * `GET /research-topics/:id/artifacts` returns this narrower projection
+ * (slug/title/summary/version only) — mirrors `ArtifactSummary`
+ * (backend `research-artifact.service.ts`), not the full `ResearchArtifact`.
+ */
+export interface ResearchArtifactSummary {
+  slug: string;
+  title: string;
+  summary?: string;
+  version: number;
+}
+
+// Mirrors `WriteResearchArtifactDto` — `slug` comes from the URL, `runId` is
+// stamped server-side only for agent-driven writes, so neither is here.
+export interface WriteResearchArtifactPayload {
+  title: string;
+  content: string;
+  summary?: string;
+  tags?: string[];
+  sources?: string[];
+  changeNote?: string;
+}
+
+export interface ResearchArtifactVersion {
+  _id: string;
+  artifactId: string;
+  version: number;
+  content: string;
+  changeNote?: string;
+  runId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ResearchRunStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled';
+export type ResearchRunTrigger = 'scheduled' | 'manual';
+
+/** One step of the background agent's tool-calling loop (audit/debug trail). */
+export interface RunStep {
+  type: 'tool_call' | 'tool_result' | 'note';
+  tool?: string;
+  argsSummary?: string;
+  resultSummary?: string;
+  ts: string;
+}
+
+export interface RunTokenUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+}
+
+export interface ResearchRun {
+  _id: string;
+  topicId: string;
+  number: number;
+  status: ResearchRunStatus;
+  trigger: ResearchRunTrigger;
+  startedAt?: string;
+  finishedAt?: string;
+  steps: RunStep[];
+  artifactsCreated: string[];
+  artifactsUpdated: string[];
+  tokenUsage?: RunTokenUsage;
+  summary?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type SecretType = 'variable' | 'password' | 'token' | 'ssh_key' | 'certificate' | 'file';
 
 export interface SecretListItem {
@@ -2122,6 +2329,50 @@ export const api = {
         `/research-sessions/${sessionId}/steps/${stepId}/save-research`,
         { method: 'POST' },
       ),
+  },
+  // Research Agent (Task 14 backend): topic CRUD, run history, artifact CRUD.
+  // The two SSE endpoints (`POST /research-topics/:id/runs` to start+stream a
+  // manual run, `GET /research-runs/:id/stream` to attach to one) are
+  // deliberately NOT wrapped here — they are consumed directly via
+  // fetch/EventSource in the components that need them (same pattern as
+  // `notepad/PromotionDialog.tsx`'s fetch+ReadableStream promotion stream),
+  // since `request<T>` assumes a single JSON response body, not a stream.
+  researchTopics: {
+    list: (filters?: { active?: boolean; q?: string }) => {
+      const params = new URLSearchParams();
+      if (filters?.active !== undefined) params.set('active', String(filters.active));
+      if (filters?.q) params.set('q', filters.q);
+      const qs = params.toString();
+      return request<ResearchTopic[]>(`/research-topics${qs ? `?${qs}` : ''}`);
+    },
+    get: (id: string) => request<ResearchTopicDetail>(`/research-topics/${id}`),
+    create: (data: CreateResearchTopicPayload) =>
+      request<ResearchTopic>('/research-topics', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: UpdateResearchTopicPayload) =>
+      request<ResearchTopic>(`/research-topics/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) => request<void>(`/research-topics/${id}`, { method: 'DELETE' }),
+
+    runsList: (id: string) => request<ResearchRun[]>(`/research-topics/${id}/runs`),
+
+    artifactsList: (id: string) =>
+      request<ResearchArtifactSummary[]>(`/research-topics/${id}/artifacts`),
+    artifactGet: (id: string, slug: string) =>
+      request<ResearchArtifact>(`/research-topics/${id}/artifacts/${slug}`),
+    artifactSave: (id: string, slug: string, data: WriteResearchArtifactPayload) =>
+      request<ResearchArtifact>(`/research-topics/${id}/artifacts/${slug}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    artifactDelete: (id: string, slug: string) =>
+      request<void>(`/research-topics/${id}/artifacts/${slug}`, { method: 'DELETE' }),
+    artifactVersions: (id: string, slug: string) =>
+      request<ResearchArtifactVersion[]>(`/research-topics/${id}/artifacts/${slug}/versions`),
+  },
+  researchRuns: {
+    get: (id: string) => request<ResearchRun>(`/research-runs/${id}`),
   },
   research: {
     list: (projectId: string) =>
