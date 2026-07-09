@@ -202,16 +202,29 @@ export class ResearchAgentService {
    * the run itself (`status: 'error'`/`'cancelled'`) and returned normally;
    * only a failure to even LOAD the topic/owner propagates as a rejection
    * (there is no run to attribute it to yet).
+   *
+   * `onRunCreated`, if given, is invoked SYNCHRONOUSLY with the new run's id
+   * the instant `runService.createRun` resolves — strictly before
+   * `resolveScope`/the first `appendStep` (see `runInContext`). This lets a
+   * caller (`ResearchAgentController.startRun`) subscribe to
+   * `runService.subscribe(runId, ...)` before this function itself has any
+   * chance to publish a `step`/`artifact` event, closing the "discover the
+   * run id, then subscribe late" race that could otherwise drop early steps
+   * (notably the scope-truncation note) or — with two concurrent runs for
+   * one topic — subscribe to the wrong run entirely.
    */
   async run(
     topicId: string,
     trigger: 'scheduled' | 'manual',
     signal?: AbortSignal,
+    onRunCreated?: (runId: string) => void,
   ): Promise<ResearchRunDocument> {
     const topic = await this.topicService.get(topicId);
     const ownerUser = await this.buildOwnerRequestUser(topic.ownerUserId.toString());
 
-    return RequestContext.run(ownerUser, undefined, () => this.runInContext(topic, trigger, signal));
+    return RequestContext.run(ownerUser, undefined, () =>
+      this.runInContext(topic, trigger, signal, onRunCreated),
+    );
   }
 
   /** Builds a full `RequestUser` (permissions + project/customer scope) from
@@ -238,11 +251,16 @@ export class ResearchAgentService {
     topic: ResearchTopicDocument,
     trigger: 'scheduled' | 'manual',
     signal?: AbortSignal,
+    onRunCreated?: (runId: string) => void,
   ): Promise<ResearchRunDocument> {
     // If createRun itself throws, there is no run yet to finalize/attribute
     // the failure to — let it propagate.
     const run = await this.runService.createRun(topic._id.toString(), trigger);
     const runId = (run._id as Types.ObjectId).toString();
+
+    // MUST fire synchronously here, before `resolveScope`/the scope-note
+    // `onStep` call below — see the doc comment on `run()`.
+    onRunCreated?.(runId);
 
     const onStep = async (step: RunStep): Promise<void> => {
       await this.runService.appendStep(runId, step);

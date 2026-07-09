@@ -133,23 +133,45 @@ export class ResearchAgentController {
    * Starts a manual research run and streams its progress.
    *
    * `ResearchAgentService.run()` creates its OWN `ResearchRun` document
-   * internally (Task 13's `runInContext` → `runService.createRun`) — the
-   * run's id is therefore not known to this controller until that write has
-   * landed. This handler polls briefly (createRun is a single fast insert)
-   * for the newly-appeared run for this topic, then subscribes to its bus
-   * channel as early as possible for live `step`/`artifact`/`done`/`error`
-   * events. Any event published in the short gap before the subscription
-   * catches up (in practice, at most `run_started`, which is not persisted
-   * onto `steps` either way) does not create a correctness gap: this handler
+   * internally (Task 13's `runInContext` → `runService.createRun`), but — as
+   * of the T14 review fix — it also accepts an `onRunCreated` callback that
+   * fires SYNCHRONOUSLY with the new run's id the instant that insert
+   * resolves, strictly before the service can publish any `step`/`artifact`
+   * event. This handler uses that callback to subscribe to the run's bus
+   * channel deterministically: no discovery poll, no "guess which run just
+   * appeared" — the runId this handler streams is guaranteed to be THIS
+   * request's own run, and the subscription is guaranteed live before the
+   * first step (see `ResearchAgentService.runInContext`). This handler still
    * ALWAYS emits a definitive terminal (`done`/`error`) event derived from
    * the run's final DB state once `agentService.run()` itself resolves,
-   * unless the bus already delivered one.
+   * unless the bus already delivered one for this exact run.
+   *
+   * A topic can have at most one active (non-terminal) run at a time — see
+   * the `409` guard below — so the "two concurrent runs for one topic"
+   * scenario the old discovery-poll code had to defend against (and could
+   * still get wrong) cannot arise here in the first place.
    */
   @Post('research-topics/:id/runs')
   async startRun(@Param('id') id: string, @Req() req: Request, @Res() res: Response): Promise<void> {
     // Validates the topic exists BEFORE any SSE header goes out, so a bad id
     // gets a normal JSON 404 instead of an SSE stream carrying an error line.
     await this.topicService.get(id);
+
+    // Same reasoning for concurrency: a topic that already has an
+    // active/non-terminal run gets a normal JSON 409 instead of a second SSE
+    // stream that would race the first for control of a single topic (and,
+    // pre-fix, could subscribe to the wrong run's bus channel entirely).
+    const existingRuns = await this.runService.listByTopic(id);
+    const activeRun = existingRuns.find(
+      (r) => r.status === ResearchRunStatus.RUNNING || r.status === ResearchRunStatus.QUEUED,
+    );
+    if (activeRun) {
+      res.status(409).json({
+        message: `Topic ${id} already has an active run (#${activeRun.number})`,
+        runId: (activeRun._id as Types.ObjectId).toString(),
+      });
+      return;
+    }
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -173,38 +195,15 @@ export class ResearchAgentController {
     let terminalSent = false;
 
     try {
-      const before = await this.runService.listByTopic(id);
-      const beforeIds = new Set(before.map((r) => (r._id as Types.ObjectId).toString()));
-
-      const runPromise = this.agentService.run(id, 'manual', abort.signal);
-      let runSettled = false;
-      runPromise.then(
-        () => {
-          runSettled = true;
-        },
-        () => {
-          runSettled = true;
-        },
-      );
-
-      for (
-        let attempt = 0;
-        attempt < 200 && !unsubscribe && !runSettled && !abort.signal.aborted;
-        attempt++
-      ) {
-        const runs = await this.runService.listByTopic(id);
-        const created = runs.find((r) => !beforeIds.has((r._id as Types.ObjectId).toString()));
-        if (created) {
-          const runId = (created._id as Types.ObjectId).toString();
-          send({ type: 'run_started', runId, number: created.number, trigger: 'manual' });
-          unsubscribe = this.runService.subscribe(runId, (event) => {
-            send(event);
-            if (event.type === 'done' || event.type === 'error') terminalSent = true;
-          });
-        } else {
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-      }
+      const runPromise = this.agentService.run(id, 'manual', abort.signal, (runId) => {
+        // Fires synchronously, before `agentService.run()` can publish
+        // anything else — subscribing here means no step is ever missed.
+        send({ type: 'run_started', runId, trigger: 'manual' });
+        unsubscribe = this.runService.subscribe(runId, (event) => {
+          send(event);
+          if (event.type === 'done' || event.type === 'error') terminalSent = true;
+        });
+      });
 
       const finalRun = await runPromise;
       if (!terminalSent) {
@@ -224,10 +223,22 @@ export class ResearchAgentController {
    * `step` events, then either immediately reports the terminal status (if
    * the run has already finished) or subscribes for live updates until the
    * run reaches a terminal status or the client disconnects.
+   *
+   * Subscribe-before-read (T14 review fix): the OLD code read `run.steps`
+   * ONCE up front and only subscribed afterwards, so a step appended in that
+   * gap was neither in the snapshot nor caught by the (terminal-only)
+   * re-fetch below — it was silently lost. This version subscribes FIRST,
+   * buffering whatever arrives live into `buffered` instead of sending it,
+   * THEN takes the `.steps` snapshot and replays it, THEN flushes the
+   * buffer. Every live event is now delivered at least once — a step that
+   * lands in both the snapshot and the buffer is delivered twice, an
+   * acceptable rare duplicate for a live log (unlike loss).
    */
   @Get('research-runs/:id/stream')
   async attachToRun(@Param('id') id: string, @Req() req: Request, @Res() res: Response): Promise<void> {
-    const run: ResearchRunDocument = await this.runService.getRun(id);
+    // Validates the run exists BEFORE any SSE header goes out (same
+    // reasoning as `startRun`'s topic check).
+    await this.runService.getRun(id);
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -250,44 +261,52 @@ export class ResearchAgentController {
     let unsubscribe: (() => void) | undefined;
 
     try {
+      let buffering = true;
+      const buffered: RunEvent[] = [];
+      let terminalSeen = false;
+      let resolveWait: (() => void) | undefined;
+
+      // Subscribe FIRST — anything published from this point on is either
+      // buffered (while `buffering`) or sent live (once flushed below), so
+      // nothing published after this line can be lost.
+      unsubscribe = this.runService.subscribe(id, (event) => {
+        if (buffering) {
+          buffered.push(event);
+        } else {
+          send(event);
+        }
+        if (event.type === 'done' || event.type === 'error') {
+          terminalSeen = true;
+          resolveWait?.();
+        }
+      });
+
+      const run: ResearchRunDocument = await this.runService.getRun(id);
       for (const step of run.steps) {
         send({ type: 'step', step });
       }
 
-      if (TERMINAL_RUN_STATUSES.has(run.status)) {
-        send(terminalEventFrom(run));
-      } else {
-        await new Promise<void>((resolve) => {
-          let resolved = false;
-          const finish = (): void => {
-            if (resolved) return;
-            resolved = true;
-            resolve();
-          };
+      buffering = false;
+      for (const event of buffered) {
+        send(event);
+      }
+      buffered.length = 0;
 
-          unsubscribe = this.runService.subscribe(id, (event) => {
-            send(event);
-            if (event.type === 'done' || event.type === 'error') finish();
+      if (!terminalSeen) {
+        if (TERMINAL_RUN_STATUSES.has(run.status)) {
+          // The snapshot read above happened AFTER we subscribed, so if it
+          // already shows a terminal status and the bus never delivered a
+          // terminal event through our subscription, that event must have
+          // fired before this handler even started (i.e. before subscribe
+          // was possible) — synthesize it from the snapshot instead of
+          // waiting forever for an event that will never come.
+          send(terminalEventFrom(run));
+        } else {
+          await new Promise<void>((resolve) => {
+            resolveWait = resolve;
+            abort.signal.addEventListener('abort', () => resolve(), { once: true });
           });
-
-          // Bridges the race where the run went terminal between `getRun()`
-          // above and this `subscribe()` call: re-checks the persisted
-          // status now that we're listening. If the bus event already fired
-          // before we subscribed, this synthesizes it from a fresh DB read
-          // instead of waiting forever for an event that will never come.
-          this.runService
-            .getRun(id)
-            .then((fresh) => {
-              if (resolved) return;
-              if (TERMINAL_RUN_STATUSES.has(fresh.status)) {
-                send(terminalEventFrom(fresh));
-                finish();
-              }
-            })
-            .catch(() => finish());
-
-          abort.signal.addEventListener('abort', finish, { once: true });
-        });
+        }
       }
     } catch (err) {
       send({ type: 'error', message: (err as Error).message || 'unknown error' });
