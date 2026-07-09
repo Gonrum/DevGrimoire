@@ -11,6 +11,8 @@ export interface SyncLogEntry {
   collection: string;
   documentId: string;
   projectId: string | null;
+  /** Multi-project entities: their project array (null for single-project). */
+  projectIds: string[] | null;
   document: Record<string, unknown> | null;
   updatedAtMs: number | null;
   deletedAtMs: number | null;

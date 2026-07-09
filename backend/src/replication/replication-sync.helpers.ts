@@ -18,6 +18,9 @@ export function toSyncEntry(logDoc: Record<string, unknown>): SyncLogEntry {
     collection: String(logDoc.collection),
     documentId: String(logDoc.documentId),
     projectId: logDoc.projectId == null ? null : String(logDoc.projectId),
+    projectIds: Array.isArray(logDoc.projectIds)
+      ? (logDoc.projectIds as unknown[]).map((p) => String(p))
+      : null,
     document: (logDoc.document as Record<string, unknown> | null) ?? null,
     updatedAtMs: logDoc.updatedAtMs == null ? null : Number(logDoc.updatedAtMs),
     deletedAtMs: logDoc.deletedAtMs == null ? null : Number(logDoc.deletedAtMs),
