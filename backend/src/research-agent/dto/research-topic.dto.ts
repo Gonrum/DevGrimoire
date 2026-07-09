@@ -122,9 +122,11 @@ export class CreateResearchTopicDto {
   @Type(() => ResearchGuardrailsDto)
   guardrails?: ResearchGuardrailsDto;
 
-  @IsOptional()
-  @IsMongoId()
-  ownerUserId?: string;
+  // `ownerUserId` is intentionally NOT client-settable here — it is always
+  // the trusted, authenticated caller's id, passed in by the controller as
+  // a separate service-method argument (see ResearchTopicService.create).
+  // Accepting it via the DTO would let a caller impersonate another user's
+  // scope for the scheduled research agent (privilege escalation).
 
   @IsOptional()
   @IsBoolean()

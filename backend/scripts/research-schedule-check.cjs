@@ -32,4 +32,9 @@ assert.strictEqual(monthly.getUTCDate(), 15);
 assert.strictEqual(monthly.getUTCHours(), 6);
 assert.ok(monthly > from);
 
+// An unrecognized frequency must throw immediately rather than silently
+// leaving `next` unchanged, which would otherwise recurse into the
+// `next <= from` guard forever (RangeError: Maximum call stack size exceeded).
+assert.throws(() => computeNextRun(from, { frequency: 'bogus', hour: 6 }));
+
 console.log('research-schedule-check OK');

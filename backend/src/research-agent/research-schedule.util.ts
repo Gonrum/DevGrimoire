@@ -82,6 +82,9 @@ export function computeNextRun(from: Date, s: ResearchScheduleInput): Date {
       );
       break;
     }
+
+    default:
+      throw new Error('Unknown research frequency: ' + frequency);
   }
 
   // If the computed instant is still not strictly in the future, add one more cycle.

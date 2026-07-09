@@ -82,12 +82,19 @@ export class ResearchTopicService {
     return { ...DEFAULT_GUARDRAILS, ...definedOnly(dto) };
   }
 
-  private resolveOwnerUserId(dtoOwnerUserId: string | undefined, fallback: string): Types.ObjectId {
-    const raw = dtoOwnerUserId ?? fallback;
-    if (!raw || !isValidObjectId(raw)) {
+  /**
+   * `ownerUserId` MUST come exclusively from the trusted `ownerUserId` param
+   * (the authenticated caller, as resolved by the controller) — never from
+   * client-supplied DTO fields. The scheduled research agent later runs in
+   * this user's RequestContext (their read scope/permissions), so accepting
+   * a DTO override would let a low-privileged caller submit
+   * `{ ownerUserId: '<admin id>' }` and have the agent run with admin scope.
+   */
+  private resolveOwnerUserId(ownerUserId: string): Types.ObjectId {
+    if (!ownerUserId || !isValidObjectId(ownerUserId)) {
       throw new BadRequestException('ownerUserId is required and must be a valid ObjectId');
     }
-    return new Types.ObjectId(raw);
+    return new Types.ObjectId(ownerUserId);
   }
 
   async create(dto: CreateResearchTopicDto, ownerUserId: string): Promise<ResearchTopicDocument> {
@@ -97,7 +104,7 @@ export class ResearchTopicService {
       provider: dto.webSearch?.provider,
     };
     const guardrails = this.buildGuardrails(dto.guardrails);
-    const owner = this.resolveOwnerUserId(dto.ownerUserId, ownerUserId);
+    const owner = this.resolveOwnerUserId(ownerUserId);
 
     const active = dto.schedule.active ?? true;
     const now = new Date();
