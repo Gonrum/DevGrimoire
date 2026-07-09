@@ -1,17 +1,16 @@
-import { Injectable, Logger, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { createHash } from 'crypto';
-import { AxiosError } from 'axios';
 import { SettingsService } from '../../settings/settings.service';
 import { WebSearchRateLimiterService } from './web-search-rate-limiter.service';
+import { SearxngProvider } from '../providers/searxng.provider';
 import { WebSearchCache, WebSearchCacheDocument } from '../schemas/web-search-cache.schema';
 import {
   WebSearchQuery,
   WebSearchResponse,
   WebSearchHit,
-  SearxngResponse,
   SearchCategory,
 } from '../dto/web-search.dto';
 
@@ -39,6 +38,7 @@ export class WebSearchService {
     private readonly http: HttpService,
     private readonly settings: SettingsService,
     private readonly rateLimiter: WebSearchRateLimiterService,
+    private readonly provider: SearxngProvider,
     @InjectModel(WebSearchCache.name)
     private readonly cacheModel: Model<WebSearchCacheDocument>,
   ) {}
@@ -112,35 +112,28 @@ export class WebSearchService {
     // Rate-limit only on cache miss — cached responses are free.
     this.rateLimiter.consume('search');
 
-    const url = await this.getSearxngUrl();
-    const params: Record<string, string> = {
-      q: query,
-      format: 'json',
+    const results = await this.provider.search(query, {
+      limit,
       language,
-      safesearch: '1',
-    };
-    if (categories.length) params.categories = categories.join(',');
-    if (timeRange) params.time_range = timeRange;
+      categories: categories.length ? categories.join(',') : undefined,
+      timeRange,
+    });
 
-    const raw = await this.callSearxng(url, params);
-
-    const hits: WebSearchHit[] = (raw.results ?? [])
-      .slice(0, limit)
-      .map((r) => ({
-        title: r.title ?? '',
-        url: r.url,
-        snippet: (r.content ?? '').slice(0, 500),
-        engine: r.engine,
-        score: r.score,
-        publishedDate: r.publishedDate,
-      }));
+    const hits: WebSearchHit[] = results.map((r) => ({
+      title: r.title,
+      url: r.url,
+      snippet: r.snippet,
+      engine: r.engine ?? '',
+      score: r.score,
+      publishedDate: r.publishedDate,
+    }));
 
     const response: WebSearchResponse = {
       results: hits,
-      totalResults: raw.number_of_results ?? hits.length,
+      totalResults: hits.length,
       cached: false,
       query,
-      engines: raw.engines ?? [],
+      engines: [...new Set(hits.map((h) => h.engine).filter(Boolean))],
     };
 
     // Fire and forget — cache write must not block response
@@ -160,26 +153,6 @@ export class WebSearchService {
       { $set: { queryHash: hash, query, payload: cacheable, expiresAt } },
       { upsert: true },
     );
-  }
-
-  private async callSearxng(url: string, params: Record<string, string>): Promise<SearxngResponse> {
-    try {
-      const res = await this.http.axiosRef.get<SearxngResponse>(`${url}/search`, {
-        params,
-        timeout: 15000,
-        headers: { Accept: 'application/json' },
-      });
-      return res.data;
-    } catch (err) {
-      const ax = err as AxiosError;
-      const msg = ax.response
-        ? `SearXNG returned ${ax.response.status}`
-        : ax.code === 'ECONNABORTED'
-          ? 'SearXNG timeout'
-          : `SearXNG unreachable: ${ax.message}`;
-      this.logger.error(msg);
-      throw new ServiceUnavailableException(msg);
-    }
   }
 
   async stats(): Promise<{ cached: number; oldestEntry?: Date }> {

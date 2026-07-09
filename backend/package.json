@@ -36,7 +36,8 @@
     "check:llm-migrator-merge": "node scripts/llm-migrator-merge-check.cjs",
     "check:llm-health": "node scripts/llm-health-check.cjs",
     "check:endpoint-allocator": "node scripts/endpoint-allocator-check.cjs",
-    "check:http-requests-download-ticket": "node scripts/http-requests-download-ticket-check.cjs"
+    "check:http-requests-download-ticket": "node scripts/http-requests-download-ticket-check.cjs",
+    "check:searxng-provider": "node scripts/searxng-provider-check.cjs"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.0",
