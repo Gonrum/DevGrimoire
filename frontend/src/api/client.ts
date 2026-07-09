@@ -1445,6 +1445,31 @@ export interface ParsedCurlRequest {
   auth: WkAuth; body: WkBody; followRedirects: boolean; warnings: string[];
 }
 
+export type WebSearchProviderType = 'searxng' | 'tavily' | 'brave' | 'serpapi';
+
+export interface PublicWebSearchProvider {
+  type: WebSearchProviderType;
+  baseUrl?: string;
+  hasApiKey: boolean;
+}
+
+export interface PublicWebSearchConfig {
+  activeProvider: WebSearchProviderType;
+  providers: PublicWebSearchProvider[];
+}
+
+export interface SetWebSearchProvider {
+  type: WebSearchProviderType;
+  baseUrl?: string;
+  /** undefined = keep stored key, '' = delete key, non-empty = set key. */
+  apiKey?: string;
+}
+
+export interface SetWebSearchConfig {
+  activeProvider: WebSearchProviderType;
+  providers: SetWebSearchProvider[];
+}
+
 export const api = {
   projects: {
     list: (filters?: { active?: boolean; favorite?: boolean; customerId?: string }) => {
@@ -2042,6 +2067,17 @@ export const api = {
         '/web-search/cache/clear',
         { method: 'POST' },
       ),
+    getConfig: () => request<PublicWebSearchConfig>('/web-search/config'),
+    setConfig: (cfg: SetWebSearchConfig) =>
+      request<PublicWebSearchConfig>('/web-search/config', {
+        method: 'PUT',
+        body: JSON.stringify(cfg),
+      }),
+    testConfig: (p: SetWebSearchProvider) =>
+      request<{ ok: boolean; count: number; error?: string }>('/web-search/config/test', {
+        method: 'POST',
+        body: JSON.stringify(p),
+      }),
   },
   researchSessions: {
     list: (filters?: { status?: ResearchSessionStatus; q?: string }) => {
