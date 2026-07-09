@@ -39,7 +39,8 @@
     "check:http-requests-download-ticket": "node scripts/http-requests-download-ticket-check.cjs",
     "check:searxng-provider": "node scripts/searxng-provider-check.cjs",
     "check:search-providers": "node scripts/search-providers-check.cjs",
-    "check:web-search-config": "node scripts/web-search-config-check.cjs"
+    "check:web-search-config": "node scripts/web-search-config-check.cjs",
+    "check:research-topic-schema": "node scripts/research-topic-schema-check.cjs"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.0",
