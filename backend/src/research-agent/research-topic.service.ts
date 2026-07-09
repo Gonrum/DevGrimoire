@@ -23,7 +23,7 @@ import {
   UpdateResearchTopicDto,
 } from './dto/research-topic.dto';
 import { CountersService } from '../counters/counters.service';
-import { computeNextRun } from './research-schedule.util';
+import { computeNextRun, nextStatusUpdate } from './research-schedule.util';
 
 export interface ResearchTopicListFilter {
   active?: boolean;
@@ -198,6 +198,52 @@ export class ResearchTopicService {
 
     await topic.save();
     return topic;
+  }
+
+  /**
+   * Active topics whose schedule is due to fire as of `now` — the selection
+   * `ResearchScheduler.handleCron` polls every minute. Matches the compound
+   * `{'schedule.active':1,'schedule.nextRun':1}` index on the schema.
+   */
+  async findDue(now: Date): Promise<ResearchTopicDocument[]> {
+    return this.topicModel
+      .find({
+        'schedule.active': true,
+        'schedule.nextRun': { $ne: null, $lte: now },
+      })
+      .sort({ 'schedule.nextRun': 1 })
+      .exec();
+  }
+
+  /**
+   * Persists one schedule-status patch: `lastRun`, `lastRunStatus`, and
+   * `nextRun` (computed from `ranAt`, NOT from `Date.now()` — see
+   * `nextStatusUpdate`'s doc comment for why this ordering matters).
+   *
+   * `ResearchScheduler` calls this TWICE per fired topic per tick, both times
+   * with the SAME `ranAt` (the tick's own `now`): once up front — before
+   * `ResearchAgentService.run` is invoked at all — with a provisional status,
+   * and once more after the run settles (or is skipped) with the final
+   * status. Because `nextStatusUpdate` derives `nextRun` purely from `ranAt`
+   * and the schedule's frequency fields (neither of which the first call
+   * changes), the second call recomputes the identical `nextRun` — it is
+   * idempotent, not a second advance.
+   */
+  async markRun(topicId: string, ranAt: Date, status: string): Promise<void> {
+    const topic = await this.get(topicId);
+    const patch = nextStatusUpdate(topic, ranAt, status);
+    await this.topicModel
+      .updateOne(
+        { _id: topic._id },
+        {
+          $set: {
+            'schedule.lastRun': patch.lastRun,
+            'schedule.lastRunStatus': patch.lastRunStatus,
+            'schedule.nextRun': patch.nextRun,
+          },
+        },
+      )
+      .exec();
   }
 
   /** Cascade-delete the topic together with all its artifacts, artifact versions, and runs. */

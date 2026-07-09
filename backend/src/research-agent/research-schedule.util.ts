@@ -94,3 +94,37 @@ export function computeNextRun(from: Date, s: ResearchScheduleInput): Date {
 
   return next;
 }
+
+/** Result shape of `nextStatusUpdate` — the exact fields `ResearchSchedule`
+ * tracks about its last/next firing. */
+export interface ScheduleStatusUpdate {
+  lastRun: Date;
+  nextRun: Date;
+  lastRunStatus: string;
+}
+
+/**
+ * Pure schedule-status-patch computation, extracted out of
+ * `ResearchTopicService.markRun` so it is unit-testable without a Mongoose
+ * model (see `scripts/research-due-check.cjs`).
+ *
+ * `ranAt` MUST be the instant `ResearchScheduler.handleCron` decided to fire
+ * the topic (i.e. the cron tick's own `now`), NOT a timestamp taken after the
+ * research run has executed. Computing `nextRun` from `ranAt` up front — and
+ * persisting it via `markRun` BEFORE `ResearchAgentService.run` is even
+ * called — is what keeps a slow or crashing run from being re-fired on the
+ * very next tick: whether the run ends up `done`, `error`, or is skipped
+ * entirely (topic already has an active run), `nextRun` has already moved on
+ * by the time anything else happens.
+ */
+export function nextStatusUpdate(
+  topic: { schedule: ResearchScheduleInput },
+  ranAt: Date,
+  status: string,
+): ScheduleStatusUpdate {
+  return {
+    lastRun: ranAt,
+    nextRun: computeNextRun(ranAt, topic.schedule),
+    lastRunStatus: status,
+  };
+}

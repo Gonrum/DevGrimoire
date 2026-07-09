@@ -11,6 +11,7 @@ import { ResearchTopicService } from './research-topic.service';
 import { ResearchArtifactService } from './research-artifact.service';
 import { ResearchRunService } from './research-run.service';
 import { ResearchAgentService } from './research-agent.service';
+import { ResearchScheduler } from './research-scheduler';
 import { ResearchAgentController } from './research-agent.controller';
 import { CountersModule } from '../counters/counters.module';
 import { SettingsModule } from '../settings/settings.module';
@@ -51,6 +52,9 @@ import { EncryptionService } from '../common/encryption.service';
     ResearchArtifactService,
     ResearchRunService,
     ResearchAgentService,
+    // `ScheduleModule.forRoot()` is registered app-wide (app.module.ts) — no
+    // module-local import needed for `@Cron` to be picked up here.
+    ResearchScheduler,
     // Registered here directly (its own instance, not ChatModule's) —
     // mirrors how RagModule/BalancerModule each provide their own
     // `EncryptionService` rather than importing a shared module for it.
