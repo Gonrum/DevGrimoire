@@ -72,6 +72,13 @@ export class ResearchTopic {
   @Prop({ required: true })
   brief: string;
 
+  // This Mongoose-level default only fires if `scope` is omitted entirely
+  // from the document passed to `.create()` — in practice unreachable, since
+  // `ResearchTopicService.create`/`.update()` always compute and pass an
+  // explicit `scope` via `buildScope()`, which is the AUTHORITATIVE
+  // normalization (mode-dependent `includeGlobal` default — final-review
+  // fix F1). Kept in sync with `buildScope`'s `mode: 'all'` case (where
+  // `includeGlobal: true` is the correct default) purely as a safety net.
   @Prop({
     type: Object,
     default: (): ResearchScope => ({

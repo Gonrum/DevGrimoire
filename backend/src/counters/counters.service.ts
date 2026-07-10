@@ -25,7 +25,7 @@ export class CountersService {
       return { projectId: null, customerId: scope.customerId };
     }
     if (allowEmpty) {
-      // Global counter (e.g. research sessions span multiple projects).
+      // Global counter (e.g. research topics span multiple projects).
       return { projectId: null, customerId: null };
     }
     throw new BadRequestException('Counter scope requires projectId or customerId');

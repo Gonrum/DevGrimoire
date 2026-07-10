@@ -1011,12 +1011,24 @@ function WissenSection() {
       <Section title={isDE ? 'Recherche' : 'Research'}>
         <p className="text-sm text-gray-400 mb-3">
           {isDE
-            ? 'Zeitpunktbezogene Recherchen mit Quellenangaben. Optional in Research-Sessions gruppiert (mehrere Steps mit Frage/Antwort/Quellen).'
-            : 'Time-stamped research with source citations. Optionally grouped into research sessions (multi-step question/answer/sources).'}
+            ? 'Zeitpunktbezogene Recherchen mit Quellenangaben.'
+            : 'Time-stamped research with source citations.'}
         </p>
         <div className="space-y-2 text-sm text-gray-400">
-          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Research · Research-Sessions" />
-          <InfoRow label="MCP" value="research_*, research_session_*, research_step_*" />
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Research" />
+          <InfoRow label="MCP" value="research_*" />
+        </div>
+      </Section>
+
+      <Section title={isDE ? 'Autonome Recherche-Agenten' : 'Autonomous Research Agents'}>
+        <p className="text-sm text-gray-400 mb-3">
+          {isDE
+            ? 'Geplante Recherche-Topics: ein Hintergrund-Agent durchsucht rag_search/Web nach Zeitplan (oder on-demand über research_topic_run) und pflegt pro Topic ein Wiki aus versionierten Artefakten. Läuft mit dem Lese-Scope des Owners.'
+            : 'Scheduled research topics: a background agent searches rag_search/web on a schedule (or on-demand via research_topic_run) and maintains a per-topic wiki of versioned artifacts. Runs with the owner\'s read scope.'}
+        </p>
+        <div className="space-y-2 text-sm text-gray-400">
+          <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Research (Topic-Übersicht + Detail: Artefakte, Live-Run-Log, Einstellungen)" />
+          <InfoRow label="MCP" value="research_topic_*, research_run_*, research_artifact_*" />
         </div>
       </Section>
 

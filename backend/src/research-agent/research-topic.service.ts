@@ -55,11 +55,21 @@ export class ResearchTopicService {
   ) {}
 
   private buildScope(dto?: ResearchScopeDto): ResearchScope {
+    const mode = dto?.mode ?? 'all';
     const scope: ResearchScope = {
-      mode: dto?.mode ?? 'all',
+      mode,
       projectIds: (dto?.projectIds || []).map((id) => new Types.ObjectId(id)),
       customerIds: (dto?.customerIds || []).map((id) => new Types.ObjectId(id)),
-      includeGlobal: dto?.includeGlobal ?? true,
+      // Mode-dependent default (final-review fix, F1): `mode: 'all'` is
+      // already an unbounded sweep, so defaulting `includeGlobal` to `true`
+      // there adds nothing extra. `mode: 'selected'` is an operator-curated,
+      // deliberately narrow set of projects/customers — defaulting
+      // `includeGlobal` to `true` there silently turns a focused topic into
+      // a FULLY-UNSCOPED search across every project the owner can see (see
+      // `RagService.searchScopes`'s `includeGlobal` branch), which is never
+      // what "selected" was meant to express. An explicit caller-provided
+      // value always wins over this default either way.
+      includeGlobal: dto?.includeGlobal ?? mode === 'all',
     };
     this.validateScope(scope);
     return scope;

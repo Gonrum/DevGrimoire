@@ -62,6 +62,12 @@ export default function CreateTopicDialog({
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
   const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(new Set());
   const [includeGlobal, setIncludeGlobal] = useState(true);
+  // Tracks whether the user has EXPLICITLY toggled the checkbox — until they
+  // do, its value follows `scopeMode` (checked for 'all', unchecked for
+  // 'selected'; final-review fix F1, mirrors the server-side default in
+  // `ResearchTopicService.buildScope`). Once touched, the user's choice
+  // persists across further mode switches.
+  const [includeGlobalTouched, setIncludeGlobalTouched] = useState(false);
 
   const [frequency, setFrequency] = useState<ResearchFrequency>('weekly');
   const [hour, setHour] = useState(9);
@@ -99,6 +105,16 @@ export default function CreateTopicDialog({
       else next.add(id);
       return next;
     });
+  };
+
+  const handleScopeModeChange = (mode: 'all' | 'selected') => {
+    setScopeMode(mode);
+    if (!includeGlobalTouched) setIncludeGlobal(mode === 'all');
+  };
+
+  const handleIncludeGlobalChange = (checked: boolean) => {
+    setIncludeGlobalTouched(true);
+    setIncludeGlobal(checked);
   };
 
   const handleCreate = async () => {
@@ -175,7 +191,7 @@ export default function CreateTopicDialog({
                   type="radio"
                   name="scopeMode"
                   checked={scopeMode === 'all'}
-                  onChange={() => setScopeMode('all')}
+                  onChange={() => handleScopeModeChange('all')}
                   className={radioClass}
                 />
                 {t('researchTopics.scopeModeAll')}
@@ -185,7 +201,7 @@ export default function CreateTopicDialog({
                   type="radio"
                   name="scopeMode"
                   checked={scopeMode === 'selected'}
-                  onChange={() => setScopeMode('selected')}
+                  onChange={() => handleScopeModeChange('selected')}
                   className={radioClass}
                 />
                 {t('researchTopics.scopeModeSelected')}
@@ -247,7 +263,7 @@ export default function CreateTopicDialog({
               <input
                 type="checkbox"
                 checked={includeGlobal}
-                onChange={(e) => setIncludeGlobal(e.target.checked)}
+                onChange={(e) => handleIncludeGlobalChange(e.target.checked)}
                 className={checkboxClass}
               />
               {t('researchTopics.scopeIncludeGlobal')}

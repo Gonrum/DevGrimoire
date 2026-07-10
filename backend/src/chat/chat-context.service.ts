@@ -242,7 +242,8 @@ ${contextSection}${attachmentSection}`;
    * the assistant as a researcher across the listed projects.
    *
    * No customer scoping (research is project-centric). Attachments not used —
-   * research sessions don't accept file uploads yet (YAGNI). Tools allowed.
+   * this research-mode context builder doesn't accept file uploads yet
+   * (YAGNI). Tools allowed.
    */
   async buildResearch(
     projectIds: string[],

@@ -22,6 +22,7 @@ import { ResearchTopicService } from './research-agent/research-topic.service';
 import { ResearchRunService } from './research-agent/research-run.service';
 import { ResearchArtifactService } from './research-agent/research-artifact.service';
 import { ResearchAgentService } from './research-agent/research-agent.service';
+import { ResearchRunStatus } from './research-agent/schemas/research-run.schema';
 import { SettingsService } from './settings/settings.service';
 import { NotificationsService } from './notifications/notifications.service';
 import { SchemasService } from './schemas/schemas.service';
@@ -5352,6 +5353,22 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         case 'research_topic_run': {
           const runTopicId = requireString(a, 'id');
+
+          // Same active-run guard as `ResearchAgentController.startRun`'s
+          // REST `409` (final-review fix F2) — without it, an MCP-triggered
+          // run could overlap a scheduled/REST/other-MCP run for the same
+          // topic, since `ResearchAgentService.run` itself starts
+          // unconditionally.
+          const existingRuns = await researchRunService.listByTopic(runTopicId);
+          const activeRun = existingRuns.find(
+            (r) => r.status === ResearchRunStatus.RUNNING || r.status === ResearchRunStatus.QUEUED,
+          );
+          if (activeRun) {
+            throw new Error(
+              `Topic ${runTopicId} already has an active run (#${activeRun.number}, status=${activeRun.status})`,
+            );
+          }
+
           let runAlreadyCreated = false;
           result = await new Promise<{ runId: string }>((resolve, reject) => {
             researchAgentService
