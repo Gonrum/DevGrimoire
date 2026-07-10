@@ -95,6 +95,12 @@ export default function WebSearchSettings() {
   const [providerError, setProviderError] = useState<string | null>(null);
   const [providerSuccess, setProviderSuccess] = useState<string | null>(null);
   const [providerTests, setProviderTests] = useState<Partial<Record<WebSearchProviderType, ProviderTestResult>>>({});
+  const [advancedOpen, setAdvancedOpen] = useState<Record<WebSearchProviderType, boolean>>({
+    searxng: false,
+    tavily: false,
+    brave: false,
+    serpapi: false,
+  });
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -433,36 +439,51 @@ export default function WebSearchSettings() {
                       )}
                     </div>
 
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    {type === 'searxng' ? (
                       <FormInput
                         label={t('settings.webSearch.providerBaseUrl')}
                         value={entry.baseUrl}
                         onChange={(e) => updateProviderField(type, { baseUrl: e.target.value })}
                         placeholder={PROVIDER_DEFAULT_URL[type]}
                       />
-                      {type !== 'searxng' && (
-                        <div>
-                          <SecretInput
-                            label={t('settings.webSearch.providerApiKey')}
-                            value={entry.apiKey ?? ''}
-                            onChange={(e) => updateProviderField(type, { apiKey: e.target.value })}
-                            placeholder={entry.hasApiKey ? '••••••' : t('settings.webSearch.apiKeyPlaceholder')}
+                    ) : (
+                      <div className="space-y-2">
+                        <SecretInput
+                          label={t('settings.webSearch.providerApiKey')}
+                          value={entry.apiKey ?? ''}
+                          onChange={(e) => updateProviderField(type, { apiKey: e.target.value })}
+                          placeholder={entry.hasApiKey ? '••••••' : t('settings.webSearch.apiKeyPlaceholder')}
+                        />
+                        {entry.hasApiKey && entry.apiKey === undefined && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-500">{t('settings.webSearch.apiKeyKeepHint')}</span>
+                            <button
+                              type="button"
+                              onClick={() => updateProviderField(type, { apiKey: '' })}
+                              className="text-xs text-red-400 hover:text-red-300"
+                            >
+                              {t('settings.webSearch.apiKeyClear')}
+                            </button>
+                          </div>
+                        )}
+                        {advancedOpen[type] || entry.baseUrl.trim() ? (
+                          <FormInput
+                            label={t('settings.webSearch.providerBaseUrlOverride')}
+                            value={entry.baseUrl}
+                            onChange={(e) => updateProviderField(type, { baseUrl: e.target.value })}
+                            placeholder={PROVIDER_DEFAULT_URL[type]}
                           />
-                          {entry.hasApiKey && entry.apiKey === undefined && (
-                            <div className="mt-1 flex items-center gap-2">
-                              <span className="text-xs text-gray-500">{t('settings.webSearch.apiKeyKeepHint')}</span>
-                              <button
-                                type="button"
-                                onClick={() => updateProviderField(type, { apiKey: '' })}
-                                className="text-xs text-red-400 hover:text-red-300"
-                              >
-                                {t('settings.webSearch.apiKeyClear')}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setAdvancedOpen((prev) => ({ ...prev, [type]: true }))}
+                            className="text-xs text-gray-500 hover:text-gray-300"
+                          >
+                            {t('settings.webSearch.advancedEndpoint')}
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                     <div className="mt-3 flex flex-wrap items-center gap-3">
                       <Button size="sm" onClick={() => testProviderConfig(type)} disabled={test?.testing === true}>
