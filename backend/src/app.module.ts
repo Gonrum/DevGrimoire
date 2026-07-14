@@ -10,6 +10,7 @@ import { ProjectsModule } from './projects/projects.module';
 import { TodosModule } from './todos/todos.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
+import { StacksModule } from './stacks/stacks.module';
 import { ChangelogModule } from './changelog/changelog.module';
 import { MilestonesModule } from './milestones/milestones.module';
 import { EventsModule } from './events/events.module';
@@ -86,6 +87,7 @@ if (!MONGODB_URI) {
     TodosModule,
     SessionsModule,
     KnowledgeModule,
+    StacksModule,
     ChangelogModule,
     MilestonesModule,
     EventsModule,
