@@ -17,6 +17,8 @@ import ProjectSettings from './pages/ProjectSettings';
 import TagManagement from './pages/TagManagement';
 import ResearchOverview from './pages/ResearchOverview';
 import ResearchTopicPage from './pages/ResearchTopicPage';
+import StacksOverview from './pages/StacksOverview';
+import StackDetailPage from './pages/StackDetailPage';
 import QuestionsOverview from './pages/QuestionsOverview';
 import GlobalLogsView from './pages/GlobalLogsView';
 import TodoDetailPage from './pages/TodoDetailPage';
@@ -245,6 +247,14 @@ function AppShell() {
               {t('nav.research')}
             </NavLink>
             <NavLink
+              to="/stacks"
+              className={({ isActive }) =>
+                isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'
+              }
+            >
+              {t('nav.stacks')}
+            </NavLink>
+            <NavLink
               to="/questions"
               className={({ isActive }) =>
                 isActive ? 'text-cyan-400' : 'text-gray-400 hover:text-gray-200'
@@ -349,6 +359,15 @@ function AppShell() {
               {t('nav.research')}
             </NavLink>
             <NavLink
+              to="/stacks"
+              onClick={() => setMobileMenuOpen(false)}
+              className={({ isActive }) =>
+                `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
+              }
+            >
+              {t('nav.stacks')}
+            </NavLink>
+            <NavLink
               to="/questions"
               onClick={() => setMobileMenuOpen(false)}
               className={({ isActive }) =>
@@ -397,6 +416,8 @@ function AppShell() {
           <Route path="/projects/tags" element={<TagManagement />} />
           <Route path="/research" element={<ResearchOverview />} />
           <Route path="/research/:id" element={<ResearchTopicPage />} />
+          <Route path="/stacks" element={<StacksOverview />} />
+          <Route path="/stacks/:id" element={<StackDetailPage />} />
           <Route path="/questions" element={<QuestionsOverview />} />
           <Route path="/logs" element={<GlobalLogsView />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
