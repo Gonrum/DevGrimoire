@@ -23,4 +23,8 @@ assert.strictEqual(sub.path('title').isRequired, true, 'entry.title must be requ
 assert.strictEqual(sub.path('content').instance, 'String', 'entry.content must be String');
 assert.strictEqual(sub.path('order').instance, 'Number', 'entry.order must be Number');
 
+assert.strictEqual(m.StackSchema.options.timestamps, true, 'timestamps must be enabled');
+assert.notStrictEqual(m.StackSchema.path('description').isRequired, true, 'description must be optional');
+assert.strictEqual(entries.$isMongooseDocumentArray, true, 'entries must be a subdocument array');
+
 console.log('stack-schema-check OK');
