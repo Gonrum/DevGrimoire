@@ -62,6 +62,7 @@ import { ChatService } from './chat/chat.service';
 import { ChatLlmService } from './chat/chat-llm.service';
 import { ChatContextService } from './chat/chat-context.service';
 import { WebSearchService } from './web-search/services/web-search.service';
+import { StacksService } from './stacks/stacks.service';
 import { ReadabilityService } from './web-search/services/readability.service';
 import { SearchCategory, SearchTimeRange } from './web-search/dto/web-search.dto';
 import { RequestContext } from './common/request-context';
@@ -486,6 +487,7 @@ export interface McpServices {
   workspaceCliToken: WorkspaceCliTokenService;
   sshService: SshService;
   sshSessionService: SshSessionService;
+  stackService: StacksService;
 }
 
 const tools = [
@@ -1056,6 +1058,106 @@ const tools = [
       type: 'object' as const,
       properties: {
         id: { type: 'string', description: 'Knowledge entry MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'stack_create',
+    description: 'Create a new standalone stack definition (tech-stack blueprint / "Bauplan"). Not project-scoped.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Stack name' },
+        description: { type: 'string', description: 'Optional intro text (rendered above the sections on export)' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'stack_list',
+    description: 'List all stacks (metadata only: name, description, entryCount).',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'stack_get',
+    description: 'Get a stack with all its section entries (sorted by order).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string', description: 'Stack id' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'stack_update',
+    description: 'Update a stack name and/or description.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'stack_delete',
+    description: 'Delete a stack.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'stack_entry_add',
+    description: 'Add a section entry (title + markdown content) to a stack.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Stack id' },
+        title: { type: 'string' },
+        content: { type: 'string', description: 'Markdown body (optional, may be empty)' },
+      },
+      required: ['id', 'title'],
+    },
+  },
+  {
+    name: 'stack_entry_update',
+    description: 'Update a section entry (title, content and/or order).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Stack id' },
+        entryId: { type: 'string' },
+        title: { type: 'string' },
+        content: { type: 'string' },
+        order: { type: 'number' },
+      },
+      required: ['id', 'entryId'],
+    },
+  },
+  {
+    name: 'stack_entry_remove',
+    description: 'Remove a section entry from a stack.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Stack id' },
+        entryId: { type: 'string' },
+      },
+      required: ['id', 'entryId'],
+    },
+  },
+  {
+    name: 'stack_export_markdown',
+    description: 'Export a stack as Markdown, or a single section if entryId is given.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Stack id' },
+        entryId: { type: 'string', description: 'Optional: export only this section' },
       },
       required: ['id'],
     },
@@ -4203,6 +4305,7 @@ const EXPLICIT_WRITE_TOOLS = new Set<string>([
   'milestone_import_apply',
   'milestone_create_with_todos',
   'request_import_curl',
+  'stack_entry_remove',
 ]);
 
 export function isWriteTool(name: string): boolean {
@@ -4227,7 +4330,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService, stackService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -4718,6 +4821,70 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           await knowledgeService.remove(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
           break;
+        case 'stack_create': {
+          const s = await stackService.create({
+            name: requireString(a, 'name'),
+            description: optionalString(a, 'description'),
+          });
+          result = compactCreateResult(s, { name: s.name });
+          break;
+        }
+        case 'stack_list': {
+          const stacks = await stackService.findAll();
+          result = compactList(stacks, []);
+          break;
+        }
+        case 'stack_get':
+          result = await stackService.findById(requireString(a, 'id'));
+          break;
+        case 'stack_update': {
+          const s = await stackService.update(requireString(a, 'id'), {
+            name: optionalString(a, 'name'),
+            description: optionalString(a, 'description'),
+          });
+          result = compactUpdateResult(s);
+          break;
+        }
+        case 'stack_delete':
+          await stackService.remove(requireString(a, 'id'));
+          result = { deleted: true };
+          break;
+        case 'stack_entry_add': {
+          const s = await stackService.addEntry(requireString(a, 'id'), {
+            title: requireString(a, 'title'),
+            content: optionalString(a, 'content'),
+          });
+          result = s;
+          break;
+        }
+        case 'stack_entry_update': {
+          const s = await stackService.updateEntry(
+            requireString(a, 'id'),
+            requireString(a, 'entryId'),
+            {
+              title: optionalString(a, 'title'),
+              content: optionalString(a, 'content'),
+              order: optionalNumber(a, 'order'),
+            },
+          );
+          result = s;
+          break;
+        }
+        case 'stack_entry_remove': {
+          const s = await stackService.removeEntry(
+            requireString(a, 'id'),
+            requireString(a, 'entryId'),
+          );
+          result = s;
+          break;
+        }
+        case 'stack_export_markdown': {
+          const { content } = await stackService.exportAsMarkdown(
+            requireString(a, 'id'),
+            optionalString(a, 'entryId'),
+          );
+          return { content: [{ type: 'text' as const, text: content }] };
+        }
         case 'changelog_add': {
           const clEntry = await changelogService.create({
             projectId: requireString(a, 'projectId'),

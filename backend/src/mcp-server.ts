@@ -58,6 +58,7 @@ import { MonitoringService } from './monitoring/monitoring.service';
 import { HttpRequestsService } from './http-requests/http-requests.service';
 import { SshService } from './ssh/ssh.service';
 import { SshSessionService } from './ssh/ssh-session.service';
+import { StacksService } from './stacks/stacks.service';
 import { UserRole } from './auth/schemas/user.schema';
 import { registerMcpTools } from './mcp-tools';
 
@@ -168,6 +169,7 @@ async function bootstrap() {
     workspaceCliToken: app.get(WorkspaceCliTokenService),
     sshService: app.get(SshService),
     sshSessionService: app.get(SshSessionService),
+    stackService: app.get(StacksService),
   });
 
   const transport = new StdioServerTransport();
