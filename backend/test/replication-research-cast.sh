@@ -23,6 +23,8 @@ TOPIC="000000000000000000000310"  # research topic (multi-project via scope.proj
 ART="000000000000000000000311"    # research artifact (single-project, topicId/lastRunId refs)
 TREF="000000000000000000000312"   # topicId ref
 RREF="000000000000000000000313"   # lastRunId ref
+UREF="000000000000000000000314"   # ownerUserId ref
+CREF="000000000000000000000315"   # scope.customerIds ref
 
 cleanup() {
   set +e
@@ -40,16 +42,16 @@ $MONGO "db.projects.updateOne({_id:ObjectId('$PEN')},{\$set:{name:'cast-e2e',rep
 UMS=$(python3 -c "import time;print(int(time.time()*1000))")
 ISO=$(python3 -c "import datetime;print(datetime.datetime.utcfromtimestamp($UMS/1000).isoformat()+'Z')")
 
-echo "== 1. ResearchTopic upsert casts nested scope.projectIds to ObjectId =="
+echo "== 1. ResearchTopic upsert casts scope.projectIds + scope.customerIds + ownerUserId to ObjectId =="
 BODY_T=$(cat <<JSON
-{"sourceInstanceId":"REMOTE-PEER","entries":[{"seq":801,"eventId":"rt:$TOPIC:1","op":"upsert","collection":"researchtopics","documentId":"$TOPIC","projectId":null,"projectIds":["$PEN"],"document":{"_id":"$TOPIC","title":"cast topic","scope":{"mode":"selected","projectIds":["$PEN"],"customerIds":[],"includeGlobal":false},"updatedAt":"$ISO"},"updatedAtMs":$UMS,"deletedAtMs":null,"originInstanceId":"REMOTE-PEER"}]}
+{"sourceInstanceId":"REMOTE-PEER","entries":[{"seq":801,"eventId":"rt:$TOPIC:1","op":"upsert","collection":"researchtopics","documentId":"$TOPIC","projectId":null,"projectIds":["$PEN"],"document":{"_id":"$TOPIC","title":"cast topic","ownerUserId":"$UREF","scope":{"mode":"selected","projectIds":["$PEN"],"customerIds":["$CREF"],"includeGlobal":false},"updatedAt":"$ISO"},"updatedAtMs":$UMS,"deletedAtMs":null,"originInstanceId":"REMOTE-PEER"}]}
 JSON
 )
 R1=$(eval curl -s -X POST "$BASE/api/replication/sync/receive" $AUTH -H "'Content-Type: application/json'" -d "'$BODY_T'")
 echo "  $R1"
 echo "$R1" | grep -q '"appliedThrough":801' || { echo "FAIL: topic appliedThrough!=801"; exit 1; }
-TOK=$($MONGO "var d=db.researchtopics.findOne({_id:ObjectId('$TOPIC')}); print(d && d.scope && d.scope.projectIds && d.scope.projectIds[0] instanceof ObjectId)" | tr -d '\r')
-[ "$TOK" = "true" ] || { echo "FAIL: scope.projectIds[0] not cast to ObjectId (got $TOK)"; exit 1; }
+TOK=$($MONGO "var d=db.researchtopics.findOne({_id:ObjectId('$TOPIC')}); print(d && (d.scope.projectIds[0] instanceof ObjectId) && (d.scope.customerIds[0] instanceof ObjectId) && (d.ownerUserId instanceof ObjectId))" | tr -d '\r')
+[ "$TOK" = "true" ] || { echo "FAIL: topic scope.projectIds/scope.customerIds/ownerUserId not all cast to ObjectId (got $TOK)"; exit 1; }
 echo "PASS"
 
 echo "== 2. ResearchArtifact upsert casts topicId + lastRunId (+ existing projectId) to ObjectId =="

@@ -12,7 +12,7 @@ import { SyncLogEntry, SyncEntryResult } from './replication-sync.types';
 import { REPL_INSTANCE_ID } from './replication.constants';
 
 /** ObjectId-typed fields that arrive as strings over JSON and must be cast back. */
-const OBJECTID_FIELDS = ['projectId', 'customerId', 'milestoneId', 'entityId', 'topicId', 'lastRunId'];
+const OBJECTID_FIELDS = ['projectId', 'customerId', 'milestoneId', 'entityId', 'topicId', 'lastRunId', 'ownerUserId'];
 
 @Injectable()
 export class ReplicationSyncApplyService {
