@@ -12,7 +12,7 @@ import { SyncLogEntry, SyncEntryResult } from './replication-sync.types';
 import { REPL_INSTANCE_ID } from './replication.constants';
 
 /** ObjectId-typed fields that arrive as strings over JSON and must be cast back. */
-const OBJECTID_FIELDS = ['projectId', 'customerId', 'milestoneId', 'entityId'];
+const OBJECTID_FIELDS = ['projectId', 'customerId', 'milestoneId', 'entityId', 'topicId', 'lastRunId'];
 
 @Injectable()
 export class ReplicationSyncApplyService {
@@ -112,20 +112,25 @@ export class ReplicationSyncApplyService {
 
       const doc: Record<string, unknown> = { ...entry.document };
       delete doc._id;
+      // ObjectId ref fields arrive as strings over JSON — cast them back so BSON
+      // comparisons + unique indexes work on the receiver. Unparseable values
+      // (and non-strings) are left untouched.
+      const toOid = (v: unknown): unknown => {
+        if (typeof v !== 'string') return v;
+        try { return new ObjectId(v); } catch { return v; }
+      };
       for (const f of OBJECTID_FIELDS) {
-        if (typeof doc[f] === 'string') {
-          try { doc[f] = new ObjectId(doc[f] as string); } catch { /* leave as-is */ }
+        if (typeof doc[f] === 'string') doc[f] = toOid(doc[f]);
+      }
+      if (Array.isArray(doc.blockedBy)) doc.blockedBy = (doc.blockedBy as unknown[]).map(toOid);
+      if (Array.isArray(doc.projectIds)) doc.projectIds = (doc.projectIds as unknown[]).map(toOid);
+      // ResearchTopic nests its ObjectId ref arrays under `scope` (scope.projectIds,
+      // scope.customerIds) rather than at the top level.
+      const scope = doc.scope as Record<string, unknown> | undefined;
+      if (scope && typeof scope === 'object' && !Array.isArray(scope)) {
+        for (const f of ['projectIds', 'customerIds']) {
+          if (Array.isArray(scope[f])) scope[f] = (scope[f] as unknown[]).map(toOid);
         }
-      }
-      if (Array.isArray(doc.blockedBy)) {
-        doc.blockedBy = (doc.blockedBy as string[]).map((id) => {
-          try { return new ObjectId(id); } catch { return id; }
-        });
-      }
-      if (Array.isArray(doc.projectIds)) {
-        doc.projectIds = (doc.projectIds as string[]).map((id) => {
-          try { return new ObjectId(id); } catch { return id; }
-        });
       }
       this.normalizeTimestamps(doc);
 
