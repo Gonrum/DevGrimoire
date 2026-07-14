@@ -86,6 +86,15 @@ const DEFAULT_TOOLS_ALLOWLIST = [
   'contact_get',
   'customer_project_list',
   'project_customer_links',
+  // Stacks (read + write; stack_delete stays permanently blocked)
+  'stack_list',
+  'stack_get',
+  'stack_export_markdown',
+  'stack_create',
+  'stack_update',
+  'stack_entry_add',
+  'stack_entry_update',
+  'stack_entry_remove',
 ];
 
 /** Providers where tool-calling via OpenAI function-call protocol works today. */

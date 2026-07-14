@@ -27,6 +27,7 @@ import { CommitsService } from '../commits/commits.service';
 import { CustomersService } from '../customers/customers.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { QuestionsService } from '../questions/questions.service';
+import { StacksService } from '../stacks/stacks.service';
 
 /**
  * Tools split by read/write so the Settings UI can surface write tools with a
@@ -44,7 +45,9 @@ export const TOOL_GROUPS: Record<
   | 'customer_write'
   | 'workspace_read'
   | 'workspace_write'
-  | 'external_read',
+  | 'external_read'
+  | 'stacks_read'
+  | 'stacks_write',
   string[]
 > = {
   tasks_read: [
@@ -112,6 +115,8 @@ export const TOOL_GROUPS: Record<
     'workspace_clone', 'workspace_pull', 'workspace_exec', 'workspace_attachment_save',
   ],
   external_read: ['web_search', 'web_fetch'],
+  stacks_read: ['stack_list', 'stack_get', 'stack_export_markdown'],
+  stacks_write: ['stack_create', 'stack_update', 'stack_entry_add', 'stack_entry_update', 'stack_entry_remove'],
 };
 
 export const ALL_TOOL_NAMES: string[] = Object.values(TOOL_GROUPS).flat();
@@ -125,6 +130,7 @@ export const WRITE_TOOL_NAMES: Set<string> = new Set([
   ...TOOL_GROUPS.project_write,
   ...TOOL_GROUPS.customer_write,
   ...TOOL_GROUPS.workspace_write,
+  ...TOOL_GROUPS.stacks_write,
 ]);
 
 /**
@@ -148,6 +154,7 @@ export const PERMANENTLY_BLOCKED_TOOLS: Set<string> = new Set([
   'secret_delete',
   'environment_delete',
   'attachment_delete',
+  'stack_delete',
 ]);
 
 /** Minimal JSON-Schema fragment for OpenAI function parameters */
@@ -441,6 +448,31 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
         status: { type: 'string', enum: ['planned', 'in_development', 'released', 'deprecated'] },
         category: { type: 'string' },
       },
+    },
+  },
+
+  // --- Stacks ---
+  stack_list: {
+    name: 'stack_list',
+    description: 'List all stacks (blueprints), metadata only.',
+    parameters: { type: 'object', properties: {} },
+  },
+  stack_get: {
+    name: 'stack_get',
+    description: 'Get a stack with all its section entries.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  stack_export_markdown: {
+    name: 'stack_export_markdown',
+    description: 'Export a stack (or a single section via entryId) as Markdown.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string' }, entryId: { type: 'string' } },
+      required: ['id'],
     },
   },
 
@@ -1175,6 +1207,56 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
       required: ['id', 'path'],
     },
   },
+
+  // --- Stacks (write) ---
+  stack_create: {
+    name: 'stack_create',
+    description: 'Create a new stack definition.',
+    parameters: {
+      type: 'object',
+      properties: { name: { type: 'string' }, description: { type: 'string' } },
+      required: ['name'],
+    },
+  },
+  stack_update: {
+    name: 'stack_update',
+    description: 'Update a stack name/description.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string' }, name: { type: 'string' }, description: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  stack_entry_add: {
+    name: 'stack_entry_add',
+    description: 'Add a section entry to a stack.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string' }, title: { type: 'string' }, content: { type: 'string' } },
+      required: ['id', 'title'],
+    },
+  },
+  stack_entry_update: {
+    name: 'stack_entry_update',
+    description: 'Update a section entry.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' }, entryId: { type: 'string' },
+        title: { type: 'string' }, content: { type: 'string' }, order: { type: 'number' },
+      },
+      required: ['id', 'entryId'],
+    },
+  },
+  stack_entry_remove: {
+    name: 'stack_entry_remove',
+    description: 'Remove a section entry from a stack.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string' }, entryId: { type: 'string' } },
+      required: ['id', 'entryId'],
+    },
+  },
 };
 
 export interface ToolContext {
@@ -1219,6 +1301,7 @@ export class ChatToolsService {
     private readonly customers: CustomersService,
     private readonly contacts: ContactsService,
     private readonly questions: QuestionsService,
+    private readonly stacksService: StacksService,
   ) {}
 
   /** Fire-and-forget audit log for a write-tool call. Never throws. */
@@ -2553,6 +2636,55 @@ export class ChatToolsService {
             },
           };
         }
+
+        // ─── Stacks ─────────────────────────────────────────────────────
+        case 'stack_list':
+          return { success: true, result: await this.stacksService.findAll() };
+        case 'stack_get':
+          return { success: true, result: await this.stacksService.findById(args.id as string) };
+        case 'stack_export_markdown':
+          return {
+            success: true,
+            result: await this.stacksService.exportAsMarkdown(args.id as string, args.entryId as string | undefined),
+          };
+        case 'stack_create':
+          return {
+            success: true,
+            result: await this.stacksService.create({
+              name: args.name as string,
+              description: args.description as string | undefined,
+            }),
+          };
+        case 'stack_update':
+          return {
+            success: true,
+            result: await this.stacksService.update(args.id as string, {
+              name: args.name as string | undefined,
+              description: args.description as string | undefined,
+            }),
+          };
+        case 'stack_entry_add':
+          return {
+            success: true,
+            result: await this.stacksService.addEntry(args.id as string, {
+              title: args.title as string,
+              content: args.content as string | undefined,
+            }),
+          };
+        case 'stack_entry_update':
+          return {
+            success: true,
+            result: await this.stacksService.updateEntry(args.id as string, args.entryId as string, {
+              title: args.title as string | undefined,
+              content: args.content as string | undefined,
+              order: args.order as number | undefined,
+            }),
+          };
+        case 'stack_entry_remove':
+          return {
+            success: true,
+            result: await this.stacksService.removeEntry(args.id as string, args.entryId as string),
+          };
 
         default:
           return { success: false, error: `Unknown tool: ${name}` };

@@ -36,6 +36,7 @@ import { CommitsModule } from '../commits/commits.module';
 import { CustomersModule } from '../customers/customers.module';
 import { ContactsModule } from '../contacts/contacts.module';
 import { QuestionsModule } from '../questions/questions.module';
+import { StacksModule } from '../stacks/stacks.module';
 import { AgentRolesModule } from '../agent-roles/agent-roles.module';
 import { BalancerModule } from '../balancer/balancer.module';
 
@@ -75,6 +76,7 @@ import { BalancerModule } from '../balancer/balancer.module';
     ContactsModule,
     QuestionsModule,
     AgentRolesModule,
+    StacksModule,
   ],
   controllers: [ChatController, ChatActivityController],
   providers: [ChatService, ChatLlmService, ChatContextService, ChatToolsService, ChatActivityService, EncryptionService],
