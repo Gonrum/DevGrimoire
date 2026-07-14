@@ -64,6 +64,32 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
     return id;
   }
 
+  /**
+   * Enable change-stream pre-images on every replicated collection so DELETE
+   * events carry the pre-delete document (→ its projectId). Idempotent: collMod
+   * with the same setting is a no-op. A collection that doesn't exist yet is
+   * skipped (enabled on the next restart after it's created). Any other failure
+   * is logged (deletes for that collection won't replicate) but does not stop
+   * the watcher.
+   */
+  private async ensurePreImages(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    db: any,
+    collections: string[],
+  ): Promise<void> {
+    for (const coll of collections) {
+      try {
+        await db.command({ collMod: coll, changeStreamPreAndPostImages: { enabled: true } });
+      } catch (err) {
+        const e = err as { codeName?: string; message?: string };
+        if (e.codeName === 'NamespaceNotFound') continue; // created later → enabled on next start
+        this.logger.warn(
+          `Could not enable pre-images on ${coll} (deletes may not replicate): ${e.message}`,
+        );
+      }
+    }
+  }
+
   private async start() {
     const db = this.connection.db;
     if (!db) {
@@ -72,6 +98,8 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
     }
 
     const watched = replicatedCollectionNames();
+    // Ensure DELETE events will carry the deleted doc's projectId (pre-images).
+    await this.ensurePreImages(db, watched);
     const pipeline = [{ $match: { 'ns.coll': { $in: watched } } }];
 
     // Resume from the persisted token if present.
