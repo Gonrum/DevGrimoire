@@ -52,6 +52,11 @@ pass "reorder works"
 curl -sS -X PATCH "${AUTH[@]}" -H 'Content-Type: application/json' \
   -d '{"content":"NestJS 11"}' "$API_BASE/stacks/$STACK_ID/entries/$E1" >/dev/null
 
+# verify update actually took effect (fetch fresh, not the PATCH response)
+UPDATED_CONTENT="$(curl -sS "${AUTH[@]}" "$API_BASE/stacks/$STACK_ID" | jq -r --arg id "$E1" '.entries[] | select(._id==$id) | .content')"
+[[ "$UPDATED_CONTENT" == "NestJS 11" ]] || fail "update entry did not take effect (got: $UPDATED_CONTENT)"
+pass "update entry took effect"
+
 # whole-stack export.md
 EXPORT="$(curl -sS "${AUTH[@]}" "$API_BASE/stacks/$STACK_ID/export.md")"
 echo "$EXPORT" | grep -q '^# E2E Stack' || fail "export missing stack H1"
