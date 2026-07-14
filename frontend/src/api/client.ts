@@ -50,6 +50,42 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
   return res.json();
 }
 
+/**
+ * Fetches a Markdown export (Content-Type: text/markdown) and returns the raw
+ * text plus the filename parsed from Content-Disposition. Mirrors request<T>'s
+ * 401-refresh/retry behavior exactly (only retries when the refresh actually
+ * succeeded). Does not auto-download — callers decide what to do with the text.
+ */
+export async function requestMarkdown(path: string): Promise<{ text: string; filename: string }> {
+  const buildHeaders = (): Record<string, string> => {
+    const h: Record<string, string> = { Accept: 'text/markdown' };
+    const token = getAccessToken?.();
+    if (token) h['Authorization'] = `Bearer ${token}`;
+    return h;
+  };
+
+  let res = await fetch(`${BASE_URL}${path}`, { headers: buildHeaders() });
+
+  // Auto-refresh on 401 (mirrors request<T>)
+  if (res.status === 401 && onUnauthorized) {
+    const refreshed = await onUnauthorized();
+    if (refreshed) {
+      res = await fetch(`${BASE_URL}${path}`, { headers: buildHeaders() });
+    }
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(err.message || res.statusText);
+  }
+
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const match = disposition.match(/filename="(.+)"/);
+  const filename = match?.[1] || 'export.md';
+  const text = await res.text();
+  return { text, filename };
+}
+
 export interface ProjectComponent {
   name: string;
   version: string;
@@ -73,6 +109,52 @@ export interface Project {
   gitRepositories?: GitRepository[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface StackEntry {
+  _id: string;
+  title: string;
+  content: string;
+  order: number;
+}
+
+export interface Stack {
+  _id: string;
+  name: string;
+  description?: string;
+  entries: StackEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StackListItem {
+  _id: string;
+  name: string;
+  description?: string;
+  entryCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateStackPayload {
+  name: string;
+  description?: string;
+}
+
+export interface UpdateStackPayload {
+  name?: string;
+  description?: string;
+}
+
+export interface CreateStackEntryPayload {
+  title: string;
+  content?: string;
+}
+
+export interface UpdateStackEntryPayload {
+  title?: string;
+  content?: string;
+  order?: number;
 }
 
 export interface ProjectTag {
@@ -3179,6 +3261,26 @@ export const api = {
   },
   balancer: {
     status: () => request<BalancerStatus>('/balancer/status'),
+  },
+  stacks: {
+    list: () => request<StackListItem[]>('/stacks'),
+    get: (id: string) => request<Stack>(`/stacks/${id}`),
+    create: (data: CreateStackPayload) =>
+      request<Stack>('/stacks', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: UpdateStackPayload) =>
+      request<Stack>(`/stacks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    delete: (id: string) => request<void>(`/stacks/${id}`, { method: 'DELETE' }),
+    addEntry: (id: string, data: CreateStackEntryPayload) =>
+      request<Stack>(`/stacks/${id}/entries`, { method: 'POST', body: JSON.stringify(data) }),
+    updateEntry: (id: string, entryId: string, data: UpdateStackEntryPayload) =>
+      request<Stack>(`/stacks/${id}/entries/${entryId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    removeEntry: (id: string, entryId: string) =>
+      request<void>(`/stacks/${id}/entries/${entryId}`, { method: 'DELETE' }),
+    reorder: (id: string, entryIds: string[]) =>
+      request<Stack>(`/stacks/${id}/reorder`, { method: 'PATCH', body: JSON.stringify({ entryIds }) }),
+    exportMarkdown: (id: string) => requestMarkdown(`/stacks/${id}/export.md`),
+    exportEntryMarkdown: (id: string, entryId: string) =>
+      requestMarkdown(`/stacks/${id}/entries/${entryId}/export.md`),
   },
 };
 
