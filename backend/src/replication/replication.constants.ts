@@ -34,6 +34,14 @@ export const REPL_LAST_SYNC_CYCLE = 'replication.lastSyncCycle';
  *  is deadlettered and the cursor advances past it (spec §8.2). */
 export const MAX_APPLY_ATTEMPTS = 3;
 
+/** Exponential backoff base (ms) per sync direction on a retryable transport error. */
+export const REPL_BACKOFF_BASE_MS = 20000;
+/** Backoff cap (ms). A terminal error jumps straight to the cap. */
+export const REPL_BACKOFF_CAP_MS = 300000;
+/** Persisted last-notified direction state (debounce, analog Monitoring). */
+export const REPL_OUTBOUND_NOTIFIED_STATE = 'replication.outbound.notifiedState';
+export const REPL_INBOUND_NOTIFIED_STATE = 'replication.inbound.notifiedState';
+
 export type ReplicationRole = 'standalone' | 'master' | 'slave' | 'peer';
 
 /** Roles that PUSH local changes to a remote (master to slave, peer to peer). */
