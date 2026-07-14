@@ -105,7 +105,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
     // Resume from the persisted token if present.
     const tokenRaw = await this.settingsService.get(REPL_WATCHER_RESUME_TOKEN);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const options: any = { fullDocument: 'updateLookup' };
+    const options: any = { fullDocument: 'updateLookup', fullDocumentBeforeChange: 'whenAvailable' };
     if (tokenRaw) {
       try {
         options.resumeAfter = JSON.parse(tokenRaw);
@@ -172,7 +172,14 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
         : deriveEventId(coll, documentId, clusterTimeMs);
 
       const fullDoc = change.fullDocument ?? null;
-      const { projectId, projectIds } = this.extractProjectRefs(coll, fullDoc, documentId);
+      // On a delete, fullDocument is null (updateLookup can't find the gone doc);
+      // the pre-image carries the deleted doc → its projectId(s). Upserts keep
+      // using fullDocument (unchanged). Without a pre-image (collection not
+      // enabled / expired) refDoc is null → projectId null → the delete is
+      // filtered out downstream, i.e. no worse than before this plan.
+      const preImage = change.fullDocumentBeforeChange ?? null;
+      const refDoc = op === 'delete' ? preImage : fullDoc;
+      const { projectId, projectIds } = this.extractProjectRefs(coll, refDoc, documentId);
       const updatedAtMs = this.toMs(fullDoc?.updatedAt);
       const deletedAtMs = op === 'delete' ? clusterTimeMs : null;
 
