@@ -80,6 +80,9 @@ export interface ReplicationConfig {
   /** Cron schedule for inbound pull (peer mode behind NAT/firewall). */
   pullCron: string;
   instanceId: string;
+  /** Active replication engine: 'legacy' (fire-on-emit) | 'log' (change-stream
+   *  log). Default 'legacy'; 'log' silences the legacy engine (Plan 4 cutover). */
+  engine: 'legacy' | 'log';
 }
 
 export interface ReplicationStatus {

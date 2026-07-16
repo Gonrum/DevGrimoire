@@ -14,11 +14,12 @@ import { ReplicationQueue, ReplicationQueueDocument } from './schemas/replicatio
 import {
   REPL_ROLE, REPL_SLAVE_URL, REPL_SLAVE_API_KEY,
   REPL_PEER_URL, REPL_PEER_API_KEY,
-  REPL_INSTANCE_ID, REPL_LAST_SYNC,
+  REPL_INSTANCE_ID, REPL_LAST_SYNC, REPL_ENGINE,
   PUSHING_ROLES,
   ReplicationPayload,
   ReplicationRole,
 } from './replication.constants';
+import { legacyEngineEnabled } from './replication-engine.helpers';
 import { randomUUID } from 'crypto';
 
 /**
@@ -96,6 +97,9 @@ export class ReplicationPushService {
   async handleProjectChange(event: ProjectChangeEvent): Promise<void> {
     const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
     if (!role || !PUSHING_ROLES.has(role)) return;
+    // Migration gate: under the log engine the legacy on-emit push+enqueue is
+    // off, so the replication_queue never fills (processQueue is off too).
+    if (!legacyEngineEnabled(await this.settingsService.get(REPL_ENGINE))) return;
     if (!event.entityId) return;
 
     // Skip notification events — not worth replicating

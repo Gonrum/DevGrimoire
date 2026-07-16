@@ -10,10 +10,12 @@ import {
   REPL_ROLE,
   REPL_FULL_SYNC_CRON,
   REPL_PULL_CRON,
+  REPL_ENGINE,
   PUSHING_ROLES,
   ReplicationRole,
   REPL_SYNC_INTERVAL_SEC,
 } from './replication.constants';
+import { legacyEngineEnabled } from './replication-engine.helpers';
 
 const FULL_SYNC_JOB = 'replication.fullSync';
 const PULL_JOB = 'replication.pull';
@@ -50,11 +52,19 @@ export class ReplicationScheduler implements OnModuleInit {
     this.registerSyncDriverInterval(intervalSec);
   }
 
+  /** Legacy engine active? Only 'log' turns the legacy fire-on-emit/pull
+   *  engine off (Plan 4 cutover). Default legacy → unchanged for existing
+   *  instances. */
+  private async legacyOn(): Promise<boolean> {
+    return legacyEngineEnabled(await this.settingsService.get(REPL_ENGINE));
+  }
+
   /** Process replication queue every 30 seconds (master + peer push backlog). */
   @Cron('*/30 * * * * *')
   async processQueue(): Promise<void> {
     const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
     if (!role || !PUSHING_ROLES.has(role)) return;
+    if (!(await this.legacyOn())) return;
 
     try {
       const sent = await this.pushService.processQueue();
@@ -102,6 +112,7 @@ export class ReplicationScheduler implements OnModuleInit {
   private async runScheduledFullSync(): Promise<void> {
     const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
     if (!role || !PUSHING_ROLES.has(role)) return;
+    if (!(await this.legacyOn())) return;
 
     this.logger.log('Starting scheduled full sync...');
     try {
@@ -117,6 +128,7 @@ export class ReplicationScheduler implements OnModuleInit {
   private async runScheduledPull(): Promise<void> {
     const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
     if (role !== 'peer') return;
+    if (!(await this.legacyOn())) return;
 
     try {
       const result = await this.pullService.runPull();

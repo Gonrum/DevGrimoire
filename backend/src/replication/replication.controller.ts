@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Put, Patch, Param, Body, Query, HttpCode,
-  BadRequestException,
+  BadRequestException, ConflictException,
 } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
@@ -28,9 +28,10 @@ import {
   REPL_ROLE, REPL_SLAVE_URL, REPL_SLAVE_API_KEY,
   REPL_MASTER_URL, REPL_PEER_URL, REPL_PEER_API_KEY,
   REPL_LAST_SYNC, REPL_LAST_FULL_SYNC, REPL_LAST_PULL,
-  REPL_FULL_SYNC_CRON, REPL_PULL_CRON, REPL_INSTANCE_ID,
+  REPL_FULL_SYNC_CRON, REPL_PULL_CRON, REPL_INSTANCE_ID, REPL_ENGINE,
   ReplicationPayload, ReplicationConfig, ReplicationStatus, ReplicationPullResponse,
 } from './replication.constants';
+import { resolveEngine, legacyEngineEnabled } from './replication-engine.helpers';
 import { randomUUID } from 'crypto';
 
 /** Maps entity types to MongoDB collection names — used by the pull endpoint
@@ -234,7 +235,7 @@ export class ReplicationController {
 
   @Get('config')
   async getConfig(): Promise<ReplicationConfig> {
-    const [role, slaveUrl, slaveApiKey, masterUrl, peerUrl, peerApiKey, cron, pullCron, instanceId] = await Promise.all([
+    const [role, slaveUrl, slaveApiKey, masterUrl, peerUrl, peerApiKey, cron, pullCron, instanceId, engineRaw] = await Promise.all([
       this.settingsService.getOrDefault(REPL_ROLE, 'standalone'),
       this.settingsService.get(REPL_SLAVE_URL),
       this.settingsService.get(REPL_SLAVE_API_KEY),
@@ -244,6 +245,7 @@ export class ReplicationController {
       this.settingsService.getOrDefault(REPL_FULL_SYNC_CRON, '0 3 * * *'),
       this.settingsService.getOrDefault(REPL_PULL_CRON, '0 * * * *'),
       this.getOrCreateInstanceId(),
+      this.settingsService.get(REPL_ENGINE),
     ]);
 
     return {
@@ -256,6 +258,7 @@ export class ReplicationController {
       fullSyncCron: cron,
       pullCron,
       instanceId,
+      engine: resolveEngine(engineRaw),
     };
   }
 
@@ -264,7 +267,11 @@ export class ReplicationController {
     if (body.role && !['standalone', 'master', 'slave', 'peer'].includes(body.role)) {
       throw new BadRequestException('Invalid role');
     }
+    if (body.engine !== undefined && !['legacy', 'log'].includes(body.engine)) {
+      throw new BadRequestException('Invalid engine (expected "legacy" or "log")');
+    }
     if (body.role !== undefined) await this.settingsService.set(REPL_ROLE, body.role);
+    if (body.engine !== undefined) await this.settingsService.set(REPL_ENGINE, body.engine);
     if (body.slaveUrl !== undefined) await this.settingsService.set(REPL_SLAVE_URL, body.slaveUrl);
     if (body.slaveApiKey !== undefined && body.slaveApiKey !== '***') {
       await this.settingsService.set(REPL_SLAVE_API_KEY, body.slaveApiKey);
@@ -345,6 +352,7 @@ export class ReplicationController {
   @Post('receive')
   @HttpCode(200)
   async receive(@Body() payload: ReplicationPayload) {
+    await this.assertLegacyEngine();
     const result = await this.receiveService.applyChange(payload);
     return result;
   }
@@ -352,8 +360,18 @@ export class ReplicationController {
   @Post('full-sync')
   @HttpCode(200)
   async receiveFullSync(@Body() projectExport: Record<string, unknown>) {
+    await this.assertLegacyEngine();
     const result = await this.receiveService.applyFullSync(projectExport);
     return result;
+  }
+
+  /** Reject legacy inbound once this instance has cut over to the log engine
+   *  (Plan 4). The change-stream log path (/sync/receive, /sync/pull) is the
+   *  only inbound under 'log' — a still-legacy peer's push is a misconfig. */
+  private async assertLegacyEngine(): Promise<void> {
+    if (!legacyEngineEnabled(await this.settingsService.get(REPL_ENGINE))) {
+      throw new ConflictException('Legacy engine disabled (REPL_ENGINE=log) — use /sync/receive');
+    }
   }
 
   /**

@@ -33,6 +33,7 @@
     "check:replication-outcome": "node scripts/replication-outcome-units-check.cjs",
     "check:replication-backoff": "node scripts/replication-backoff-units-check.cjs",
     "check:replication-gc": "node scripts/replication-gc-units-check.cjs",
+    "check:replication-engine": "node scripts/replication-engine-units-check.cjs",
     "check:http-requests-template": "node scripts/http-requests-template-check.cjs",
     "check:http-requests-curl": "node scripts/http-requests-curl-check.cjs",
     "check:llm-endpoints-merge": "node scripts/llm-endpoints-merge-check.cjs",
