@@ -26,27 +26,51 @@ export class MinioService implements OnModuleInit {
     const secretKey = process.env.MINIO_SECRET_KEY || 'minioadmin';
     this.bucket = process.env.MINIO_BUCKET || 'devgrimoire';
 
-    try {
-      this.client = new Minio.Client({
-        endPoint: endpoint,
-        port,
-        useSSL,
-        accessKey,
-        secretKey,
-      });
+    // Creating the client performs no network I/O — only the bucket check
+    // below does. Run that check in the background so a configured-but-
+    // unreachable MinIO never blocks Nest bootstrap: otherwise app.listen()
+    // (and thus the Docker healthcheck) waits out the full TCP connect
+    // timeout (~2 min) and the container is marked unhealthy on every boot.
+    const client = new Minio.Client({
+      endPoint: endpoint,
+      port,
+      useSSL,
+      accessKey,
+      secretKey,
+    });
+    const target = `${useSSL ? 'https' : 'http'}://${endpoint}:${port}`;
+    void this.connect(client, target);
+  }
 
-      const exists = await this.client.bucketExists(this.bucket);
+  // Verify connectivity off the bootstrap path. `this.client` is only
+  // exposed once the bucket check succeeds, so the operational methods keep
+  // their "MinIO not available" contract while a reachable-but-slow or
+  // unreachable endpoint resolves.
+  private async connect(client: Minio.Client, target: string): Promise<void> {
+    const CONNECT_TIMEOUT_MS = 10_000;
+    try {
+      const exists = await this.withTimeout(client.bucketExists(this.bucket), CONNECT_TIMEOUT_MS);
       if (!exists) {
         const region = process.env.MINIO_REGION || 'us-east-1';
-        await this.client.makeBucket(this.bucket, region);
+        await this.withTimeout(client.makeBucket(this.bucket, region), CONNECT_TIMEOUT_MS);
         this.logger.log(`Bucket "${this.bucket}" created`);
       }
 
+      this.client = client;
       this._enabled = true;
-      this.logger.log(`MinIO connected → ${useSSL ? 'https' : 'http'}://${endpoint}:${port}/${this.bucket}`);
+      this.logger.log(`MinIO connected → ${target}/${this.bucket}`);
     } catch (err) {
-      this.logger.error(`MinIO initialization failed: ${(err as Error).message}`);
+      this.logger.error(`MinIO initialization failed: ${(err as Error).message} — file storage disabled`);
     }
+  }
+
+  private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms).unref();
+      }),
+    ]);
   }
 
   isEnabled(): boolean {
