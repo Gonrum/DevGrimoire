@@ -510,16 +510,20 @@ export class ReplicationController {
     return { count: rows.length, items: rows };
   }
 
-  /** Re-apply a deadletter's stored payload via the idempotent apply path. */
+  /** Re-apply a deadletter's stored payload via the idempotent apply path.
+   *  Destructive (re-writes an entity) → admin-only; the read-only list stays open. */
   @Post('deadletter/:id/replay')
   @HttpCode(200)
+  @Roles(UserRole.ADMIN)
   async replayDeadletter(@Param('id') id: string) {
     return this.deadletterService.replay(id);
   }
 
-  /** Permanently discard a deadletter (admin decided it's obsolete). */
+  /** Permanently discard a deadletter (admin decided it's obsolete). Destructive
+   *  → admin-only. */
   @Post('deadletter/:id/discard')
   @HttpCode(200)
+  @Roles(UserRole.ADMIN)
   async discardDeadletter(@Param('id') id: string) {
     return this.deadletterService.discard(id);
   }
