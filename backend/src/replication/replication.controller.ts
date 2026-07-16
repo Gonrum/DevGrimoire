@@ -18,6 +18,7 @@ import { ReplicationScheduler } from './replication.scheduler';
 import { ReplicationSyncService } from './replication-sync.service';
 import { ReplicationSyncDriverService } from './replication-sync-driver.service';
 import { ReplicationDeadletterService } from './replication-deadletter.service';
+import { ReplicationGcService, GcResult } from './replication-gc.service';
 import {
   SyncReceiveRequest, SyncReceiveResponse, SyncPullResponse, SyncCycleResult, SyncStatus,
 } from './replication-sync.types';
@@ -76,6 +77,7 @@ export class ReplicationController {
     private syncService: ReplicationSyncService,
     private syncDriver: ReplicationSyncDriverService,
     private deadletterService: ReplicationDeadletterService,
+    private gcService: ReplicationGcService,
   ) {}
 
   // ── Per-project replication opt-in ─────────────
@@ -490,6 +492,15 @@ export class ReplicationController {
   @Get('sync/status')
   async syncStatus(): Promise<SyncStatus> {
     return this.syncDriver.getSyncStatus();
+  }
+
+  /** Manually prune the replication_log by age now (ops / first-run cleanup).
+   *  The scheduled pass runs daily; this triggers one immediately. */
+  @Post('gc/run')
+  @HttpCode(200)
+  @Roles(UserRole.ADMIN)
+  async runGc(): Promise<GcResult> {
+    return this.gcService.runGc();
   }
 
   /** List final (pending) deadletters for the admin UI. */

@@ -20,6 +20,7 @@ import { ReplicationSyncService } from './replication-sync.service';
 import { ReplicationSyncClientService } from './replication-sync-client.service';
 import { ReplicationSyncDriverService } from './replication-sync-driver.service';
 import { ReplicationDeadletterService } from './replication-deadletter.service';
+import { ReplicationGcService } from './replication-gc.service';
 import { SettingsModule } from '../settings/settings.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -56,6 +57,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ReplicationSyncClientService,
     ReplicationSyncDriverService,
     ReplicationDeadletterService,
+    ReplicationGcService,
   ],
   exports: [ReplicationReadonlyGuard],
 })
