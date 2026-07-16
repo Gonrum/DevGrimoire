@@ -30,3 +30,28 @@ export function deriveDirectionState(
   if (lastErrorClass === 'terminal') return 'error';
   return 'degraded';
 }
+
+/** Consecutive retryable failures before a still-'degraded' direction alerts.
+ *  A 'terminal' error ('error' state) alerts immediately regardless of count. */
+export const ALERT_THRESHOLD = 5;
+
+export type AlertAction = 'none' | 'alert' | 'recover';
+
+/**
+ * Debounced direction alerting (analogous to the monitoring module's
+ * lastNotifiedStatus). Alert once when a direction becomes unhealthy enough — a
+ * terminal error, or degraded past ALERT_THRESHOLD consecutive failures — and
+ * recover once when it returns to healthy. `prevAlerted` is the persisted
+ * last-notified flag; the returned `alerted` is the flag to persist next.
+ */
+export function directionAlert(
+  prevAlerted: boolean,
+  state: DirectionState,
+  consecutiveFailures: number,
+): { action: AlertAction; alerted: boolean } {
+  const alertable =
+    state === 'error' || (state === 'degraded' && consecutiveFailures >= ALERT_THRESHOLD);
+  if (alertable && !prevAlerted) return { action: 'alert', alerted: true };
+  if (prevAlerted && state === 'healthy') return { action: 'recover', alerted: false };
+  return { action: 'none', alerted: prevAlerted };
+}

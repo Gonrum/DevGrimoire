@@ -8,7 +8,10 @@ import { ReplicationApplied, ReplicationAppliedDocument } from './schemas/replic
 import { ReplicationCounterService } from './replication-counter.service';
 import { isReplicatedCollection, getReplicatedByCollection, replicatedCollectionNames } from './replication-collections';
 import { mapOperation, deriveEventId, makeAppliedKey } from './replication-log.helpers';
-import { REPL_WATCHER_RESUME_TOKEN, REPL_INSTANCE_ID } from './replication.constants';
+import { REPL_WATCHER_RESUME_TOKEN, REPL_INSTANCE_ID, REPL_WATCHER_HEARTBEAT } from './replication.constants';
+
+/** How often the watcher stamps its liveness heartbeat while consuming. */
+const HEARTBEAT_INTERVAL_MS = 30_000;
 
 /**
  * Dedicated change-stream consumer that captures every write to a replicated
@@ -26,6 +29,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
   private readonly logger = new Logger(ReplicationLogWriterService.name);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private changeStream: any = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private readonly standalone: boolean;
   private selfInstanceId: string | null = null;
   private closing = false;
@@ -50,7 +54,34 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
 
   onModuleDestroy() {
     this.closing = true;
+    this.stopHeartbeat();
     this.changeStream?.close();
+  }
+
+  /** Stamp a liveness heartbeat now + every HEARTBEAT_INTERVAL_MS while the
+   *  consume loop is alive. The timer is cleared when consume() exits, so the
+   *  heartbeat goes stale exactly when the watcher dies (→ detectable in
+   *  getSyncStatus), even while the stream is idle. */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    void this.stampHeartbeat();
+    this.heartbeatTimer = setInterval(() => void this.stampHeartbeat(), HEARTBEAT_INTERVAL_MS);
+    this.heartbeatTimer.unref?.();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  private async stampHeartbeat(): Promise<void> {
+    try {
+      await this.settingsService.set(REPL_WATCHER_HEARTBEAT, new Date().toISOString());
+    } catch (err) {
+      this.logger.warn(`Heartbeat stamp failed: ${(err as Error).message}`);
+    }
   }
 
   private async getSelfInstanceId(): Promise<string> {
@@ -117,6 +148,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
     try {
       this.changeStream = db.watch(pipeline, options);
       this.logger.log(`Replication log writer watching: ${watched.join(', ')}`);
+      this.startHeartbeat();
       // Drive the stream with an async iterator (NOT fire-and-forget .on('change')):
       // for-await pulls the next event only after the current handleChange resolves,
       // so each log entry is durable AND its resume token persisted before the next
@@ -142,6 +174,10 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
       if (!this.closing) {
         this.logger.error(`Replication change stream error: ${(err as Error).message}`);
       }
+    } finally {
+      // Watcher loop ended (error or shutdown) → stop stamping so the heartbeat
+      // goes stale and getSyncStatus can surface a dead watcher.
+      this.stopHeartbeat();
     }
   }
 

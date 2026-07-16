@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { REPLICATION_STATUS_CHANGED } from '../events/project-event';
 import { SettingsService } from '../settings/settings.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ReplicationLog, ReplicationLogDocument } from './schemas/replication-log.schema';
 import { ReplicationSyncClientService } from './replication-sync-client.service';
 import { ReplicationSyncApplyService } from './replication-sync-apply.service';
@@ -17,7 +18,14 @@ import {
   isTerminalOutcome,
   InboundResult,
 } from './replication-sync-cursor.helpers';
-import { SyncCycleResult, SyncStatus, SyncLogEntry, SyncReceiveResponse } from './replication-sync.types';
+import {
+  classifyHttpError,
+  computeBackoffMs,
+  deriveDirectionState,
+  directionAlert,
+  ErrorClass,
+} from './replication-backoff.helpers';
+import { SyncCycleResult, SyncStatus, SyncLogEntry, SyncReceiveResponse, DirectionHealth } from './replication-sync.types';
 import {
   REPL_INSTANCE_ID,
   REPL_SYNC_DRIVER,
@@ -25,6 +33,11 @@ import {
   REPL_CURSOR_INBOUND,
   REPL_LAST_SYNC_CYCLE,
   REPL_PEER_URL,
+  REPL_BACKOFF_BASE_MS,
+  REPL_BACKOFF_CAP_MS,
+  REPL_OUTBOUND_NOTIFIED_STATE,
+  REPL_INBOUND_NOTIFIED_STATE,
+  REPL_WATCHER_HEARTBEAT,
 } from './replication.constants';
 
 /** Entries per POST /sync/receive call. */
@@ -35,17 +48,34 @@ const PULL_PAGE_LIMIT = 500;
  *  cycles rather than blocking one cycle indefinitely. */
 const MAX_BATCHES_PER_CYCLE = 50;
 
+/** In-memory resilience state for one sync direction (Plan 3b). Reset on
+ *  process restart → an immediate retry, which is harmless. */
+interface DirState {
+  consecutiveFailures: number;
+  lastErrorClass: ErrorClass | null;
+  /** Epoch ms of the earliest next attempt while backing off; 0 = now. */
+  nextAttemptAtMs: number;
+}
+
 /**
  * Active-side sync orchestrator (spec §6). Every cycle: PUSH local log entries
  * to the peer, then PULL the peer's entries and apply them. Cursors advance
  * only on durable success → at-least-once, crash-safe, idempotent re-apply. In-
  * memory lock (`running`) prevents overlap between the scheduled tick and a
  * manual /sync/now. A passive/unconfigured instance is a strict no-op.
+ *
+ * Resilience (Plan 3b): each direction backs off exponentially on a retryable
+ * transport error and stops (paused-at-cap) on a terminal one; a 413 halves the
+ * push batch. Direction health + debounced alerts surface via getSyncStatus.
  */
 @Injectable()
 export class ReplicationSyncDriverService {
   private readonly logger = new Logger(ReplicationSyncDriverService.name);
   private running = false;
+
+  private readonly outbound: DirState = { consecutiveFailures: 0, lastErrorClass: null, nextAttemptAtMs: 0 };
+  private readonly inbound: DirState = { consecutiveFailures: 0, lastErrorClass: null, nextAttemptAtMs: 0 };
+  private outboundBatchLimit = PUSH_BATCH_LIMIT;
 
   constructor(
     @InjectConnection() private readonly connection: Connection,
@@ -55,6 +85,7 @@ export class ReplicationSyncDriverService {
     private applyService: ReplicationSyncApplyService,
     private eventEmitter: EventEmitter2,
     private deadletter: ReplicationDeadletterService,
+    private notifications: NotificationsService,
   ) {}
 
   isRunning(): boolean {
@@ -88,6 +119,25 @@ export class ReplicationSyncDriverService {
     return new Set(rows.map((r) => String(r._id)));
   }
 
+  /** Record a transport failure on a direction: classify, count, and schedule
+   *  the next attempt (exponential backoff; a terminal error jumps to the cap so
+   *  it keeps a slow retry in case the operator fixes the config). */
+  private recordFailure(st: DirState, err: unknown): void {
+    st.consecutiveFailures += 1;
+    st.lastErrorClass = classifyHttpError(err);
+    const waitMs =
+      st.lastErrorClass === 'terminal'
+        ? REPL_BACKOFF_CAP_MS
+        : computeBackoffMs(st.consecutiveFailures, REPL_BACKOFF_BASE_MS, REPL_BACKOFF_CAP_MS);
+    st.nextAttemptAtMs = Date.now() + waitMs;
+  }
+
+  private resetDirection(st: DirState): void {
+    st.consecutiveFailures = 0;
+    st.lastErrorClass = null;
+    st.nextAttemptAtMs = 0;
+  }
+
   async runCycle(trigger: 'scheduled' | 'manual'): Promise<SyncCycleResult> {
     const outboundCursor = await this.getCursor(REPL_CURSOR_OUTBOUND);
     const inboundCursor = await this.getCursor(REPL_CURSOR_INBOUND);
@@ -104,9 +154,18 @@ export class ReplicationSyncDriverService {
 
     this.running = true;
     try {
-      const push = await this.pushPhase();
-      const pull = await this.pullPhase();
+      // A manual /sync/now bypasses the backoff window (operator asked explicitly).
+      const nowMs = Date.now();
+      const bypass = trigger === 'manual';
+      const push = bypass || nowMs >= this.outbound.nextAttemptAtMs
+        ? await this.pushPhase()
+        : { pushed: 0, cursor: outboundCursor };
+      const pull = bypass || nowMs >= this.inbound.nextAttemptAtMs
+        ? await this.pullPhase()
+        : { pulled: 0, applied: 0, skipped: 0, cursor: inboundCursor };
+
       await this.settingsService.set(REPL_LAST_SYNC_CYCLE, new Date().toISOString());
+      await this.evaluateAlerts();
       this.eventEmitter.emit(REPLICATION_STATUS_CHANGED);
       if (push.pushed || pull.applied || pull.skipped) {
         this.logger.log(
@@ -136,12 +195,13 @@ export class ReplicationSyncDriverService {
     const excluded = await this.deadletter.pendingEventIds('outbound');
     let cursor = await this.getCursor(REPL_CURSOR_OUTBOUND);
     let pushed = 0;
+    let errored = false;
 
     for (let batch = 0; batch < MAX_BATCHES_PER_CYCLE; batch++) {
       const window = await this.logModel
         .find({ seq: { $gt: cursor } })
         .sort({ seq: 1 })
-        .limit(PUSH_BATCH_LIMIT)
+        .limit(this.outboundBatchLimit)
         .lean()
         .exec();
       if (window.length === 0) break;
@@ -160,14 +220,24 @@ export class ReplicationSyncDriverService {
         try {
           resp = await this.client.pushReceive(self, sendSet);
         } catch (err) {
+          // 413 Payload Too Large → shrink the push batch so the next cycle fits.
+          const status = (err as { response?: { status?: number } })?.response?.status;
+          if (status === 413) {
+            this.outboundBatchLimit = Math.max(1, Math.floor(this.outboundBatchLimit / 2));
+            this.logger.warn(`Push 413 — halving outbound batch limit to ${this.outboundBatchLimit}`);
+          }
           this.logger.warn(`Push failed at cursor ${cursor}: ${(err as Error).message}`);
-          break; // transient — cursor stays, retry next cycle
+          this.recordFailure(this.outbound, err);
+          errored = true;
+          break; // transient — cursor stays, retry after backoff
         }
         const appliedThrough = Number(resp.appliedThrough);
         if (!Number.isFinite(appliedThrough)) {
           // Malformed peer ack — treat as transient, leave the cursor so we
           // never advance on a NaN (which would otherwise persist as "NaN").
           this.logger.warn(`Push got non-numeric appliedThrough at cursor ${cursor} — skipping advance`);
+          this.recordFailure(this.outbound, new Error('non-numeric appliedThrough'));
+          errored = true;
           break;
         }
         pushed += sendSet.length;
@@ -201,7 +271,13 @@ export class ReplicationSyncDriverService {
       if (newCursor <= cursor) break; // no progress (poison frontier) — stop
       cursor = newCursor;
       await this.settingsService.set(REPL_CURSOR_OUTBOUND, String(cursor));
-      if (window.length < PUSH_BATCH_LIMIT) break; // window not full → drained
+      if (window.length < this.outboundBatchLimit) break; // window not full → drained
+    }
+
+    if (!errored) {
+      // Transport healthy this phase — clear backoff + restore the full batch.
+      this.resetDirection(this.outbound);
+      this.outboundBatchLimit = PUSH_BATCH_LIMIT;
     }
     return { pushed, cursor };
   }
@@ -237,6 +313,7 @@ export class ReplicationSyncDriverService {
     let pulled = 0;
     let applied = 0;
     let skipped = 0;
+    let errored = false;
 
     for (let round = 0; round < MAX_BATCHES_PER_CYCLE; round++) {
       let entries: SyncLogEntry[];
@@ -249,11 +326,15 @@ export class ReplicationSyncDriverService {
         hasMore = !!resp.hasMore;
       } catch (err) {
         this.logger.warn(`Pull failed at since ${cursor}: ${(err as Error).message}`);
-        break; // transient — cursor stays, retry next cycle
+        this.recordFailure(this.inbound, err);
+        errored = true;
+        break; // transient — cursor stays, retry after backoff
       }
       if (!Number.isFinite(nextSince)) {
         // Malformed peer response — treat as transient, leave the inbound cursor.
         this.logger.warn(`Pull got non-numeric nextSince at since ${cursor} — skipping advance`);
+        this.recordFailure(this.inbound, new Error('non-numeric nextSince'));
+        errored = true;
         break;
       }
       pulled += entries.length;
@@ -286,18 +367,72 @@ export class ReplicationSyncDriverService {
       await this.settingsService.set(REPL_CURSOR_INBOUND, String(cursor));
       if (!hasMore) break;
     }
+
+    if (!errored) this.resetDirection(this.inbound); // transport healthy → clear backoff
     return { pulled, applied, skipped, cursor };
   }
 
-  /** Cursor/lag snapshot for the status endpoint + UI (Plan 5). */
+  /** After a cycle: derive each direction's health and fire debounced alerts
+   *  (one on becoming unhealthy, one on recovery), persisting the notified flag
+   *  analogous to the monitoring module. Only reached when the driver is active. */
+  private async evaluateAlerts(): Promise<void> {
+    await Promise.all([
+      this.alertDirection('Push (ausgehend)', this.outbound, REPL_OUTBOUND_NOTIFIED_STATE),
+      this.alertDirection('Pull (eingehend)', this.inbound, REPL_INBOUND_NOTIFIED_STATE),
+    ]);
+  }
+
+  private async alertDirection(label: string, st: DirState, notifiedKey: string): Promise<void> {
+    const state = deriveDirectionState(true, st.consecutiveFailures, st.lastErrorClass);
+    const prevAlerted = (await this.settingsService.get(notifiedKey)) === 'alerted';
+    const { action, alerted } = directionAlert(prevAlerted, state, st.consecutiveFailures);
+    if (action === 'none') return;
+
+    if (alerted !== prevAlerted) {
+      await this.settingsService.set(notifiedKey, alerted ? 'alerted' : '');
+    }
+    try {
+      if (action === 'alert') {
+        const nextAt = st.nextAttemptAtMs ? new Date(st.nextAttemptAtMs).toISOString() : 'sofort';
+        await this.notifications.create(
+          `Replikation: ${label} ${state === 'error' ? 'gestört (Admin-Aktion nötig)' : 'anhaltend fehlerhaft'}`,
+          `Die Richtung "${label}" ist seit ${st.consecutiveFailures} Zyklen fehlerhaft (${st.lastErrorClass ?? 'unbekannt'}). Nächster Versuch: ${nextAt}.`,
+          '/settings',
+          'replication_sync',
+        );
+      } else {
+        await this.notifications.create(
+          `Replikation: ${label} wieder gesund`,
+          `Die Richtung "${label}" synchronisiert wieder normal.`,
+          '/settings',
+          'replication_sync',
+        );
+      }
+    } catch (err) {
+      this.logger.warn(`Replication alert (${label}) failed: ${(err as Error).message}`);
+    }
+  }
+
+  private directionHealth(active: boolean, st: DirState): DirectionHealth {
+    return {
+      state: deriveDirectionState(active, st.consecutiveFailures, st.lastErrorClass),
+      consecutiveFailures: st.consecutiveFailures,
+      lastErrorClass: st.lastErrorClass,
+      nextAttemptAt: st.nextAttemptAtMs ? new Date(st.nextAttemptAtMs).toISOString() : null,
+    };
+  }
+
+  /** Cursor/lag + resilience snapshot for the status endpoint + UI (Plan 5). */
   async getSyncStatus(): Promise<SyncStatus> {
-    const [driver, outboundCursor, inboundCursor, lastCycleAt, deadletterCount] = await Promise.all([
+    const [driver, outboundCursor, inboundCursor, lastCycleAt, deadletterCount, heartbeat] = await Promise.all([
       this.settingsService.get(REPL_SYNC_DRIVER),
       this.getCursor(REPL_CURSOR_OUTBOUND),
       this.getCursor(REPL_CURSOR_INBOUND),
       this.settingsService.get(REPL_LAST_SYNC_CYCLE),
       this.deadletter.count(),
+      this.settingsService.get(REPL_WATCHER_HEARTBEAT),
     ]);
+    const active = driver === 'active';
     const top = await this.logModel.findOne().sort({ seq: -1 }).select('seq').lean().exec();
     const localMaxSeq = top ? Number((top as { seq: number }).seq) : 0;
     return {
@@ -309,6 +444,10 @@ export class ReplicationSyncDriverService {
       lastCycleAt: lastCycleAt ?? null,
       running: this.running,
       deadletterCount,
+      outbound: this.directionHealth(active, this.outbound),
+      inbound: this.directionHealth(active, this.inbound),
+      outboundBatchLimit: this.outboundBatchLimit,
+      lastHeartbeatAt: heartbeat ?? null,
     };
   }
 }

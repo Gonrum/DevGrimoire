@@ -74,6 +74,15 @@ export interface SyncCycleResult {
   skippedReason?: string;
 }
 
+/** Per-direction resilience health for the status endpoint (Plan 3b). */
+export interface DirectionHealth {
+  state: 'healthy' | 'degraded' | 'error' | 'paused';
+  consecutiveFailures: number;
+  lastErrorClass: 'terminal' | 'retryable' | null;
+  /** ISO time of the next allowed attempt while backing off; null when clear. */
+  nextAttemptAt: string | null;
+}
+
 /** Cursor/lag snapshot for GET /sync/status (drives the Plan 5 UI). */
 export interface SyncStatus {
   driver: string;
@@ -84,4 +93,11 @@ export interface SyncStatus {
   lastCycleAt: string | null;
   running: boolean;
   deadletterCount: number;
+  /** Resilience (Plan 3b): per-direction health + backoff. */
+  outbound: DirectionHealth;
+  inbound: DirectionHealth;
+  /** Current outbound push batch limit (halved on 413, restored on success). */
+  outboundBatchLimit: number;
+  /** Last change-stream watcher heartbeat (ISO); null if never/standalone. */
+  lastHeartbeatAt: string | null;
 }

@@ -5,6 +5,8 @@ const {
   classifyHttpError,
   computeBackoffMs,
   deriveDirectionState,
+  directionAlert,
+  ALERT_THRESHOLD,
 } = require('../dist/replication/replication-backoff.helpers');
 
 let passed = 0, failed = 0;
@@ -48,6 +50,31 @@ check('deriveDirectionState', () => {
   assert.equal(deriveDirectionState(true, 0, null), 'healthy');
   assert.equal(deriveDirectionState(true, 2, 'retryable'), 'degraded');
   assert.equal(deriveDirectionState(true, 1, 'terminal'), 'error');
+});
+
+// directionAlert (debounced)
+check('directionAlert: terminal error alerts once', () => {
+  const a = directionAlert(false, 'error', 1);
+  assert.deepEqual(a, { action: 'alert', alerted: true });
+  // already alerted → no repeat
+  assert.deepEqual(directionAlert(true, 'error', 3), { action: 'none', alerted: true });
+});
+check('directionAlert: degraded alerts only past ALERT_THRESHOLD', () => {
+  assert.deepEqual(directionAlert(false, 'degraded', ALERT_THRESHOLD - 1), { action: 'none', alerted: false });
+  assert.deepEqual(directionAlert(false, 'degraded', ALERT_THRESHOLD), { action: 'alert', alerted: true });
+});
+check('directionAlert: recovers once on return to healthy', () => {
+  assert.deepEqual(directionAlert(true, 'healthy', 0), { action: 'recover', alerted: false });
+  // not previously alerted → healthy is a no-op
+  assert.deepEqual(directionAlert(false, 'healthy', 0), { action: 'none', alerted: false });
+});
+check('directionAlert: stays alerted while degraded between error and healthy', () => {
+  // was alerted, now degraded but below threshold → hold the alert, no recover yet
+  assert.deepEqual(directionAlert(true, 'degraded', 1), { action: 'none', alerted: true });
+});
+check('directionAlert: paused (driver off) does not alert or recover', () => {
+  assert.deepEqual(directionAlert(false, 'paused', 0), { action: 'none', alerted: false });
+  assert.deepEqual(directionAlert(true, 'paused', 0), { action: 'none', alerted: true });
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

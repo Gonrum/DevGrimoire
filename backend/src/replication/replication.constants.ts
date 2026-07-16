@@ -41,6 +41,9 @@ export const REPL_BACKOFF_CAP_MS = 300000;
 /** Persisted last-notified direction state (debounce, analog Monitoring). */
 export const REPL_OUTBOUND_NOTIFIED_STATE = 'replication.outbound.notifiedState';
 export const REPL_INBOUND_NOTIFIED_STATE = 'replication.inbound.notifiedState';
+/** ISO timestamp last stamped by the log-writer's change-stream watcher while
+ *  its consume loop is alive (§8.3). Goes stale if the watcher dies. */
+export const REPL_WATCHER_HEARTBEAT = 'replication.watcher.heartbeat';
 
 export type ReplicationRole = 'standalone' | 'master' | 'slave' | 'peer';
 
