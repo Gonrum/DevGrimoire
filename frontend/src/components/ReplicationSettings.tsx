@@ -4,6 +4,7 @@ import { api, ReplicationConfig, ReplicationStatus, ReplicationProjectEntry, Rem
 import { wsEventBus, isProjectChangeEvent } from '../api/wsEventBus';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
+import ReplicationSyncStatus from './ReplicationSyncStatus';
 
 export default function ReplicationSettings() {
   const { t, i18n } = useTranslation();
@@ -23,6 +24,7 @@ export default function ReplicationSettings() {
   const [peerUrl, setPeerUrl] = useState('');
   const [peerApiKey, setPeerApiKey] = useState('');
   const [fullSyncCron, setFullSyncCron] = useState('0 3 * * *');
+  const [engine, setEngine] = useState<'legacy' | 'log'>('legacy');
 
   // Per-project replication opt-in (T-80)
   const [projects, setProjects] = useState<ReplicationProjectEntry[] | null>(null);
@@ -60,6 +62,7 @@ export default function ReplicationSettings() {
       setPeerUrl(cfg.peerUrl || '');
       setPeerApiKey('');
       setFullSyncCron(cfg.fullSyncCron);
+      setEngine(cfg.engine ?? 'legacy');
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -301,6 +304,21 @@ export default function ReplicationSettings() {
     }
   };
 
+  const changeEngine = async (next: 'legacy' | 'log') => {
+    const prev = engine;
+    setEngine(next); // optimistic
+    setError(null);
+    try {
+      const updated = await api.replication.updateConfig({ engine: next });
+      setConfig(updated);
+      setSuccess(t('replication.engineSaved'));
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setEngine(prev); // roll back
+      setError((err as Error).message);
+    }
+  };
+
   if (loading) return <p className="text-gray-500 py-10 text-center">{t('common.loading')}</p>;
 
   return (
@@ -335,6 +353,22 @@ export default function ReplicationSettings() {
           <p className="text-xs text-gray-500 mt-2">{t('replication.peerHint')}</p>
         )}
       </div>
+
+      {/* Engine selector (Plan 4 cutover) */}
+      {role !== 'standalone' && (
+        <div className="bg-gray-900 border border-gray-700 rounded-lg p-4">
+          <h2 className="text-sm font-medium text-gray-300 mb-3">{t('replication.engineTitle')}</h2>
+          <select
+            value={engine}
+            onChange={(e) => changeEngine(e.target.value as 'legacy' | 'log')}
+            className="bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
+          >
+            <option value="legacy">{t('replication.engineLegacy')}</option>
+            <option value="log">{t('replication.engineLog')}</option>
+          </select>
+          <p className="text-xs text-gray-500 mt-2">{t('replication.engineHint')}</p>
+        </div>
+      )}
 
       {/* Master Config */}
       {role === 'master' && (
@@ -513,6 +547,9 @@ export default function ReplicationSettings() {
           </div>
         </div>
       )}
+
+      {/* Change-stream log engine: sync status + deadletter (Plan 3b–5) */}
+      {role !== 'standalone' && <ReplicationSyncStatus />}
 
       {/* Per-project replication opt-in (T-80) */}
       {role !== 'standalone' && (

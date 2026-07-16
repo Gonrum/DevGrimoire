@@ -1594,6 +1594,8 @@ export interface ReplicationConfig {
   /** Cron schedule for inbound pull when behind NAT (peer mode). */
   pullCron?: string;
   instanceId: string;
+  /** Active engine: 'legacy' (fire-on-emit) | 'log' (change-stream log). */
+  engine?: 'legacy' | 'log';
 }
 
 export interface ReplicationProjectEntry {
@@ -1624,6 +1626,66 @@ export interface ReplicationStatus {
   lastPull: string | null;
   queueSize: number;
   failedCount: number;
+}
+
+// ── Change-stream log engine (Plan 3b–5) ──
+export type ReplDirectionState = 'healthy' | 'degraded' | 'error' | 'paused';
+
+export interface ReplDirectionHealth {
+  state: ReplDirectionState;
+  consecutiveFailures: number;
+  lastErrorClass: 'terminal' | 'retryable' | null;
+  nextAttemptAt: string | null;
+}
+
+export interface ReplSyncStatus {
+  driver: string;
+  outboundCursor: number;
+  inboundCursor: number;
+  localMaxSeq: number;
+  outboundLag: number;
+  lastCycleAt: string | null;
+  running: boolean;
+  deadletterCount: number;
+  outbound: ReplDirectionHealth;
+  inbound: ReplDirectionHealth;
+  outboundBatchLimit: number;
+  lastHeartbeatAt: string | null;
+}
+
+export interface ReplSyncCycleResult {
+  pushed: number;
+  pulled: number;
+  applied: number;
+  skipped: number;
+  outboundCursor: number;
+  inboundCursor: number;
+  skippedReason?: string;
+}
+
+export interface ReplDeadletter {
+  _id: string;
+  direction: 'inbound' | 'outbound';
+  eventId: string;
+  seq: number;
+  collection: string;
+  documentId: string;
+  reason: string;
+  attempts: number;
+  status: string;
+  firstFailedAt?: string;
+  lastFailedAt?: string;
+}
+
+export interface ReplGcResult {
+  deleted: number;
+  retentionDays: number;
+  cutoff: string;
+  maxSeqInclusive: number;
+  guarded: boolean;
+  deadletterOrphansDeleted: number;
+  deadletterResolvedDeleted: number;
+  skippedReason?: string;
 }
 
 export type ReleaseType = 'manual' | 'gitlab';
@@ -2890,6 +2952,16 @@ export const api = {
         `/replication/import-project/${id}`,
         { method: 'POST' },
       ),
+    // ── Change-stream log engine ──
+    getSyncStatus: () => request<ReplSyncStatus>('/replication/sync/status'),
+    syncNow: () => request<ReplSyncCycleResult>('/replication/sync/now', { method: 'POST' }),
+    listDeadletters: () =>
+      request<{ count: number; items: ReplDeadletter[] }>('/replication/deadletter'),
+    replayDeadletter: (id: string) =>
+      request<{ ok: boolean; reason?: string }>(`/replication/deadletter/${id}/replay`, { method: 'POST' }),
+    discardDeadletter: (id: string) =>
+      request<{ ok: boolean }>(`/replication/deadletter/${id}/discard`, { method: 'POST' }),
+    runGc: () => request<ReplGcResult>('/replication/gc/run', { method: 'POST' }),
   },
   profile: {
     get: () => request<UserInfo>('/auth/profile'),
