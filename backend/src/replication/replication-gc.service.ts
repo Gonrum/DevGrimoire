@@ -5,7 +5,8 @@ import { Model } from 'mongoose';
 import { SettingsService } from '../settings/settings.service';
 import { ReplicationLog, ReplicationLogDocument } from './schemas/replication-log.schema';
 import { REPL_LOG_RETENTION_DAYS, REPL_SYNC_DRIVER, REPL_CURSOR_OUTBOUND } from './replication.constants';
-import { resolveRetentionDays, logGcBound } from './replication-gc.helpers';
+import { resolveRetentionDays, logGcBound, deadletterGcCutoffs } from './replication-gc.helpers';
+import { ReplicationDeadletterService } from './replication-deadletter.service';
 
 export interface GcResult {
   deleted: number;
@@ -13,6 +14,8 @@ export interface GcResult {
   cutoff: string;
   maxSeqInclusive: number;
   guarded: boolean;
+  deadletterOrphansDeleted: number;
+  deadletterResolvedDeleted: number;
   skippedReason?: string;
 }
 
@@ -34,6 +37,7 @@ export class ReplicationGcService {
   constructor(
     @InjectModel(ReplicationLog.name) private logModel: Model<ReplicationLogDocument>,
     private settingsService: SettingsService,
+    private deadletter: ReplicationDeadletterService,
   ) {
     this.standalone = process.env.MONGODB_STANDALONE === 'true';
   }
@@ -44,10 +48,13 @@ export class ReplicationGcService {
   async scheduledGc(): Promise<void> {
     try {
       const result = await this.runGc();
-      if (result.deleted > 0) {
+      const dl = result.deadletterOrphansDeleted + result.deadletterResolvedDeleted;
+      if (result.deleted > 0 || dl > 0) {
         this.logger.log(
           `GC pruned ${result.deleted} replication_log entries older than ` +
-            `${result.retentionDays}d (cutoff ${result.cutoff}, maxSeq ${result.maxSeqInclusive})`,
+            `${result.retentionDays}d (cutoff ${result.cutoff}, maxSeq ${result.maxSeqInclusive}); ` +
+            `deadletter: ${result.deadletterOrphansDeleted} orphaned retries, ` +
+            `${result.deadletterResolvedDeleted} resolved`,
         );
       }
     } catch (err) {
@@ -67,18 +74,28 @@ export class ReplicationGcService {
     if (this.standalone) {
       return {
         deleted: 0, retentionDays, cutoff: new Date(0).toISOString(),
-        maxSeqInclusive: 0, guarded: false, skippedReason: 'standalone (no log writer)',
+        maxSeqInclusive: 0, guarded: false,
+        deadletterOrphansDeleted: 0, deadletterResolvedDeleted: 0,
+        skippedReason: 'standalone (no log writer)',
       };
     }
 
+    const nowMs = Date.now();
     const isActive = (await this.settingsService.get(REPL_SYNC_DRIVER)) === 'active';
     const outboundCursor = await this.getCursor(REPL_CURSOR_OUTBOUND);
-    const bound = logGcBound(Date.now(), retentionDays, isActive, outboundCursor);
+    const bound = logGcBound(nowMs, retentionDays, isActive, outboundCursor);
 
     const res = await this.logModel.deleteMany({
       createdAt: { $lt: new Date(bound.cutoffMs) },
       seq: { $lte: bound.maxSeqInclusive },
     });
+
+    // Same pass prunes deadletter history + orphaned retry records (never pending).
+    const dlCutoffs = deadletterGcCutoffs(nowMs, retentionDays);
+    const dl = await this.deadletter.gc(
+      new Date(dlCutoffs.resolvedCutoffMs),
+      new Date(dlCutoffs.orphanCutoffMs),
+    );
 
     return {
       deleted: res.deletedCount ?? 0,
@@ -86,6 +103,8 @@ export class ReplicationGcService {
       cutoff: new Date(bound.cutoffMs).toISOString(),
       maxSeqInclusive: bound.maxSeqInclusive,
       guarded: isActive,
+      deadletterOrphansDeleted: dl.orphanedRetrying,
+      deadletterResolvedDeleted: dl.resolved,
     };
   }
 }

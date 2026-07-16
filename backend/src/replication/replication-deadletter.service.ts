@@ -134,4 +134,27 @@ export class ReplicationDeadletterService {
     await doc.save();
     return { ok: true };
   }
+
+  /**
+   * Prune resolved history (`replayed`/`discarded` older than `resolvedCutoff`)
+   * and orphaned `retrying` records (lastFailedAt older than `orphanCutoff` — an
+   * entry that succeeded via a non-clearing path or was terminal-skipped, P3a
+   * follow-up). `pending` is never touched: it is unresolved and drives count().
+   */
+  async gc(
+    resolvedCutoff: Date,
+    orphanCutoff: Date,
+  ): Promise<{ orphanedRetrying: number; resolved: number }> {
+    const [orphans, resolved] = await Promise.all([
+      this.model.deleteMany({ status: 'retrying', lastFailedAt: { $lt: orphanCutoff } }),
+      this.model.deleteMany({
+        status: { $in: ['replayed', 'discarded'] },
+        lastFailedAt: { $lt: resolvedCutoff },
+      }),
+    ]);
+    return {
+      orphanedRetrying: orphans.deletedCount ?? 0,
+      resolved: resolved.deletedCount ?? 0,
+    };
+  }
 }

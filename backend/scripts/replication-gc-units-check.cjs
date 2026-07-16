@@ -7,6 +7,8 @@ const {
   resolveRetentionDays,
   logGcBound,
   isPrunable,
+  RETRY_ORPHAN_HOURS,
+  deadletterGcCutoffs,
 } = require('../dist/replication/replication-gc.helpers');
 
 let passed = 0;
@@ -71,6 +73,20 @@ check('passive: SAME old-above-cursor entry IS prunable (age-only, no guard)', (
 check('boundary: createdAt exactly at cutoff is kept (strict <)', () => {
   const b = logGcBound(NOW, 14, true, 100);
   assert.equal(isPrunable({ createdAtMs: b.cutoffMs, seq: 1 }, b), false);
+});
+
+// deadletter GC cutoffs
+check('deadletterGcCutoffs: resolved = now − retention days', () => {
+  const c = deadletterGcCutoffs(NOW, 14);
+  assert.equal(c.resolvedCutoffMs, NOW - 14 * MS_PER_DAY);
+});
+check('deadletterGcCutoffs: orphan window is RETRY_ORPHAN_HOURS', () => {
+  const c = deadletterGcCutoffs(NOW, 14);
+  assert.equal(c.orphanCutoffMs, NOW - RETRY_ORPHAN_HOURS * 3_600_000);
+});
+check('deadletterGcCutoffs: orphan window is much shorter than resolved', () => {
+  const c = deadletterGcCutoffs(NOW, 14);
+  assert.ok(c.orphanCutoffMs > c.resolvedCutoffMs, 'orphans pruned sooner than resolved history');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

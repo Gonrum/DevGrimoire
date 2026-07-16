@@ -57,3 +57,29 @@ export function isPrunable(
 ): boolean {
   return entry.createdAtMs < bound.cutoffMs && entry.seq <= bound.maxSeqInclusive;
 }
+
+/** Orphaned-`retrying` deadletter window. A retrying record's lastFailedAt is
+ *  refreshed every failing cycle (~20s), so one untouched for hours is an orphan
+ *  (its entry succeeded via a path that didn't clear it, or was terminal-skipped
+ *  — P3a follow-up). Deleting it only resets the attempt counter if the entry is
+ *  somehow still live → benign, never data loss. */
+export const RETRY_ORPHAN_HOURS = 6;
+
+const MS_PER_HOUR = 3_600_000;
+
+/** Cutoffs for the deadletter GC pass:
+ *  - `resolvedCutoffMs`: replayed/discarded history kept `retentionDays` (as the
+ *    log), then pruned.
+ *  - `orphanCutoffMs`: `retrying` records untouched for RETRY_ORPHAN_HOURS.
+ *  `pending` is never pruned (unresolved → needs admin action; keeps count()). */
+export interface DeadletterGcCutoffs {
+  resolvedCutoffMs: number;
+  orphanCutoffMs: number;
+}
+
+export function deadletterGcCutoffs(nowMs: number, retentionDays: number): DeadletterGcCutoffs {
+  return {
+    resolvedCutoffMs: nowMs - retentionDays * MS_PER_DAY,
+    orphanCutoffMs: nowMs - RETRY_ORPHAN_HOURS * MS_PER_HOUR,
+  };
+}
