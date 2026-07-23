@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -18,6 +19,11 @@ import {
   SshAuditSourceContext,
 } from './schemas/ssh-audit.schema';
 import { SshConnectionDocument } from './schemas/ssh-connection.schema';
+import { SettingsService } from '../settings/settings.service';
+import {
+  computeEffectiveUploadLimit,
+  pipeToSftpWithLimit,
+} from './upload-limit.util';
 
 /**
  * Minimal injectable surface for `new ssh2.Client()`. Tests swap this for a
@@ -48,7 +54,6 @@ const STDERR_LIMIT = 64 * 1024;
 const SIGKILL_GRACE_MS = 5_000;
 const DEFAULT_DOWNLOAD_BYTES = 1_048_576; // 1 MB
 const HARD_MAX_DOWNLOAD_BYTES = 10_485_760; // 10 MB
-const SFTP_MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB (spec §6.4)
 const DEFAULT_LIST_ENTRIES = 200;
 const HARD_MAX_LIST_ENTRIES = 2000;
 const LIST_RECURSE_MAX_DEPTH = 10;
@@ -192,6 +197,13 @@ export interface SshUploadResult {
   remotePath: string;
 }
 
+export interface SshUploadStreamOpts extends SshUploadOpts {
+  /** Known source size (bytes) for a cheap pre-check + audit. */
+  expectedSize?: number;
+  /** Pre-resolved effective limit; if omitted, resolveUploadLimit is called. */
+  limitBytes?: number;
+}
+
 export interface SshDownloadOpts {
   maxBytes?: number;
   sourceContext?: Exclude<SshSessionSourceContext, 'terminal'>;
@@ -278,9 +290,26 @@ export class SshSessionService {
     @InjectModel(SshAudit.name)
     private readonly auditModel: Model<SshAuditDocument>,
     private readonly notificationsService: NotificationsService,
+    private readonly settingsService: SettingsService,
     @Optional()
     private readonly clientFactory: SshClientFactory = DEFAULT_FACTORY,
   ) {}
+
+  /**
+   * Effective per-upload byte cap for a connection: per-connection override
+   * beats the global `ssh.maxUploadBytes` setting beats the 10 MB default,
+   * clamped to the 500 MB hard ceiling.
+   */
+  async resolveUploadLimit(
+    connection: SshConnectionDocument,
+  ): Promise<number> {
+    const raw = await this.settingsService.get('ssh.maxUploadBytes');
+    const parsed = raw !== null ? Number.parseInt(raw, 10) : NaN;
+    return computeEffectiveUploadLimit(
+      Number.isNaN(parsed) ? null : parsed,
+      connection.maxUploadBytes,
+    );
+  }
 
   // ===========================================================================
   // Public API
@@ -737,17 +766,16 @@ export class SshSessionService {
     const startedAt = Date.now();
     const sourceContext = opts.sourceContext ?? 'mcp';
     await this.acquireSlot(connId);
-    // Hard size cap per spec §6.4. Guard inside the slot so the release in
-    // finally still runs, but before we open any network resources.
-    if (content.length > SFTP_MAX_UPLOAD_BYTES) {
-      this.releaseSlot(connId);
-      throw new Error(
-        `upload_too_large: ${content.length} > ${SFTP_MAX_UPLOAD_BYTES}`,
-      );
-    }
     let client: Ssh2Client | null = null;
     try {
       const connection = await this.sshService.findById(connId);
+      // Effective per-connection cap (global setting > override > default,
+      // clamped to 500 MB). Checked inside the slot so the finally still
+      // balances, but before we open any network resource.
+      const limit = await this.resolveUploadLimit(connection);
+      if (content.length > limit) {
+        throw new Error(`upload_too_large: ${content.length} > ${limit}`);
+      }
       const creds = await this.resolveCredentialsOrFail(connection);
       client = await this.openClient(connection, creds);
       const sftp = await this.openSftp(client);
@@ -761,6 +789,67 @@ export class SshSessionService {
         remotePath,
         content,
         opts.mode ?? 0o644,
+      );
+
+      void this.writeAudit({
+        connectionId: connection._id as Types.ObjectId,
+        action: 'upload',
+        sourceContext,
+        userId: opts.userId,
+        remotePath,
+        bytes: result.bytesWritten,
+        durationMs: Date.now() - startedAt,
+      });
+
+      return result;
+    } finally {
+      if (client) {
+        try { client.end(); } catch { /* noop */ }
+        try { client.destroy(); } catch { /* noop */ }
+      }
+      this.releaseSlot(connId);
+    }
+  }
+
+  /**
+   * Streaming upload: pipes any Readable to the remote file without buffering
+   * the whole payload. Shares the concurrency slot, credential resolution,
+   * dir-creation and audit scaffold with sftpUpload. Enforces the effective
+   * per-connection limit both as a pre-check (when expectedSize is known) and
+   * mid-stream via the byte counter.
+   */
+  async sftpUploadStream(
+    connId: string,
+    remotePath: string,
+    source: Readable,
+    opts: SshUploadStreamOpts = {},
+  ): Promise<SshUploadResult> {
+    const startedAt = Date.now();
+    const sourceContext = opts.sourceContext ?? 'mcp';
+    await this.acquireSlot(connId);
+    let client: Ssh2Client | null = null;
+    try {
+      const connection = await this.sshService.findById(connId);
+      const limit = opts.limitBytes ?? (await this.resolveUploadLimit(connection));
+      if (opts.expectedSize !== undefined && opts.expectedSize > limit) {
+        // Pre-check before opening any network resource.
+        try { source.destroy(); } catch { /* noop */ }
+        throw new Error(`upload_too_large: ${opts.expectedSize} > ${limit}`);
+      }
+      const creds = await this.resolveCredentialsOrFail(connection);
+      client = await this.openClient(connection, creds);
+      const sftp = await this.openSftp(client);
+
+      if (opts.createDirs) {
+        await this.ensureParentDirs(sftp, remotePath);
+      }
+
+      const result = await this.runSftpWriteStream(
+        sftp,
+        remotePath,
+        source,
+        opts.mode ?? 0o644,
+        limit,
       );
 
       void this.writeAudit({
@@ -1319,6 +1408,35 @@ export class SshSessionService {
         ws.end();
       });
     });
+  }
+
+  /**
+   * Stream `source` to a remote file, enforcing `limitBytes` mid-flight. On any
+   * failure (limit exceeded, stream/SFTP error) the partial remote file is
+   * removed best-effort via sftp.unlink.
+   */
+  private async runSftpWriteStream(
+    sftp: SFTPWrapper,
+    remotePath: string,
+    source: Readable,
+    mode: number,
+    limitBytes: number,
+  ): Promise<SshUploadResult> {
+    const ws = sftp.createWriteStream(remotePath, { mode });
+    try {
+      const bytesWritten = await pipeToSftpWithLimit(ws, source, limitBytes);
+      return { bytesWritten, remotePath };
+    } catch (err) {
+      // Best-effort cleanup of the partial remote file.
+      await new Promise<void>((resolve) => {
+        try {
+          sftp.unlink(remotePath, () => resolve());
+        } catch {
+          resolve();
+        }
+      });
+      throw err;
+    }
   }
 
   private runSftpRead(

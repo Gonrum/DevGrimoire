@@ -16,6 +16,7 @@ import { SshSessionService } from './ssh-session.service';
 import { SshController } from './ssh.controller';
 import { SecretsModule } from '../secrets/secrets.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -36,6 +37,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
     SecretsModule,
     // Auth-failure push (T-385 §6.6) routes through NotificationsService.
     NotificationsModule,
+    // Global `ssh.maxUploadBytes` setting for the effective upload-limit resolver.
+    SettingsModule,
   ],
   controllers: [SshController],
   // SshSessionService is exported so main.ts can grab it via `app.get(...)`
