@@ -75,6 +75,13 @@ export class UpdateSshConnectionDto {
   @IsBoolean()
   notifyOnAuthFailure?: boolean;
 
+  // Per-connection SFTP upload cap in bytes. Server clamps to [1, 500 MB].
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(500 * 1024 * 1024)
+  maxUploadBytes?: number;
+
   // ----- Credential rotation ------------------------------------------------
   @IsOptional()
   @IsIn(['key', 'password'])

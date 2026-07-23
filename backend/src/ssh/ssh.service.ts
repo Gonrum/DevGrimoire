@@ -356,6 +356,10 @@ export class SshService {
       doc.notifyOnAuthFailure = dto.notifyOnAuthFailure;
       metaPatch.notifyOnAuthFailure = dto.notifyOnAuthFailure;
     }
+    if (dto.maxUploadBytes !== undefined) {
+      doc.maxUploadBytes = dto.maxUploadBytes;
+      metaPatch.maxUploadBytes = dto.maxUploadBytes;
+    }
 
     // Did the caller supply pick-existing rotation refs?
     const hasPickRotation =

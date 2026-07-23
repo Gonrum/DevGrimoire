@@ -78,6 +78,13 @@ export class SshConnection {
   // ---- Notification options -------------------------------------------------
   @Prop({ default: false })
   notifyOnAuthFailure: boolean;
+
+  // ---- Upload limit override ------------------------------------------------
+  // Optional per-connection cap for SFTP uploads, in bytes. Unset = fall back
+  // to the global `ssh.maxUploadBytes` setting (or the 10 MB default). Clamped
+  // to SFTP_HARD_MAX_UPLOAD_BYTES (500 MB) at every write-path regardless.
+  @Prop({ min: 1 })
+  maxUploadBytes?: number;
 }
 
 export const SshConnectionSchema = SchemaFactory.createForClass(SshConnection);

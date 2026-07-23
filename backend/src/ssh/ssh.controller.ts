@@ -238,6 +238,7 @@ export class SshController {
       lastConnectedAt: doc.lastConnectedAt,
       lastConnectError: doc.lastConnectError,
       notifyOnAuthFailure: doc.notifyOnAuthFailure,
+      maxUploadBytes: doc.maxUploadBytes,
       ...(inheritedFromCustomerId ? { inheritedFromCustomerId } : {}),
     };
   }
