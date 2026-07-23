@@ -100,6 +100,9 @@ export default function SshConnectionForm({
   const [notifyOnAuthFailure, setNotifyOnAuthFailure] = useState<boolean>(
     initial?.notifyOnAuthFailure ?? false,
   );
+  const [maxUploadMb, setMaxUploadMb] = useState<string>(
+    initial?.maxUploadBytes ? String(Math.round(initial.maxUploadBytes / (1024 * 1024))) : '',
+  );
 
   const [authTab, setAuthTab] = useState<AuthTab>(initial?.authMethod ?? 'key');
   // In create-mode the user picks inline-vs-pick. In edit-mode credentials are
@@ -117,10 +120,15 @@ export default function SshConnectionForm({
   const [passphraseSecretId, setPassphraseSecretId] = useState<string>('');
   const [passwordSecretId, setPasswordSecretId] = useState<string>('');
 
-  // Sync description once the detail-fetch resolves in edit-mode.
+  // Sync description + upload override once the detail-fetch resolves in edit-mode.
   useEffect(() => {
     if (detail) {
       setDescription(detail.description ?? '');
+      setMaxUploadMb(
+        detail.maxUploadBytes
+          ? String(Math.round(detail.maxUploadBytes / (1024 * 1024)))
+          : '',
+      );
     }
   }, [detail]);
 
@@ -293,6 +301,10 @@ export default function SshConnectionForm({
         description: description.trim() || undefined,
         tags,
         notifyOnAuthFailure,
+        maxUploadBytes:
+          maxUploadMb.trim() === ''
+            ? undefined
+            : Math.round(Number(maxUploadMb) * 1024 * 1024),
       };
       // Credential rotation — only when the user explicitly unlocked the
       // credentials section via the "Credentials ändern" confirm. Mirrors
@@ -455,6 +467,18 @@ export default function SshConnectionForm({
               />
               {t('ssh.form.notifyOnAuthFailure')}
             </label>
+
+            {isEdit && (
+              <FormInput
+                label={t('ssh.form.maxUpload')}
+                type="number"
+                min={1}
+                max={500}
+                value={maxUploadMb}
+                onChange={(e) => setMaxUploadMb(e.target.value)}
+                helpText={t('ssh.form.maxUploadHint')}
+              />
+            )}
 
             {/* Auth-method tabs */}
             <div className="border-t border-gray-800 pt-3">

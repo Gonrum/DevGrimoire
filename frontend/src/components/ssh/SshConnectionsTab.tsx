@@ -10,6 +10,7 @@ import SshAuditTab from './SshAuditTab';
 import SshConnectionForm from './SshConnectionForm';
 import SshFingerprintDialog from './SshFingerprintDialog';
 import SshTerminalModal from './SshTerminalModal';
+import SshUploadModal from './SshUploadModal';
 import { deriveSshStatus, SSH_STATUS_VISUAL } from './sshStatus';
 import { useSshConnections } from './hooks/useSshConnections';
 import {
@@ -40,6 +41,7 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [openTerminalConn, setOpenTerminalConn] = useState<SshConnectionListItem | null>(null);
   const [openAuditConn, setOpenAuditConn] = useState<SshConnectionListItem | null>(null);
+  const [uploadFor, setUploadFor] = useState<{ id: string; label: string } | null>(null);
   const [testConnection] = useTestSshConnection();
   const [acceptFingerprint] = useAcceptSshFingerprint();
   // When the quick-test surfaces a new (or mismatched) host key we render
@@ -221,6 +223,15 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
               {t('common.edit')}
             </Button>
           )}
+          {!inherited && (
+            <Button
+              size="xs"
+              variant="secondary"
+              onClick={() => setUploadFor({ id: conn.id, label: conn.label })}
+            >
+              ⬆ {t('ssh.tab.upload')}
+            </Button>
+          )}
           <Button
             size="xs"
             variant="secondary"
@@ -339,6 +350,14 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
           open={!!openAuditConn}
           onClose={() => setOpenAuditConn(null)}
           connection={openAuditConn}
+        />
+      )}
+
+      {uploadFor && (
+        <SshUploadModal
+          connectionId={uploadFor.id}
+          connectionLabel={uploadFor.label}
+          onClose={() => setUploadFor(null)}
         />
       )}
     </div>
