@@ -212,19 +212,28 @@ export class SshController {
     return new Promise((resolve, reject) => {
       const bb = Busboy({ headers: req.headers });
       const fields: Record<string, string> = {};
-      let handled = false;
-      let uploadPromise: Promise<{ bytesWritten: number; remotePath: string }> | null = null;
+      let fileSeen = false;
+      let settled = false;
+      const settle = (
+        fn: (v: never) => void,
+        arg: unknown,
+      ) => {
+        if (settled) return;
+        settled = true;
+        (fn as (v: unknown) => void)(arg);
+      };
 
       bb.on('field', (name, val) => {
         fields[name] = val;
       });
 
       bb.on('file', (_name, fileStream) => {
-        handled = true;
+        fileSeen = true;
         const remotePath = fields.remotePath;
         if (!remotePath) {
-          fileStream.resume(); // drain so the request can complete
-          reject(
+          fileStream.resume(); // drain so busboy can finish
+          settle(
+            reject,
             new BadRequestException(
               'remotePath field is required (send it before the file part)',
             ),
@@ -233,28 +242,30 @@ export class SshController {
         }
         const createDirs = fields.createDirs === 'true';
         const mode = fields.mode ? Number.parseInt(fields.mode, 10) : undefined;
-        uploadPromise = this.sshSessionService.sftpUploadStream(
-          id,
-          remotePath,
-          fileStream,
-          {
+        // Attach handlers directly so a rejection is never left unhandled and,
+        // crucially, drain the file part on failure — otherwise busboy never
+        // emits 'close' and the request hangs (e.g. connection-not-found).
+        this.sshSessionService
+          .sftpUploadStream(id, remotePath, fileStream, {
             createDirs,
             mode,
             sourceContext: 'rest',
             userId,
-          },
-        );
+          })
+          .then((res) => settle(resolve, res))
+          .catch((err) => {
+            fileStream.resume();
+            settle(reject, err);
+          });
       });
 
       bb.on('close', () => {
-        if (!handled) {
-          reject(new BadRequestException('no file part in multipart body'));
-          return;
+        if (!fileSeen) {
+          settle(reject, new BadRequestException('no file part in multipart body'));
         }
-        if (uploadPromise) uploadPromise.then(resolve, reject);
       });
 
-      bb.on('error', (err) => reject(err as Error));
+      bb.on('error', (err) => settle(reject, err));
       req.pipe(bb);
     });
   }
