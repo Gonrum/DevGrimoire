@@ -77,6 +77,7 @@ import { SshSessionService } from './ssh/ssh-session.service';
 import { SshConnectionDocument } from './ssh/schemas/ssh-connection.schema';
 import type { SshConnectionWithInheritance } from './ssh/ssh.service';
 import { SshAuditDocument } from './ssh/schemas/ssh-audit.schema';
+import { computeEffectiveUploadLimit } from './ssh/upload-limit.util';
 
 const RAG_BACKEND_URL = process.env.RAG_BACKEND_URL || 'http://localhost:3200';
 
@@ -2904,7 +2905,7 @@ const tools = [
   },
   {
     name: 'ssh_upload',
-    description: 'Upload a file to a remote server via SFTP. Max 10 MB per upload (hard cap). Use encoding="base64" for binary content (zips, images, etc.); otherwise utf-8 is assumed. Set createDirs=true to ensure parent directories exist (idempotent mkdir -p). Default file mode is 0o644. Connection lookup is identical to ssh_exec: connectionId wins; otherwise slug + (projectId|customerId).',
+    description: 'Upload a file to a remote server via SFTP by sending its content inline. Subject to the configured per-connection upload limit (default 10 MB; admin-configurable up to 500 MB). NOTE: inline content rides the JSON request body, so payloads above ~75 MB should use ssh_upload_from_attachment or ssh_upload_from_workspace instead. Use encoding="base64" for binary content (zips, images, etc.); otherwise utf-8 is assumed. Set createDirs=true to ensure parent directories exist (idempotent mkdir -p). Default file mode is 0o644. Connection lookup is identical to ssh_exec: connectionId wins; otherwise slug + (projectId|customerId).',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -2919,6 +2920,43 @@ const tools = [
         createDirs: { type: 'boolean', description: 'When true, mkdir -p the parent directories before writing. Default false.' },
       },
       required: ['remotePath', 'content'],
+    },
+  },
+  {
+    name: 'ssh_upload_from_attachment',
+    description: 'Stream an existing attachment (stored in MinIO) to a remote server via SFTP, without buffering it in memory. Subject to the connection\'s configured upload limit (up to 500 MB). Requires MinIO to be configured. Connection lookup is identical to ssh_upload.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        connectionId: { type: 'string', description: 'SshConnection MongoDB ID — wins if given' },
+        slug: { type: 'string', description: 'SshConnection slug (requires projectId or customerId)' },
+        projectId: { type: 'string', description: 'Required with slug for project-scoped connections' },
+        customerId: { type: 'string', description: 'Required with slug for customer-scoped connections' },
+        attachmentId: { type: 'string', description: 'Attachment MongoDB ID to stream from MinIO' },
+        remotePath: { type: 'string', description: 'Absolute path on the remote where the file will be written' },
+        mode: { type: 'number', description: 'File permission bits as a decimal number (e.g. 420 for 0o644). Default 420.' },
+        createDirs: { type: 'boolean', description: 'When true, mkdir -p the parent directories before writing. Default false.' },
+      },
+      required: ['attachmentId', 'remotePath'],
+    },
+  },
+  {
+    name: 'ssh_upload_from_workspace',
+    description: 'Stream a file from a DevGrimoire workspace to a remote server via SFTP, without buffering it in memory. Ideal for deploying build artifacts. Subject to the connection\'s configured upload limit (up to 500 MB). Connection lookup is identical to ssh_upload.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        connectionId: { type: 'string', description: 'SshConnection MongoDB ID — wins if given' },
+        slug: { type: 'string', description: 'SshConnection slug (requires projectId or customerId)' },
+        projectId: { type: 'string', description: 'Required with slug for project-scoped connections' },
+        customerId: { type: 'string', description: 'Required with slug for customer-scoped connections' },
+        workspaceId: { type: 'string', description: 'Workspace MongoDB ID to read the source file from' },
+        sourcePath: { type: 'string', description: 'Path of the file inside the workspace (relative to the workspace root)' },
+        remotePath: { type: 'string', description: 'Absolute path on the remote where the file will be written' },
+        mode: { type: 'number', description: 'File permission bits as a decimal number (e.g. 420 for 0o644). Default 420.' },
+        createDirs: { type: 'boolean', description: 'When true, mkdir -p the parent directories before writing. Default false.' },
+      },
+      required: ['workspaceId', 'sourcePath', 'remotePath'],
     },
   },
   {
@@ -6356,28 +6394,31 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           if (encoding !== 'utf-8' && encoding !== 'base64') {
             throw new Error(`encoding must be 'utf-8' or 'base64' (got ${encoding})`);
           }
-          // Pre-decode size cap: a 10 MB base64 string decodes to ~7.5 MB
-          // bytes — but the SAFE upper bound on the post-decode buffer is
-          // `content.length` itself, so any string longer than the hard cap
-          // can be rejected up-front without spending RAM on the decode.
-          //
-          // For base64 we use a tighter cap (HARD_MAX * 4/3 + padding slack):
-          // anything above that string length can only ever decode to >
-          // HARD_MAX bytes, so we reject before paying for ~30 MB of decode
-          // RAM. Post-decode check below stays as second line of defense.
-          const HARD_MAX = 10 * 1024 * 1024;
-          const BASE64_PRE_MAX = Math.ceil((HARD_MAX * 4) / 3) + 4;
-          if (encoding === 'utf-8' && content.length > HARD_MAX) {
-            throw new Error(`upload_too_large: utf-8 content length ${content.length} exceeds ${HARD_MAX} bytes`);
+          // Pre-decode size cap against the connection's EFFECTIVE limit
+          // (global setting > per-connection override > 10 MB default, clamped
+          // to 500 MB). `content.length` is a safe upper bound on the decoded
+          // buffer, so oversize strings are rejected before spending decode RAM.
+          // For base64 we use the tighter (limit * 4/3 + padding) string cap.
+          // The post-decode check stays as a second line of defense, and
+          // sftpUpload re-checks the decoded buffer against the same limit.
+          const rawLimit = await settingsService.get('ssh.maxUploadBytes');
+          const parsedLimit = rawLimit !== null ? Number.parseInt(rawLimit, 10) : NaN;
+          const effectiveLimit = computeEffectiveUploadLimit(
+            Number.isNaN(parsedLimit) ? null : parsedLimit,
+            conn.maxUploadBytes,
+          );
+          const BASE64_PRE_MAX = Math.ceil((effectiveLimit * 4) / 3) + 4;
+          if (encoding === 'utf-8' && content.length > effectiveLimit) {
+            throw new Error(`upload_too_large: utf-8 content length ${content.length} exceeds ${effectiveLimit} bytes`);
           }
           if (encoding === 'base64' && content.length > BASE64_PRE_MAX) {
-            throw new Error(`upload_too_large: base64 input length ${content.length} would decode beyond ${HARD_MAX} bytes`);
+            throw new Error(`upload_too_large: base64 input length ${content.length} would decode beyond ${effectiveLimit} bytes`);
           }
           const buf = encoding === 'base64'
             ? Buffer.from(content, 'base64')
             : Buffer.from(content, 'utf8');
-          if (buf.length > HARD_MAX) {
-            throw new Error(`upload_too_large: decoded length ${buf.length} exceeds ${HARD_MAX} bytes`);
+          if (buf.length > effectiveLimit) {
+            throw new Error(`upload_too_large: decoded length ${buf.length} exceeds ${effectiveLimit} bytes`);
           }
           const mode = optionalNumber(a, 'mode');
           const createDirs = optionalBoolean(a, 'createDirs');
@@ -6388,6 +6429,67 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             sourceContext: 'mcp',
             userId,
           });
+          break;
+        }
+        case 'ssh_upload_from_attachment': {
+          const conn = await resolveSshConnection(sshService, {
+            id: optionalString(a, 'connectionId'),
+            slug: optionalString(a, 'slug'),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
+          });
+          const attachmentId = requireString(a, 'attachmentId');
+          const remotePath = requireString(a, 'remotePath');
+          const mode = optionalNumber(a, 'mode');
+          const createDirs = optionalBoolean(a, 'createDirs');
+          const userId = requireUserId();
+          const { stream, attachment } = await attachmentsService.download(attachmentId);
+          result = await sshSessionService.sftpUploadStream(
+            conn._id.toString(),
+            remotePath,
+            stream,
+            {
+              mode,
+              createDirs,
+              sourceContext: 'mcp',
+              userId,
+              expectedSize: attachment.size,
+            },
+          );
+          break;
+        }
+        case 'ssh_upload_from_workspace': {
+          const conn = await resolveSshConnection(sshService, {
+            id: optionalString(a, 'connectionId'),
+            slug: optionalString(a, 'slug'),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
+          });
+          const workspaceId = requireString(a, 'workspaceId');
+          const sourcePath = requireString(a, 'sourcePath');
+          const remotePath = requireString(a, 'remotePath');
+          const mode = optionalNumber(a, 'mode');
+          const createDirs = optionalBoolean(a, 'createDirs');
+          const userId = requireUserId();
+          // Ownership check against the local DB before hitting the sidecar
+          // (the sidecar only enforces format-level path safety).
+          const ws = await workspacesService.findById(workspaceId);
+          const { stream, size } = await workspaceClient.readStream(
+            ws._id.toString(),
+            sourcePath,
+          );
+          result = await sshSessionService.sftpUploadStream(
+            conn._id.toString(),
+            remotePath,
+            stream,
+            {
+              mode,
+              createDirs,
+              sourceContext: 'mcp',
+              userId,
+              expectedSize: size || undefined,
+            },
+          );
           break;
         }
         case 'ssh_download': {
