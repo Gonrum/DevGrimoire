@@ -8,9 +8,13 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
+  UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
+import Busboy from 'busboy';
 import { Types } from 'mongoose';
 import { SshService } from './ssh.service';
 import { SshTestService } from './ssh-test.service';
@@ -28,6 +32,16 @@ import { AuditQueryDto } from './dto/audit-query.dto';
 import { ListSshConnectionsDto } from './dto/list-ssh-connections.dto';
 import { SshConnectionDocument } from './schemas/ssh-connection.schema';
 import { SshConnectionWithInheritance } from './ssh.service';
+import { SshSessionService } from './ssh-session.service';
+import { SettingsService } from '../settings/settings.service';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { UserRole } from '../auth/schemas/user.schema';
+import {
+  computeEffectiveUploadLimit,
+  SFTP_HARD_MAX_UPLOAD_BYTES,
+  SFTP_DEFAULT_UPLOAD_BYTES,
+} from './upload-limit.util';
 
 interface AuthRequest {
   user?: { userId?: string };
@@ -58,7 +72,52 @@ export class SshController {
     private readonly sshTestService: SshTestService,
     @InjectModel(SshAudit.name)
     private readonly auditModel: Model<SshAuditDocument>,
+    private readonly settingsService: SettingsService,
+    private readonly sshSessionService: SshSessionService,
   ) {}
+
+  // ---------------------------------------------------------------------------
+  // Global SSH config (admin-only)
+  // ---------------------------------------------------------------------------
+
+  @Get('ssh-config')
+  async getConfig() {
+    const raw = await this.settingsService.get('ssh.maxUploadBytes');
+    const parsed = raw !== null ? Number.parseInt(raw, 10) : NaN;
+    const maxUploadBytes = computeEffectiveUploadLimit(
+      Number.isNaN(parsed) ? null : parsed,
+      null,
+    );
+    return {
+      maxUploadBytes,
+      hardMaxBytes: SFTP_HARD_MAX_UPLOAD_BYTES,
+      defaultBytes: SFTP_DEFAULT_UPLOAD_BYTES,
+    };
+  }
+
+  @Put('ssh-config')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async setConfig(@Body() body: { maxUploadBytes?: number }) {
+    const value = body?.maxUploadBytes;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) {
+      throw new BadRequestException(
+        'maxUploadBytes must be a positive integer (bytes)',
+      );
+    }
+    if (value > SFTP_HARD_MAX_UPLOAD_BYTES) {
+      throw new BadRequestException(
+        `maxUploadBytes exceeds the 500 MB hard ceiling (${SFTP_HARD_MAX_UPLOAD_BYTES})`,
+      );
+    }
+    const clamped = Math.floor(value);
+    await this.settingsService.set('ssh.maxUploadBytes', String(clamped));
+    return {
+      maxUploadBytes: clamped,
+      hardMaxBytes: SFTP_HARD_MAX_UPLOAD_BYTES,
+      defaultBytes: SFTP_DEFAULT_UPLOAD_BYTES,
+    };
+  }
 
   // ---------------------------------------------------------------------------
   // Listing (nested + flat)
@@ -130,6 +189,74 @@ export class SshController {
   @HttpCode(204)
   async delete(@Param('id') id: string) {
     await this.sshService.delete(id);
+  }
+
+  /**
+   * Streaming file upload to a remote host via SFTP. The multipart file part is
+   * piped straight into sftpUploadStream — never buffered in full — so large
+   * files are handled within the connection's effective upload limit. The
+   * global express.json parser ignores multipart bodies, so busboy owns the
+   * raw request here. Send `remotePath` (and any `createDirs`/`mode`) as form
+   * fields BEFORE the file part so they are parsed when the file stream opens.
+   */
+  @Post('ssh-connections/:id/upload')
+  async uploadFile(
+    @Param('id') id: string,
+    @Req() req: Request & AuthRequest,
+  ): Promise<{ bytesWritten: number; remotePath: string }> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid SshConnection id');
+    }
+    const userId = req.user?.userId || 'system';
+
+    return new Promise((resolve, reject) => {
+      const bb = Busboy({ headers: req.headers });
+      const fields: Record<string, string> = {};
+      let handled = false;
+      let uploadPromise: Promise<{ bytesWritten: number; remotePath: string }> | null = null;
+
+      bb.on('field', (name, val) => {
+        fields[name] = val;
+      });
+
+      bb.on('file', (_name, fileStream) => {
+        handled = true;
+        const remotePath = fields.remotePath;
+        if (!remotePath) {
+          fileStream.resume(); // drain so the request can complete
+          reject(
+            new BadRequestException(
+              'remotePath field is required (send it before the file part)',
+            ),
+          );
+          return;
+        }
+        const createDirs = fields.createDirs === 'true';
+        const mode = fields.mode ? Number.parseInt(fields.mode, 10) : undefined;
+        uploadPromise = this.sshSessionService.sftpUploadStream(
+          id,
+          remotePath,
+          fileStream,
+          {
+            createDirs,
+            mode,
+            sourceContext: 'rest',
+            userId,
+          },
+        );
+      });
+
+      bb.on('close', () => {
+        if (!handled) {
+          reject(new BadRequestException('no file part in multipart body'));
+          return;
+        }
+        if (uploadPromise) uploadPromise.then(resolve, reject);
+      });
+
+      bb.on('error', (err) => reject(err as Error));
+      req.pipe(bb);
+    });
   }
 
   // ---------------------------------------------------------------------------
