@@ -1813,7 +1813,8 @@
     "pushCategory_ssh_auth_failure": "SSH-Auth fehlgeschlagen",
     "pushCategory_ssh_auth_failure_desc": "Wenn eine SSH-Verbindung mit aktiviertem \"Bei Auth-Failure benachrichtigen\" einen Authentifizierungsfehler meldet.",
     "pushCategory_recurring": "Wiederkehrende Aufgaben",
-    "pushCategory_recurring_desc": "Wenn eine Rite eine Notification-Action ausführt."
+    "pushCategory_recurring_desc": "Wenn eine Rite eine Notification-Action ausführt.",
+    "tabSsh": "SSH"
   },
   "chat": {
     "open": "Chat öffnen",
@@ -2413,7 +2414,8 @@
       "ownConnections": "Eigene Server",
       "inheritedConnections": "Vom Kunden geerbt",
       "inheritedBadge": "geerbt",
-      "inheritedHint": "Verwaltet beim Kunden — dort bearbeiten."
+      "inheritedHint": "Verwaltet beim Kunden — dort bearbeiten.",
+      "upload": "Upload"
     },
     "audit": {
       "title": "Audit-Log für {{label}}",
@@ -2524,7 +2526,9 @@
       "testSuccess": "Test erfolgreich.",
       "testFailed": "Test fehlgeschlagen: {{reason}}. Connection wurde gespeichert — du kannst Host/Username/Auth jetzt korrigieren und nochmal testen.",
       "saved": "Server gespeichert.",
-      "deleted": "Server gelöscht."
+      "deleted": "Server gelöscht.",
+      "maxUpload": "Max. Upload-Größe (MB)",
+      "maxUploadHint": "Leer = globaler Standard. Max. 500 MB."
     },
     "fingerprint": {
       "title": "Host-Key bestätigen",
@@ -2534,6 +2538,24 @@
       "accepted": "Host-Key gespeichert.",
       "mismatchTitle": "Der Host-Key hat sich geändert!",
       "mismatchBody": "Das kann ein Man-in-the-Middle-Angriff sein oder der Server wurde neu installiert. Bitte den neuen Fingerprint extern verifizieren, bevor du fortfährst."
+    },
+    "settings": {
+      "subtitle": "Maximale Größe für SFTP-Uploads (global). Pro Verbindung überschreibbar.",
+      "limitTitle": "Upload-Limit",
+      "limitLabel": "Max. Upload-Größe (MB)",
+      "limitHint": "Absolute Obergrenze: {{max}} MB.",
+      "invalid": "Bitte eine Zahl zwischen 1 und {{max}} MB angeben.",
+      "saved": "Upload-Limit gespeichert."
+    },
+    "upload": {
+      "title": "Upload → {{label}}",
+      "remotePath": "Ziel-Pfad (remote)",
+      "createDirs": "Übergeordnete Verzeichnisse anlegen",
+      "submit": "Hochladen",
+      "uploading": "Lädt hoch…",
+      "done": "Hochgeladen ({{bytes}} Bytes).",
+      "noFile": "Bitte eine Datei auswählen.",
+      "noPath": "Bitte einen Ziel-Pfad angeben."
     }
   }
 }

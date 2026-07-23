@@ -1038,6 +1038,8 @@ export interface SshConnectionListItem {
   lastConnectedAt?: string;
   lastConnectError?: SshLastConnectError;
   notifyOnAuthFailure: boolean;
+  /** Per-connection SFTP upload cap in bytes; unset = use the global default. */
+  maxUploadBytes?: number;
   /**
    * Set when this row was surfaced into a project-scoped listing because
    * its owning customer is linked to that project (T-386). Project tabs
@@ -1127,6 +1129,14 @@ export interface SshConnectionUpdateInput {
   privateKeySecretId?: string;
   passphraseSecretId?: string;
   passwordSecretId?: string;
+  maxUploadBytes?: number;
+}
+
+/** Global SSH upload-limit config from `GET/PUT /api/ssh-config`. */
+export interface SshUploadConfig {
+  maxUploadBytes: number;
+  hardMaxBytes: number;
+  defaultBytes: number;
 }
 
 export type SshAuditAction =
@@ -2189,6 +2199,54 @@ export const api = {
       const suffix = qs.toString() ? `?${qs.toString()}` : '';
       return request<SshAuditResponse>(`/ssh-connections/${id}/audit${suffix}`);
     },
+    getConfig: () => request<SshUploadConfig>('/ssh-config'),
+    setConfig: (maxUploadBytes: number) =>
+      request<SshUploadConfig>('/ssh-config', {
+        method: 'PUT',
+        body: JSON.stringify({ maxUploadBytes }),
+      }),
+    uploadFile: (
+      id: string,
+      file: File,
+      remotePath: string,
+      opts: { createDirs?: boolean; mode?: number } = {},
+      onProgress?: (fraction: number) => void,
+    ) =>
+      new Promise<{ bytesWritten: number; remotePath: string }>((resolve, reject) => {
+        const form = new FormData();
+        // Fields must precede the file part so the server parses them before
+        // the file stream opens.
+        form.append('remotePath', remotePath);
+        if (opts.createDirs) form.append('createDirs', 'true');
+        if (opts.mode !== undefined) form.append('mode', String(opts.mode));
+        form.append('file', file);
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${BASE_URL}/ssh-connections/${id}/upload`);
+        const token = getCurrentAccessToken();
+        if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.upload.onprogress = (e) => {
+          if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total);
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch {
+              resolve({ bytesWritten: 0, remotePath });
+            }
+          } else {
+            let msg = xhr.responseText;
+            try {
+              msg = JSON.parse(xhr.responseText).message || msg;
+            } catch {
+              /* keep raw */
+            }
+            reject(new Error(msg || `upload failed (${xhr.status})`));
+          }
+        };
+        xhr.onerror = () => reject(new Error('network error during upload'));
+        xhr.send(form);
+      }),
   },
   manuals: {
     list: (projectId: string, category?: string) => {

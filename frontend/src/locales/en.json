@@ -1813,7 +1813,8 @@
     "pushCategory_ssh_auth_failure": "SSH auth failure",
     "pushCategory_ssh_auth_failure_desc": "An SSH connection with \"Notify on auth failure\" enabled reported an authentication error.",
     "pushCategory_recurring": "Recurring tasks",
-    "pushCategory_recurring_desc": "When a recurring task fires a notification action."
+    "pushCategory_recurring_desc": "When a recurring task fires a notification action.",
+    "tabSsh": "SSH"
   },
   "chat": {
     "open": "Open chat",
@@ -2414,7 +2415,8 @@
       "ownConnections": "Own servers",
       "inheritedConnections": "Inherited from customer",
       "inheritedBadge": "inherited",
-      "inheritedHint": "Managed at the customer — edit there."
+      "inheritedHint": "Managed at the customer — edit there.",
+      "upload": "Upload"
     },
     "audit": {
       "title": "Audit log for {{label}}",
@@ -2525,7 +2527,9 @@
       "testSuccess": "Test succeeded.",
       "testFailed": "Test failed: {{reason}}. Connection was saved — you can correct host/username/auth and test again.",
       "saved": "Server saved.",
-      "deleted": "Server deleted."
+      "deleted": "Server deleted.",
+      "maxUpload": "Max upload size (MB)",
+      "maxUploadHint": "Empty = global default. Max 500 MB."
     },
     "fingerprint": {
       "title": "Confirm host key",
@@ -2535,6 +2539,24 @@
       "accepted": "Host key saved.",
       "mismatchTitle": "The host key has changed!",
       "mismatchBody": "This could be a man-in-the-middle attack or the server was reinstalled. Verify the new fingerprint externally before continuing."
+    },
+    "settings": {
+      "subtitle": "Maximum size for SFTP uploads (global). Overridable per connection.",
+      "limitTitle": "Upload limit",
+      "limitLabel": "Max upload size (MB)",
+      "limitHint": "Absolute ceiling: {{max}} MB.",
+      "invalid": "Please enter a number between 1 and {{max}} MB.",
+      "saved": "Upload limit saved."
+    },
+    "upload": {
+      "title": "Upload → {{label}}",
+      "remotePath": "Remote path",
+      "createDirs": "Create parent directories",
+      "submit": "Upload",
+      "uploading": "Uploading…",
+      "done": "Uploaded ({{bytes}} bytes).",
+      "noFile": "Please choose a file.",
+      "noPath": "Please enter a remote path."
     }
   }
 }

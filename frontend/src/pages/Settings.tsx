@@ -14,9 +14,10 @@ import ApiKeysSettings from '../components/settings/ApiKeysSettings';
 import MyLlmSettings from '../components/settings/MyLlmSettings';
 import LlmEndpointsSettings from '../components/settings/LlmEndpointsSettings';
 import OnboardingBanner from '../components/settings/OnboardingBanner';
+import SshSettings from '../components/settings/SshSettings';
 import { SettingsShell } from '../components/ui/SettingsShell';
 
-type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'llmEndpoints' | 'chatlog' | 'websearch' | 'users' | 'auditlog' | 'replication' | 'backups' | 'customerTemplates';
+type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'llmEndpoints' | 'chatlog' | 'websearch' | 'users' | 'auditlog' | 'replication' | 'backups' | 'customerTemplates' | 'ssh';
 
 export default function Settings() {
   const { t } = useTranslation();
@@ -39,6 +40,7 @@ export default function Settings() {
 
     { key: 'backups', label: t('settings.tabBackups'), group: t('settings.groupInfra'), adminOnly: true },
     { key: 'replication', label: t('settings.tabReplication'), group: t('settings.groupInfra'), adminOnly: true },
+    { key: 'ssh', label: t('settings.tabSsh'), group: t('settings.groupInfra'), adminOnly: true },
     { key: 'customerTemplates', label: t('settings.tabCustomerTemplates'), group: t('settings.groupInfra'), adminOnly: true },
 
     { key: 'notifications', label: t('settings.tabNotifications'), group: t('settings.groupObserve') },
@@ -63,6 +65,7 @@ export default function Settings() {
       {tab === 'backups' && isAdmin && <BackupSettings />}
       {tab === 'customerTemplates' && isAdmin && <CustomerTemplatesSettings />}
       {tab === 'replication' && isAdmin && <ReplicationSettings />}
+      {tab === 'ssh' && isAdmin && <SshSettings />}
     </SettingsShell>
   );
 }
