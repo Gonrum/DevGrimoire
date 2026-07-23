@@ -2,6 +2,7 @@ import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { AxiosError } from 'axios';
 import { firstValueFrom } from 'rxjs';
+import { Readable } from 'node:stream';
 
 export interface SidecarProcessResult {
   exitCode: number | null;
@@ -109,6 +110,41 @@ export class WorkspaceClient {
       '/read-base64',
       { workspaceId, path },
     );
+  }
+
+  /**
+   * Streaming binary read for large files. Uses native fetch (like execStream)
+   * so the body is not buffered; returns a Node Readable plus the declared
+   * size from Content-Length. Throws ServiceUnavailable if the sidecar is
+   * unconfigured, Error on non-2xx.
+   */
+  async readStream(
+    workspaceId: string,
+    path: string,
+  ): Promise<{ stream: Readable; size: number }> {
+    if (!this.token) {
+      throw new ServiceUnavailableException(
+        'Workspace sidecar is not configured — set WORKSPACE_API_TOKEN to enable workspace_* tools',
+      );
+    }
+    const res = await fetch(`${this.baseUrl}/read-stream`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ workspaceId, path }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`sidecar ${res.status} /read-stream: ${text}`);
+    }
+    if (!res.body) throw new Error('sidecar /read-stream: empty response body');
+    const size = Number.parseInt(res.headers.get('content-length') ?? '0', 10);
+    const stream = Readable.fromWeb(
+      res.body as import('node:stream/web').ReadableStream,
+    );
+    return { stream, size: Number.isNaN(size) ? 0 : size };
   }
 
   search(workspaceId: string, query: string, include?: string[], exclude?: string[]): Promise<SearchResponse> {

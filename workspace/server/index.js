@@ -14,6 +14,7 @@ const PORT = parseInt(process.env.PORT || '9000', 10);
 const ROOT = process.env.WORKSPACE_ROOT || '/workspaces';
 const TOKEN = process.env.WORKSPACE_API_TOKEN || '';
 const READ_MAX_BYTES = parseInt(process.env.READ_MAX_BYTES || `${5 * 1024 * 1024}`, 10);
+const STREAM_MAX_BYTES = parseInt(process.env.STREAM_MAX_BYTES || `${500 * 1024 * 1024}`, 10);
 const DEFAULT_TREE_DEPTH = 3;
 const MAX_TREE_DEPTH = 8;
 const MAX_TREE_ENTRIES = 5000;
@@ -330,6 +331,42 @@ app.post('/read-base64', async (req, res) => {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'file not found' });
     res.status(400).json({ error: err.message });
   }
+});
+
+/**
+ * Streaming download for large files (SFTP uploads etc.). Unlike /read, this
+ * pipes the file straight to the response — no full-buffer, no base64 — so it
+ * supports files far larger than READ_MAX_BYTES (capped at STREAM_MAX_BYTES,
+ * default 500 MB). Same path-safety rules as /read.
+ */
+app.post('/read-stream', async (req, res) => {
+  const id = requireWorkspaceId(req, res); if (!id) return;
+  const requested = req.body?.path;
+  if (typeof requested !== 'string' || !requested) {
+    return res.status(400).json({ error: 'path must be a non-empty string' });
+  }
+  let target;
+  try {
+    target = await resolveInsideWorkspace(id, requested);
+    const stat = await fsp.stat(target);
+    if (!stat.isFile()) return res.status(400).json({ error: 'path is not a regular file' });
+    if (stat.size > STREAM_MAX_BYTES) {
+      return res.status(413).json({ error: `file too large (>${STREAM_MAX_BYTES} bytes)`, size: stat.size });
+    }
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Length', String(stat.size));
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'file not found' });
+    return res.status(400).json({ error: err.message });
+  }
+  const stream = fs.createReadStream(target);
+  // Abort the read if the client disconnects mid-stream.
+  req.on('close', () => { try { stream.destroy(); } catch { /* noop */ } });
+  stream.on('error', (err) => {
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+    else res.destroy(err);
+  });
+  stream.pipe(res);
 });
 
 app.post('/tree', async (req, res) => {
