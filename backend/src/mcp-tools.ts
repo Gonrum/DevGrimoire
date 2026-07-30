@@ -78,6 +78,10 @@ import { SshConnectionDocument } from './ssh/schemas/ssh-connection.schema';
 import type { SshConnectionWithInheritance } from './ssh/ssh.service';
 import { SshAuditDocument } from './ssh/schemas/ssh-audit.schema';
 import { computeEffectiveUploadLimit } from './ssh/upload-limit.util';
+import {
+  assertSha256Matches,
+  decodeBase64Strict,
+} from './ssh/upload-integrity.util';
 
 const RAG_BACKEND_URL = process.env.RAG_BACKEND_URL || 'http://localhost:3200';
 
@@ -2905,7 +2909,7 @@ const tools = [
   },
   {
     name: 'ssh_upload',
-    description: 'Write a file to a remote server via SFTP from content supplied inline. USE ONLY FOR CONTENT YOU AUTHOR YOURSELF — config files, scripts, patches, .env, unit files. For a file that already exists as bytes (tarball, zip, image, build artifact) use ssh_upload_from_workspace, ssh_upload_from_attachment, or the REST endpoint POST /api/ssh-connections/:id/upload instead. Reason: inline content has to be re-emitted token by token, and a single dropped or altered character in a base64 payload decodes SILENTLY into a corrupt remote file — no error, wrong bytes. Splitting a binary into smaller chunks does NOT help; it multiplies the risk. The practical ceiling here is the output-token budget (a few hundred KB at most), not the configured upload limit (default 10 MB, admin-configurable up to 500 MB, enforced on the decoded bytes). Use encoding="base64" for binary content (zips, images, etc.); otherwise utf-8 is assumed. Set createDirs=true to ensure parent directories exist (idempotent mkdir -p). Default file mode is 0o644. Connection lookup is identical to ssh_exec: connectionId wins; otherwise slug + (projectId|customerId).',
+    description: 'Write a file to a remote server via SFTP from content supplied inline. USE ONLY FOR CONTENT YOU AUTHOR YOURSELF — config files, scripts, patches, .env, unit files. For a file that already exists as bytes (tarball, zip, image, build artifact) use ssh_upload_from_workspace, ssh_upload_from_attachment, or the REST endpoint POST /api/ssh-connections/:id/upload instead. Reason: inline content has to be re-emitted token by token, and a single dropped or altered character in a base64 payload decodes SILENTLY into a corrupt remote file — no error, wrong bytes. Splitting a binary into smaller chunks does NOT help; it multiplies the risk. The practical ceiling here is the output-token budget (a few hundred KB at most), not the configured upload limit (default 10 MB, admin-configurable up to 500 MB, enforced on the decoded bytes). Use encoding="base64" for binary content (zips, images, etc.); otherwise utf-8 is assumed. Set createDirs=true to ensure parent directories exist (idempotent mkdir -p). Default file mode is 0o644. Pass sha256 whenever the bytes come from an existing file — the call then fails loudly instead of writing garbage, and the digest of what was written is always returned. If no workspace/attachment/REST route is available and you must move an existing file inline anyway, do it as VERIFIED CHUNKS: first call append=false with the sha256 of chunk 1, every following call append=true with the sha256 of that chunk; on checksum_mismatch re-send only the failed chunk, and confirm the assembled file with `ssh_exec sha256sum <remotePath>` at the end. Send chunks strictly one at a time — parallel appends to the same remotePath interleave and corrupt the result. Connection lookup is identical to ssh_exec: connectionId wins; otherwise slug + (projectId|customerId).',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -2914,10 +2918,12 @@ const tools = [
         projectId: { type: 'string', description: 'Required with slug for project-scoped connections' },
         customerId: { type: 'string', description: 'Required with slug for customer-scoped connections' },
         remotePath: { type: 'string', description: 'Absolute path on the remote where the file will be written' },
-        content: { type: 'string', description: 'File content. For encoding="utf-8" send the raw text; for encoding="base64" send the base64-encoded bytes.' },
+        content: { type: 'string', description: 'File content. For encoding="utf-8" send the raw text; for encoding="base64" send the base64-encoded bytes (line breaks are tolerated; any other stray character is rejected).' },
         encoding: { type: 'string', enum: ['utf-8', 'base64'], description: 'How `content` is encoded. Default "utf-8". Use "base64" for binary.' },
         mode: { type: 'number', description: 'File permission bits as a decimal number (e.g. 420 for 0o644, 493 for 0o755). Default 420.' },
         createDirs: { type: 'boolean', description: 'When true, mkdir -p the parent directories before writing. Default false.' },
+        sha256: { type: 'string', description: 'Expected sha256 (hex) of the DECODED bytes — of this chunk when append=true, of the whole file otherwise. Verified before anything is written: on mismatch the call fails with checksum_mismatch and the remote file is left untouched. Always send this when the content came from an existing file.' },
+        append: { type: 'boolean', description: 'When true, append to the remote file instead of overwriting it (creates it if absent). Default false. The upload limit is then enforced against the resulting total size, not the chunk.' },
       },
       required: ['remotePath', 'content'],
     },
@@ -6414,18 +6420,29 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           if (encoding === 'base64' && content.length > BASE64_PRE_MAX) {
             throw new Error(`upload_too_large: base64 input length ${content.length} would decode beyond ${effectiveLimit} bytes`);
           }
+          // Strict decode: the lenient Buffer.from(str,'base64') would swallow
+          // a dropped/garbled character and produce plausible-but-wrong bytes,
+          // which is exactly how an inline upload silently corrupts a file.
           const buf = encoding === 'base64'
-            ? Buffer.from(content, 'base64')
+            ? decodeBase64Strict(content)
             : Buffer.from(content, 'utf8');
           if (buf.length > effectiveLimit) {
             throw new Error(`upload_too_large: decoded length ${buf.length} exceeds ${effectiveLimit} bytes`);
           }
+          // Verified before any remote handle is opened, so a mismatch never
+          // leaves a truncated file behind.
+          const expectedSha256 = optionalString(a, 'sha256');
+          if (expectedSha256 !== undefined) {
+            assertSha256Matches(expectedSha256, buf);
+          }
           const mode = optionalNumber(a, 'mode');
           const createDirs = optionalBoolean(a, 'createDirs');
+          const append = optionalBoolean(a, 'append');
           const userId = requireUserId();
           result = await sshSessionService.sftpUpload(conn._id.toString(), remotePath, buf, {
             mode,
             createDirs,
+            append,
             sourceContext: 'mcp',
             userId,
           });

@@ -56,7 +56,8 @@
     "check:research-topic-scope-default": "node scripts/research-topic-scope-default-check.cjs",
     "check:stack-schema": "node scripts/stack-schema-check.cjs",
     "check:stack-markdown": "node scripts/stack-markdown-check.cjs",
-    "check:stack-chat-tools": "node scripts/stack-chat-tools-check.cjs"
+    "check:stack-chat-tools": "node scripts/stack-chat-tools-check.cjs",
+    "check:ssh-upload-integrity": "node scripts/ssh-upload-integrity-check.cjs"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.0",

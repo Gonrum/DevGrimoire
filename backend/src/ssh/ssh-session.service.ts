@@ -24,6 +24,7 @@ import {
   computeEffectiveUploadLimit,
   pipeToSftpWithLimit,
 } from './upload-limit.util';
+import { sha256Hex } from './upload-integrity.util';
 
 /**
  * Minimal injectable surface for `new ssh2.Client()`. Tests swap this for a
@@ -190,14 +191,30 @@ export interface SshUploadOpts {
   createDirs?: boolean;
   sourceContext?: Exclude<SshSessionSourceContext, 'terminal'>;
   userId?: string;
+  /**
+   * Append to an existing remote file instead of truncating it. Used for
+   * chunked inline uploads where each chunk is verified on its own. The
+   * effective upload limit is then checked against the resulting total size,
+   * not just the chunk — otherwise many small appends would walk past it.
+   */
+  append?: boolean;
 }
 
 export interface SshUploadResult {
   bytesWritten: number;
   remotePath: string;
+  /**
+   * sha256 of the bytes written by this call (for append: of the chunk, not
+   * the resulting file). Set on the buffer path; the streaming paths do not
+   * hash their source.
+   */
+  sha256?: string;
 }
 
-export interface SshUploadStreamOpts extends SshUploadOpts {
+// `append` is deliberately excluded: the streaming paths always truncate, and
+// silently ignoring an append=true from a caller would be worse than a type
+// error. Chunked/append uploads go through the buffer path.
+export interface SshUploadStreamOpts extends Omit<SshUploadOpts, 'append'> {
   /** Known source size (bytes) for a cheap pre-check + audit. */
   expectedSize?: number;
   /** Pre-resolved effective limit; if omitted, resolveUploadLimit is called. */
@@ -784,12 +801,26 @@ export class SshSessionService {
         await this.ensureParentDirs(sftp, remotePath);
       }
 
+      // For append the chunk alone says nothing about the limit — what matters
+      // is what the file grows to. A missing remote file counts as size 0 so
+      // the first chunk creates it.
+      if (opts.append) {
+        const existing = await this.statAppendBaseline(sftp, remotePath);
+        if (existing + content.length > limit) {
+          throw new Error(
+            `upload_too_large: ${existing} existing + ${content.length} appended > ${limit}`,
+          );
+        }
+      }
+
       const result = await this.runSftpWrite(
         sftp,
         remotePath,
         content,
         opts.mode ?? 0o644,
+        opts.append ? 'a' : 'w',
       );
+      result.sha256 = sha256Hex(content);
 
       void this.writeAudit({
         connectionId: connection._id as Types.ObjectId,
@@ -1377,14 +1408,47 @@ export class SshSessionService {
     });
   }
 
+  /**
+   * Current remote size of `remotePath`, used as the append baseline.
+   *
+   * A missing file resolves to 0 (the normal first-chunk case). Any OTHER
+   * stat failure rejects instead of degrading to 0: without a trustworthy
+   * baseline the limit cannot be enforced, and silently assuming 0 would let
+   * repeated appends walk straight past the cap.
+   */
+  private statAppendBaseline(sftp: SFTPWrapper, remotePath: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const done = (err: unknown, stats?: { size?: number }) => {
+        if (err) {
+          // ssh2 reports SFTP status codes numerically; 2 = NO_SUCH_FILE.
+          const code = (err as { code?: number | string }).code;
+          if (code === 2 || code === 'ENOENT') {
+            resolve(0);
+            return;
+          }
+          const msg = err instanceof Error ? err.message : String(err);
+          reject(new Error(`append_stat_failed: cannot determine current size of ${remotePath} (${msg})`));
+          return;
+        }
+        resolve(typeof stats?.size === 'number' ? stats.size : 0);
+      };
+      try {
+        sftp.stat(remotePath, done);
+      } catch (err) {
+        done(err);
+      }
+    });
+  }
+
   private runSftpWrite(
     sftp: SFTPWrapper,
     remotePath: string,
     content: Buffer,
     mode: number,
+    flags: 'w' | 'a' = 'w',
   ): Promise<SshUploadResult> {
     return new Promise((resolve, reject) => {
-      const ws = sftp.createWriteStream(remotePath, { mode });
+      const ws = sftp.createWriteStream(remotePath, { mode, flags });
       let bytesWritten = 0;
       let settled = false;
       ws.on('error', (err: Error) => {

@@ -605,6 +605,139 @@ process.env.MCP_STDIO_USER_ID = TEST_USER_ID;
   });
 
   // -------------------------------------------------------------------------
+  // ssh_upload integrity (T-435): strict base64 + sha256 + append
+  // -------------------------------------------------------------------------
+  await check('ssh_upload rejects base64 that lost a character instead of writing corrupt bytes', async () => {
+    const projectId = new Types.ObjectId();
+    const conn = makeConn({ projectId, knownHostFingerprint: 'aa' });
+    const ssh = makeSshServiceStub({ connections: [conn] });
+    const session = makeSshSessionServiceStub();
+    const server = makeFakeServer();
+    mcpTools.registerMcpTools(server, buildServices({ sshService: ssh, sshSessionService: session }));
+    // The exact failure seen in the field: one character dropped mid-payload.
+    // Buffer.from would decode this happily into 1 byte less.
+    const b64 = Buffer.from('Hello DevGrimoire, a test payload!').toString('base64');
+    const res = unwrap(await server.invoke('ssh_upload', {
+      connectionId: conn._id.toString(),
+      remotePath: '/tmp/bin',
+      content: b64.slice(0, 12) + b64.slice(13),
+      encoding: 'base64',
+    }));
+    assert.ok(res.error, 'expected error');
+    assert.match(res.error, /invalid_base64/);
+    assert.equal(session.calls.upload.length, 0, 'nothing may be written');
+  });
+
+  await check('ssh_upload rejects stray characters in the base64 payload', async () => {
+    const projectId = new Types.ObjectId();
+    const conn = makeConn({ projectId, knownHostFingerprint: 'aa' });
+    const ssh = makeSshServiceStub({ connections: [conn] });
+    const session = makeSshSessionServiceStub();
+    const server = makeFakeServer();
+    mcpTools.registerMcpTools(server, buildServices({ sshService: ssh, sshSessionService: session }));
+    const res = unwrap(await server.invoke('ssh_upload', {
+      connectionId: conn._id.toString(),
+      remotePath: '/tmp/bin',
+      content: 'SGVsbG8h!!@#',
+      encoding: 'base64',
+    }));
+    assert.ok(res.error, 'expected error');
+    assert.match(res.error, /invalid_base64/);
+    assert.equal(session.calls.upload.length, 0);
+  });
+
+  await check('ssh_upload tolerates line breaks in base64 (base64 without -w0)', async () => {
+    const projectId = new Types.ObjectId();
+    const conn = makeConn({ projectId, knownHostFingerprint: 'aa' });
+    const ssh = makeSshServiceStub({ connections: [conn] });
+    const session = makeSshSessionServiceStub();
+    const server = makeFakeServer();
+    mcpTools.registerMcpTools(server, buildServices({ sshService: ssh, sshSessionService: session }));
+    const original = Buffer.from('a'.repeat(200));
+    const wrapped = original.toString('base64').replace(/(.{76})/g, '$1\n');
+    const res = unwrap(await server.invoke('ssh_upload', {
+      connectionId: conn._id.toString(),
+      remotePath: '/tmp/wrapped',
+      content: wrapped,
+      encoding: 'base64',
+    }));
+    assert.ok(!res.error, `unexpected error: ${res.error}`);
+    assert.ok(session.calls.upload[0].content.equals(original));
+  });
+
+  await check('ssh_upload verifies sha256 and refuses to write on mismatch', async () => {
+    const projectId = new Types.ObjectId();
+    const conn = makeConn({ projectId, knownHostFingerprint: 'aa' });
+    const ssh = makeSshServiceStub({ connections: [conn] });
+    const session = makeSshSessionServiceStub();
+    const server = makeFakeServer();
+    mcpTools.registerMcpTools(server, buildServices({ sshService: ssh, sshSessionService: session }));
+    const res = unwrap(await server.invoke('ssh_upload', {
+      connectionId: conn._id.toString(),
+      remotePath: '/tmp/cfg',
+      content: 'hello world',
+      sha256: 'f'.repeat(64),
+    }));
+    assert.ok(res.error, 'expected error');
+    assert.match(res.error, /checksum_mismatch/);
+    assert.equal(session.calls.upload.length, 0, 'mismatch must abort before the write');
+  });
+
+  await check('ssh_upload accepts a matching sha256 (case/whitespace tolerant)', async () => {
+    const projectId = new Types.ObjectId();
+    const conn = makeConn({ projectId, knownHostFingerprint: 'aa' });
+    const ssh = makeSshServiceStub({ connections: [conn] });
+    const session = makeSshSessionServiceStub();
+    const server = makeFakeServer();
+    mcpTools.registerMcpTools(server, buildServices({ sshService: ssh, sshSessionService: session }));
+    const digest = require('node:crypto')
+      .createHash('sha256').update(Buffer.from('hello world')).digest('hex');
+    const res = unwrap(await server.invoke('ssh_upload', {
+      connectionId: conn._id.toString(),
+      remotePath: '/tmp/cfg',
+      content: 'hello world',
+      sha256: `  ${digest.toUpperCase()}  `,
+    }));
+    assert.ok(!res.error, `unexpected error: ${res.error}`);
+    assert.equal(session.calls.upload.length, 1);
+  });
+
+  await check('ssh_upload rejects a malformed sha256 instead of ignoring it', async () => {
+    const projectId = new Types.ObjectId();
+    const conn = makeConn({ projectId, knownHostFingerprint: 'aa' });
+    const ssh = makeSshServiceStub({ connections: [conn] });
+    const session = makeSshSessionServiceStub();
+    const server = makeFakeServer();
+    mcpTools.registerMcpTools(server, buildServices({ sshService: ssh, sshSessionService: session }));
+    const res = unwrap(await server.invoke('ssh_upload', {
+      connectionId: conn._id.toString(),
+      remotePath: '/tmp/cfg',
+      content: 'hello world',
+      sha256: 'not-a-digest',
+    }));
+    assert.ok(res.error, 'expected error');
+    assert.match(res.error, /invalid_sha256/);
+    assert.equal(session.calls.upload.length, 0);
+  });
+
+  await check('ssh_upload passes append through to the session service', async () => {
+    const projectId = new Types.ObjectId();
+    const conn = makeConn({ projectId, knownHostFingerprint: 'aa' });
+    const ssh = makeSshServiceStub({ connections: [conn] });
+    const session = makeSshSessionServiceStub();
+    const server = makeFakeServer();
+    mcpTools.registerMcpTools(server, buildServices({ sshService: ssh, sshSessionService: session }));
+    const res = unwrap(await server.invoke('ssh_upload', {
+      connectionId: conn._id.toString(),
+      remotePath: '/tmp/chunked.bin',
+      content: 'chunk-2',
+      append: true,
+    }));
+    assert.ok(!res.error, `unexpected error: ${res.error}`);
+    assert.equal(session.calls.upload[0].opts.append, true);
+  });
+
+  // -------------------------------------------------------------------------
   // ssh_download
   // -------------------------------------------------------------------------
   await check('ssh_download auto-switches to base64 when buffer contains null byte', async () => {
