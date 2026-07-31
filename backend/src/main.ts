@@ -460,7 +460,17 @@ async function bootstrap() {
       });
     }
     mcpLogger.log(`sse session opened (${transport.sessionId.slice(0, 8)}…, total=${Object.keys(transports).length})`);
+    // The SDK's SSEServerTransport never writes keepalives, so an idle MCP
+    // session sends zero bytes between tool calls. Node-based clients kill the
+    // response body after undici's 300s bodyTimeout (measured:
+    // UND_ERR_BODY_TIMEOUT at 300.8s), which cost us ~80 session teardowns per
+    // hour and dropped any tool call in flight at the cut. Same `: ping`
+    // heartbeat the chat/research-agent/notes/workspaces streams already use.
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded) res.write(': ping\n\n');
+    }, 15000);
     res.on('close', () => {
+      clearInterval(heartbeat);
       delete transports[transport.sessionId];
       authenticatedSessions.delete(transport.sessionId);
       recentlyClosedSessions.set(transport.sessionId, Date.now());
@@ -468,7 +478,18 @@ async function bootstrap() {
       mcpLogger.log(`sse session closed (${transport.sessionId.slice(0, 8)}…, total=${Object.keys(transports).length})`);
     });
     const server = createMcpServer(services);
-    await server.connect(transport);
+    try {
+      await server.connect(transport);
+    } catch (err) {
+      // A bootstrap failure after start() wrote the SSE headers would strand the
+      // stream open forever — the heartbeat is exactly what stops the client's
+      // idle timeout from reaping it. End it so res.on('close') runs cleanup.
+      mcpLogger.error(
+        `sse bootstrap failed (${transport.sessionId.slice(0, 8)}…): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      clearInterval(heartbeat);
+      if (!res.writableEnded) res.end();
+    }
   });
 
   expressApp.post('/messages', async (req: any, res: any) => {
