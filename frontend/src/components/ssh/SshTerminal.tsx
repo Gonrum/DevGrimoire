@@ -113,6 +113,20 @@ export default function SshTerminal({
     onStateChangeRef.current = onConnectionStateChange;
   }, [onConnectionStateChange]);
 
+  // The token is a connect-time input only: the gateway verifies the JWT once
+  // during the WS upgrade and never re-checks it, so a rotation mid-session is
+  // irrelevant to an already-open socket. Holding it in a ref (instead of an
+  // effect dep) is what keeps it that way — `useAuth` refreshes at
+  // `expiry - 60s`, i.e. every 840s, and with `authToken` in the deps below
+  // that refresh tore down the WS and disposed the xterm instance, handing the
+  // user a blank new console mid-session. The audit log showed it plainly:
+  // 17 of the last 40 `terminal_close` rows sat at 840.0s ± 1s, because after
+  // the first forced remount every session starts in lockstep with the token.
+  const authTokenRef = useRef(authToken);
+  useEffect(() => {
+    authTokenRef.current = authToken;
+  }, [authToken]);
+
   // Stable identity (only touches refs + setState which is stable) → safe to
   // include in effect deps and lets us drop the broad eslint-suppress.
   const notifyState = useCallback((next: TerminalState) => {
@@ -153,7 +167,7 @@ export default function SshTerminal({
     setCloseInfo(null);
     notifyState('connecting');
 
-    const ws = new WebSocket(buildWsUrl(connectionId, authToken));
+    const ws = new WebSocket(buildWsUrl(connectionId, authTokenRef.current));
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
 
@@ -264,7 +278,10 @@ export default function SshTerminal({
     // Reconnect button works (build a fresh WS + Terminal). `notifyState` is
     // referentially stable (empty-deps `useCallback`, all callees are refs),
     // so listing it here does not re-run the connect logic.
-  }, [connectionId, authToken, reconnectKey, notifyState, t]);
+    // `authToken` deliberately stays OUT of these deps — see `authTokenRef`.
+    // The Reconnect path still picks up the freshest token because it reads
+    // the ref when it rebuilds the URL.
+  }, [connectionId, reconnectKey, notifyState, t]);
 
   const handleDisconnect = () => {
     try {
