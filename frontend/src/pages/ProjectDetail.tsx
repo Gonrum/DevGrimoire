@@ -30,6 +30,7 @@ import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents'
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import ProjectTabShell from '../components/ui/ProjectTabShell';
 import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
+import { workflowsApi } from '../api/workflows';
 import SshConnectionsTab from '../components/ssh/SshConnectionsTab';
 import ProjectAccessTab from '../components/projects/ProjectAccessTab';
 import ProjectHeader from '../components/projects/ProjectHeader';
@@ -56,6 +57,8 @@ export default function ProjectDetail() {
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [secrets, setSecrets] = useState<SecretListItem[]>([]);
   const [httpRequestCount, setHttpRequestCount] = useState(0);
+  const [sshCount, setSshCount] = useState(0);
+  const [workflowCount, setWorkflowCount] = useState(0);
   const [schemas, setSchemas] = useState<SchemaObject[]>([]);
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
   const [features, setFeatures] = useState<Feature[]>([]);
@@ -86,6 +89,16 @@ export default function ProjectDetail() {
   }, [searchParams]);
   useEffect(() => {
     if (id) api.httpRequests.listRequests(id).then((r) => setHttpRequestCount(r.length)).catch(() => {});
+  }, [id]);
+  // Kept out of the big Promise.all: the SSH list can 403 for users without
+  // access, and that must not take the whole project page down.
+  useEffect(() => {
+    if (id) api.ssh.listForProject(id).then((c) => setSshCount(c.length)).catch(() => {});
+  }, [id]);
+  // Same filter WorkflowProjectTab uses, so the badge can never disagree with
+  // the list it labels (archived ones are excluded server-side by default).
+  useEffect(() => {
+    if (id) workflowsApi.list({ scope: 'project', projectId: id }).then((w) => setWorkflowCount(w.length)).catch(() => {});
   }, [id]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -189,6 +202,8 @@ export default function ProjectDetail() {
         log: () => { api.logs.stats(id).then(setLogStats); setLogsKey((k) => k + 1); },
         commit: () => { api.commits.count(id).then((c) => setCommitCount(c.count)); setCommitsKey((k) => k + 1); },
         workspace: () => api.workspaces.list(id, 'active').then((wss) => setWorkspaceCount(wss.length)).catch(() => undefined),
+        'ssh-connection': () => api.ssh.listForProject(id).then((c) => setSshCount(c.length)).catch(() => undefined),
+        'workflow-definition': () => workflowsApi.list({ scope: 'project', projectId: id }).then((w) => setWorkflowCount(w.length)).catch(() => undefined),
         'doc-update-proposal': () => api.docUpdateProposals.list({ projectId: id, status: 'open', limit: 200 }).then((d) => setOpenDocProposalsCount(d.length)).catch(() => undefined),
         oracle: () => api.oracle.list({ projectId: id, status: 'open', limit: 500 }).then((d) => setOpenOracleCount(d.length)).catch(() => undefined),
       };
@@ -263,9 +278,9 @@ export default function ProjectDetail() {
         { key: 'environments', label: t('projectDetail.tab.environments'), count: environments.length },
         { key: 'secrets', label: t('projectDetail.tab.secrets'), count: secrets.length },
         { key: 'http-requests', label: t('projectDetail.tab.httpRequests'), count: httpRequestCount },
-        { key: 'ssh', label: t('projectDetail.tab.ssh'), count: 0 },
+        { key: 'ssh', label: t('projectDetail.tab.ssh'), count: sshCount },
         { key: 'recurring-tasks', label: t('projectDetail.tab.recurringTasks'), count: recurringTasks.filter((rt) => rt.active).length },
-        { key: 'workflows', label: t('nav.workflows'), count: 0 },
+        { key: 'workflows', label: t('nav.workflows'), count: workflowCount },
         { key: 'commits', label: t('projectDetail.tab.commits'), count: commitCount },
         { key: 'logs', label: t('projectDetail.tab.logs'), count: logStats?.total || 0 },
         // T-337: admin-only "who can access this" view.

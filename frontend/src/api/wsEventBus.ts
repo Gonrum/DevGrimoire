@@ -47,6 +47,7 @@ export interface ProjectChangeEvent {
     | 'ssh-audit'
     | 'healthcheck'
     | 'replication-status'
+    | 'workflow-definition'
     | 'workflow-run';
   action: 'created' | 'updated' | 'deleted';
   entityId?: string;
