@@ -53,11 +53,6 @@ function makeStore() {
   return new Map(); // id-string -> doc
 }
 
-function cloneDoc(doc) {
-  // Shallow-clone but keep ObjectId instances intact.
-  return Object.assign({}, doc);
-}
-
 function matchesFilter(doc, filter) {
   for (const [k, v] of Object.entries(filter || {})) {
     if (k === '_id') {

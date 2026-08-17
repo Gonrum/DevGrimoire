@@ -125,7 +125,7 @@ function makeSshServiceStub({ connections = [], latestAudit = null } = {}) {
       });
       return out;
     },
-    async findLatestAudit(connId) {
+    async findLatestAudit(_connId) {
       if (!latestAudit) return null;
       return latestAudit;
     },

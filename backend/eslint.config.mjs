@@ -16,18 +16,83 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: [
-      'dist/**',
-      'node_modules/**',
-      // Die .cjs-Checks liegen außerhalb der tsconfig und brauchen einen
-      // eigenen Config-Block (CommonJS, Node-Globals) — kommt in T-452.
-      'scripts/**',
-      'eslint.config.mjs',
-    ],
+    ignores: ['dist/**', 'node_modules/**', 'eslint.config.mjs'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
+    /*
+     * Die 52 `.cjs`-Checks (T-452). Sie liegen ausserhalb der tsconfig, sind
+     * CommonJS und laufen gegen `dist/` — deshalb ein eigener Block:
+     *
+     * - **kein** typed linting: `projectService` fände für diese Dateien kein
+     *   Programm und bräche mit "was not found by the project service" ab.
+     * - `tseslint.configs.disableTypeChecked` nimmt die typ-abhängigen Regeln
+     *   aus `recommendedTypeChecked` wieder heraus, die oben global gesetzt
+     *   wurden. Ohne das gilt hier ein Regelsatz, den ESLint gar nicht bedienen
+     *   kann.
+     * - Node-Globals (`require`, `module`, `process`, `console`, …) müssen
+     *   deklariert sein, sonst meldet `no-undef` jede Zeile.
+     *
+     * Was hier bleibt, ist `js.configs.recommended`: ungenutzte Variablen,
+     * unerreichbarer Code, doppelte Keys — genau die Klasse, die in einem
+     * Prüfskript still dazu führt, dass eine Zusicherung nie ausgeführt wird.
+     */
+    files: ['scripts/**/*.cjs'],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      sourceType: 'commonjs',
+      ecmaVersion: 2023,
+      globals: {
+        require: 'readonly',
+        module: 'writable',
+        exports: 'writable',
+        process: 'readonly',
+        console: 'readonly',
+        Buffer: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        setImmediate: 'readonly',
+        URL: 'readonly',
+        TextEncoder: 'readonly',
+        TextDecoder: 'readonly',
+        AbortController: 'readonly',
+        AbortSignal: 'readonly',
+        fetch: 'readonly',
+        structuredClone: 'readonly',
+      },
+    },
+    rules: {
+      /*
+       * `no-require-imports` kommt aus dem TS-Regelsatz und will ESM-Importe.
+       * Für eine `.cjs`-Datei ist das gegenstandslos: die Endung *bedeutet*
+       * CommonJS, und der Zweck dieser Skripte ist gerade, kompilierte Module
+       * aus `dist/` zu laden. Ein `import` wäre hier kein besserer Stil,
+       * sondern ein Syntaxfehler.
+       */
+      '@typescript-eslint/no-require-imports': 'off',
+      /*
+       * Die Checks bauen Test-Doubles: `createWriteStream(_p, _opts)` muss die
+       * Signatur des echten Aufrufs erfüllen, benutzt die Argumente aber nicht.
+       * Das ist keine Nachlässigkeit, sondern die Form der Attrappe — deshalb
+       * die verbreitete `_`-Konvention statt einer Abschaltung der Regel. Was
+       * ohne `_` ungenutzt bleibt, wird weiterhin gemeldet: genau dort steckt
+       * die tote Zusicherung, wegen der diese Skripte überhaupt gelintet
+       * werden.
+       */
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      }],
+    },
+  },
+  {
+    files: ['src/**/*.ts'],
     languageOptions: {
       parserOptions: {
         projectService: true,

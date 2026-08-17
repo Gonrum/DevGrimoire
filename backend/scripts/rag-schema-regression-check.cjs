@@ -133,7 +133,9 @@ async function main() {
     }
   } finally {
     if (fixtureId && CLEANUP) {
-      try { await call('schema_delete', { id: fixtureId }); } catch {}
+      // Aufräumen im finally: schlägt das Löschen fehl (Fixture schon weg,
+      // Verbindung tot), darf das den eigentlichen Prüfbefund nicht überdecken.
+      try { await call('schema_delete', { id: fixtureId }); } catch { /* egal */ }
     }
     await client.close();
   }

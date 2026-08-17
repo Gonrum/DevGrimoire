@@ -167,16 +167,8 @@ function makeSettingsStub({ maxUploadBytes = null } = {}) {
 // ---------------------------------------------------------------------------
 function makeFakeClient(behaviour = {}) {
   const handlers = {};
-  const channelHandlers = {};
-  let channel = null;
 
-  function emitChan(event, ...args) {
-    const set = channelHandlers[event];
-    if (!set) return;
-    for (const h of set) h(...args);
-  }
-
-  function makeChannel(opts = {}) {
+  function makeChannel(_opts = {}) {
     const stream = new EventEmitter();
     stream.stderr = new EventEmitter();
     stream.signal = (sig) => {
@@ -239,7 +231,6 @@ function makeFakeClient(behaviour = {}) {
       const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
       if (behaviour.captureExec) behaviour.captureExec.push({ command });
       const stream = makeChannel();
-      channel = stream;
       process.nextTick(() => {
         cb(undefined, stream);
         if (behaviour.onChannel) {
@@ -294,9 +285,9 @@ function makeFakeSftp({
     mkdir(p, cbOrAttrs, maybeCb) {
       const cb = typeof cbOrAttrs === 'function' ? cbOrAttrs : maybeCb;
       if (mkdirCalls) mkdirCalls.push(p);
-      cb && cb();
+      if (cb) cb();
     },
-    createWriteStream(p, opts) {
+    createWriteStream(_p, _opts) {
       const ws = new EventEmitter();
       ws.write = (chunk, cb) => {
         if (writeBehaviour && writeBehaviour.fail) {
@@ -312,7 +303,7 @@ function makeFakeSftp({
       };
       return ws;
     },
-    createReadStream(p, opts) {
+    createReadStream(_p, _opts) {
       const rs = new EventEmitter();
       rs.destroy = () => {};
       process.nextTick(() => {
@@ -462,7 +453,7 @@ function makeFakeSftp({
     // working.
     const realSetTimeout = global.setTimeout;
     let armed = 0;
-    global.setTimeout = (fn, ms) => {
+    global.setTimeout = (fn, _ms) => {
       armed += 1;
       // Fire immediately so the timeout path runs synchronously across
       // both arming sites (the outer timeout + the SIGKILL grace).
@@ -863,7 +854,7 @@ function makeFakeSftp({
 
     // 6th waiter needs the queue path; squash the 30s wait to ~0.
     const realSetTimeout = global.setTimeout;
-    global.setTimeout = (fn, ms) => realSetTimeout(fn, 0);
+    global.setTimeout = (fn, _ms) => realSetTimeout(fn, 0);
     try {
       await assert.rejects(
         () => svc['acquireSlot'](String(conn._id)),

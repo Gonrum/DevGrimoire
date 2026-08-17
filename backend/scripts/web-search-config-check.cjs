@@ -48,7 +48,7 @@ const svc = new WebSearchConfigService(settings, enc, null);
   await svc.setConfig({ activeProvider: 'tavily', providers: [{ type: 'tavily', apiKey: 'stored-secret' }] });
   const seenKeys = [];
   const originalInstantiate = svc.instantiateProvider.bind(svc);
-  svc.instantiateProvider = (type, apiKey, baseUrl) => {
+  svc.instantiateProvider = (type, apiKey, _baseUrl) => {
     seenKeys.push(apiKey);
     return { search: async () => [] };
   };

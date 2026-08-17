@@ -218,7 +218,7 @@ function instantiateService(questionModel, overrides = {}) {
 check('countOpenForTodo: invalid ObjectId returns empty without DB call', async () => {
   const model = makeQuestionModel();
   const existsSpy = { called: false };
-  model.exists = (filter) => {
+  model.exists = (_filter) => {
     existsSpy.called = true;
     return Promise.resolve(null);
   };
