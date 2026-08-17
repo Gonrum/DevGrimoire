@@ -26,11 +26,15 @@ export const HARNESS_SECTION_KEY_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export interface HarnessSectionInput {
   key: string;
   /**
-   * Typed as a widened string on purpose: a section written by a newer
-   * instance may carry a kind this build does not know yet, and the resolver
-   * has to pass it through rather than drop it.
+   * Bewusst `string`, nicht `HarnessSectionKind`: eine Section von einer neueren
+   * Instanz kann ein `kind` tragen, das dieser Build nicht kennt, und der
+   * Resolver muss sie durchreichen statt zu verwerfen. Die bekannten Werte
+   * stehen in `HARNESS_SECTION_KINDS` und werden im DTO geprüft.
+   *
+   * (`HarnessSectionKind | string` wäre dasselbe — `string` schluckt die Union —
+   * und wird von `no-redundant-type-constituents` zu Recht beanstandet.)
    */
-  kind: HarnessSectionKind | string;
+  kind: string;
   /** Omitted or empty means: inherit the title from the level below. */
   title?: string;
   body: string;
@@ -57,7 +61,8 @@ export interface ResolvedSectionOrigin {
 
 export interface ResolvedSection {
   key: string;
-  kind: HarnessSectionKind | string;
+  /** Siehe `HarnessSectionInput.kind` — bewusst offen für unbekannte Werte. */
+  kind: string;
   title: string;
   body: string;
   payload?: Record<string, unknown>;

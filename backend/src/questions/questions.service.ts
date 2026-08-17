@@ -7,6 +7,7 @@ import {
   BadRequestException,
   OnModuleInit,
 } from '@nestjs/common';
+import { errorMessage } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { FilterQuery, Model, Types } from 'mongoose';
@@ -102,7 +103,7 @@ export class QuestionsService implements OnModuleInit {
         await this.questionModel.ensureIndexes();
       }
     } catch (err) {
-      this.logger.warn(`Could not normalise question indexes: ${(err as Error).message}`);
+      this.logger.warn(`Could not normalise question indexes: ${errorMessage(err)}`);
     }
   }
 

@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { errorMessage } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
@@ -246,7 +247,7 @@ export class DocUpdateProposalsService {
     try {
       await this.detectForTodo(event.entityId);
     } catch (err) {
-      this.logger.warn(`Doc detection failed for todo ${event.entityId}: ${(err as Error).message}`);
+      this.logger.warn(`Doc detection failed for todo ${event.entityId}: ${errorMessage(err)}`);
     }
   }
 
@@ -372,7 +373,7 @@ export class DocUpdateProposalsService {
       try {
         created.push(await c.create());
       } catch (err) {
-        this.logger.warn(`Failed to create proposal: ${(err as Error).message}`);
+        this.logger.warn(`Failed to create proposal: ${errorMessage(err)}`);
       }
     }
     return created;

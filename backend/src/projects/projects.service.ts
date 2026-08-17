@@ -4,6 +4,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { errorMessage } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ModuleRef } from '@nestjs/core';
@@ -359,7 +360,7 @@ export class ProjectsService {
       ]);
     } catch (err) {
       throw new ServiceUnavailableException({
-        message: (err as Error).message || 'RAG search unavailable',
+        message: errorMessage(err) || 'RAG search unavailable',
         fallback: 'substring',
       });
     }

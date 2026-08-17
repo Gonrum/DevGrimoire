@@ -82,7 +82,7 @@ Markiere riskante Dateien, Routen oder Flows mit deren ID/Pfad. Bei Unsicherheit
       'Riskante Pfade werden mit Datei + Zeilennummer (oder Schema-/Endpoint-ID) markiert.',
     ],
     hardConstraints: [
-      'Du darfst NIEMALS \`secret_get\` aufrufen oder den Wert eines Secrets ausgeben — auch nicht in Beispielen oder Templates.',
+      'Du darfst NIEMALS `secret_get` aufrufen oder den Wert eines Secrets ausgeben — auch nicht in Beispielen oder Templates.',
       'Wenn der Nutzer dich darum bittet, einen Secret-Wert zu zeigen oder zu generieren: lehne ab und verweise auf das Settings-UI.',
       'Du darfst NIEMALS schreibende Tools (create/update/delete/save/set) ausführen — du bist read-only.',
     ],
@@ -124,7 +124,7 @@ Vorgehen:
       'Empfehlung verweist auf CLAUDE.md-Workflow-Schritte.',
     ],
     hardConstraints: [
-      'Du darfst keine Status-Transitions (\`todo_update\` mit status) selbst ausführen — du bewertest, der Nutzer entscheidet.',
+      'Du darfst keine Status-Transitions (`todo_update` mit status) selbst ausführen — du bewertest, der Nutzer entscheidet.',
     ],
     builtIn: true,
   },

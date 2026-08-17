@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { errorMessage, isDuplicateKeyError } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
@@ -102,7 +103,7 @@ export class KnowledgeGraphService {
         metadata: dto.metadata,
       });
     } catch (err) {
-      if ((err as { code?: number }).code === 11000) {
+      if (isDuplicateKeyError(err)) {
         // Duplicate — return existing
         const existing = await this.edgeModel
           .findOne({
@@ -263,7 +264,7 @@ export class KnowledgeGraphService {
     const timer = setTimeout(() => {
       this.debouncedProjects.delete(projectId);
       this.discoverForProject(projectId).catch((err) => {
-        this.logger.warn(`Graph rebuild failed for project ${projectId}: ${(err as Error).message}`);
+        this.logger.warn(`Graph rebuild failed for project ${projectId}: ${errorMessage(err)}`);
       });
     }, 1500);
     this.debouncedProjects.set(projectId, timer);
@@ -506,8 +507,8 @@ export class KnowledgeGraphService {
         if (res.upsertedCount && res.upsertedCount > 0) inserted++;
       } catch (err) {
         // Race condition on unique index can produce duplicate-key errors that are safe to ignore.
-        if ((err as { code?: number }).code !== 11000) {
-          this.logger.warn(`Failed to upsert edge: ${(err as Error).message}`);
+        if (!isDuplicateKeyError(err)) {
+          this.logger.warn(`Failed to upsert edge: ${errorMessage(err)}`);
         }
       }
     }

@@ -71,6 +71,7 @@ import { ApiKeysService } from './api-keys/api-keys.service';
 import { AuthService } from './auth/auth.service';
 import { JwtService } from '@nestjs/jwt';
 import WebSocket, { WebSocketServer } from 'ws';
+import { errorMessage, isRecord } from './common/narrow';
 import { RequestContext, RequestUser } from './common/request-context';
 import { EventsBusService, QuestionEvent } from './events/events-bus.service';
 import { ProjectChangeEvent } from './events/project-event';
@@ -122,6 +123,23 @@ function asResizeMessage(value: unknown): { cols: unknown; rows: unknown } | und
   if (value === null || typeof value !== 'object') return undefined;
   const msg = value as { type?: unknown; cols?: unknown; rows?: unknown };
   return msg.type === 'resize' ? { cols: msg.cols, rows: msg.rows } : undefined;
+}
+
+/**
+ * Ein einzelner String-Wert aus Query oder Header.
+ *
+ * Express typisiert Query-Werte als `string | string[] | ParsedQs | ParsedQs[]`
+ * und Header als `string | string[]`. Ein `as string` darauf ist eine Lüge:
+ * `?apiKey=a&apiKey=b` liefert ein Array, `?apiKey[x]=y` ein Objekt — beides
+ * lief vorher als „String" weiter in die Schlüsselprüfung. Genau dieselbe Lücke
+ * wurde im JwtAuthGuard beim `?token=`-Parameter gefunden.
+ *
+ * Mehrfach- und verschachtelte Werte gelten hier als „nicht gesetzt": ein JWT
+ * oder eine Session-Id ist niemals mehrwertig, und beide Wege endeten ohnehin
+ * in einer Ablehnung.
+ */
+function singleValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 /** JWT-Payload, wie Auth ihn signiert: Standard-`sub`, auf manchen Pfaden zusätzlich `userId`. */
@@ -406,7 +424,7 @@ async function bootstrap() {
     if (authHeader?.startsWith('Bearer cv_')) {
       apiKey = authHeader.slice(7);
     } else if (req.query?.apiKey) {
-      apiKey = req.query.apiKey as string;
+      apiKey = singleValue(req.query.apiKey);
     }
 
     if (!apiKey) {
@@ -458,7 +476,7 @@ async function bootstrap() {
     }
     // /messages requests belong to an SSE session authenticated on /sse — restore
     // both user AND apiKey so per-key tool allowlists keep being enforced.
-    const sessionId = req.query?.sessionId as string | undefined;
+    const sessionId = singleValue(req.query?.sessionId);
     const cached = sessionId ? authenticatedSessions.get(sessionId) : undefined;
     if (cached) {
       req.user = cached.user;
@@ -472,7 +490,7 @@ async function bootstrap() {
   // Streamable HTTP endpoint (protocol version 2025-11-25)
   expressApp.all('/mcp', async (req: McpRequest, res: Response) => {
     try {
-      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      const sessionId = singleValue(req.headers['mcp-session-id']);
       let transport: StreamableHTTPServerTransport;
 
       if (sessionId && transports[sessionId]) {
@@ -569,13 +587,13 @@ async function bootstrap() {
   });
 
   expressApp.post('/messages', async (req: McpRequest, res: Response) => {
-    const sessionId = req.query.sessionId as string;
+    const sessionId = singleValue(req.query.sessionId);
     // express typisiert `req.body` als `any`. JSON-RPC erlaubt als Id nur String
     // oder Number — alles andere wird verworfen. Das ist zugleich ein Fix: ein
     // Objekt als Id landete vorher per Stringifizierung als `[object Object]` im
     // Idempotenz-Key, wodurch *verschiedene* Requests fälschlich als Duplikat
     // abgewiesen wurden.
-    const rawRequestId: unknown = (req.body as { id?: unknown } | undefined)?.id;
+    const rawRequestId: unknown = isRecord(req.body) ? req.body.id : undefined;
     const requestId =
       typeof rawRequestId === 'string' || typeof rawRequestId === 'number'
         ? rawRequestId
@@ -601,11 +619,16 @@ async function bootstrap() {
       inFlightRequests.set(key, Date.now());
     }
 
-    let transport: SSEServerTransport | StreamableHTTPServerTransport | undefined =
-      transports[sessionId];
+    // Ohne sessionId gibt es keinen Transport — zur Laufzeit war
+    // `transports[undefined]` schon vorher `undefined`, das `as string` hat nur
+    // verdeckt, dass der Fall auftreten kann. Der else-Zweig unten behandelt ihn
+    // bereits korrekt und loggt „sessionId=missing".
+    let transport: SSEServerTransport | StreamableHTTPServerTransport | undefined = sessionId
+      ? transports[sessionId]
+      : undefined;
     // Grace window: cover the race where a POST hits while the close handler
     // hasn't finished deleting the transport yet.
-    if (!transport) {
+    if (!transport && sessionId) {
       transport = await waitForTransport(sessionId);
     }
 
@@ -621,7 +644,7 @@ async function bootstrap() {
       // Diagnostics so we can tell "unknown session" from "session was torn
       // down moments ago" the next time the transient bug surfaces.
       pruneRecentlyClosed();
-      const closedAt = recentlyClosedSessions.get(sessionId);
+      const closedAt = sessionId ? recentlyClosedSessions.get(sessionId) : undefined;
       const ageSec = closedAt ? Math.round((Date.now() - closedAt) / 1000) : null;
       mcpLogger.warn(
         `/messages rejected (sessionId=${sessionId ? sessionId.slice(0, 8) + '…' : 'missing'}, ` +
@@ -864,7 +887,7 @@ async function bootstrap() {
           ptyRows: initialRows,
         });
       } catch (err) {
-        const reason = (err as Error).message || 'ssh_connect_failed';
+        const reason = errorMessage(err) || 'ssh_connect_failed';
         // WS close codes 4000-4999 are reserved for application-defined
         // semantics. The spec (§4.3) mandates 4001 for host_key_mismatch;
         // we extend the mapping so the frontend can distinguish the

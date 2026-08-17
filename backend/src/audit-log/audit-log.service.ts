@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { errorMessage } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AuditLog, AuditLogDocument } from './schemas/audit-log.schema';
@@ -81,7 +82,7 @@ export class AuditLogService {
         userAgent: input.userAgent,
       });
     } catch (err) {
-      this.logger.warn(`Audit record failed for action "${input.action}": ${(err as Error).message}`);
+      this.logger.warn(`Audit record failed for action "${input.action}": ${errorMessage(err)}`);
     }
   }
 

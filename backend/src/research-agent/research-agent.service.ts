@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { errorMessage } from '../common/narrow';
 import { Types } from 'mongoose';
 import { RequestContext, RequestUser } from '../common/request-context';
 import { ChatLlmService, LlmMessageWithTools, OpenAiToolDef } from '../chat/chat-llm.service';
@@ -317,7 +318,7 @@ export class ResearchAgentService {
 
     if (topic.notifyOnComplete) {
       await this.sendCompletionNotification(topic, finalRun).catch((err) => {
-        this.logger.warn(`notifyOnComplete failed for run ${runId}: ${(err as Error).message}`);
+        this.logger.warn(`notifyOnComplete failed for run ${runId}: ${errorMessage(err)}`);
       });
     }
 

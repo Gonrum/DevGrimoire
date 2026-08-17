@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { errorMessage } from '../../common/narrow';
 import { HttpService } from '@nestjs/axios';
 import { SettingsService } from '../../settings/settings.service';
 import { EncryptionService } from '../../common/encryption.service';
@@ -126,7 +127,7 @@ export class WebSearchConfigService {
       const hits = await provider.search('test', { limit: 1 });
       return { ok: true, count: hits.length };
     } catch (err) {
-      return { ok: false, count: 0, error: (err as Error).message };
+      return { ok: false, count: 0, error: errorMessage(err) };
     }
   }
 
@@ -179,7 +180,7 @@ export class WebSearchConfigService {
     try {
       return this.encryption.decrypt(apiKeyEnc);
     } catch (err) {
-      this.logger.error(`Failed to decrypt API key for ${type}: ${(err as Error).message}`);
+      this.logger.error(`Failed to decrypt API key for ${type}: ${errorMessage(err)}`);
       return '';
     }
   }

@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
+import { errorMessage } from '../common/narrow';
 import { Response } from 'express';
 import { Readable } from 'stream';
 import { pipeline } from 'node:stream';
@@ -131,7 +132,7 @@ export class HttpRequestsController {
       });
     } catch (err) {
       if (!res.headersSent) {
-        res.status(502).json({ message: 'Upstream nicht erreichbar: ' + (err as Error).message });
+        res.status(502).json({ message: 'Upstream nicht erreichbar: ' + errorMessage(err) });
       } else {
         res.end();
       }

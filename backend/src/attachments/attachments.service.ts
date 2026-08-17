@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { errorMessage } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
@@ -124,7 +125,7 @@ export class AttachmentsService {
 
     // Async text extraction — don't await
     this.extractAndStoreText(attachment, file.buffer).catch((err) =>
-      this.logger.warn(`Text extraction failed for ${file.originalname}: ${(err as Error).message}`),
+      this.logger.warn(`Text extraction failed for ${file.originalname}: ${errorMessage(err)}`),
     );
 
     return attachment;
@@ -235,7 +236,7 @@ export class AttachmentsService {
     const attachment = await this.attachmentModel.findByIdAndDelete(id).exec();
     if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
     await this.minioService.removeObject(attachment.storageKey).catch((err) =>
-      this.logger.warn(`MinIO delete failed for ${attachment.storageKey}: ${(err as Error).message}`),
+      this.logger.warn(`MinIO delete failed for ${attachment.storageKey}: ${errorMessage(err)}`),
     );
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: attachment.projectId?.toString() ?? null,
@@ -252,7 +253,7 @@ export class AttachmentsService {
     if (attachments.length === 0) return;
     const keys = attachments.map((a) => a.storageKey);
     await this.minioService.removeObjects(keys).catch((err) =>
-      this.logger.warn(`MinIO batch delete failed: ${(err as Error).message}`),
+      this.logger.warn(`MinIO batch delete failed: ${errorMessage(err)}`),
     );
     await this.attachmentModel.deleteMany({ entityType, entityId }).exec();
   }
@@ -262,7 +263,7 @@ export class AttachmentsService {
     if (attachments.length === 0) return;
     const keys = attachments.map((a) => a.storageKey);
     await this.minioService.removeObjects(keys).catch((err) =>
-      this.logger.warn(`MinIO batch delete failed: ${(err as Error).message}`),
+      this.logger.warn(`MinIO batch delete failed: ${errorMessage(err)}`),
     );
     await this.attachmentModel.deleteMany({ projectId }).exec();
   }
@@ -272,7 +273,7 @@ export class AttachmentsService {
     if (attachments.length === 0) return;
     const keys = attachments.map((a) => a.storageKey);
     await this.minioService.removeObjects(keys).catch((err) =>
-      this.logger.warn(`MinIO batch delete failed: ${(err as Error).message}`),
+      this.logger.warn(`MinIO batch delete failed: ${errorMessage(err)}`),
     );
     await this.attachmentModel.deleteMany({ customerId }).exec();
   }
@@ -339,7 +340,7 @@ export class AttachmentsService {
         textContent = result.text;
         await parser.destroy();
       } catch (err) {
-        this.logger.warn(`PDF parsing failed for ${attachment.originalName}: ${(err as Error).message}`);
+        this.logger.warn(`PDF parsing failed for ${attachment.originalName}: ${errorMessage(err)}`);
       }
     }
 

@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { errorMessage } from '../common/narrow';
 import { Cron } from '@nestjs/schedule';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model } from 'mongoose';
@@ -64,7 +65,7 @@ export class BackupsService {
     try {
       await this.createBackup({ trigger: 'scheduled', mode: BackupMode.FULL_SYSTEM });
     } catch (err) {
-      this.logger.error(`Scheduled backup failed: ${(err as Error).message}`);
+      this.logger.error(`Scheduled backup failed: ${errorMessage(err)}`);
     }
   }
 
@@ -112,7 +113,7 @@ export class BackupsService {
         deletedObjects.push(...candidate.artifactKeys);
         await this.backupJobModel.findByIdAndDelete(candidate.jobId).exec();
       } catch (err) {
-        errors.push({ jobId: candidate.jobId, message: (err as Error).message });
+        errors.push({ jobId: candidate.jobId, message: errorMessage(err) });
       }
     }
 
@@ -208,7 +209,7 @@ export class BackupsService {
         finishedAt: new Date(),
       }, { new: true }).exec() as Promise<BackupJobDocument>;
     } catch (err) {
-      const message = (err as Error).message;
+      const message = errorMessage(err);
       await this.backupJobModel.findByIdAndUpdate(job._id, {
         status: BackupStatus.FAILED,
         error: message,
@@ -396,7 +397,7 @@ export class BackupsService {
         exists: false,
         sizeMatches: false,
         sha256Matches: false,
-        error: (err as Error).message,
+        error: errorMessage(err),
       };
     }
   }

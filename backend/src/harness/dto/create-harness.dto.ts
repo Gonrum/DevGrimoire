@@ -12,6 +12,7 @@ import {
   ValidatorConstraint,
   ValidatorConstraintInterface,
 } from 'class-validator';
+import { isRecord } from '../../common/narrow';
 import { HARNESS_SCOPES, HarnessScope } from '../harness.types';
 import { HarnessSectionDto } from './harness-section.dto';
 
@@ -26,7 +27,9 @@ const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
 @ValidatorConstraint({ name: 'harnessScopeOwner', async: false })
 export class HarnessScopeOwnerConstraint implements ValidatorConstraintInterface {
   validate(value: unknown, args: ValidationArguments): boolean {
-    const scope = (args.object as CreateHarnessDto).scope;
+    // `args.object` ist bei class-validator `object`; ein Cast auf das DTO wäre
+    // eine Behauptung. `isRecord` liest das Feld geprüft.
+    const scope = isRecord(args.object) ? args.object.scope : undefined;
     const requiredFor: HarnessScope = args.property === 'projectId' ? 'project' : 'customer';
 
     if (scope === requiredFor) {

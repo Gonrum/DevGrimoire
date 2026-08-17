@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { errorMessage } from '../common/narrow';
 import * as Minio from 'minio';
 import { Readable } from 'stream';
 
@@ -13,7 +14,10 @@ export class MinioService implements OnModuleInit {
     return this._enabled;
   }
 
-  async onModuleInit(): Promise<void> {
+  // Bewusst synchron: die Erreichbarkeitsprüfung läuft absichtlich im
+  // Hintergrund (siehe `void this.connect(...)` unten), es gibt hier also
+  // nichts zu awaiten. `OnModuleInit` erlaubt `void` genauso wie `Promise<void>`.
+  onModuleInit(): void {
     const endpoint = process.env.MINIO_ENDPOINT;
     if (!endpoint) {
       this.logger.warn('MINIO_ENDPOINT not set — file storage disabled');
@@ -60,7 +64,7 @@ export class MinioService implements OnModuleInit {
       this._enabled = true;
       this.logger.log(`MinIO connected → ${target}/${this.bucket}`);
     } catch (err) {
-      this.logger.error(`MinIO initialization failed: ${(err as Error).message} — file storage disabled`);
+      this.logger.error(`MinIO initialization failed: ${errorMessage(err)} — file storage disabled`);
     }
   }
 

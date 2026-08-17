@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { errorMessage, isRecord } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as webpush from 'web-push';
@@ -55,13 +56,18 @@ export class PushService {
           payload,
         );
         sent++;
-      } catch (err: any) {
+      } catch (err: unknown) {
         failed++;
-        if (err.statusCode === 404 || err.statusCode === 410) {
+        // web-push wirft ein WebPushError mit statusCode; 404/410 heissen
+        // „Endpoint existiert nicht mehr" und rechtfertigen das Löschen.
+        const statusCode = isRecord(err) && typeof err.statusCode === 'number'
+          ? err.statusCode
+          : undefined;
+        if (statusCode === 404 || statusCode === 410) {
           await this.subModel.deleteOne({ endpoint: sub.endpoint }).exec();
           this.logger.log(`Removed expired subscription: ${sub.endpoint.substring(0, 50)}...`);
         } else {
-          this.logger.error(`Push failed: ${err.message}`);
+          this.logger.error(`Push failed: ${errorMessage(err)}`);
         }
       }
     }

@@ -1,4 +1,5 @@
 import { readFileSync } from 'fs';
+import { errorMessage } from './common/narrow';
 import { resolve } from 'path';
 import { NestFactory } from '@nestjs/core';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -176,4 +177,10 @@ async function bootstrap() {
   await server.connect(transport);
 }
 
-bootstrap();
+bootstrap().catch((err: unknown) => {
+  // Vorher ein freischwebendes Promise: ein Startfehler des stdio-Servers kam als
+  // nackte UnhandledRejection heraus, ohne Hinweis worauf. Ausgabe auf stderr,
+  // weil stdout dem MCP-Protokoll gehört.
+  console.error('MCP stdio server konnte nicht starten:', errorMessage(err));
+  process.exit(1);
+});

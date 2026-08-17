@@ -4,7 +4,6 @@ import {
   HARNESS_MERGE_STRATEGIES,
   HARNESS_SCOPES,
   HARNESS_SECTION_KEY_PATTERN,
-  HARNESS_SECTION_KINDS,
   HarnessMergeStrategy,
   HarnessScope,
 } from '../harness.types';

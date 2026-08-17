@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { errorMessage } from '../common/narrow';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { QuestionsService } from './questions.service';
 
@@ -34,7 +35,7 @@ export class QuestionsScheduler {
         );
       }
     } catch (err) {
-      this.logger.warn(`Scheduler tick failed: ${(err as Error).message}`);
+      this.logger.warn(`Scheduler tick failed: ${errorMessage(err)}`);
     } finally {
       this.running = false;
     }

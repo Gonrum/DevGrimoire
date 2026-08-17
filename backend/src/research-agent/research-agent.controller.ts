@@ -14,6 +14,7 @@ import {
   Res,
   UnauthorizedException,
 } from '@nestjs/common';
+import { errorMessage } from '../common/narrow';
 import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import { ResearchTopicService } from './research-topic.service';
@@ -210,7 +211,7 @@ export class ResearchAgentController {
         send(terminalEventFrom(finalRun));
       }
     } catch (err) {
-      send({ type: 'error', message: (err as Error).message || 'unknown error' });
+      send({ type: 'error', message: errorMessage(err) || 'unknown error' });
     } finally {
       if (unsubscribe) unsubscribe();
       clearInterval(heartbeat);
@@ -309,7 +310,7 @@ export class ResearchAgentController {
         }
       }
     } catch (err) {
-      send({ type: 'error', message: (err as Error).message || 'unknown error' });
+      send({ type: 'error', message: errorMessage(err) || 'unknown error' });
     } finally {
       if (unsubscribe) unsubscribe();
       clearInterval(heartbeat);

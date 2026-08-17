@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { errorMessage } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CustomersService } from '../customers/customers.service';
@@ -143,22 +144,6 @@ function asStringArray(value: unknown, field: string): string[] | undefined {
     }
     return str;
   });
-}
-
-/**
- * Meldungstext eines unbekannten Wurfs. Vorher stand hier `(err as Error).message`
- * — bei allem, was kein `Error` ist, war das `undefined`, und die Warnung an den
- * Benutzer lautete wörtlich „Partial import for todos: undefined".
- *
- * Kein `JSON.stringify` als Rückfall: das wirft bei einem zyklischen Objekt, und
- * zwar hier im `catch`-Zweig, wo der Fehler dann die Antwort mitnimmt.
- */
-function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  const str = asString(err);
-  if (str !== undefined) return str;
-  if (typeof err === 'number' || typeof err === 'boolean') return String(err);
-  return 'unknown error';
 }
 
 @Injectable()

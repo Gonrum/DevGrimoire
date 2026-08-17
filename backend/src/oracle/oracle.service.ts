@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { errorMessage, isDuplicateKeyError } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
@@ -345,8 +346,8 @@ export class OracleService {
         if (res.upsertedCount && res.upsertedCount > 0) inserted++;
         else refreshed++;
       } catch (err) {
-        if ((err as { code?: number }).code !== 11000) {
-          this.logger.warn(`Failed to upsert oracle suggestion: ${(err as Error).message}`);
+        if (!isDuplicateKeyError(err)) {
+          this.logger.warn(`Failed to upsert oracle suggestion: ${errorMessage(err)}`);
         }
       }
     }
