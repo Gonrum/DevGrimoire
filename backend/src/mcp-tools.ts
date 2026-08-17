@@ -30,7 +30,14 @@ import { DependenciesService } from './dependencies/dependencies.service';
 import { FeaturesService } from './features/features.service';
 import { SoulsService } from './souls/souls.service';
 import { HarnessService } from './harness/harness.service';
-import { HARNESS_SCOPES, HARNESS_SECTION_KINDS, HARNESS_MERGE_STRATEGIES } from './harness/harness.types';
+import {
+  HARNESS_KEY_INSTRUCTIONS,
+  HARNESS_KEY_TOOL_USAGE,
+  HARNESS_MERGE_STRATEGIES,
+  HARNESS_SCOPES,
+  HARNESS_SECTION_KINDS,
+  HARNESS_SOUL_SECTIONS,
+} from './harness/harness.types';
 import { CommitsService } from './commits/commits.service';
 import { RagService } from './rag/rag.service';
 import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
@@ -155,23 +162,7 @@ const KNOWLEDGE_SCOPES: readonly NonNullable<CreateKnowledgeDto['scope']>[] = [
 ];
 const QUESTION_KNOWLEDGE_SCOPES = ['global', 'project'] as const;
 
-/*
- * Section-Keys, die die Migration (T-442) aus den bisherigen Quellen erzeugt.
- * `system_instructions_get` liest sie unter genau diesen Namen wieder aus —
- * beide Seiten müssen sich einig sein, sonst fällt der Wrapper still auf die
- * alten Quellen zurück und die Migration sieht wirkungslos aus.
- */
-const HARNESS_KEY_TOOL_USAGE = 'tool-usage';
-const HARNESS_KEY_INSTRUCTIONS = 'instructions';
-const SOUL_SECTIONS: ReadonlyArray<{ key: string; label: string }> = [
-  { key: 'vision', label: 'Vision' },
-  { key: 'principles', label: 'Principles' },
-  { key: 'conventions', label: 'Conventions' },
-  { key: 'communication', label: 'Communication' },
-  { key: 'boundaries', label: 'Boundaries' },
-  { key: 'workflow', label: 'Workflow' },
-  { key: 'quality', label: 'Quality' },
-];
+
 /*
  * Drei DTOs (question_create_followup_todo, doc_update_proposal_convert_to_todo,
  * oracle_convert_to_todo) tippen die Todo-Priorität als String-Literal-Union
@@ -5783,7 +5774,25 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const resolved = projectId
             ? await harnessService.resolve(projectId)
             : await harnessService.resolveGlobal();
-          res.harness = resolved;
+
+          /*
+           * `markdown` wird hier bewusst weggelassen.
+           *
+           * Es ist eine wortgleiche Zweitkopie genau der Bodies, die zwei
+           * Zeilen weiter unten schon in `sections` stehen. Gemessen an einem
+           * Projekt mit vollem Soul: die Antwort wuchs von 52.053 auf 157.414
+           * Zeichen — Faktor 3, weil jeder Body dreimal drinsteht (sections,
+           * markdown, Kompatibilitätsfeld). Ohne `markdown` sind es 2, und der
+           * Rest ist der bewusste Preis dafür, die Antwortstruktur für laufende
+           * Agenten-Sessions nicht zu brechen.
+           *
+           * Wer die gerenderte Fassung braucht, holt sie über `harness_get`.
+           */
+          res.harness = {
+            sections: resolved.sections,
+            suppressed: resolved.suppressed,
+            resolvedFrom: resolved.resolvedFrom,
+          };
 
           const sectionBody = (key: string): string | undefined => {
             const found = resolved.sections.find((section) => section.key === key);
@@ -5803,7 +5812,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               if (project?.instructions) res.projectInstructions = project.instructions;
             }
 
-            const harnessSoul = SOUL_SECTIONS.filter((s) => sectionBody(s.key)).map(
+            const harnessSoul = HARNESS_SOUL_SECTIONS.filter((s) => sectionBody(s.key)).map(
               (s) => `### ${s.label}\n${sectionBody(s.key) ?? ''}`,
             );
             if (harnessSoul.length > 0) {
@@ -5812,7 +5821,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               const soul = await soulsService.findByProject(projectId);
               if (soul) {
                 const soulObj = toPlainDoc(soul.toObject());
-                const soulParts = SOUL_SECTIONS.filter((s) => soulObj[s.key]).map(
+                const soulParts = HARNESS_SOUL_SECTIONS.filter((s) => soulObj[s.key]).map(
                   (s) => `### ${s.label}\n${asString(soulObj[s.key]) ?? ''}`,
                 );
                 if (soulParts.length > 0) {

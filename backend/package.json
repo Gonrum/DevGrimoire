@@ -64,7 +64,9 @@
     "check:chat-tool-definitions": "node scripts/chat-tool-definitions-check.cjs",
     "check:harness-schema": "node scripts/harness-schema-check.cjs",
     "check:harness-resolve": "node scripts/harness-resolve-units-check.cjs",
-    "check:harness-service": "node scripts/harness-service-units-check.cjs"
+    "check:harness-service": "node scripts/harness-service-units-check.cjs",
+    "check:harness-migrate": "node scripts/harness-migrate-units-check.cjs",
+    "harness:migrate": "node scripts/harness-migrate.cjs"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.0",
