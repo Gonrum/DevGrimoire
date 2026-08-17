@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model, Types } from 'mongoose';
+import { errorMessage } from '../common/narrow';
 import {
   ChatActivity,
   ChatActivityDocument,
@@ -78,8 +79,8 @@ export class ChatActivityService {
         hadImages: input.hadImages ?? false,
         userMessageLength: input.userMessageLength,
       });
-    } catch (err) {
-      this.logger.warn(`Failed to record chat activity: ${(err as Error).message}`);
+    } catch (err: unknown) {
+      this.logger.warn(`Failed to record chat activity: ${errorMessage(err)}`);
     }
   }
 
@@ -93,9 +94,14 @@ export class ChatActivityService {
     if (options.outcome) filter.outcome = options.outcome;
     if (options.provider) filter.provider = options.provider;
     if (options.startDate || options.endDate) {
-      filter.createdAt = {};
-      if (options.startDate) (filter.createdAt as Record<string, Date>).$gte = options.startDate;
-      if (options.endDate) (filter.createdAt as Record<string, Date>).$lte = options.endDate;
+      // Erst das Bereichsobjekt bauen, dann setzen — statt das leere Objekt in
+      // den Filter zu legen und per Assertion nachzufüllen. Die Grenzen werden
+      // nur gesetzt, wenn sie vorhanden sind: ein `$gte: undefined` würde von
+      // Mongoose aus der Query entfernt und die Abfrage still weiten.
+      const createdAt: { $gte?: Date; $lte?: Date } = {};
+      if (options.startDate) createdAt.$gte = options.startDate;
+      if (options.endDate) createdAt.$lte = options.endDate;
+      filter.createdAt = createdAt;
     }
     if (options.search) {
       const rx = new RegExp(this.escapeRegex(options.search), 'i');

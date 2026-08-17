@@ -9,6 +9,14 @@ export interface UsageInput {
   durationMs: number; status: 'ok' | 'error' | 'cancelled'; error?: string | null;
 }
 
+/** Ergebniszeile der `$group`-Aggregation in `summary()`. */
+export interface UsagePerEndpoint {
+  endpointId: string;
+  totalTokens: number;
+  errors: number;
+  count: number;
+}
+
 @Injectable()
 export class LlmUsageService {
   constructor(@InjectModel(LlmUsageRecord.name) private readonly model: Model<LlmUsageDocument>) {}
@@ -21,8 +29,11 @@ export class LlmUsageService {
     return this.model.find().sort({ ts: -1 }).limit(limit).exec();
   }
 
-  async summary(): Promise<{ perEndpoint: Array<{ endpointId: string; totalTokens: number; errors: number; count: number }> }> {
-    const perEndpoint = await this.model.aggregate([
+  async summary(): Promise<{ perEndpoint: UsagePerEndpoint[] }> {
+    // Der Ergebnistyp einer Aggregation ist für Mongoose nicht ableitbar; das
+    // Typargument ist der dafür vorgesehene Weg. Vorher lief das `any[]` der
+    // Aggregation ungeprüft in den deklarierten Rückgabetyp.
+    const perEndpoint = await this.model.aggregate<UsagePerEndpoint>([
       { $group: {
         _id: '$endpointId',
         totalTokens: { $sum: '$totalTokens' },

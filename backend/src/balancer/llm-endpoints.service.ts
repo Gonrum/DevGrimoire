@@ -3,8 +3,11 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { LlmEndpoint, LlmEndpointDocument } from './schemas/llm-endpoint.schema';
 import { EncryptionService } from '../common/encryption.service';
+import { errorMessage } from '../common/narrow';
+import { readModelIds, readOllamaModelNames } from './llm-responses';
 import {
   LlmProviderKind, LlmPurpose, PoolEndpoint, LLM_PROVIDER_KINDS, LLM_PURPOSES,
+  isLlmPurpose, toProviderKind,
 } from './balancer.types';
 
 export interface LlmEndpointInput {
@@ -51,18 +54,16 @@ export function resolveApiKeyEnc(
   return enc.encrypt(incoming);
 }
 
-/** Parse model ids from an upstream models-listing response, per provider. */
+/**
+ * Model-Ids einer Anbieter-Antwort, je Protokoll. Die eigentlichen Leser liegen
+ * in `llm-responses.ts` — dieselbe Liste wird auch in `chat/chat-llm.service.ts`
+ * (Endpoint-Test) gebraucht und war dort ein zweites Mal per Assertion gelesen.
+ */
 function extractModelIds(provider: LlmProviderKind, json: unknown): string[] {
-  const o = json as Record<string, unknown> | null;
-  if (!o || typeof o !== 'object') return [];
-  if (provider === 'ollama') {
-    // Ollama /api/tags → { models: [{ name: "llama3:8b" }] }
-    const arr = Array.isArray(o.models) ? o.models : [];
-    return arr.map((m) => (m as Record<string, unknown>)?.name).filter((n): n is string => typeof n === 'string');
-  }
+  // Ollama /api/tags → { models: [{ name: "llama3:8b" }] }
+  if (provider === 'ollama') return readOllamaModelNames(json);
   // OpenAI-compatible / OpenAI / Anthropic /v1/models → { data: [{ id: "..." }] }
-  const arr = Array.isArray(o.data) ? o.data : [];
-  return arr.map((m) => (m as Record<string, unknown>)?.id).filter((n): n is string => typeof n === 'string');
+  return readModelIds(json);
 }
 
 function clampConcurrency(n: number | undefined): number {
@@ -77,20 +78,34 @@ export class LlmEndpointsService {
     private readonly encryption: EncryptionService,
   ) {}
 
+  /**
+   * Schema-Felder werden über den Klassentyp gelesen, nicht direkt am Dokument.
+   *
+   * Grund: `HydratedDocument` ist die Schnittmenge aus Schema **und**
+   * `mongoose.Document`, und `Document` hat eine Methode `model()`. Der Typ von
+   * `doc.model` ist deshalb `string & (…) => Model<…>` — der Linter meldete hier
+   * zu Recht `unbound-method`. Zur Laufzeit gewinnt der Schema-Getter, das
+   * Verhalten war also korrekt; über `LlmEndpoint` ist auch der Typ wieder
+   * `string`.
+   */
   toPublic(doc: LlmEndpointDocument): LlmEndpointPublic {
+    const fields: LlmEndpoint = doc;
     return {
       id: String(doc._id),
-      label: doc.label,
-      provider: doc.provider as LlmProviderKind,
-      baseUrl: doc.baseUrl,
-      model: doc.model,
-      hasApiKey: !!doc.apiKeyEnc && doc.apiKeyEnc.length > 0,
-      purposes: (doc.purposes as LlmPurpose[]) ?? [],
-      visionCapable: !!doc.visionCapable,
-      concurrency: doc.concurrency,
-      priority: doc.priority,
-      timeoutMs: doc.timeoutMs,
-      enabled: doc.enabled,
+      label: fields.label,
+      provider: toProviderKind(fields.provider),
+      baseUrl: fields.baseUrl,
+      model: fields.model,
+      hasApiKey: !!fields.apiKeyEnc && fields.apiKeyEnc.length > 0,
+      // `purposes` ist im Schema `string[]`; die Enum-Validierung von Mongoose
+      // greift erst beim Schreiben. Ein Altbestand mit unbekanntem Wert wird
+      // hier verworfen statt als `LlmPurpose` behauptet.
+      purposes: (fields.purposes ?? []).filter(isLlmPurpose),
+      visionCapable: !!fields.visionCapable,
+      concurrency: fields.concurrency,
+      priority: fields.priority,
+      timeoutMs: fields.timeoutMs,
+      enabled: fields.enabled,
     };
   }
 
@@ -150,15 +165,19 @@ export class LlmEndpointsService {
       .exec();
     return docs
       .filter((d) => !filter?.requireVision || d.visionCapable)
-      .map((d) => ({
-        id: String(d._id),
-        provider: d.provider as LlmProviderKind,
-        baseUrl: d.baseUrl,
-        model: d.model,
-        concurrency: clampConcurrency(d.concurrency),
-        timeoutMs: d.timeoutMs,
-        visionCapable: !!d.visionCapable,
-      }));
+      .map((d) => {
+        // Schema-Felder über den Klassentyp — siehe Begründung an `toPublic`.
+        const fields: LlmEndpoint = d;
+        return {
+          id: String(d._id),
+          provider: toProviderKind(fields.provider),
+          baseUrl: fields.baseUrl,
+          model: fields.model,
+          concurrency: clampConcurrency(fields.concurrency),
+          timeoutMs: fields.timeoutMs,
+          visionCapable: !!fields.visionCapable,
+        };
+      });
   }
 
   async getDecryptedApiKey(id: string): Promise<string | null> {
@@ -217,11 +236,14 @@ export class LlmEndpointsService {
       const res = await fetch(url, { method: 'GET', headers, signal: AbortSignal.timeout(10_000) });
       const latencyMs = Date.now() - start;
       if (!res.ok) return { ok: false, latencyMs, error: `HTTP ${res.status}` };
-      const json = (await res.json().catch(() => null)) as unknown;
+      const json: unknown = await res.json().catch(() => null);
       const models = extractModelIds(provider, json);
       return { ok: true, latencyMs, models };
-    } catch (err) {
-      return { ok: false, latencyMs: Date.now() - start, error: (err as Error).message };
+    } catch (err: unknown) {
+      // `errorMessage` statt `(err as Error).message`: hier landen Timeouts und
+      // DNS-Fehler von `fetch`, und ein geworfener Nicht-Error hatte vorher den
+      // Literalstring `undefined` als Probe-Fehler in die UI geschrieben.
+      return { ok: false, latencyMs: Date.now() - start, error: errorMessage(err) };
     }
   }
 
@@ -229,6 +251,7 @@ export class LlmEndpointsService {
   async testConnection(id: string): Promise<{ ok: boolean; latencyMs?: number; error?: string; models?: string[] }> {
     const doc = await this.model.findById(id).exec();
     if (!doc) return { ok: false, error: 'endpoint_not_found' };
-    return this.probeModels({ provider: doc.provider as LlmProviderKind, baseUrl: doc.baseUrl, id });
+    const fields: LlmEndpoint = doc;
+    return this.probeModels({ provider: toProviderKind(fields.provider), baseUrl: fields.baseUrl, id });
   }
 }

@@ -13,6 +13,7 @@ import {
 } from './schemas/chat-session.schema';
 import { User, UserDocument, UserRole } from '../auth/schemas/user.schema';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
+import { errorMessage } from '../common/narrow';
 
 interface AppendMessageInput {
   role: ChatMessage['role'];
@@ -60,10 +61,10 @@ export class ChatService implements OnModuleInit {
         .updateMany({ userId: { $exists: false } }, { $set: { userId: admin._id } })
         .exec();
       this.logger.log(
-        `Migrated ${result.modifiedCount} legacy chat session(s) to admin user "${admin.username}" (${admin._id}).`,
+        `Migrated ${result.modifiedCount} legacy chat session(s) to admin user "${admin.username}" (${String(admin._id)}).`,
       );
-    } catch (err) {
-      this.logger.warn(`Legacy chat session migration failed: ${(err as Error).message}`);
+    } catch (err: unknown) {
+      this.logger.warn(`Legacy chat session migration failed: ${errorMessage(err)}`);
     }
   }
 
@@ -201,9 +202,9 @@ export class ChatService implements OnModuleInit {
       if (removed > 0) {
         this.logger.log(`Cascade-deleted ${removed} chat session(s) for project ${event.entityId}`);
       }
-    } catch (err) {
+    } catch (err: unknown) {
       this.logger.warn(
-        `Cascade delete failed for project ${event.entityId}: ${(err as Error).message}`,
+        `Cascade delete failed for project ${event.entityId}: ${errorMessage(err)}`,
       );
     }
   }

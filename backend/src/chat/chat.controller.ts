@@ -19,6 +19,8 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
+import type { AuthRequest } from '../common/request-context';
+import { errorMessage, isRecord, isUnknownArray } from '../common/narrow';
 import { ChatService } from './chat.service';
 import { ChatLlmService, LlmMessageWithTools, LlmImageInput } from './chat-llm.service';
 import { ChatContextService, AttachmentForContext } from './chat-context.service';
@@ -46,6 +48,22 @@ import {
 
 const MAX_TOOL_RESULT_CHARS = 8000;
 const MAX_ATTACHMENT_FILE_SIZE = parseInt(process.env.MINIO_MAX_FILE_SIZE || String(50 * 1024 * 1024), 10);
+
+/**
+ * Express-Request mit dem Actor, den `JwtAuthGuard` anhängt.
+ *
+ * `AuthRequest` ist die kanonische Fassung aus `common/request-context` — vorher
+ * stand an zehn Stellen dieselbe Behauptung
+ * `(req as Request & { user?: { userId: string } })`, die nebenbei `role` und
+ * beide Scope-Achsen unterschlug.
+ *
+ * `req.user?.userId` bleibt bewusst optional: ist Authentifizierung komplett
+ * deaktiviert, lässt der Guard ohne Actor durch, und die Handler unten geben
+ * dann — wie bisher — `undefined` an die Service-Schicht weiter, wo `findById`
+ * & Co. die Besitzprüfung überspringen. `listSessions`/`createSession` lehnen
+ * fehlende Actor-Ids weiterhin explizit ab.
+ */
+type ChatRequest = Request & AuthRequest;
 
 /**
  * Accepted MIME types for chat text attachments. Includes explicit entries
@@ -242,8 +260,8 @@ export class ChatController {
         try {
           const { buffer } = await this.attachments.getContent(id);
           images.push({ data: buffer.toString('base64'), mediaType: attachment.mimeType });
-        } catch (err) {
-          this.logger.warn(`Failed to load image ${id} from storage: ${(err as Error).message}`);
+        } catch (err: unknown) {
+          this.logger.warn(`Failed to load image ${id} from storage: ${errorMessage(err)}`);
         }
       } else if (text) {
         // Text attachments with no extracted content (still processing or unsupported format)
@@ -325,9 +343,9 @@ export class ChatController {
 
   @Post('sessions')
   @HttpCode(201)
-  async createSession(@Body() dto: CreateChatSessionDto, @Req() req: Request) {
+  async createSession(@Body() dto: CreateChatSessionDto, @Req() req: ChatRequest) {
     await this.assertEnabled();
-    const userId = (req as Request & { user?: { userId: string } }).user?.userId;
+    const userId = req.user?.userId;
     if (!userId) throw new BadRequestException('Authentication required');
     return this.chatService.createSession(
       { projectId: dto.projectId, customerId: dto.customerId },
@@ -338,7 +356,7 @@ export class ChatController {
 
   @Get('sessions')
   async listSessions(
-    @Req() req: Request,
+    @Req() req: ChatRequest,
     @Query('projectId') projectId?: string,
     @Query('customerId') customerId?: string,
     @Query('includeArchived') includeArchived?: string,
@@ -352,7 +370,7 @@ export class ChatController {
     if (projectId && customerId) {
       throw new BadRequestException('projectId and customerId are mutually exclusive');
     }
-    const userId = (req as Request & { user?: { userId: string } }).user?.userId;
+    const userId = req.user?.userId;
     if (!userId) throw new BadRequestException('Authentication required');
     return this.chatService.listSessions({ projectId, customerId }, userId, {
       includeArchived: includeArchived === 'true',
@@ -362,9 +380,9 @@ export class ChatController {
   }
 
   @Get('sessions/:id')
-  async getSession(@Param('id') id: string, @Req() req: Request) {
+  async getSession(@Param('id') id: string, @Req() req: ChatRequest) {
     await this.assertEnabled();
-    const userId = (req as Request & { user?: { userId: string } }).user?.userId;
+    const userId = req.user?.userId;
     return this.chatService.findById(id, userId);
   }
 
@@ -372,21 +390,21 @@ export class ChatController {
   async updateSession(
     @Param('id') id: string,
     @Body() dto: UpdateChatSessionDto,
-    @Req() req: Request,
+    @Req() req: ChatRequest,
   ) {
     await this.assertEnabled();
     if (!dto.title || !dto.title.trim()) {
       throw new BadRequestException('title is required');
     }
-    const userId = (req as Request & { user?: { userId: string } }).user?.userId;
+    const userId = req.user?.userId;
     return this.chatService.updateTitle(id, dto.title, userId);
   }
 
   @Delete('sessions/:id')
   @HttpCode(204)
-  async deleteSession(@Param('id') id: string, @Req() req: Request): Promise<void> {
+  async deleteSession(@Param('id') id: string, @Req() req: ChatRequest): Promise<void> {
     await this.assertEnabled();
-    const userId = (req as Request & { user?: { userId: string } }).user?.userId;
+    const userId = req.user?.userId;
     await this.chatService.deleteSession(id, userId);
   }
 
@@ -408,7 +426,7 @@ export class ChatController {
   async uploadAttachment(
     @Param('id') id: string,
     @UploadedFile() file: { buffer: Buffer; originalname: string; mimetype: string } | undefined,
-    @Req() req: Request,
+    @Req() req: ChatRequest,
   ) {
     await this.assertEnabled();
     if (!this.minio.isEnabled()) {
@@ -423,7 +441,7 @@ export class ChatController {
       );
     }
 
-    const userId = (req as Request & { user?: { userId: string } }).user?.userId;
+    const userId = req.user?.userId;
     const session = await this.chatService.findById(id, userId);
     if (!session.projectId) {
       throw new BadRequestException('Attachments are not supported in customer-scoped chat sessions');
@@ -464,13 +482,13 @@ export class ChatController {
   async prepareMessage(
     @Param('id') id: string,
     @Body() dto: PrepareChatMessageDto,
-    @Req() req: Request,
+    @Req() req: ChatRequest,
   ) {
     await this.assertEnabled();
     if (!dto?.content?.trim()) {
       throw new BadRequestException('content is required');
     }
-    const userId = (req as Request & { user?: { userId: string } }).user?.userId;
+    const userId = req.user?.userId;
     const session = await this.chatService.findById(id, userId);
     const projectId = session.projectId?.toString();
     const customerId = session.customerId?.toString();
@@ -519,13 +537,13 @@ export class ChatController {
   async persistMessage(
     @Param('id') id: string,
     @Body() dto: PersistChatMessageDto,
-    @Req() req: Request,
+    @Req() req: ChatRequest,
   ) {
     await this.assertEnabled();
     if (!dto?.userContent?.trim()) {
       throw new BadRequestException('userContent is required');
     }
-    const userId = (req as Request & { user?: { userId: string } }).user?.userId;
+    const userId = req.user?.userId;
 
     // Resolve attachment refs for the user message (browser-mode parity with sendMessage).
     let userAttachmentRefs: ChatAttachmentRef[] | undefined;
@@ -615,13 +633,13 @@ export class ChatController {
   async executeTool(
     @Param('id') id: string,
     @Body() dto: ExecuteChatToolDto,
-    @Req() req: Request,
+    @Req() req: ChatRequest,
   ) {
     await this.assertEnabled();
     if (!dto?.name) {
       throw new BadRequestException('name is required');
     }
-    const userId = (req as Request & { user?: { userId: string } }).user?.userId;
+    const userId = req.user?.userId;
     const session = await this.chatService.findById(id, userId);
     // T-56: owner-Id IMMER aus Session, nie aus DTO/args — verhindert
     // dass ein User über seine eigene Session Tools gegen fremde Projekte/Kunden
@@ -659,7 +677,7 @@ export class ChatController {
   async sendMessage(
     @Param('id') id: string,
     @Body() dto: SendChatMessageDto,
-    @Req() req: Request,
+    @Req() req: ChatRequest,
     @Res() res: Response,
   ): Promise<void> {
     await this.assertEnabled();
@@ -667,7 +685,7 @@ export class ChatController {
       throw new BadRequestException('content is required');
     }
 
-    const userId = (req as Request & { user?: { userId: string } }).user?.userId;
+    const userId = req.user?.userId;
     const session = await this.chatService.findById(id, userId);
     const projectId = session.projectId?.toString();
     const customerId = session.customerId?.toString();
@@ -732,8 +750,11 @@ export class ChatController {
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
-    const flushHeaders = (res as Response & { flushHeaders?: () => void }).flushHeaders;
-    if (typeof flushHeaders === 'function') flushHeaders.call(res);
+    // `flushHeaders` gehört zu `http.ServerResponse` und ist damit deklariert;
+    // die Prüfung bleibt für Response-Doubles ohne die Methode. Der direkte
+    // Aufruf hält `this` gebunden — vorher war das ein `.call(res)` auf einer
+    // losgelösten Methodenreferenz.
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
     const send = (event: Record<string, unknown>) => {
       if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -754,7 +775,9 @@ export class ChatController {
     let fullResponse = '';
     const persistedToolCalls: ChatToolCallRecord[] = [];
     let errored = false;
-    let errorMessage: string | undefined;
+    // Umbenannt von `errorMessage`, damit der Helfer gleichen Namens hier
+    // sichtbar bleibt statt vom lokalen Namen verdeckt zu werden.
+    let streamError: string | undefined;
     let pendingDoneReason: string | undefined;
     let pendingDone = false;
     const requestStartMs = Date.now();
@@ -847,11 +870,16 @@ export class ChatController {
             send({ type: 'tool_status', phase: 'tool_call', name: tc.name, state: 'running' });
             send({ type: 'tool_call', id: tc.id, name: tc.name, arguments: tc.arguments });
 
-            let parsedArgs: Record<string, unknown> = {};
+            let parsedArgs: Record<string, unknown>;
             try {
-              parsedArgs = tc.arguments ? (JSON.parse(tc.arguments) as Record<string, unknown>) : {};
-            } catch (err) {
-              const error = `Invalid JSON arguments: ${(err as Error).message}`;
+              // Ein geparster Nicht-Objekt-Wert (Array, Skalar) lief vorher als
+              // `Record<string, unknown>` in den Dispatcher; jetzt gilt er als
+              // ungültige Argumentliste — dieselbe Antwort wie kaputtes JSON.
+              const parsed: unknown = tc.arguments ? JSON.parse(tc.arguments) : {};
+              if (!isRecord(parsed)) throw new Error('arguments must be a JSON object');
+              parsedArgs = parsed;
+            } catch (err: unknown) {
+              const error = `Invalid JSON arguments: ${errorMessage(err)}`;
               send({ type: 'tool_result', id: tc.id, success: false, summary: error });
               conversation.push({
                 role: 'tool',
@@ -901,11 +929,14 @@ export class ChatController {
           imagesForIteration = undefined;
         }
       }
-    } catch (err) {
+    } catch (err: unknown) {
       errored = true;
-      errorMessage = (err as Error).message || 'LLM error';
-      this.logger.warn(`Chat stream failed for session ${id}: ${errorMessage}`);
-      send({ type: 'error', message: errorMessage });
+      // Hier landen Timeouts und abgebrochene Streams — also genau die Fälle, in
+      // denen ein Nicht-Error geworfen wird und `(err as Error).message` dem
+      // Nutzer wie dem Chat-Log den Literalstring "undefined" zeigte.
+      streamError = errorMessage(err) || 'LLM error';
+      this.logger.warn(`Chat stream failed for session ${id}: ${streamError}`);
+      send({ type: 'error', message: streamError });
     } finally {
       clearInterval(heartbeat);
       req.off('close', onClose);
@@ -935,9 +966,9 @@ export class ChatController {
           toolCalls: persistedToolCalls.length > 0 ? persistedToolCalls : undefined,
           metrics,
         }, userId);
-      } catch (err) {
+      } catch (err: unknown) {
         this.logger.warn(
-          `Failed to persist assistant message for session ${id}: ${(err as Error).message}`,
+          `Failed to persist assistant message for session ${id}: ${errorMessage(err)}`,
         );
       }
     }
@@ -961,7 +992,7 @@ export class ChatController {
       toolsEnabled: useTools,
       toolsUsed: persistedToolCalls.length > 0 ? this.aggregateTools(persistedToolCalls) : undefined,
       outcome,
-      errorMessage,
+      errorMessage: streamError,
       outputTokens: metrics?.outputTokens,
       durationMs: metrics?.durationMs,
       firstTokenMs: metrics?.firstTokenMs,
@@ -977,14 +1008,20 @@ export class ChatController {
   /** Short human-readable summary of a tool result for SSE/UI display */
   private summarizeResult(toolName: string, result: unknown): string {
     if (result == null) return 'empty';
-    if (Array.isArray(result)) return `${result.length} items`;
-    if (typeof result === 'object') {
-      const obj = result as Record<string, unknown>;
-      if (Array.isArray(obj.items)) return `${(obj.items as unknown[]).length} items`;
-      if (typeof obj.count === 'number') return `${obj.count} items`;
-      const keys = Object.keys(obj);
+    if (isUnknownArray(result)) return `${result.length} items`;
+    if (isRecord(result)) {
+      if (isUnknownArray(result.items)) return `${result.items.length} items`;
+      if (typeof result.count === 'number') return `${result.count} items`;
+      const keys = Object.keys(result);
       return `${toolName}: ${keys.slice(0, 3).join(', ')}${keys.length > 3 ? '…' : ''}`;
     }
-    return String(result).slice(0, 80);
+    // Nur noch Skalare möglich. Ein `String(unknown)` hätte für die restlichen
+    // Fälle (Funktion, Symbol) Quelltext bzw. Unsinn in die UI geschrieben —
+    // ein Tool-Ergebnis kommt aus JSON und ist keins von beiden.
+    if (typeof result === 'string') return result.slice(0, 80);
+    if (typeof result === 'number' || typeof result === 'boolean' || typeof result === 'bigint') {
+      return String(result).slice(0, 80);
+    }
+    return typeof result;
   }
 }

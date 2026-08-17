@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { SettingsService } from '../settings/settings.service';
 import { EncryptionService } from '../common/encryption.service';
 import { BalancerGateway } from '../balancer/balancer-gateway.service';
+import { readModelIds } from '../balancer/llm-responses';
+import { errorMessage, isRecord, isUnknownArray } from '../common/narrow';
+import { asString } from '../common/tool-args';
 import { CHAT_PROVIDERS, ChatProvider, isLegacyProvider } from './dto/chat.dto';
 
 export type LlmProvider = ChatProvider;
@@ -96,13 +99,6 @@ const DEFAULT_TOOLS_ALLOWLIST = [
   'stack_entry_update',
   'stack_entry_remove',
 ];
-
-/** Providers where tool-calling via OpenAI function-call protocol works today. */
-const OPENAI_COMPATIBLE_PROVIDERS: ReadonlySet<LlmProvider> = new Set([
-  'openai-compatible',
-  'lmstudio',
-  'openai',
-]);
 
 const ANTHROPIC_VERSION = '2023-06-01';
 
@@ -243,8 +239,8 @@ export class ChatLlmService {
         // One-shot: overwrite the DB entry with the migrated form so the
         // legacy-provider path doesn't run on every read.
         this.logger.log('Auto-migrating stored chat endpoints to drop legacy ollama provider');
-        await this.persistStored(endpoints.map((e) => this.toStored(e))).catch((err) => {
-          this.logger.warn(`Persist-after-migrate failed: ${(err as Error).message}`);
+        await this.persistStored(endpoints.map((e) => this.toStored(e))).catch((err: unknown) => {
+          this.logger.warn(`Persist-after-migrate failed: ${errorMessage(err)}`);
         });
       }
       if (endpoints.length > 0) return endpoints;
@@ -339,34 +335,36 @@ export class ChatLlmService {
       this.logger.warn(`Malformed ${SETTING_ENDPOINTS_V2} JSON — ignoring`);
       return { endpoints: [], migrated: false };
     }
-    if (!Array.isArray(parsed)) return { endpoints: [], migrated: false };
+    // `isUnknownArray` statt `Array.isArray`: letzteres verengt ein `unknown` zu
+    // `any[]`, und jedes `entry.*` unten wäre wieder ein ungeprüfter any-Zugriff.
+    if (!isUnknownArray(parsed)) return { endpoints: [], migrated: false };
 
     const out: LlmEndpoint[] = [];
     let migrated = false;
     for (const entry of parsed) {
-      if (!entry || typeof entry !== 'object') continue;
-      let { provider } = entry as Partial<StoredEndpoint>;
-      const { url, model, apiKeyEnc, visionCapable } = entry as Partial<StoredEndpoint>;
+      if (!isRecord(entry)) continue;
+      const rawProvider = asString(entry.provider);
+      const url = asString(entry.url);
+      const model = asString(entry.model);
 
       // Transparent migration: legacy 'ollama' → 'openai-compatible'.
       // Ollama's /v1-shim has been stable since 0.3 and supports tools + vision,
       // so the native adapter is strictly inferior. URL stays the same — our
       // openai adapter appends /v1/chat/completions itself.
-      if (typeof provider === 'string' && isLegacyProvider(provider)) {
-        provider = 'openai-compatible';
-        migrated = true;
-      }
+      if (rawProvider !== undefined && isLegacyProvider(rawProvider)) migrated = true;
+      const provider = this.toProvider(rawProvider);
 
-      if (!this.isValidProvider(provider) || !url || !model) continue;
+      if (!provider || !url || !model) continue;
 
       const ep: LlmEndpoint = { provider, url, model };
-      if (visionCapable) ep.visionCapable = true;
+      if (entry.visionCapable) ep.visionCapable = true;
+      const apiKeyEnc = asString(entry.apiKeyEnc);
       if (apiKeyEnc) {
         try {
           ep.apiKey = this.encryption.decrypt(apiKeyEnc);
-        } catch (err) {
+        } catch (err: unknown) {
           this.logger.error(
-            `Failed to decrypt API key for ${provider} @ ${url}: ${(err as Error).message}. ` +
+            `Failed to decrypt API key for ${provider} @ ${url}: ${errorMessage(err)}. ` +
               'Endpoint will run without a key — reconfigure from Settings UI.',
           );
         }
@@ -380,21 +378,32 @@ export class ChatLlmService {
     await this.settings.set(SETTING_ENDPOINTS_V2, JSON.stringify(stored));
   }
 
-  private isValidProvider(value: unknown): value is LlmProvider {
-    return typeof value === 'string' && (CHAT_PROVIDERS as readonly string[]).includes(value);
+  /**
+   * Provider-String → Provider-Typ, oder `undefined` wenn unbekannt.
+   *
+   * Die eine Stelle, an der ein gespeicherter oder aus der Umgebung gelesener
+   * String zum `LlmProvider` wird. `find()` liefert `ChatProvider | undefined`
+   * — der enge Typ entsteht damit aus einer echten Laufzeitprüfung statt aus
+   * einem `as LlmProvider`, das vorher an drei Stellen stand und ungeprüfte
+   * Strings (`CHAT_LLM_PROVIDER=tippfehler`) als Provider durchließ.
+   */
+  private toProvider(value: string | undefined): LlmProvider | undefined {
+    if (value === undefined || value === '') return undefined;
+    if (isLegacyProvider(value)) return 'openai-compatible';
+    return CHAT_PROVIDERS.find((candidate) => candidate === value);
   }
 
   /** Legacy CSV format: `provider|url|model` (pre-v2, no API key). Applies the same
    *  legacy-provider migration as `decodeStored`. */
   private parseLegacyCsv(str: string): LlmEndpoint[] {
-    return str
-      .split(',')
-      .map((entry) => {
-        const [rawProvider, url, model] = entry.trim().split('|');
-        const provider = (isLegacyProvider(rawProvider) ? 'openai-compatible' : rawProvider) as LlmProvider;
-        return { provider, url, model };
-      })
-      .filter((e) => e.url && e.model && this.isValidProvider(e.provider));
+    const out: LlmEndpoint[] = [];
+    for (const entry of str.split(',')) {
+      const [rawProvider, url, model] = entry.trim().split('|');
+      const provider = this.toProvider(rawProvider);
+      if (!provider || !url || !model) continue;
+      out.push({ provider, url, model });
+    }
+    return out;
   }
 
   /** Fallback when neither v2 nor CSV is set: single primary + optional fallback from loose env vars. */
@@ -406,7 +415,11 @@ export class ChatLlmService {
           "Update your .env to use 'openai-compatible' against Ollama's /v1 shim.",
       );
     }
-    const provider = (isLegacyProvider(rawProvider) ? 'openai-compatible' : rawProvider) as LlmProvider;
+    // Ein unbekannter Provider-String fiel vorher ungeprüft durch und landete
+    // als `LlmProvider` im Endpunkt; die Adapter behandeln alles außer
+    // `anthropic` ohnehin als OpenAI-kompatibel — der Fallback macht das
+    // sichtbar, statt den Tippfehler weiterzutragen.
+    const provider = this.toProvider(rawProvider) ?? 'openai-compatible';
     const url = this.defaultUrlFor(provider, process.env.CHAT_LLM_URL);
     const model = process.env.CHAT_LLM_MODEL || 'google/gemma-3-4b';
 
@@ -421,12 +434,10 @@ export class ChatLlmService {
         `CHAT_LLM_FALLBACK_PROVIDER=${rawFbProvider} is deprecated — mapped to 'openai-compatible'.`,
       );
     }
-    const fbProvider = rawFbProvider
-      ? (isLegacyProvider(rawFbProvider) ? 'openai-compatible' : rawFbProvider as LlmProvider)
-      : undefined;
+    const fbProvider = this.toProvider(rawFbProvider);
     const fbUrl = process.env.CHAT_LLM_FALLBACK_URL;
     const fbModel = process.env.CHAT_LLM_FALLBACK_MODEL;
-    if (fbProvider && this.isValidProvider(fbProvider) && fbUrl && fbModel) {
+    if (fbProvider && fbUrl && fbModel) {
       const fb: LlmEndpoint = { provider: fbProvider, url: fbUrl, model: fbModel };
       if (process.env.CHAT_LLM_FALLBACK_API_KEY) fb.apiKey = process.env.CHAT_LLM_FALLBACK_API_KEY;
       out.push(fb);
@@ -519,8 +530,10 @@ export class ChatLlmService {
         return await this.testAnthropic(effective, timeoutMs);
       }
       return await this.testOpenAiCompatible(effective, timeoutMs);
-    } catch (err) {
-      return { ok: false, error: (err as Error).message };
+    } catch (err: unknown) {
+      // Hier landen Timeouts und Verbindungsabbrüche des Endpunkt-Tests —
+      // `(err as Error).message` hätte dem Admin "undefined" angezeigt.
+      return { ok: false, error: errorMessage(err) };
     }
   }
 
@@ -549,9 +562,9 @@ export class ChatLlmService {
       }
       return { ok: false, error: `HTTP ${res.status}` };
     }
-    const data = (await res.json()) as { data?: Array<{ id: string }> };
-    const models = Array.isArray(data.data) ? data.data.map((m) => m.id) : [];
-    return { ok: true, models };
+    // Derselbe Leser wie in `balancer/llm-endpoints.service.ts` — die
+    // Modell-Liste wurde vorher zweimal unabhängig per Assertion gelesen.
+    return { ok: true, models: readModelIds(await res.json()) };
   }
 
   /**

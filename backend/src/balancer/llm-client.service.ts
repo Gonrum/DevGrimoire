@@ -1,9 +1,28 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LlmProviderKind, TokenUsage, parseUsage } from './balancer.types';
+import { isRecord } from '../common/narrow';
+import {
+  parseJsonRecord,
+  readAnthropicStreamEvent,
+  readEmbeddingVector,
+  readOllamaEmbeddingVector,
+  readOpenAiChoiceDelta,
+} from './llm-responses';
 // Type-only imports (erased at compile time) → no runtime dependency on ChatModule.
 import type { ChatStreamEvent, OpenAiToolDef, LlmMessageWithTools } from '../chat/chat-llm.service';
 
 const ANTHROPIC_VERSION = '2023-06-01';
+
+/**
+ * `tool_use.input` eines Anthropic-Blocks aus dem `arguments`-String des
+ * OpenAI-Formats. Nicht-Objekte (Array, Skalar, kaputtes JSON) werden zu `{}` —
+ * vorher lief das `any` von `JSON.parse` ungeprüft in ein als
+ * `Record<string, unknown>` deklariertes Feld.
+ */
+function parseToolInput(raw: string | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  return parseJsonRecord(raw) ?? {};
+}
 
 /**
  * Extract the first complete top-level JSON object from a string via bracket-
@@ -142,8 +161,15 @@ export class LlmClient {
       if (!res.ok) {
         throw new Error(`Ollama embed failed (${res.status}): ${await res.text()}`);
       }
-      const data = (await res.json()) as { embeddings: number[][] };
-      return data.embeddings[0];
+      // Vorher `data.embeddings[0]` auf einem als `number[][]` behaupteten Body:
+      // liefert der Anbieter `embeddings: []`, war das Ergebnis `undefined` in
+      // einem als `number[]` deklarierten Rückgabewert — der Fehler wurde dann
+      // erst im RAG-Index sichtbar. Jetzt scheitert der Call hier.
+      const vector = readOllamaEmbeddingVector(await res.json());
+      if (!vector) {
+        throw new Error(`Ollama embed returned no usable vector (model ${o.model})`);
+      }
+      return vector;
     }
 
     const res = await fetch(`${o.baseUrl}/v1/embeddings`, {
@@ -155,8 +181,11 @@ export class LlmClient {
     if (!res.ok) {
       throw new Error(`Embedding API failed (${res.status}): ${await res.text()}`);
     }
-    const data = (await res.json()) as { data: Array<{ embedding: number[] }> };
-    return data.data[0].embedding;
+    const vector = readEmbeddingVector(await res.json());
+    if (!vector) {
+      throw new Error(`Embedding API returned no usable vector (model ${o.model})`);
+    }
+    return vector;
   }
 
   /** Streams plain content deltas — dispatches to the provider-specific implementation. */
@@ -180,24 +209,29 @@ export class LlmClient {
 
     // Inject images into the most recent user message without breaking the
     // tool-call protocol message shape for the other turns.
+    //
+    // Die Bild-Variante hat ein Content-*Array* statt eines Strings, ist also
+    // gerade KEINE `LlmMessageWithTools` — vorher stand hier ein
+    // `as unknown as LlmMessageWithTools`, das das Gegenteil behauptete. Der
+    // Wert geht ausschließlich in `JSON.stringify`, deshalb ist `unknown[]` der
+    // ehrliche Zieltyp.
     let outgoingMessages: unknown[] = o.messages;
     if (o.images && o.images.length > 0) {
-      const clone = [...o.messages];
-      for (let i = clone.length - 1; i >= 0; i--) {
-        if (clone[i].role === 'user') {
-          const original = clone[i];
-          clone[i] = {
-            ...original,
-            content: [
-              { type: 'text', text: original.content },
-              ...o.images.map((img) => ({
-                type: 'image_url' as const,
-                image_url: { url: `data:${img.mediaType};base64,${img.data}` },
-              })),
-            ],
-          } as unknown as LlmMessageWithTools;
-          break;
-        }
+      const clone: unknown[] = [...o.messages];
+      for (let i = o.messages.length - 1; i >= 0; i--) {
+        const original = o.messages[i];
+        if (original.role !== 'user') continue;
+        clone[i] = {
+          ...original,
+          content: [
+            { type: 'text', text: original.content },
+            ...o.images.map((img) => ({
+              type: 'image_url' as const,
+              image_url: { url: `data:${img.mediaType};base64,${img.data}` },
+            })),
+          ],
+        };
+        break;
       }
       outgoingMessages = clone;
     }
@@ -240,41 +274,23 @@ export class LlmClient {
           if (!trimmed.startsWith('data:')) continue;
           const data = trimmed.slice(5).trim();
           if (!data || data === '[DONE]') continue;
-          try {
-            const parsed = JSON.parse(data) as {
-              choices?: Array<{
-                delta?: {
-                  content?: string;
-                  tool_calls?: Array<{
-                    index: number;
-                    id?: string;
-                    type?: string;
-                    function?: { name?: string; arguments?: string };
-                  }>;
-                };
-                finish_reason?: string;
-              }>;
-            };
-            const choice = parsed.choices?.[0];
-            if (!choice) continue;
-            if (choice.delta?.content) {
-              yield { type: 'content', delta: choice.delta.content };
-            }
-            if (choice.delta?.tool_calls) {
-              for (const tc of choice.delta.tool_calls) {
-                const existing = toolCallAcc.get(tc.index) ?? { id: '', name: '', arguments: '' };
-                if (tc.id) existing.id = tc.id;
-                if (tc.function?.name) existing.name = tc.function.name;
-                if (tc.function?.arguments) existing.arguments += tc.function.arguments;
-                toolCallAcc.set(tc.index, existing);
-              }
-            }
-            if (choice.finish_reason) {
-              const r = choice.finish_reason;
-              finishReason = r === 'stop' || r === 'tool_calls' || r === 'length' ? r : 'other';
-            }
-          } catch {
-            /* malformed chunk */
+          // `undefined` deckt beides ab, was vorher der try/catch abfing: nicht
+          // parsebarer Chunk und Chunk ohne `choices`.
+          const choice = readOpenAiChoiceDelta(parseJsonRecord(data));
+          if (!choice) continue;
+          if (choice.content) {
+            yield { type: 'content', delta: choice.content };
+          }
+          for (const tc of choice.toolCalls) {
+            const existing = toolCallAcc.get(tc.index) ?? { id: '', name: '', arguments: '' };
+            if (tc.id) existing.id = tc.id;
+            if (tc.name) existing.name = tc.name;
+            if (tc.argumentsFragment) existing.arguments += tc.argumentsFragment;
+            toolCallAcc.set(tc.index, existing);
+          }
+          if (choice.finishReason) {
+            const r = choice.finishReason;
+            finishReason = r === 'stop' || r === 'tool_calls' || r === 'length' ? r : 'other';
           }
         }
       }
@@ -379,17 +395,11 @@ export class LlmClient {
         }
         if (m.tool_calls?.length) {
           for (const tc of m.tool_calls) {
-            let parsedInput: Record<string, unknown> = {};
-            try {
-              parsedInput = tc.function.arguments ? JSON.parse(tc.function.arguments) : {};
-            } catch {
-              parsedInput = {};
-            }
             blocks.push({
               type: 'tool_use',
               id: tc.id,
               name: tc.function.name,
-              input: parsedInput,
+              input: parseToolInput(tc.function.arguments),
             });
           }
         }
@@ -428,11 +438,27 @@ export class LlmClient {
     if (body[0].role !== 'user') body.unshift({ role: 'user', content: '' });
 
     // Translate OpenAI tool defs → Anthropic shape.
-    const anthropicTools = o.tools.map((t) => ({
-      name: t.function.name,
-      description: t.function.description,
-      input_schema: t.function.parameters,
-    }));
+    //
+    // `function` ist im Typ Pflicht, kam hier aber real als `undefined` an: die
+    // Aufrufseite baut die Definitionen aus einer Lookup-Tabelle, und ein
+    // Fehltreffer ergab `{ type: 'function', function: undefined }` — jeder
+    // tool-fähige Chat mit der Default-Allowlist starb dann in
+    // `t.function.name`. Die Ursache liegt in `chat/chat-tools.ts` und ist
+    // behoben; die Prüfung bleibt, damit ein künftiger Fehltreffer ein Tool
+    // kostet statt den ganzen Turn.
+    const anthropicTools: Array<{ name: string; description: string; input_schema: unknown }> = [];
+    for (const t of o.tools) {
+      const fn: OpenAiToolDef['function'] | undefined = t.function;
+      if (!fn) {
+        this.logger.warn('Tool-Definition ohne function-Block übersprungen (Lookup-Fehltreffer?)');
+        continue;
+      }
+      anthropicTools.push({
+        name: fn.name,
+        description: fn.description,
+        input_schema: fn.parameters,
+      });
+    }
 
     const res = await fetch(`${o.baseUrl}/v1/messages`, {
       method: 'POST',
@@ -479,56 +505,44 @@ export class LlmClient {
           if (!trimmed.startsWith('data:')) continue;
           const data = trimmed.slice(5).trim();
           if (!data) continue;
-          try {
-            const parsed = JSON.parse(data) as {
-              type?: string;
-              index?: number;
-              content_block?: { type?: string; id?: string; name?: string; input?: unknown };
-              delta?: {
-                type?: string;
-                text?: string;
-                partial_json?: string;
-                stop_reason?: string;
-              };
-            };
-            switch (parsed.type) {
-              case 'content_block_start': {
-                if (typeof parsed.index === 'number' && parsed.content_block?.type === 'tool_use') {
-                  toolBlocks.set(parsed.index, {
-                    id: parsed.content_block.id || '',
-                    name: parsed.content_block.name || '',
-                    argsJson: '',
-                  });
-                }
-                break;
+          // Ein nicht parsebarer Chunk ergibt `{}` und fällt damit in den
+          // default-Zweig — dasselbe Ergebnis wie der vorherige try/catch.
+          const ev = readAnthropicStreamEvent(parseJsonRecord(data));
+          switch (ev.type) {
+            case 'content_block_start': {
+              if (typeof ev.index === 'number' && ev.blockType === 'tool_use') {
+                toolBlocks.set(ev.index, {
+                  id: ev.blockId ?? '',
+                  name: ev.blockName ?? '',
+                  argsJson: '',
+                });
               }
-              case 'content_block_delta': {
-                if (parsed.delta?.type === 'text_delta' && parsed.delta.text) {
-                  yield { type: 'content', delta: parsed.delta.text };
-                } else if (
-                  parsed.delta?.type === 'input_json_delta' &&
-                  typeof parsed.index === 'number' &&
-                  typeof parsed.delta.partial_json === 'string'
-                ) {
-                  const existing = toolBlocks.get(parsed.index);
-                  if (existing) existing.argsJson += parsed.delta.partial_json;
-                }
-                break;
-              }
-              case 'message_delta': {
-                const r = parsed.delta?.stop_reason;
-                if (r === 'end_turn') stopReason = 'stop';
-                else if (r === 'tool_use') stopReason = 'tool_calls';
-                else if (r === 'max_tokens') stopReason = 'length';
-                else if (r) stopReason = 'other';
-                break;
-              }
-              default:
-                /* message_start, message_stop, ping, content_block_stop — ignored */
-                break;
+              break;
             }
-          } catch {
-            /* malformed chunk */
+            case 'content_block_delta': {
+              if (ev.deltaType === 'text_delta' && ev.text) {
+                yield { type: 'content', delta: ev.text };
+              } else if (
+                ev.deltaType === 'input_json_delta' &&
+                typeof ev.index === 'number' &&
+                ev.partialJson !== undefined
+              ) {
+                const existing = toolBlocks.get(ev.index);
+                if (existing) existing.argsJson += ev.partialJson;
+              }
+              break;
+            }
+            case 'message_delta': {
+              const r = ev.stopReason;
+              if (r === 'end_turn') stopReason = 'stop';
+              else if (r === 'tool_use') stopReason = 'tool_calls';
+              else if (r === 'max_tokens') stopReason = 'length';
+              else if (r) stopReason = 'other';
+              break;
+            }
+            default:
+              /* message_start, message_stop, ping, content_block_stop — ignored */
+              break;
           }
         }
       }
@@ -579,8 +593,14 @@ export class LlmClient {
     }
     const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(o.body) });
     if (!res.ok) throw new Error(`upstream HTTP ${res.status}: ${await res.text().catch(() => '')}`);
-    const json = (await res.json()) as Record<string, unknown>;
-    return { json, usage: parseUsage(json.usage) };
+    const parsed: unknown = await res.json();
+    // Ein JSON-Array oder Skalar hatte vorher als `Record<string, unknown>`
+    // gegolten; der Aufrufer lief dann in ein nichtssagendes
+    // `llm_error_no_choice`. Der Fehler wird jetzt an der Grenze benannt.
+    if (!isRecord(parsed)) {
+      throw new Error(`upstream returned a non-object JSON body (${url})`);
+    }
+    return { json: parsed, usage: parseUsage(parsed.usage) };
   }
 
   /**
@@ -638,12 +658,7 @@ export class LlmClient {
     }
     yield* this.parseSseStream(res.body, (data) => {
       if (data === '[DONE]') return null;
-      try {
-        const parsed = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> };
-        return parsed.choices?.[0]?.delta?.content ?? '';
-      } catch {
-        return '';
-      }
+      return readOpenAiChoiceDelta(parseJsonRecord(data))?.content ?? '';
     });
   }
 
@@ -719,19 +734,12 @@ export class LlmClient {
     }
 
     yield* this.parseSseStream(res.body, (data) => {
-      try {
-        const parsed = JSON.parse(data) as {
-          type?: string;
-          delta?: { type?: string; text?: string };
-        };
-        if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
-          return parsed.delta.text ?? '';
-        }
-        // Ignore message_start/stop/ping/message_delta etc. for plain streaming
-        return '';
-      } catch {
-        return '';
+      const ev = readAnthropicStreamEvent(parseJsonRecord(data));
+      if (ev.type === 'content_block_delta' && ev.deltaType === 'text_delta') {
+        return ev.text ?? '';
       }
+      // Ignore message_start/stop/ping/message_delta etc. for plain streaming
+      return '';
     });
   }
 

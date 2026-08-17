@@ -28,13 +28,17 @@ export class ChatActivityController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
-    if (outcome && !VALID_OUTCOMES.includes(outcome as ChatActivityOutcome)) {
+    // `find` statt `includes` + Assertion: der verengte Typ entsteht aus der
+    // Laufzeitprüfung. Ein leerer `outcome`-Parameter bleibt wie vorher ohne
+    // Filterwirkung, statt eine 400 auszulösen.
+    const parsedOutcome = VALID_OUTCOMES.find((candidate) => candidate === outcome);
+    if (outcome && !parsedOutcome) {
       throw new BadRequestException(`Invalid outcome: ${outcome}`);
     }
     return this.activity.list({
       projectId,
       sessionId,
-      outcome: outcome as ChatActivityOutcome | undefined,
+      outcome: parsedOutcome,
       provider,
       search,
       startDate: startDate ? this.parseDate(startDate, 'startDate') : undefined,

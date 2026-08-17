@@ -8,7 +8,8 @@ import { LlmClient } from './llm-client.service';
 import { LlmHealthService } from './llm-health.service';
 import { LlmUsageService } from './llm-usage.service';
 import { StreamRelay } from './stream-relay.service';
-import { ChatRunner, ChatJobPayload } from './chat-runner.service';
+import { ChatRunner, hasCommittedOutput, readChatJobPayload } from './chat-runner.service';
+import { errorMessage } from '../common/narrow';
 
 @Processor(BALANCER_QUEUE, { concurrency: 16 })
 export class GatewayProcessor extends WorkerHost {
@@ -28,17 +29,20 @@ export class GatewayProcessor extends WorkerHost {
   private async safeRecord(rec: Parameters<LlmUsageService['record']>[0]): Promise<void> {
     try {
       await this.usage.record(rec);
-    } catch (err) {
-      this.logger.warn(`usage.record failed (non-fatal): ${(err as Error).message}`);
+    } catch (err: unknown) {
+      this.logger.warn(`usage.record failed (non-fatal): ${errorMessage(err)}`);
     }
   }
 
   async process(job: Job<GatewayJobData>): Promise<void> {
     const jobId = String(job.id);
     const { purpose, requireVision } = job.data;
-    const token = (job as unknown as { token: string }).token;
+    // BullMQ setzt `job.token` vor dem Aufruf (`Worker.processJob`) und
+    // deklariert das Feld inzwischen auch — der `as unknown as { token: string }`
+    // hier war die Umgehung einer älteren Typdatei.
+    const token = job.token;
     const tried = new Set<string>();
-    let lastErr: Error | null = null;
+    let lastErrMessage: string | null = null;
 
     for (;;) {
       const slot = await this.allocator.acquire(purpose, { requireVision, exclude: tried });
@@ -54,7 +58,10 @@ export class GatewayProcessor extends WorkerHost {
       try {
         const apiKey = await this.endpoints.getDecryptedApiKey(slot.id);
         if (purpose === 'embedding') {
-          const text = String(job.data.payload.text ?? '');
+          // Payload-Feld aus Redis-JSON: `String(unknown)` hätte für ein Objekt
+          // "[object Object]" eingebettet statt den Job scheitern zu lassen.
+          const raw = job.data.payload.text;
+          const text = typeof raw === 'string' ? raw : '';
           const embedding = await this.client.embed({
             provider: slot.provider, baseUrl: slot.baseUrl, model: slot.model, apiKey,
             text, timeoutMs: slot.timeoutMs,
@@ -63,7 +70,7 @@ export class GatewayProcessor extends WorkerHost {
         } else if (purpose === 'chat') {
           // The runner streams one turn and relays each event (and the terminal
           // `done`) itself; tool execution stays in the chat controller loop.
-          await this.chatRunner.run(jobId, slot, apiKey, job.data.payload as unknown as ChatJobPayload);
+          await this.chatRunner.run(jobId, slot, apiKey, readChatJobPayload(job.data.payload));
         } else {
           // workflow branch added in Task 13
           throw new Error(`purpose_not_implemented:${purpose}`);
@@ -76,19 +83,19 @@ export class GatewayProcessor extends WorkerHost {
         });
         this.allocator.release(slot.id);
         return;
-      } catch (err) {
+      } catch (err: unknown) {
         this.allocator.release(slot.id);
         this.health.recordFailure(slot.id);
-        lastErr = err as Error;
+        lastErrMessage = errorMessage(err);
         await this.safeRecord({
           purpose, endpointId: slot.id, model: slot.model,
           ...ZERO_USAGE,
-          durationMs: Date.now() - startedAt, status: 'error', error: lastErr.message,
+          durationMs: Date.now() - startedAt, status: 'error', error: lastErrMessage,
         });
         // Chat that already streamed tokens can't be retried elsewhere (would
         // duplicate output). Embed is atomic → always retriable.
-        if ((err as { committed?: boolean }).committed) {
-          this.relay.publish(jobId, { type: 'error', status: 502, message: lastErr.message });
+        if (hasCommittedOutput(err)) {
+          this.relay.publish(jobId, { type: 'error', status: 502, message: lastErrMessage });
           return;
         }
         tried.add(slot.id);
@@ -97,7 +104,7 @@ export class GatewayProcessor extends WorkerHost {
     }
     this.relay.publish(jobId, {
       type: 'error', status: 502,
-      message: lastErr?.message ?? `all ${purpose} endpoints failed`,
+      message: lastErrMessage ?? `all ${purpose} endpoints failed`,
     });
   }
 }

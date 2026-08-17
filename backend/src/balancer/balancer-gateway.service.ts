@@ -6,6 +6,7 @@ import { RelayEvent, Slot, LlmProviderKind } from './balancer.types';
 import { EndpointAllocator } from './endpoint-allocator.service';
 import { LlmEndpointsService } from './llm-endpoints.service';
 import { LlmHealthService } from './llm-health.service';
+import { errorMessage } from '../common/narrow';
 import type { ChatStreamEvent, OpenAiToolDef } from '../chat/chat-llm.service';
 
 /** Input for a single chat turn routed through the balancer queue. */
@@ -90,7 +91,10 @@ export class BalancerGateway {
       ),
     );
     if (ev.type === 'error') throw new Error(ev.message);
-    return (ev.data.embedding as number[]) ?? [];
+    // `RelayEvent` trägt den Embedding-Vektor jetzt typisiert (der Relay ist
+    // prozess-intern, es wird nichts serialisiert) — und `LlmClient.embed`
+    // scheitert, statt bei leerer Anbieter-Antwort `undefined` zu liefern.
+    return ev.data.embedding;
   }
 
   /**
@@ -139,7 +143,15 @@ export class BalancerGateway {
     const buffer: RelayEvent[] = [];
     let wake: (() => void) | null = null;
     let completed = false;
-    let observableError: Error | null = null;
+    /**
+     * Der Fehler des Observables liegt in einem Objekt, nicht in einer
+     * `let`-Variable: TypeScript verfolgt Zuweisungen aus verschachtelten
+     * Callbacks nicht und sah an der Wurfstelle unten deshalb den Initialwert
+     * `null` — aus Typsicht war das ein `throw never`, und genau das meldete
+     * `only-throw-error`. Über die Objekt-Eigenschaft greift die Verengung im
+     * `if` wieder, ohne dass sich das Laufzeitverhalten ändert.
+     */
+    const failure: { error: Error | null } = { error: null };
     let aborted = false;
 
     const wakeUp = (): void => {
@@ -157,7 +169,7 @@ export class BalancerGateway {
 
     const sub = this.relay.subscribe(jobId).subscribe({
       next: (ev) => { buffer.push(ev); wakeUp(); },
-      error: (err) => { observableError = err instanceof Error ? err : new Error(String(err)); wakeUp(); },
+      error: (err: unknown) => { failure.error = err instanceof Error ? err : new Error(errorMessage(err)); wakeUp(); },
       complete: () => { completed = true; wakeUp(); },
     });
 
@@ -168,7 +180,7 @@ export class BalancerGateway {
         // Client aborted → stop yielding and return normally (finally cancels + tears down).
         if (aborted) return;
         if (buffer.length === 0) {
-          if (observableError) throw observableError;
+          if (failure.error) throw failure.error;
           if (completed) { endedNormally = true; return; }
           // Wait for the next event, an abort, or an idle deadline. The timer is
           // an IDLE timeout (re-armed on every wait, cleared as soon as anything
@@ -187,16 +199,17 @@ export class BalancerGateway {
             // SAME tick the idle timer fired (its callback nulled `wake` first,
             // so that wakeUp() no-op'd). Let real state win instead of spuriously
             // timing out — the loop top re-drains buffer / handles done/error/abort.
-            if (buffer.length > 0 || completed || observableError || aborted) {
+            if (buffer.length > 0 || completed || failure.error || aborted) {
               continue;
             }
             throw new Error('chat pool wait timeout — no endpoint available or all busy/unhealthy');
           }
           continue;
         }
-        const ev = buffer.shift() as RelayEvent;
+        const ev = buffer.shift();
+        if (!ev) continue;
         if (ev.type === 'chat_event') {
-          yield ev.event as unknown as ChatStreamEvent;
+          yield ev.event;
         } else if (ev.type === 'done') {
           endedNormally = true;
           return;

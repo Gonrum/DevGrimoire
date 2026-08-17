@@ -7,11 +7,13 @@ export type LlmEndpointDocument = HydratedDocument<LlmEndpoint>;
 @Schema({ timestamps: true, collection: 'llmendpoints' })
 export class LlmEndpoint {
   @Prop({ required: true }) label: string;
-  @Prop({ required: true, enum: LLM_PROVIDER_KINDS as unknown as string[] }) provider: string;
+  // `[...]` statt `as unknown as string[]`: Mongoose braucht ein veränderbares
+  // Array, die Kopie liefert es ohne Behauptung über den Elementtyp.
+  @Prop({ required: true, enum: [...LLM_PROVIDER_KINDS] }) provider: string;
   @Prop({ required: true }) baseUrl: string;
   @Prop({ required: true }) model: string;
   @Prop() apiKeyEnc?: string;
-  @Prop({ type: [String], enum: LLM_PURPOSES as unknown as string[], default: [] }) purposes: string[];
+  @Prop({ type: [String], enum: [...LLM_PURPOSES], default: [] }) purposes: string[];
   @Prop({ default: false }) visionCapable: boolean;
   @Prop({ default: 1, min: 0, max: 16 }) concurrency: number;
   @Prop({ default: 100 }) priority: number;

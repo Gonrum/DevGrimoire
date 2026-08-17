@@ -6,6 +6,7 @@ import { ChatMessage, ChatContextRef } from './schemas/chat-session.schema';
 import { LlmMessage, LlmImageInput } from './chat-llm.service';
 import { WorkspaceDocument } from '../workspaces/schemas/workspace.schema';
 import { AgentRolesService } from '../agent-roles/agent-roles.service';
+import { errorMessage } from '../common/narrow';
 
 function shortenRepo(url?: string): string {
   if (!url) return '';
@@ -113,8 +114,8 @@ export class ChatContextService {
     let ragResults: Awaited<ReturnType<RagService['search']>> = [];
     try {
       ragResults = await this.rag.search(userMessage, projectId, undefined, topK, customerId);
-    } catch (err) {
-      this.logger.warn(`RAG search unavailable: ${(err as Error).message}`);
+    } catch (err: unknown) {
+      this.logger.warn(`RAG search unavailable: ${errorMessage(err)}`);
     }
 
     const contextSection =
@@ -277,8 +278,8 @@ ${contextSection}${attachmentSection}`;
       validProjects.map((p) =>
         this.rag
           .search(userMessage, p._id.toString(), undefined, topK)
-          .catch((err) => {
-            this.logger.warn(`RAG unavailable for ${p.name}: ${(err as Error).message}`);
+          .catch((err: unknown) => {
+            this.logger.warn(`RAG unavailable for ${p.name}: ${errorMessage(err)}`);
             return [] as Awaited<ReturnType<RagService['search']>>;
           }),
       ),
