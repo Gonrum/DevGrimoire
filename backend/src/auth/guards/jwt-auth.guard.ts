@@ -1,9 +1,54 @@
 import { ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
+import type { Request } from 'express';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { AuthService } from '../auth.service';
 import { ApiKeysService } from '../../api-keys/api-keys.service';
+import type { ApiKeyDocument } from '../../api-keys/schemas/api-key.schema';
+import type { ScopeMode } from '../../common/permissions';
+import type { RequestUser } from '../../common/request-context';
+
+/**
+ * The Express request as it looks once an actor has been authenticated.
+ *
+ * `user` is deliberately the same `RequestUser` shape that `RequestContext`
+ * and the `ActorScope` helpers consume downstream, and `apiKey` carries the
+ * raw key document (tool allowlist etc.). Declaring the extension once here
+ * keeps every access in this guard type-checked instead of scattering casts.
+ */
+interface AuthRequest extends Request {
+  user?: RequestUser;
+  apiKey?: ApiKeyDocument;
+}
+
+/** Effective scope after intersecting an api-key scope with its owner's. */
+interface NarrowedScope {
+  mode: ScopeMode;
+  ids: string[];
+}
+
+const intersect = (a: string[], b: string[]): string[] => a.filter((id) => b.includes(id));
+
+/**
+ * Combines an api-key scope with the owning user's scope. A key can only ever
+ * narrow, never widen: `mode` falls back to `'all'` for legacy documents that
+ * predate the scope fields, and any `'none'` on either side wins.
+ */
+const narrow = (
+  keyMode: ScopeMode | undefined,
+  keyIds: string[],
+  ownerMode: ScopeMode | undefined,
+  ownerIds: string[],
+): NarrowedScope => {
+  const km = keyMode || 'all';
+  const om = ownerMode || 'all';
+  if (km === 'none' || om === 'none') return { mode: 'none', ids: [] };
+  if (km === 'all' && om === 'all') return { mode: 'all', ids: [] };
+  if (km === 'all') return { mode: 'allowlist', ids: ownerIds };
+  if (om === 'all') return { mode: 'allowlist', ids: keyIds };
+  return { mode: 'allowlist', ids: intersect(keyIds, ownerIds) };
+};
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
@@ -30,7 +75,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<AuthRequest>();
 
     // API Key auth: Bearer cv_... header or ?apiKey= query param
     const authHeader = request.headers.authorization;
@@ -59,41 +104,25 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       // Concretely: if the user has projectScopeMode='allowlist' with 5 ids,
       // and the key has projectScopeMode='all', the effective access is still
       // the user's 5 ids. See knowledge entry T-210 for the rationale.
-      const keyAllowedProjectIds = (validated.allowedProjectIds || []).map((id: any) => id.toString());
-      const keyAllowedCustomerIds = (validated.allowedCustomerIds || []).map((id: any) => id.toString());
-      const ownerAllowedProjectIds = ((owner as any).allowedProjectIds || []).map((id: any) => id.toString());
-      const ownerAllowedCustomerIds = ((owner as any).allowedCustomerIds || []).map((id: any) => id.toString());
-
-      const intersect = (a: string[], b: string[]): string[] => a.filter((id) => b.includes(id));
-      const narrow = (
-        keyMode: any,
-        keyIds: string[],
-        ownerMode: any,
-        ownerIds: string[],
-      ): { mode: any; ids: string[] } => {
-        const km = keyMode || 'all';
-        const om = ownerMode || 'all';
-        if (km === 'none' || om === 'none') return { mode: 'none', ids: [] };
-        if (km === 'all' && om === 'all') return { mode: 'all', ids: [] };
-        if (km === 'all') return { mode: 'allowlist', ids: ownerIds };
-        if (om === 'all') return { mode: 'allowlist', ids: keyIds };
-        return { mode: 'allowlist', ids: intersect(keyIds, ownerIds) };
-      };
+      const keyAllowedProjectIds = (validated.allowedProjectIds || []).map((id) => id.toString());
+      const keyAllowedCustomerIds = (validated.allowedCustomerIds || []).map((id) => id.toString());
+      const ownerAllowedProjectIds = (owner.allowedProjectIds || []).map((id) => id.toString());
+      const ownerAllowedCustomerIds = (owner.allowedCustomerIds || []).map((id) => id.toString());
 
       const proj = narrow(
         validated.projectScopeMode,
         keyAllowedProjectIds,
-        (owner as any).projectScopeMode,
+        owner.projectScopeMode,
         ownerAllowedProjectIds,
       );
       const cust = narrow(
         validated.customerScopeMode,
         keyAllowedCustomerIds,
-        (owner as any).customerScopeMode,
+        owner.customerScopeMode,
         ownerAllowedCustomerIds,
       );
-      const ownerPerms: string[] = ((owner as any).permissions || []) as string[];
-      const keyPerms: string[] = (validated.permissions || []);
+      const ownerPerms: string[] = owner.permissions || [];
+      const keyPerms: string[] = validated.permissions || [];
       // Permissions: admin role bypasses the list. For non-admin owners, the
       // effective permission set is the intersection of key + owner perms; an
       // empty key.permissions falls through to the owner's set (legacy keys).
@@ -114,36 +143,56 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       return true;
     }
 
-    // SSE endpoint: accept token from query parameter
-    if (!request.headers.authorization && request.query?.token) {
-      request.headers.authorization = `Bearer ${request.query.token}`;
+    // SSE endpoint: accept token from query parameter. Only a single string
+    // value is accepted — a repeated (`?token=a&token=b`) or nested query
+    // param is not a JWT and previously only produced a header that passport
+    // was bound to reject, so ignoring it leads to the same 401.
+    const tokenFromQuery = request.query?.token;
+    if (
+      !request.headers.authorization &&
+      typeof tokenFromQuery === 'string' &&
+      tokenFromQuery.length > 0
+    ) {
+      request.headers.authorization = `Bearer ${tokenFromQuery}`;
     }
 
     const passportResult = await (super.canActivate(context) as Promise<boolean>);
-    if (passportResult && request.user?.userId) {
+    const jwtUser = request.user;
+    if (passportResult && jwtUser?.userId) {
       // Enrich request.user with scope/permission info from DB so service-layer
       // helpers (actorCanAccessProject etc.) work for human-user requests too.
       // The JWT itself only carries sub/username/role — scope changes after
       // login take effect on the next request, not after token refresh.
-      const fullUser = await this.authService.findUserById(request.user.userId);
+      const fullUser = await this.authService.findUserById(jwtUser.userId);
       if (fullUser) {
-        const u = fullUser as any;
         request.user = {
-          ...request.user,
-          permissions: (u.permissions || []) as string[],
-          projectScopeMode: u.projectScopeMode || 'all',
-          allowedProjectIds: (u.allowedProjectIds || []).map((id: any) => id.toString()),
-          customerScopeMode: u.customerScopeMode || 'all',
-          allowedCustomerIds: (u.allowedCustomerIds || []).map((id: any) => id.toString()),
+          ...jwtUser,
+          permissions: fullUser.permissions || [],
+          projectScopeMode: fullUser.projectScopeMode || 'all',
+          allowedProjectIds: (fullUser.allowedProjectIds || []).map((id) => id.toString()),
+          customerScopeMode: fullUser.customerScopeMode || 'all',
+          allowedCustomerIds: (fullUser.allowedCustomerIds || []).map((id) => id.toString()),
         };
       }
     }
     return passportResult;
   }
 
-  handleRequest(err: any, user: any) {
-    if (err || !user) {
-      throw err || new UnauthorizedException();
+  /**
+   * Passport hands us `(err, user)` from the strategy: `err` is the Error a
+   * strategy raised (or null), `user` is `false` when the strategy failed to
+   * authenticate. Either case results in a 401 — the strategy's own error is
+   * rethrown unchanged so its status/message survives.
+   */
+  handleRequest<TUser = RequestUser>(
+    err: Error | null | undefined,
+    user: TUser | false | null | undefined,
+  ): TUser {
+    if (err) {
+      throw err;
+    }
+    if (!user) {
+      throw new UnauthorizedException();
     }
     return user;
   }

@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectConnection } from '@nestjs/mongoose';
-import { Connection } from 'mongoose';
+import { Connection, mongo } from 'mongoose';
 import { Observable, Subject } from 'rxjs';
 import { PROJECT_CHANGED, REPLICATION_STATUS_CHANGED, WORKFLOW_RUN_PROGRESS, ProjectChangeEvent } from './project-event';
 import { NOTIFICATION_CREATED } from '../notifications/notifications.service';
@@ -16,9 +16,84 @@ export interface QuestionEvent {
   todoId?: string | null;
   projectId?: string | null;
   targetUserId?: string | null;
-  expiresAt?: string;
+  /**
+   * ISO timestamp of the soft timeout. `null` when the question has no wait
+   * window — QuestionsService emits `expiresAt: null` explicitly, so the field
+   * is nullable, not just optional.
+   */
+  expiresAt?: string | null;
   answer?: string;
   answeredByUserId?: string | null;
+}
+
+/**
+ * Payload of the `question.created` signal emitted by QuestionsService on the
+ * local EventEmitter. Only `questionId` is guaranteed; everything else stays
+ * optional so a payload that grows or shrinks on the emitter side can never
+ * make the bus drop an event.
+ */
+export interface QuestionCreatedPayload {
+  questionId: string;
+  question?: string;
+  options?: string[];
+  context?: string;
+  todoId?: string | null;
+  projectId?: string | null;
+  targetUserId?: string | null;
+  expiresAt?: string | null;
+}
+
+/** Payload of the `question.answered` signal emitted by QuestionsService. */
+export interface QuestionAnsweredPayload {
+  questionId: string;
+  answer?: string;
+  answeredByUserId?: string | null;
+}
+
+/**
+ * A change-stream document as it comes off the raw driver: plain BSON, no
+ * Mongoose hydration. Every field is `unknown` and optional on purpose — the
+ * watcher spans ~19 collections with different shapes, and a field that only
+ * exists for some of them must not narrow the type of the others.
+ */
+interface ChangeDoc {
+  _id?: unknown;
+  [field: string]: unknown;
+}
+
+/**
+ * The change-stream operations we translate into bus events — single source of
+ * truth for both the action map and the narrowing guard below. All four are
+ * document-level operations, i.e. they always carry `ns` and `documentKey`
+ * (unlike drop/rename/invalidate, which the watcher ignores).
+ */
+const DOCUMENT_OPERATIONS = ['insert', 'update', 'replace', 'delete'] as const;
+type DocumentOperation = (typeof DOCUMENT_OPERATIONS)[number];
+
+type AnyChange = mongo.ChangeStreamDocument<ChangeDoc>;
+type DocumentChange = Extract<AnyChange, { operationType: DocumentOperation }>;
+
+/** BSON ids/strings → string. Anything else yields undefined instead of "[object Object]". */
+function toIdString(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  if (value instanceof mongo.ObjectId) return value.toHexString();
+  return undefined;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+/** BSON dates arrive as `Date`; tolerate an already-stringified value too. */
+function toIsoString(value: unknown): string | undefined {
+  if (value instanceof Date) return value.toISOString();
+  return asString(value);
 }
 
 const COLLECTION_ENTITY_MAP: Record<string, ProjectChangeEvent['entity']> = {
@@ -56,12 +131,21 @@ const DUAL_SCOPED_ENTITIES = new Set<ProjectChangeEvent['entity']>([
 
 const QUESTION_COLLECTION = 'questions';
 
-const OPERATION_ACTION_MAP: Record<string, ProjectChangeEvent['action']> = {
+const OPERATION_ACTION_MAP: Record<DocumentOperation, ProjectChangeEvent['action']> = {
   insert: 'created',
   update: 'updated',
   replace: 'updated',
   delete: 'deleted',
 };
+
+/**
+ * Guard + narrowing in one. Everything that is not a document-level operation
+ * (drop, rename, invalidate, index events, …) is ignored — exactly as before,
+ * when the missing OPERATION_ACTION_MAP entry triggered the early return.
+ */
+function isDocumentChange(change: AnyChange): change is DocumentChange {
+  return DOCUMENT_OPERATIONS.some((operation) => operation === change.operationType);
+}
 
 /**
  * Central in-process event bus for live updates. Sourced from two places:
@@ -77,8 +161,7 @@ export class EventsBusService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EventsBusService.name);
   private readonly events$$ = new Subject<ProjectChangeEvent>();
   private readonly questionEvents$$ = new Subject<QuestionEvent>();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private changeStream: any = null;
+  private changeStream: mongo.ChangeStream<ChangeDoc, AnyChange> | null = null;
   private readonly recentEvents = new Map<string, number>();
   private readonly standalone: boolean;
 
@@ -103,7 +186,11 @@ export class EventsBusService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy() {
-    this.changeStream?.close();
+    // Fire-and-forget as before; a failing close during shutdown is nothing we
+    // can act on, but it must not surface as an unhandled rejection.
+    this.changeStream?.close().catch(() => {
+      /* shutting down anyway */
+    });
   }
 
   private watchChangeStreams() {
@@ -116,44 +203,45 @@ export class EventsBusService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn('Database not available for Change Streams');
         return;
       }
-      this.changeStream = db.watch(pipeline, { fullDocument: 'updateLookup' });
+      this.changeStream = db.watch<ChangeDoc>(pipeline, { fullDocument: 'updateLookup' });
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.changeStream.on('change', (change: any) => {
-        const coll = change.ns?.coll;
-        const doc = change.fullDocument || change.documentKey;
+      this.changeStream.on('change', (change) => {
+        if (!isDocumentChange(change)) return;
         const action = OPERATION_ACTION_MAP[change.operationType];
-        if (!action) return;
+        const coll = change.ns.coll;
+        // `fullDocument` is absent on deletes and can be missing on updates
+        // (document already gone when updateLookup ran) — fall back to the
+        // documentKey, which carries at least the _id (plus shard keys).
+        const fullDocument = 'fullDocument' in change ? change.fullDocument : undefined;
+        const doc: ChangeDoc = fullDocument ?? change.documentKey;
+        const docId = toIdString(doc._id) ?? toIdString(change.documentKey._id);
 
-        if (coll === QUESTION_COLLECTION && doc && change.operationType === 'insert') {
-          const questionId = doc._id?.toString();
-          if (questionId && doc.status === 'pending') {
+        if (coll === QUESTION_COLLECTION && change.operationType === 'insert') {
+          if (docId && asString(doc.status) === 'pending') {
             this.questionEvents$$.next({
               type: 'question_created',
-              questionId,
-              question: doc.question,
-              options: doc.options || [],
-              context: doc.context,
-              todoId: doc.todoId?.toString() || null,
-              projectId: doc.projectId?.toString() || null,
-              targetUserId: doc.targetUserId?.toString() || null,
-              expiresAt: doc.expiresAt?.toISOString?.() || doc.expiresAt,
+              questionId: docId,
+              question: asString(doc.question),
+              options: asStringArray(doc.options) ?? [],
+              context: asString(doc.context),
+              todoId: toIdString(doc.todoId) ?? null,
+              projectId: toIdString(doc.projectId) ?? null,
+              targetUserId: toIdString(doc.targetUserId) ?? null,
+              expiresAt: toIsoString(doc.expiresAt),
             });
           }
           return;
         }
         if (
           coll === QUESTION_COLLECTION &&
-          doc &&
           (change.operationType === 'update' || change.operationType === 'replace')
         ) {
-          const questionId = (doc._id || change.documentKey?._id)?.toString();
-          if (questionId && doc.status === 'answered') {
+          if (docId && asString(doc.status) === 'answered') {
             this.questionEvents$$.next({
               type: 'question_answered',
-              questionId,
-              answer: doc.answer,
-              answeredByUserId: doc.answeredByUserId?.toString() || null,
+              questionId: docId,
+              answer: asString(doc.answer),
+              answeredByUserId: toIdString(doc.answeredByUserId) ?? null,
             });
           }
           return;
@@ -165,10 +253,10 @@ export class EventsBusService implements OnModuleInit, OnModuleDestroy {
         let projectId: string | null | undefined;
         let customerId: string | null | undefined;
         if (entity === 'project') {
-          projectId = (doc?._id || change.documentKey?._id)?.toString();
+          projectId = docId;
         } else {
-          projectId = doc?.projectId?.toString();
-          customerId = doc?.customerId?.toString();
+          projectId = toIdString(doc.projectId);
+          customerId = toIdString(doc.customerId);
         }
         // ssh-audit rows carry only `connectionId` — no project/customer. We
         // still want to broadcast them so the audit-tab can live-refresh; the
@@ -187,14 +275,14 @@ export class EventsBusService implements OnModuleInit, OnModuleDestroy {
           customerId: customerId ?? null,
           entity,
           action,
-          entityId: (doc?._id || change.documentKey?._id)?.toString(),
+          entityId: docId,
         };
 
         if (this.isDuplicate(event)) return;
         this.events$$.next(event);
       });
 
-      this.changeStream.on('error', (err: Error) => {
+      this.changeStream.on('error', (err) => {
         this.logger.error('Change stream error', err.message);
       });
 
@@ -238,8 +326,7 @@ export class EventsBusService implements OnModuleInit, OnModuleDestroy {
   }
 
   @OnEvent(QUESTION_CREATED)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  handleQuestionCreated(event: any) {
+  handleQuestionCreated(event: QuestionCreatedPayload) {
     this.questionEvents$$.next({
       type: 'question_created',
       questionId: event.questionId,
@@ -254,8 +341,7 @@ export class EventsBusService implements OnModuleInit, OnModuleDestroy {
   }
 
   @OnEvent(QUESTION_ANSWERED)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  handleQuestionAnswered(event: any) {
+  handleQuestionAnswered(event: QuestionAnsweredPayload) {
     this.questionEvents$$.next({
       type: 'question_answered',
       questionId: event.questionId,

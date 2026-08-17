@@ -51,6 +51,11 @@ export class ApiKey {
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Customer' }], default: [] })
   allowedCustomerIds: Types.ObjectId[];
+
+  // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
+  // nicht am Typ — ohne Deklaration brauchten Leser dafür ein `as any`.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const ApiKeySchema = SchemaFactory.createForClass(ApiKey);

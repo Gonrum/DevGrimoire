@@ -8,7 +8,7 @@ import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { SettingsService } from '../settings/settings.service';
 import { EncryptionService } from '../common/encryption.service';
 import { RequestContext } from '../common/request-context';
-import { isExcludedFromRag, SensitivityLevel } from '../common/sensitivity';
+import { ALL_SENSITIVITY_LEVELS, isExcludedFromRag, SensitivityLevel } from '../common/sensitivity';
 import { BalancerGateway } from '../balancer/balancer-gateway.service';
 
 const SETTING_RAG_ENDPOINTS_V1 = 'rag_embedding_endpoints_v1';
@@ -79,6 +79,83 @@ export interface RagSearchHit {
 }
 
 /**
+ * A row as it comes back from LanceDB. The driver types `toArray()` as
+ * `any[]`, so every read is funnelled through `RagService.queryRows()` and
+ * enters our code as unknown-valued records instead of `any`.
+ */
+type LanceRow = Record<string, unknown>;
+
+/** Narrowing helper: a plain object with unknown-typed members. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Narrowing helper: an array whose element type is not known yet. */
+function isUnknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
+}
+
+/**
+ * Mongo `ObjectId` (or anything else handing out a hex id) — structural check
+ * so this module doesn't have to import the driver just to test a field.
+ */
+function isObjectIdLike(value: unknown): value is { toHexString: () => string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'toHexString' in value &&
+    typeof value.toHexString === 'function'
+  );
+}
+
+/**
+ * Convert a raw Mongo/LanceDB field value into text worth embedding.
+ *
+ * Only values with a meaningful string form are accepted. Plain objects and
+ * arrays are deliberately dropped instead of stringified: `String({})` yields
+ * `[object Object]`, and that string would become part of the embedded text —
+ * making the affected index entry useless for semantic search without
+ * anything ever failing loudly. Array fields go through `asTextList` instead.
+ */
+function asText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'bigint') return value.toString();
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (value instanceof Date) return value.toISOString();
+  if (isObjectIdLike(value)) return value.toHexString();
+  return '';
+}
+
+/** `asText` for array fields — non-text elements are dropped, not stringified. */
+function asTextList(value: unknown): string[] {
+  if (!isUnknownArray(value)) return [];
+  return value.map((item) => asText(item).trim()).filter((item) => item.length > 0);
+}
+
+/** Finite numbers only — NaN, strings and undefined all become undefined. */
+function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/** Message of an unknown throwable, without stringifying non-Error objects. */
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  // Non-Error throwables from native bindings / HTTP clients still carry a
+  // usable message — keep it instead of logging a placeholder.
+  if (isRecord(err) && typeof err.message === 'string') return err.message;
+  return 'unknown error';
+}
+
+function isSensitivityLevel(value: unknown): value is SensitivityLevel {
+  return typeof value === 'string' && (ALL_SENSITIVITY_LEVELS as readonly string[]).includes(value);
+}
+
+function isIndexableEntity(value: string): value is IndexableEntity {
+  return (INDEXABLE_ENTITIES as readonly string[]).includes(value);
+}
+
+/**
  * Pure merge helper for `searchScopes`: takes one hit list per scope (project,
  * customer, global), dedupes by source document id (keeping the highest
  * score per id), sorts by score descending, and truncates to `limit`.
@@ -116,8 +193,13 @@ export interface EmbeddingEndpointPublic {
   hasApiKey: boolean;
 }
 
+/**
+ * Unvalidated endpoint as it arrives from the REST body. `provider` is a plain
+ * string on purpose — the value is whatever the client sent and only becomes
+ * an `EmbeddingProvider` after `isValidProvider()` has vouched for it.
+ */
 export interface EmbeddingEndpointInput {
-  provider: EmbeddingProvider;
+  provider: string;
   url: string;
   model: string;
   /** undefined → keep existing key for matching endpoint; "" → delete; otherwise → encrypt+store. */
@@ -151,17 +233,27 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     private readonly gateway: BalancerGateway,
   ) {}
 
-  async onModuleInit() {
+  onModuleInit(): void {
     this.initPromise = this.initialize();
-    // Don't await — let the app start even if embedding server is not available
-    this.initPromise.catch((err) => {
-      this.logger.warn(`RAG initialization failed: ${err.message}. RAG features disabled.`);
+    // Deliberately not awaited — let the app start even if the embedding server
+    // is unavailable. `initPromise` is awaited later by `ensureReady()`.
+    this.initPromise.catch((err: unknown) => {
+      this.logger.warn(`RAG initialization failed: ${errorMessage(err)}. RAG features disabled.`);
     });
   }
 
-  async onModuleDestroy() {
+  onModuleDestroy(): void {
+    // Release the native LanceDB handles instead of only dropping the
+    // references — the Rust side keeps the dataset open otherwise.
+    try {
+      if (this.table?.isOpen()) this.table.close();
+      if (this.db?.isOpen()) this.db.close();
+    } catch (err) {
+      this.logger.warn(`Closing LanceDB failed: ${errorMessage(err)}`);
+    }
     this.db = null;
     this.table = null;
+    this.ready = false;
   }
 
   /**
@@ -239,7 +331,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
           ep.apiKey = this.encryption.decrypt(apiKeyEnc);
         } catch (err) {
           this.logger.error(
-            `Failed to decrypt API key for ${provider} @ ${url}: ${(err as Error).message}. ` +
+            `Failed to decrypt API key for ${provider} @ ${url}: ${errorMessage(err)}. ` +
               'Endpoint runs without a key — reconfigure via Settings UI.',
           );
         }
@@ -249,7 +341,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return out;
   }
 
-  private endpointKey(e: Pick<EmbeddingEndpoint, 'provider' | 'url' | 'model'>): string {
+  private endpointKey(e: { provider: string; url: string; model: string }): string {
     return `${e.provider}${e.url}${e.model}`;
   }
 
@@ -338,7 +430,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       const vec = await this.embedWithEndpoint(probe, 'health-check');
       return { ok: true, dimensions: vec.length, latencyMs: Date.now() - start };
     } catch (err) {
-      return { ok: false, error: (err as Error).message, latencyMs: Date.now() - start };
+      return { ok: false, error: errorMessage(err), latencyMs: Date.now() - start };
     }
   }
 
@@ -349,8 +441,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
    */
   async reload(): Promise<void> {
     this.ready = false;
-    this.initPromise = this.initialize().catch((err) => {
-      this.logger.warn(`RAG re-initialization failed: ${err.message}.`);
+    this.initPromise = this.initialize().catch((err: unknown) => {
+      this.logger.warn(`RAG re-initialization failed: ${errorMessage(err)}.`);
     });
     await this.initPromise;
   }
@@ -371,7 +463,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         this.logger.log(`Embedding connected: provider=${endpoint.provider}, model=${endpoint.model}, url=${endpoint.url}`);
         break;
       } catch (err) {
-        this.logger.warn(`Embedding endpoint unavailable: ${endpoint.provider} @ ${endpoint.url} — ${(err as Error).message}`);
+        this.logger.warn(`Embedding endpoint unavailable: ${endpoint.provider} @ ${endpoint.url} — ${errorMessage(err)}`);
       }
     }
 
@@ -529,103 +621,153 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return vector;
   }
 
-  /** Serialize a schema document into stable RAG text. */
+  /**
+   * Serialize a schema document into stable RAG text.
+   *
+   * `DbSchema.fields`/`indexes` are declared `[Object]` in Mongoose, i.e. the
+   * DB accepts arbitrary shapes there. Every value therefore goes through
+   * `asText`/`asTextList`, which drop non-text values instead of embedding
+   * `[object Object]` into the index.
+   */
   private serializeSchema(doc: Record<string, unknown>): string {
     const parts: string[] = [];
     const add = (label: string, value: unknown) => {
-      if (value === undefined || value === null || value === '') return;
-      parts.push(`${label}: ${String(value)}`);
+      const text = asText(value);
+      if (text === '') return;
+      parts.push(`${label}: ${text}`);
     };
 
     add('Schema name', doc.name);
     add('Database type', doc.dbType);
     add('Database', doc.database);
     add('Description', doc.description);
-    if (Array.isArray(doc.tags) && doc.tags.length > 0) {
-      parts.push(`Tags: ${doc.tags.map(String).join(', ')}`);
-    }
+    const tags = asTextList(doc.tags);
+    if (tags.length > 0) parts.push(`Tags: ${tags.join(', ')}`);
 
-    if (Array.isArray(doc.fields) && doc.fields.length > 0) {
+    const fields = isUnknownArray(doc.fields) ? doc.fields.filter(isRecord) : [];
+    if (fields.length > 0) {
       parts.push('Fields:');
-      for (const field of doc.fields as Array<Record<string, unknown>>) {
+      for (const field of fields) {
         const attrs: string[] = [];
-        if (field.type) attrs.push(`type=${field.type}`);
-        if (field.nullable !== undefined) attrs.push(`nullable=${field.nullable}`);
-        if (field.defaultValue !== undefined && field.defaultValue !== '') attrs.push(`default=${field.defaultValue}`);
+        const type = asText(field.type);
+        if (type !== '') attrs.push(`type=${type}`);
+        if (typeof field.nullable === 'boolean') attrs.push(`nullable=${asText(field.nullable)}`);
+        const defaultValue = asText(field.defaultValue);
+        if (defaultValue !== '') attrs.push(`default=${defaultValue}`);
         if (field.isPrimaryKey) attrs.push('primaryKey');
         if (field.isIndexed) attrs.push('indexed');
-        if (field.reference) attrs.push(`reference=${field.reference}`);
+        const reference = asText(field.reference);
+        if (reference !== '') attrs.push(`reference=${reference}`);
         const suffix = attrs.length > 0 ? ` (${attrs.join(', ')})` : '';
-        const description = field.description ? ` — ${field.description}` : '';
-        parts.push(`- ${String(field.name || 'unnamed')}${suffix}${description}`);
+        const description = asText(field.description);
+        const descriptionSuffix = description !== '' ? ` — ${description}` : '';
+        parts.push(`- ${asText(field.name) || 'unnamed'}${suffix}${descriptionSuffix}`);
       }
     }
 
-    if (Array.isArray(doc.indexes) && doc.indexes.length > 0) {
+    const indexes = isUnknownArray(doc.indexes) ? doc.indexes.filter(isRecord) : [];
+    if (indexes.length > 0) {
       parts.push('Indexes:');
-      for (const index of doc.indexes as Array<Record<string, unknown>>) {
+      for (const index of indexes) {
         const attrs: string[] = [];
-        if (Array.isArray(index.fields) && index.fields.length > 0) attrs.push(`fields=${index.fields.map(String).join(',')}`);
+        const indexFields = asTextList(index.fields);
+        if (indexFields.length > 0) attrs.push(`fields=${indexFields.join(',')}`);
         if (index.unique) attrs.push('unique');
-        if (index.type) attrs.push(`type=${index.type}`);
+        const type = asText(index.type);
+        if (type !== '') attrs.push(`type=${type}`);
         const suffix = attrs.length > 0 ? ` (${attrs.join(', ')})` : '';
-        parts.push(`- ${String(index.name || 'unnamed')}${suffix}`);
+        parts.push(`- ${asText(index.name) || 'unnamed'}${suffix}`);
       }
     }
 
     return parts.join('\n');
   }
 
-  /** Extract indexable text from a MongoDB document */
+  /**
+   * Extract indexable text from a MongoDB document.
+   *
+   * Field values arrive untyped (`Record<string, unknown>` straight from the
+   * driver), so every read goes through `asText`/`asTextList`. Field *names*
+   * must match the Mongoose schema of the respective collection — a typo here
+   * fails silently and produces content-free index entries (see 'changelog').
+   */
   private extractText(entity: IndexableEntity, doc: Record<string, unknown>): { title: string; content: string } | null {
     switch (entity) {
       case 'knowledge':
-        return { title: String(doc.topic || ''), content: String(doc.content || '') };
+        return { title: asText(doc.topic), content: asText(doc.content) };
       case 'research':
-        return { title: String(doc.title || ''), content: String(doc.content || '') };
+        return { title: asText(doc.title), content: asText(doc.content) };
       case 'manual':
-        return { title: String(doc.title || ''), content: String(doc.content || '') };
-      case 'changelog':
-        return { title: String(doc.type || '') + ': ' + String(doc.title || ''), content: String(doc.description || '') };
+        return { title: asText(doc.title), content: asText(doc.content) };
+      case 'changelog': {
+        // Field names per changelog.schema.ts: version/summary/component/
+        // repoLabel/changes[]. The previous implementation read type/title/
+        // description — fields that never existed on this collection, so every
+        // changelog was indexed as the literal string ": " (541 useless
+        // entries) and changelog text was not searchable at all.
+        const version = asText(doc.version);
+        const summary = asText(doc.summary);
+        const component = asText(doc.component);
+        const repoLabel = asText(doc.repoLabel);
+        const changes = asTextList(doc.changes);
+        const contentParts: string[] = [];
+        if (component !== '') contentParts.push(`Component: ${component}`);
+        if (repoLabel !== '') contentParts.push(`Repository: ${repoLabel}`);
+        if (changes.length > 0) contentParts.push(changes.map((change) => `- ${change}`).join('\n'));
+        return {
+          title: [version, summary].filter((part) => part !== '').join(' — '),
+          content: contentParts.join('\n'),
+        };
+      }
       case 'todo':
-        return { title: String(doc.title || ''), content: String(doc.description || '') };
+        return { title: asText(doc.title), content: asText(doc.description) };
       case 'session':
-        return { title: 'Session', content: String(doc.summary || '') };
-      case 'snippet':
-        return { title: String(doc.title || ''), content: `[${String(doc.language || '')}] ${String(doc.code || '')}` };
+        return { title: 'Session', content: asText(doc.summary) };
+      case 'snippet': {
+        const language = asText(doc.language);
+        const code = asText(doc.code);
+        return {
+          title: asText(doc.title),
+          content: language !== '' ? `[${language}] ${code}` : code,
+        };
+      }
       case 'attachment':
-        return { title: String(doc.originalName || ''), content: String(doc.textContent || '') };
+        return { title: asText(doc.originalName), content: asText(doc.textContent) };
       case 'schema':
-        return { title: String(doc.name || ''), content: this.serializeSchema(doc) };
+        return { title: asText(doc.name), content: this.serializeSchema(doc) };
       case 'project': {
         const parts: string[] = [];
-        if (doc.description) parts.push(String(doc.description));
-        if (Array.isArray(doc.techStack) && doc.techStack.length > 0) {
-          parts.push(`Tech: ${(doc.techStack as unknown[]).map(String).join(', ')}`);
-        }
-        if (Array.isArray(doc.tags) && doc.tags.length > 0) {
-          parts.push(`Tags: ${(doc.tags as unknown[]).map(String).join(', ')}`);
-        }
-        if (doc.instructions) parts.push(String(doc.instructions));
-        return { title: String(doc.name || ''), content: parts.join('\n') };
+        const description = asText(doc.description);
+        if (description !== '') parts.push(description);
+        const techStack = asTextList(doc.techStack);
+        if (techStack.length > 0) parts.push(`Tech: ${techStack.join(', ')}`);
+        const tags = asTextList(doc.tags);
+        if (tags.length > 0) parts.push(`Tags: ${tags.join(', ')}`);
+        const instructions = asText(doc.instructions);
+        if (instructions !== '') parts.push(instructions);
+        return { title: asText(doc.name), content: parts.join('\n') };
       }
       case 'question': {
         // T-392: only answered questions belong in the index — pending ones
         // would pollute results with unresolved noise and create privacy
         // issues for user-targeted asks.
-        if (doc.status !== 'answered') return null;
-        const titlePrefix = doc.direction === 'user_to_agent' ? 'Q→Agent: ' : 'Q→User: ';
-        const parts: string[] = [];
-        parts.push(`Frage: ${String(doc.question || '')}`);
-        if (doc.context) parts.push(`Kontext: ${String(doc.context)}`);
-        if (doc.answer) parts.push(`Antwort: ${String(doc.answer)}`);
+        if (asText(doc.status) !== 'answered') return null;
+        const titlePrefix = asText(doc.direction) === 'user_to_agent' ? 'Q→Agent: ' : 'Q→User: ';
+        const question = asText(doc.question);
+        const parts: string[] = [`Frage: ${question}`];
+        const context = asText(doc.context);
+        if (context !== '') parts.push(`Kontext: ${context}`);
+        const answer = asText(doc.answer);
+        if (answer !== '') parts.push(`Antwort: ${answer}`);
         return {
-          title: titlePrefix + String(doc.question || '').slice(0, 120),
+          title: titlePrefix + question.slice(0, 120),
           content: parts.join('\n\n'),
         };
       }
-      case 'research_artifact':
-        return { title: String(doc.title || ''), content: String(doc.summary || doc.content || '') };
+      case 'research_artifact': {
+        const summary = asText(doc.summary);
+        return { title: asText(doc.title), content: summary !== '' ? summary : asText(doc.content) };
+      }
       default:
         return null;
     }
@@ -639,19 +781,25 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     // never enter the index. We also remove any pre-existing chunks for this
     // doc so a `internal → confidential` reclassification effectively redacts
     // it from RAG.
-    const sensitivity = doc.sensitivity as SensitivityLevel | undefined;
+    const sensitivity: SensitivityLevel | undefined = isSensitivityLevel(doc.sensitivity)
+      ? doc.sensitivity
+      : undefined;
+    const docId = asText(doc._id);
+    if (docId === '') {
+      this.logger.warn(`Skipping ${entity} document without usable _id`);
+      return;
+    }
     if (isExcludedFromRag(sensitivity)) {
-      await this.removeDocument(String(doc._id));
+      await this.removeDocument(docId);
       return;
     }
 
     const extracted = this.extractText(entity, doc);
     if (!extracted || (!extracted.title && !extracted.content)) return;
 
-    const docId = String(doc._id);
     // For project entities the doc IS the project, so its _id is the projectId.
-    const projectId = entity === 'project' ? docId : String(doc.projectId || '');
-    const customerId = String(doc.customerId || '');
+    const projectId = entity === 'project' ? docId : asText(doc.projectId);
+    const customerId = asText(doc.customerId);
     const combinedText = `${extracted.title}\n${extracted.content}`.trim();
 
     // Delete all existing chunks for this document
@@ -701,14 +849,14 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     // Skip in stdio MCP mode — only the HTTP backend should do background indexing
     if (process.env.MCP_STDIO === 'true') return;
     if (!(await this.ensureReady())) return;
-    if (!INDEXABLE_ENTITIES.includes(event.entity as IndexableEntity)) return;
+    if (!isIndexableEntity(event.entity)) return;
     if (!event.entityId) return;
 
-    const entity = event.entity as IndexableEntity;
+    const entity = event.entity;
 
     if (event.action === 'deleted') {
-      await this.removeDocument(event.entityId).catch((err) =>
-        this.logger.warn(`RAG delete failed: ${err.message}`),
+      await this.removeDocument(event.entityId).catch((err: unknown) =>
+        this.logger.warn(`RAG delete failed: ${errorMessage(err)}`),
       );
       return;
     }
@@ -725,11 +873,30 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         await this.upsertDocument(entity, doc);
       }
     } catch (err) {
-      this.logger.warn(`RAG upsert failed for ${entity}/${event.entityId}: ${(err as Error).message}`);
+      this.logger.warn(`RAG upsert failed for ${entity}/${event.entityId}: ${errorMessage(err)}`);
     }
   }
 
-  /** Semantic search across all indexed documents (deduplicated by source document) */
+  /**
+   * Boundary for every LanceDB read: the driver declares `toArray()` as
+   * `any[]`, which would spread untyped values through the whole service. Rows
+   * leave this method as `LanceRow`, so all column reads have to be narrowed
+   * explicitly (`asText`/`asNumber`).
+   */
+  private async queryRows(query: { toArray(): Promise<unknown[]> }): Promise<LanceRow[]> {
+    const rows = await query.toArray();
+    return rows.filter(isRecord);
+  }
+
+  /**
+   * Semantic search across all indexed documents (deduplicated by source document).
+   *
+   * The return type is structurally identical to `RagSearchHit[]` but stays
+   * spelled out inline on purpose: mcp-tools.ts assigns the result to
+   * `Array<Record<string, unknown>>`, which TypeScript only permits for
+   * anonymous object types (those get an implicit index signature, named
+   * interfaces don't).
+   */
   async search(
     query: string,
     projectId?: string,
@@ -743,9 +910,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
     const vector = await this.getEmbedding(query);
 
-    const queryBuilder = this.table!.search(vector).limit(limit * 5); // Overfetch for filtering + dedup
-
-    const results = await queryBuilder.toArray();
+    // Overfetch for filtering + dedup
+    const results = await this.queryRows(this.table!.search(vector).limit(limit * 5));
 
     // Apply caller's scope (api-key/user) on top of explicit filter args. We
     // filter post-hoc on the JS side because LanceDB filter expressions are
@@ -759,17 +925,22 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     const allowedCustomerIds = new Set((actor?.allowedCustomerIds || []).map(String));
 
     // Filter, deduplicate by sourceId (keep best chunk per document), then limit
-    const seen = new Map<string, { row: Record<string, unknown>; score: number }>();
+    const seen = new Map<string, RagSearchHit>();
     for (const row of results) {
-      if (row.id === '__init__') continue;
-      if (projectId && row.projectId !== projectId && row.projectId !== '') continue;
-      if (customerId && row.customerId !== customerId && row.customerId !== '') continue;
-      if (entity && row.entity !== entity) continue;
+      const rowId = asText(row.id);
+      if (rowId === '__init__') continue;
 
-      // Server-side scope enforcement. A row's projectId/customerId may be
-      // empty string for global entries — those always pass.
-      const rowProjectId = (row.projectId as string) || '';
-      const rowCustomerId = (row.customerId as string) || '';
+      // A row's projectId/customerId is the empty string for global entries —
+      // those always pass, both for the explicit filter args and for the
+      // server-side scope enforcement below.
+      const rowProjectId = asText(row.projectId);
+      const rowCustomerId = asText(row.customerId);
+      const rowEntity = asText(row.entity);
+
+      if (projectId && rowProjectId !== projectId && rowProjectId !== '') continue;
+      if (customerId && rowCustomerId !== customerId && rowCustomerId !== '') continue;
+      if (entity && rowEntity !== entity) continue;
+
       if (enforceProjectScope && rowProjectId && !allowedProjectIds.has(rowProjectId)) {
         if (actor.projectScopeMode === 'none') continue;
         continue;
@@ -779,27 +950,27 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
-      const sourceId = (row.sourceId as string) || (row.id as string);
-      const score = row._distance != null ? 1 - (row._distance as number) : 0;
+      const sourceId = asText(row.sourceId) || rowId;
+      const distance = asNumber(row._distance);
+      const score = distance !== undefined ? 1 - distance : 0;
 
       const existing = seen.get(sourceId);
       if (!existing || score > existing.score) {
-        seen.set(sourceId, { row, score });
+        seen.set(sourceId, {
+          id: sourceId,
+          projectId: rowProjectId,
+          customerId: rowCustomerId,
+          entity: rowEntity,
+          title: asText(row.title),
+          content: asText(row.content),
+          score,
+        });
       }
     }
 
     return Array.from(seen.values())
       .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
-      .map(({ row, score }) => ({
-        id: ((row.sourceId as string) || (row.id as string)),
-        projectId: row.projectId as string,
-        customerId: (row.customerId as string) || '',
-        entity: row.entity as string,
-        title: row.title as string,
-        content: row.content as string,
-        score,
-      }));
+      .slice(0, limit);
   }
 
   /**
@@ -893,12 +1064,22 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       // Process in batches (with chunking)
       const batch: RagDocument[] = [];
       for await (const doc of cursor) {
+        // T-219: honour the data classification here as well. `upsertDocument`
+        // keeps confidential/personal/secret entries out of the index, so a
+        // full reindex must not quietly put them back in.
+        const sensitivity = isSensitivityLevel(doc.sensitivity) ? doc.sensitivity : undefined;
+        if (isExcludedFromRag(sensitivity)) continue;
+
         const extracted = this.extractText(entity, doc);
         if (!extracted || (!extracted.title && !extracted.content)) continue;
 
-        const docId = String(doc._id);
-        const docProjectId = entity === 'project' ? docId : String(doc.projectId || '');
-        const docCustomerId = String(doc.customerId || '');
+        const docId = asText(doc._id);
+        if (docId === '') {
+          this.logger.warn(`Skipping ${entity} document without usable _id`);
+          continue;
+        }
+        const docProjectId = entity === 'project' ? docId : asText(doc.projectId);
+        const docCustomerId = asText(doc.customerId);
         const combinedText = `${extracted.title}\n${extracted.content}`.trim();
         const chunks = this.chunkText(combinedText);
 
@@ -964,17 +1145,18 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    const allRows = await this.table.search(new Array(this.dimensions).fill(0)).limit(100000).toArray();
-    const validRows = allRows.filter((r) => r.id !== '__init__');
+    const zeroVector = new Array<number>(this.dimensions).fill(0);
+    const allRows = await this.queryRows(this.table.search(zeroVector).limit(100000));
+    const validRows = allRows.filter((row) => asText(row.id) !== '__init__');
 
     // Count unique source documents and entities (by sourceId)
     const uniqueSources = new Set<string>();
     const entities: Record<string, number> = {};
     for (const row of validRows) {
-      const sourceId = (row.sourceId as string) || (row.id as string);
+      const sourceId = asText(row.sourceId) || asText(row.id);
       if (!uniqueSources.has(sourceId)) {
         uniqueSources.add(sourceId);
-        const e = row.entity as string;
+        const e = asText(row.entity);
         entities[e] = (entities[e] || 0) + 1;
       }
     }

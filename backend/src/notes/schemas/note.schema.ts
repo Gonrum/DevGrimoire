@@ -55,6 +55,11 @@ export class Note {
 
   @Prop({ type: Number, default: 0 })
   promotionAttempts: number;
+
+  // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
+  // nicht am Typ — ohne Deklaration brauchten Leser dafür ein `as any`.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const NoteSchema = SchemaFactory.createForClass(Note);

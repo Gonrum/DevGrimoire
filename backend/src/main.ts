@@ -3,7 +3,8 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { randomUUID } from 'node:crypto';
 import helmet from 'helmet';
-const { json } = require('express');
+import { json } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -87,6 +88,82 @@ function createMcpServer(services: McpServices): Server {
   );
   registerMcpTools(server, services);
   return server;
+}
+
+/**
+ * Express-Request, wie die MCP-Auth-Middleware ihn anreichert.
+ *
+ * Eine Deklaration statt `req: any` pro Handler: die acht MCP-Handler in dieser
+ * Datei trugen zusammen über 100 Lint-Findings, weil jeder Zugriff auf einem
+ * `any` stattfand — inklusive `req.headers` und `res.status()`, wo Express längst
+ * präzise Typen liefert.
+ */
+interface McpRequest extends Request {
+  user?: RequestUser;
+  apiKey?: ApiKey;
+}
+
+/**
+ * `ws` liefert Nachrichten als `RawData` — das ist `Buffer | ArrayBuffer | Buffer[]`.
+ *
+ * Ein blankes `data.toString()` war stillschweigend falsch: bei einem
+ * fragmentierten Frame (`Buffer[]`) kommt eine komma-verbundene Liste heraus, bei
+ * einem `ArrayBuffer` wörtlich `[object ArrayBuffer]`. Beides fällt nicht auf,
+ * weil nichts abstürzt — die Terminal-Eingabe wird nur stillschweigend Müll.
+ */
+function rawDataToString(data: WebSocket.RawData): string {
+  if (Buffer.isBuffer(data)) return data.toString('utf8');
+  if (Array.isArray(data)) return Buffer.concat(data).toString('utf8');
+  return Buffer.from(data).toString('utf8');
+}
+
+/** Vom Client geschickte Resize-Nachricht — ungeprüftes JSON, deshalb alles `unknown`. */
+function asResizeMessage(value: unknown): { cols: unknown; rows: unknown } | undefined {
+  if (value === null || typeof value !== 'object') return undefined;
+  const msg = value as { type?: unknown; cols?: unknown; rows?: unknown };
+  return msg.type === 'resize' ? { cols: msg.cols, rows: msg.rows } : undefined;
+}
+
+/** JWT-Payload, wie Auth ihn signiert: Standard-`sub`, auf manchen Pfaden zusätzlich `userId`. */
+interface TerminalTokenPayload {
+  sub?: string;
+  userId?: string;
+}
+
+/**
+ * Adapter für einen async `upgrade`-Handler.
+ *
+ * EventEmitter-Handler dürfen kein Promise zurückgeben: eine Rejection bliebe
+ * unbehandelt, und Node beendet dann standardmäßig den Prozess. Ein
+ * fehlgeschlagener Terminal-Upgrade hätte also die gesamte API mitgenommen.
+ * Jetzt wird der Socket geschlossen und der Fehler protokolliert.
+ */
+function onUpgradeAsync(
+  handler: (
+    req: import('http').IncomingMessage,
+    socket: import('net').Socket,
+    head: Buffer,
+  ) => Promise<void>,
+): (req: import('http').IncomingMessage, socket: import('net').Socket, head: Buffer) => void {
+  return (req, socket, head) => {
+    handler(req, socket, head).catch((err: unknown) => {
+      console.error('WebSocket-Upgrade gescheitert:', err);
+      socket.destroy();
+    });
+  };
+}
+
+/** Wie `onUpgradeAsync`, aber für beliebige void-erwartende Callbacks. */
+function voidAsync<A extends unknown[]>(
+  handler: (...args: A) => Promise<void>,
+  onError?: (err: unknown, ...args: A) => void,
+): (...args: A) => void {
+  return (...args: A) => {
+    handler(...args).catch((err: unknown) => {
+      console.error('Asynchroner Handler gescheitert:', err);
+      onError?.(err, ...args);
+    });
+  };
 }
 
 async function bootstrap() {
@@ -213,7 +290,7 @@ async function bootstrap() {
   const apiKeysService = app.get(ApiKeysService);
   const authService = app.get(AuthService);
 
-  const getPublicOrigin = (req: any) => {
+  const getPublicOrigin = (req: Request) => {
     const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
     const proto = forwardedProto || req.protocol || 'http';
     return `${proto}://${req.get('host')}`;
@@ -274,11 +351,11 @@ async function bootstrap() {
     };
   };
 
-  const mcpDiscoveryHandler = (_req: any, res: any) => {
+  const mcpDiscoveryHandler = (_req: Request, res: Response) => {
     res.json(getMcpDiscoveryPayload());
   };
 
-  const mcpRegistryManifestHandler = (req: any, res: any) => {
+  const mcpRegistryManifestHandler = (req: McpRequest, res: Response) => {
     const discovery = getMcpDiscoveryPayload();
     const origin = getPublicOrigin(req);
 
@@ -315,7 +392,7 @@ async function bootstrap() {
   expressApp.get('/.well-known/mcp-server.json', mcpRegistryManifestHandler);
   expressApp.get('/server.json', mcpRegistryManifestHandler);
 
-  const mcpAuthMiddleware = async (req: any, res: any, next: any) => {
+  const mcpAuthMiddleware = async (req: McpRequest, res: Response, next: NextFunction) => {
     // Skip auth if auth is not enabled — still set a default user so per-user
     // scoped tools (chat_*) can resolve an owner.
     if (!authService.isAuthEnabled()) {
@@ -373,7 +450,7 @@ async function bootstrap() {
 
   expressApp.use('/mcp', mcpAuthMiddleware);
   expressApp.use('/sse', mcpAuthMiddleware);
-  expressApp.use('/messages', async (req: any, res: any, next: any) => {
+  expressApp.use('/messages', async (req: McpRequest, res: Response, next: NextFunction) => {
     // Skip auth if not enabled but still attach a default user
     if (!authService.isAuthEnabled()) {
       req.user = { userId: 'system', username: 'system', role: 'admin' } satisfies RequestUser;
@@ -393,7 +470,7 @@ async function bootstrap() {
   });
 
   // Streamable HTTP endpoint (protocol version 2025-11-25)
-  expressApp.all('/mcp', async (req: any, res: any) => {
+  expressApp.all('/mcp', async (req: McpRequest, res: Response) => {
     try {
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
       let transport: StreamableHTTPServerTransport;
@@ -437,7 +514,7 @@ async function bootstrap() {
       }
 
       await RequestContext.run(req.user, req.apiKey, () => transport.handleRequest(req, res, req.body));
-    } catch (error) {
+    } catch {
       if (!res.headersSent) {
         res.status(500).json({
           jsonrpc: '2.0',
@@ -449,13 +526,13 @@ async function bootstrap() {
   });
 
   // Legacy SSE endpoint (protocol version 2024-11-05)
-  expressApp.get('/sse', async (req: any, res: any) => {
+  expressApp.get('/sse', async (req: McpRequest, res: Response) => {
     const transport = new SSEServerTransport('/messages', res);
     transports[transport.sessionId] = transport;
     if (req.user) {
       authenticatedSessions.set(transport.sessionId, {
-        user: req.user as RequestUser,
-        apiKey: req.apiKey as ApiKey | undefined,
+        user: req.user,
+        apiKey: req.apiKey,
       });
     }
     mcpLogger.log(`sse session opened (${transport.sessionId.slice(0, 8)}…, total=${Object.keys(transports).length})`);
@@ -491,9 +568,18 @@ async function bootstrap() {
     }
   });
 
-  expressApp.post('/messages', async (req: any, res: any) => {
+  expressApp.post('/messages', async (req: McpRequest, res: Response) => {
     const sessionId = req.query.sessionId as string;
-    const requestId = req.body?.id;
+    // express typisiert `req.body` als `any`. JSON-RPC erlaubt als Id nur String
+    // oder Number — alles andere wird verworfen. Das ist zugleich ein Fix: ein
+    // Objekt als Id landete vorher per Stringifizierung als `[object Object]` im
+    // Idempotenz-Key, wodurch *verschiedene* Requests fälschlich als Duplikat
+    // abgewiesen wurden.
+    const rawRequestId: unknown = (req.body as { id?: unknown } | undefined)?.id;
+    const requestId =
+      typeof rawRequestId === 'string' || typeof rawRequestId === 'number'
+        ? rawRequestId
+        : undefined;
 
     // Idempotency: refuse to redispatch the same (session, jsonrpc.id) within
     // the in-flight window. Prevents double writes when a client retries after
@@ -593,7 +679,7 @@ async function bootstrap() {
   const TERMINAL_ROUTE = /^\/api\/workspaces\/([a-f0-9]{24})\/terminal\/?$/i;
 
   const httpServer = app.getHttpServer();
-  httpServer.on('upgrade', async (req: import('http').IncomingMessage, socket: import('net').Socket, head: Buffer) => {
+  httpServer.on('upgrade', onUpgradeAsync(async (req: import('http').IncomingMessage, socket: import('net').Socket, head: Buffer) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     const match = TERMINAL_ROUTE.exec(url.pathname);
     if (!match) return; // let other upgrades fall through to whatever else listens
@@ -609,7 +695,7 @@ async function bootstrap() {
 
     let userId: string | undefined;
     try {
-      const payload = jwt.verify(token);
+      const payload = jwt.verify<TerminalTokenPayload>(token);
       // Auth signs JWTs with the standard `sub` claim (user id) plus a
       // legacy `userId` field on some paths — accept either.
       userId = payload.sub || payload.userId;
@@ -658,7 +744,7 @@ async function bootstrap() {
     });
 
     upstream.on('error', () => reject(502, 'Bad Gateway'));
-  });
+  }));
 
   // ─── WebSocket SSH terminal ──────────────────────────────────────────
   // Same JWT-via-query-param pattern as the workspace terminal above. We
@@ -710,7 +796,7 @@ async function bootstrap() {
   const sshTerminalWss = new WebSocketServer({ noServer: true });
   const SSH_TERMINAL_ROUTE = /^\/api\/ssh\/([a-f0-9]{24})\/terminal\/?$/i;
 
-  httpServer.on('upgrade', async (req: import('http').IncomingMessage, socket: import('net').Socket, head: Buffer) => {
+  httpServer.on('upgrade', (req: import('http').IncomingMessage, socket: import('net').Socket, head: Buffer) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     const match = SSH_TERMINAL_ROUTE.exec(url.pathname);
     if (!match) return;
@@ -725,7 +811,7 @@ async function bootstrap() {
 
     let userId: string | undefined;
     try {
-      const payload = jwt.verify(token);
+      const payload = jwt.verify<TerminalTokenPayload>(token);
       userId = payload.sub || payload.userId;
     } catch {
       return rejectUpgrade(401, 'Unauthorized');
@@ -744,7 +830,7 @@ async function bootstrap() {
     // ssh2 client setup happens AFTER the WS upgrade so we can surface
     // ssh errors as close-frames (with a reason the UI can render),
     // rather than as raw HTTP rejects with cryptic codes.
-    sshTerminalWss.handleUpgrade(req, socket, head, async (clientWs) => {
+    sshTerminalWss.handleUpgrade(req, socket, head, voidAsync(async (clientWs: WebSocket) => {
       const startedAt = Date.now();
       let sshClient: import('ssh2').Client | null = null;
       let channel: import('ssh2').ClientChannel | null = null;
@@ -852,13 +938,13 @@ async function bootstrap() {
           return;
         }
         if (!isBinary) {
-          const text = data.toString();
+          const text = rawDataToString(data);
           // Tolerate either a stringified Buffer or a real text frame.
           try {
-            const msg = JSON.parse(text);
-            if (msg && msg.type === 'resize') {
-              const cols = Number(msg.cols);
-              const rows = Number(msg.rows);
+            const resize = asResizeMessage(JSON.parse(text));
+            if (resize) {
+              const cols = Number(resize.cols);
+              const rows = Number(resize.rows);
               if (Number.isFinite(cols) && Number.isFinite(rows) && cols > 0 && rows > 0) {
                 try { channel.setWindow(rows, cols, 0, 0); } catch { /* noop */ }
               }
@@ -879,7 +965,7 @@ async function bootstrap() {
       sshClient.on('end', () => closeAll());
       sshClient.on('close', () => closeAll());
       sshClient.on('error', (err) => closeAll(1011, err.message || 'ssh_error'));
-    });
+    }));
   });
 
   // ─── WebSocket multiplex bus for live events ─────────────────────────
@@ -928,7 +1014,7 @@ async function bootstrap() {
       const token = url.searchParams.get('token');
       if (!token) return reject(401, 'Unauthorized');
       try {
-        const payload = jwt.verify(token);
+        const payload = jwt.verify<TerminalTokenPayload>(token);
         userId = payload.sub || payload.userId;
       } catch {
         return reject(401, 'Unauthorized');
@@ -993,13 +1079,14 @@ async function bootstrap() {
       }, HEARTBEAT_INTERVAL_MS);
 
       ws.on('message', (data) => {
-        let msg: { type?: string; id?: string; scope?: string; projectId?: string };
+        let parsed: unknown;
         try {
-          msg = JSON.parse(data.toString());
+          parsed = JSON.parse(rawDataToString(data));
         } catch {
           return;
         }
-        if (!msg || typeof msg !== 'object') return;
+        if (parsed === null || typeof parsed !== 'object') return;
+        const msg = parsed as { type?: string; id?: string; scope?: string; projectId?: string };
         if (msg.type === 'subscribe' && typeof msg.id === 'string') {
           subs.set(msg.id, {
             id: msg.id,
@@ -1029,4 +1116,9 @@ async function bootstrap() {
   console.log(`DevGrimoire API running on port ${port}`);
   console.log(`MCP HTTP transport available at /mcp (Streamable HTTP) and /sse (Legacy SSE)`);
 }
-bootstrap();
+bootstrap().catch((err: unknown) => {
+  // Vorher ein unbehandelter Promise: ein Startfehler kam als nackte
+  // UnhandledRejection heraus, ohne Hinweis worauf.
+  console.error('DevGrimoire konnte nicht starten:', err);
+  process.exit(1);
+});

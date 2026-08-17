@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException, forwardRef } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { ChatLlmService, type LlmMessage } from '../chat/chat-llm.service';
 import { ProjectsService } from '../projects/projects.service';
 import { CustomersService } from '../customers/customers.service';
@@ -7,8 +7,19 @@ import { SnippetsService } from '../snippets/snippets.service';
 import { TodosService } from '../todos/todos.service';
 import { ResearchService } from '../research/research.service';
 import { ManualsService } from '../manuals/manuals.service';
-import { NotesService } from './notes.service';
+import { NotesService, type NoteWithIdle } from './notes.service';
 import type { Note } from './schemas/note.schema';
+
+/** Single source of truth for the promotion targets — used for parsing *and* dispatch. */
+export const PROMOTION_ENTITY_TYPES = [
+  'knowledge',
+  'snippet',
+  'todo',
+  'research',
+  'manual',
+] as const;
+
+export type PromotionEntityType = (typeof PROMOTION_ENTITY_TYPES)[number];
 
 export interface PromotionEvent {
   type: 'status' | 'token' | 'proposal' | 'error' | 'done';
@@ -16,12 +27,24 @@ export interface PromotionEvent {
 }
 
 export interface PromotionProposal {
-  entityType: 'knowledge' | 'snippet' | 'todo' | 'research' | 'manual';
+  entityType: PromotionEntityType;
   projectId: string | null;
   customerId: string | null;
   title: string;
   tags?: string[];
   reasoning?: string;
+}
+
+/** The projects/customers as they are rendered into the system prompt. */
+interface PromptProject {
+  id: string;
+  name: string;
+  techStack: string[];
+}
+
+interface PromptCustomer {
+  id: string;
+  name: string;
 }
 
 const MAX_PARSE_RETRIES = 3;
@@ -65,12 +88,12 @@ export class NotesPromotionService {
       this.customersService.findAll({ includeArchived: false }).catch(() => []),
     ]);
 
-    const projectsForPrompt = projects.map((p: any) => ({
+    const projectsForPrompt: PromptProject[] = projects.map((p) => ({
       id: p._id.toString(),
       name: p.name,
       techStack: Array.isArray(p.techStack) ? p.techStack.slice(0, 10) : [],
     }));
-    const customersForPrompt = customers.map((c: any) => ({
+    const customersForPrompt: PromptCustomer[] = customers.map((c) => ({
       id: c._id.toString(),
       name: c.name,
     }));
@@ -78,7 +101,9 @@ export class NotesPromotionService {
     // 3. Increment attempt counter (best-effort — don't block on this).
     await this.notesService
       .incrementPromotionAttempts(userId, noteId)
-      .catch((err) => this.logger.warn(`Failed to increment promotionAttempts: ${err}`));
+      .catch((err: unknown) =>
+        this.logger.warn(`Failed to increment promotionAttempts: ${errorMessage(err)}`),
+      );
 
     yield { type: 'status', phase: 'analyzing' };
 
@@ -109,8 +134,8 @@ export class NotesPromotionService {
           // Only forward tokens on the first attempt — retries are noisy.
           if (attempt === 1) yield { type: 'token', text: token };
         }
-      } catch (err: any) {
-        const message = err?.message || String(err);
+      } catch (err) {
+        const message = errorMessage(err);
         this.logger.warn(`Promotion LLM stream failed (attempt ${attempt}): ${message}`);
         lastError = message;
         // If the LLM is unreachable, don't retry.
@@ -149,14 +174,14 @@ export class NotesPromotionService {
     userId: string,
     noteId: string,
     payload: {
-      entityType: 'knowledge' | 'snippet' | 'todo' | 'research' | 'manual';
+      entityType: PromotionEntityType;
       projectId?: string;
       customerId?: string;
       title: string;
       tags?: string[];
       reasoning?: string;
     },
-  ): Promise<{ promotedTo: any; entityLink: string }> {
+  ): Promise<{ promotedTo: NoteWithIdle['promotedTo']; entityLink: string }> {
     const noteDoc = await this.notesService.findOne(userId, noteId);
     if (noteDoc.archived) {
       throw new BadRequestException('Note is already archived');
@@ -171,6 +196,13 @@ export class NotesPromotionService {
       throw new BadRequestException(
         `entityType '${payload.entityType}' requires either projectId or customerId`,
       );
+    }
+
+    // Guard before the switch: the switch below is exhaustive over
+    // PromotionEntityType, so a `default:` branch would be dead code that TS
+    // narrows to `never`. Callers that bypass the DTO validation still get a 400.
+    if (!PROMOTION_ENTITY_TYPES.includes(payload.entityType)) {
+      throw new BadRequestException(`Unknown entityType: ${payload.entityType}`);
     }
 
     let entityId: string;
@@ -191,7 +223,7 @@ export class NotesPromotionService {
           content,
           tags,
         });
-        entityId = (created as any)._id.toString();
+        entityId = created._id.toString();
         entityLink = projectId
           ? `/projects/${projectId}?tab=knowledge&knowledgeId=${entityId}`
           : customerId
@@ -208,7 +240,7 @@ export class NotesPromotionService {
           code: content,
           tags,
         });
-        entityId = (created as any)._id.toString();
+        entityId = created._id.toString();
         entityLink = projectId
           ? `/projects/${projectId}?tab=snippets&snippetId=${entityId}`
           : `/customers/${customerId}?tab=snippets&snippetId=${entityId}`;
@@ -225,7 +257,7 @@ export class NotesPromotionService {
           description: content,
           tags,
         });
-        entityId = (created as any)._id.toString();
+        entityId = created._id.toString();
         entityLink = `/todos/${entityId}`;
         break;
       }
@@ -237,7 +269,7 @@ export class NotesPromotionService {
           content,
           tags,
         });
-        entityId = (created as any)._id.toString();
+        entityId = created._id.toString();
         entityLink = projectId
           ? `/projects/${projectId}?tab=research&researchId=${entityId}`
           : `/customers/${customerId}?tab=research&researchId=${entityId}`;
@@ -250,14 +282,12 @@ export class NotesPromotionService {
           title: payload.title,
           content,
         });
-        entityId = (created as any)._id.toString();
+        entityId = created._id.toString();
         entityLink = projectId
           ? `/projects/${projectId}?tab=manual&manualId=${entityId}`
           : `/customers/${customerId}?tab=manual&manualId=${entityId}`;
         break;
       }
-      default:
-        throw new BadRequestException(`Unknown entityType: ${payload.entityType}`);
     }
 
     const updated = await this.notesService.markPromoted(userId, noteId, {
@@ -276,10 +306,30 @@ export class NotesPromotionService {
 
 // --- helpers -----------------------------------------------------------------
 
-function buildSystemPrompt(
-  projects: Array<{ id: string; name: string; techStack: string[] }>,
-  customers: Array<{ id: string; name: string }>,
-): string {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** `Array.isArray` widens `unknown` to `any[]`; this keeps the elements `unknown`. */
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+/** Best-effort message extraction from a caught value of unknown shape. */
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message || String(err);
+  if (isRecord(err)) {
+    const message = asString(err.message);
+    if (message) return message;
+  }
+  return typeof err === 'string' ? err : String(err);
+}
+
+function buildSystemPrompt(projects: PromptProject[], customers: PromptCustomer[]): string {
   const projectsBlock =
     projects.length > 0
       ? projects
@@ -348,54 +398,41 @@ function tryParseProposal(
   if (start < 0 || end < 0 || end <= start) return null;
   const slice = body.slice(start, end + 1);
 
-  let parsed: any;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(slice);
   } catch {
     return null;
   }
-  if (!parsed || typeof parsed !== 'object') return null;
+  if (!isRecord(parsed)) return null;
 
-  const entityType = parsed.entityType;
-  if (
-    entityType !== 'knowledge' &&
-    entityType !== 'snippet' &&
-    entityType !== 'todo' &&
-    entityType !== 'research' &&
-    entityType !== 'manual'
-  ) {
-    return null;
-  }
+  // `find` yields the literal union type — no assertion needed.
+  const rawEntityType = parsed.entityType;
+  const entityType = PROMOTION_ENTITY_TYPES.find((candidate) => candidate === rawEntityType);
+  if (!entityType) return null;
 
-  let projectId: string | null = null;
-  if (typeof parsed.projectId === 'string' && validProjectIds.has(parsed.projectId)) {
-    projectId = parsed.projectId;
-  }
-  let customerId: string | null = null;
-  if (
-    typeof parsed.customerId === 'string' &&
-    validCustomerIds.has(parsed.customerId)
-  ) {
-    customerId = parsed.customerId;
-  }
+  const rawProjectId = asString(parsed.projectId);
+  const projectId =
+    rawProjectId !== undefined && validProjectIds.has(rawProjectId) ? rawProjectId : null;
+
+  const rawCustomerId = asString(parsed.customerId);
+  let customerId =
+    rawCustomerId !== undefined && validCustomerIds.has(rawCustomerId) ? rawCustomerId : null;
   // If both are set, prefer project (knowledge/research/manual/snippet/todo)
   if (projectId && customerId) customerId = null;
 
-  const title =
-    typeof parsed.title === 'string' && parsed.title.trim()
-      ? parsed.title.trim().slice(0, 200)
-      : 'Notiz';
-  const tags = Array.isArray(parsed.tags)
-    ? parsed.tags
-        .filter((t: any) => typeof t === 'string')
-        .map((t: string) => t.trim())
-        .filter(Boolean)
+  const rawTitle = asString(parsed.title)?.trim();
+  const title = rawTitle ? rawTitle.slice(0, 200) : 'Notiz';
+
+  const rawTags = parsed.tags;
+  const tags = isUnknownArray(rawTags)
+    ? rawTags
+        .map((tag) => asString(tag)?.trim())
+        .filter((tag): tag is string => Boolean(tag))
         .slice(0, 20)
     : undefined;
-  const reasoning =
-    typeof parsed.reasoning === 'string'
-      ? parsed.reasoning.trim().slice(0, 2000)
-      : undefined;
+
+  const reasoning = asString(parsed.reasoning)?.trim().slice(0, 2000);
 
   return { entityType, projectId, customerId, title, tags, reasoning };
 }
