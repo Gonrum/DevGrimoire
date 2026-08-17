@@ -63,7 +63,8 @@
     "check:git-providers": "node scripts/git-providers-behaviour-check.cjs",
     "check:chat-tool-definitions": "node scripts/chat-tool-definitions-check.cjs",
     "check:harness-schema": "node scripts/harness-schema-check.cjs",
-    "check:harness-resolve": "node scripts/harness-resolve-units-check.cjs"
+    "check:harness-resolve": "node scripts/harness-resolve-units-check.cjs",
+    "check:harness-service": "node scripts/harness-service-units-check.cjs"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.0",
