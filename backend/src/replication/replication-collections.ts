@@ -61,6 +61,7 @@ export const EXCLUDED_COLLECTIONS: { className: string; reason: string }[] = [
   { className: 'ChatActivity', reason: 'Chat-Aktivitätslog, instanzlokal' },
   { className: 'Counter', reason: 'Interne Sequenz-Zähler — instanzlokal, würde Nummern-Kollisionen erzeugen' },
   { className: 'CustomerProjectLink', reason: 'Customer-Domäne, separate Replikations-Entscheidung außerhalb dieses Features' },
+  { className: 'Harness', reason: 'Harness-Definitionen (M-51/H1) — Replikation wird in T-443 entschieden und dort nach REPLICATED_COLLECTIONS verschoben. Offen: scope=global/customer tragen keine projectId und greifen damit nicht ins Per-Projekt-Opt-in.' },
   { className: 'Healthcheck', reason: 'Customer-skopiertes Monitoring, kein Projekt-Inhalt' },
   { className: 'LogEntry', reason: 'Hochvolumige lokale Diagnose-Logs — nicht projekt-inhaltlich' },
   { className: 'ReplicationDeadletter', reason: 'Interne Engine-Collection (Deadletter-Store) — darf sich nicht selbst replizieren' },

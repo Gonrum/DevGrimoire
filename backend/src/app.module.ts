@@ -33,6 +33,7 @@ import { SchemasModule } from './schemas/schemas.module';
 import { DependenciesModule } from './dependencies/dependencies.module';
 import { FeaturesModule } from './features/features.module';
 import { SoulsModule } from './souls/souls.module';
+import { HarnessModule } from './harness/harness.module';
 import { CommitsModule } from './commits/commits.module';
 import { ProjectTransferModule } from './project-transfer/project-transfer.module';
 import { CustomerTransferModule } from './customer-transfer/customer-transfer.module';
@@ -108,6 +109,7 @@ if (!MONGODB_URI) {
     DependenciesModule,
     FeaturesModule,
     SoulsModule,
+    HarnessModule,
     CommitsModule,
     ProjectTransferModule,
     CustomerTransferModule,
