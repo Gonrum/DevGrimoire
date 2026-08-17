@@ -30,5 +30,14 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    rules: {
+      /*
+       * Über `recommended-type-checked` hinaus bewusst aktiviert — gleiche
+       * Begründung wie im Backend: `x as never` und `x as unknown as T`
+       * umgehen die Typprüfung, erzeugen aber kein `any` und bleiben damit für
+       * `no-explicit-any` und die `no-unsafe-*`-Familie unsichtbar.
+       */
+      '@typescript-eslint/no-unsafe-type-assertion': 'error',
+    },
   },
 );

@@ -34,5 +34,23 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    rules: {
+      /*
+       * Über `recommended-type-checked` hinaus bewusst aktiviert.
+       *
+       * Grund: `recommended-type-checked` hat einen blinden Fleck. `x as never`
+       * und `x as unknown as T` erzeugen kein `any`, also schweigen
+       * `no-explicit-any` und die ganze `no-unsafe-*`-Familie — obwohl die
+       * Typprüfung an der Stelle vollständig umgangen wird. Gemessen waren das
+       * 63× `as never` und 53× `as unknown as` im Backend, davon 29 allein in
+       * `chat-tools.ts`, wo darüber ungeprüfte LLM-Strings in Service-Enums
+       * liefen. Die Datei stand dabei auf null Findings.
+       *
+       * Ohne diese Regel wäre „null Findings" also kein belastbares Ziel: das
+       * Gate würde eine Klasse durchlassen, die riskanter ist als das, was es
+       * fängt.
+       */
+      '@typescript-eslint/no-unsafe-type-assertion': 'error',
+    },
   },
 );
