@@ -139,6 +139,12 @@ export class ChatSession {
 
   @Prop({ type: String })
   model?: string;
+
+  // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
+  // nicht am Typ. Ohne die Deklaration mussten Leser sie über `as any` holen,
+  // was dann auch echte Fehler in derselben Zeile verdeckt hat.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const ChatSessionSchema = SchemaFactory.createForClass(ChatSession);

@@ -39,6 +39,11 @@ export class Environment {
 
   @Prop({ default: true })
   active: boolean;
+
+  // `timestamps` legt diese Felder zur Laufzeit an, deklariert sie aber nicht
+  // am Typ — ohne Deklaration brauchten Leser dafür ein `as any`.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const EnvironmentSchema = SchemaFactory.createForClass(Environment);

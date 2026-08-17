@@ -20,6 +20,11 @@ export class SchemaVersion {
 
   @Prop()
   changeNote?: string;
+
+  // `timestamps` legt diese Felder zur Laufzeit an, deklariert sie aber nicht
+  // am Typ — ohne Deklaration brauchten Leser dafür ein `as any`.
+  // updatedAt ist am Schema bewusst abgeschaltet (Versions-Snapshots sind unveränderlich).
+  createdAt?: Date;
 }
 
 export const SchemaVersionSchema = SchemaFactory.createForClass(SchemaVersion);

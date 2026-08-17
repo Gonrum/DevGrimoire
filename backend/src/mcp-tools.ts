@@ -35,21 +35,14 @@ import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service
 import { WorkflowsService } from './workflows/workflows.service';
 import { WorkflowEngineService } from './workflows/engine/workflow-engine.service';
 import { NodeRegistry } from './workflows/engine/node-registry';
-import { WorkflowScope, WorkflowStatus } from './workflows/schemas/workflow-definition.schema';
 import { CustomerTemplatesService } from './customer-templates/customer-templates.service';
-import { CustomerTemplateType } from './customer-templates/schemas/customer-template.schema';
 import { ValidationReportsService } from './validation-reports/validation-reports.service';
-import { ValidationReportStatus } from './validation-reports/schemas/validation-report.schema';
 import { DocUpdateProposalsService } from './doc-update-proposals/doc-update-proposals.service';
-import { DocProposalStatus } from './doc-update-proposals/schemas/doc-update-proposal.schema';
 import { KnowledgeGraphService } from './knowledge-graph/knowledge-graph.service';
-import { KgEntityType, KgRelation, KG_ENTITY_TYPES, KG_RELATIONS } from './knowledge-graph/schemas/knowledge-graph-edge.schema';
+import { KG_ENTITY_TYPES, KG_RELATIONS } from './knowledge-graph/schemas/knowledge-graph-edge.schema';
 import { OracleService } from './oracle/oracle.service';
-import { OracleRiskType, OracleSeverity, OracleSuggestionStatus } from './oracle/schemas/oracle-suggestion.schema';
-import { TodoPriority } from './todos/schemas/todo.schema';
 import { SnippetsService } from './snippets/snippets.service';
 import { WorkspacesService } from './workspaces/workspaces.service';
-import { WorkspaceStatus } from './workspaces/schemas/workspace.schema';
 import { WorkspaceClient } from './workspaces/workspace-client.service';
 import { WorkspaceGitTokensService } from './workspaces/workspace-git-tokens.service';
 import { WorkspaceCliTokenService } from './workspaces/workspace-cli-token.service';
@@ -65,6 +58,9 @@ import { WebSearchService } from './web-search/services/web-search.service';
 import { StacksService } from './stacks/stacks.service';
 import { ReadabilityService } from './web-search/services/readability.service';
 import { SearchCategory, SearchTimeRange } from './web-search/dto/web-search.dto';
+import type { ParsedTodo, ParsedMilestone } from './milestones/milestones.service';
+import type { CreateKnowledgeDto } from './knowledge/dto/create-knowledge.dto';
+import type { BodyDto } from './http-requests/dto/create-request.dto';
 import { RequestContext } from './common/request-context';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 import { AuthService } from './auth/auth.service';
@@ -91,19 +87,19 @@ function ragHeaders(): Record<string, string> {
   return {};
 }
 
-async function ragHttpGet(path: string): Promise<any> {
+async function ragHttpGet(path: string): Promise<unknown> {
   const res = await fetch(`${RAG_BACKEND_URL}${path}`, { headers: ragHeaders() });
   if (!res.ok) throw new Error(`RAG backend error: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
-async function ragHttpPost(path: string): Promise<any> {
+async function ragHttpPost(path: string): Promise<unknown> {
   const res = await fetch(`${RAG_BACKEND_URL}${path}`, { method: 'POST', headers: ragHeaders() });
   if (!res.ok) throw new Error(`RAG backend error: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
-async function backendHttpPostJson(path: string, body: unknown): Promise<any> {
+async function backendHttpPostJson(path: string, body: unknown): Promise<unknown> {
   const res = await fetch(`${RAG_BACKEND_URL}${path}`, {
     method: 'POST',
     headers: { ...ragHeaders(), 'Content-Type': 'application/json' },
@@ -113,19 +109,55 @@ async function backendHttpPostJson(path: string, body: unknown): Promise<any> {
   return res.json();
 }
 
-function requireString(args: Record<string, unknown>, field: string): string {
+/*
+ * Die Argument-Helfer sind generisch über ihren Rückgabetyp, damit der
+ * Kontexttyp der Aufrufstelle die Verengung übernimmt: ein Service, der
+ * `TodoStatus` erwartet, bekommt `TodoStatus` statt `string`. Vorher stand an
+ * ~50 Stellen `optionalString(a, 'status')` — der Cast unterdrückte
+ * nicht nur ein Finding, er machte den gesamten umgebenden Ausdruck zu `any`.
+ *
+ * Die Verengung ist zur Compile-Zeit eine Behauptung; geprüft wird der Wert
+ * weiterhin zur Laufzeit von der Mongoose-Enum-Validierung im Service. Eine
+ * freundlichere Prüfung direkt hier wäre eine Verbesserung — siehe Folge-Todo.
+ */
+function requireString<T extends string = string>(args: Record<string, unknown>, field: string): T {
   const val = args[field];
   if (typeof val !== 'string' || val.length === 0) {
     throw new Error(`Missing required field: ${field}`);
   }
-  return val;
+  return val as T;
 }
 
-function optionalString(args: Record<string, unknown>, field: string): string | undefined {
+function optionalString<T extends string = string>(
+  args: Record<string, unknown>,
+  field: string,
+): T | undefined {
   const val = args[field];
   if (val === undefined || val === null) return undefined;
   if (typeof val !== 'string') throw new Error(`${field} must be a string`);
-  return val;
+  return val as T;
+}
+
+/**
+ * Enum-Argument mit echter Laufzeitprüfung. `find` liefert `T | undefined`,
+ * deshalb kommt der verengte Typ hier ohne Assertion zustande — im Gegensatz zu
+ * `optionalString<T>`, das die Verengung nur behauptet.
+ *
+ * Zu bevorzugen, wo die erlaubten Werte bekannt sind: der Aufrufer bekommt eine
+ * verständliche Fehlermeldung statt eines Mongoose-Validierungsfehlers.
+ */
+function optionalEnum<T extends string>(
+  args: Record<string, unknown>,
+  field: string,
+  allowed: readonly T[],
+): T | undefined {
+  const val = optionalString(args, field);
+  if (val === undefined) return undefined;
+  const match = allowed.find((candidate) => candidate === val);
+  if (match === undefined) {
+    throw new Error(`${field} must be one of: ${allowed.join(', ')}`);
+  }
+  return match;
 }
 
 function optionalStringArray(args: Record<string, unknown>, field: string): string[] | undefined {
@@ -141,19 +173,37 @@ function optionalStringArray(args: Record<string, unknown>, field: string): stri
   return val;
 }
 
-function requireObject(args: Record<string, unknown>, field: string): Record<string, unknown> {
+function requireObject<T extends object = PlainDoc>(
+  args: Record<string, unknown>,
+  field: string,
+): T {
   const val = args[field];
   if (!val || typeof val !== 'object' || Array.isArray(val)) {
     throw new Error(`Missing required object field: ${field}`);
   }
-  return val as Record<string, unknown>;
+  return val as T;
 }
 
-function optionalObject(args: Record<string, unknown>, field: string): Record<string, unknown> | undefined {
+function optionalObject<T extends object = PlainDoc>(
+  args: Record<string, unknown>,
+  field: string,
+): T | undefined {
   const val = args[field];
   if (val === undefined || val === null) return undefined;
   if (typeof val !== 'object' || Array.isArray(val)) throw new Error(`${field} must be an object`);
-  return val as Record<string, unknown>;
+  return val as T;
+}
+
+/**
+ * Array-Argument in der vom Service erwarteten Element-Form. Die Array-Prüfung
+ * passiert hier zur Laufzeit; die Element-Struktur validiert der Service. Ersetzt
+ * Muster wie `optionalObjectArray(a, 'fields')[]`, bei denen weder das eine noch das andere geprüft war.
+ */
+function optionalObjectArray<T>(args: Record<string, unknown>, field: string): T[] | undefined {
+  const val = args[field];
+  if (val === undefined || val === null) return undefined;
+  if (!Array.isArray(val)) throw new Error(`${field} must be an array`);
+  return val as T[];
 }
 
 function optionalBoolean(args: Record<string, unknown>, field: string): boolean | undefined {
@@ -250,9 +300,51 @@ function requireUserId(): string {
   return userId;
 }
 
-function compactList<T extends Record<string, unknown>>(items: T[], stripFields: string[]): Record<string, unknown>[] {
+/** Plain, serialisierbare Form eines Dokuments. */
+type PlainDoc = Record<string, unknown>;
+
+/**
+ * Normalisiert Mongoose-Dokumente und Plain Objects auf dieselbe Form.
+ *
+ * `toJSON` wird per Duck-Typing geprüft statt über einen mongoose-Import: diese
+ * Datei ist die MCP-Schicht und soll nicht an die Persistenz gebunden sein. Die
+ * Assertions bleiben lokal auf diesen Helfer beschränkt — vorher trugen
+ * `compactList`, `compactUpdateResult` und `compactCreateResult` je ein `any`,
+ * das sich über 86 Aufrufstellen weiterverteilt hat.
+ */
+function toPlainDoc(doc: unknown): PlainDoc {
+  if (doc === null || typeof doc !== 'object') return {};
+  const toJSON = (doc as { toJSON?: unknown }).toJSON;
+  if (typeof toJSON === 'function') {
+    const json: unknown = (toJSON as () => unknown).call(doc);
+    if (json !== null && typeof json === 'object') return json as PlainDoc;
+  }
+  return { ...(doc as PlainDoc) };
+}
+
+/** Liest ein Feld eines PlainDoc als String — oder undefined, wenn es keiner ist. */
+function asString(v: unknown): string | undefined {
+  return typeof v === 'string' ? v : undefined;
+}
+
+/** Länge eines Feldes, das ein Array sein sollte; 0 wenn nicht. */
+function countArray(v: unknown): number {
+  return Array.isArray(v) ? v.length : 0;
+}
+
+/**
+ * Narrowt eine unbekannte HTTP-Antwort auf ein Array von Objekten. Nötig, seit
+ * die HTTP-Helfer `unknown` statt `any` liefern — `res.json()` ist zur
+ * Compile-Zeit nichts, worauf man sich verlassen kann.
+ */
+function asObjectArray(value: unknown): PlainDoc[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is PlainDoc => v !== null && typeof v === 'object');
+}
+
+function compactList(items: unknown[], stripFields: string[]): PlainDoc[] {
   return items.map((item) => {
-    const obj = typeof item.toJSON === 'function' ? (item as any).toJSON() : { ...item };
+    const obj = toPlainDoc(item);
     for (const f of stripFields) delete obj[f];
     return obj;
   });
@@ -277,14 +369,16 @@ function errorResult(message: string) {
 function idToString(v: unknown): string | undefined {
   if (v == null) return undefined;
   if (typeof v === 'string') return v;
-  const s = typeof (v as { toString?: () => string }).toString === 'function'
-    ? (v as { toString: () => string }).toString()
-    : String(v);
+  // Nur Werte mit eigenem toString ergeben eine brauchbare Id; alles andere
+  // würde als '[object Object]' herauskommen und wird darum verworfen.
+  const maybe = v as { toString?: () => string };
+  if (typeof maybe.toString !== 'function') return undefined;
+  const s = maybe.toString();
   return s && s !== '[object Object]' ? s : undefined;
 }
 
-export function compactUpdateResult(doc: any): Record<string, unknown> {
-  const obj = typeof doc.toJSON === 'function' ? doc.toJSON() : { ...doc };
+export function compactUpdateResult(doc: unknown): PlainDoc {
+  const obj = toPlainDoc(doc);
   return {
     updated: true,
     _id: idToString(obj._id),
@@ -294,8 +388,8 @@ export function compactUpdateResult(doc: any): Record<string, unknown> {
   };
 }
 
-export function compactCreateResult(doc: any, extra?: Record<string, unknown>): Record<string, unknown> {
-  const obj = typeof doc.toJSON === 'function' ? doc.toJSON() : { ...doc };
+export function compactCreateResult(doc: unknown, extra?: Record<string, unknown>): PlainDoc {
+  const obj = toPlainDoc(doc);
   return {
     created: true,
     _id: idToString(obj._id),
@@ -4374,9 +4468,9 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, pushService, environmentsService, secretsService, manualsService, researchService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService, stackService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, environmentsService, secretsService, manualsService, researchService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService, stackService } = services;
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
+  server.setRequestHandler(ListToolsRequestSchema, () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
     return { tools: filteredTools };
   });
@@ -4388,7 +4482,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
   // the `ui://` URIs and ignore the `_meta.ui.resourceUri` annotation on
   // tools — fallback to the classic JSON tool result is automatic.
   // See docs/mcp-apps.md for the full mapping and security model.
-  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  server.setRequestHandler(ListResourcesRequestSchema, () => {
     return {
       resources: UI_RESOURCES.map((r) => ({
         uri: r.uri,
@@ -4399,7 +4493,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
     };
   });
 
-  server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
+  server.setRequestHandler(ReadResourceRequestSchema, (req) => {
     const uri = req.params?.uri as string | undefined;
     if (!uri) throw new Error('resources/read requires a uri parameter');
     const resource = findUiResource(uri);
@@ -4441,14 +4535,14 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             tags: optionalStringArray(a, 'tags'),
             repository: optionalString(a, 'repository'),
             instructions: optionalString(a, 'instructions'),
-            components: a.components as any,
+            components: optionalObjectArray(a, 'components'),
           });
-          result = compactCreateResult(proj, { name: (proj as any).name });
+          result = compactCreateResult(proj, { name: proj.name });
           break;
         }
         case 'project_list': {
           const projects = await projectsService.findAll(optionalBoolean(a, 'active'), optionalBoolean(a, 'favorite'));
-          result = compactList(projects as any, ['instructions', 'components', '__v', 'description', 'repository', 'todoNumberFormat', 'milestoneNumberFormat', 'gitRepositories', 'createdAt', 'updatedAt']);
+          result = compactList(projects, ['instructions', 'components', '__v', 'description', 'repository', 'todoNumberFormat', 'milestoneNumberFormat', 'gitRepositories', 'createdAt', 'updatedAt']);
           break;
         }
         case 'project_get': {
@@ -4474,7 +4568,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             repository: optionalString(a, 'repository'),
             active: optionalBoolean(a, 'active'),
             instructions: optionalString(a, 'instructions'),
-            components: a.components as any,
+            components: optionalObjectArray(a, 'components'),
           }));
           break;
         case 'project_delete': {
@@ -4530,7 +4624,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const customer = await customersService.create({
             name: requireString(a, 'name'),
             description: optionalString(a, 'description'),
-            status: optionalString(a, 'status') as any,
+            status: optionalString(a, 'status'),
             tags: optionalStringArray(a, 'tags'),
             primaryContactName: optionalString(a, 'primaryContactName'),
             primaryContactEmail: optionalString(a, 'primaryContactEmail'),
@@ -4538,18 +4632,18 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             website: optionalString(a, 'website'),
             notes: optionalString(a, 'notes'),
           });
-          result = compactCreateResult(customer, { name: (customer as any).name, status: (customer as any).status });
+          result = compactCreateResult(customer, { name: customer.name, status: customer.status });
           break;
         }
         case 'customer_list': {
           const customers = await customersService.findAll({
-            status: optionalString(a, 'status') as any,
+            status: optionalString(a, 'status'),
             tag: optionalString(a, 'tag'),
             q: optionalString(a, 'q'),
             includeArchived: optionalBoolean(a, 'includeArchived'),
             projectId: optionalString(a, 'projectId'),
           });
-          const compactCustomers = compactList(customers as any, ['notes', '__v']);
+          const compactCustomers = compactList(customers, ['notes', '__v']);
           result = applyPagination(compactCustomers, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
           break;
         }
@@ -4560,7 +4654,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = compactUpdateResult(await customersService.update(requireString(a, 'id'), {
             name: optionalString(a, 'name'),
             description: optionalString(a, 'description'),
-            status: optionalString(a, 'status') as any,
+            status: optionalString(a, 'status'),
             tags: optionalStringArray(a, 'tags'),
             primaryContactName: optionalString(a, 'primaryContactName'),
             primaryContactEmail: optionalString(a, 'primaryContactEmail'),
@@ -4575,20 +4669,20 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'customer_project_link': {
           const link = await customersService.createProjectLink(requireString(a, 'customerId'), {
             projectId: requireString(a, 'projectId'),
-            status: optionalString(a, 'status') as any,
+            status: optionalString(a, 'status'),
             role: optionalString(a, 'role'),
             notes: optionalString(a, 'notes'),
             environmentIds: optionalStringArray(a, 'environmentIds'),
           });
           result = compactCreateResult(link, {
-            customerId: (link as any).customerId,
-            projectId: (link as any).projectId,
+            customerId: link.customerId,
+            projectId: link.projectId,
           });
           break;
         }
         case 'customer_project_list':
           result = compactList(
-            await customersService.findProjectLinks(requireString(a, 'customerId')) as any,
+            await customersService.findProjectLinks(requireString(a, 'customerId')),
             ['__v'],
           );
           break;
@@ -4597,7 +4691,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             requireString(a, 'customerId'),
             requireString(a, 'linkId'),
             {
-              status: optionalString(a, 'status') as any,
+              status: optionalString(a, 'status'),
               role: optionalString(a, 'role'),
               notes: optionalString(a, 'notes'),
               environmentIds: optionalStringArray(a, 'environmentIds'),
@@ -4610,7 +4704,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         case 'project_customer_links':
           result = compactList(
-            await customersService.findLinksByProject(requireString(a, 'projectId')) as any,
+            await customersService.findLinksByProject(requireString(a, 'projectId')),
             ['__v'],
           );
           break;
@@ -4624,12 +4718,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             isPrimary: optionalBoolean(a, 'isPrimary'),
             sortOrder: optionalNumber(a, 'sortOrder'),
           });
-          result = compactCreateResult(contact, { name: (contact as any).name });
+          result = compactCreateResult(contact, { name: contact.name });
           break;
         }
         case 'contact_list':
           result = compactList(
-            await contactsService.findByCustomer(requireString(a, 'customerId')) as any,
+            await contactsService.findByCustomer(requireString(a, 'customerId')),
             ['__v'],
           );
           break;
@@ -4657,8 +4751,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             customerId: optionalString(a, 'customerId'),
             title: requireString(a, 'title'),
             description: optionalString(a, 'description'),
-            status: optionalString(a, 'status') as any,
-            priority: optionalString(a, 'priority') as any,
+            status: optionalString(a, 'status'),
+            priority: optionalString(a, 'priority'),
             tags: optionalStringArray(a, 'tags'),
             milestoneId: optionalString(a, 'milestoneId'),
             blockedBy: optionalStringArray(a, 'blockedBy'),
@@ -4669,20 +4763,20 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             edgeCases: optionalString(a, 'edgeCases'),
             openQuestions: optionalStringArray(a, 'openQuestions'),
           });
-          result = compactCreateResult(todo, { displayNumber: (todo as any).displayNumber, title: (todo as any).title });
+          result = compactCreateResult(todo, { displayNumber: todo.displayNumber, title: todo.title });
           break;
         }
         case 'todo_list': {
           const todos = await todosService.findAll({
             projectId: optionalString(a, 'projectId'),
             customerId: optionalString(a, 'customerId'),
-            status: optionalString(a, 'status') as any,
+            status: optionalString(a, 'status'),
             priority: optionalString(a, 'priority'),
             milestoneId: optionalString(a, 'milestoneId'),
             tag: optionalString(a, 'tag'),
             includeArchived: optionalBoolean(a, 'includeArchived'),
           });
-          const compactTodos = compactList(todos as any, ['description', 'comments', 'blockedBy', '__v']);
+          const compactTodos = compactList(todos, ['description', 'comments', 'blockedBy', '__v']);
           const scoped = optionalString(a, 'projectId') || optionalString(a, 'customerId');
           const todoLimit = optionalNumber(a, 'limit') ?? (scoped ? undefined : 50);
           result = applyPagination(compactTodos, todoLimit, optionalNumber(a, 'offset'));
@@ -4706,8 +4800,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = compactUpdateResult(await todosService.update(todoUpdateId, {
             title: optionalString(a, 'title'),
             description: optionalString(a, 'description'),
-            status: optionalString(a, 'status') as any,
-            priority: optionalString(a, 'priority') as any,
+            status: optionalString(a, 'status'),
+            priority: optionalString(a, 'priority'),
             tags: optionalStringArray(a, 'tags'),
             milestoneId: optionalString(a, 'milestoneId'),
             blockedBy: optionalStringArray(a, 'blockedBy'),
@@ -4778,12 +4872,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const limit = optionalNumber(a, 'limit') || 1;
           if (limit > 1) {
             const sessions = await sessionsService.findByProject(projectId, limit);
-            result = (sessions as any[]).map((s: any) => {
-              const obj = typeof s.toJSON === 'function' ? s.toJSON() : { ...s };
+            result = sessions.map((s) => {
+              const obj = toPlainDoc(s);
               return {
                 _id: obj._id,
                 projectId: obj.projectId,
-                summary: snippet(obj.summary),
+                summary: snippet(asString(obj.summary)),
                 createdAt: obj.createdAt,
               };
             });
@@ -4794,8 +4888,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'knowledge_save': {
-          const kScope = optionalString(a, 'scope') as 'global' | 'project' | 'customer' | undefined;
-          const kDto: any = {
+          const kScope = optionalString<'global' | 'project' | 'customer'>(a, 'scope');
+          const kDto: CreateKnowledgeDto = {
             topic: requireString(a, 'topic'),
             content: requireString(a, 'content'),
             tags: optionalStringArray(a, 'tags'),
@@ -4807,7 +4901,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const kCid = optionalString(a, 'customerId');
           if (kCid) kDto.customerId = kCid;
           const kEntry = await knowledgeService.create(kDto);
-          result = compactCreateResult(kEntry, { topic: (kEntry as any).topic, scope: (kEntry as any).scope });
+          result = compactCreateResult(kEntry, { topic: kEntry.topic, scope: kEntry.scope });
           break;
         }
         case 'knowledge_search': {
@@ -4821,11 +4915,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             kCustomerId,
           );
           const limited = searchResults.slice(0, optionalNumber(a, 'limit') || 10);
-          result = limited.map((item: any) => {
-            const obj = typeof item.toJSON === 'function' ? item.toJSON() : { ...item };
+          result = limited.map((item) => {
+            const obj = toPlainDoc(item);
             if (kProjectId || kCustomerId) {
               // Scoped: return snippet
-              obj.content = snippet(obj.content);
+              obj.content = snippet(asString(obj.content));
             } else {
               // Global search: only return compact metadata
               delete obj.content;
@@ -4846,7 +4940,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               offset: optionalNumber(a, 'offset'),
             },
           );
-          const compactEntries = compactList(entries as any, ['content', '__v']);
+          const compactEntries = compactList(entries, ['content', '__v']);
           result = compactEntries;
           break;
         }
@@ -4938,7 +5032,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             component: optionalString(a, 'component'),
             repoLabel: optionalString(a, 'repoLabel'),
           });
-          result = compactCreateResult(clEntry, { version: (clEntry as any).version });
+          result = compactCreateResult(clEntry, { version: clEntry.version });
           break;
         }
         case 'changelog_list': {
@@ -4947,7 +5041,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             requireString(a, 'projectId'),
             clLimit + (optionalNumber(a, 'offset') || 0),
           );
-          const compactChangelogs = compactList(changelogs as any, ['changes', '__v']);
+          const compactChangelogs = compactList(changelogs, ['changes', '__v']);
           result = applyPagination(compactChangelogs, clLimit, optionalNumber(a, 'offset'));
           break;
         }
@@ -4972,19 +5066,19 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             projectId: requireString(a, 'projectId'),
             name: requireString(a, 'name'),
             description: optionalString(a, 'description'),
-            status: optionalString(a, 'status') as any,
+            status: optionalString(a, 'status'),
             dueDate: optionalString(a, 'dueDate'),
           });
-          result = compactCreateResult(ms, { displayNumber: (ms as any).displayNumber, name: (ms as any).name });
+          result = compactCreateResult(ms, { displayNumber: ms.displayNumber, name: ms.name });
           break;
         }
         case 'milestone_list': {
           const milestones = await milestonesService.findByProject(
             requireString(a, 'projectId'),
-            optionalString(a, 'status') as any,
+            optionalString(a, 'status'),
             optionalBoolean(a, 'includeArchived'),
           );
-          result = compactList(milestones as any, ['description', '__v']);
+          result = compactList(milestones, ['description', '__v']);
           break;
         }
         case 'milestone_get': {
@@ -5005,7 +5099,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = compactUpdateResult(await milestonesService.update(msUpdateId, {
             name: optionalString(a, 'name'),
             description: optionalString(a, 'description'),
-            status: optionalString(a, 'status') as any,
+            status: optionalString(a, 'status'),
             dueDate: optionalString(a, 'dueDate'),
             archived: optionalBoolean(a, 'archived'),
             changelogId: optionalString(a, 'changelogId'),
@@ -5038,7 +5132,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'milestone_import_apply': {
           const importResult = await milestonesService.importFromParsed(
             requireString(a, 'projectId'),
-            a['parsed'] as any,
+            requireObject<ParsedMilestone>(a, 'parsed'),
           );
           return { content: [{ type: 'text' as const, text: JSON.stringify(importResult, null, 2) }] };
         }
@@ -5046,7 +5140,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const cwt_projectId = requireString(a, 'projectId');
           const cwt_name = requireString(a, 'name');
           const cwt_description = optionalString(a, 'description');
-          const cwt_todos = (a['todos'] as any[]) ?? [];
+          const cwt_todos = optionalObjectArray<ParsedTodo>(a, 'todos') ?? [];
           const cwt_result = await milestonesService.importFromParsed(cwt_projectId, {
             name: cwt_name,
             description: cwt_description,
@@ -5096,8 +5190,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const escalationChain = Array.isArray(escalationChainRaw)
             ? (escalationChainRaw as Array<Record<string, unknown>>).map((step) => ({
                 kind: step.kind as 'user' | 'role' | 'broadcast',
-                userId: typeof step.userId === 'string' ? step.userId : undefined,
-                role: typeof step.role === 'string' ? step.role : undefined,
+                userId: asString(step.userId),
+                role: asString(step.role),
                 afterMs: Number(step.afterMs),
               }))
             : undefined;
@@ -5128,7 +5222,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
                 3,
                 optionalString(a, 'customerId'),
               );
-            } catch (err) {
+            } catch {
               // RAG offline shouldn't break ask_user — just skip the hint.
               priorMatches = undefined;
             }
@@ -5163,10 +5257,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'question_list': {
-          const direction = optionalString(a, 'direction') as 'agent_to_user' | 'user_to_agent' | undefined;
-          if (direction && direction !== 'agent_to_user' && direction !== 'user_to_agent') {
-            throw new Error(`Invalid direction: ${direction}`);
-          }
+          const direction = optionalEnum(a, 'direction', ['agent_to_user', 'user_to_agent'] as const);
           const todoId = optionalString(a, 'todoId');
           const includeAnswered = optionalBoolean(a, 'includeAnswered') ?? false;
           if (todoId) {
@@ -5207,7 +5298,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               content: optionalString(a, 'content'),
               tags: Array.isArray(a.tags) ? (a.tags as string[]) : undefined,
               category: optionalString(a, 'category'),
-              scope: optionalString(a, 'scope') as 'global' | 'project' | undefined,
+              scope: optionalString(a, 'scope'),
             },
           );
           result = knowledge.toJSON ? knowledge.toJSON() : { ...knowledge };
@@ -5246,7 +5337,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const out = await questionsService.createFollowupTodo(requireString(a, 'id'), {
             title: optionalString(a, 'title'),
             description: optionalString(a, 'description'),
-            priority: optionalString(a, 'priority') as 'low' | 'medium' | 'high' | 'critical' | undefined,
+            priority: optionalString(a, 'priority'),
           });
           result = { todoId: out.todoId, question: serializeQuestion(out.question) };
           break;
@@ -5271,10 +5362,10 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             port: optionalNumber(a, 'port'),
             user: optionalString(a, 'user'),
             url: optionalString(a, 'url'),
-            variables: a.variables as any,
+            variables: optionalObjectArray(a, 'variables'),
             active: optionalBoolean(a, 'active'),
           });
-          result = compactCreateResult(env, { name: (env as any).name });
+          result = compactCreateResult(env, { name: env.name });
           break;
         }
         case 'environment_list': {
@@ -5286,15 +5377,15 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const envs = envCustomerId
             ? await environmentsService.findByCustomer(envCustomerId)
             : await environmentsService.findByProject(envProjectId!);
-          result = (envs as any[]).map((e: any) => {
-            const obj = typeof e.toJSON === 'function' ? e.toJSON() : { ...e };
+          result = envs.map((e) => {
+            const obj = toPlainDoc(e);
             return {
               _id: obj._id,
               projectId: obj.projectId,
               customerId: obj.customerId,
               name: obj.name,
               active: obj.active,
-              variableCount: (obj.variables || []).length,
+              variableCount: countArray(obj.variables),
               createdAt: obj.createdAt,
               updatedAt: obj.updatedAt,
             };
@@ -5312,7 +5403,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             port: optionalNumber(a, 'port'),
             user: optionalString(a, 'user'),
             url: optionalString(a, 'url'),
-            variables: a.variables as any,
+            variables: optionalObjectArray(a, 'variables'),
             active: optionalBoolean(a, 'active'),
           }));
           break;
@@ -5330,7 +5421,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             description: optionalString(a, 'description'),
             type: optionalString(a, 'type'),
           });
-          result = compactCreateResult(secret, { key: (secret as any).key });
+          result = compactCreateResult(secret, { key: secret.key });
           break;
         }
         case 'secret_get':
@@ -5362,8 +5453,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const includeGlobal = optionalBoolean(a, 'includeGlobalSecrets') !== false;
           const env = await environmentsService.findById(envId);
           const ownerMatches = owner.customerId
-            ? (env as any).customerId?.toString() === owner.customerId
-            : (env as any).projectId?.toString() === owner.projectId;
+            ? env.customerId?.toString() === owner.customerId
+            : env.projectId?.toString() === owner.projectId;
           if (!ownerMatches) {
             throw new Error('Environment does not belong to the specified owner');
           }
@@ -5394,7 +5485,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             category: optionalString(a, 'category'),
             sortOrder: optionalNumber(a, 'sortOrder'),
           });
-          result = compactCreateResult(manual, { title: (manual as any).title });
+          result = compactCreateResult(manual, { title: manual.title });
           break;
         }
         case 'manual_list': {
@@ -5406,7 +5497,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const manuals = manualCustomerId
             ? await manualsService.findByCustomer(manualCustomerId, optionalString(a, 'category'))
             : await manualsService.findByProject(manualProjectId!, optionalString(a, 'category'));
-          result = compactList(manuals as any, ['content', '__v']);
+          result = compactList(manuals, ['content', '__v']);
           break;
         }
         case 'manual_get': {
@@ -5437,7 +5528,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             sources: optionalStringArray(a, 'sources'),
             tags: optionalStringArray(a, 'tags'),
           });
-          result = compactCreateResult(rEntry, { title: (rEntry as any).title });
+          result = compactCreateResult(rEntry, { title: rEntry.title });
           break;
         }
         case 'research_search': {
@@ -5449,14 +5540,14 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             rCustomerId,
           );
           const rLimited = rSearchResults.slice(0, optionalNumber(a, 'limit') || 10);
-          result = rLimited.map((item: any) => {
-            const obj = typeof item.toJSON === 'function' ? item.toJSON() : { ...item };
+          result = rLimited.map((item) => {
+            const obj = toPlainDoc(item);
             if (rProjectId || rCustomerId) {
-              obj.content = snippet(obj.content);
+              obj.content = snippet(asString(obj.content));
             } else {
               delete obj.content;
             }
-            obj.sourceCount = (obj.sources || []).length;
+            obj.sourceCount = countArray(obj.sources);
             delete obj.sources;
             delete obj.__v;
             return obj;
@@ -5472,10 +5563,10 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const rEntries = rProjectId
             ? await researchService.findByProject(rProjectId)
             : await researchService.findByCustomer(rCustomerId!);
-          const compactResearch = rEntries.map((item: any) => {
-            const obj = typeof item.toJSON === 'function' ? item.toJSON() : { ...item };
+          const compactResearch = rEntries.map((item) => {
+            const obj = toPlainDoc(item);
             delete obj.content;
-            obj.sourceCount = (obj.sources || []).length;
+            obj.sourceCount = countArray(obj.sources);
             delete obj.sources;
             delete obj.__v;
             return obj;
@@ -5503,17 +5594,17 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             {
               title: requireString(a, 'title'),
               brief: requireString(a, 'brief'),
-              scope: optionalObject(a, 'scope') as any,
-              webSearch: optionalObject(a, 'webSearch') as any,
-              schedule: requireObject(a, 'schedule') as any,
+              scope: optionalObject(a, 'scope'),
+              webSearch: optionalObject(a, 'webSearch'),
+              schedule: requireObject(a, 'schedule'),
               guardrails: optionalObject(a, 'guardrails'),
               notifyOnComplete: optionalBoolean(a, 'notifyOnComplete'),
             },
             requireUserId(),
           );
           result = compactCreateResult(topic, {
-            displayNumber: (topic as any).displayNumber,
-            title: (topic as any).title,
+            displayNumber: topic.displayNumber,
+            title: topic.title,
           });
           break;
         }
@@ -5522,7 +5613,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             active: optionalBoolean(a, 'active'),
             q: optionalString(a, 'q'),
           });
-          const compactTopics = topics.map((t: any) => {
+          const compactTopics = topics.map((t) => {
             const obj = typeof t.toJSON === 'function' ? t.toJSON() : t;
             return {
               _id: idToString(obj._id),
@@ -5549,9 +5640,9 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const updatedTopic = await researchTopicService.update(requireString(a, 'id'), {
             title: optionalString(a, 'title'),
             brief: optionalString(a, 'brief'),
-            scope: optionalObject(a, 'scope') as any,
-            webSearch: optionalObject(a, 'webSearch') as any,
-            schedule: optionalObject(a, 'schedule') as any,
+            scope: optionalObject(a, 'scope'),
+            webSearch: optionalObject(a, 'webSearch'),
+            schedule: optionalObject(a, 'schedule'),
             guardrails: optionalObject(a, 'guardrails'),
             notifyOnComplete: optionalBoolean(a, 'notifyOnComplete'),
           });
@@ -5594,14 +5685,16 @@ export function registerMcpTools(server: Server, services: McpServices): void {
                 // fired (those are recorded on the run via finalize()), so this
                 // branch is purely to avoid an unhandled rejection for that
                 // already-settled background promise.
-                if (!runAlreadyCreated) reject(err);
+                if (!runAlreadyCreated) {
+                  reject(err instanceof Error ? err : new Error(String(err)));
+                }
               });
           });
           break;
         }
         case 'research_run_list': {
           const runs = await researchRunService.listByTopic(requireString(a, 'topicId'));
-          const compactRuns = compactList(runs as any[], ['steps']);
+          const compactRuns = compactList(runs, ['steps']);
           result = applyPagination(compactRuns, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
           break;
         }
@@ -5610,13 +5703,15 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         case 'research_artifact_list': {
           const artifacts = await researchArtifactService.listByTopic(requireString(a, 'topicId'));
-          const compactArtifacts = artifacts.map((art) => ({ ...art, summary: snippet(art.summary) }));
+          const compactArtifacts = artifacts.map((art) => ({ ...art, summary: snippet(asString(art.summary)) }));
           result = applyPagination(compactArtifacts, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
           break;
         }
         case 'research_artifact_get': {
-          const artifact = await researchArtifactService.getBySlug(requireString(a, 'topicId'), requireString(a, 'slug'));
-          if (!artifact) throw new Error(`Artifact "${a.slug}" not found for topic ${a.topicId}`);
+          const artTopicId = requireString(a, 'topicId');
+          const artSlug = requireString(a, 'slug');
+          const artifact = await researchArtifactService.getBySlug(artTopicId, artSlug);
+          if (!artifact) throw new Error(`Artifact "${artSlug}" not found for topic ${artTopicId}`);
           result = artifact;
           break;
         }
@@ -5638,8 +5733,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           );
           result = {
             ...compactUpdateResult(artifact),
-            slug: (artifact as any).slug,
-            version: (artifact as any).version,
+            slug: artifact.slug,
+            version: artifact.version,
           };
           break;
         }
@@ -5673,7 +5768,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               ];
               const soulParts = sections
                 .filter((s) => soulObj[s.key])
-                .map((s) => `### ${s.label}\n${soulObj[s.key]}`);
+                .map((s) => `### ${s.label}\n${asString(soulObj[s.key]) ?? ''}`);
               if (soulParts.length > 0) {
                 res.projectSoul = `## Project Soul\n\n${soulParts.join('\n\n')}`;
               }
@@ -5694,14 +5789,14 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const schema = await schemasService.create({
             projectId: requireString(a, 'projectId'),
             name: requireString(a, 'name'),
-            dbType: requireString(a, 'dbType') as any,
+            dbType: requireString(a, 'dbType'),
             database: optionalString(a, 'database'),
             description: optionalString(a, 'description'),
-            fields: (a.fields as any[]) || [],
-            indexes: (a.indexes as any[]) || [],
+            fields: optionalObjectArray(a, 'fields') ?? [],
+            indexes: optionalObjectArray(a, 'indexes') ?? [],
             tags: optionalStringArray(a, 'tags'),
           });
-          result = compactCreateResult(schema, { name: (schema as any).name });
+          result = compactCreateResult(schema, { name: schema.name });
           break;
         }
         case 'schema_list': {
@@ -5710,7 +5805,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             optionalString(a, 'dbType'),
             optionalStringArray(a, 'tags'),
           );
-          const compactSchemas = compactList(schemas as any, ['fields', 'indexes', '__v']);
+          const compactSchemas = compactList(schemas, ['fields', 'indexes', '__v']);
           result = applyPagination(compactSchemas, optionalNumber(a, 'limit'), optionalNumber(a, 'offset'));
           break;
         }
@@ -5740,8 +5835,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             result = await schemasService.getVersion(requireString(a, 'schemaId'), ver);
           } else {
             const versions = await schemasService.getVersions(requireString(a, 'schemaId'));
-            result = (versions as any[]).map((v: any) => {
-              const obj = typeof v.toJSON === 'function' ? v.toJSON() : { ...v };
+            result = versions.map((v) => {
+              const obj = toPlainDoc(v);
               return {
                 _id: obj._id,
                 version: obj.version,
@@ -5758,21 +5853,21 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             name: requireString(a, 'name'),
             description: optionalString(a, 'description'),
             category: optionalString(a, 'category'),
-            status: optionalString(a, 'status') as any,
+            status: optionalString(a, 'status'),
             version: optionalString(a, 'version'),
-            priority: optionalString(a, 'priority') as any,
+            priority: optionalString(a, 'priority'),
             tags: optionalStringArray(a, 'tags'),
           });
-          result = compactCreateResult(feat, { name: (feat as any).name });
+          result = compactCreateResult(feat, { name: feat.name });
           break;
         }
         case 'feature_list': {
           const features = await featuresService.findByProject(requireString(a, 'projectId'), {
-            status: optionalString(a, 'status') as any,
+            status: optionalString(a, 'status'),
             category: optionalString(a, 'category'),
           });
           result = applyPagination(
-            compactList(features as any, ['description', '__v']),
+            compactList(features, ['description', '__v']),
             optionalNumber(a, 'limit'),
             optionalNumber(a, 'offset'),
           );
@@ -5786,9 +5881,9 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             name: optionalString(a, 'name'),
             description: optionalString(a, 'description'),
             category: optionalString(a, 'category'),
-            status: optionalString(a, 'status') as any,
+            status: optionalString(a, 'status'),
             version: optionalString(a, 'version'),
-            priority: optionalString(a, 'priority') as any,
+            priority: optionalString(a, 'priority'),
             tags: optionalStringArray(a, 'tags'),
           }));
           break;
@@ -5802,28 +5897,28 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             version: requireString(a, 'version'),
             title: optionalString(a, 'title'),
             description: optionalString(a, 'description'),
-            releaseType: optionalString(a, 'releaseType') as any,
-            platform: optionalString(a, 'platform') as any,
-            status: optionalString(a, 'status') as any,
+            releaseType: optionalString(a, 'releaseType'),
+            platform: optionalString(a, 'platform'),
+            status: optionalString(a, 'status'),
             downloadUrl: optionalString(a, 'downloadUrl'),
             tags: optionalStringArray(a, 'tags'),
-            assets: a.assets as any,
+            assets: optionalObjectArray(a, 'assets'),
           });
-          result = compactCreateResult(rel, { version: (rel as any).version });
+          result = compactCreateResult(rel, { version: rel.version });
           break;
         }
         case 'release_list': {
           const releases = await releasesService.findByProject(
             requireString(a, 'projectId'),
             {
-              status: optionalString(a, 'status') as any,
-              platform: optionalString(a, 'platform') as any,
-              releaseType: optionalString(a, 'releaseType') as any,
+              status: optionalString(a, 'status'),
+              platform: optionalString(a, 'platform'),
+              releaseType: optionalString(a, 'releaseType'),
             },
             optionalNumber(a, 'limit'),
             optionalNumber(a, 'offset'),
           );
-          result = compactList(releases as any, ['description', 'assets', 'downloadUrl', 'gitlabReleaseId', 'gitlabTagName', 'providerReleaseId', 'repoLabel', '__v']);
+          result = compactList(releases, ['description', 'assets', 'downloadUrl', 'gitlabReleaseId', 'gitlabTagName', 'providerReleaseId', 'repoLabel', '__v']);
           break;
         }
         case 'release_get':
@@ -5834,12 +5929,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             version: optionalString(a, 'version'),
             title: optionalString(a, 'title'),
             description: optionalString(a, 'description'),
-            releaseType: optionalString(a, 'releaseType') as any,
-            platform: optionalString(a, 'platform') as any,
-            status: optionalString(a, 'status') as any,
+            releaseType: optionalString(a, 'releaseType'),
+            platform: optionalString(a, 'platform'),
+            status: optionalString(a, 'status'),
             downloadUrl: optionalString(a, 'downloadUrl'),
             tags: optionalStringArray(a, 'tags'),
-            assets: a.assets as any,
+            assets: optionalObjectArray(a, 'assets'),
           }));
           break;
         case 'release_delete':
@@ -5858,23 +5953,23 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             projectId: requireString(a, 'projectId'),
             name: requireString(a, 'name'),
             version: requireString(a, 'version'),
-            packageManager: requireString(a, 'packageManager') as any,
+            packageManager: requireString(a, 'packageManager'),
             description: optionalString(a, 'description'),
             devDependency: a.devDependency === true,
             category: optionalString(a, 'category'),
             tags: optionalStringArray(a, 'tags'),
           });
-          result = compactCreateResult(dep, { name: (dep as any).name, version: (dep as any).version });
+          result = compactCreateResult(dep, { name: dep.name, version: dep.version });
           break;
         }
         case 'dependency_list': {
           const deps = await dependenciesService.findByProject(requireString(a, 'projectId'), {
-            packageManager: optionalString(a, 'packageManager') as any,
+            packageManager: optionalString(a, 'packageManager'),
             category: optionalString(a, 'category'),
             devDependency: a.devDependency !== undefined ? a.devDependency === true : undefined,
           });
           result = applyPagination(
-            compactList(deps as any, ['description', 'tags', '__v']),
+            compactList(deps, ['description', 'tags', '__v']),
             optionalNumber(a, 'limit'),
             optionalNumber(a, 'offset'),
           );
@@ -5899,8 +5994,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'dependency_scan': {
           const scanResult = await dependenciesService.bulkCreate({
             projectId: requireString(a, 'projectId'),
-            packageManager: requireString(a, 'packageManager') as any,
-            dependencies: a.dependencies as any,
+            packageManager: requireString(a, 'packageManager'),
+            dependencies: optionalObjectArray(a, 'dependencies') ?? [],
           });
           result = scanResult;
           break;
@@ -5943,7 +6038,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             limit: optionalNumber(a, 'limit') || 20,
             offset: optionalNumber(a, 'offset'),
           });
-          result = commits.map((c: any) => ({
+          result = commits.map((c) => ({
             sha: c.sha?.substring(0, 8),
             message: c.message?.split('\n')[0]?.substring(0, 120),
             author: c.authorName,
@@ -5960,7 +6055,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             requireString(a, 'query'),
             optionalNumber(a, 'limit'),
           );
-          result = found.map((c: any) => ({
+          result = found.map((c) => ({
             sha: c.sha?.substring(0, 8),
             message: snippet(c.message),
             author: c.authorName,
@@ -5989,11 +6084,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             if (cid) params.set('customerId', cid);
             if (ent) params.set('entity', ent);
             if (lim) params.set('limit', String(lim));
-            const ragResults = await ragHttpGet(`/api/rag/search?${params}`);
-            result = ragResults.map((r: any) => ({
+            const ragResults = asObjectArray(await ragHttpGet(`/api/rag/search?${params}`));
+            result = ragResults.map((r) => ({
               ...r,
-              content: snippet(r.content),
-              score: Math.round(r.score * 1000) / 1000,
+              content: snippet(asString(r.content)),
+              score: typeof r.score === 'number' ? Math.round(r.score * 1000) / 1000 : undefined,
             }));
           } else {
             const ragResults = await ragService.search(
@@ -6005,7 +6100,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             );
             result = ragResults.map((r) => ({
               ...r,
-              content: snippet(r.content),
+              content: snippet(asString(r.content)),
               score: Math.round(r.score * 1000) / 1000,
             }));
           }
@@ -6037,7 +6132,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const query = requireString(a, 'query');
           const language = optionalString(a, 'language');
           const categories = optionalStringArray(a, 'categories') as SearchCategory[] | undefined;
-          const timeRange = optionalString(a, 'timeRange') as SearchTimeRange | undefined;
+          const timeRange = optionalString<SearchTimeRange>(a, 'timeRange');
           const limit = optionalNumber(a, 'limit');
           if (process.env.MCP_STDIO === 'true') {
             const params = new URLSearchParams({ q: query });
@@ -6084,9 +6179,9 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'workspace_list': {
           const list = await workspacesService.findByProject(
             requireString(a, 'projectId'),
-            optionalString(a, 'status') as WorkspaceStatus | undefined,
+            optionalString(a, 'status'),
           );
-          result = compactList(list as any[], ['description']);
+          result = compactList(list, ['description']);
           break;
         }
         case 'workspace_get': {
@@ -6619,14 +6714,14 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             tags: optionalStringArray(a, 'tags'),
             milestoneId: optionalString(a, 'milestoneId'),
             repoLabel: optionalString(a, 'repoLabel'),
-            frequency: requireString(a, 'frequency') as any,
+            frequency: requireString(a, 'frequency'),
             dayOfWeek: optionalNumber(a, 'dayOfWeek'),
             dayOfMonth: optionalNumber(a, 'dayOfMonth'),
             month: optionalNumber(a, 'month'),
             hour: optionalNumber(a, 'hour'),
             maxCatchUp: optionalNumber(a, 'maxCatchUp'),
           });
-          result = compactCreateResult(rt, { nextRun: (rt as any).nextRun });
+          result = compactCreateResult(rt, { nextRun: rt.nextRun });
           break;
         }
         case 'recurring_task_list': {
@@ -6636,7 +6731,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             systemOnly: optionalBoolean(a, 'systemOnly'),
             active: optionalBoolean(a, 'active'),
           });
-          result = compactList(rts as any[], ['description', 'createdTodoIds']);
+          result = compactList(rts, ['description', 'createdTodoIds']);
           break;
         }
         case 'recurring_task_get': {
@@ -6651,7 +6746,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             tags: optionalStringArray(a, 'tags'),
             milestoneId: optionalString(a, 'milestoneId'),
             repoLabel: optionalString(a, 'repoLabel'),
-            frequency: optionalString(a, 'frequency') as any,
+            frequency: optionalString(a, 'frequency'),
             dayOfWeek: optionalNumber(a, 'dayOfWeek'),
             dayOfMonth: optionalNumber(a, 'dayOfMonth'),
             month: optionalNumber(a, 'month'),
@@ -6675,15 +6770,15 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             workflowRunId: optionalString(a, 'workflowRunId'),
             name: requireString(a, 'name'),
             command: optionalString(a, 'command'),
-            status: requireString(a, 'status') as ValidationReportStatus,
+            status: requireString(a, 'status'),
             exitCode: optionalNumber(a, 'exitCode'),
             durationMs: optionalNumber(a, 'durationMs'),
             summary: optionalString(a, 'summary'),
             outputSnippet: optionalString(a, 'outputSnippet'),
             tags: optionalStringArray(a, 'tags'),
-            metadata: a.metadata as any,
+            metadata: optionalObject(a, 'metadata'),
           });
-          result = compactCreateResult(report, { status: (report as any).status });
+          result = compactCreateResult(report, { status: report.status });
           break;
         }
         case 'validation_report_list': {
@@ -6692,10 +6787,10 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             todoId: optionalString(a, 'todoId'),
             commitId: optionalString(a, 'commitId'),
             workflowRunId: optionalString(a, 'workflowRunId'),
-            status: optionalString(a, 'status') as ValidationReportStatus | undefined,
+            status: optionalString(a, 'status'),
             limit: optionalNumber(a, 'limit'),
           });
-          result = compactList(reports as any[], ['outputSnippet', 'metadata', '__v']);
+          result = compactList(reports, ['outputSnippet', 'metadata', '__v']);
           break;
         }
         case 'validation_report_get': {
@@ -6705,7 +6800,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'validation_report_propose_bug_todo': {
           const outcome = await validationReportsService.proposeBugTodo(requireString(a, 'id'), {
             title: optionalString(a, 'title'),
-            priority: optionalString(a, 'priority') as TodoPriority | undefined,
+            priority: optionalString(a, 'priority'),
             milestoneId: optionalString(a, 'milestoneId'),
             tags: optionalStringArray(a, 'tags'),
           });
@@ -6720,14 +6815,14 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'doc_update_proposal_list': {
           const proposals = await docUpdateProposalsService.list({
             projectId: optionalString(a, 'projectId'),
-            status: optionalString(a, 'status') as DocProposalStatus | undefined,
-            sourceType: optionalString(a, 'sourceType') as never,
+            status: optionalString(a, 'status'),
+            sourceType: optionalString(a, 'sourceType'),
             sourceId: optionalString(a, 'sourceId'),
-            targetType: optionalString(a, 'targetType') as never,
+            targetType: optionalString(a, 'targetType'),
             targetId: optionalString(a, 'targetId'),
             limit: optionalNumber(a, 'limit'),
           });
-          result = compactList(proposals as any[], ['metadata', '__v', 'suggestedChange']);
+          result = compactList(proposals, ['metadata', '__v', 'suggestedChange']);
           break;
         }
         case 'doc_update_proposal_get': {
@@ -6737,12 +6832,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'doc_update_proposal_create': {
           const proposal = await docUpdateProposalsService.create({
             projectId: requireString(a, 'projectId'),
-            source: requireObject(a, 'source') as never,
-            target: requireObject(a, 'target') as never,
+            source: requireObject(a, 'source'),
+            target: requireObject(a, 'target'),
             reason: requireString(a, 'reason'),
             confidence: requireNumber(a, 'confidence'),
-            suggestedChange: requireObject(a, 'suggestedChange') as never,
-            createdBy: optionalString(a, 'createdBy') as 'system' | 'agent' | 'user' | undefined,
+            suggestedChange: requireObject(a, 'suggestedChange'),
+            createdBy: optionalString(a, 'createdBy'),
             metadata: optionalObject(a, 'metadata'),
           });
           result = compactCreateResult(proposal, { status: proposal.status });
@@ -6751,7 +6846,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'doc_update_proposal_update_status': {
           const updated = await docUpdateProposalsService.updateStatus(
             requireString(a, 'id'),
-            requireString(a, 'status') as DocProposalStatus,
+            requireString(a, 'status'),
             optionalString(a, 'note'),
           );
           result = { id: updated._id.toString(), status: updated.status };
@@ -6775,7 +6870,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'knowledge_graph_neighbors': {
           const edges = await knowledgeGraphService.neighbors(
             requireString(a, 'projectId'),
-            requireString(a, 'entityType') as KgEntityType,
+            requireString(a, 'entityType'),
             requireString(a, 'entityId'),
           );
           result = edges.map((e) => e.toObject());
@@ -6784,7 +6879,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'knowledge_graph_impact': {
           result = await knowledgeGraphService.impact(
             requireString(a, 'projectId'),
-            requireString(a, 'entityType') as KgEntityType,
+            requireString(a, 'entityType'),
             requireString(a, 'entityId'),
             optionalNumber(a, 'depth'),
           );
@@ -6793,13 +6888,13 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'knowledge_graph_link': {
           const edge = await knowledgeGraphService.create({
             projectId: requireString(a, 'projectId'),
-            source: requireObject(a, 'source') as never,
-            target: requireObject(a, 'target') as never,
-            relation: requireString(a, 'relation') as KgRelation,
+            source: requireObject(a, 'source'),
+            target: requireObject(a, 'target'),
+            relation: requireString(a, 'relation'),
             weight: optionalNumber(a, 'weight'),
             confidence: optionalNumber(a, 'confidence'),
-            direction: optionalString(a, 'direction') as 'directed' | 'undirected' | undefined,
-            createdBy: optionalString(a, 'createdBy') as 'system' | 'agent' | 'user' | undefined,
+            direction: optionalString(a, 'direction'),
+            createdBy: optionalString(a, 'createdBy'),
             metadata: optionalObject(a, 'metadata'),
           });
           result = compactCreateResult(edge, { relation: edge.relation });
@@ -6812,12 +6907,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'knowledge_graph_list': {
           const edges = await knowledgeGraphService.list({
             projectId: optionalString(a, 'projectId'),
-            entityType: optionalString(a, 'entityType') as KgEntityType | undefined,
+            entityType: optionalString(a, 'entityType'),
             entityId: optionalString(a, 'entityId'),
-            relation: optionalString(a, 'relation') as KgRelation | undefined,
+            relation: optionalString(a, 'relation'),
             limit: optionalNumber(a, 'limit'),
           });
-          result = compactList(edges as any[], ['metadata', '__v']);
+          result = compactList(edges, ['metadata', '__v']);
           break;
         }
         case 'oracle_analyze': {
@@ -6827,12 +6922,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'oracle_list': {
           const suggestions = await oracleService.list({
             projectId: optionalString(a, 'projectId'),
-            status: optionalString(a, 'status') as OracleSuggestionStatus | undefined,
-            severity: optionalString(a, 'severity') as OracleSeverity | undefined,
-            type: optionalString(a, 'type') as OracleRiskType | undefined,
+            status: optionalString(a, 'status'),
+            severity: optionalString(a, 'severity'),
+            type: optionalString(a, 'type'),
             limit: optionalNumber(a, 'limit'),
           });
-          result = compactList(suggestions as any[], ['metadata', '__v']);
+          result = compactList(suggestions, ['metadata', '__v']);
           break;
         }
         case 'oracle_get': {
@@ -6842,7 +6937,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'oracle_update_status': {
           const updated = await oracleService.updateStatus(
             requireString(a, 'id'),
-            requireString(a, 'status') as OracleSuggestionStatus,
+            requireString(a, 'status'),
             optionalString(a, 'note'),
           );
           result = { id: updated._id.toString(), status: updated.status };
@@ -6878,7 +6973,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'workflow_create': {
           const wf = await workflowsService.createDefinition({
-            scope: requireString(a, 'scope') as WorkflowScope,
+            scope: requireString(a, 'scope'),
             projectId: optionalString(a, 'projectId'),
             customerId: optionalString(a, 'customerId'),
             name: requireString(a, 'name'),
@@ -6894,10 +6989,10 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'workflow_list': {
           const list = await workflowsService.listDefinitions({
-            scope: optionalString(a, 'scope') as WorkflowScope | undefined,
+            scope: optionalString(a, 'scope'),
             projectId: optionalString(a, 'projectId'),
             customerId: optionalString(a, 'customerId'),
-            status: optionalString(a, 'status') as WorkflowStatus | undefined,
+            status: optionalString(a, 'status'),
             tag: optionalString(a, 'tag'),
             includeArchived: typeof a.includeArchived === 'boolean' ? a.includeArchived : undefined,
             limit: optionalNumber(a, 'limit'),
@@ -6925,7 +7020,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const updated = await workflowsService.updateDefinition(requireString(a, 'id'), {
             name: optionalString(a, 'name'),
             description: optionalString(a, 'description'),
-            status: optionalString(a, 'status') as WorkflowStatus | undefined,
+            status: optionalString(a, 'status'),
             tags: Array.isArray(a.tags) ? (a.tags as string[]) : undefined,
             trigger: (a.trigger as Record<string, unknown>) || undefined,
             nodes: Array.isArray(a.nodes) ? (a.nodes as never) : undefined,
@@ -6954,7 +7049,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             });
           } else {
             result = workflowsService.validateGraph({
-              scope: optionalString(a, 'scope') as WorkflowScope | undefined,
+              scope: optionalString(a, 'scope'),
               projectId: optionalString(a, 'projectId'),
               customerId: optionalString(a, 'customerId'),
               nodes: Array.isArray(a.nodes) ? (a.nodes as never) : undefined,
@@ -6980,7 +7075,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'workflow_run_list': {
           const runs = await workflowsService.listRuns({
             definitionId: optionalString(a, 'definitionId'),
-            scope: optionalString(a, 'scope') as WorkflowScope | undefined,
+            scope: optionalString(a, 'scope'),
             projectId: optionalString(a, 'projectId'),
             customerId: optionalString(a, 'customerId'),
             status: optionalString(a, 'status'),
@@ -7023,8 +7118,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'workflow_node_test': {
           result = await workflowEngineService.testNode({
-            node: requireObject(a, 'node') as never,
-            scope: optionalString(a, 'scope') as WorkflowScope | undefined,
+            node: requireObject(a, 'node'),
+            scope: optionalString(a, 'scope'),
             input: optionalObject(a, 'input'),
             runContext: optionalObject(a, 'runContext'),
           });
@@ -7054,7 +7149,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             name: requireString(a, 'name'),
             slug: requireString(a, 'slug'),
             description: optionalString(a, 'description'),
-            type: requireString(a, 'type') as CustomerTemplateType,
+            type: requireString(a, 'type'),
             active: typeof a.active === 'boolean' ? a.active : undefined,
             tags: Array.isArray(a.tags) ? (a.tags as string[]) : undefined,
             items: Array.isArray(a.items) ? (a.items as never) : undefined,
@@ -7064,7 +7159,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'customer_template_list': {
           const list = await customerTemplatesService.list({
-            type: optionalString(a, 'type') as CustomerTemplateType | undefined,
+            type: optionalString(a, 'type'),
             active: typeof a.active === 'boolean' ? a.active : undefined,
             tag: optionalString(a, 'tag'),
           });
@@ -7090,7 +7185,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const updated = await customerTemplatesService.update(requireString(a, 'id'), {
             name: optionalString(a, 'name'),
             description: optionalString(a, 'description'),
-            type: optionalString(a, 'type') as CustomerTemplateType | undefined,
+            type: optionalString(a, 'type'),
             active: typeof a.active === 'boolean' ? a.active : undefined,
             tags: Array.isArray(a.tags) ? (a.tags as string[]) : undefined,
             items: Array.isArray(a.items) ? (a.items as never) : undefined,
@@ -7129,7 +7224,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             category: optionalString(a, 'category'),
             fileName: optionalString(a, 'fileName'),
           });
-          result = compactCreateResult(snip, { title: (snip as any).title });
+          result = compactCreateResult(snip, { title: snip.title });
           break;
         }
         case 'snippet_list': {
@@ -7152,7 +7247,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
                 optionalString(a, 'tag'),
               );
           result = applyPagination(
-            compactList(snippets as any, ['code', 'description', '__v']),
+            compactList(snippets, ['code', 'description', '__v']),
             optionalNumber(a, 'limit'),
             optionalNumber(a, 'offset'),
           );
@@ -7182,10 +7277,10 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             optionalString(a, 'projectId'),
             optionalString(a, 'customerId'),
           );
-          result = searchResults.map((s: any) => {
-            const obj = typeof s.toJSON === 'function' ? s.toJSON() : { ...s };
-            obj.code = snippet(obj.code);
-            obj.description = snippet(obj.description);
+          result = searchResults.map((s) => {
+            const obj = toPlainDoc(s);
+            obj.code = snippet(asString(obj.code));
+            obj.description = snippet(asString(obj.description));
             delete obj.__v;
             return obj;
           });
@@ -7207,9 +7302,9 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             requireString(a, 'content'),
           );
           result = compactCreateResult(attachment, {
-            originalName: (attachment as any).originalName,
-            size: (attachment as any).size,
-            mimeType: (attachment as any).mimeType,
+            originalName: attachment.originalName,
+            size: attachment.size,
+            mimeType: attachment.mimeType,
           });
           break;
         }
@@ -7231,7 +7326,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
                 optionalString(a, 'entityId'),
               );
           result = applyPagination(
-            compactList(items as any, ['textContent', '__v']),
+            compactList(items, ['textContent', '__v']),
             optionalNumber(a, 'limit') ?? 50,
             optionalNumber(a, 'offset') ?? 0,
           );
@@ -7250,7 +7345,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               originalName: att.originalName,
               mimeType: att.mimeType,
               size: att.size,
-              error: `File too large for MCP download (${(att.size / 1024 / 1024).toFixed(1)}MB). Use the REST API: GET /api/attachments/${att._id}/download`,
+              error: `File too large for MCP download (${(att.size / 1024 / 1024).toFixed(1)}MB). Use the REST API: GET /api/attachments/${idToString(att._id) ?? ''}/download`,
             };
           } else if (att.mimeType.startsWith('text/') || ['application/json', 'application/javascript', 'application/typescript', 'application/xml', 'application/x-yaml', 'application/x-sh'].includes(att.mimeType)) {
             result = {
@@ -7284,7 +7379,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             limit: optionalNumber(a, 'limit'),
             offset: optionalNumber(a, 'offset'),
           });
-          result = logs.map((l: any) => ({
+          result = logs.map((l) => ({
             _id: l._id,
             level: l.level,
             message: snippet(l.message, 300),
@@ -7303,7 +7398,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             level: optionalString(a, 'level'),
             limit: optionalNumber(a, 'limit'),
           });
-          result = searchLogs.map((l: any) => ({
+          result = searchLogs.map((l) => ({
             _id: l._id,
             level: l.level,
             message: snippet(l.message, 300),
@@ -7328,7 +7423,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             requireUserId(),
             optionalString(a, 'title'),
           );
-          result = { _id: (created as any)._id, title: (created as any).title };
+          result = { _id: created._id, title: created.title };
           break;
         }
         case 'chat_list': {
@@ -7344,10 +7439,10 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               offset: optionalNumber(a, 'offset'),
             },
           );
-          result = (sessions as any[]).map((s) => ({
+          result = sessions.map((s) => ({
             _id: s._id,
             title: s.title,
-            messageCount: Array.isArray(s.messages) ? s.messages.length : 0,
+            messageCount: countArray(s.messages),
             archived: s.archived,
             updatedAt: s.updatedAt,
           }));
@@ -7356,19 +7451,19 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'chat_get': {
           const session = await chatService.findById(requireString(a, 'id'), requireUserId());
           result = {
-            _id: (session as any)._id,
-            projectId: (session as any).projectId,
-            title: (session as any).title,
-            archived: (session as any).archived,
-            messages: ((session as any).messages || []).map((m: any) => ({
+            _id: session._id,
+            projectId: session.projectId,
+            title: session.title,
+            archived: session.archived,
+            messages: (session.messages || []).map((m) => ({
               role: m.role,
               content: m.content,
               timestamp: m.timestamp,
               contextUsed: m.contextUsed,
               toolCalls: m.toolCalls,
             })),
-            createdAt: (session as any).createdAt,
-            updatedAt: (session as any).updatedAt,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
           };
           break;
         }
@@ -7382,10 +7477,18 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const content = requireString(a, 'content');
           const userId = requireUserId();
           const session = await chatService.findById(sessionId, userId);
-          const projectId = (session as any).projectId.toString();
+          // Chat-Sessions können kunden- statt projektbezogen sein, dann ist
+          // projectId leer. Vorher stand hier ein `as any`, das den Fall
+          // verdeckte — ein kundenbezogener Chat lief in einen TypeError.
+          if (!session.projectId) {
+            return errorResult(
+              'chat_send über MCP braucht eine projektbezogene Chat-Session; diese Session hängt an einem Kunden.',
+            );
+          }
+          const projectId = session.projectId.toString();
           const opts = await chatLlmService.getOptions();
 
-          const built = await chatContextService.build(projectId, content, (session as any).messages, {
+          const built = await chatContextService.build(projectId, content, session.messages, {
             topK: opts.topK,
             historyLimit: opts.historyLimit,
             toolsEnabled: opts.toolsEnabled,
@@ -7432,7 +7535,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             environmentId: optionalString(a, 'environmentId'),
             name: requireString(a, 'name'),
             description: optionalString(a, 'description'),
-            method: optionalString(a, 'method') as any,
+            method: optionalString(a, 'method'),
             url: requireString(a, 'url'),
             headers: headers?.map((h) => ({ name: h.name, value: h.value ?? '' })),
             secretHeaders,
@@ -7445,12 +7548,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             failureThreshold: optionalNumber(a, 'failureThreshold'),
             active: optionalBoolean(a, 'active'),
           });
-          result = compactCreateResult(check, { name: (check as any).name, customerId: (check as any).customerId });
+          result = compactCreateResult(check, { name: check.name, customerId: check.customerId });
           break;
         }
         case 'monitor_list': {
           const checks = await monitoringService.findByCustomer(requireString(a, 'customerId'));
-          result = compactList(checks as any, ['__v', 'headers', 'secretHeaders', 'body']);
+          result = compactList(checks, ['__v', 'headers', 'secretHeaders', 'body']);
           break;
         }
         case 'monitor_get':
@@ -7470,7 +7573,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             environmentId: optionalString(a, 'environmentId'),
             name: optionalString(a, 'name'),
             description: optionalString(a, 'description'),
-            method: optionalString(a, 'method') as any,
+            method: optionalString(a, 'method'),
             url: optionalString(a, 'url'),
             headers: headers?.map((h) => ({ name: h.name, value: h.value ?? '' })),
             secretHeaders,
@@ -7509,12 +7612,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             description: optionalString(a, 'description'),
             order: optionalNumber(a, 'order'),
           });
-          result = compactCreateResult(col, { name: (col as any).name });
+          result = compactCreateResult(col, { name: col.name });
           break;
         }
         case 'request_collection_list':
           result = compactList(
-            (await httpRequestsService.listCollections(requireString(a, 'projectId'))) as any,
+            (await httpRequestsService.listCollections(requireString(a, 'projectId'))),
             ['__v'],
           );
           break;
@@ -7534,16 +7637,16 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             collectionId: requireString(a, 'collectionId'),
             name: requireString(a, 'name'),
             description: optionalString(a, 'description'),
-            method: optionalString(a, 'method') as any,
+            method: optionalString(a, 'method'),
             url: requireString(a, 'url'),
-            queryParams: a.queryParams as any,
-            headers: a.headers as any,
-            auth: a.auth as any,
-            body: a.body as any,
+            queryParams: optionalObject(a, 'queryParams'),
+            headers: optionalObject(a, 'headers'),
+            auth: optionalObject(a, 'auth'),
+            body: optionalObject<BodyDto>(a, 'body'),
             timeoutMs: optionalNumber(a, 'timeoutMs'),
             followRedirects: optionalBoolean(a, 'followRedirects'),
           });
-          result = compactCreateResult(req, { name: (req as any).name });
+          result = compactCreateResult(req, { name: req.name });
           break;
         }
         case 'request_list':
@@ -7551,7 +7654,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             (await httpRequestsService.listRequests({
               collectionId: optionalString(a, 'collectionId'),
               projectId: optionalString(a, 'projectId'),
-            })) as any,
+            })),
             ['__v', 'headers', 'queryParams', 'body', 'auth'],
           );
           break;
@@ -7562,12 +7665,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = compactUpdateResult(await httpRequestsService.updateRequest(requireString(a, 'id'), {
             name: optionalString(a, 'name'),
             description: optionalString(a, 'description'),
-            method: optionalString(a, 'method') as any,
+            method: optionalString(a, 'method'),
             url: optionalString(a, 'url'),
-            queryParams: a.queryParams as any,
-            headers: a.headers as any,
-            auth: a.auth as any,
-            body: a.body as any,
+            queryParams: optionalObject(a, 'queryParams'),
+            headers: optionalObject(a, 'headers'),
+            auth: optionalObject(a, 'auth'),
+            body: optionalObject<BodyDto>(a, 'body'),
             timeoutMs: optionalNumber(a, 'timeoutMs'),
             followRedirects: optionalBoolean(a, 'followRedirects'),
           }));
@@ -7600,7 +7703,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               requireString(a, 'id'),
               optionalNumber(a, 'limit'),
               optionalNumber(a, 'offset'),
-            )) as any,
+            )),
             ['__v'],
           );
           break;
@@ -7613,7 +7716,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             requireString(a, 'curl'),
             optionalString(a, 'name'),
           );
-          result = compactCreateResult(req, { name: (req as any).name });
+          result = compactCreateResult(req, { name: req.name });
           break;
         }
         default:
@@ -7757,7 +7860,7 @@ function formatToolBody(toolName: string, args: Record<string, unknown>, result:
 
   // Status / priority / category if the tool sets them.
   for (const key of ['status', 'priority', 'category', 'scope']) {
-    const v = (r as any)?.[key];
+    const v = r?.[key];
     if (typeof v === 'string') pieces.push(`${key}: ${v}`);
   }
 

@@ -45,7 +45,7 @@ export class LogsService {
       limit?: number;
       offset?: number;
     },
-  ): Promise<any[]> {
+  ) {
     const filter: FilterQuery<LogEntry> = { projectId: new Types.ObjectId(projectId) };
 
     if (options?.level) filter.level = options.level;
@@ -86,7 +86,7 @@ export class LogsService {
     endDate?: string;
     limit?: number;
     offset?: number;
-  }): Promise<any[]> {
+  }) {
     const filter: FilterQuery<LogEntry> = {};
 
     if (options?.projectIds && options.projectIds.length > 0) {

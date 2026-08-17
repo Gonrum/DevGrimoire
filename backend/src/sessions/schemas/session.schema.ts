@@ -19,6 +19,11 @@ export class Session {
 
   @Prop({ type: [String], default: [] })
   openQuestions: string[];
+
+  // `timestamps` legt diese Felder zur Laufzeit an, deklariert sie aber nicht
+  // am Typ — ohne Deklaration brauchten Leser dafür ein `as any`.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const SessionSchema = SchemaFactory.createForClass(Session);
