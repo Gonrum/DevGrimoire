@@ -17,11 +17,12 @@ export class TriggerScheduleExecutor implements NodeExecutor {
     outputs: { scheduleSlotAt: 'string|null' },
     branches: ['success'],
   };
-  async execute(ctx: NodeExecutionContext): Promise<NodeResult> {
+  // Kein `async`: der Node liest nur ein Feld aus dem Run.
+  execute(ctx: NodeExecutionContext): Promise<NodeResult> {
     const slot = ctx.run.triggeredBy?.scheduleSlotAt;
-    return {
+    return Promise.resolve({
       status: 'success',
       output: { scheduleSlotAt: slot?.toISOString?.() ?? null },
-    };
+    });
   }
 }

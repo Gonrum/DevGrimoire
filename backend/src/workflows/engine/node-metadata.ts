@@ -2,6 +2,29 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 
+/**
+ * `zod-to-json-schema` deklariert seinen Parameter über `zod/v3`, das Projekt
+ * baut seine Schemas über `zod` — in zod 3.25 sind das zwei getrennte
+ * Deklarationsbäume über **einer** Implementierung. Ein `z.ZodTypeAny` von
+ * `zod` ist zu `ZodType` von `zod/v3` deshalb nicht zuweisbar, und der
+ * Vergleich sprengt zusätzlich das Instanziierungslimit von TS (TS2589).
+ *
+ * Vorher stand dafür `zodToJsonSchema(schema as any, …)`, was drei Regeln auf
+ * einmal auslöste. Der Aufruf wird stattdessen einmal hier über eine
+ * Signatur geführt, die nur behauptet, was zur Laufzeit auch stimmt: es geht
+ * ein Zod-Schema hinein und ein JSON-Schema-Objekt heraus. Das ist keine
+ * Umgehung der Typprüfung an der Aufrufstelle, sondern ihre einzige Stelle.
+ *
+ * Ursache liegt außerhalb dieses Moduls: sauber wird das erst, wenn
+ * `zod-to-json-schema` und `zod` denselben Deklarationsbaum benutzen.
+ */
+type SchemaToJsonSchema = (
+  schema: unknown,
+  options?: { name?: string; $refStrategy?: 'root' | 'relative' | 'none' | 'seen' },
+) => object;
+
+const toJsonSchema: SchemaToJsonSchema = zodToJsonSchema;
+
 export type NodeBranch = 'success' | 'failure' | 'custom';
 
 export interface NodeMetadata {
@@ -37,7 +60,7 @@ export function toPublicMetadata(meta: NodeMetadata): NodeMetadataPublic {
     label: meta.label,
     description: meta.description,
     allowedScopes: meta.allowedScopes,
-    configJsonSchema: zodToJsonSchema(meta.configSchema as any, {
+    configJsonSchema: toJsonSchema(meta.configSchema, {
       name: meta.type,
       $refStrategy: 'none',
     }),

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsArray, IsMongoId, IsNumber, IsBoolean, MinLength, Min, Max, ValidateNested, IsObject } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsArray, IsMongoId, IsNumber, IsBoolean, MinLength, Min, Max, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { RecurringAction, RecurringFrequency } from '../schemas/recurring-task.schema';
 

@@ -74,7 +74,7 @@ export class OracleService {
     const now = Date.now();
     for (const t of ctx.todos) {
       if (t.status !== TodoStatus.IN_PROGRESS && t.status !== TodoStatus.REVIEW) continue;
-      const updatedRaw = (t as unknown as { updatedAt?: Date | string }).updatedAt;
+      const updatedRaw = t.updatedAt;
       const updated = updatedRaw ? new Date(updatedRaw).getTime() : now;
       const days = Math.floor((now - updated) / (1000 * 60 * 60 * 24));
       if (days < STAGNATION_DAYS) continue;

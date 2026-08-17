@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types';
 import { NodeMetadata } from '../engine/node-metadata';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
+import { asString } from '../../common/tool-args';
+import { asNumber } from '../workflow-narrow';
 
 const MAX_DELAY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -28,30 +30,31 @@ export class ControlDelayExecutor implements NodeExecutor {
     branches: ['success'],
   };
 
-  async execute(ctx: NodeExecutionContext): Promise<NodeResult> {
-    const cfg = ctx.config as { delayMs?: number; until?: string };
-    const resumeAt = cfg.delayMs
-      ? new Date(Date.now() + cfg.delayMs)
-      : new Date(String(cfg.until));
+  // Kein `async`: der Node berechnet nur einen Zeitpunkt.
+  execute(ctx: NodeExecutionContext): Promise<NodeResult> {
+    const delayMs = asNumber(ctx.config.delayMs);
+    const resumeAt = delayMs
+      ? new Date(Date.now() + delayMs)
+      : new Date(asString(ctx.config.until) ?? '');
 
     if (Number.isNaN(resumeAt.getTime())) {
-      return {
+      return Promise.resolve({
         status: 'failed',
         error: { code: 'invalid_config', message: 'invalid resumeAt' },
-      };
+      });
     }
 
     if (resumeAt.getTime() <= Date.now()) {
       // Already in the past — succeed immediately with zero wait.
-      return {
+      return Promise.resolve({
         status: 'success',
         output: { resumedAt: new Date().toISOString(), waitedMs: 0 },
-      };
+      });
     }
 
-    return {
+    return Promise.resolve({
       status: 'waiting',
       waitingFor: { type: 'delay', resumeAt },
-    };
+    });
   }
 }

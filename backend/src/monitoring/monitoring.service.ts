@@ -24,9 +24,19 @@ import { CustomersService } from '../customers/customers.service';
 import { SecretsService } from '../secrets/secrets.service';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { NotificationsService } from '../notifications/notifications.service';
+import { errorMessage, isDuplicateKeyError, isRecord } from '../common/narrow';
 
 const HISTORY_TTL_DAYS = 30;
 const RUN_TIMEOUT_BUDGET_MS = 130_000; // hard ceiling for a check execution
+
+/**
+ * Abbruch durch das Timeout. `fetch` wirft dafür eine `DOMException` mit
+ * `name === 'AbortError'` — kein `Error`-Subtyp, auf den man sich verlassen
+ * könnte, deshalb die Formprüfung über `isRecord` statt `instanceof`.
+ */
+function isAbortError(err: unknown): boolean {
+  return isRecord(err) && err.name === 'AbortError';
+}
 
 export interface CustomerHealthSummary {
   customerId: string;
@@ -103,8 +113,8 @@ export class MonitoringService {
       });
       this.emit('created', check, 'angelegt');
       return check;
-    } catch (err: any) {
-      if (err?.code === 11000) {
+    } catch (err: unknown) {
+      if (isDuplicateKeyError(err)) {
         throw new ConflictException(`Healthcheck "${dto.name}" existiert bereits für diesen Kunden`);
       }
       throw err;
@@ -201,8 +211,8 @@ export class MonitoringService {
       if (!check) throw new NotFoundException(`Healthcheck ${id} not found`);
       this.emit('updated', check, 'aktualisiert');
       return check;
-    } catch (err: any) {
-      if (err?.code === 11000) {
+    } catch (err: unknown) {
+      if (isDuplicateKeyError(err)) {
         throw new ConflictException(`Healthcheck "${dto.name}" existiert bereits für diesen Kunden`);
       }
       throw err;
@@ -303,8 +313,8 @@ export class MonitoringService {
       try {
         await this.executeCheck(check);
         count++;
-      } catch (err) {
-        this.logger.error(`Healthcheck ${id} execution crashed: ${(err as Error).message}`);
+      } catch (err: unknown) {
+        this.logger.error(`Healthcheck ${id} execution crashed: ${errorMessage(err)}`);
       } finally {
         this.inflight.delete(id);
       }
@@ -322,7 +332,10 @@ export class MonitoringService {
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     let statusCode: number | undefined;
-    let latencyMs = 0;
+    // Ohne Initialwert: try- und catch-Zweig setzen die Latenz beide, die 0 war
+    // nie lesbar. Bewusst *nicht* nach dem try/catch gemessen — im Erfolgsfall
+    // soll die Zeit bis zum Antwort-Header zählen, nicht bis zum gelesenen Body.
+    let latencyMs: number;
     let bodySnippet: string | undefined;
     let error: string | undefined;
     let networkOk = false;
@@ -347,13 +360,12 @@ export class MonitoringService {
         const text = await res.text();
         bodySnippet = text.slice(0, 4000);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       latencyMs = Date.now() - t0;
-      if (err?.name === 'AbortError') {
-        error = `Timeout nach ${timeoutMs}ms`;
-      } else {
-        error = err?.message || 'Unbekannter Fehler';
-      }
+      // `errorMessage` statt `err?.message`: bei einem Nicht-Error stand hier
+      // vorher `undefined`, und genau das ist bei Healthcheck-Fehlern (Timeout,
+      // DNS) der Normalfall — der Text landet in History und Notification.
+      error = isAbortError(err) ? `Timeout nach ${timeoutMs}ms` : errorMessage(err);
     } finally {
       clearTimeout(timer);
     }
@@ -442,8 +454,8 @@ export class MonitoringService {
   private async safeNotify(title: string, body: string, url?: string): Promise<void> {
     try {
       await this.notificationsService.create(title, body, url, 'monitoring_unhealthy');
-    } catch (err) {
-      this.logger.warn(`Failed to dispatch monitoring notification: ${(err as Error).message}`);
+    } catch (err: unknown) {
+      this.logger.warn(`Failed to dispatch monitoring notification: ${errorMessage(err)}`);
     }
   }
 
@@ -502,9 +514,11 @@ export class MonitoringService {
       try {
         const secret = await this.secretsService.findById(sh.secretId.toString());
         out[sh.name] = secret.value;
-      } catch (err) {
+      } catch (err: unknown) {
+        // Nur Id und Fehlertext — der aufgelöste Wert darf nirgends hin außer in
+        // `out`, und `out` geht ausschließlich in den fetch-Header.
         this.logger.warn(
-          `Healthcheck ${check._id} could not resolve secret ${sh.secretId}: ${(err as Error).message}`,
+          `Healthcheck ${check._id.toString()} could not resolve secret ${sh.secretId.toString()}: ${errorMessage(err)}`,
         );
       }
     }

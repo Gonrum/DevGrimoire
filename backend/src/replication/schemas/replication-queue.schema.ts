@@ -36,6 +36,11 @@ export class ReplicationQueue {
 
   @Prop({ default: 'pending', enum: ['pending', 'failed', 'sent'] })
   status: string;
+
+  // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
+  // nicht am Typ — Leser brauchten dafür `as unknown as { createdAt?: Date }`.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const ReplicationQueueSchema = SchemaFactory.createForClass(ReplicationQueue);

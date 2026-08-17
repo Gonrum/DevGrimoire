@@ -4,6 +4,7 @@ import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types'
 import { NodeMetadata } from '../engine/node-metadata';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { expandTemplate } from './template';
+import { asString } from '../../common/tool-args';
 
 @Injectable()
 export class ActionLogExecutor implements NodeExecutor {
@@ -21,12 +22,14 @@ export class ActionLogExecutor implements NodeExecutor {
     outputs: { message: 'string', level: 'string' },
     branches: ['success'],
   };
-  async execute(ctx: NodeExecutionContext): Promise<NodeResult> {
-    const message = expandTemplate(String(ctx.config.message ?? ''), ctx.runContext);
-    const level = (ctx.config.level as string) ?? 'info';
+  // Kein `async`: der Node arbeitet rein synchron. `Promise.resolve` erfüllt
+  // die `NodeExecutor`-Signatur, ohne eine Await-Stelle zu erfinden.
+  execute(ctx: NodeExecutionContext): Promise<NodeResult> {
+    const message = expandTemplate(asString(ctx.config.message) ?? '', ctx.runContext);
+    const level = asString(ctx.config.level) ?? 'info';
     if (level === 'warn') ctx.logger.warn(message);
     else if (level === 'error') ctx.logger.error(message);
     else ctx.logger.info(message);
-    return { status: 'success', output: { message, level } };
+    return Promise.resolve({ status: 'success', output: { message, level } });
   }
 }

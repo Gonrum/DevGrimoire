@@ -8,6 +8,7 @@ import {
   WorkflowNodeRunStatus,
 } from '../schemas/workflow-node-run.schema';
 import { WorkflowEngineService } from './workflow-engine.service';
+import { errorMessage } from '../workflow-narrow';
 
 @Injectable()
 export class WorkflowDelayScheduler {
@@ -33,8 +34,10 @@ export class WorkflowDelayScheduler {
     for (const nr of due) {
       try {
         await this.engine.resumeDelayedNode(nr._id);
-      } catch (err) {
-        this.logger.warn(`resumeDelayedNode failed for ${nr._id}: ${(err as Error).message}`);
+      } catch (err: unknown) {
+        this.logger.warn(
+          `resumeDelayedNode failed for ${nr._id.toString()}: ${errorMessage(err)}`,
+        );
       }
     }
   }

@@ -7,6 +7,8 @@ import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types'
 import { NodeMetadata } from '../engine/node-metadata';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { expandConfig } from './template';
+import { asString, optionalEnum } from '../../common/tool-args';
+import { asStringArray, errorMessage } from '../workflow-narrow';
 
 @Injectable()
 export class ActionTodoCreateExecutor implements NodeExecutor {
@@ -35,13 +37,13 @@ export class ActionTodoCreateExecutor implements NodeExecutor {
   async execute(ctx: NodeExecutionContext): Promise<NodeResult> {
     const expanded = expandConfig(ctx.config, ctx.runContext);
     const projectId =
-      (expanded.projectId as string | undefined) ??
+      asString(expanded.projectId) ??
       (ctx.run.projectId instanceof Types.ObjectId ? ctx.run.projectId.toString() : undefined);
     const customerId =
-      (expanded.customerId as string | undefined) ??
+      asString(expanded.customerId) ??
       (ctx.run.customerId instanceof Types.ObjectId ? ctx.run.customerId.toString() : undefined);
 
-    const title = String(expanded.title ?? '').trim();
+    const title = (asString(expanded.title) ?? '').trim();
     if (!title) {
       return {
         status: 'failed',
@@ -49,17 +51,23 @@ export class ActionTodoCreateExecutor implements NodeExecutor {
       };
     }
 
-    const rawPriority = expanded.priority as string | undefined;
-    const priority = Object.values(TodoPriority).includes(rawPriority as TodoPriority)
-      ? (rawPriority as TodoPriority)
-      : undefined;
+    // `optionalEnum` prüft gegen die Enum-Werte und liefert damit `TodoPriority`
+    // aus einer echten Laufzeitprüfung. Anders als vorher wird ein *ungültiger*
+    // Wert jetzt abgelehnt statt still auf `undefined` zu fallen — ein
+    // Tippfehler in der Node-Konfiguration bleibt damit nicht unsichtbar.
+    let priority: TodoPriority | undefined;
+    try {
+      priority = optionalEnum(expanded, 'priority', Object.values(TodoPriority));
+    } catch (err: unknown) {
+      return { status: 'failed', error: { code: 'invalid_config', message: errorMessage(err) } };
+    }
 
     const todo = await this.todosService.create({
       title,
-      description: expanded.description as string | undefined,
+      description: asString(expanded.description),
       priority,
-      tags: (expanded.tags as string[]) ?? [],
-      milestoneId: expanded.milestoneId as string | undefined,
+      tags: asStringArray(expanded.tags) ?? [],
+      milestoneId: asString(expanded.milestoneId),
       projectId,
       customerId,
     });

@@ -6,6 +6,8 @@ import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types'
 import { NodeMetadata } from '../engine/node-metadata';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { expandConfig } from './template';
+import { asString } from '../../common/tool-args';
+import { asStringArray, errorMessage } from '../workflow-narrow';
 
 @Injectable()
 export class ActionKnowledgeCreateExecutor implements NodeExecutor {
@@ -35,21 +37,24 @@ export class ActionKnowledgeCreateExecutor implements NodeExecutor {
     const customerId =
       ctx.run.customerId instanceof Types.ObjectId ? ctx.run.customerId.toString() : undefined;
     try {
+      // Ohne das frühere `as never` greift die kontextuelle Typisierung des
+      // DTO wieder: `scope` wird als `'project' | 'customer'` gelesen statt als
+      // beliebiger String, der dorthin gar nicht zuweisbar war.
       const k = await this.knowledge.create({
         topic: String(expanded.topic),
         content: String(expanded.content),
-        category: expanded.category as string | undefined,
-        tags: (expanded.tags as string[]) ?? [],
+        category: asString(expanded.category),
+        tags: asStringArray(expanded.tags) ?? [],
         scope: projectId ? 'project' : 'customer',
         projectId,
         customerId,
-      } as never);
+      });
       return {
         status: 'success',
-        output: { knowledgeId: String((k as { _id: unknown })._id) },
+        output: { knowledgeId: k._id.toString() },
       };
-    } catch (err) {
-      return { status: 'failed', error: { code: 'knowledge_create_failed', message: (err as Error).message } };
+    } catch (err: unknown) {
+      return { status: 'failed', error: { code: 'knowledge_create_failed', message: errorMessage(err) } };
     }
   }
 }

@@ -12,6 +12,7 @@ import {
 import { CreateRecurringTaskDto } from './dto/create-recurring-task.dto';
 import { UpdateRecurringTaskDto } from './dto/update-recurring-task.dto';
 import { TodosService } from '../todos/todos.service';
+import { TodoPriority } from '../todos/schemas/todo.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CustomersService } from '../customers/customers.service';
 import { ChatService } from '../chat/chat.service';
@@ -20,6 +21,34 @@ import { redactValue } from '../workflows/workflow-redaction';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
 import { RequestContext } from '../common/request-context';
+import { errorMessage } from '../common/narrow';
+
+/**
+ * Wie oft `computeNextRunFromDate` höchstens einen Zyklus nachlegt, um `from` zu
+ * überholen. Bei jeder gültigen Frequenz reicht der erste Schritt; die Grenze
+ * ersetzt die frühere Endrekursion, die bei einem Zyklus ohne Fortschritt bis
+ * zum Stack-Overflow lief.
+ */
+const MAX_CYCLE_STEPS = 3;
+
+/** Letzter Tag des Monats, in dem `d` liegt. */
+function daysInMonth(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+}
+
+/**
+ * String → Enum-Mitglied, oder `undefined`.
+ *
+ * Der `find`-Vergleich muss in einer generischen Funktion stehen: `T extends
+ * string` vergleicht String mit String, während ein direktes
+ * `TodoPriority === string` genau das ist, was `no-unsafe-enum-comparison`
+ * anmerkt. Derselbe Kniff wie in `common/tool-args.ts` (`optionalEnum`) — hier
+ * aber ohne Wurf, weil ein unbekannter Wert die Aufgabe nicht scheitern lassen
+ * soll (siehe `todoPriority`).
+ */
+function asEnumValue<T extends string>(allowed: readonly T[], value: string): T | undefined {
+  return allowed.find((candidate) => candidate === value);
+}
 
 @Injectable()
 export class RecurringTasksService {
@@ -170,7 +199,13 @@ export class RecurringTasksService {
   async trigger(id: string): Promise<RecurringTaskDocument> {
     const task = await this.findById(id);
     await this.executeTask(task);
-    return this.recurringTaskModel.findById(id).exec() as Promise<RecurringTaskDocument>;
+    // Vorher `… .exec() as Promise<RecurringTaskDocument>`: die Behauptung hat
+    // das `null` weggelogen, das `findById` sehr wohl liefern kann — etwa wenn
+    // die Aufgabe während des Laufs gelöscht wurde. Der Aufrufer bekam dann
+    // `null` in einem Feld, das `RecurringTaskDocument` verspricht.
+    const refreshed = await this.recurringTaskModel.findById(id).exec();
+    if (!refreshed) throw new NotFoundException(`RecurringTask ${id} not found`);
+    return refreshed;
   }
 
   async processDueTasks(): Promise<number> {
@@ -184,7 +219,20 @@ export class RecurringTasksService {
     for (const task of dueTasks) {
       // Compute next nextRun up-front so a thrown executeTask doesn't leave the
       // task stuck due and re-fire on every scheduler tick.
-      const nextRun = this.computeNextRun(task.frequency, task.hour, task.dayOfWeek, task.dayOfMonth, task.month);
+      let nextRun: Date;
+      try {
+        nextRun = this.computeNextRun(task.frequency, task.hour, task.dayOfWeek, task.dayOfMonth, task.month);
+      } catch (err: unknown) {
+        // Unbrauchbarer Zeitplan (Frequenz, die der switch nicht kennt; Stunde
+        // außerhalb 0–23). Über create/update kommt das nicht herein, über
+        // Import/Replikation schon. Früher endete das in einer Endrekursion bzw.
+        // einem CastError und nahm alle übrigen fälligen Aufgaben dieser Runde
+        // mit — jetzt bleibt es bei dieser einen.
+        this.logger.error(
+          `Recurring task ${task._id.toString()} has an unusable schedule: ${errorMessage(err)}`,
+        );
+        continue;
+      }
       try {
         let runs = 0;
         const maxRuns = task.maxCatchUp || 3;
@@ -204,8 +252,10 @@ export class RecurringTasksService {
           await this.executeTask(fresh);
           count++;
         }
-      } catch (err) {
-        this.logger.error(`Failed to process recurring task ${task._id}: ${err}`);
+      } catch (err: unknown) {
+        this.logger.error(
+          `Failed to process recurring task ${task._id.toString()}: ${errorMessage(err)}`,
+        );
       } finally {
         await this.recurringTaskModel
           .findByIdAndUpdate(task._id, { lastRun: now, nextRun })
@@ -229,9 +279,12 @@ export class RecurringTasksService {
           $unset: { lastRunError: '' },
         })
         .exec();
-    } catch (err) {
-      const msg = this.sanitizeError((err as Error).message ?? 'recurring_task_failed');
-      this.logger.error(`Recurring task ${task._id} failed: ${msg}`);
+    } catch (err: unknown) {
+      // `errorMessage` statt `(err as Error).message ?? …`: bei allem, was kein
+      // Error ist, war `.message` undefined — der Nutzer sah in `lastRunError`
+      // dann nur „recurring_task_failed" statt des geworfenen Strings.
+      const msg = this.sanitizeError(errorMessage(err));
+      this.logger.error(`Recurring task ${task._id.toString()} failed: ${msg}`);
       await this.recurringTaskModel
         .findByIdAndUpdate(task._id, {
           lastRunStatus: RecurringRunStatus.FAILED,
@@ -242,13 +295,30 @@ export class RecurringTasksService {
     }
   }
 
+  /**
+   * Gespeicherte Priorität → `TodoPriority`.
+   *
+   * Beide Seiten kennen dieselben vier Werte, das Schema hält sie als blanken
+   * String. `find` liefert den Enum-Typ aus einer echten Prüfung — vorher stand
+   * hier `task.priority as any`, was jeden Wert (auch einen per Import oder
+   * Replikation eingeschleusten) unbesehen in die Todo-Erzeugung ließ.
+   */
+  private todoPriority(value?: string): TodoPriority | undefined {
+    if (!value) return undefined;
+    const match = asEnumValue(Object.values(TodoPriority), value);
+    if (match === undefined) {
+      this.logger.warn(`Unknown recurring-task priority "${value}" — todo created without one`);
+    }
+    return match;
+  }
+
   private async executeTodoAction(task: RecurringTaskDocument): Promise<void> {
     if (task.projectId) {
       const todo = await this.todosService.create({
         projectId: task.projectId.toString(),
         title: task.title,
         description: task.description,
-        priority: task.priority as any,
+        priority: this.todoPriority(task.priority),
         tags: [...task.tags],
         milestoneId: task.milestoneId?.toString(),
         repoLabel: task.repoLabel,
@@ -261,7 +331,7 @@ export class RecurringTasksService {
         customerId: task.customerId.toString(),
         title: task.title,
         description: task.description,
-        priority: task.priority as any,
+        priority: this.todoPriority(task.priority),
         tags: [...task.tags],
       });
       await this.recurringTaskModel.findByIdAndUpdate(task._id, {
@@ -370,7 +440,7 @@ export class RecurringTasksService {
   }
 
   computeNextRun(
-    frequency: RecurringFrequency | string,
+    frequency: RecurringFrequency,
     hour: number,
     dayOfWeek?: number,
     dayOfMonth?: number,
@@ -380,13 +450,22 @@ export class RecurringTasksService {
     return this.computeNextRunFromDate(now, frequency, hour, dayOfWeek, dayOfMonth, month);
   }
 
+  /**
+   * Der Parameter war `RecurringFrequency | string`. Das war nicht nur
+   * ungenauer, es hat den `switch` unten faktisch entwertet: `string` teilt
+   * keinen Enum-Typ mit den `case`-Labels (genau das meldete
+   * `no-unsafe-enum-comparison` sechsmal), und ein Wert, den kein `case` trifft,
+   * fällt durch — `next` bleibt dann auf „heute, `hour` Uhr" stehen und der
+   * frühere Endrekursions-Schritt lief endlos.
+   */
   private computeNextRunFromDate(
     from: Date,
-    frequency: RecurringFrequency | string,
+    frequency: RecurringFrequency,
     hour: number,
     dayOfWeek?: number,
     dayOfMonth?: number,
     month?: number,
+    step = 0,
   ): Date {
     const next = new Date(from);
     next.setMinutes(0, 0, 0);
@@ -418,33 +497,67 @@ export class RecurringTasksService {
         break;
       }
 
+      // `setDate(1)` vor jeder Monats-/Jahres-Arithmetik: `setMonth(+1)` auf dem
+      // 31. rollt in den Folgemonat (31.01. + 1 Monat = 03.03.), und die
+      // anschließende Korrektur auf `dayOfMonth` bezog sich dann schon auf den
+      // *falschen* Monat — eine monatliche Aufgabe, die am 31. angelegt wurde,
+      // sprang von Januar direkt auf den 1. März und übersprang den Februar.
       case RecurringFrequency.MONTHLY: {
         const targetDom = dayOfMonth ?? 1;
+        next.setDate(1);
         next.setMonth(next.getMonth() + 1);
-        next.setDate(Math.min(targetDom, new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()));
+        next.setDate(Math.min(targetDom, daysInMonth(next)));
         break;
       }
 
       case RecurringFrequency.QUARTERLY: {
         const targetDomQ = dayOfMonth ?? 1;
+        next.setDate(1);
         next.setMonth(next.getMonth() + 3);
-        next.setDate(Math.min(targetDomQ, new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()));
+        next.setDate(Math.min(targetDomQ, daysInMonth(next)));
         break;
       }
 
       case RecurringFrequency.YEARLY: {
         const targetMonth = (month ?? 1) - 1; // month is 1-indexed
         const targetDomY = dayOfMonth ?? 1;
+        next.setDate(1);
         next.setFullYear(next.getFullYear() + 1);
         next.setMonth(targetMonth);
-        next.setDate(Math.min(targetDomY, new Date(next.getFullYear(), targetMonth + 1, 0).getDate()));
+        next.setDate(Math.min(targetDomY, daysInMonth(next)));
         break;
       }
     }
 
-    // If computed time is still in the past, add one more cycle
+    // Ein `Invalid Date` (etwa aus `setHours(NaN)`, wenn `hour` nicht gesetzt
+    // ist) ist in *jedem* Vergleich `false`. Es käme also unbemerkt durch die
+    // Zukunftsprüfung unten und würde als `nextRun` entweder einen CastError
+    // beim Speichern oder — schlimmer — eine Aufgabe erzeugen, die nie wieder
+    // fällig wird. Deshalb hier abbrechen, wo die Ursache noch benennbar ist.
+    if (Number.isNaN(next.getTime())) {
+      throw new BadRequestException(
+        `Cannot compute nextRun: invalid schedule (frequency=${frequency}, hour=${hour})`,
+      );
+    }
+
+    // If computed time is still in the past, add one more cycle. Begrenzt statt
+    // endrekursiv: jede gültige Frequenz liegt schon im ersten Schritt hinter
+    // `from`, ein Zyklus ohne Fortschritt lief hier vorher bis zum Stack-Overflow.
     if (next <= from) {
-      return this.computeNextRunFromDate(next, frequency, hour, dayOfWeek, dayOfMonth, month);
+      if (step >= MAX_CYCLE_STEPS) {
+        throw new BadRequestException(
+          `Cannot compute nextRun: frequency "${frequency}" does not advance past ${from.toISOString()}`,
+        );
+      }
+      return this.computeNextRunFromDate(
+        next,
+        frequency,
+        hour,
+        dayOfWeek,
+        dayOfMonth,
+        month,
+        step + 1,
+      );
     }
 
     return next;

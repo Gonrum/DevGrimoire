@@ -40,8 +40,8 @@ export class StacksService {
       name: s.name,
       description: s.description,
       entryCount: s.entries?.length ?? 0,
-      createdAt: (s as { createdAt?: Date }).createdAt,
-      updatedAt: (s as { updatedAt?: Date }).updatedAt,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
     }));
   }
 

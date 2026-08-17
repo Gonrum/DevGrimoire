@@ -12,6 +12,7 @@ import {
   Req,
   Res,
 } from '@nestjs/common';
+import { errorMessage } from '../common/narrow';
 import type { Request, Response } from 'express';
 import { NotesService } from './notes.service';
 import { NotesPromotionService } from './notes-promotion.service';
@@ -109,8 +110,8 @@ export class NotesController {
       for await (const event of this.promotionService.analyze(userId, id, abort.signal)) {
         send(event);
       }
-    } catch (err: any) {
-      send({ type: 'error', message: err?.message || 'unknown error' });
+    } catch (err: unknown) {
+      send({ type: 'error', message: errorMessage(err) });
     } finally {
       clearInterval(heartbeat);
       if (!res.writableEnded) res.end();

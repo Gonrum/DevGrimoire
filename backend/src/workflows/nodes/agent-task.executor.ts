@@ -6,6 +6,8 @@ import { NodeMetadata } from '../engine/node-metadata';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { WorkflowAgentService } from '../workflow-agent.service';
 import { expandConfig } from './template';
+import { asString } from '../../common/tool-args';
+import { asNumber, asStringArray, errorMessage } from '../workflow-narrow';
 
 @Injectable()
 export class AgentTaskExecutor implements NodeExecutor {
@@ -46,12 +48,12 @@ export class AgentTaskExecutor implements NodeExecutor {
     try {
       const out = await this.agent.run({
         prompt: String(expanded.prompt),
-        systemPrompt: expanded.systemPrompt as string | undefined,
+        systemPrompt: asString(expanded.systemPrompt),
         runContext: ctx.runContext,
-        allowedTools: (expanded.allowedTools as string[]) ?? [],
+        allowedTools: asStringArray(expanded.allowedTools) ?? [],
         callerScope: { projectId, customerId },
-        timeoutMs: (expanded.timeoutMs as number) ?? 60000,
-        maxToolIterations: expanded.maxToolIterations as number | undefined,
+        timeoutMs: asNumber(expanded.timeoutMs) ?? 60000,
+        maxToolIterations: asNumber(expanded.maxToolIterations),
       });
       return {
         status: 'success',
@@ -64,8 +66,8 @@ export class AgentTaskExecutor implements NodeExecutor {
           model: out.model,
         },
       };
-    } catch (err) {
-      const msg = (err as Error).message ?? 'agent_failed';
+    } catch (err: unknown) {
+      const msg = errorMessage(err);
       const code =
         msg.startsWith('llm_error_') ? 'llm_error'
         : msg === 'timeout' ? 'timeout'

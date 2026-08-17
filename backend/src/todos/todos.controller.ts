@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Post,
@@ -18,6 +19,11 @@ import { UpdateTodoDto } from './dto/update-todo.dto';
 import { CreateTodoQuestionDto } from './dto/create-todo-question.dto';
 import { TodoStatus } from './schemas/todo.schema';
 import { ValidateProjectIdPipe } from '../common/pipes/validate-project-id.pipe';
+
+/** String-Wert → Enum-Mitglied, für die Filter-Query `?status=a,b`. */
+const TODO_STATUS_BY_VALUE: ReadonlyMap<string, TodoStatus> = new Map(
+  Object.values(TodoStatus).map((value) => [String(value), value]),
+);
 
 @Controller('todos')
 export class TodosController {
@@ -39,9 +45,28 @@ export class TodosController {
     @Query('status') status?: string,
   ) {
     // Support comma-separated status values: ?status=in_progress,review
-    const statusFilter = status
-      ? (status.split(',') as TodoStatus[])
-      : [];
+    //
+    // Der Cast auf TodoStatus[] war eine Behauptung über Nutzereingabe:
+    // `?status=nonsense` lief ungeprüft in den Service-Filter und traf dort
+    // nichts, ohne dass der Aufrufer erfuhr warum. `find` über die Enum-Werte
+    // liefert den engen Typ aus einer echten Prüfung.
+    const statusFilter = (status ?? '')
+      .split(',')
+      .map((raw) => raw.trim())
+      .filter((raw) => raw !== '')
+      .map((raw) => {
+        // Nachschlagen statt vergleichen: `candidate === raw` stellt einen
+        // echten TS-Enum gegen einen String und wird von
+        // `no-unsafe-enum-comparison` zu Recht beanstandet. Die Map liefert
+        // `TodoStatus | undefined` direkt aus einem String-Schlüssel.
+        const match = TODO_STATUS_BY_VALUE.get(raw);
+        if (!match) {
+          throw new BadRequestException(
+            `status must be one of: ${[...TODO_STATUS_BY_VALUE.keys()].join(', ')} (got "${raw}")`,
+          );
+        }
+        return match;
+      });
     return this.todosService.findAll({
       projectId,
       customerId,

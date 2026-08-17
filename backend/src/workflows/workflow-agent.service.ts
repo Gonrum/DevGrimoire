@@ -10,10 +10,66 @@ import { ChatToolsService, ALL_TOOL_NAMES, TOOL_DEFINITIONS } from '../chat/chat
 import { BalancerGateway } from '../balancer/balancer-gateway.service';
 import { LlmClient } from '../balancer/llm-client.service';
 import { LlmProviderKind } from '../balancer/balancer.types';
+import { asString } from '../common/tool-args';
+import { asNumber, errorMessage, isRecord } from './workflow-narrow';
 
 const SETTING_KEY = 'workflow_agent_endpoint_v1';
 /** Fallback tool-loop cap when no stored config exists yet (mirrors the frontend's default). */
 const DEFAULT_MAX_TOOL_ITERATIONS = 5;
+
+const AGENT_PROVIDERS: readonly WorkflowAgentProvider[] = [
+  'lmstudio',
+  'openai-compatible',
+  'openai',
+  'anthropic',
+];
+
+/**
+ * Liest den in den Settings abgelegten Endpunkt.
+ *
+ * `JSON.parse` liefert `any` — die Form wurde vorher an zwei Stellen mit
+ * `as StoredEndpoint` behauptet. Hier wird sie einmal geprüft: ohne `url` oder
+ * `model` gilt der Eintrag als nicht konfiguriert (`null`), genau wie ein
+ * fehlender Setting-Wert. Ein kaputter Eintrag lässt damit nicht mehr
+ * `undefined` in die Endpunkt-Felder laufen.
+ *
+ * Ein *unbekannter* `provider` verwirft den Eintrag bewusst **nicht**: das
+ * Feld wird seit der Balancer-Umstellung nur noch angezeigt (der tatsächliche
+ * Endpunkt kommt aus der `workflow`-Pool-Registry), aber `toolsEnabled` und
+ * `maxToolIterations` daneben steuern den Run. Ein Verwerfen hätte Tools bei
+ * einem Altbestand still abgeschaltet.
+ */
+function parseStoredEndpoint(raw: string): StoredEndpoint | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed)) return null;
+  const url = asString(parsed.url);
+  const model = asString(parsed.model);
+  if (!url || !model) return null;
+  return {
+    provider: AGENT_PROVIDERS.find((candidate) => candidate === parsed.provider) ?? 'openai-compatible',
+    url,
+    model,
+    apiKeyEncrypted: asString(parsed.apiKeyEncrypted),
+    toolsEnabled: parsed.toolsEnabled === true,
+    maxToolIterations: asNumber(parsed.maxToolIterations) ?? DEFAULT_MAX_TOOL_ITERATIONS,
+  };
+}
+
+/** Tool-Argumente eines LLM-Calls: JSON-String → geprüftes Objekt. */
+function parseToolArguments(raw: string | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 /** Endpoint leased from the balancer's `workflow` pool for one agent run (registry-backed, no stored behavior options). */
 interface LeasedEndpoint {
@@ -56,7 +112,8 @@ export class WorkflowAgentService {
   async getConfig(): Promise<WorkflowAgentConfigPublic | null> {
     const raw = await this.settings.get(SETTING_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as StoredEndpoint;
+    const parsed = parseStoredEndpoint(raw);
+    if (!parsed) return null;
     return {
       provider: parsed.provider,
       url: parsed.url,
@@ -91,7 +148,8 @@ export class WorkflowAgentService {
   async loadEndpoint(): Promise<WorkflowAgentEndpoint | null> {
     const raw = await this.settings.get(SETTING_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as StoredEndpoint;
+    const parsed = parseStoredEndpoint(raw);
+    if (!parsed) return null;
     return {
       provider: parsed.provider,
       url: parsed.url,
@@ -188,11 +246,11 @@ export class WorkflowAgentService {
           body,
         });
         json = resp.json;
-      } catch (e) {
+      } catch (e: unknown) {
         // Prefix preserved as `llm_error_...` (not just `llm_error:`) so
         // agent-task.executor.ts's `msg.startsWith('llm_error_')` categorization
         // still matches after moving off the inline fetch.
-        throw new Error(`llm_error_upstream: ${(e as Error).message}`);
+        throw new Error(`llm_error_upstream: ${errorMessage(e)}`, { cause: e });
       }
       const choice = json.choices?.[0]?.message;
       if (json.usage?.prompt_tokens) totalIn += json.usage.prompt_tokens;
@@ -220,12 +278,7 @@ export class WorkflowAgentService {
 
       for (const tc of tcs) {
         const name = tc.function?.name ?? '';
-        let args: Record<string, unknown> = {};
-        try {
-          args = JSON.parse(tc.function?.arguments ?? '{}') as Record<string, unknown>;
-        } catch {
-          args = {};
-        }
+        const args = parseToolArguments(tc.function?.arguments);
         if (!allowlist.includes(name)) {
           messages.push({
             role: 'tool',
@@ -300,8 +353,8 @@ export class WorkflowAgentService {
           body,
         });
         json = resp.json;
-      } catch (e) {
-        throw new Error(`llm_error_upstream: ${(e as Error).message}`);
+      } catch (e: unknown) {
+        throw new Error(`llm_error_upstream: ${errorMessage(e)}`, { cause: e });
       }
       if (json.usage?.input_tokens) totalIn += json.usage.input_tokens;
       if (json.usage?.output_tokens) totalOut += json.usage.output_tokens;
@@ -325,7 +378,7 @@ export class WorkflowAgentService {
       const userContent: unknown[] = [];
       for (const tu of toolUses) {
         const name = tu.name ?? '';
-        const args = (tu.input as Record<string, unknown>) ?? {};
+        const args = isRecord(tu.input) ? tu.input : {};
         let result: unknown;
         if (!allowlist.includes(name)) {
           result = { success: false, error: `tool "${name}" not in allowlist` };

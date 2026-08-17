@@ -16,6 +16,7 @@ import {
 import {
   WorkflowNodeRun,
   WorkflowNodeRunDocument,
+  WorkflowNodeRunStatus,
 } from './schemas/workflow-node-run.schema';
 import {
   CancelWorkflowRunDto,
@@ -24,7 +25,9 @@ import {
   ListWorkflowRunsDto,
   StartWorkflowRunDto,
   UpdateWorkflowDefinitionDto,
+  workflowNodeFromDto,
 } from './dto/workflow.dto';
+import { errorMessage } from './workflow-narrow';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { workflowSecurityIssues } from './workflow-security.policy';
 import { NodeRegistry } from './engine/node-registry';
@@ -197,7 +200,7 @@ export class WorkflowsService {
     if (dto.status !== undefined) existing.status = dto.status;
     if (dto.tags !== undefined) existing.tags = dto.tags;
     if (dto.trigger !== undefined) existing.trigger = dto.trigger;
-    if (dto.nodes !== undefined) existing.nodes = dto.nodes as never;
+    if (dto.nodes !== undefined) existing.nodes = dto.nodes.map(workflowNodeFromDto);
     if (dto.edges !== undefined) existing.edges = dto.edges;
     if (dto.ui !== undefined) existing.ui = dto.ui;
 
@@ -345,7 +348,7 @@ export class WorkflowsService {
     });
 
     this.emitRun('created', run, `Workflow-Run für "${def.name}" v${def.version} eingereiht`);
-    this.eventEmitter.emit('workflow.run.queued', { runId: (run._id as { toString(): string }).toString() });
+    this.eventEmitter.emit('workflow.run.queued', { runId: run._id.toString() });
     await this.audit('workflow.run.queued', def, run, {
       trigger: run.trigger?.type,
     });
@@ -412,14 +415,18 @@ export class WorkflowsService {
           id: c._id.toString(),
           status: c.status,
           createdAt: c.createdAt,
-          retryFromNodeId: (c as { retryFromNodeId?: string }).retryFromNodeId,
+          retryFromNodeId: c.retryFromNodeId,
         })),
       },
       summary: {
         totalNodeRuns: nodeRuns.length,
         statusCounts: counts,
-        failedNodeIds: nodeRuns.filter((nr) => nr.status === 'failed').map((nr) => nr.nodeId),
-        waitingNodeIds: nodeRuns.filter((nr) => nr.status === 'waiting').map((nr) => nr.nodeId),
+        failedNodeIds: nodeRuns
+          .filter((nr) => nr.status === WorkflowNodeRunStatus.FAILED)
+          .map((nr) => nr.nodeId),
+        waitingNodeIds: nodeRuns
+          .filter((nr) => nr.status === WorkflowNodeRunStatus.WAITING)
+          .map((nr) => nr.nodeId),
       },
       nodeRuns: nodeRuns.map((nr) => ({
         id: nr._id.toString(),
@@ -435,8 +442,8 @@ export class WorkflowsService {
         outputPreview: this.safePreview(nr.outputSnapshot),
         logPreview: this.safePreview(nr.logs),
         error: this.safePreview(nr.error),
-        createdAt: (nr as unknown as { createdAt?: Date }).createdAt,
-        updatedAt: (nr as unknown as { updatedAt?: Date }).updatedAt,
+        createdAt: nr.createdAt,
+        updatedAt: nr.updatedAt,
       })),
     };
   }
@@ -477,8 +484,8 @@ export class WorkflowsService {
     if (def.scope) {
       try {
         this.assertScope({ scope: def.scope, projectId: def.projectId, customerId: def.customerId });
-      } catch (err) {
-        issues.push((err as Error).message);
+      } catch (err: unknown) {
+        issues.push(errorMessage(err));
       }
     }
 

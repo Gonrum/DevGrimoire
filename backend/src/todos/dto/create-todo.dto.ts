@@ -9,6 +9,7 @@ import {
   IsBoolean,
   ValidateNested,
 } from 'class-validator';
+import { isRecord } from '../../common/narrow';
 import { Type } from 'class-transformer';
 import { TodoStatus, TodoPriority } from '../schemas/todo.schema';
 
@@ -23,11 +24,11 @@ export class AcceptanceCriterionDto {
 }
 
 export class CreateTodoDto {
-  @ValidateIf((o) => !o.customerId)
+  @ValidateIf((o) => !(isRecord(o) && o.customerId))
   @IsMongoId()
   projectId?: string;
 
-  @ValidateIf((o) => !o.projectId)
+  @ValidateIf((o) => !(isRecord(o) && o.projectId))
   @IsMongoId()
   customerId?: string;
 

@@ -45,6 +45,11 @@ export class Attachment {
   // Data classification (T-219). confidential/personal/secret skip RAG.
   @Prop({ type: String, enum: ALL_SENSITIVITY_LEVELS, default: Sensitivity.INTERNAL })
   sensitivity: SensitivityLevel;
+
+  // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
+  // nicht am Typ — Leser brauchten dafür `as unknown as { createdAt?: Date }`.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const AttachmentSchema = SchemaFactory.createForClass(Attachment);

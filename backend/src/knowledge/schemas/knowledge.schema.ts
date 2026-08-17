@@ -40,6 +40,11 @@ export class Knowledge {
    */
   @Prop({ type: Types.ObjectId, ref: 'Question' })
   sourceQuestionId?: Types.ObjectId;
+
+  // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
+  // nicht am Typ — Leser brauchten dafür `as unknown as { createdAt?: Date }`.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const KnowledgeSchema = SchemaFactory.createForClass(Knowledge);

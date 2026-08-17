@@ -10,6 +10,26 @@ import {
 } from '../schemas/workflow-definition.schema';
 import { WorkflowsService } from '../workflows.service';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../../events/project-event';
+import { errorMessage } from '../workflow-narrow';
+
+/**
+ * Ein Filterfeld der Trigger-Konfiguration gegen den Event-Wert.
+ *
+ * Verhalten identisch zum vorherigen `(config.entity as string) ?? '*'`:
+ * fehlt das Feld, gilt Wildcard; steht `'*'` drin, gilt Wildcard; ein String
+ * muss gleich sein. Ein Nicht-String (z.B. eine Zahl aus einem handgeschriebenen
+ * Config-JSON) fällt durch den Vergleich und matcht nicht — er wird bewusst
+ * **nicht** zur Wildcard, das würde den Trigger aufweiten.
+ *
+ * Bewusst eine Modul-Funktion und keine Methode: `matches` wird in
+ * `scripts/workflow-nodes-units-check.cjs` vom Prototyp gelöst und mit
+ * `matches.call({}, …)` aufgerufen. Eine `this.`-Delegation wäre dort
+ * `undefined`.
+ */
+function matchesFilter(want: unknown, actual: string): boolean {
+  if (want === undefined || want === null || want === '*') return true;
+  return want === actual;
+}
 
 @Injectable()
 export class WorkflowEventListener {
@@ -43,22 +63,18 @@ export class WorkflowEventListener {
         if (!this.matches(node.config, payload)) continue;
         try {
           await this.workflowsService.startRun({
-            definitionId: (def._id as { toString(): string }).toString(),
+            definitionId: def._id.toString(),
             triggeredBy: { type: 'event' },
             input: { event: payload, matchedNodeId: node.id },
-          } as never);
-        } catch (err) {
-          this.logger.warn(`event-trigger failed for ${def.name}: ${(err as Error).message}`);
+          });
+        } catch (err: unknown) {
+          this.logger.warn(`event-trigger failed for ${def.name}: ${errorMessage(err)}`);
         }
       }
     }
   }
 
   private matches(config: Record<string, unknown>, ev: ProjectChangeEvent): boolean {
-    const wantEntity = (config.entity as string) ?? '*';
-    const wantAction = (config.action as string) ?? '*';
-    if (wantEntity !== '*' && wantEntity !== ev.entity) return false;
-    if (wantAction !== '*' && wantAction !== ev.action) return false;
-    return true;
+    return matchesFilter(config.entity, ev.entity) && matchesFilter(config.action, ev.action);
   }
 }

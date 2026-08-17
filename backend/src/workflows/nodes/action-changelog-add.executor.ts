@@ -6,6 +6,8 @@ import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types'
 import { NodeMetadata } from '../engine/node-metadata';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { expandConfig } from './template';
+import { asString } from '../../common/tool-args';
+import { asStringArray, errorMessage } from '../workflow-narrow';
 
 @Injectable()
 export class ActionChangelogAddExecutor implements NodeExecutor {
@@ -38,20 +40,20 @@ export class ActionChangelogAddExecutor implements NodeExecutor {
     try {
       const cl = await this.changelog.create({
         projectId,
-        version: expanded.version as string | undefined,
-        summary: expanded.summary as string | undefined,
-        changes: (expanded.changes as string[]) ?? [],
-        component: expanded.component as string | undefined,
+        version: asString(expanded.version),
+        summary: asString(expanded.summary),
+        changes: asStringArray(expanded.changes) ?? [],
+        component: asString(expanded.component),
       });
       return {
         status: 'success',
         output: {
-          changelogId: String((cl as { _id: unknown })._id),
-          version: (cl as { version?: string }).version ?? null,
+          changelogId: cl._id.toString(),
+          version: cl.version ?? null,
         },
       };
-    } catch (err) {
-      return { status: 'failed', error: { code: 'changelog_create_failed', message: (err as Error).message } };
+    } catch (err: unknown) {
+      return { status: 'failed', error: { code: 'changelog_create_failed', message: errorMessage(err) } };
     }
   }
 }

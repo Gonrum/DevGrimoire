@@ -6,6 +6,8 @@ import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types'
 import { NodeMetadata } from '../engine/node-metadata';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { expandConfig } from './template';
+import { asString } from '../../common/tool-args';
+import { asNumber, errorMessage } from '../workflow-narrow';
 
 @Injectable()
 export class ActionManualCreateExecutor implements NodeExecutor {
@@ -37,18 +39,18 @@ export class ActionManualCreateExecutor implements NodeExecutor {
     try {
       const m = await this.manuals.create({
         title: String(expanded.title),
-        content: expanded.content as string | undefined,
-        category: expanded.category as string | undefined,
-        sortOrder: expanded.sortOrder as number | undefined,
+        content: asString(expanded.content),
+        category: asString(expanded.category),
+        sortOrder: asNumber(expanded.sortOrder),
         projectId,
         customerId,
       });
       return {
         status: 'success',
-        output: { manualId: String((m as { _id: unknown })._id) },
+        output: { manualId: m._id.toString() },
       };
-    } catch (err) {
-      return { status: 'failed', error: { code: 'manual_create_failed', message: (err as Error).message } };
+    } catch (err: unknown) {
+      return { status: 'failed', error: { code: 'manual_create_failed', message: errorMessage(err) } };
     }
   }
 }

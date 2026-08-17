@@ -488,7 +488,7 @@ export class QuestionsService implements OnModuleInit {
     const map: Record<string, QuestionsByTodoSummary> = {};
     for (const d of docs) {
       const key = d.todoId!.toString();
-      const updatedAt = (d as unknown as { updatedAt?: Date }).updatedAt ?? new Date();
+      const updatedAt = d.updatedAt ?? new Date();
       const cur = map[key] ?? {
         todoId: key,
         pendingAgentToUser: 0,

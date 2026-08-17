@@ -96,6 +96,11 @@ export class Todo {
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Question' }], default: [] })
   openQuestions: Types.ObjectId[];
+
+  // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
+  // nicht am Typ — Leser brauchten dafür `as unknown as { createdAt?: Date }`.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const TodoSchema = SchemaFactory.createForClass(Todo);

@@ -41,6 +41,11 @@ export class Customer {
 
   @Prop()
   notes?: string;
+
+  // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
+  // nicht am Typ — Leser brauchten dafür `as unknown as { createdAt?: Date }`.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const CustomerSchema = SchemaFactory.createForClass(Customer);

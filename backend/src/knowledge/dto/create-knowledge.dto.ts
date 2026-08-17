@@ -6,15 +6,16 @@ import {
   IsIn,
   ValidateIf,
 } from 'class-validator';
+import { isRecord } from '../../common/narrow';
 import { ALL_SENSITIVITY_LEVELS, SensitivityLevel } from '../../common/sensitivity';
 
 export class CreateKnowledgeDto {
   @IsMongoId()
-  @ValidateIf((o) => o.scope === 'project')
+  @ValidateIf((o) => isRecord(o) && o.scope === 'project')
   projectId?: string;
 
   @IsMongoId()
-  @ValidateIf((o) => o.scope === 'customer')
+  @ValidateIf((o) => isRecord(o) && o.scope === 'customer')
   customerId?: string;
 
   @IsIn(['global', 'project', 'customer'])

@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { isDuplicateKeyError } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
@@ -40,7 +41,14 @@ export interface CustomerDashboardEntry {
   status: CustomerStatus;
   openTodoCount: number;
   projectCount: number;
-  lastActivityAt: Date;
+  /**
+   * Optional, weil `timestamps: true` das Feld nicht am Typ garantiert (z.B.
+   * bei einer `.select()`-Projektion). Vorher stand hier `Date` und der
+   * Zugriff lief über `as unknown as { updatedAt: Date }` — die Behauptung
+   * hat nur verdeckt, dass zur Laufzeit ohnehin `undefined` herauskam.
+   * Das Frontend rendert das Feld derzeit nicht.
+   */
+  lastActivityAt?: Date;
 }
 
 export interface CustomerDashboard {
@@ -83,8 +91,8 @@ export class CustomersService {
         summary: `Kunde "${customer.name}" angelegt`,
       });
       return customer;
-    } catch (err: any) {
-      if (err?.code === 11000) {
+    } catch (err: unknown) {
+      if (isDuplicateKeyError(err)) {
         throw new ConflictException(`Customer "${dto.name}" already exists`);
       }
       throw err;
@@ -165,7 +173,7 @@ export class CustomersService {
       status: c.status,
       openTodoCount: todoMap.get(c._id.toString()) ?? 0,
       projectCount: linkMap.get(c._id.toString()) ?? 0,
-      lastActivityAt: (c as unknown as { updatedAt: Date }).updatedAt,
+      lastActivityAt: c.updatedAt,
     }));
 
     const thirtyDaysAgo = new Date();
@@ -207,8 +215,8 @@ export class CustomersService {
         summary: `Kunde "${customer.name}" aktualisiert`,
       });
       return customer;
-    } catch (err: any) {
-      if (err?.code === 11000) {
+    } catch (err: unknown) {
+      if (isDuplicateKeyError(err)) {
         throw new ConflictException(`Customer "${dto.name}" already exists`);
       }
       throw err;
@@ -258,8 +266,8 @@ export class CustomersService {
         summary: `Projekt "${project.name}" mit Kunde "${customer.name}" verknüpft`,
       });
       return link;
-    } catch (err: any) {
-      if (err?.code === 11000) {
+    } catch (err: unknown) {
+      if (isDuplicateKeyError(err)) {
         throw new ConflictException('Project is already linked to this customer');
       }
       throw err;

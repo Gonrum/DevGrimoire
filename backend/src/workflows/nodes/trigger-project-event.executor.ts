@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types';
 import { NodeMetadata } from '../engine/node-metadata';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
+import { isRecord } from '../workflow-narrow';
 
 const entityEnum = z.enum([
   'project', 'todo', 'session', 'knowledge', 'changelog', 'milestone', 'manual', 'research',
@@ -35,8 +36,10 @@ export class TriggerProjectEventExecutor implements NodeExecutor {
     branches: ['success'],
   };
 
-  async execute(ctx: NodeExecutionContext): Promise<NodeResult> {
-    const input = (ctx.runContext as { input?: { event?: unknown } }).input;
-    return { status: 'success', output: { event: input?.event ?? null } };
+  // Kein `async`: der Trigger gibt nur den Event aus dem Run-Input zurück.
+  execute(ctx: NodeExecutionContext): Promise<NodeResult> {
+    const input = ctx.runContext.input;
+    const event = isRecord(input) ? input.event : undefined;
+    return Promise.resolve({ status: 'success', output: { event: event ?? null } });
   }
 }

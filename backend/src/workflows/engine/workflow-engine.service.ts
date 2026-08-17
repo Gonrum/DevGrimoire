@@ -12,7 +12,6 @@ import { ModuleRef } from '@nestjs/core';
 import {
   WorkflowDefinition,
   WorkflowDefinitionDocument,
-  WorkflowEdge,
   WorkflowNode,
 } from '../schemas/workflow-definition.schema';
 import { lookupPath } from '../nodes/template';
@@ -29,15 +28,18 @@ import {
 import { WorkflowQueueService } from './workflow-queue.service';
 import { WorkflowWorkerPool } from './workflow-worker.pool';
 import { NodeRegistry } from './node-registry';
-import { NodeJob, NodeResult, RetryConfig } from './types';
+import { NodeExecutionContext, NodeJob, NodeResult, RetryConfig } from './types';
 import { findTriggerNodes, nextNodes } from './graph-walker';
+import { readGraph } from './snapshot';
+import { NodeBranch } from './node-metadata';
 import { QuestionsService, QUESTION_ANSWERED } from '../../questions/questions.service';
-import { TestWorkflowNodeDto } from '../dto/workflow.dto';
+import { TestWorkflowNodeDto, workflowNodeFromDto } from '../dto/workflow.dto';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { WORKFLOW_RUN_PROGRESS } from '../../events/project-event';
-import { redact, redactLogs, redactValue } from '../workflow-redaction';
+import { redact, redactLogs, redactRecord } from '../workflow-redaction';
+import { asNumber, asStringArray, errorMessage, errorName, isRecord } from '../workflow-narrow';
 import {
   checkRunBudget,
   checkRuntimeNode,
@@ -45,6 +47,12 @@ import {
 } from '../workflow-security.runtime';
 
 const DEFAULT_TIMEOUT_MS = WORKFLOW_RUNTIME_LIMITS.defaultNodeTimeoutMs;
+/**
+ * Erlaubte Branch-Namen als Laufzeitliste. `find()` darauf liefert den
+ * Union-Typ ohne Assertion — ein `branchMap`-Wert aus der Node-Konfiguration
+ * ist ungeprüftes JSON und war vorher als Branch nur behauptet.
+ */
+const NODE_BRANCHES: readonly NodeBranch[] = ['success', 'failure', 'custom'];
 const NODE_LOG_CAP = Number(process.env.WORKFLOW_NODE_LOG_CAP ?? 200);
 const RECOVERY_AGE_MS = Number(process.env.WORKFLOW_RUN_RECOVERY_AGE_MS ?? 5 * 60_000);
 const WORKER_CONCURRENCY = Number(process.env.WORKFLOW_WORKER_CONCURRENCY ?? 4);
@@ -106,11 +114,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       customerId: run.customerId?.toString(),
     });
 
-    const snapshot = run.definitionSnapshot as { nodes: WorkflowNode[]; edges: unknown[] };
-    const triggers = findTriggerNodes({
-      nodes: snapshot.nodes,
-      edges: snapshot.edges as never,
-    });
+    const triggers = findTriggerNodes(readGraph(run.definitionSnapshot));
     if (triggers.length === 0) {
       await this.failRun(run, { code: 'no_trigger', message: 'No trigger node in graph' });
       return;
@@ -152,14 +156,14 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     if (!run || !nodeRun) return;
     if (run.status !== WorkflowRunStatus.RUNNING) return;
 
-    const snapshot = run.definitionSnapshot as { nodes: WorkflowNode[]; edges: unknown[] };
-    const node = snapshot.nodes.find((n) => n.id === job.nodeId);
+    const node = readGraph(run.definitionSnapshot).nodes.find((n) => n.id === job.nodeId);
     if (!node) {
-      await this.completeNodeRun(nodeRun, {
-        status: 'failed',
-        error: { code: 'node_missing', message: `Node ${job.nodeId} not in snapshot` },
-      });
-      await this.failRun(run, nodeRun.error as { code: string; message: string });
+      // Denselben Fehler an beide Aufrufe geben, statt ihn über das Dokument
+      // zurückzulesen: `completeNodeRun` schreibt eine *redigierte* Kopie, und
+      // `nodeRun.error` ist im Schema ein offenes Objekt.
+      const error = { code: 'node_missing', message: `Node ${job.nodeId} not in snapshot` };
+      await this.completeNodeRun(nodeRun, { status: 'failed', error });
+      await this.failRun(run, error);
       return;
     }
 
@@ -221,11 +225,9 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     try {
       executor = this.registry.get(node.type);
     } catch {
-      await this.completeNodeRun(nodeRun, {
-        status: 'failed',
-        error: { code: 'unknown_type', message: `No executor for "${node.type}"` },
-      });
-      await this.failRun(run, nodeRun.error as { code: string; message: string });
+      const error = { code: 'unknown_type', message: `No executor for "${node.type}"` };
+      await this.completeNodeRun(nodeRun, { status: 'failed', error });
+      await this.failRun(run, error);
       return;
     }
 
@@ -252,12 +254,12 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     let result: NodeResult;
     try {
       result = await this.withTimeout(executor.execute(ctx), timeoutMs);
-    } catch (err) {
+    } catch (err: unknown) {
       result = {
         status: 'failed',
         error: {
-          code: (err as Error).name === 'TimeoutError' ? 'timeout' : 'executor_threw',
-          message: (err as Error).message,
+          code: errorName(err) === 'TimeoutError' ? 'timeout' : 'executor_threw',
+          message: errorMessage(err),
         },
       };
     }
@@ -308,6 +310,10 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
         ),
       };
     }
+    // `configSchema` ist ein `z.ZodTypeAny`, `parsed.data` damit `any`. Die
+    // Form wird geprüft statt behauptet; ein Node-Schema, das kein Objekt
+    // liefert, gibt es nicht (alle sind `z.object(...)`).
+    const parsedConfig: Record<string, unknown> = isRecord(parsed.data) ? parsed.data : {};
 
     // Node test mode must never perform writes or external/agent side effects.
     // For the MVP we execute only trigger/control nodes; action and agent nodes
@@ -329,22 +335,27 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     const nodeRunId = new Types.ObjectId();
     const input = dto.input ?? {};
     const runContext = dto.runContext ?? { nodes: {}, input };
+    // Der DTO-Knoten hat `config`/`secretRefs` optional, `WorkflowNode` nicht —
+    // die Defaults setzt `workflowNodeFromDto`, statt den Unterschied mit
+    // `as never` zu überschreiben.
+    const testNodeShape = workflowNodeFromDto(node);
     const result = await this.withTimeout(
       executor.execute({
         run: {
           _id: runId,
           definitionId: new Types.ObjectId(),
           definitionVersion: 0,
-          definitionSnapshot: { nodes: [node], edges: [] },
+          definitionSnapshot: { nodes: [testNodeShape], edges: [] },
           scope,
           trigger: { type: 'manual', input },
           status: WorkflowRunStatus.RUNNING,
           currentNodeIds: [node.id],
           triggeredBy: { type: 'manual' },
           context: runContext,
+          executedNodeCount: 0,
           createdAt: now,
           updatedAt: now,
-        } as never,
+        },
         nodeRun: {
           _id: nodeRunId,
           runId,
@@ -357,8 +368,8 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
           startedAt: now,
           logs,
         },
-        node: node as never,
-        config: parsed.data as Record<string, unknown>,
+        node: testNodeShape,
+        config: parsedConfig,
         secretRefs: node.secretRefs ?? [],
         runContext,
         logger: {
@@ -366,11 +377,9 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
           warn: (msg: string, data?: Record<string, unknown>) => logs.push({ level: 'warn', msg, ...(data ?? {}) }),
           error: (msg: string, data?: Record<string, unknown>) => logs.push({ level: 'error', msg, ...(data ?? {}) }),
         },
-        askUser: async () => {
-          throw new Error('askUser is disabled in node test mode');
-        },
+        askUser: () => Promise.reject(new Error('askUser is disabled in node test mode')),
       }),
-      Number((parsed.data as Record<string, unknown>).timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      Number(parsedConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     );
 
     return {
@@ -391,36 +400,40 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     return redact(value, { maxDepth: 5, maxStringLength: 500 }).value;
   }
 
-  private buildContext(run: WorkflowRunDocument, nodeRun: WorkflowNodeRunDocument, node: WorkflowNode) {
+  private buildContext(
+    run: WorkflowRunDocument,
+    nodeRun: WorkflowNodeRunDocument,
+    node: WorkflowNode,
+  ): NodeExecutionContext {
     const logs: Array<Record<string, unknown>> = nodeRun.logs;
     const append = (level: 'info' | 'warn' | 'error', msg: string, data?: Record<string, unknown>) => {
       // Redact per-entry on push so a crash mid-execute can't leave a raw
       // secret in the unsaved buffer either.
-      const entry = redactValue(
+      const entry = redactRecord(
         { at: new Date().toISOString(), level, msg, ...(data ?? {}) },
         { maxStringLength: 1024 },
-      ) as Record<string, unknown>;
+      );
       logs.push(entry);
       while (logs.length > NODE_LOG_CAP) logs.shift();
     };
     // T-325: build the per-target `incoming` bag from edges that landed on
     // this node and carry a payloadMapping. Templates can use
     // `{{incoming.foo}}` instead of (or alongside) `{{nodes.X.foo}}`.
-    const baseContext = (run.context as {
-      nodes?: Record<string, unknown>;
-      fromEdges?: Record<string, Record<string, unknown>>;
-    }) ?? { nodes: {} };
-    const snapshot = run.definitionSnapshot as { edges?: WorkflowEdge[] };
+    const baseContext = isRecord(run.context) ? run.context : {};
+    const fromEdges = isRecord(baseContext.fromEdges) ? baseContext.fromEdges : undefined;
     const incoming: Record<string, unknown> = {};
-    for (const edge of snapshot.edges ?? []) {
+    for (const edge of readGraph(run.definitionSnapshot).edges) {
       if (edge.target !== node.id) continue;
-      const fromEdge = baseContext.fromEdges?.[edge.id];
-      if (fromEdge) Object.assign(incoming, fromEdge);
+      const fromEdge = fromEdges?.[edge.id];
+      if (isRecord(fromEdge)) Object.assign(incoming, fromEdge);
     }
 
     return {
-      run: run.toObject() as never,
-      nodeRun: nodeRun.toObject() as never,
+      // `toObject<T>()` ist die von Mongoose vorgesehene Stelle, die POJO-Form
+      // zu benennen; ohne Typargument liefert es `any` (DocType der
+      // untypisierten `Document`-Basis) und das lief vorher in ein `as never`.
+      run: run.toObject<WorkflowRun>(),
+      nodeRun: nodeRun.toObject<WorkflowNodeRun>(),
       node,
       config: (node.config) ?? {},
       secretRefs: node.secretRefs ?? [],
@@ -446,6 +459,23 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     };
   }
 
+  /**
+   * `config.retry` aus der offenen Node-Konfiguration.
+   *
+   * Vorher stand hier `(node.config as { retry?: RetryConfig }).retry` — eine
+   * Behauptung über ungeprüftes JSON, und eine mit Folgen: bei einem
+   * `maxAttempts: "3"` rechnete `attempt < max + 1` als `attempt < "31"`
+   * (String-Konkatenation) und der Node lief bis zu 31 Mal statt 4 Mal.
+   */
+  private readRetryConfig(raw: unknown): RetryConfig {
+    const cfg = isRecord(raw) ? raw : {};
+    return {
+      maxAttempts: asNumber(cfg.maxAttempts) ?? 0,
+      backoffMs: asNumber(cfg.backoffMs) ?? 1000,
+      backoffMultiplier: asNumber(cfg.backoffMultiplier),
+    };
+  }
+
   private async applyResult(
     run: WorkflowRunDocument,
     nodeRun: WorkflowNodeRunDocument,
@@ -454,21 +484,19 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
   ): Promise<void> {
     if (result.status === 'success') {
       await this.completeNodeRun(nodeRun, result);
-      const ctx = (run.context as {
-        nodes: Record<string, unknown>;
-        fromEdges?: Record<string, Record<string, unknown>>;
-      }) ?? { nodes: {} };
-      ctx.nodes = ctx.nodes ?? {};
+      const ctx = isRecord(run.context) ? run.context : {};
+      const ctxNodes = isRecord(ctx.nodes) ? ctx.nodes : {};
       // Persist redacted output to run.context so downstream nodes can read
       // upstream output without re-leaking secrets via the context object.
-      const redactedOutput = redactValue(result.output ?? {});
-      ctx.nodes[node.id] = redactedOutput;
+      const redactedOutput = redactRecord(result.output ?? {});
+      ctxNodes[node.id] = redactedOutput;
+      ctx.nodes = ctxNodes;
 
-      const snapshot = run.definitionSnapshot as { nodes: WorkflowNode[]; edges: WorkflowEdge[] };
+      const graph = readGraph(run.definitionSnapshot);
 
       // T-325: evaluate payloadMapping for outgoing edges and persist the
       // mapped value per edge. Target nodes pick it up in buildContext.
-      for (const edge of snapshot.edges ?? []) {
+      for (const edge of graph.edges) {
         if (edge.source !== node.id) continue;
         const mapping = edge.payloadMapping;
         if (!mapping || Object.keys(mapping).length === 0) continue;
@@ -476,19 +504,16 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
         for (const [targetKey, sourcePath] of Object.entries(mapping)) {
           mapped[targetKey] = lookupPath(sourcePath, redactedOutput);
         }
-        ctx.fromEdges = ctx.fromEdges ?? {};
-        ctx.fromEdges[edge.id] = mapped;
+        const fromEdges = isRecord(ctx.fromEdges) ? ctx.fromEdges : {};
+        fromEdges[edge.id] = mapped;
+        ctx.fromEdges = fromEdges;
       }
 
       run.context = ctx;
       run.markModified('context');
       await run.save();
 
-      const succs = nextNodes(
-        node.id,
-        result.branch ?? 'success',
-        { nodes: snapshot.nodes, edges: snapshot.edges },
-      );
+      const succs = nextNodes(node.id, result.branch ?? 'success', graph);
       for (const succ of succs) await this.enqueueNode(run, succ, 1);
       await this.maybeFinishRun(run);
       return;
@@ -506,12 +531,10 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     }
 
     // failed
-    const retry = ((node.config ?? {}) as { retry?: RetryConfig }).retry;
-    const max = retry?.maxAttempts ?? 0;
+    const retry = this.readRetryConfig(node.config.retry);
+    const max = retry.maxAttempts;
     if (nodeRun.attempt < max + 1) {
-      const base = retry?.backoffMs ?? 1000;
-      const mult = retry?.backoffMultiplier ?? 1;
-      const delay = base * Math.pow(mult, nodeRun.attempt - 1);
+      const delay = retry.backoffMs * Math.pow(retry.backoffMultiplier ?? 1, nodeRun.attempt - 1);
       await this.completeNodeRun(nodeRun, { ...result, status: 'failed' });
       await this.enqueueNode(run, node, nodeRun.attempt + 1, delay);
       return;
@@ -530,10 +553,10 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     // Redact at WRITE time, not just on read: anyone reading the raw mongo
     // document (replication peer, db dump, RAG indexer) must never see secrets.
     if (result.output !== undefined) {
-      nodeRun.outputSnapshot = redactValue(result.output);
+      nodeRun.outputSnapshot = redactRecord(result.output);
     }
     if (result.error) {
-      nodeRun.error = redactValue(result.error);
+      nodeRun.error = redactRecord(result.error);
     }
     if (nodeRun.logs?.length) {
       nodeRun.logs = redactLogs(nodeRun.logs);
@@ -588,7 +611,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
   private async failRun(run: WorkflowRunDocument, error: { code: string; message: string }): Promise<void> {
     this.queue.removeRun(run._id.toString());
     run.status = WorkflowRunStatus.FAILED;
-    run.error = redactValue(error);
+    run.error = redactRecord(error);
     run.finishedAt = new Date();
     await run.save();
     this.eventEmitter.emit('workflow.run.finished', { runId: run._id.toString(), status: run.status });
@@ -630,8 +653,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
 
     const run = await this.runModel.findById(nodeRun.runId).exec();
     if (!run) return;
-    const snapshot = run.definitionSnapshot as { nodes: WorkflowNode[]; edges: unknown[] };
-    const node = snapshot.nodes.find((n) => n.id === nodeRun.nodeId);
+    const node = readGraph(run.definitionSnapshot).nodes.find((n) => n.id === nodeRun.nodeId);
     if (!node) return;
 
     nodeRun.set('waitingFor', undefined);
@@ -639,12 +661,10 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     await nodeRun.save();
     run.status = WorkflowRunStatus.RUNNING;
     await run.save();
-    const cfg = (node.config ?? {}) as {
-      branchMap?: Record<string, 'success' | 'failure' | 'custom'>;
-      options?: string[];
-    };
-    const branch = cfg.branchMap?.[payload.answer];
-    const optionIndex = cfg.options ? cfg.options.indexOf(payload.answer) : -1;
+    const branchMap = isRecord(node.config.branchMap) ? node.config.branchMap : undefined;
+    const branch = NODE_BRANCHES.find((candidate) => candidate === branchMap?.[payload.answer]);
+    const options = asStringArray(node.config.options);
+    const optionIndex = options ? options.indexOf(payload.answer) : -1;
     await this.applyResult(run, nodeRun, node, {
       status: 'success',
       output: { answer: payload.answer, optionIndex: optionIndex >= 0 ? optionIndex : null },
@@ -656,13 +676,11 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     const nodeRun = await this.nodeRunModel.findById(nodeRunId).exec();
     if (!nodeRun) return;
     if (nodeRun.status !== WorkflowNodeRunStatus.WAITING) return;
-    const wf = nodeRun.waitingFor as { type?: string; resumeAt?: Date } | undefined;
-    if (wf?.type !== 'delay') return;
+    if (nodeRun.waitingFor?.type !== 'delay') return;
 
     const run = await this.runModel.findById(nodeRun.runId).exec();
     if (!run) return;
-    const snapshot = run.definitionSnapshot as { nodes: WorkflowNode[]; edges: unknown[] };
-    const node = snapshot.nodes.find((n) => n.id === nodeRun.nodeId);
+    const node = readGraph(run.definitionSnapshot).nodes.find((n) => n.id === nodeRun.nodeId);
     if (!node) return;
 
     const waitedMs = nodeRun.startedAt
@@ -709,22 +727,22 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     }
     const parent = claim;
 
-    const snapshot = parent.definitionSnapshot as { nodes: WorkflowNode[]; edges: unknown[] };
+    const graph = readGraph(parent.definitionSnapshot);
     let nodeToStart: WorkflowNode | undefined;
     let resolvedFromNodeId = fromNodeId;
-    if (fromNodeId) nodeToStart = snapshot.nodes.find((n) => n.id === fromNodeId);
+    if (fromNodeId) nodeToStart = graph.nodes.find((n) => n.id === fromNodeId);
     if (!nodeToStart) {
       const failed = await this.nodeRunModel
         .findOne({ runId: parent._id, status: WorkflowNodeRunStatus.FAILED })
         .sort({ createdAt: 1 })
         .exec();
       if (failed) {
-        nodeToStart = snapshot.nodes.find((n) => n.id === failed.nodeId);
+        nodeToStart = graph.nodes.find((n) => n.id === failed.nodeId);
         resolvedFromNodeId = failed.nodeId;
       }
     }
     if (!nodeToStart) {
-      nodeToStart = findTriggerNodes({ nodes: snapshot.nodes, edges: snapshot.edges as never })[0];
+      nodeToStart = findTriggerNodes(graph)[0];
       resolvedFromNodeId = nodeToStart?.id;
     }
 

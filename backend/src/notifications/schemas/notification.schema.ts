@@ -19,6 +19,11 @@ export class AppNotification {
 
   @Prop()
   category: string;
+
+  // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
+  // nicht am Typ — Leser brauchten dafür `as unknown as { createdAt?: Date }`.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const NotificationSchema = SchemaFactory.createForClass(AppNotification);

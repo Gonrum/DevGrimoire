@@ -9,7 +9,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { WorkflowScope, WorkflowStatus } from '../schemas/workflow-definition.schema';
+import { WorkflowNode, WorkflowScope, WorkflowStatus } from '../schemas/workflow-definition.schema';
 
 export class WorkflowNodeDto {
   @IsString()
@@ -45,6 +45,27 @@ export class WorkflowNodeDto {
   @IsOptional()
   @IsObject()
   ui?: Record<string, unknown>;
+}
+
+/**
+ * DTO-Knoten → Schema-Knoten.
+ *
+ * Der Unterschied ist genau `config`/`secretRefs`: im DTO optional, im Schema
+ * mit Default. Vorher stand dafür `existing.nodes = dto.nodes as never`, was
+ * die Prüfung komplett aushebelte; die Defaults werden hier explizit gesetzt.
+ */
+export function workflowNodeFromDto(dto: WorkflowNodeDto): WorkflowNode {
+  return {
+    id: dto.id,
+    type: dto.type,
+    label: dto.label,
+    position: dto.position,
+    config: dto.config ?? {},
+    secretRefs: dto.secretRefs ?? [],
+    inputs: dto.inputs,
+    outputs: dto.outputs,
+    ui: dto.ui,
+  };
 }
 
 export class WorkflowEdgeDto {

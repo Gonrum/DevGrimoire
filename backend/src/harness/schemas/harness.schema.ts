@@ -70,6 +70,11 @@ export class Harness {
 
   @Prop({ type: [HarnessSectionSchema], default: [] })
   sections: HarnessSection[];
+
+  // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
+  // nicht am Typ — Leser brauchten dafür `as unknown as { createdAt?: Date }`.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export type HarnessDocument = HydratedDocument<Harness>;

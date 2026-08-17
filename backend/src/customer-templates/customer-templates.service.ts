@@ -16,6 +16,7 @@ import {
 import {
   ApplyCustomerTemplateDto,
   CreateCustomerTemplateDto,
+  CustomerTemplateItemDto,
   ListCustomerTemplatesDto,
   UpdateCustomerTemplateDto,
 } from './dto/customer-template.dto';
@@ -27,6 +28,20 @@ import { WorkflowsService } from '../workflows/workflows.service';
 import { CustomersService } from '../customers/customers.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { WorkflowScope } from '../workflows/schemas/workflow-definition.schema';
+import { TodoPriority } from '../todos/schemas/todo.schema';
+import { HealthcheckMethod } from '../monitoring/schemas/healthcheck.schema';
+import { CreateEnvironmentDto } from '../environments/dto/create-environment.dto';
+import { CreateWorkflowDefinitionDto } from '../workflows/dto/workflow.dto';
+import { errorMessage, isRecord, isUnknownArray } from '../common/narrow';
+import {
+  optionalEnum,
+  optionalNumber,
+  optionalObject,
+  optionalObjectArray,
+  optionalString,
+  optionalStringArray,
+  ToolArgs,
+} from '../common/tool-args';
 
 const SECRET_KEY_HINTS = new Set([
   'value',
@@ -61,6 +76,57 @@ export interface ApplyResult {
 
 const RUNTIME_FIELDS: Array<keyof UpdateCustomerTemplateDto> = ['items', 'type'];
 
+/**
+ * Element-Formen, die die Ziel-Services erwarten. Aus deren DTOs abgeleitet
+ * statt hier nachgebaut: ein selbst erfundenes `{ key: string; value: string }`
+ * wäre eine zweite Wahrheit, die beim nächsten Feld auseinanderläuft.
+ */
+type EnvVariableInput = NonNullable<CreateEnvironmentDto['variables']>[number];
+type WorkflowNodeInput = NonNullable<CreateWorkflowDefinitionDto['nodes']>[number];
+type WorkflowEdgeInput = NonNullable<CreateWorkflowDefinitionDto['edges']>[number];
+
+/**
+ * DTO-Item → Schema-Item.
+ *
+ * Der Unterschied sind genau die drei Felder mit Schema-Default (`payload`,
+ * `requiredSecretKeys`, `placeholders`): im DTO optional, im Schema gesetzt.
+ * Dafür stand vorher `dto.items as never` — `never` ist allem zuweisbar, die
+ * Prüfung fiel damit komplett aus. Die Defaults stehen jetzt hier, statt sich
+ * auf Mongoose zu verlassen.
+ */
+function templateItemsFromDto(items: CustomerTemplateItemDto[]): CustomerTemplateItem[] {
+  return items.map((item) => ({
+    kind: item.kind,
+    title: item.title,
+    description: item.description,
+    payload: item.payload ?? {},
+    requiredSecretKeys: item.requiredSecretKeys ?? [],
+    placeholders: item.placeholders ?? {},
+  }));
+}
+
+/**
+ * Zahlen-Liste aus einem Payload-Feld (`expectedStatus`).
+ *
+ * Politik wie bei den `optional*`-Lesern in `common/tool-args.ts`: fehlt das
+ * Feld, greift der Default; ist es da, aber falsch geformt, bricht *dieses*
+ * Template-Item ab statt still zu verschwinden. Der Helfer fehlt dort bisher —
+ * siehe Bericht.
+ */
+function optionalNumberArray(args: ToolArgs, field: string): number[] | undefined {
+  const value = args[field];
+  if (value === undefined || value === null) return undefined;
+  if (!isUnknownArray(value)) {
+    throw new BadRequestException(`${field} must be an array of numbers`);
+  }
+  return value.map((entry) => {
+    if (typeof entry !== 'number' || !Number.isFinite(entry)) {
+      throw new BadRequestException(`${field} must be an array of numbers`);
+    }
+    return entry;
+  });
+}
+
 @Injectable()
 export class CustomerTemplatesService {
   private readonly logger = new Logger(CustomerTemplatesService.name);
@@ -80,8 +146,14 @@ export class CustomerTemplatesService {
   /**
    * Reject template payloads that look like they smuggled secret values in.
    * Templates only carry secret *requirements* (requiredSecretKeys), never values.
+   *
+   * Der Parameter nennt genau die zwei Felder, die durchsucht werden — damit
+   * passen DTO-Items (payload/placeholders optional) und Schema-Items (mit
+   * Default) beide hinein, ohne das `as never` an den Aufrufstellen.
    */
-  private assertNoSecretValues(items: CustomerTemplateItem[] | undefined): void {
+  private assertNoSecretValues(
+    items: ReadonlyArray<{ payload?: unknown; placeholders?: unknown }> | undefined,
+  ): void {
     for (const item of items ?? []) {
       this.walkForSecrets(item.payload, `items[].payload`);
       this.walkForSecrets(item.placeholders, `items[].placeholders`);
@@ -98,12 +170,14 @@ export class CustomerTemplatesService {
       }
       return;
     }
-    if (Array.isArray(value)) {
+    if (isUnknownArray(value)) {
       value.forEach((item, idx) => this.walkForSecrets(item, `${path}[${idx}]`));
       return;
     }
-    if (typeof value === 'object') {
-      for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    // `isRecord` statt `typeof value === 'object'` + Behauptung: das Prädikat
+    // erlaubt den Feldzugriff, ohne etwas über die Feldtypen zu behaupten.
+    if (isRecord(value)) {
+      for (const [key, child] of Object.entries(value)) {
         if (SECRET_KEY_HINTS.has(key.toLowerCase()) && typeof child === 'string' && child.length > 0) {
           throw new BadRequestException(
             `Template field "${key}" at ${path} looks like a secret value. Use requiredSecretKeys instead.`,
@@ -118,7 +192,7 @@ export class CustomerTemplatesService {
     if (!dto.slug.match(/^[a-z0-9][a-z0-9-]*$/)) {
       throw new BadRequestException('slug must be lowercase letters, digits, and hyphens only');
     }
-    this.assertNoSecretValues(dto.items as never);
+    this.assertNoSecretValues(dto.items);
     const created = await this.templateModel.create({
       name: dto.name,
       slug: dto.slug,
@@ -126,7 +200,7 @@ export class CustomerTemplatesService {
       type: dto.type,
       active: dto.active ?? true,
       tags: dto.tags ?? [],
-      items: dto.items ?? [],
+      items: dto.items ? templateItemsFromDto(dto.items) : [],
       version: 1,
       createdByUserId: userId && isValidObjectId(userId) ? new Types.ObjectId(userId) : undefined,
     });
@@ -155,7 +229,7 @@ export class CustomerTemplatesService {
   ): Promise<CustomerTemplateDocument> {
     const existing = await this.findById(id);
     if (dto.items !== undefined) {
-      this.assertNoSecretValues(dto.items as never);
+      this.assertNoSecretValues(dto.items);
     }
 
     const touchesRuntime = RUNTIME_FIELDS.some((field) => dto[field] !== undefined);
@@ -166,7 +240,7 @@ export class CustomerTemplatesService {
     if (dto.type !== undefined) existing.type = dto.type;
     if (dto.active !== undefined) existing.active = dto.active;
     if (dto.tags !== undefined) existing.tags = dto.tags;
-    if (dto.items !== undefined) existing.items = dto.items as never;
+    if (dto.items !== undefined) existing.items = templateItemsFromDto(dto.items);
     if (userId && isValidObjectId(userId)) {
       existing.updatedByUserId = new Types.ObjectId(userId);
     }
@@ -215,11 +289,11 @@ export class CustomerTemplatesService {
     };
   }
 
-  async apply(
-    templateId: string,
-    dto: ApplyCustomerTemplateDto,
-    userId?: string,
-  ): Promise<ApplyResult> {
+  // Kein `userId`-Parameter: er war deklariert, aber nie gelesen, und kein
+  // Aufrufer (Controller, mcp-tools) hat ihn je übergeben. `ApplyResult` hat
+  // auch kein Feld dafür — wer „wer hat angewendet" braucht, muss das Ergebnis
+  // erweitern, nicht einen toten Parameter wiederbeleben.
+  async apply(templateId: string, dto: ApplyCustomerTemplateDto): Promise<ApplyResult> {
     const template = await this.findById(templateId);
     if (!template.active) throw new BadRequestException('Template is not active');
     await this.customersService.findById(dto.customerId);
@@ -232,14 +306,16 @@ export class CustomerTemplatesService {
       try {
         const applied = await this.applyItem(item, dto.customerId);
         created.push(applied);
-      } catch (err) {
-        this.logger.warn(
-          `Template ${template.slug} item "${item.title}" failed: ${(err as Error).message}`,
-        );
+      } catch (err: unknown) {
+        // `errorMessage` statt `(err as Error).message`: der Text landet im
+        // Ergebnis, das der Nutzer sieht. Bei allem, was kein Error ist, stand
+        // dort wörtlich „failed: undefined".
+        const reason = errorMessage(err);
+        this.logger.warn(`Template ${template.slug} item "${item.title}" failed: ${reason}`);
         created.push({
           kind: item.kind,
           title: item.title,
-          note: `failed: ${(err as Error).message}`,
+          note: `failed: ${reason}`,
         });
       }
     }
@@ -265,32 +341,44 @@ export class CustomerTemplatesService {
     return result;
   }
 
+  /**
+   * `item.payload` ist ungeprüftes JSON aus dem Template — dieselbe Lage wie bei
+   * Tool-Argumenten, deshalb dieselben Leser (`common/tool-args.ts`). Sie prüfen
+   * zur Laufzeit und liefern getypte Werte; die frühere Variante behauptete mit
+   * `as never` / `as string`, dass schon alles passt.
+   *
+   * Politik der Leser: fehlendes Feld → `undefined`, also greift der
+   * Schema-Default wie bisher. Vorhandenes, aber falsch geformtes Feld → Wurf.
+   * Der Wurf landet im `catch` von `apply()` und erscheint als
+   * `failed: <Grund>` am Ergebnis-Item — vorher fiel so ein Feld still auf den
+   * Default zurück oder lief als Lüge in Mongoose.
+   */
   private async applyItem(
     item: CustomerTemplateItem,
     customerId: string,
   ): Promise<AppliedEntity> {
-    const p = item.payload ?? {};
+    const p: ToolArgs = item.payload ?? {};
     switch (item.kind) {
       case CustomerTemplateItemKind.TODO: {
         const todo = await this.todosService.create({
           customerId,
           title: item.title,
           description: item.description,
-          priority: (p.priority as never) || undefined,
-          tags: Array.isArray(p.tags) ? (p.tags as string[]) : undefined,
+          priority: optionalEnum(p, 'priority', Object.values(TodoPriority)),
+          tags: optionalStringArray(p, 'tags'),
         });
         return { kind: item.kind, id: todo._id.toString(), title: todo.title };
       }
       case CustomerTemplateItemKind.ENVIRONMENT: {
         const env = await this.environmentsService.create({
           customerId,
-          name: (p.name as string) || item.title,
+          name: optionalString(p, 'name') || item.title,
           description: item.description,
-          host: (p.host as string) || undefined,
-          port: (p.port as number) || undefined,
-          user: (p.user as string) || undefined,
-          url: (p.url as string) || (p.urlPlaceholder as string) || undefined,
-          variables: Array.isArray(p.variables) ? (p.variables as never) : undefined,
+          host: optionalString(p, 'host') || undefined,
+          port: optionalNumber(p, 'port') || undefined,
+          user: optionalString(p, 'user') || undefined,
+          url: optionalString(p, 'url') || optionalString(p, 'urlPlaceholder') || undefined,
+          variables: optionalObjectArray<EnvVariableInput>(p, 'variables'),
           active: typeof p.active === 'boolean' ? p.active : true,
         });
         return { kind: item.kind, id: env._id.toString(), title: env.name };
@@ -298,23 +386,24 @@ export class CustomerTemplatesService {
       case CustomerTemplateItemKind.CONTACT_TYPE: {
         const contact = await this.contactsService.create(customerId, {
           name: item.title,
-          role: (p.role as string) || item.title,
+          role: optionalString(p, 'role') || item.title,
           notes: item.description,
         });
         return { kind: item.kind, id: contact._id.toString(), title: contact.name };
       }
       case CustomerTemplateItemKind.MONITORING_CHECK: {
-        if (!p.url || typeof p.url !== 'string') {
+        const url = optionalString(p, 'url');
+        if (!url) {
           throw new BadRequestException('monitoring_check requires payload.url');
         }
         const check = await this.monitoringService.create({
           customerId,
           name: item.title,
           description: item.description,
-          url: p.url,
-          method: (p.method as never) || undefined,
+          url,
+          method: optionalEnum(p, 'method', Object.values(HealthcheckMethod)),
           intervalSeconds: typeof p.intervalSeconds === 'number' ? p.intervalSeconds : 300,
-          expectedStatus: Array.isArray(p.expectedStatus) ? (p.expectedStatus as number[]) : undefined,
+          expectedStatus: optionalNumberArray(p, 'expectedStatus'),
           failureThreshold: typeof p.failureThreshold === 'number' ? p.failureThreshold : 3,
           active: typeof p.active === 'boolean' ? p.active : true,
         });
@@ -326,10 +415,10 @@ export class CustomerTemplatesService {
           customerId,
           name: item.title,
           description: item.description,
-          tags: Array.isArray(p.tags) ? (p.tags as string[]) : undefined,
-          trigger: (p.trigger as Record<string, unknown>) || undefined,
-          nodes: Array.isArray(p.nodes) ? (p.nodes as never) : undefined,
-          edges: Array.isArray(p.edges) ? (p.edges as never) : undefined,
+          tags: optionalStringArray(p, 'tags'),
+          trigger: optionalObject(p, 'trigger'),
+          nodes: optionalObjectArray<WorkflowNodeInput>(p, 'nodes'),
+          edges: optionalObjectArray<WorkflowEdgeInput>(p, 'edges'),
         });
         return { kind: item.kind, id: def._id.toString(), title: def.name };
       }

@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types';
 import { NodeMetadata } from '../engine/node-metadata';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
+import { asString } from '../../common/tool-args';
+import { asStringArray } from '../workflow-narrow';
 
 @Injectable()
 export class ActionUserQuestionExecutor implements NodeExecutor {
@@ -24,8 +26,8 @@ export class ActionUserQuestionExecutor implements NodeExecutor {
   };
 
   async execute(ctx: NodeExecutionContext): Promise<NodeResult> {
-    const question = String(ctx.config.question ?? '').trim();
-    const options = (ctx.config.options as string[] | undefined) ?? [];
+    const question = (asString(ctx.config.question) ?? '').trim();
+    const options = asStringArray(ctx.config.options) ?? [];
     if (!question) {
       return { status: 'failed', error: { code: 'invalid_config', message: 'question required' } };
     }

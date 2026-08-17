@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsIn, IsArray, ValidateNested, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsIn, IsArray, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ReleaseType, ReleasePlatform, ReleaseStatus } from '../schemas/release.schema';
 import { ReleaseAssetDto } from './create-release.dto';

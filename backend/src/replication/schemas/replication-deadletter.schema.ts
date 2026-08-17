@@ -55,6 +55,11 @@ export class ReplicationDeadletter {
 
   @Prop({ type: Date, default: null })
   lastFailedAt: Date | null;
+
+  // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
+  // nicht am Typ — Leser brauchten dafür `as unknown as { createdAt?: Date }`.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const ReplicationDeadletterSchema = SchemaFactory.createForClass(ReplicationDeadletter);

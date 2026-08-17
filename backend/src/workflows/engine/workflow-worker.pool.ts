@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { WorkflowQueueService } from './workflow-queue.service';
 import { NodeJob } from './types';
+import { errorMessage } from '../workflow-narrow';
 
 export type JobRunner = (job: NodeJob) => Promise<void>;
 
@@ -56,9 +57,9 @@ export class WorkflowWorkerPool implements OnModuleDestroy {
       }
       try {
         await this.runner(job);
-      } catch (err) {
+      } catch (err: unknown) {
         this.logger.error(
-          `Worker ${idx} runner threw (run=${job.runId}, node=${job.nodeId}): ${(err as Error).message}`,
+          `Worker ${idx} runner threw (run=${job.runId}, node=${job.nodeId}): ${errorMessage(err)}`,
         );
       } finally {
         this.queue.releaseLock(job.definitionId);

@@ -5,6 +5,8 @@ import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types'
 import { NodeMetadata } from '../engine/node-metadata';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { expandConfig } from './template';
+import { asString } from '../../common/tool-args';
+import { errorMessage } from '../workflow-narrow';
 
 @Injectable()
 export class ActionTodoLinkMilestoneExecutor implements NodeExecutor {
@@ -27,16 +29,16 @@ export class ActionTodoLinkMilestoneExecutor implements NodeExecutor {
 
   async execute(ctx: NodeExecutionContext): Promise<NodeResult> {
     const expanded = expandConfig(ctx.config, ctx.runContext);
-    const todoId = String(expanded.todoId ?? '').trim();
-    const milestoneId = String(expanded.milestoneId ?? '').trim();
+    const todoId = (asString(expanded.todoId) ?? '').trim();
+    const milestoneId = (asString(expanded.milestoneId) ?? '').trim();
     if (!todoId || !milestoneId) {
       return { status: 'failed', error: { code: 'invalid_config', message: 'todoId and milestoneId required' } };
     }
     try {
       await this.todos.update(todoId, { milestoneId });
       return { status: 'success', output: { todoId, milestoneId } };
-    } catch (err) {
-      return { status: 'failed', error: { code: 'todo_link_failed', message: (err as Error).message } };
+    } catch (err: unknown) {
+      return { status: 'failed', error: { code: 'todo_link_failed', message: errorMessage(err) } };
     }
   }
 }

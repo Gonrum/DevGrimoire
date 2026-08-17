@@ -62,6 +62,12 @@ export class WorkflowNodeRun {
 
   @Prop()
   durationMs?: number;
+
+  // Von `@Schema({ timestamps: true })` gesetzt. Ohne die Deklaration lasen
+  // Aufrufer sie über `as unknown as { createdAt?: Date }` — vgl. WorkflowRun,
+  // wo sie schon immer deklariert waren.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const WorkflowNodeRunSchema = SchemaFactory.createForClass(WorkflowNodeRun);

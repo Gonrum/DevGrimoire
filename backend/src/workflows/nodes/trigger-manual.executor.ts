@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { z } from 'zod';
-import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types';
+import { NodeExecutor, NodeResult } from '../engine/types';
 import { NodeMetadata } from '../engine/node-metadata';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 
@@ -17,7 +17,11 @@ export class TriggerManualExecutor implements NodeExecutor {
     outputs: {},
     branches: ['success'],
   };
-  async execute(_ctx: NodeExecutionContext): Promise<NodeResult> {
-    return { status: 'success', output: {} };
+  // Ohne Parameter: der Node braucht den Context nicht, und ein ungenutztes
+  // `_ctx` ist trotz Unterstrich ein `no-unused-vars`-Fund (die Regel ist hier
+  // ohne `argsIgnorePattern` konfiguriert). Eine Methode mit weniger Parametern
+  // erfüllt `NodeExecutor.execute` weiterhin.
+  execute(): Promise<NodeResult> {
+    return Promise.resolve({ status: 'success', output: {} });
   }
 }

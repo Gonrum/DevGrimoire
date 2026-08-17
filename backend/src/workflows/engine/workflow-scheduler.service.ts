@@ -10,6 +10,8 @@ import {
 import { WorkflowsService } from '../workflows.service';
 import { computeMissedSlots, computeNext } from './scheduler-helpers';
 import { ScheduleTriggerConfig } from './types';
+import { asNumber, errorMessage, isRecord, mongoErrorCode } from '../workflow-narrow';
+import { asString } from '../../common/tool-args';
 
 @Injectable()
 export class WorkflowSchedulerService {
@@ -39,38 +41,55 @@ export class WorkflowSchedulerService {
       .exec();
 
     for (const def of due) {
-      const id = (def._id as { toString(): string }).toString();
+      const id = def._id.toString();
       if (this.definitionLocks.has(id)) continue;
       this.definitionLocks.add(id);
       try {
         await this.processDefinition(def, now);
-      } catch (err) {
-        this.logger.error(`Scheduler failed for ${def.name}: ${(err as Error).message}`);
+      } catch (err: unknown) {
+        this.logger.error(`Scheduler failed for ${def.name}: ${errorMessage(err)}`);
       } finally {
         this.definitionLocks.delete(id);
       }
     }
   }
 
+  /**
+   * `WorkflowDefinition.trigger` ist ein offenes `Record<string, unknown>` —
+   * die Query filtert auf `trigger.type === 'schedule'`, über die Feldtypen
+   * sagt das nichts. Sie werden hier geprüft statt behauptet; `asNumber`
+   * übernimmt numerische Strings, damit ein `"intervalMinutes": "15"` aus dem
+   * Editor weiterhin trägt (vorher durch JS-Coercion, nicht durch Absicht).
+   */
+  private readScheduleTrigger(trigger: unknown): ScheduleTriggerConfig {
+    const raw = isRecord(trigger) ? trigger : {};
+    return {
+      type: 'schedule',
+      cron: asString(raw.cron),
+      intervalMinutes: asNumber(raw.intervalMinutes),
+      timezone: asString(raw.timezone),
+      maxCatchUp: asNumber(raw.maxCatchUp),
+    };
+  }
+
   private async processDefinition(def: WorkflowDefinitionDocument, now: Date): Promise<void> {
-    const trigger = def.trigger as unknown as ScheduleTriggerConfig;
+    const trigger = this.readScheduleTrigger(def.trigger);
     let slots: Date[];
     try {
       slots = computeMissedSlots(def.lastRunAt, now, trigger);
-    } catch (err) {
-      this.logger.warn(`Invalid schedule trigger on "${def.name}": ${(err as Error).message}`);
+    } catch (err: unknown) {
+      this.logger.warn(`Invalid schedule trigger on "${def.name}": ${errorMessage(err)}`);
       return;
     }
 
     for (const slot of slots) {
       try {
         await this.workflowsService.startRun({
-          definitionId: (def._id as { toString(): string }).toString(),
+          definitionId: def._id.toString(),
           triggeredBy: { type: 'schedule', scheduleSlotAt: slot.toISOString() },
-        } as never);
-      } catch (err) {
-        const code = (err as { code?: number }).code;
-        if (code !== 11000) throw err;
+        });
+      } catch (err: unknown) {
+        if (mongoErrorCode(err) !== 11000) throw err;
         this.logger.debug(`Skipped duplicate slot ${slot.toISOString()} for ${def.name}`);
       }
     }

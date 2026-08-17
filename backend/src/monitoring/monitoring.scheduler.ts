@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { MonitoringService } from './monitoring.service';
+import { errorMessage } from '../common/narrow';
 
 @Injectable()
 export class MonitoringScheduler {
@@ -17,8 +18,8 @@ export class MonitoringScheduler {
       if (count > 0) {
         this.logger.log(`Executed ${count} healthcheck(s)`);
       }
-    } catch (err) {
-      this.logger.error(`Monitoring scheduler tick failed: ${(err as Error).message}`);
+    } catch (err: unknown) {
+      this.logger.error(`Monitoring scheduler tick failed: ${errorMessage(err)}`);
     }
   }
 }

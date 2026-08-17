@@ -15,6 +15,9 @@
  * never stores raw mutations alongside untrusted input.
  */
 
+import { isUnknownArray } from '../common/tool-args';
+import { isRecord } from './workflow-narrow';
+
 const SENSITIVE_KEY = /(authorization|api[-_]?key|secret|token|password|passwd|credential|private[-_]?key|cookie)/i;
 const BEARER_RE = /Bearer\s+[A-Za-z0-9._~+/=-]+/gi;
 const KV_RE = /(api[-_]?key|secret|token|password|passwd)\s*[:=]\s*[^\s,;]+/gi;
@@ -30,8 +33,17 @@ export interface RedactOptions {
   maxDepth?: number;
 }
 
-export interface RedactedValue<T = unknown> {
-  value: T;
+export interface RedactedValue {
+  /**
+   * Der bereinigte Wert.
+   *
+   * Bewusst `unknown` und **nicht** generisch über den Eingabetyp: Redaction
+   * kann die Form ändern — ein zu tiefes Objekt wird zu `'[Truncated: max
+   * depth]'`, eine zu große Struktur zu einem abgeschnittenen JSON-String. Ein
+   * `RedactedValue<T>` hätte das nur behauptet (und tat es vorher per
+   * `as unknown as T`). Wer ein Objekt-Feld beschreibt, nimmt `redactRecord`.
+   */
+  value: unknown;
   truncated: boolean;
   maskedPaths: string[];
 }
@@ -43,10 +55,7 @@ export interface RedactedValue<T = unknown> {
  * For primitives, the returned `value` is a primitive. For objects/arrays,
  * a defensive copy is made (no mutation of the caller's input).
  */
-export function redact<T = unknown>(
-  input: T,
-  options: RedactOptions = {},
-): RedactedValue<T> {
+export function redact(input: unknown, options: RedactOptions = {}): RedactedValue {
   const knownTokens = (options.knownTokens ?? []).filter((s) => s && s.length >= 4);
   const maxChars = options.maxChars ?? 4096;
   const maxStringLength = options.maxStringLength ?? 500;
@@ -83,14 +92,18 @@ export function redact<T = unknown>(
       truncated = true;
       return '[Truncated: max depth]';
     }
-    if (Array.isArray(current)) {
+    if (isUnknownArray(current)) {
       if (current.length > 25) truncated = true;
       return current
         .slice(0, 25)
         .map((item, idx) => visit(item, `${path}[${idx}]`, depth + 1));
     }
+    // `isRecord` schließt Arrays aus — die sind oben schon behandelt. Der Zweig
+    // ist damit zur Laufzeit immer wahr und ersetzt nur die vorherige
+    // Assertion auf `Record<string, unknown>`.
+    if (!isRecord(current)) return current;
     const out: Record<string, unknown> = {};
-    const entries = Object.entries(current as Record<string, unknown>);
+    const entries = Object.entries(current);
     if (entries.length > 50) truncated = true;
     for (const [key, child] of entries.slice(0, 50)) {
       const childPath = path ? `${path}.${key}` : key;
@@ -109,21 +122,46 @@ export function redact<T = unknown>(
   if (json && json.length > maxChars) {
     truncated = true;
     return {
-      value: `${json.slice(0, maxChars)}…` as unknown as T,
+      value: `${json.slice(0, maxChars)}…`,
       truncated,
       maskedPaths,
     };
   }
-  return { value: safe as T, truncated, maskedPaths };
+  return { value: safe, truncated, maskedPaths };
 }
 
 /**
- * Convenience: redact and return only the cleaned value (no envelope).
- * Use this when persisting back into a structured field that is itself an
- * object/array — the caller does not need truncated/maskedPaths metadata.
+ * Redaction eines einzelnen Strings.
+ *
+ * Nur `string` → `string`, weil das der einzige Fall ist, für den die Form
+ * beweisbar erhalten bleibt: `visit` gibt für einen String einen String
+ * zurück, und die `maxChars`-Faltung greift nur für Objekte. Ein generisches
+ * `redactValue<T>(input: T): T` konnte das nicht beweisen und hat es mit
+ * `as T` behauptet — für ein Objekt sogar falsch, siehe `RedactedValue.value`.
+ *
+ * Objekt-Felder gehen über `redactRecord`.
  */
-export function redactValue<T = unknown>(input: T, options: RedactOptions = {}): T {
-  return redact(input, options).value;
+export function redactValue(input: string, options: RedactOptions = {}): string {
+  const { value } = redact(input, options);
+  return typeof value === 'string' ? value : input;
+}
+
+/**
+ * Redaction für ein Feld, das im Schema ein Objekt ist (`outputSnapshot`,
+ * `error`, eine Log-Zeile, `run.context.nodes[*]`).
+ *
+ * Faltet `redact` die Struktur wegen `maxChars` zu einem String zusammen, wird
+ * dieser sichtbar verpackt statt als Objekt behauptet. Vorher landete in so
+ * einem Fall ein blanker String in einem als `Record<string, unknown>`
+ * deklarierten Mixed-Feld — der Typ log, die DB nahm es an.
+ */
+export function redactRecord(
+  input: unknown,
+  options: RedactOptions = {},
+): Record<string, unknown> {
+  const { value, truncated } = redact(input, options);
+  if (isRecord(value)) return value;
+  return { redacted: value, truncated };
 }
 
 /**
@@ -135,12 +173,11 @@ export function redactLogs(
   logs: Array<Record<string, unknown>>,
   knownTokens: readonly string[] = [],
 ): Array<Record<string, unknown>> {
-  return logs.map(
-    (entry) =>
-      redact(entry, {
-        knownTokens,
-        maxStringLength: 1024,
-        maxDepth: 4,
-      }).value,
+  return logs.map((entry) =>
+    redactRecord(entry, {
+      knownTokens,
+      maxStringLength: 1024,
+      maxDepth: 4,
+    }),
   );
 }
