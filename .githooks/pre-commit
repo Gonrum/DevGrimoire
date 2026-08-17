@@ -32,18 +32,26 @@ lint_package() {
 
   # -z + read -d '' hält Pfade mit Leerzeichen zusammen.
   # --diff-filter=d lässt gelöschte Dateien aus: die kann ESLint nicht lesen.
+  #
+  # Umfang: das ganze Paket, nicht nur `src`. Die `.cjs`-Prüfskripte
+  # (`scripts/`, `test/`) und die Build-Dateien des Frontends (`vite.config.ts`,
+  # `postcss.config.js`, `tailwind.config.js`, `public/sw.js`) haben eigene
+  # Config-Blöcke und gehören genauso ins Gate — sonst prüft es weniger, als
+  # `npm run lint` meldet.
   while IFS= read -r -d '' file; do
     files+=("${file#"$pkg"/}")
-  done < <(git diff --cached --name-only --diff-filter=d -z -- "$pkg/src" \
-           | tr '\0' '\n' | grep -E '\.tsx?$' | tr '\n' '\0')
+  done < <(git diff --cached --name-only --diff-filter=d -z -- "$pkg" \
+           | tr '\0' '\n' | grep -E '\.(tsx?|jsx?|cjs|mjs)$' | tr '\n' '\0')
 
   if [ ${#files[@]} -eq 0 ]; then
     return 0
   fi
 
   echo "⏳ eslint: ${#files[@]} gestagte Datei(en) in $pkg/ …"
+  # --no-warn-ignored: `eslint.config.mjs` selbst ist ignoriert; explizit
+  # übergeben würde ESLint das sonst pro Datei anmerken.
   if ! (cd "$REPO_ROOT/$pkg" && NODE_OPTIONS=--max-old-space-size=8192 \
-        npx eslint --no-inline-config "${files[@]}"); then
+        npx eslint --no-inline-config --no-warn-ignored "${files[@]}"); then
     FAILED=1
   fi
 }

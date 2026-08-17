@@ -24,6 +24,45 @@ export default tseslint.config(
   reactHooks.configs.flat['recommended-latest'],
   reactRefresh.configs.vite,
   {
+    /*
+     * Build- und Laufzeit-Dateien ausserhalb der tsconfig: `vite.config.ts`,
+     * `postcss.config.js`, `tailwind.config.js` und der Service Worker
+     * `public/sw.js`.
+     *
+     * Ohne eigenen Block scheitert das typed linting an ihnen mit
+     * "was not found by the project service" — ein *fataler* Parse-Fehler, also
+     * keine Fundstelle, die man wegarbeiten könnte. Bisher fielen sie schlicht
+     * aus dem Lint heraus, weil das Skript nur `src` prüfte.
+     *
+     * `disableTypeChecked` nimmt die typ-abhängigen Regeln zurück; was bleibt,
+     * ist `js.configs.recommended` — für einen Service Worker durchaus
+     * relevant (unerreichbarer Code, ungenutzte Variablen, doppelte Keys).
+     */
+    files: ['*.config.js', '*.config.ts', 'public/**/*.js'],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: {
+        // sw.js läuft im ServiceWorkerGlobalScope, die Config-Dateien in Node.
+        self: 'readonly',
+        caches: 'readonly',
+        clients: 'readonly',
+        fetch: 'readonly',
+        console: 'readonly',
+        process: 'readonly',
+        module: 'writable',
+        require: 'readonly',
+        __dirname: 'readonly',
+        URL: 'readonly',
+      },
+    },
+    rules: {
+      // Gleiche Begründung wie im Backend: `.js` in einem Verzeichnis ohne
+      // `"type": "module"` ist CommonJS, `require` ist dort korrekt.
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
+  {
+    files: ['src/**/*.{ts,tsx}'],
     languageOptions: {
       parserOptions: {
         projectService: true,

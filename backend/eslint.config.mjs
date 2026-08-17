@@ -22,8 +22,9 @@ export default tseslint.config(
   ...tseslint.configs.recommendedTypeChecked,
   {
     /*
-     * Die 52 `.cjs`-Checks (T-452). Sie liegen ausserhalb der tsconfig, sind
-     * CommonJS und laufen gegen `dist/` — deshalb ein eigener Block:
+     * Die `.cjs`-Checks aus `scripts/` und `test/` (T-452). Sie liegen
+     * ausserhalb der tsconfig, sind CommonJS und laufen gegen `dist/` —
+     * deshalb ein eigener Block:
      *
      * - **kein** typed linting: `projectService` fände für diese Dateien kein
      *   Programm und bräche mit "was not found by the project service" ab.
@@ -38,7 +39,7 @@ export default tseslint.config(
      * unerreichbarer Code, doppelte Keys — genau die Klasse, die in einem
      * Prüfskript still dazu führt, dass eine Zusicherung nie ausgeführt wird.
      */
-    files: ['scripts/**/*.cjs'],
+    files: ['scripts/**/*.cjs', 'test/**/*.cjs'],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: {
       sourceType: 'commonjs',
