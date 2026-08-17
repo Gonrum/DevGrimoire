@@ -15,14 +15,30 @@ import { UpdateApiKeyDto } from './dto/update-api-key.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../auth/schemas/user.schema';
+import type { AuthRequest } from '../common/request-context';
 
+/**
+ * Alle Routen hier sind nicht `@Public()`, der `JwtAuthGuard` hat also einen
+ * Actor angehängt — deshalb `AuthRequest` (kanonische Fassung aus
+ * `common/request-context`) statt einer eigenen `{ user?: { userId?: string } }`
+ * -Deklaration.
+ *
+ * `req.user!.userId` behält das bisherige Laufzeitverhalten exakt: fehlt der
+ * Actor (nur möglich, wenn Authentifizierung komplett deaktiviert ist — dann
+ * lässt der Guard ohne `user` durch), lief der Zugriff schon vorher in einen
+ * TypeError → HTTP 500. Wichtig ist, dass kein `undefined` als `userId` in die
+ * Queries gelangt: `list`, `update` und `revoke` filtern darüber, und Mongoose
+ * würde ein `userId: undefined` aus dem Filter *entfernen* — `list()` würde
+ * dann die Keys **aller** Nutzer liefern und `revoke()` fremde Keys löschen.
+ * Der Fehlschlag vor der Query ist also die sichere Variante und bleibt.
+ */
 @Controller('api-keys')
 export class ApiKeysController {
   constructor(private readonly apiKeysService: ApiKeysService) {}
 
   @Post()
-  async create(@Body() dto: CreateApiKeyDto, @Req() req: any) {
-    const userId = req.user.userId;
+  async create(@Body() dto: CreateApiKeyDto, @Req() req: AuthRequest) {
+    const userId = req.user!.userId;
     const expiresAt = dto.expiresAt ? new Date(dto.expiresAt) : undefined;
     const { key, apiKey } = await this.apiKeysService.generate(
       userId,
@@ -43,7 +59,7 @@ export class ApiKeysController {
       name: apiKey.name,
       prefix: apiKey.prefix,
       expiresAt: apiKey.expiresAt,
-      createdAt: (apiKey as any).createdAt,
+      createdAt: apiKey.createdAt,
       allowedTools: apiKey.allowedTools,
       permissions: apiKey.permissions,
       projectScopeMode: apiKey.projectScopeMode,
@@ -54,8 +70,8 @@ export class ApiKeysController {
   }
 
   @Get()
-  async list(@Req() req: any) {
-    return this.apiKeysService.list(req.user.userId);
+  async list(@Req() req: AuthRequest) {
+    return this.apiKeysService.list(req.user!.userId);
   }
 
   // T-337: admin-only "all keys + ownerUsername" view for the Settings table.
@@ -70,14 +86,14 @@ export class ApiKeysController {
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateApiKeyDto,
-    @Req() req: any,
+    @Req() req: AuthRequest,
   ) {
-    return this.apiKeysService.update(id, req.user.userId, dto);
+    return this.apiKeysService.update(id, req.user!.userId, dto);
   }
 
   @Delete(':id')
-  async revoke(@Param('id') id: string, @Req() req: any) {
-    await this.apiKeysService.revoke(id, req.user.userId);
+  async revoke(@Param('id') id: string, @Req() req: AuthRequest) {
+    await this.apiKeysService.revoke(id, req.user!.userId);
     return { deleted: true };
   }
 }

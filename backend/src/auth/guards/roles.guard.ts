@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import { UserRole } from '../schemas/user.schema';
+import type { AuthRequest } from '../../common/request-context';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -14,8 +15,13 @@ export class RolesGuard implements CanActivate {
     ]);
     if (!requiredRoles) return true;
 
-    const { user } = context.switchToHttp().getRequest();
+    const { user } = context.switchToHttp().getRequest<AuthRequest>();
     if (!user?.role) return false;
-    return requiredRoles.includes(user.role);
+    // `RequestUser.role` ist ein `string` (er kommt aus JWT bzw. DB, nicht aus
+    // dem TS-Enum), `requiredRoles` ist `UserRole[]`. Die Zuweisung auf
+    // `string[]` ist eine Verbreiterung — keine Behauptung — und lässt den
+    // `includes`-Vergleich unverändert: gleiche Werte, gleiche Semantik.
+    const allowedRoles: string[] = requiredRoles;
+    return allowedRoles.includes(user.role);
   }
 }

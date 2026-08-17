@@ -31,6 +31,11 @@ export class Secret {
   // explicitly via "Pick-Existing" leave this unset and stay independent.
   @Prop({ type: Types.ObjectId, ref: 'SshConnection' })
   ownedBySshConnectionId?: Types.ObjectId;
+
+  // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
+  // nicht am Typ — ohne Deklaration brauchten Leser dafür ein `as any`.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const SecretSchema = SchemaFactory.createForClass(Secret);

@@ -14,6 +14,26 @@ interface ScopeFields {
   allowedCustomerIds?: string[];
 }
 
+/**
+ * Was `buildScopePatch` schreibt: dieselben Felder wie `ScopeFields`, aber mit
+ * den ids bereits zu `ObjectId` konvertiert.
+ *
+ * Vorher war der Rückgabetyp `Record<string, unknown>`, weshalb die
+ * Allowlist-Prüfung `patch.allowedProjectIds` per `as Types.ObjectId[]`
+ * zurückbehaupten musste. Mit dem präzisen Typ ist die Prüfung derselbe
+ * Vergleich — nur ohne Behauptung.
+ */
+interface ScopePatch {
+  permissions?: string[];
+  projectScopeMode?: ScopeMode;
+  allowedProjectIds?: Types.ObjectId[];
+  customerScopeMode?: ScopeMode;
+  allowedCustomerIds?: Types.ObjectId[];
+}
+
+/** Eine `$lookup`-angereicherte API-Key-Zeile aus der Aggregation. */
+type ApiKeyRowWithOwner = Record<string, unknown> & { ownerUsername?: string };
+
 @Injectable()
 export class ApiKeysService {
   private readonly logger = new Logger(ApiKeysService.name);
@@ -37,8 +57,8 @@ export class ApiKeysService {
     });
   }
 
-  private buildScopePatch(scope: ScopeFields, isCreate: boolean): Record<string, unknown> {
-    const patch: Record<string, unknown> = {};
+  private buildScopePatch(scope: ScopeFields, isCreate: boolean): ScopePatch {
+    const patch: ScopePatch = {};
 
     if (scope.permissions !== undefined) {
       patch.permissions = scope.permissions;
@@ -73,7 +93,7 @@ export class ApiKeysService {
     // that axis. We surface this as a validation error rather than letting it
     // drift through and confuse users.
     if (patch.projectScopeMode === 'allowlist') {
-      const ids = (patch.allowedProjectIds as Types.ObjectId[] | undefined) ?? [];
+      const ids = patch.allowedProjectIds ?? [];
       if (ids.length === 0) {
         throw new BadRequestException(
           'projectScopeMode=allowlist erfordert mindestens eine projectId in allowedProjectIds.',
@@ -81,7 +101,7 @@ export class ApiKeysService {
       }
     }
     if (patch.customerScopeMode === 'allowlist') {
-      const ids = (patch.allowedCustomerIds as Types.ObjectId[] | undefined) ?? [];
+      const ids = patch.allowedCustomerIds ?? [];
       if (ids.length === 0) {
         throw new BadRequestException(
           'customerScopeMode=allowlist erfordert mindestens eine customerId in allowedCustomerIds.',
@@ -167,8 +187,11 @@ export class ApiKeysService {
    * username via $lookup so the Settings UI can render an Owner column
    * without N+1 calls.
    */
-  async findAllWithOwners(): Promise<Array<Record<string, unknown> & { ownerUsername?: string }>> {
-    const rows = await this.apiKeyModel.aggregate([
+  async findAllWithOwners(): Promise<ApiKeyRowWithOwner[]> {
+    // `aggregate()` ohne Typparameter liefert `any[]`; die Zeilen wanderten
+    // damit untypisiert bis in den Controller. Der Parameter ändert nichts an
+    // der Pipeline, macht aber die deklarierte Rückgabe zur geprüften Aussage.
+    const rows = await this.apiKeyModel.aggregate<ApiKeyRowWithOwner>([
       { $sort: { createdAt: -1 } },
       {
         $lookup: {
@@ -196,12 +219,12 @@ export class ApiKeysService {
    */
   async findByProjectAccess(
     projectId: string,
-  ): Promise<Array<Record<string, unknown> & { ownerUsername?: string }>> {
+  ): Promise<ApiKeyRowWithOwner[]> {
     if (!Types.ObjectId.isValid(projectId)) {
       throw new BadRequestException(`Invalid projectId: ${projectId}`);
     }
     const pid = new Types.ObjectId(projectId);
-    const rows = await this.apiKeyModel.aggregate([
+    const rows = await this.apiKeyModel.aggregate<ApiKeyRowWithOwner>([
       {
         $match: {
           $or: [

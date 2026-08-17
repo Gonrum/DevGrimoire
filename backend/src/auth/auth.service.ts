@@ -6,6 +6,7 @@ import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { RefreshToken, RefreshTokenDocument } from './schemas/refresh-token.schema';
 import { User, UserDocument, UserRole, UserLlmConfig } from './schemas/user.schema';
+import type { ScopeMode } from '../common/permissions';
 import { LlmConfigDto } from './dto/update-profile.dto';
 import { EncryptionService } from '../common/encryption.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
@@ -27,6 +28,32 @@ export interface ActiveUserSummary {
   lastSeenAt: Date;
 }
 
+/**
+ * Rückgabe von `createUser`: das einfache Objekt aus `toObject()` **ohne**
+ * `passwordHash`.
+ *
+ * Der deklarierte Typ war vorher `UserDocument`, obwohl die Methode längst
+ * kein Dokument mehr zurückgibt (kein `save()` usw.), und der Hash wurde per
+ * `delete (result as any).passwordHash` entfernt — das `any` war nötig, weil
+ * `passwordHash` am Typ nicht optional ist. Der ehrliche Rückgabetyp macht das
+ * `any` entbehrlich: das Löschen bleibt, der Typ sagt jetzt aber, dass der
+ * Hash draußen ist.
+ */
+export type CreatedUser = Omit<User, 'passwordHash'> & { _id: Types.ObjectId };
+
+/** Felder, die `updateUser` schreiben darf. */
+interface UserUpdatePatch {
+  username?: string;
+  email?: string;
+  role?: UserRole;
+  active?: boolean;
+  permissions?: string[];
+  projectScopeMode?: ScopeMode;
+  allowedProjectIds?: string[];
+  customerScopeMode?: ScopeMode;
+  allowedCustomerIds?: string[];
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -38,7 +65,11 @@ export class AuthService {
     private readonly encryptionService: EncryptionService,
     private readonly auditLog: AuditLogService,
   ) {
-    this.seedAdminUser();
+    // `void`: der Seed lief hier schon vorher unbeobachtet los. Ein `.catch()`
+    // wäre eine Verhaltensänderung (Fehler würden geschluckt statt als
+    // unhandled rejection sichtbar zu werden) — `void` markiert nur, dass das
+    // Ignorieren beabsichtigt ist.
+    void this.seedAdminUser();
     // Clean up old refresh tokens from pre-migration (had username field instead of userId)
     this.refreshTokenModel.deleteMany({ userId: { $exists: false } }).exec().catch(() => {});
     // Encrypt any plaintext llmConfig.apiKey values (T-57 migration)
@@ -65,8 +96,12 @@ export class AuthService {
       if (migrated > 0) {
         this.logger.log(`Encrypted ${migrated} legacy plaintext llmConfig.apiKey value(s).`);
       }
-    } catch (err) {
-      this.logger.warn(`llmConfig.apiKey migration failed: ${(err as Error).message}`);
+    } catch (err: unknown) {
+      // Explizite Annotation, weil `useUnknownInCatchVariables` hier nicht
+      // aktiv ist (kein `strict`) — ohne sie wäre `err` wieder `any`.
+      this.logger.warn(
+        `llmConfig.apiKey migration failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -152,7 +187,13 @@ export class AuthService {
     await this.refreshTokenModel.deleteOne({ token: refreshToken }).exec();
   }
 
-  async getAuthStatus(): Promise<{ enabled: boolean; authenticated: boolean }> {
+  /**
+   * Rein synchron — der Status kommt aus einer Modul-Konstante, es gibt nichts
+   * zu awaiten. Vorher war die Methode `async` und damit ein `Promise` ohne
+   * Grund; der einzige Aufrufer (`AuthController.status`) gibt den Wert direkt
+   * an Nest weiter, die Antwort ist identisch.
+   */
+  getAuthStatus(): { enabled: boolean; authenticated: boolean } {
     return { enabled: AUTH_ENABLED, authenticated: false };
   }
 
@@ -329,7 +370,7 @@ export class AuthService {
     email?: string;
     password: string;
     role?: UserRole;
-  }): Promise<UserDocument> {
+  }): Promise<CreatedUser> {
     const passwordHash = await bcrypt.hash(data.password, BCRYPT_ROUNDS);
     const user = await this.userModel.create({
       username: data.username,
@@ -344,9 +385,14 @@ export class AuthService {
       entityId: user._id.toString(),
       meta: { username: data.username, role: data.role || UserRole.USER },
     });
-    const result = user.toObject();
-    delete (result as any).passwordHash;
-    return result;
+    // Die Annotation macht `passwordHash` optional — nur dadurch ist `delete`
+    // überhaupt erlaubt (am Schema-Typ ist das Feld required). Das ist eine
+    // Verbreiterung, keine Behauptung: das Objekt *hat* den Hash, der Typ sagt
+    // nur, dass er fehlen darf. Rest-Destrukturierung ginge auch, kollidiert
+    // hier aber mit `no-unused-vars` (`ignoreRestSiblings` ist aus).
+    const plain: CreatedUser & { passwordHash?: string } = user.toObject();
+    delete plain.passwordHash;
+    return plain;
   }
 
   async updateUser(id: string, data: {
@@ -360,7 +406,7 @@ export class AuthService {
     customerScopeMode?: 'all' | 'allowlist' | 'none';
     allowedCustomerIds?: string[];
   }): Promise<UserDocument | null> {
-    const update: Record<string, unknown> = {};
+    const update: UserUpdatePatch = {};
     if (data.username !== undefined) update.username = data.username;
     if (data.email !== undefined) update.email = data.email;
     if (data.role !== undefined) update.role = data.role;
@@ -375,28 +421,30 @@ export class AuthService {
     // silently locking a user out of all data on an axis is a footgun.
     if (update.projectScopeMode === 'allowlist'
         && Array.isArray(update.allowedProjectIds)
-        && (update.allowedProjectIds as string[]).length === 0) {
+        && update.allowedProjectIds.length === 0) {
       throw new UnauthorizedException(
         'projectScopeMode=allowlist erfordert mindestens eine projectId.',
       );
     }
     if (update.customerScopeMode === 'allowlist'
         && Array.isArray(update.allowedCustomerIds)
-        && (update.allowedCustomerIds as string[]).length === 0) {
+        && update.allowedCustomerIds.length === 0) {
       throw new UnauthorizedException(
         'customerScopeMode=allowlist erfordert mindestens eine customerId.',
       );
     }
 
     // Persistent audit trail (T-214 — replaces previous Logger.warn placeholder).
-    const securityFields = [
+    // `keyof UserUpdatePatch` statt `string[]`: so ist `update[f]` getypt und
+    // ein Tippfehler in der Liste fällt beim Kompilieren auf.
+    const securityFields: (keyof UserUpdatePatch)[] = [
       'role', 'active', 'permissions',
       'projectScopeMode', 'allowedProjectIds',
       'customerScopeMode', 'allowedCustomerIds',
     ];
     const securityChanges: Record<string, unknown> = {};
     for (const f of securityFields) {
-      if (f in update) securityChanges[f] = (update)[f];
+      if (f in update) securityChanges[f] = update[f];
     }
 
     const result = await this.userModel

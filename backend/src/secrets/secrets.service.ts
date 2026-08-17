@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Model } from 'mongoose';
+import { FilterQuery, Model } from 'mongoose';
 import { Secret, SecretDocument } from './schemas/secret.schema';
 import { CreateSecretDto } from './dto/create-secret.dto';
 import { UpdateSecretDto } from './dto/update-secret.dto';
@@ -27,8 +27,11 @@ export interface SecretListItem {
   key: string;
   description?: string;
   type: string;
-  createdAt: Date;
-  updatedAt: Date;
+  // Optional, weil `timestamps: true` die Felder erst beim Schreiben anlegt:
+  // am Typ sind sie damit `Date | undefined`. Vorher stand hier `Date` und
+  // `toListItem` musste den Wert per `as any` aus dem Dokument holen.
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 @Injectable()
@@ -82,7 +85,12 @@ export class SecretsService {
     if (actor && !actorCanAccessProject(actor, projectId)) {
       throw new ForbiddenException(`Project ${projectId} is not in your scope`);
     }
-    const filter: any = { projectId };
+    // `FilterQuery` statt `any`: der Filter bleibt Feld für Feld derselbe.
+    // Wichtig ist die `!== undefined`-Bedingung — sie bleibt unverändert, denn
+    // Mongoose *entfernt* `undefined`-Felder aus dem Filter, ein
+    // `environmentId: undefined` würde also nicht "kein Environment" heißen,
+    // sondern "beliebiges Environment".
+    const filter: FilterQuery<SecretDocument> = { projectId };
     if (environmentId !== undefined) {
       filter.environmentId = environmentId || null;
     }
@@ -95,7 +103,7 @@ export class SecretsService {
     if (actor && !actorCanAccessCustomer(actor, customerId)) {
       throw new ForbiddenException(`Customer ${customerId} is not in your scope`);
     }
-    const filter: any = { customerId };
+    const filter: FilterQuery<SecretDocument> = { customerId };
     if (environmentId !== undefined) {
       filter.environmentId = environmentId || null;
     }
@@ -165,7 +173,17 @@ export class SecretsService {
     owner: { projectId?: string; customerId?: string },
     environmentId?: string,
   ): Promise<{ key: string; value: string }[]> {
-    const filter: any = {};
+    // Ohne Owner wäre der Filter leer und diese Methode gäbe **alle Secrets der
+    // Datenbank entschlüsselt** zurück. Heute prüfen beide Aufrufer den Owner
+    // vorher, der Pfad ist also unerreichbar — aber genau diese Klasse (leerer
+    // Filter trifft alles) hat in diesem Projekt schon dreimal echte Fehler
+    // verursacht, weil Mongoose `undefined`-Felder aus dem Filter entfernt.
+    // Bei einem Entschlüsselungspfad ist das die Absicherung wert.
+    if (!owner.projectId && !owner.customerId) {
+      throw new BadRequestException('projectId or customerId is required');
+    }
+
+    const filter: FilterQuery<SecretDocument> = {};
     if (owner.projectId) filter.projectId = owner.projectId;
     if (owner.customerId) filter.customerId = owner.customerId;
     if (environmentId !== undefined) {
@@ -188,8 +206,8 @@ export class SecretsService {
       key: obj.key,
       description: obj.description,
       type: obj.type || 'variable',
-      createdAt: (obj as any).createdAt,
-      updatedAt: (obj as any).updatedAt,
+      createdAt: obj.createdAt,
+      updatedAt: obj.updatedAt,
     };
   }
 }

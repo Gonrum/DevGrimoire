@@ -2,25 +2,23 @@ import { ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/com
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
+import { firstValueFrom, isObservable } from 'rxjs';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { AuthService } from '../auth.service';
 import { ApiKeysService } from '../../api-keys/api-keys.service';
-import type { ApiKeyDocument } from '../../api-keys/schemas/api-key.schema';
 import type { ScopeMode } from '../../common/permissions';
-import type { RequestUser } from '../../common/request-context';
+import type { AuthRequest, RequestUser } from '../../common/request-context';
 
 /**
  * The Express request as it looks once an actor has been authenticated.
  *
- * `user` is deliberately the same `RequestUser` shape that `RequestContext`
- * and the `ActorScope` helpers consume downstream, and `apiKey` carries the
- * raw key document (tool allowlist etc.). Declaring the extension once here
- * keeps every access in this guard type-checked instead of scattering casts.
+ * `AuthRequest` (`{ user?: RequestUser; apiKey?: ApiKey }`) is the canonical
+ * declaration in `common/request-context` — the same shape `RequestContext`
+ * and the `ActorScope` helpers consume downstream. Only the Express half is
+ * added here, because this guard is the one place that also touches transport
+ * details (`headers`, `query`).
  */
-interface AuthRequest extends Request {
-  user?: RequestUser;
-  apiKey?: ApiKeyDocument;
-}
+type GuardRequest = Request & AuthRequest;
 
 /** Effective scope after intersecting an api-key scope with its owner's. */
 interface NarrowedScope {
@@ -75,7 +73,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest<AuthRequest>();
+    const request = context.switchToHttp().getRequest<GuardRequest>();
 
     // API Key auth: Bearer cv_... header or ?apiKey= query param
     const authHeader = request.headers.authorization;
@@ -156,7 +154,17 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       request.headers.authorization = `Bearer ${tokenFromQuery}`;
     }
 
-    const passportResult = await (super.canActivate(context) as Promise<boolean>);
+    // `CanActivate.canActivate` darf laut Interface `boolean`, `Promise` oder
+    // `Observable` liefern. Vorher stand hier ein `as Promise<boolean>` — eine
+    // Behauptung, die im Observable-Fall stillschweigend das *Observable-Objekt*
+    // als Ergebnis durchgereicht hätte (truthy → Zugriff erlaubt, ohne dass
+    // jemals ein User geprüft wurde). Statt der Behauptung jetzt eine echte
+    // Laufzeit-Unterscheidung; `@nestjs/passport` liefert praktisch immer ein
+    // Promise, dieser Pfad ändert daran nichts.
+    const passportOutcome = super.canActivate(context);
+    const passportResult = isObservable(passportOutcome)
+      ? await firstValueFrom(passportOutcome)
+      : await passportOutcome;
     const jwtUser = request.user;
     if (passportResult && jwtUser?.userId) {
       // Enrich request.user with scope/permission info from DB so service-layer
