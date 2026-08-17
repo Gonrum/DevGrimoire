@@ -16,7 +16,6 @@ import {
 } from '@nestjs/common';
 import { errorMessage } from '../common/narrow';
 import { Request, Response } from 'express';
-import { Types } from 'mongoose';
 import { ResearchTopicService } from './research-topic.service';
 import { ResearchArtifactService } from './research-artifact.service';
 import { ResearchRunService, RunEvent } from './research-run.service';
@@ -178,8 +177,13 @@ export class ResearchAgentController {
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
-    const flushHeaders = (res as Response & { flushHeaders?: () => void }).flushHeaders;
-    if (typeof flushHeaders === 'function') flushHeaders.call(res);
+    // Direkt aufgerufen statt über eine losgelöste Methoden-Referenz: Express'
+    // `Response` erbt von `http.ServerResponse` und hat `flushHeaders` immer.
+    // Das vorherige `const f = (res as … ).flushHeaders; f.call(res)` löste die
+    // Methode von ihrem Objekt und band sie per `.call` wieder an — Aufwand für
+    // eine Duck-Typing-Prüfung, die bei einer echten Express-Response nie
+    // fehlschlägt.
+    res.flushHeaders();
 
     const send = (event: Record<string, unknown>): void => {
       if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -245,8 +249,13 @@ export class ResearchAgentController {
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
-    const flushHeaders = (res as Response & { flushHeaders?: () => void }).flushHeaders;
-    if (typeof flushHeaders === 'function') flushHeaders.call(res);
+    // Direkt aufgerufen statt über eine losgelöste Methoden-Referenz: Express'
+    // `Response` erbt von `http.ServerResponse` und hat `flushHeaders` immer.
+    // Das vorherige `const f = (res as … ).flushHeaders; f.call(res)` löste die
+    // Methode von ihrem Objekt und band sie per `.call` wieder an — Aufwand für
+    // eine Duck-Typing-Prüfung, die bei einer echten Express-Response nie
+    // fehlschlägt.
+    res.flushHeaders();
 
     const send = (event: Record<string, unknown>): void => {
       if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);

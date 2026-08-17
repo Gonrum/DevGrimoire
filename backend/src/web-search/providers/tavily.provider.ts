@@ -1,10 +1,13 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
-import { AxiosError } from 'axios';
 import { SearchProvider, SearchProviderOptions, SearchResult } from './search-provider.interface';
+import { providerErrorMessage } from './provider-error';
 
+// `title` und `results` optional wie der Mapper sie liest (`r.title ?? ''`,
+// `raw.results ?? []`). `score`/`published_date` liefert Tavily je Treffer
+// unterschiedlich — beides bleibt optional und wird nicht ersetzt.
 interface TavilyResultItem {
-  title: string;
+  title?: string;
   url: string;
   content?: string;
   score?: number;
@@ -12,7 +15,7 @@ interface TavilyResultItem {
 }
 
 interface TavilyResponse {
-  results: TavilyResultItem[];
+  results?: TavilyResultItem[];
 }
 
 /**
@@ -62,13 +65,8 @@ export class TavilyProvider implements SearchProvider {
         headers: { Accept: 'application/json' },
       });
       return res.data;
-    } catch (err) {
-      const ax = err as AxiosError;
-      const msg = ax.response
-        ? `Tavily returned ${ax.response.status}`
-        : ax.code === 'ECONNABORTED'
-          ? 'Tavily timeout'
-          : `Tavily unreachable: ${ax.message}`;
+    } catch (err: unknown) {
+      const msg = providerErrorMessage('Tavily', err);
       this.logger.error(msg);
       throw new ServiceUnavailableException(msg);
     }

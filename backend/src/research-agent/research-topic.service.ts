@@ -30,14 +30,23 @@ export interface ResearchTopicListFilter {
   q?: string;
 }
 
-/** Strip `undefined` values so a partial-update spread never clobbers existing fields. */
-function definedOnly<T extends object>(obj?: Partial<T>): Partial<T> {
-  if (!obj) return {};
-  const out: Partial<T> = {};
-  for (const key of Object.keys(obj) as (keyof T)[]) {
-    if (obj[key] !== undefined) out[key] = obj[key];
-  }
-  return out;
+/**
+ * Legt die vier Guardrails fest: gesetzter Wert gewinnt, sonst der Wert aus
+ * `base`.
+ *
+ * Ersetzt ein generisches `definedOnly<T>()`, das `Object.keys(obj) as (keyof
+ * T)[]` behaupten musste, weil `Object.keys` nur `string[]` liefert. Feldweise
+ * ausgeschrieben braucht es die Behauptung nicht — und der Compiler prüft
+ * dabei, dass alle vier Felder wirklich belegt sind, was der Spread
+ * `{...base, ...definedOnly(dto)}` nur zugesagt hat.
+ */
+function mergeGuardrails(base: ResearchGuardrails, dto?: ResearchGuardrailsDto): ResearchGuardrails {
+  return {
+    maxIterations: dto?.maxIterations ?? base.maxIterations,
+    maxWebSearches: dto?.maxWebSearches ?? base.maxWebSearches,
+    maxWebFetches: dto?.maxWebFetches ?? base.maxWebFetches,
+    timeoutMs: dto?.timeoutMs ?? base.timeoutMs,
+  };
 }
 
 @Injectable()
@@ -89,7 +98,7 @@ export class ResearchTopicService {
   }
 
   private buildGuardrails(dto?: ResearchGuardrailsDto): ResearchGuardrails {
-    return { ...DEFAULT_GUARDRAILS, ...definedOnly(dto) };
+    return mergeGuardrails(DEFAULT_GUARDRAILS, dto);
   }
 
   /**
@@ -179,7 +188,7 @@ export class ResearchTopicService {
     }
 
     if (dto.guardrails) {
-      topic.guardrails = { ...topic.guardrails, ...definedOnly(dto.guardrails) };
+      topic.guardrails = mergeGuardrails(topic.guardrails, dto.guardrails);
     }
 
     if (dto.schedule) {

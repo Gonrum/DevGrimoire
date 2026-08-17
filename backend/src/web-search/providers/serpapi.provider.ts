@@ -1,10 +1,13 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
-import { AxiosError } from 'axios';
 import { SearchProvider, SearchProviderOptions, SearchResult } from './search-provider.interface';
+import { providerErrorMessage } from './provider-error';
 
+// `title` optional wie der Mapper es liest (`r.title ?? ''`); `link` bleibt
+// zugesagt, ohne Link gibt es kein Ergebnis. `date` liefert Google nur für
+// datierte Treffer — deshalb optional und nicht auf '' normalisiert.
 interface SerpApiResultItem {
-  title: string;
+  title?: string;
   link: string;
   snippet?: string;
   date?: string;
@@ -62,13 +65,8 @@ export class SerpApiProvider implements SearchProvider {
         headers: { Accept: 'application/json' },
       });
       return res.data;
-    } catch (err) {
-      const ax = err as AxiosError;
-      const msg = ax.response
-        ? `SerpApi returned ${ax.response.status}`
-        : ax.code === 'ECONNABORTED'
-          ? 'SerpApi timeout'
-          : `SerpApi unreachable: ${ax.message}`;
+    } catch (err: unknown) {
+      const msg = providerErrorMessage('SerpApi', err);
       this.logger.error(msg);
       throw new ServiceUnavailableException(msg);
     }

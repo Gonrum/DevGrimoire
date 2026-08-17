@@ -1,6 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { errorMessage } from '../common/narrow';
-import { Types } from 'mongoose';
+import { errorMessage, isRecord } from '../common/narrow';
 import { RequestContext, RequestUser } from '../common/request-context';
 import { ChatLlmService, LlmMessageWithTools, OpenAiToolDef } from '../chat/chat-llm.service';
 import { RagService } from '../rag/rag.service';
@@ -106,8 +105,8 @@ function collectArtifactAction(
 ): void {
   if (toolName !== 'artifact_write') return;
   try {
-    const parsed = JSON.parse(resultText) as { slug?: unknown; action?: unknown };
-    if (typeof parsed?.slug !== 'string') return;
+    const parsed: unknown = JSON.parse(resultText);
+    if (!isRecord(parsed) || typeof parsed.slug !== 'string') return;
     if (parsed.action === 'created') created.add(parsed.slug);
     else if (parsed.action === 'updated') updated.add(parsed.slug);
   } catch {
@@ -571,8 +570,18 @@ export class ResearchAgentService {
     try {
       const result = await Promise.race([loopPromise, timeoutPromise, abortPromise]);
       return { result };
-    } catch (err) {
-      const code = (err as { code?: GuardrailFailure }).code ?? 'error';
+    } catch (err: unknown) {
+      // Die beiden Abbruchgründe werden oben als `Object.assign(new Error(…),
+      // { code })` geworfen. Vorher stand hier `(err as { code?:
+      // GuardrailFailure }).code ?? 'error'` — das behauptete für JEDEN Fehler
+      // aus dem Tool-Loop, sein `code` sei einer der drei Guardrail-Werte, und
+      // gab ihn unverändert weiter. Sichtbar wird das bei `raced.failure ===
+      // 'cancelled'` (siehe `run`): ein fremdes `code: 'cancelled'` hätte den
+      // Lauf als abgebrochen statt als fehlgeschlagen verbucht. Jetzt zählen
+      // nur die beiden Werte, die diese Funktion selbst wirft.
+      const rawCode = isRecord(err) ? err.code : undefined;
+      const code: GuardrailFailure =
+        rawCode === 'timeout' || rawCode === 'cancelled' ? rawCode : 'error';
       return { failure: code, error: err instanceof Error ? err : new Error(String(err)) };
     } finally {
       if (timer) clearTimeout(timer);

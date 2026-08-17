@@ -1,10 +1,13 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
-import { AxiosError } from 'axios';
 import { SearchProvider, SearchProviderOptions, SearchResult } from './search-provider.interface';
+import { providerErrorMessage } from './provider-error';
 
+// `title` und `web.results` sind optional deklariert, weil der Mapper unten
+// genau so damit umgeht (`r.title ?? ''`, `raw.web?.results ?? []`). Nur `url`
+// gilt als zugesagt — ein organisches Ergebnis ohne URL wäre kein Ergebnis.
 interface BraveResultItem {
-  title: string;
+  title?: string;
   url: string;
   description?: string;
   age?: string;
@@ -12,7 +15,7 @@ interface BraveResultItem {
 
 interface BraveResponse {
   web?: {
-    results: BraveResultItem[];
+    results?: BraveResultItem[];
   };
 }
 
@@ -64,13 +67,8 @@ export class BraveProvider implements SearchProvider {
         },
       });
       return res.data;
-    } catch (err) {
-      const ax = err as AxiosError;
-      const msg = ax.response
-        ? `Brave returned ${ax.response.status}`
-        : ax.code === 'ECONNABORTED'
-          ? 'Brave timeout'
-          : `Brave unreachable: ${ax.message}`;
+    } catch (err: unknown) {
+      const msg = providerErrorMessage('Brave', err);
       this.logger.error(msg);
       throw new ServiceUnavailableException(msg);
     }

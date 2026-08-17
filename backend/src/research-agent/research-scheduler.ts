@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { Types } from 'mongoose';
 import { ResearchTopicService } from './research-topic.service';
 import { ResearchRunService } from './research-run.service';
 import { ResearchAgentService } from './research-agent.service';
@@ -55,7 +54,7 @@ export class ResearchScheduler {
           await this.fireTopic(topic, now);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          this.logger.error(`Failed to process due research topic ${topic._id}: ${message}`);
+          this.logger.error(`Failed to process due research topic ${topic._id.toString()}: ${message}`);
         }
       }
     } finally {

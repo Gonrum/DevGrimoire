@@ -8,11 +8,14 @@ import { WebSearchRateLimiterService } from './web-search-rate-limiter.service';
 import { WebSearchConfigService } from './web-search-config.service';
 import { resolveSearxngUrl } from './searxng-url.util';
 import { WebSearchCache, WebSearchCacheDocument } from '../schemas/web-search-cache.schema';
+import { errorMessage } from '../../common/narrow';
 import {
   WebSearchQuery,
   WebSearchResponse,
   WebSearchHit,
   SearchCategory,
+  SEARCH_CATEGORIES,
+  readCachedWebSearchResponse,
 } from '../dto/web-search.dto';
 
 export const SETTING_ENABLED = 'web_search_enabled';
@@ -21,13 +24,7 @@ export const SETTING_CACHE_TTL_HOURS = 'web_search_cache_ttl_hours';
 export const SETTING_CONTENT_CACHE_TTL_DAYS = 'web_search_content_cache_ttl_days';
 export const SETTING_MAX_RESULTS = 'web_search_max_results';
 
-const VALID_CATEGORIES: ReadonlySet<SearchCategory> = new Set([
-  'general',
-  'news',
-  'science',
-  'it',
-  'files',
-]);
+const VALID_CATEGORIES: ReadonlySet<SearchCategory> = new Set(SEARCH_CATEGORIES);
 
 @Injectable()
 export class WebSearchService {
@@ -104,9 +101,8 @@ export class WebSearchService {
     const hash = this.hashQuery(query, language, categories, timeRange);
 
     const cached = await this.cacheModel.findOne({ queryHash: hash }).lean().exec();
-    if (cached) {
-      return { ...(cached.payload as unknown as WebSearchResponse), cached: true };
-    }
+    const fromCache = cached ? readCachedWebSearchResponse(cached.payload) : undefined;
+    if (fromCache) return fromCache;
 
     // Rate-limit only on cache miss — cached responses are free.
     this.rateLimiter.consume('search');
@@ -137,8 +133,8 @@ export class WebSearchService {
     };
 
     // Fire and forget — cache write must not block response
-    this.writeCache(hash, query, response).catch((err) =>
-      this.logger.warn(`cache write failed: ${err.message ?? err}`),
+    this.writeCache(hash, query, response).catch((err: unknown) =>
+      this.logger.warn(`cache write failed: ${errorMessage(err)}`),
     );
 
     return response;

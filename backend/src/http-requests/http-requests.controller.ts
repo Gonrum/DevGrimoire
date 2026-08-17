@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import { errorMessage } from '../common/narrow';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { Readable } from 'stream';
 import { pipeline } from 'node:stream';
 import { HttpRequestsService } from './http-requests.service';
@@ -13,6 +13,12 @@ import { ParseCurlDto } from './dto/parse-curl.dto';
 import { Public } from '../auth/decorators/public.decorator';
 import { DownloadTicketService } from './download-ticket.service';
 import { DownloadTicketDto } from './dto/download-ticket.dto';
+
+/** `JwtAuthGuard` hängt global (`app.module.ts`), `req.user` ist also gesetzt,
+ * sobald ein Request hier ankommt — gleiche Form wie in `auth.controller.ts`. */
+interface AuthRequest extends Request {
+  user?: { userId?: string };
+}
 
 @Controller()
 export class HttpRequestsController {
@@ -104,7 +110,7 @@ export class HttpRequestsController {
   // ---- Streaming-Download ----
   @Post('requests/:id/download-ticket')
   @HttpCode(200)
-  async downloadTicket(@Param('id') id: string, @Body() dto: DownloadTicketDto, @Req() req: any) {
+  async downloadTicket(@Param('id') id: string, @Body() dto: DownloadTicketDto, @Req() req: AuthRequest) {
     await this.svc.getRequest(id); // Existenz-Check (wirft NotFound, wenn der Request nicht existiert)
     const userId = req.user?.userId ?? 'anonymous';
     const ticket = this.tickets.mint({ requestId: id, environmentId: dto.environmentId, userId });
@@ -125,7 +131,14 @@ export class HttpRequestsController {
       if (cl && !upstream.headers.get('content-encoding')) res.setHeader('Content-Length', cl);
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       if (!upstream.body) { res.end(); return; }
-      pipeline(Readable.fromWeb(upstream.body as any), res, (err) => {
+      // `Readable.from` statt `Readable.fromWeb`: der Body von fetch() ist der
+      // `ReadableStream` aus undici-types, `fromWeb` erwartet den aus
+      // `node:stream/web` — zwei Deklarationen, die TS nicht ineinander
+      // zuweisen lässt (`ReadableStreamReadDoneResult.value` optional vs.
+      // pflichtig). Genau dafür stand hier vorher `as any`. Der Body ist
+      // async-iterierbar, `from` braucht keine Behauptung; `objectMode: false`
+      // hält den Stream im Buffer-Modus wie beim Durchpipen üblich.
+      pipeline(Readable.from(upstream.body, { objectMode: false }), res, (err) => {
         if (err && !res.headersSent) {
           res.status(502).json({ message: 'Stream-Fehler: ' + err.message });
         }

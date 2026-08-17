@@ -1,7 +1,7 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
-import { AxiosError } from 'axios';
 import { SearchProvider, SearchProviderOptions, SearchResult } from './search-provider.interface';
+import { providerErrorMessage } from './provider-error';
 import { SearxngResponse } from '../dto/web-search.dto';
 
 /**
@@ -56,13 +56,8 @@ export class SearxngProvider implements SearchProvider {
         headers: { Accept: 'application/json' },
       });
       return res.data;
-    } catch (err) {
-      const ax = err as AxiosError;
-      const msg = ax.response
-        ? `SearXNG returned ${ax.response.status}`
-        : ax.code === 'ECONNABORTED'
-          ? 'SearXNG timeout'
-          : `SearXNG unreachable: ${ax.message}`;
+    } catch (err: unknown) {
+      const msg = providerErrorMessage('SearXNG', err);
       this.logger.error(msg);
       throw new ServiceUnavailableException(msg);
     }

@@ -6,14 +6,16 @@ import { lookup } from 'dns/promises';
 import { isIP } from 'net';
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
-import DOMPurify from 'isomorphic-dompurify';
-import { AxiosError } from 'axios';
+import { isAxiosError } from 'axios';
+// `isomorphic-dompurify` wird hier nicht mehr importiert — siehe Kommentar in
+// `extractReadable`.
 import { HttpService } from '@nestjs/axios';
+import { errorMessage } from '../../common/narrow';
 import { WebSearchService } from './web-search.service';
 import { WebSearchRateLimiterService } from './web-search-rate-limiter.service';
 import { ConcurrencyLimiter } from './concurrency-limiter';
 import { WebFetchCache, WebFetchCacheDocument } from '../schemas/web-fetch-cache.schema';
-import { WebFetchResponse, WebFetchQuery } from '../dto/web-search.dto';
+import { WebFetchResponse, WebFetchQuery, readCachedWebFetchResponse } from '../dto/web-search.dto';
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
@@ -48,9 +50,8 @@ export class ReadabilityService {
     const cacheKey = this.hashUrl(normalizedUrl, input.raw === true, maxLength);
 
     const cached = await this.cacheModel.findOne({ urlHash: cacheKey }).lean().exec();
-    if (cached) {
-      return { ...(cached.payload as unknown as WebFetchResponse), cached: true };
-    }
+    const fromCache = cached ? readCachedWebFetchResponse(cached.payload) : undefined;
+    if (fromCache) return fromCache;
 
     // Rate-limit only on cache miss — cached responses are free.
     this.rateLimiter.consume('fetch');
@@ -88,7 +89,7 @@ export class ReadabilityService {
         { upsert: true },
       )
       .exec()
-      .catch((err) => this.logger.warn(`fetch cache write failed: ${err.message ?? err}`));
+      .catch((err: unknown) => this.logger.warn(`fetch cache write failed: ${errorMessage(err)}`));
 
     return response;
   }
@@ -154,15 +155,19 @@ export class ReadabilityService {
           'Accept-Language': 'de,en;q=0.8',
         },
       });
-    } catch (err) {
-      const ax = err as AxiosError;
-      if (ax.code === 'ECONNABORTED') throw new ServiceUnavailableException('Fetch timeout');
-      throw new ServiceUnavailableException(`Fetch failed: ${ax.message ?? 'unknown error'}`);
+    } catch (err: unknown) {
+      if (isAxiosError(err) && err.code === 'ECONNABORTED') {
+        throw new ServiceUnavailableException('Fetch timeout');
+      }
+      throw new ServiceUnavailableException(`Fetch failed: ${errorMessage(err)}`);
     }
 
-    // Redirect — manually re-validate the next hop
-    if (res.status >= 300 && res.status < 400 && res.headers.location) {
-      const next = new URL(res.headers.location, url).toString();
+    // Redirect — manually re-validate the next hop. `headers` ist bei axios über
+    // eine Index-Signatur `any` getypt; der Wert wird deshalb als `unknown`
+    // gelesen und geprüft, statt ihn als String zu behaupten.
+    const location: unknown = res.headers.location;
+    if (res.status >= 300 && res.status < 400 && typeof location === 'string' && location) {
+      const next = new URL(location, url).toString();
       return this.safeFetch(next, redirectDepth + 1);
     }
 
@@ -171,7 +176,11 @@ export class ReadabilityService {
     }
 
     const body = typeof res.data === 'string' ? res.data : String(res.data ?? '');
-    const contentType = (res.headers['content-type'] as string | undefined)?.split(';')[0]?.trim().toLowerCase();
+    const rawContentType: unknown = res.headers['content-type'];
+    const contentType =
+      typeof rawContentType === 'string'
+        ? rawContentType.split(';')[0]?.trim().toLowerCase()
+        : undefined;
     return { body, finalUrl: url.toString(), contentType };
   }
 
@@ -255,9 +264,12 @@ export class ReadabilityService {
       if (!article) {
         throw new BadRequestException('Readability could not extract any content from this page');
       }
-      const sanitized = DOMPurify.sanitize(article.content ?? '', {
-        USE_PROFILES: { html: true },
-      });
+      // Hier stand ein `DOMPurify.sanitize(article.content …)`, dessen Ergebnis
+      // in einer Variablen landete und nie gelesen wurde: die Antwort enthält
+      // ausschließlich `article.textContent` (Klartext), kein HTML-Feld. Der
+      // Aufruf hat also nichts geschützt — er sah nur so aus. Entfernt statt
+      // scheinbar benutzt; wer HTML ausliefern will, braucht ein eigenes Feld
+      // *und* dann diese Bereinigung.
       const text = (article.textContent ?? '').trim().slice(0, maxLength);
       return {
         title: article.title ?? '',

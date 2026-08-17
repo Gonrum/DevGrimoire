@@ -1,4 +1,6 @@
-import { ParsedCurlRequest, HttpMethod, KeyValue, HeaderEntry, RequestAuth, RequestBody } from './http-requests.types';
+import {
+  ParsedCurlRequest, HttpMethod, HTTP_METHODS, KeyValue, HeaderEntry, RequestAuth, RequestBody,
+} from './http-requests.types';
 
 // --- Shell-aware tokenizer: single/double quotes, backslash escapes, \<nl> continuations. ---
 function tokenize(input: string): string[] {
@@ -100,9 +102,18 @@ export function parseCurl(input: string): ParsedCurlRequest {
     const next = () => tokens[++i];
 
     switch (flag) {
-      case '-X': case '--request':
-        method = takeValue(inlineVal, next).toUpperCase() as HttpMethod;
+      case '-X': case '--request': {
+        // `find` statt `as HttpMethod`: ein `-X FOO` behauptete vorher eine
+        // Methode, die es nicht gibt, und fiel erst weiter hinten auf — beim
+        // Import an der Enum-Prüfung des Schemas, beim Senden am fetch().
+        // Jetzt greift die normale Inferenz (POST bei Body, sonst GET) und die
+        // verworfene Methode steht in den Warnungen, die der Import ausgibt.
+        const requested = takeValue(inlineVal, next).toUpperCase();
+        const known = HTTP_METHODS.find((candidate) => candidate === requested);
+        if (known) method = known;
+        else warnings.push(`Unbekannte HTTP-Methode ignoriert: ${requested}`);
         break;
+      }
       case '-H': case '--header': {
         const raw = takeValue(inlineVal, next);
         const idx = raw.indexOf(':');

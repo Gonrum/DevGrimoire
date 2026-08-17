@@ -6,12 +6,11 @@ import { ReadabilityService } from './services/readability.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../auth/schemas/user.schema';
-import { SearchCategory, SearchTimeRange } from './dto/web-search.dto';
+import { SearchCategory, SearchTimeRange, isSearchCategory } from './dto/web-search.dto';
 import {
-  SearchProviderType,
-  SEARCH_PROVIDER_TYPES,
   UpdateWebSearchConfigDto,
   TestProviderConfigDto,
+  isValidProviderType,
 } from './dto/web-search-config.dto';
 
 @Controller('web-search')
@@ -63,12 +62,14 @@ export class WebSearchController {
   ) {
     if (!q) throw new BadRequestException('Query parameter "q" is required');
     const parsedLimit = limit ? parseInt(limit, 10) : undefined;
-    const parsedCategories = categories
-      ? (categories.split(',').map((c) => c.trim()).filter(Boolean) as SearchCategory[])
+    // Beide Query-Parameter kommen als beliebige Strings herein. Vorher wurden
+    // sie mit `as SearchCategory[]` / `as SearchProviderType` behauptet; jetzt
+    // filtern bzw. prüfen Prädikate, sodass ein unbekannter Wert wegfällt statt
+    // getypt weiterzulaufen.
+    const parsedCategories: SearchCategory[] | undefined = categories
+      ? categories.split(',').map((c) => c.trim()).filter(isSearchCategory)
       : undefined;
-    const parsedProvider = provider && (SEARCH_PROVIDER_TYPES as readonly string[]).includes(provider)
-      ? (provider as SearchProviderType)
-      : undefined;
+    const parsedProvider = isValidProviderType(provider) ? provider : undefined;
     return this.webSearchService.search({
       query: q,
       language,

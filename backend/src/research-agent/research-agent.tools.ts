@@ -1,3 +1,4 @@
+import { isRecord, isUnknownArray } from '../common/narrow';
 import { ResearchArtifactService } from './research-artifact.service';
 import { ResearchGuardrails, ResearchTopicDocument } from './schemas/research-topic.schema';
 import { RunStep } from './schemas/research-run.schema';
@@ -97,8 +98,17 @@ function topicId(topic: ResearchTopicDocument): string {
   return topic._id.toString();
 }
 
+// Tool-Argumente kommen als vom LLM erzeugtes JSON, also als `unknown`. Gelesen
+// wird über `isRecord`/`isUnknownArray` statt über
+// `(args as Record<string, unknown>)?.[key]`: das Prädikat prüft dieselbe Form,
+// die die Behauptung nur zugesagt hat. `Array.isArray` wäre hier die falsche
+// Wahl — es verengt `unknown` zu `any[]` und macht jedes Element wieder zu `any`.
+function readArg(args: unknown, key: string): unknown {
+  return isRecord(args) ? args[key] : undefined;
+}
+
 function requireString(args: unknown, key: string): string {
-  const value = (args as Record<string, unknown> | null | undefined)?.[key];
+  const value = readArg(args, key);
   if (typeof value !== 'string' || !value.trim()) {
     throw new Error(`Parameter "${key}" ist erforderlich`);
   }
@@ -106,13 +116,13 @@ function requireString(args: unknown, key: string): string {
 }
 
 function optionalString(args: unknown, key: string): string | undefined {
-  const value = (args as Record<string, unknown> | null | undefined)?.[key];
+  const value = readArg(args, key);
   return typeof value === 'string' ? value : undefined;
 }
 
 function optionalStringArray(args: unknown, key: string): string[] | undefined {
-  const value = (args as Record<string, unknown> | null | undefined)?.[key];
-  if (!Array.isArray(value)) return undefined;
+  const value = readArg(args, key);
+  if (!isUnknownArray(value)) return undefined;
   return value.filter((v): v is string => typeof v === 'string');
 }
 
@@ -272,7 +282,7 @@ export function buildResearchTools(ctx: ResearchToolContext): {
 
   async function execRagSearch(args: unknown): Promise<string> {
     const query = requireString(args, 'query');
-    const requested = (args as { limit?: unknown })?.limit;
+    const requested = readArg(args, 'limit');
     const requestedLimit = typeof requested === 'number' && Number.isFinite(requested) ? requested : RAG_SEARCH_DEFAULT_LIMIT;
     const limit = Math.max(1, Math.min(Math.trunc(requestedLimit), RAG_SEARCH_MAX_LIMIT));
 

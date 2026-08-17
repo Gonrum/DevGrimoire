@@ -17,7 +17,11 @@ import { EnvironmentsService } from '../environments/environments.service';
 import { projectIdFilter } from '../common/project-id-filter';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { parseCurl } from './curl-parser';
-import { ParsedCurlRequest, RequestDefinition } from './http-requests.types';
+import { isRecord, errorMessage } from '../common/narrow';
+import {
+  AUTH_TYPES, BODY_MODES, HTTP_METHODS,
+  ParsedCurlRequest, RequestAuth, RequestBody, RequestDefinition,
+} from './http-requests.types';
 import { SendRequestDto } from './dto/send-request.dto';
 import { buildResolutionContext, resolveRequest, maskSecrets } from './template-resolver';
 
@@ -50,6 +54,32 @@ interface PreparedRequest {
   environmentName?: string;
   environmentOid?: Types.ObjectId;
 }
+
+/**
+ * Verengt einen fremden String auf einen der erlaubten Werte. `find` liefert
+ * `T | undefined`, der verengte Typ entsteht also aus der Laufzeitprüfung statt
+ * aus einer Behauptung — dasselbe Muster wie `optionalEnum` in
+ * `common/tool-args.ts`.
+ *
+ * Gebraucht wird das, weil hier zwei Schreibweisen derselben Werte
+ * zusammenlaufen: die Mongoose-/DTO-Seite benutzt String-Enums
+ * (`HttpRequestMethod.GET`), die Nest-freien Resolver-Typen String-Unions
+ * (`'GET'`). TS lässt zwischen beiden keine Zuweisung zu — vorher stand
+ * deshalb an jeder Grenze ein `as unknown as`.
+ */
+function pickAllowed<T extends string>(allowed: readonly T[], value: string, label: string): T {
+  const match = allowed.find((candidate) => candidate === value);
+  if (match === undefined) {
+    throw new BadRequestException(`${label} "${value}" wird nicht unterstützt`);
+  }
+  return match;
+}
+
+/** Felder, die `updateRequest` aus dem DTO nach `$set` durchlässt. */
+const UPDATABLE_REQUEST_FIELDS = [
+  'name', 'description', 'order', 'method', 'url', 'queryParams', 'headers',
+  'auth', 'body', 'timeoutMs', 'followRedirects',
+] as const satisfies readonly (keyof UpdateRequestDto)[];
 
 function sanitizeFilename(name: string): string {
   const cleaned = name.replace(/[\r\n"]/g, '').replace(/[/\\]/g, '_').trim();
@@ -154,8 +184,9 @@ export class HttpRequestsService {
 
   async updateRequest(id: string, dto: UpdateRequestDto): Promise<SavedRequestDocument> {
     const $set: Record<string, unknown> = {};
-    for (const key of ['name', 'description', 'order', 'method', 'url', 'queryParams', 'headers', 'auth', 'body', 'timeoutMs', 'followRedirects'] as const) {
-      if ((dto as Record<string, unknown>)[key] !== undefined) $set[key] = (dto as Record<string, unknown>)[key];
+    for (const key of UPDATABLE_REQUEST_FIELDS) {
+      const value = dto[key];
+      if (value !== undefined) $set[key] = value;
     }
     const doc = await this.requestModel.findByIdAndUpdate(this.objectId(id), { $set }, { new: true }).exec();
     if (!doc) throw new NotFoundException('Request not found');
@@ -195,12 +226,25 @@ export class HttpRequestsService {
     return this.createRequest({
       collectionId,
       name: name || `${parsed.method} ${parsed.url}`.slice(0, 120),
-      method: parsed.method as unknown as CreateRequestDto['method'],
+      // Parser-Union → Schema-Enum. Der Parser liefert nur bekannte Werte, die
+      // Prüfung kostet also nichts — sie ersetzt aber drei `as unknown as`,
+      // die jeden künftigen Parser-Wert ungeprüft ins Schema geschrieben hätten.
+      method: pickAllowed(Object.values(HttpRequestMethod), parsed.method, 'HTTP-Methode'),
       url: parsed.url,
       queryParams: parsed.queryParams,
       headers: parsed.headers,
-      auth: parsed.auth as unknown as CreateRequestDto['auth'],
-      body: parsed.body as unknown as CreateRequestDto['body'],
+      auth: {
+        type: pickAllowed(Object.values(RequestAuthType), parsed.auth.type, 'Auth-Typ'),
+        username: parsed.auth.username,
+        password: parsed.auth.password,
+        token: parsed.auth.token,
+      },
+      body: {
+        mode: pickAllowed(Object.values(RequestBodyMode), parsed.body.mode, 'Body-Modus'),
+        raw: parsed.body.raw,
+        contentType: parsed.body.contentType,
+        formFields: parsed.body.formFields,
+      },
       followRedirects: parsed.followRedirects,
     });
   }
@@ -210,16 +254,39 @@ export class HttpRequestsService {
   // Gemeinsame Auflösung für send() und openStream() (Templating + Secrets +
   // ausgehender Request). Kein fetch, kein read.
   private async prepareOutgoing(base: SavedRequestDocument, opts: SendRequestDto): Promise<PreparedRequest> {
-    const def = {
-      method: opts.method ?? base.method,
+    // Editor-Stand (DTO, String-Enums) oder gespeicherter Request
+    // (Mongoose-Subdokumente) → Nest-freie Resolver-Form. Die Enum-Werte werden
+    // dabei geprüft statt behauptet; ein Dokument mit einer Methode/einem
+    // Body-Modus, den das Schema nicht kennt, führt jetzt zu 400 statt zu einem
+    // ausgehenden Request mit erfundener Methode.
+    const authSource = opts.auth ?? base.auth;
+    const bodySource = opts.body ?? base.body;
+    const auth: RequestAuth | undefined = authSource
+      ? {
+          type: pickAllowed(AUTH_TYPES, authSource.type, 'Auth-Typ'),
+          username: authSource.username,
+          password: authSource.password,
+          token: authSource.token,
+        }
+      : undefined;
+    const body: RequestBody | undefined = bodySource
+      ? {
+          mode: pickAllowed(BODY_MODES, bodySource.mode, 'Body-Modus'),
+          raw: bodySource.raw,
+          contentType: bodySource.contentType,
+          formFields: bodySource.formFields,
+        }
+      : undefined;
+    const def: RequestDefinition = {
+      method: pickAllowed(HTTP_METHODS, opts.method ?? base.method, 'HTTP-Methode'),
       url: opts.url ?? base.url,
       queryParams: opts.queryParams ?? base.queryParams,
       headers: opts.headers ?? base.headers,
-      auth: opts.auth ?? base.auth,
-      body: opts.body ?? base.body,
+      auth,
+      body,
       timeoutMs: opts.timeoutMs ?? base.timeoutMs,
       followRedirects: opts.followRedirects ?? base.followRedirects,
-    } as unknown as RequestDefinition;
+    };
 
     const projectId = base.projectId.toString();
     const globalSecrets = await this.secretsService.getDecryptedForEnvironment({ projectId }, '');
@@ -229,7 +296,7 @@ export class HttpRequestsService {
     let environmentOid: Types.ObjectId | undefined;
     if (opts.environmentId) {
       const env = await this.environmentsService.findById(opts.environmentId);
-      const envProj = (env as unknown as { projectId?: { toString(): string } }).projectId?.toString();
+      const envProj = env.projectId?.toString();
       if (envProj && envProj !== projectId) {
         throw new BadRequestException('Environment gehört nicht zu diesem Projekt');
       }
@@ -329,8 +396,12 @@ export class HttpRequestsService {
       truncated = rawText.length > MAX_RESPONSE_BODY;
       liveBody = truncated ? rawText.slice(0, MAX_RESPONSE_BODY) : rawText;
     } catch (err: unknown) {
-      const e = err as { name?: string; message?: string };
-      error = e?.name === 'AbortError' ? `Timeout nach ${timeoutMs}ms` : (e?.message || 'Unbekannter Fehler');
+      // `name` wird über `isRecord` gelesen statt über `instanceof Error`: der
+      // Abbruch von fetch() kommt als DOMException, und ob die in der
+      // Node-Version im Prototypen von Error hängt, soll die Timeout-Meldung
+      // nicht entscheiden.
+      const name = isRecord(err) ? err.name : undefined;
+      error = name === 'AbortError' ? `Timeout nach ${timeoutMs}ms` : (errorMessage(err) || 'Unbekannter Fehler');
     } finally {
       clearTimeout(timer);
     }

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { errorMessage } from '../../common/narrow';
+import { errorMessage, isRecord, isUnknownArray } from '../../common/narrow';
 import { HttpService } from '@nestjs/axios';
 import { SettingsService } from '../../settings/settings.service';
 import { EncryptionService } from '../../common/encryption.service';
@@ -45,6 +45,24 @@ export function resolveTestApiKey(
 interface StoredWebSearchConfig {
   activeProvider: SearchProviderType;
   providers: StoredProviderConfig[];
+}
+
+/**
+ * Liest einen Provider-Eintrag aus dem gespeicherten JSON.
+ *
+ * Vorher: `parsed.providers.filter((p): p is StoredProviderConfig => … &&
+ * isValidProviderType((p as StoredProviderConfig).type))` — geprüft wurde nur
+ * `type`, behauptet aber der ganze Eintrag. Ein `apiKeyEnc: 42` (etwa aus einer
+ * von Hand editierten Settings-Zeile) wäre so als String durchgelaufen und erst
+ * in `EncryptionService.decrypt` aufgefallen. Jetzt wird jedes Feld einzeln
+ * geprüft und der Eintrag neu aufgebaut.
+ */
+function readStoredProvider(value: unknown): StoredProviderConfig | undefined {
+  if (!isRecord(value) || !isValidProviderType(value.type)) return undefined;
+  const entry: StoredProviderConfig = { type: value.type };
+  if (typeof value.baseUrl === 'string') entry.baseUrl = value.baseUrl;
+  if (typeof value.apiKeyEnc === 'string') entry.apiKeyEnc = value.apiKeyEnc;
+  return entry;
 }
 
 /**
@@ -131,7 +149,19 @@ export class WebSearchConfigService {
     }
   }
 
-  private instantiateProvider(type: SearchProviderType, apiKey: string, baseUrl?: string): SearchProvider {
+  /**
+   * `type` ist absichtlich als `string` deklariert und wird hier geprüft: der
+   * Wert kommt aus dem gespeicherten JSON bzw. aus einem Query-Parameter. Der
+   * Fallback-Zweig stand vorher als `default:` im `switch` — und weil der
+   * `switch` alle vier Union-Werte abdeckt, war `type` dort für TS `never`, die
+   * Warnmeldung also unauswertbar (`Invalid type "never" of template literal
+   * expression`). Die defensive Prüfung gehört vor den `switch`, nicht hinein.
+   */
+  private instantiateProvider(type: string, apiKey: string, baseUrl?: string): SearchProvider {
+    if (!isValidProviderType(type)) {
+      this.logger.warn(`Unknown provider type "${type}" — falling back to searxng`);
+      return new SearxngProvider(this.http, () => resolveSearxngUrl(this.settings));
+    }
     if (type === 'searxng') {
       const getUrl = async () => (baseUrl ? baseUrl.replace(/\/$/, '') : resolveSearxngUrl(this.settings));
       return new SearxngProvider(this.http, getUrl);
@@ -144,9 +174,6 @@ export class WebSearchConfigService {
         return new BraveProvider(this.http, providerCfg);
       case 'serpapi':
         return new SerpApiProvider(this.http, providerCfg);
-      default:
-        this.logger.warn(`Unknown provider type "${type}" — falling back to searxng`);
-        return new SearxngProvider(this.http, () => resolveSearxngUrl(this.settings));
     }
   }
 
@@ -200,15 +227,20 @@ export class WebSearchConfigService {
     const raw = await this.settings.get(SETTING_WEB_SEARCH_CONFIG);
     if (!raw) return { activeProvider: DEFAULT_ACTIVE_PROVIDER, providers: [] };
     try {
-      const parsed = JSON.parse(raw) as { activeProvider?: unknown; providers?: unknown };
+      const parsed: unknown = JSON.parse(raw);
+      if (!isRecord(parsed)) {
+        this.logger.warn(`Malformed ${SETTING_WEB_SEARCH_CONFIG} JSON — ignoring`);
+        return { activeProvider: DEFAULT_ACTIVE_PROVIDER, providers: [] };
+      }
       const activeProvider = isValidProviderType(parsed.activeProvider)
         ? parsed.activeProvider
         : DEFAULT_ACTIVE_PROVIDER;
-      const providers = Array.isArray(parsed.providers)
-        ? parsed.providers.filter(
-            (p): p is StoredProviderConfig =>
-              !!p && typeof p === 'object' && isValidProviderType((p as StoredProviderConfig).type),
-          )
+      // `isUnknownArray` statt `Array.isArray`: letzteres verengt `unknown` zu
+      // `any[]` und macht damit jedes Element wieder zu `any`.
+      const providers = isUnknownArray(parsed.providers)
+        ? parsed.providers
+            .map(readStoredProvider)
+            .filter((entry): entry is StoredProviderConfig => entry !== undefined)
         : [];
       return { activeProvider, providers };
     } catch {
