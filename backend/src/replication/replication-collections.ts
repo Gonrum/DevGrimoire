@@ -36,6 +36,26 @@ export const REPLICATED_COLLECTIONS: ReplicatedCollection[] = [
   { className: 'Dependency', entity: 'dependency', collection: 'dependencies', appendOnly: false },
   { className: 'Feature', entity: 'feature', collection: 'features', appendOnly: false },
   { className: 'Soul', entity: 'soul', collection: 'souls', appendOnly: false },
+  /*
+   * Harness (M-51/H1) — dieselbe Semantik wie Soul, absichtlich direkt daneben.
+   *
+   * **Am Code verifiziert, nicht angenommen** (T-443): `isEntryOptedIn()` in
+   * `replication-sync-cursor.helpers.ts` sagt "No projects → never replicated",
+   * und `extractProjectRefs()` liefert für ein Dokument ohne `projectId` genau
+   * `projectId: null`. Daraus folgt:
+   *
+   *   - `scope: 'project'`  → repliziert, sobald das Projekt opt-in hat.
+   *   - `scope: 'customer'` → repliziert **nicht**.
+   *   - `scope: 'global'`   → repliziert **nicht**.
+   *
+   * Das ist exakt das Verhalten kunden-gebundener Souls heute: die tragen
+   * ebenfalls nur `customerId` und fallen aus demselben Grund heraus. Die
+   * globale und die Kundenebene sind damit pro Instanz zu pflegen — eine
+   * Einschränkung, aber eine, die dem bestehenden Modell entspricht. Sie zu
+   * ändern hiesse, das Per-Projekt-Opt-in selbst zu ändern (ausdrücklich
+   * ausserhalb dieses Milestones).
+   */
+  { className: 'Harness', entity: 'harness', collection: 'harnesses', appendOnly: false },
   { className: 'Commit', entity: 'commit', collection: 'commits', appendOnly: true },
   { className: 'RecurringTask', entity: 'recurring-task', collection: 'recurringtasks', appendOnly: false },
   { className: 'Snippet', entity: 'snippet', collection: 'snippets', appendOnly: false },
@@ -61,7 +81,6 @@ export const EXCLUDED_COLLECTIONS: { className: string; reason: string }[] = [
   { className: 'ChatActivity', reason: 'Chat-Aktivitätslog, instanzlokal' },
   { className: 'Counter', reason: 'Interne Sequenz-Zähler — instanzlokal, würde Nummern-Kollisionen erzeugen' },
   { className: 'CustomerProjectLink', reason: 'Customer-Domäne, separate Replikations-Entscheidung außerhalb dieses Features' },
-  { className: 'Harness', reason: 'Harness-Definitionen (M-51/H1) — Replikation wird in T-443 entschieden und dort nach REPLICATED_COLLECTIONS verschoben. Offen: scope=global/customer tragen keine projectId und greifen damit nicht ins Per-Projekt-Opt-in.' },
   { className: 'Healthcheck', reason: 'Customer-skopiertes Monitoring, kein Projekt-Inhalt' },
   { className: 'LogEntry', reason: 'Hochvolumige lokale Diagnose-Logs — nicht projekt-inhaltlich' },
   { className: 'ReplicationDeadletter', reason: 'Interne Engine-Collection (Deadletter-Store) — darf sich nicht selbst replizieren' },
