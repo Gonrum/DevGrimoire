@@ -1,6 +1,6 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { TodosService } from '../todos/todos.service';
-import { MilestonesService } from '../milestones/milestones.service';
+import { MilestonesService, type ParsedMilestone, type ParsedTodo } from '../milestones/milestones.service';
 import { ChangelogService } from '../changelog/changelog.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { ResearchService } from '../research/research.service';
@@ -28,6 +28,44 @@ import { CustomersService } from '../customers/customers.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { QuestionsService } from '../questions/questions.service';
 import { StacksService } from '../stacks/stacks.service';
+import { TodoPriority, TodoStatus } from '../todos/schemas/todo.schema';
+import { MilestoneStatus } from '../milestones/schemas/milestone.schema';
+import { FeaturePriority, FeatureStatus } from '../features/schemas/feature.schema';
+import { PackageManager } from '../dependencies/schemas/dependency.schema';
+import { ReleasePlatform, ReleaseStatus, ReleaseType } from '../releases/schemas/release.schema';
+import { CustomerStatus } from '../customers/schemas/customer.schema';
+import { RecurringFrequency } from '../recurring-tasks/schemas/recurring-task.schema';
+import { WORKSPACE_STATUSES } from '../workspaces/schemas/workspace.schema';
+import type { QuestionDirection } from '../questions/schemas/question.schema';
+import type { CreateKnowledgeDto } from '../knowledge/dto/create-knowledge.dto';
+import {
+  idToString,
+  isUnknownArray,
+  optionalBoolean,
+  optionalEnum,
+  optionalNumber,
+  optionalObject,
+  optionalObjectArray,
+  optionalString,
+  optionalStringArray,
+  requireEnum,
+  requireString,
+  type ToolArgs,
+} from '../common/tool-args';
+
+/**
+ * Wert-Listen für Unions, die — anders als die Schema-Enums — kein Laufzeit-Objekt
+ * haben. `optionalEnum` braucht die erlaubten Werte als Array; ohne diese Listen
+ * bliebe nur eine Assertion.
+ */
+const QUESTION_DIRECTIONS: readonly QuestionDirection[] = ['agent_to_user', 'user_to_agent'];
+const SEARCH_CATEGORIES: readonly SearchCategory[] = ['general', 'news', 'science', 'it', 'files'];
+const SEARCH_TIME_RANGES: readonly SearchTimeRange[] = ['day', 'week', 'month', 'year'];
+/**
+ * `CreateKnowledgeDto.scope` kennt zusätzlich `customer`; der Chat-Tool-Schema
+ * bietet es nicht an, also wird es hier auch nicht akzeptiert.
+ */
+const KNOWLEDGE_SCOPES: readonly ('global' | 'project')[] = ['global', 'project'];
 
 /**
  * Tools split by read/write so the Settings UI can surface write tools with a
@@ -1257,6 +1295,84 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
       required: ['id', 'entryId'],
     },
   },
+
+  // ---------------------------------------------------------------------------
+  // Kunden-Kontext (read-only)
+  //
+  // Diese sechs Tools standen in TOOL_GROUPS und in DEFAULT_TOOLS_ALLOWLIST und
+  // haben funktionierende dispatch()-Cases — es fehlten nur ihre Definitionen
+  // hier. `getToolsForLlm` baute daraus `{ type: 'function', function: undefined }`,
+  // und der Anthropic-Adapter in llm-client.service.ts liest `t.function.name`:
+  // jeder tool-fähige Chat mit der Default-Allowlist lief damit in einen
+  // TypeError. Sichtbar wurde das erst, als die Casts fielen — `Record<string,
+  // ToolDefinition>` verspricht eine totale Index-Signatur, und `tsconfig.json`
+  // hat kein `noUncheckedIndexedAccess`.
+  // ---------------------------------------------------------------------------
+  customer_list: {
+    name: 'customer_list',
+    description:
+      'Listet Kunden. Filter nach Status, Tag, Freitextsuche und Projekt-Verknüpfung.',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['lead', 'onboarding', 'active', 'paused', 'offboarding', 'cancelled'],
+          description: 'Filter nach Kundenstatus',
+        },
+        tag: { type: 'string' },
+        q: { type: 'string', description: 'Freitextsuche über Name und Beschreibung' },
+        includeArchived: { type: 'boolean' },
+        projectId: PROJECT_ID_PROP,
+        limit: { type: 'number', description: 'Max. Anzahl (Default 50)' },
+      },
+    },
+  },
+  customer_get: {
+    name: 'customer_get',
+    description: 'Lädt einen Kunden mit Kontaktdaten, Status und Tags.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'Customer MongoDB ID' } },
+      required: ['id'],
+    },
+  },
+  contact_list: {
+    name: 'contact_list',
+    description: 'Listet die Kontakte eines Kunden.',
+    parameters: {
+      type: 'object',
+      properties: { customerId: { type: 'string', description: 'Customer MongoDB ID' } },
+      required: ['customerId'],
+    },
+  },
+  contact_get: {
+    name: 'contact_get',
+    description: 'Lädt einen Kontakt mit Rolle, E-Mail, Telefon und Notizen.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'Contact MongoDB ID' } },
+      required: ['id'],
+    },
+  },
+  customer_project_list: {
+    name: 'customer_project_list',
+    description: 'Listet die Projekt-Verknüpfungen eines Kunden.',
+    parameters: {
+      type: 'object',
+      properties: { customerId: { type: 'string', description: 'Customer MongoDB ID' } },
+      required: ['customerId'],
+    },
+  },
+  project_customer_links: {
+    name: 'project_customer_links',
+    description:
+      'Listet die Kunden-Verknüpfungen eines Projekts. Ohne projectId wird der Chat-Projekt-Kontext verwendet.',
+    parameters: {
+      type: 'object',
+      properties: { projectId: PROJECT_ID_PROP },
+    },
+  },
 };
 
 export interface ToolContext {
@@ -1328,16 +1444,31 @@ export class ChatToolsService {
         tags: ['chat', 'write-tool', name],
       });
     } catch (err) {
-      this.logger.warn(`Audit log failed for ${name}: ${(err as Error).message}`);
+      this.logger.warn(
+        `Audit log failed for ${name}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
   /** Returns OpenAI-formatted tool list, filtered by allowlist */
   getToolsForLlm(allowlist: string[]): OpenAiTool[] {
     const allowed = new Set(allowlist);
-    return ALL_TOOL_NAMES
-      .filter((name) => allowed.has(name))
-      .map((name) => ({ type: 'function' as const, function: TOOL_DEFINITIONS[name] }));
+    const tools: OpenAiTool[] = [];
+    for (const name of ALL_TOOL_NAMES) {
+      if (!allowed.has(name)) continue;
+      const definition = TOOL_DEFINITIONS[name];
+      // Namen ohne Definition werden übersprungen statt als
+      // `{ function: undefined }` ausgeliefert. Der Anthropic-Adapter liest
+      // `t.function.name` und lief sonst in einen TypeError — eine Lücke
+      // zwischen TOOL_GROUPS und TOOL_DEFINITIONS darf höchstens dazu führen,
+      // dass ein Tool nicht angeboten wird, nicht den ganzen Chat abschießen.
+      if (!definition) {
+        this.logger.warn(`Tool "${name}" ist in der Allowlist, hat aber keine Definition`);
+        continue;
+      }
+      tools.push({ type: 'function' as const, function: definition });
+    }
+    return tools;
   }
 
   /** Execute a tool call. Returns success/error wrapper, never throws. */
@@ -1356,9 +1487,12 @@ export class ChatToolsService {
     const isWrite = WRITE_TOOL_NAMES.has(name);
     // Session-projectId overrides any args.projectId for write tools — prevents an
     // LLM from mutating data in projects other than the current chat session.
+    // Ein nicht-String in args.projectId zählt wie „nicht gesetzt"; früher wurde er
+    // per Assertion durchgereicht und erst in der Query zum Problem.
+    const argProjectId = typeof args.projectId === 'string' ? args.projectId : undefined;
     const projectId = isWrite
       ? ctx.projectId || undefined
-      : (args.projectId as string | undefined) || ctx.projectId || undefined;
+      : argProjectId || ctx.projectId || undefined;
     const effectiveArgs = isWrite ? { ...args, projectId } : args;
 
     const result = await this.dispatch(name, effectiveArgs, projectId);
@@ -1372,7 +1506,7 @@ export class ChatToolsService {
   /** Internal: the actual tool dispatch table. Assumes authorization + projectId checks already ran. */
   private async dispatch(
     name: string,
-    args: Record<string, unknown>,
+    args: ToolArgs,
     projectId: string | undefined,
   ): Promise<ToolExecutionResult> {
     try {
@@ -1380,11 +1514,11 @@ export class ChatToolsService {
         case 'todo_list': {
           const todos = await this.todos.findAll({
             projectId,
-            status: args.status as never,
-            priority: args.priority as string | undefined,
-            milestoneId: args.milestoneId as string | undefined,
-            tag: args.tag as string | undefined,
-            includeArchived: args.includeArchived as boolean | undefined,
+            status: optionalEnum(args, 'status', Object.values(TodoStatus)),
+            priority: optionalString(args, 'priority'),
+            milestoneId: optionalString(args, 'milestoneId'),
+            tag: optionalString(args, 'tag'),
+            includeArchived: optionalBoolean(args, 'includeArchived'),
           });
           const limit = typeof args.limit === 'number' ? args.limit : 50;
           const trimmed = todos.slice(0, limit).map((t) => ({
@@ -1399,7 +1533,7 @@ export class ChatToolsService {
           return { success: true, result: { count: todos.length, items: trimmed } };
         }
         case 'todo_get': {
-          const id = await this.todos.resolveId({ id: args.id as string, projectId: projectId || undefined });
+          const id = await this.todos.resolveId({ id: requireString(args, 'id'), projectId });
           const t = await this.todos.findById(id);
           return {
             success: true,
@@ -1420,8 +1554,8 @@ export class ChatToolsService {
           if (!projectId) return { success: false, error: 'projectId required' };
           const items = await this.milestones.findByProject(
             projectId,
-            args.status as never,
-            args.includeArchived as boolean | undefined,
+            optionalEnum(args, 'status', Object.values(MilestoneStatus)),
+            optionalBoolean(args, 'includeArchived'),
           );
           return {
             success: true,
@@ -1434,7 +1568,7 @@ export class ChatToolsService {
           };
         }
         case 'milestone_get': {
-          const m = await this.milestones.findById(args.id as string);
+          const m = await this.milestones.findById(requireString(args, 'id'));
           return { success: true, result: m.toObject() };
         }
         case 'changelog_list': {
@@ -1449,18 +1583,18 @@ export class ChatToolsService {
               summary: c.summary,
               component: c.component,
               changes: c.changes,
-              createdAt: (c as unknown as { createdAt?: Date }).createdAt,
+              createdAt: c.createdAt,
             })),
           };
         }
         case 'changelog_get': {
-          const c = await this.changelog.findById(args.id as string);
+          const c = await this.changelog.findById(requireString(args, 'id'));
           return { success: true, result: c.toObject() };
         }
         case 'question_list': {
-          const direction = args.direction as 'agent_to_user' | 'user_to_agent' | undefined;
-          const todoId = args.todoId as string | undefined;
-          const includeAnswered = (args.includeAnswered as boolean | undefined) ?? false;
+          const direction = optionalEnum(args, 'direction', QUESTION_DIRECTIONS);
+          const todoId = optionalString(args, 'todoId');
+          const includeAnswered = optionalBoolean(args, 'includeAnswered') ?? false;
           if (todoId) {
             const list = await this.questions.findByTodo(todoId, includeAnswered);
             const filtered = direction ? list.filter((q) => q.direction === direction) : list;
@@ -1478,7 +1612,7 @@ export class ChatToolsService {
                   answer: q.answer,
                   todoId: q.todoId?.toString(),
                   projectId: q.projectId?.toString(),
-                  createdAt: (q as unknown as { createdAt?: Date }).createdAt,
+                  createdAt: q.createdAt,
                   answeredAt: q.answeredAt,
                 })),
               },
@@ -1502,13 +1636,13 @@ export class ChatToolsService {
                 options: q.options,
                 todoId: q.todoId?.toString(),
                 projectId: q.projectId?.toString(),
-                createdAt: (q as unknown as { createdAt?: Date }).createdAt,
+                createdAt: q.createdAt,
               })),
             },
           };
         }
         case 'question_get': {
-          const qId = args.id as string | undefined;
+          const qId = optionalString(args, 'id');
           if (!qId) return { success: false, error: 'id required' };
           const q = await this.questions.findById(qId);
           return {
@@ -1527,13 +1661,13 @@ export class ChatToolsService {
               answeredByAgent: q.answeredByAgent,
               answeredAt: q.answeredAt,
               expiresAt: q.expiresAt,
-              createdAt: (q as unknown as { createdAt?: Date }).createdAt,
+              createdAt: q.createdAt,
             },
           };
         }
         case 'question_answer': {
-          const qId = args.id as string | undefined;
-          const ans = args.answer as string | undefined;
+          const qId = optionalString(args, 'id');
+          const ans = optionalString(args, 'answer');
           if (!qId || !ans) return { success: false, error: 'id and answer required' };
           const updated = await this.questions.answer(
             qId,
@@ -1553,9 +1687,9 @@ export class ChatToolsService {
         case 'rag_search': {
           const limit = typeof args.limit === 'number' ? args.limit : 10;
           const results = await this.rag.search(
-            args.query as string,
+            requireString(args, 'query'),
             projectId,
-            args.entity as string | undefined,
+            optionalString(args, 'entity'),
             limit,
           );
           return {
@@ -1570,13 +1704,22 @@ export class ChatToolsService {
           };
         }
         case 'web_search': {
-          const query = args.query as string | undefined;
+          const query = optionalString(args, 'query');
           if (!query) return { success: false, error: 'query required' };
+          // `find` liefert den verengten Typ aus einer Laufzeitprüfung — anders als
+          // eine Assertion auf SearchCategory[], die auch "foo" durchgelassen hätte.
+          const categories = optionalStringArray(args, 'categories')?.map((entry) => {
+            const match = SEARCH_CATEGORIES.find((candidate) => candidate === entry);
+            if (match === undefined) {
+              throw new Error(`categories must contain only: ${SEARCH_CATEGORIES.join(', ')}`);
+            }
+            return match;
+          });
           const response = await this.webSearch.search({
             query,
-            language: args.language as string | undefined,
-            categories: args.categories as SearchCategory[] | undefined,
-            timeRange: args.timeRange as SearchTimeRange | undefined,
+            language: optionalString(args, 'language'),
+            categories,
+            timeRange: optionalEnum(args, 'timeRange', SEARCH_TIME_RANGES),
             limit: typeof args.limit === 'number' ? args.limit : undefined,
           });
           return {
@@ -1596,11 +1739,11 @@ export class ChatToolsService {
           };
         }
         case 'web_fetch': {
-          const url = args.url as string | undefined;
+          const url = optionalString(args, 'url');
           if (!url) return { success: false, error: 'url required' };
           const response = await this.readability.fetch({
             url,
-            raw: args.raw as boolean | undefined,
+            raw: optionalBoolean(args, 'raw'),
             maxLength: typeof args.maxLength === 'number' ? args.maxLength : undefined,
           });
           return {
@@ -1619,9 +1762,9 @@ export class ChatToolsService {
         }
         case 'knowledge_search': {
           const items = await this.knowledge.search(
-            args.query as string,
+            requireString(args, 'query'),
             projectId,
-            args.scope as string | undefined,
+            optionalString(args, 'scope'),
           );
           return {
             success: true,
@@ -1635,11 +1778,11 @@ export class ChatToolsService {
           };
         }
         case 'knowledge_get': {
-          const k = await this.knowledge.findById(args.id as string);
+          const k = await this.knowledge.findById(requireString(args, 'id'));
           return { success: true, result: k.toObject() };
         }
         case 'research_search': {
-          const items = await this.research.search(args.query as string, projectId);
+          const items = await this.research.search(requireString(args, 'query'), projectId);
           return {
             success: true,
             result: items.slice(0, 20).map((r) => ({
@@ -1651,12 +1794,12 @@ export class ChatToolsService {
           };
         }
         case 'research_get': {
-          const r = await this.research.findById(args.id as string);
+          const r = await this.research.findById(requireString(args, 'id'));
           return { success: true, result: r.toObject() };
         }
         case 'manual_list': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const items = await this.manuals.findByProject(projectId, args.category as string | undefined);
+          const items = await this.manuals.findByProject(projectId, optionalString(args, 'category'));
           return {
             success: true,
             result: items.map((m) => ({
@@ -1668,7 +1811,7 @@ export class ChatToolsService {
           };
         }
         case 'manual_get': {
-          const m = await this.manuals.findById(args.id as string);
+          const m = await this.manuals.findById(requireString(args, 'id'));
           return { success: true, result: m.toObject() };
         }
         case 'session_get': {
@@ -1683,13 +1826,13 @@ export class ChatToolsService {
               filesChanged: s.filesChanged,
               nextSteps: s.nextSteps,
               openQuestions: s.openQuestions,
-              createdAt: (s as unknown as { createdAt?: Date }).createdAt,
+              createdAt: s.createdAt,
             })),
           };
         }
         case 'schema_list': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const items = await this.schemas.findByProject(projectId, args.dbType as string | undefined);
+          const items = await this.schemas.findByProject(projectId, optionalString(args, 'dbType'));
           return {
             success: true,
             result: items.map((s) => ({
@@ -1703,14 +1846,14 @@ export class ChatToolsService {
           };
         }
         case 'schema_get': {
-          const s = await this.schemas.findById(args.id as string);
+          const s = await this.schemas.findById(requireString(args, 'id'));
           return { success: true, result: s.toObject() };
         }
         case 'dependency_list': {
           if (!projectId) return { success: false, error: 'projectId required' };
           const items = await this.dependencies.findByProject(projectId, {
-            packageManager: args.packageManager as never,
-            category: args.category as string | undefined,
+            packageManager: optionalEnum(args, 'packageManager', Object.values(PackageManager)),
+            category: optionalString(args, 'category'),
           });
           return {
             success: true,
@@ -1727,8 +1870,8 @@ export class ChatToolsService {
         case 'feature_list': {
           if (!projectId) return { success: false, error: 'projectId required' };
           const items = await this.features.findByProject(projectId, {
-            status: args.status as never,
-            category: args.category as string | undefined,
+            status: optionalEnum(args, 'status', Object.values(FeatureStatus)),
+            category: optionalString(args, 'category'),
           });
           return {
             success: true,
@@ -1747,38 +1890,38 @@ export class ChatToolsService {
 
         case 'todo_create': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const title = args.title as string | undefined;
+          const title = optionalString(args, 'title');
           if (!title) return { success: false, error: 'title required' };
           const todo = await this.todos.create({
             projectId,
             title,
-            description: args.description as string | undefined,
-            status: args.status as never,
-            priority: args.priority as never,
-            tags: args.tags as string[] | undefined,
-            milestoneId: args.milestoneId as string | undefined,
+            description: optionalString(args, 'description'),
+            status: optionalEnum(args, 'status', Object.values(TodoStatus)),
+            priority: optionalEnum(args, 'priority', Object.values(TodoPriority)),
+            tags: optionalStringArray(args, 'tags'),
+            milestoneId: optionalString(args, 'milestoneId'),
           });
           return {
             success: true,
             result: {
               id: todo._id.toString(),
-              number: (todo as unknown as { number?: number }).number,
+              number: todo.number,
               title: todo.title,
               status: todo.status,
             },
           };
         }
         case 'todo_update': {
-          const id = args.id as string | undefined;
+          const id = optionalString(args, 'id');
           if (!id) return { success: false, error: 'id required' };
           const updated = await this.todos.update(id, {
-            title: args.title as string | undefined,
-            description: args.description as string | undefined,
-            status: args.status as never,
-            priority: args.priority as never,
-            tags: args.tags as string[] | undefined,
-            milestoneId: args.milestoneId as string | undefined,
-            archived: args.archived as boolean | undefined,
+            title: optionalString(args, 'title'),
+            description: optionalString(args, 'description'),
+            status: optionalEnum(args, 'status', Object.values(TodoStatus)),
+            priority: optionalEnum(args, 'priority', Object.values(TodoPriority)),
+            tags: optionalStringArray(args, 'tags'),
+            milestoneId: optionalString(args, 'milestoneId'),
+            archived: optionalBoolean(args, 'archived'),
           });
           return {
             success: true,
@@ -1786,52 +1929,54 @@ export class ChatToolsService {
           };
         }
         case 'todo_comment': {
-          const id = args.id as string | undefined;
-          const text = args.text as string | undefined;
+          const id = optionalString(args, 'id');
+          const text = optionalString(args, 'text');
           if (!id || !text) return { success: false, error: 'id and text required' };
-          const author = (args.author as string | undefined) || 'chat';
+          const author = optionalString(args, 'author') || 'chat';
           await this.todos.addComment(id, text, author);
           return { success: true, result: { id, commentAdded: true } };
         }
         case 'milestone_create': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const name = args.name as string | undefined;
+          const name = optionalString(args, 'name');
           if (!name) return { success: false, error: 'name required' };
           const m = await this.milestones.create({
             projectId,
             name,
-            description: args.description as string | undefined,
-            dueDate: args.dueDate as string | undefined,
-            status: args.status as never,
+            description: optionalString(args, 'description'),
+            dueDate: optionalString(args, 'dueDate'),
+            status: optionalEnum(args, 'status', Object.values(MilestoneStatus)),
           });
           return { success: true, result: { id: m._id.toString(), name: m.name, status: m.status } };
         }
         case 'milestone_update': {
-          const id = args.id as string | undefined;
+          const id = optionalString(args, 'id');
           if (!id) return { success: false, error: 'id required' };
           const updated = await this.milestones.update(id, {
-            name: args.name as string | undefined,
-            description: args.description as string | undefined,
-            status: args.status as never,
-            dueDate: args.dueDate as string | undefined,
-            archived: args.archived as boolean | undefined,
-            changelogId: args.changelogId as string | undefined,
+            name: optionalString(args, 'name'),
+            description: optionalString(args, 'description'),
+            status: optionalEnum(args, 'status', Object.values(MilestoneStatus)),
+            dueDate: optionalString(args, 'dueDate'),
+            archived: optionalBoolean(args, 'archived'),
+            changelogId: optionalString(args, 'changelogId'),
           });
           return { success: true, result: { id: updated._id.toString(), status: updated.status } };
         }
         case 'milestone_import_preview': {
-          const markdown = args.markdown as string | undefined;
+          const markdown = optionalString(args, 'markdown');
           if (!markdown) return { success: false, error: 'markdown required' };
           const parsed = this.milestones.parseMarkdown(markdown);
           return { success: true, result: parsed };
         }
         case 'milestone_import_apply': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const parsed = args.parsed as { name: string; description?: string; todos: unknown[] } | undefined;
-          if (!parsed || !parsed.name || !Array.isArray(parsed.todos)) {
+          // Nur die Form wird hier geprüft (Objekt, name-String, todos-Array); die
+          // Struktur der einzelnen Todos validiert importFromParsed/CreateTodoDto.
+          const parsed = optionalObject<ParsedMilestone>(args, 'parsed');
+          if (!parsed || typeof parsed.name !== 'string' || !parsed.name || !isUnknownArray(parsed.todos)) {
             return { success: false, error: 'parsed (with name and todos[]) required' };
           }
-          const importResult = await this.milestones.importFromParsed(projectId, parsed as never);
+          const importResult = await this.milestones.importFromParsed(projectId, parsed);
           return {
             success: true,
             result: {
@@ -1843,14 +1988,16 @@ export class ChatToolsService {
         }
         case 'milestone_create_with_todos': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const msName = args.name as string | undefined;
+          const msName = optionalString(args, 'name');
           if (!msName) return { success: false, error: 'name required' };
-          const todos = args.todos as unknown[] | undefined;
-          if (!Array.isArray(todos)) return { success: false, error: 'todos (array) required' };
+          const todos = isUnknownArray(args.todos)
+            ? optionalObjectArray<ParsedTodo>(args, 'todos')
+            : undefined;
+          if (!todos) return { success: false, error: 'todos (array) required' };
           const importResult = await this.milestones.importFromParsed(projectId, {
             name: msName,
-            description: args.description as string | undefined,
-            todos: todos as never,
+            description: optionalString(args, 'description'),
+            todos,
           });
           return {
             success: true,
@@ -1863,33 +2010,32 @@ export class ChatToolsService {
         }
         case 'changelog_add': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const changes = args.changes;
-          if (!Array.isArray(changes) || changes.length === 0) {
+          const changes = optionalStringArray(args, 'changes');
+          if (!changes || changes.length === 0) {
             return { success: false, error: 'changes (non-empty array) required' };
           }
           const entry = await this.changelog.create({
             projectId,
-            changes: changes as string[],
-            version: args.version as string | undefined,
-            summary: args.summary as string | undefined,
-            component: args.component as string | undefined,
+            changes,
+            version: optionalString(args, 'version'),
+            summary: optionalString(args, 'summary'),
+            component: optionalString(args, 'component'),
           });
           return { success: true, result: { id: entry._id.toString(), version: entry.version } };
         }
         case 'knowledge_save': {
-          const topic = args.topic as string | undefined;
-          const content = args.content as string | undefined;
+          const topic = optionalString(args, 'topic');
+          const content = optionalString(args, 'content');
           if (!topic || !content) return { success: false, error: 'topic and content required' };
-          const scope = args.scope as 'global' | 'project' | undefined;
-          const dto: Record<string, unknown> = {
+          const dto: CreateKnowledgeDto = {
             topic,
             content,
-            tags: args.tags,
-            category: args.category,
-            scope,
+            tags: optionalStringArray(args, 'tags'),
+            category: optionalString(args, 'category'),
+            scope: optionalEnum(args, 'scope', KNOWLEDGE_SCOPES),
           };
           if (projectId) dto.projectId = projectId;
-          const entry = await this.knowledge.create(dto as never);
+          const entry = await this.knowledge.create(dto);
           return {
             success: true,
             result: {
@@ -1900,102 +2046,102 @@ export class ChatToolsService {
           };
         }
         case 'knowledge_update': {
-          const id = args.id as string | undefined;
+          const id = optionalString(args, 'id');
           if (!id) return { success: false, error: 'id required' };
           const updated = await this.knowledge.update(id, {
-            topic: args.topic as string | undefined,
-            content: args.content as string | undefined,
-            tags: args.tags as string[] | undefined,
-            category: args.category as string | undefined,
+            topic: optionalString(args, 'topic'),
+            content: optionalString(args, 'content'),
+            tags: optionalStringArray(args, 'tags'),
+            category: optionalString(args, 'category'),
           });
           return { success: true, result: { id: updated._id.toString(), topic: updated.topic } };
         }
         case 'research_save': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const title = args.title as string | undefined;
-          const content = args.content as string | undefined;
+          const title = optionalString(args, 'title');
+          const content = optionalString(args, 'content');
           if (!title || !content) return { success: false, error: 'title and content required' };
           const entry = await this.research.create({
             projectId,
             title,
             content,
-            sources: args.sources as string[] | undefined,
-            tags: args.tags as string[] | undefined,
+            sources: optionalStringArray(args, 'sources'),
+            tags: optionalStringArray(args, 'tags'),
           });
           return { success: true, result: { id: entry._id.toString(), title: entry.title } };
         }
         case 'manual_create': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const title = args.title as string | undefined;
+          const title = optionalString(args, 'title');
           if (!title) return { success: false, error: 'title required' };
           const entry = await this.manuals.create({
             projectId,
             title,
-            content: args.content as string | undefined,
-            category: args.category as string | undefined,
-            sortOrder: args.sortOrder as number | undefined,
+            content: optionalString(args, 'content'),
+            category: optionalString(args, 'category'),
+            sortOrder: optionalNumber(args, 'sortOrder'),
           });
           return { success: true, result: { id: entry._id.toString(), title: entry.title } };
         }
         case 'manual_update': {
-          const id = args.id as string | undefined;
+          const id = optionalString(args, 'id');
           if (!id) return { success: false, error: 'id required' };
           const updated = await this.manuals.update(id, {
-            title: args.title as string | undefined,
-            content: args.content as string | undefined,
-            category: args.category as string | undefined,
-            sortOrder: args.sortOrder as number | undefined,
+            title: optionalString(args, 'title'),
+            content: optionalString(args, 'content'),
+            category: optionalString(args, 'category'),
+            sortOrder: optionalNumber(args, 'sortOrder'),
           });
           return { success: true, result: { id: updated._id.toString(), title: updated.title } };
         }
         case 'session_save': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const summary = args.summary as string | undefined;
+          const summary = optionalString(args, 'summary');
           if (!summary) return { success: false, error: 'summary required' };
           const s = await this.sessions.create({
             projectId,
             summary,
-            filesChanged: args.filesChanged as string[] | undefined,
-            nextSteps: args.nextSteps as string[] | undefined,
-            openQuestions: args.openQuestions as string[] | undefined,
+            filesChanged: optionalStringArray(args, 'filesChanged'),
+            nextSteps: optionalStringArray(args, 'nextSteps'),
+            openQuestions: optionalStringArray(args, 'openQuestions'),
           });
           return { success: true, result: { id: s._id.toString() } };
         }
         case 'feature_create': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const featureName = args.name as string | undefined;
+          const featureName = optionalString(args, 'name');
           if (!featureName) return { success: false, error: 'name required' };
           const f = await this.features.create({
             projectId,
             name: featureName,
-            description: args.description as string | undefined,
-            category: args.category as string | undefined,
-            status: args.status as never,
-            version: args.version as string | undefined,
-            priority: args.priority as never,
-            tags: args.tags as string[] | undefined,
+            description: optionalString(args, 'description'),
+            category: optionalString(args, 'category'),
+            status: optionalEnum(args, 'status', Object.values(FeatureStatus)),
+            version: optionalString(args, 'version'),
+            priority: optionalEnum(args, 'priority', Object.values(FeaturePriority)),
+            tags: optionalStringArray(args, 'tags'),
           });
           return { success: true, result: { id: f._id.toString(), name: f.name } };
         }
         case 'feature_update': {
-          const id = args.id as string | undefined;
+          const id = optionalString(args, 'id');
           if (!id) return { success: false, error: 'id required' };
           const updated = await this.features.update(id, {
-            name: args.name as string | undefined,
-            description: args.description as string | undefined,
-            category: args.category as string | undefined,
-            status: args.status as never,
-            version: args.version as string | undefined,
-            priority: args.priority as never,
-            tags: args.tags as string[] | undefined,
+            name: optionalString(args, 'name'),
+            description: optionalString(args, 'description'),
+            category: optionalString(args, 'category'),
+            status: optionalEnum(args, 'status', Object.values(FeatureStatus)),
+            version: optionalString(args, 'version'),
+            priority: optionalEnum(args, 'priority', Object.values(FeaturePriority)),
+            tags: optionalStringArray(args, 'tags'),
           });
           return { success: true, result: { id: updated._id.toString(), name: updated.name } };
         }
         case 'dependency_add': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const depName = args.name as string | undefined;
-          const version = args.version as string | undefined;
-          const packageManager = args.packageManager as string | undefined;
+          const depName = optionalString(args, 'name');
+          const version = optionalString(args, 'version');
+          const packageManager = optionalEnum(args, 'packageManager', Object.values(PackageManager));
           if (!depName || !version || !packageManager) {
             return { success: false, error: 'name, version, and packageManager required' };
           }
@@ -2003,11 +2149,11 @@ export class ChatToolsService {
             projectId,
             name: depName,
             version,
-            packageManager: packageManager as never,
-            description: args.description as string | undefined,
-            devDependency: args.devDependency as boolean | undefined,
-            category: args.category as string | undefined,
-            tags: args.tags as string[] | undefined,
+            packageManager,
+            description: optionalString(args, 'description'),
+            devDependency: optionalBoolean(args, 'devDependency'),
+            category: optionalString(args, 'category'),
+            tags: optionalStringArray(args, 'tags'),
           });
           return { success: true, result: { id: d._id.toString(), name: d.name, version: d.version } };
         }
@@ -2015,8 +2161,8 @@ export class ChatToolsService {
         // ─── Recurring tasks ─────────────────────────────────────────────
         case 'recurring_task_list': {
           const items = await this.recurringTasks.findAll({
-            projectId: projectId || (args.projectId as string | undefined),
-            systemOnly: args.systemOnly as boolean | undefined,
+            projectId: projectId || optionalString(args, 'projectId'),
+            systemOnly: optionalBoolean(args, 'systemOnly'),
           });
           return {
             success: true,
@@ -2032,7 +2178,7 @@ export class ChatToolsService {
           };
         }
         case 'recurring_task_get': {
-          const r = await this.recurringTasks.findById(args.id as string);
+          const r = await this.recurringTasks.findById(requireString(args, 'id'));
           return { success: true, result: r.toObject() };
         }
         case 'recurring_task_create': {
@@ -2043,25 +2189,25 @@ export class ChatToolsService {
             return { success: false, error: 'projectId required for chat-created recurring tasks' };
           }
           const r = await this.recurringTasks.create({
-            projectId: (projectId || args.projectId) as string,
-            title: args.title as string,
-            description: args.description as string | undefined,
-            priority: args.priority as never,
-            tags: args.tags as string[] | undefined,
-            milestoneId: args.milestoneId as string | undefined,
-            frequency: args.frequency as never,
-            dayOfWeek: args.weekday as number | undefined,
-            dayOfMonth: args.monthDay as number | undefined,
+            projectId: projectId || requireString(args, 'projectId'),
+            title: requireString(args, 'title'),
+            description: optionalString(args, 'description'),
+            priority: optionalString(args, 'priority'),
+            tags: optionalStringArray(args, 'tags'),
+            milestoneId: optionalString(args, 'milestoneId'),
+            frequency: requireEnum(args, 'frequency', Object.values(RecurringFrequency)),
+            dayOfWeek: optionalNumber(args, 'weekday'),
+            dayOfMonth: optionalNumber(args, 'monthDay'),
           });
           return { success: true, result: { id: r._id.toString(), title: r.title } };
         }
         case 'recurring_task_update': {
-          const r = await this.recurringTasks.update(args.id as string, {
-            title: args.title as string | undefined,
-            description: args.description as string | undefined,
-            active: args.active as boolean | undefined,
-            priority: args.priority as never,
-            tags: args.tags as string[] | undefined,
+          const r = await this.recurringTasks.update(requireString(args, 'id'), {
+            title: optionalString(args, 'title'),
+            description: optionalString(args, 'description'),
+            active: optionalBoolean(args, 'active'),
+            priority: optionalString(args, 'priority'),
+            tags: optionalStringArray(args, 'tags'),
           });
           return { success: true, result: { id: r._id.toString(), title: r.title, active: r.active } };
         }
@@ -2071,9 +2217,9 @@ export class ChatToolsService {
           if (!projectId) return { success: false, error: 'projectId required' };
           const items = await this.snippets.findByProject(
             projectId,
-            args.language as string | undefined,
-            args.category as string | undefined,
-            args.tag as string | undefined,
+            optionalString(args, 'language'),
+            optionalString(args, 'category'),
+            optionalString(args, 'tag'),
           );
           return {
             success: true,
@@ -2088,13 +2234,13 @@ export class ChatToolsService {
           };
         }
         case 'snippet_get': {
-          const s = await this.snippets.findById(args.id as string);
+          const s = await this.snippets.findById(requireString(args, 'id'));
           return { success: true, result: s.toObject() };
         }
         case 'snippet_search': {
           const items = await this.snippets.search(
-            args.q as string,
-            projectId || (args.projectId as string | undefined),
+            requireString(args, 'q'),
+            projectId || optionalString(args, 'projectId'),
           );
           return {
             success: true,
@@ -2110,24 +2256,27 @@ export class ChatToolsService {
           if (!projectId) return { success: false, error: 'projectId required' };
           const s = await this.snippets.create({
             projectId,
-            title: args.title as string,
-            language: (args.language as string).toLowerCase(),
-            code: args.code as string,
-            description: args.description as string | undefined,
-            category: args.category as string | undefined,
-            fileName: args.fileName as string | undefined,
-            tags: args.tags as string[] | undefined,
+            title: requireString(args, 'title'),
+            language: requireString(args, 'language').toLowerCase(),
+            code: requireString(args, 'code'),
+            description: optionalString(args, 'description'),
+            category: optionalString(args, 'category'),
+            fileName: optionalString(args, 'fileName'),
+            tags: optionalStringArray(args, 'tags'),
           });
           return { success: true, result: { id: s._id.toString(), title: s.title } };
         }
         case 'snippet_update': {
-          const s = await this.snippets.update(args.id as string, {
-            title: args.title as string | undefined,
-            language: args.language ? (args.language as string).toLowerCase() : undefined,
-            code: args.code as string | undefined,
-            description: args.description as string | undefined,
-            category: args.category as string | undefined,
-            tags: args.tags as string[] | undefined,
+          // Leerstring bleibt wie bisher „nicht gesetzt" — sonst würde ein
+          // `language: ""` das Feld im Dokument leeren.
+          const language = optionalString(args, 'language');
+          const s = await this.snippets.update(requireString(args, 'id'), {
+            title: optionalString(args, 'title'),
+            language: language ? language.toLowerCase() : undefined,
+            code: optionalString(args, 'code'),
+            description: optionalString(args, 'description'),
+            category: optionalString(args, 'category'),
+            tags: optionalStringArray(args, 'tags'),
           });
           return { success: true, result: { id: s._id.toString(), title: s.title } };
         }
@@ -2141,13 +2290,13 @@ export class ChatToolsService {
         case 'soul_update': {
           if (!projectId) return { success: false, error: 'projectId required' };
           const s = await this.souls.upsert({ projectId }, {
-            vision: args.vision as string | undefined,
-            principles: args.principles as string | undefined,
-            conventions: args.conventions as string | undefined,
-            communication: args.communication as string | undefined,
-            boundaries: args.boundaries as string | undefined,
-            workflow: args.workflow as string | undefined,
-            quality: args.quality as string | undefined,
+            vision: optionalString(args, 'vision'),
+            principles: optionalString(args, 'principles'),
+            conventions: optionalString(args, 'conventions'),
+            communication: optionalString(args, 'communication'),
+            boundaries: optionalString(args, 'boundaries'),
+            workflow: optionalString(args, 'workflow'),
+            quality: optionalString(args, 'quality'),
           });
           return { success: true, result: { id: s._id.toString(), updated: true } };
         }
@@ -2158,29 +2307,31 @@ export class ChatToolsService {
           const limit = typeof args.limit === 'number' ? args.limit : 50;
           const items = await this.commits.findByProject(projectId, {
             limit,
-            repoLabel: args.repoLabel as string | undefined,
+            repoLabel: optionalString(args, 'repoLabel'),
           });
           return {
             success: true,
             result: items.map((c) => ({
-              shortSha: (c as unknown as { sha?: string }).sha?.slice(0, 7),
-              message: ((c as unknown as { message?: string }).message || '').split('\n')[0],
-              author: (c as unknown as { author?: string }).author,
-              date: (c as unknown as { committedAt?: Date }).committedAt,
-              repoLabel: (c as unknown as { repoLabel?: string }).repoLabel,
+              shortSha: c.sha.slice(0, 7),
+              message: (c.message || '').split('\n')[0],
+              // Das Schema-Feld heißt `authorName`; der frühere Cast auf `{author?: string}`
+              // hat kompiliert, aber zur Laufzeit immer `undefined` geliefert.
+              author: c.authorName,
+              date: c.committedAt,
+              repoLabel: c.repoLabel,
             })),
           };
         }
         case 'commit_search': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const items = await this.commits.search(projectId, args.q as string);
+          const items = await this.commits.search(projectId, requireString(args, 'q'));
           return {
             success: true,
             result: items.map((c) => ({
-              shortSha: (c as unknown as { sha?: string }).sha?.slice(0, 7),
-              message: ((c as unknown as { message?: string }).message || '').split('\n')[0],
-              author: (c as unknown as { author?: string }).author,
-              date: (c as unknown as { committedAt?: Date }).committedAt,
+              shortSha: c.sha.slice(0, 7),
+              message: (c.message || '').split('\n')[0],
+              author: c.authorName,
+              date: c.committedAt,
             })),
           };
         }
@@ -2194,30 +2345,30 @@ export class ChatToolsService {
         case 'log_list': {
           if (!projectId) return { success: false, error: 'projectId required' };
           const items = await this.logs.findByProject(projectId, {
-            level: args.level as string | undefined,
-            service: args.service as string | undefined,
-            search: args.search as string | undefined,
-            startDate: args.startDate as string | undefined,
-            endDate: args.endDate as string | undefined,
-            limit: args.limit as number | undefined,
+            level: optionalString(args, 'level'),
+            service: optionalString(args, 'service'),
+            search: optionalString(args, 'search'),
+            startDate: optionalString(args, 'startDate'),
+            endDate: optionalString(args, 'endDate'),
+            limit: optionalNumber(args, 'limit'),
           });
           return {
             success: true,
             result: items.map((l) => ({
-              id: (l._id as unknown as { toString(): string }).toString(),
+              id: idToString(l._id),
               level: l.level,
               service: l.service,
               area: l.area,
               message: (l.message || '').slice(0, 400),
-              createdAt: (l as unknown as { createdAt?: Date }).createdAt,
+              createdAt: l.createdAt,
             })),
           };
         }
         case 'log_search': {
           if (!projectId) return { success: false, error: 'projectId required' };
           const items = await this.logs.findByProject(projectId, {
-            search: args.q as string,
-            level: args.level as string | undefined,
+            search: requireString(args, 'q'),
+            level: optionalString(args, 'level'),
             limit: 50,
           });
           return {
@@ -2226,7 +2377,7 @@ export class ChatToolsService {
               level: l.level,
               service: l.service,
               snippet: (l.message || '').slice(0, 200),
-              createdAt: (l as unknown as { createdAt?: Date }).createdAt,
+              createdAt: l.createdAt,
             })),
           };
         }
@@ -2239,9 +2390,9 @@ export class ChatToolsService {
         case 'release_list': {
           if (!projectId) return { success: false, error: 'projectId required' };
           const items = await this.releases.findByProject(projectId, {
-            status: args.status as never,
-            platform: args.platform as never,
-            releaseType: args.releaseType as never,
+            status: optionalEnum(args, 'status', Object.values(ReleaseStatus)),
+            platform: optionalEnum(args, 'platform', Object.values(ReleasePlatform)),
+            releaseType: optionalEnum(args, 'releaseType', Object.values(ReleaseType)),
           });
           return {
             success: true,
@@ -2257,30 +2408,30 @@ export class ChatToolsService {
           };
         }
         case 'release_get': {
-          const r = await this.releases.findById(args.id as string);
+          const r = await this.releases.findById(requireString(args, 'id'));
           return { success: true, result: r.toObject() };
         }
         case 'release_create': {
           if (!projectId) return { success: false, error: 'projectId required' };
           const r = await this.releases.create({
             projectId,
-            version: args.version as string,
-            title: args.title as string | undefined,
-            description: args.description as string | undefined,
-            releaseType: args.releaseType as never,
-            platform: args.platform as never,
-            status: args.status as never,
-            downloadUrl: args.downloadUrl as string | undefined,
-            tags: args.tags as string[] | undefined,
+            version: requireString(args, 'version'),
+            title: optionalString(args, 'title'),
+            description: optionalString(args, 'description'),
+            releaseType: optionalEnum(args, 'releaseType', Object.values(ReleaseType)),
+            platform: optionalEnum(args, 'platform', Object.values(ReleasePlatform)),
+            status: optionalEnum(args, 'status', Object.values(ReleaseStatus)),
+            downloadUrl: optionalString(args, 'downloadUrl'),
+            tags: optionalStringArray(args, 'tags'),
           });
           return { success: true, result: { id: r._id.toString(), version: r.version } };
         }
         case 'release_update': {
-          const r = await this.releases.update(args.id as string, {
-            version: args.version as string | undefined,
-            title: args.title as string | undefined,
-            description: args.description as string | undefined,
-            status: args.status as never,
+          const r = await this.releases.update(requireString(args, 'id'), {
+            version: optionalString(args, 'version'),
+            title: optionalString(args, 'title'),
+            description: optionalString(args, 'description'),
+            status: optionalEnum(args, 'status', Object.values(ReleaseStatus)),
           });
           return { success: true, result: { id: r._id.toString(), version: r.version } };
         }
@@ -2288,7 +2439,7 @@ export class ChatToolsService {
           if (!projectId) return { success: false, error: 'projectId required' };
           const result = await this.releases.syncReleases(
             projectId,
-            args.repoIndex as number | undefined,
+            optionalNumber(args, 'repoIndex'),
           );
           return { success: true, result };
         }
@@ -2298,8 +2449,8 @@ export class ChatToolsService {
           if (!projectId) return { success: false, error: 'projectId required' };
           const items = await this.attachments.findByProject(
             projectId,
-            args.entityType as string | undefined,
-            args.entityId as string | undefined,
+            optionalString(args, 'entityType'),
+            optionalString(args, 'entityId'),
           );
           const limit = typeof args.limit === 'number' ? args.limit : 50;
           return {
@@ -2315,7 +2466,7 @@ export class ChatToolsService {
           };
         }
         case 'attachment_get': {
-          const a = await this.attachments.findById(args.id as string);
+          const a = await this.attachments.findById(requireString(args, 'id'));
           return {
             success: true,
             result: {
@@ -2329,7 +2480,8 @@ export class ChatToolsService {
           };
         }
         case 'attachment_download': {
-          const { text, attachment } = await this.attachments.getText(args.id as string);
+          const attachmentId = requireString(args, 'id');
+          const { text, attachment } = await this.attachments.getText(attachmentId);
           if (text != null) {
             return {
               success: true,
@@ -2342,7 +2494,7 @@ export class ChatToolsService {
               },
             };
           }
-          const { buffer } = await this.attachments.getContent(args.id as string);
+          const { buffer } = await this.attachments.getContent(attachmentId);
           // Cap binary download at ~3MB after base64 expansion to keep prompts sane.
           if (buffer.length > 3 * 1024 * 1024) {
             return { success: false, error: `binary file too large for chat context (${buffer.length} bytes)` };
@@ -2363,14 +2515,14 @@ export class ChatToolsService {
           const a = await this.attachments.createFromBase64(
             {
               projectId,
-              fileName: args.fileName as string,
-              mimeType: args.mimeType as string | undefined,
-              entityType: args.entityType as string | undefined,
-              entityId: args.entityId as string | undefined,
-              description: args.description as string | undefined,
-              tags: args.tags as string[] | undefined,
+              fileName: requireString(args, 'fileName'),
+              mimeType: optionalString(args, 'mimeType'),
+              entityType: optionalString(args, 'entityType'),
+              entityId: optionalString(args, 'entityId'),
+              description: optionalString(args, 'description'),
+              tags: optionalStringArray(args, 'tags'),
             },
-            args.content as string,
+            requireString(args, 'content'),
           );
           return { success: true, result: { id: a._id.toString(), fileName: a.originalName, size: a.size } };
         }
@@ -2380,7 +2532,7 @@ export class ChatToolsService {
           if (!projectId) return { success: false, error: 'projectId required' };
           const items = await this.workspaces.findByProject(
             projectId,
-            args.status as never,
+            optionalEnum(args, 'status', WORKSPACE_STATUSES),
           );
           return {
             success: true,
@@ -2396,55 +2548,57 @@ export class ChatToolsService {
           };
         }
         case 'workspace_get': {
-          if (args.id) {
-            const w = await this.workspaces.findById(args.id as string);
+          const wsId = optionalString(args, 'id');
+          if (wsId) {
+            const w = await this.workspaces.findById(wsId);
             return { success: true, result: w.toObject() };
           }
           if (!projectId) return { success: false, error: 'projectId or id required' };
-          const w = await this.workspaces.findByName(projectId, args.name as string);
+          const w = await this.workspaces.findByName(projectId, requireString(args, 'name'));
           return { success: true, result: w.toObject() };
         }
         case 'workspace_create': {
           if (!projectId) return { success: false, error: 'projectId required' };
           const w = await this.workspaces.create({
             projectId,
-            name: args.name as string,
-            description: args.description as string | undefined,
-            repoUrl: args.repoUrl as string | undefined,
-            branch: args.branch as string | undefined,
+            name: requireString(args, 'name'),
+            description: optionalString(args, 'description'),
+            repoUrl: optionalString(args, 'repoUrl'),
+            branch: optionalString(args, 'branch'),
           });
           return { success: true, result: { id: w._id.toString(), name: w.name, path: w.path } };
         }
         case 'workspace_update': {
-          const w = await this.workspaces.update(args.id as string, {
-            name: args.name as string | undefined,
-            description: args.description as string | undefined,
-            repoUrl: args.repoUrl as string | undefined,
-            branch: args.branch as string | undefined,
+          const w = await this.workspaces.update(requireString(args, 'id'), {
+            name: optionalString(args, 'name'),
+            description: optionalString(args, 'description'),
+            repoUrl: optionalString(args, 'repoUrl'),
+            branch: optionalString(args, 'branch'),
           });
           return { success: true, result: { id: w._id.toString(), name: w.name } };
         }
         case 'workspace_archive': {
-          const w = await this.workspaces.archive(args.id as string);
+          const w = await this.workspaces.archive(requireString(args, 'id'));
           return { success: true, result: { id: w._id.toString(), status: w.status } };
         }
         case 'workspace_delete': {
           // Chat path goes straight through — the user is already in the chat
           // dock and explicitly asked. The MCP path adds an ask_user dialog
           // (see mcp-tools.ts), but here the chat IS the user-interface.
-          await this.workspaces.remove(args.id as string);
-          return { success: true, result: { deleted: true, id: args.id } };
+          const wsId = requireString(args, 'id');
+          await this.workspaces.remove(wsId);
+          return { success: true, result: { deleted: true, id: wsId } };
         }
         case 'workspace_clone': {
-          const w = await this.workspaces.findById(args.id as string);
+          const w = await this.workspaces.findById(requireString(args, 'id'));
           const authenticatedUrl = await this.workspaceGitTokens.buildAuthenticatedCloneUrl(
             w,
-            args.repoUrl as string,
+            requireString(args, 'repoUrl'),
           );
           const sidecar = await this.workspaceClient.clone(
             w._id.toString(),
             authenticatedUrl,
-            args.branch as string | undefined,
+            optionalString(args, 'branch'),
           );
           let sizeBytes: number | undefined;
           try {
@@ -2456,47 +2610,49 @@ export class ChatToolsService {
           return { success: true, result: { cloned: true, sizeBytes, sidecar } };
         }
         case 'workspace_pull': {
-          const w = await this.workspaces.findById(args.id as string);
+          const w = await this.workspaces.findById(requireString(args, 'id'));
           const sidecar = await this.workspaceClient.pull(w._id.toString());
           await this.workspaces.touch(w._id.toString());
           return { success: true, result: { pulled: true, sidecar } };
         }
         case 'workspace_tree': {
-          const w = await this.workspaces.findById(args.id as string);
+          const w = await this.workspaces.findById(requireString(args, 'id'));
           const tree = await this.workspaceClient.tree(
             w._id.toString(),
-            args.path as string | undefined,
-            args.depth as number | undefined,
+            optionalString(args, 'path'),
+            optionalNumber(args, 'depth'),
           );
           await this.workspaces.touch(w._id.toString());
           return { success: true, result: tree };
         }
         case 'workspace_read': {
-          const w = await this.workspaces.findById(args.id as string);
-          const file = await this.workspaceClient.read(w._id.toString(), args.path as string);
+          const w = await this.workspaces.findById(requireString(args, 'id'));
+          const file = await this.workspaceClient.read(w._id.toString(), requireString(args, 'path'));
           await this.workspaces.touch(w._id.toString());
           return { success: true, result: file };
         }
         case 'workspace_search': {
-          const w = await this.workspaces.findById(args.id as string);
+          const w = await this.workspaces.findById(requireString(args, 'id'));
           const search = await this.workspaceClient.search(
             w._id.toString(),
-            args.query as string,
-            args.include as string[] | undefined,
-            args.exclude as string[] | undefined,
+            requireString(args, 'query'),
+            optionalStringArray(args, 'include'),
+            optionalStringArray(args, 'exclude'),
           );
           await this.workspaces.touch(w._id.toString());
           return { success: true, result: search };
         }
         case 'workspace_status': {
-          const w = await this.workspaces.findById(args.id as string);
+          const w = await this.workspaces.findById(requireString(args, 'id'));
           const status = await this.workspaceClient.status(w._id.toString());
           await this.workspaces.touch(w._id.toString());
           return { success: true, result: status };
         }
         case 'workspace_exec': {
-          const w = await this.workspaces.findById(args.id as string);
-          const callerEnv = args.env as Record<string, string> | undefined;
+          const w = await this.workspaces.findById(requireString(args, 'id'));
+          // Nur die Objekt-Form wird geprüft; die Key/Value-Regeln (Keys [A-Z_]…,
+          // Werte <=4KB) erzwingt der Sidecar bzw. ExecWorkspaceDto.
+          const callerEnv = optionalObject<Record<string, string>>(args, 'env');
           const gitEnv = await this.workspaceGitTokens.resolveForWorkspace(w);
           const dgEnv = this.workspaceCliToken.buildEnvFor(w._id.toString(), w.projectId.toString());
           const mergedEnv = Object.keys(gitEnv).length || Object.keys(dgEnv).length || callerEnv
@@ -2504,31 +2660,28 @@ export class ChatToolsService {
             : undefined;
           const exec = await this.workspaceClient.exec(
             w._id.toString(),
-            args.command as string,
-            args.timeout as number | undefined,
+            requireString(args, 'command'),
+            optionalNumber(args, 'timeout'),
             mergedEnv,
           );
           await this.workspaces.touch(w._id.toString());
           return { success: true, result: exec };
         }
         case 'workspace_attachment_save': {
-          const w = await this.workspaces.findById(args.id as string);
-          const path = args.path as string;
+          const w = await this.workspaces.findById(requireString(args, 'id'));
+          const path = requireString(args, 'path');
           const file = await this.workspaceClient.readBase64(w._id.toString(), path);
-          const fileName = (args.fileName as string | undefined)
+          const fileName = optionalString(args, 'fileName')
             || path.split('/').filter(Boolean).pop()
             || 'file';
-          const tags = Array.isArray(args.tags)
-            ? (args.tags as unknown[]).filter((t): t is string => typeof t === 'string')
-            : undefined;
           const attachment = await this.attachments.createFromBase64(
             {
               projectId: w.projectId.toString(),
               fileName,
-              entityType: args.entityType as string | undefined,
-              entityId: args.entityId as string | undefined,
-              description: args.description as string | undefined,
-              tags,
+              entityType: optionalString(args, 'entityType'),
+              entityId: optionalString(args, 'entityId'),
+              description: optionalString(args, 'description'),
+              tags: optionalStringArray(args, 'tags'),
             },
             file.contentBase64,
           );
@@ -2546,11 +2699,11 @@ export class ChatToolsService {
 
         case 'customer_list': {
           const items = await this.customers.findAll({
-            status: args.status as never,
-            tag: args.tag as string | undefined,
-            q: args.q as string | undefined,
-            includeArchived: args.includeArchived as boolean | undefined,
-            projectId: args.projectId as string | undefined,
+            status: optionalEnum(args, 'status', Object.values(CustomerStatus)),
+            tag: optionalString(args, 'tag'),
+            q: optionalString(args, 'q'),
+            includeArchived: optionalBoolean(args, 'includeArchived'),
+            projectId: optionalString(args, 'projectId'),
           });
           const limit = typeof args.limit === 'number' ? args.limit : 50;
           return {
@@ -2564,7 +2717,7 @@ export class ChatToolsService {
           };
         }
         case 'customer_get': {
-          const c = await this.customers.findById(args.id as string);
+          const c = await this.customers.findById(requireString(args, 'id'));
           return {
             success: true,
             result: {
@@ -2580,7 +2733,7 @@ export class ChatToolsService {
           };
         }
         case 'customer_project_list': {
-          const links = await this.customers.findProjectLinks(args.customerId as string);
+          const links = await this.customers.findProjectLinks(requireString(args, 'customerId'));
           return {
             success: true,
             result: links.map((l) => ({
@@ -2593,7 +2746,7 @@ export class ChatToolsService {
           };
         }
         case 'project_customer_links': {
-          const pid = (args.projectId as string | undefined) || projectId;
+          const pid = optionalString(args, 'projectId') || projectId;
           if (!pid) return { success: false, error: 'projectId required' };
           const links = await this.customers.findLinksByProject(pid);
           return {
@@ -2607,7 +2760,7 @@ export class ChatToolsService {
           };
         }
         case 'contact_list': {
-          const items = await this.contacts.findByCustomer(args.customerId as string);
+          const items = await this.contacts.findByCustomer(requireString(args, 'customerId'));
           return {
             success: true,
             result: items.map((c) => ({
@@ -2621,7 +2774,7 @@ export class ChatToolsService {
           };
         }
         case 'contact_get': {
-          const c = await this.contacts.findById(args.id as string);
+          const c = await this.contacts.findById(requireString(args, 'id'));
           return {
             success: true,
             result: {
@@ -2643,49 +2796,59 @@ export class ChatToolsService {
         case 'stack_list':
           return { success: true, result: await this.stacksService.findAll() };
         case 'stack_get':
-          return { success: true, result: await this.stacksService.findById(args.id as string) };
+          return { success: true, result: await this.stacksService.findById(requireString(args, 'id')) };
         case 'stack_export_markdown':
           return {
             success: true,
-            result: await this.stacksService.exportAsMarkdown(args.id as string, args.entryId as string | undefined),
+            result: await this.stacksService.exportAsMarkdown(
+              requireString(args, 'id'),
+              optionalString(args, 'entryId'),
+            ),
           };
         case 'stack_create':
           return {
             success: true,
             result: await this.stacksService.create({
-              name: args.name as string,
-              description: args.description as string | undefined,
+              name: requireString(args, 'name'),
+              description: optionalString(args, 'description'),
             }),
           };
         case 'stack_update':
           return {
             success: true,
-            result: await this.stacksService.update(args.id as string, {
-              name: args.name as string | undefined,
-              description: args.description as string | undefined,
+            result: await this.stacksService.update(requireString(args, 'id'), {
+              name: optionalString(args, 'name'),
+              description: optionalString(args, 'description'),
             }),
           };
         case 'stack_entry_add':
           return {
             success: true,
-            result: await this.stacksService.addEntry(args.id as string, {
-              title: args.title as string,
-              content: args.content as string | undefined,
+            result: await this.stacksService.addEntry(requireString(args, 'id'), {
+              title: requireString(args, 'title'),
+              content: optionalString(args, 'content'),
             }),
           };
         case 'stack_entry_update':
           return {
             success: true,
-            result: await this.stacksService.updateEntry(args.id as string, args.entryId as string, {
-              title: args.title as string | undefined,
-              content: args.content as string | undefined,
-              order: args.order as number | undefined,
-            }),
+            result: await this.stacksService.updateEntry(
+              requireString(args, 'id'),
+              requireString(args, 'entryId'),
+              {
+                title: optionalString(args, 'title'),
+                content: optionalString(args, 'content'),
+                order: optionalNumber(args, 'order'),
+              },
+            ),
           };
         case 'stack_entry_remove':
           return {
             success: true,
-            result: await this.stacksService.removeEntry(args.id as string, args.entryId as string),
+            result: await this.stacksService.removeEntry(
+              requireString(args, 'id'),
+              requireString(args, 'entryId'),
+            ),
           };
 
         default:

@@ -51,6 +51,15 @@ export class EncryptionService {
     const authTag = Buffer.from(parts[1], 'hex');
     const encrypted = Buffer.from(parts[2], 'hex');
 
+    // Längen explizit prüfen. `Buffer.from(..., 'hex')` verschluckt ungültige
+    // Zeichen still und liefert einen zu kurzen Buffer — der Fehler käme sonst
+    // erst als generisches "Unsupported state or unable to authenticate data"
+    // aus `final()` und wäre von einem echten Manipulationsversuch nicht zu
+    // unterscheiden. (AUTH_TAG_LENGTH war bis hierhin eine tote Konstante.)
+    if (iv.length !== IV_LENGTH || authTag.length !== AUTH_TAG_LENGTH) {
+      throw new Error('Invalid encrypted value format');
+    }
+
     const decipher = createDecipheriv(ALGORITHM, this.key, iv);
     decipher.setAuthTag(authTag);
 
