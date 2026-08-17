@@ -10,6 +10,7 @@ import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { ExecWorkspaceDto } from './dto/exec-workspace.dto';
 import { WORKSPACE_STATUSES, WorkspaceStatus } from './schemas/workspace.schema';
 import { LogsService } from '../logs/logs.service';
+import { errorMessage } from '../common/narrow';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/schemas/user.schema';
 
@@ -93,8 +94,10 @@ export class WorkspacesController {
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
-    const flushHeaders = (res as Response & { flushHeaders?: () => void }).flushHeaders;
-    if (typeof flushHeaders === 'function') flushHeaders.call(res);
+    // Direkt am `res` aufrufen statt die Methode zu entnehmen: sonst geht `this`
+    // verloren. Das `?.` behält die Absicherung für Response-Mocks ohne
+    // flushHeaders, die der frühere Cast bezweckte.
+    res.flushHeaders?.();
 
     const abort = new AbortController();
     req.on('close', () => abort.abort());
@@ -125,8 +128,8 @@ export class WorkspacesController {
           if (event.type === 'done') lastDone = event;
         },
       );
-    } catch (err) {
-      send({ type: 'error', message: (err as Error).message });
+    } catch (err: unknown) {
+      send({ type: 'error', message: errorMessage(err) });
     }
     if (!res.writableEnded) res.end();
 

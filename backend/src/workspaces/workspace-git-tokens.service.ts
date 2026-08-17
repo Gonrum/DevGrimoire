@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ProjectsService } from '../projects/projects.service';
 import { SecretsService } from '../secrets/secrets.service';
 import { WorkspaceDocument } from './schemas/workspace.schema';
+import { errorMessage } from '../common/narrow';
 
 /**
  * Resolves env vars (GH_TOKEN / GITLAB_TOKEN / GITLAB_HOST) for a workspace
@@ -149,9 +150,9 @@ export class WorkspaceGitTokensService {
     try {
       const secret = await this.secrets.findById(secretId);
       return secret.value;
-    } catch (err) {
+    } catch (err: unknown) {
       this.logger.warn(
-        `git token secret ${secretId} could not be loaded: ${(err as Error).message}`,
+        `git token secret ${secretId} could not be loaded: ${errorMessage(err)}`,
       );
       return null;
     }

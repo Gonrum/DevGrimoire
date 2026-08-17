@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+import { errorMessage } from '../../common/narrow';
 
 export type SshAuthMethod = 'key' | 'password';
 
@@ -172,8 +173,11 @@ SshConnectionSchema.pre('save', function (next) {
   try {
     validateSshConnectionInvariants(this);
     next();
-  } catch (err) {
-    next(err as Error);
+  } catch (err: unknown) {
+    // `next` erwartet einen Error. Die Invarianten werfen ausschließlich
+    // Errors; alles andere wird geprüft eingepackt, statt es zu behaupten —
+    // sonst käme bei Mongoose ein Nicht-Error als Validierungsfehler an.
+    next(err instanceof Error ? err : new Error(errorMessage(err)));
   }
 });
 

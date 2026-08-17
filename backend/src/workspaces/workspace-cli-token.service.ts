@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { errorMessage } from '../common/narrow';
 
 const TOKEN_TTL = '1h';
 const TOKEN_SUBJECT = 'workspace-cli';
@@ -58,8 +59,8 @@ export class WorkspaceCliTokenService {
         return null;
       }
       return { workspaceId: payload.workspaceId, projectId: payload.projectId };
-    } catch (err) {
-      this.logger.debug(`dg token verify failed: ${(err as Error).message}`);
+    } catch (err: unknown) {
+      this.logger.debug(`dg token verify failed: ${errorMessage(err)}`);
       return null;
     }
   }

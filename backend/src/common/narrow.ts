@@ -62,3 +62,23 @@ export function mongoErrorCode(err: unknown): number | undefined {
 export function isDuplicateKeyError(err: unknown): boolean {
   return mongoErrorCode(err) === 11000;
 }
+
+/**
+ * `new Error(msg, { cause })` — nur eben kompilierbar.
+ *
+ * `tsconfig.json` steht auf `target: "ES2021"` ohne eigenes `lib`, damit fehlt
+ * `ErrorOptions` und die Zwei-Argument-Form von `new Error` existiert für TS
+ * nicht. Die ESLint-Regel `preserve-caught-error` aus `js.configs.recommended`
+ * verlangt die Ursache aber bei jedem Umwerfen — ohne diesen Helfer erfindet
+ * jedes Modul seine eigene Variante (es waren schon zwei).
+ *
+ * Node 22 liest `.cause` als Property identisch zur Konstruktor-Form.
+ *
+ * Die sauberere Lösung wäre `target: "ES2022"` (Node 22 kann es vollständig);
+ * das ändert aber das Emit und gehört in denselben Schritt wie `strict: true`.
+ */
+export function errorWithCause(message: string, cause: unknown): Error {
+  const err: Error & { cause?: unknown } = new Error(message);
+  err.cause = cause;
+  return err;
+}

@@ -4,6 +4,7 @@ import { WorkspacesService } from './workspaces.service';
 import { WorkspaceClient } from './workspace-client.service';
 import { SettingsService } from '../settings/settings.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { errorMessage } from '../common/narrow';
 
 export const TTL_SETTING_ENABLED = 'workspace.ttl.enabled';
 export const TTL_SETTING_ARCHIVE_DAYS = 'workspace.ttl.archive_after_days';
@@ -64,8 +65,8 @@ export class WorkspaceTtlScheduler {
         await this.workspaces.archive(ws._id.toString());
         archivedCount += 1;
         await this.notifyArchived(ws.name, archiveDays).catch(() => undefined);
-      } catch (err) {
-        this.logger.warn(`archive failed for ${ws._id}: ${(err as Error).message}`);
+      } catch (err: unknown) {
+        this.logger.warn(`archive failed for ${ws._id.toString()}: ${errorMessage(err)}`);
       }
     }
 
@@ -76,15 +77,17 @@ export class WorkspaceTtlScheduler {
     for (const ws of toDelete) {
       try {
         if (this.workspaceClient.isConfigured()) {
-          await this.workspaceClient.cleanup(ws._id.toString()).catch((err) => {
-            this.logger.warn(`sidecar cleanup failed for ${ws._id}: ${(err as Error).message}`);
+          await this.workspaceClient.cleanup(ws._id.toString()).catch((err: unknown) => {
+            this.logger.warn(
+              `sidecar cleanup failed for ${ws._id.toString()}: ${errorMessage(err)}`,
+            );
           });
         }
         await this.workspaces.remove(ws._id.toString());
         deletedCount += 1;
         await this.notifyDeleted(ws.name, deleteDays).catch(() => undefined);
-      } catch (err) {
-        this.logger.warn(`delete failed for ${ws._id}: ${(err as Error).message}`);
+      } catch (err: unknown) {
+        this.logger.warn(`delete failed for ${ws._id.toString()}: ${errorMessage(err)}`);
       }
     }
 

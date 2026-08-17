@@ -10,6 +10,7 @@ import {
   ConnectConfig,
 } from 'ssh2';
 import { SshService } from './ssh.service';
+import { errorMessage, errorWithCause } from '../common/narrow';
 import { SecretsService } from '../secrets/secrets.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -39,6 +40,26 @@ const DEFAULT_FACTORY: SshClientFactory = {
   create: () => new Ssh2Client(),
 };
 
+/**
+ * Normalisiert einen geworfenen Wert auf `Error`.
+ *
+ * Echte Errors gehen unverändert durch — bei ssh2 hängen an ihnen `level` und
+ * `code`, die `isAuthFailure` liest. Nur Nicht-Errors (ssh2 emittiert die
+ * gelegentlich) werden eingepackt, damit `reject`/`recordConnectError` einen
+ * verlässlichen `.message` bekommen statt des Literalstrings `undefined`.
+ */
+function asError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(errorMessage(value));
+}
+
+/**
+ * Fehler mit angehängter Ursache.
+ *
+ * `new Error(msg, { cause })` bräuchte `lib: es2022`; das Backend kompiliert
+ * gegen `target: ES2021`, wo die Überladung nicht existiert. Die Property
+ * direkt zu setzen ist zur Laufzeit dasselbe (Node 22 liest `err.cause`) und
+ * hält die Ursache am Symptom-Fehler fest, statt sie im catch zu verlieren.
+ */
 // -------------------- Limits (per spec §6.4) --------------------
 const KEEPALIVE_MS = 30_000;
 const READY_TIMEOUT_MS = 9_500;
@@ -353,15 +374,20 @@ export class SshSessionService {
    */
   async connect(
     connId: string,
-    _opts: { ptyCols?: number; ptyRows?: number } = {},
+    opts: { ptyCols?: number; ptyRows?: number } = {},
   ): Promise<Ssh2Client> {
+    // Bewusst ungelesen: die PTY-Geometrie wird erst bei `client.shell()` auf
+    // dem zurückgegebenen Client gesetzt (siehe Doc-Block). Der Parameter
+    // bleibt für die Aufrufer-Symmetrie in der Signatur; `void` sagt explizit,
+    // dass das hier keine Auslassung ist.
+    void opts;
     const connection = await this.sshService.findById(connId);
     let creds: ResolvedCreds;
     try {
       creds = await this.resolveCredentials(connection);
-    } catch (err) {
-      await this.recordError(connId, 'credential_missing', err as Error);
-      throw new Error('credential_missing');
+    } catch (err: unknown) {
+      await this.recordError(connId, 'credential_missing', err);
+      throw errorWithCause('credential_missing', err);
     }
     return this.openClient(connection, creds);
   }
@@ -384,8 +410,8 @@ export class SshSessionService {
       let creds: ResolvedCreds;
       try {
         creds = await this.resolveCredentials(connection);
-      } catch (err) {
-        await this.recordError(connId, 'credential_missing', err as Error);
+      } catch (err: unknown) {
+        await this.recordError(connId, 'credential_missing', err);
         void this.writeAudit({
           connectionId: connection._id,
           action: 'exec',
@@ -395,7 +421,7 @@ export class SshSessionService {
           durationMs: Date.now() - startedAt,
           errorMsg: 'credential_missing',
         });
-        throw new Error('credential_missing');
+        throw errorWithCause('credential_missing', err);
       }
 
       client = await this.openClient(connection, creds);
@@ -525,13 +551,14 @@ export class SshSessionService {
 
     // Kick the actual exec into the background. We intentionally do NOT
     // await — control returns to the caller with the jobId immediately.
-    void this.runJobBackground(job, opts).catch((err) => {
+    void this.runJobBackground(job, opts).catch((err: unknown) => {
       // Catastrophic errors (credential_missing, openClient reject, etc.)
       // land here. Stamp the job as aborted/error and release the slot
       // we acquired synchronously above.
-      this.logger.warn(`Async exec job ${jobId} failed before runExec: ${(err as Error).message}`);
+      const msg = errorMessage(err);
+      this.logger.warn(`Async exec job ${jobId} failed before runExec: ${msg}`);
       job.state = 'aborted';
-      job.errorMsg = (err as Error).message;
+      job.errorMsg = msg;
       job.durationMs = Date.now() - job.startedAt;
       this.releaseSlot(connId);
       this.scheduleJobCleanup(job);
@@ -587,8 +614,8 @@ export class SshSessionService {
       let creds: ResolvedCreds;
       try {
         creds = await this.resolveCredentials(connection);
-      } catch (err) {
-        await this.recordError(job.connectionId, 'credential_missing', err as Error);
+      } catch (err: unknown) {
+        await this.recordError(job.connectionId, 'credential_missing', err);
         void this.writeAudit({
           connectionId: connection._id,
           action: 'exec',
@@ -598,7 +625,7 @@ export class SshSessionService {
           durationMs: Date.now() - job.startedAt,
           errorMsg: 'credential_missing',
         });
-        throw new Error('credential_missing');
+        throw errorWithCause('credential_missing', err);
       }
 
       client = await this.openClient(connection, creds);
@@ -1041,9 +1068,9 @@ export class SshSessionService {
 
     return Promise.resolve(this.auditModel.create(doc))
       .then(() => undefined)
-      .catch((err: Error) => {
+      .catch((err: unknown) => {
         this.logger.warn(
-          `Audit persistence failed for SshConnection ${entry.connectionId}: ${err.message}`,
+          `Audit persistence failed for SshConnection ${entry.connectionId.toString()}: ${errorMessage(err)}`,
         );
       });
   }
@@ -1087,9 +1114,9 @@ export class SshSessionService {
           connection.notifyOnAuthFailure &&
           this.isAuthFailure(err)
         ) {
-          this.dispatchAuthFailureNotification(connection).catch((nerr) => {
+          this.dispatchAuthFailureNotification(connection).catch((nerr: unknown) => {
             this.logger.warn(
-              `Auth-failure notification failed for SshConnection ${connection._id.toString()}: ${(nerr as Error).message}`,
+              `Auth-failure notification failed for SshConnection ${connection._id.toString()}: ${errorMessage(nerr)}`,
             );
           });
         }
@@ -1161,8 +1188,8 @@ export class SshSessionService {
 
       try {
         client.connect({ ...config, ...authPatch });
-      } catch (err) {
-        finishWithError(err as Error);
+      } catch (err: unknown) {
+        finishWithError(asError(err));
       }
     });
   }
@@ -1396,12 +1423,12 @@ export class SshSessionService {
             finalize();
           });
         });
-      } catch (err) {
+      } catch (err: unknown) {
         if (settled) return;
         settled = true;
         if (timeoutHandle) clearTimeout(timeoutHandle);
         clearIdleTimer();
-        reject(err as Error);
+        reject(asError(err));
         return;
       }
     });
@@ -1425,7 +1452,7 @@ export class SshSessionService {
             resolve(0);
             return;
           }
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = errorMessage(err);
           reject(new Error(`append_stat_failed: cannot determine current size of ${remotePath} (${msg})`));
           return;
         }
@@ -1527,7 +1554,9 @@ export class SshSessionService {
         const remaining = maxBytes - total;
         if (remaining <= 0) {
           truncated = true;
-          try { (rs as unknown as { destroy?: () => void }).destroy?.(); } catch { /* noop */ }
+          // `destroy` ist am ssh2-ReadStream deklariert; der try fängt weiterhin
+          // Fakes ohne die Methode ab (vorher tat das ein `?.` am Cast).
+          try { rs.destroy(); } catch { /* noop */ }
           finalize();
           return;
         }
@@ -1538,7 +1567,7 @@ export class SshSessionService {
           chunks.push(chunk.subarray(0, remaining));
           total += remaining;
           truncated = true;
-          try { (rs as unknown as { destroy?: () => void }).destroy?.(); } catch { /* noop */ }
+          try { rs.destroy(); } catch { /* noop */ }
           finalize();
         }
       });
@@ -1709,13 +1738,13 @@ export class SshSessionService {
   private async resolveCredentialsOrFail(connection: SshConnectionDocument): Promise<ResolvedCreds> {
     try {
       return await this.resolveCredentials(connection);
-    } catch (err) {
+    } catch (err: unknown) {
       await this.recordError(
         connection._id.toString(),
         'credential_missing',
-        err as Error,
+        err,
       );
-      throw new Error('credential_missing');
+      throw errorWithCause('credential_missing', err);
     }
   }
 
@@ -1749,9 +1778,9 @@ export class SshSessionService {
     await this.notificationsService.create(title, body, undefined, 'ssh_auth_failure');
   }
 
-  private async recordError(connId: string, code: string, err: Error): Promise<void> {
+  private async recordError(connId: string, code: string, err: unknown): Promise<void> {
     try {
-      await this.sshService.recordConnectError(connId, `${code}: ${err.message}`);
+      await this.sshService.recordConnectError(connId, `${code}: ${errorMessage(err)}`);
     } catch {
       /* swallow — status persistence is best-effort */
     }

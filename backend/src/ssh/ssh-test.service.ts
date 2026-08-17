@@ -4,6 +4,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Client as Ssh2Client } from 'ssh2';
 import { SshService } from './ssh.service';
+import { errorMessage, isRecord } from '../common/narrow';
 import { SecretsService } from '../secrets/secrets.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -102,21 +103,20 @@ export class SshTestService {
     const startedAt = Date.now();
     const sourceContext: SshAuditSourceContext = 'rest';
 
-    let connection;
-    try {
-      connection = await this.sshService.findById(connId);
-    } catch (err) {
-      // Connection not found → bubble up (controller maps to 404). No audit
-      // possible without a connectionId reference.
-      throw err;
-    }
+    // A missing connection bubbles up (controller maps it to 404). No audit is
+    // possible without a connectionId reference, so there is nothing to do
+    // around this call but let it throw.
+    const connection = await this.sshService.findById(connId);
 
     // Resolve credential material. Any miss → structured `credential_missing`.
     let creds: ResolvedCreds;
     try {
       creds = await this.resolveCredentials(connection);
-    } catch (err) {
-      const msg = (err as Error).message || 'credential_missing';
+    } catch (err: unknown) {
+      // Fallback bleibt der Code-String: `errorMessage` würde für einen
+      // Nicht-Error 'Unbekannter Fehler' liefern, was in der API-Antwort
+      // weniger sagt als 'credential_missing'.
+      const msg = (err instanceof Error ? err.message : '') || 'credential_missing';
       await this.sshService.recordConnectError(connId, msg).catch(() => {});
       await this.writeAudit({
         connectionId: connection._id,
@@ -152,13 +152,15 @@ export class SshTestService {
         // (error/timeout paths), so we ALSO call destroy() to make sure the
         // underlying TCP socket gets released. Both throws are ignored:
         // ssh2 may have already errored and torn itself down.
+        // `end`/`destroy` sind Teil des Pick<> in SshClientFactory — der Cast
+        // auf den vollen Ssh2Client war überflüssig.
         try {
-          (client as Ssh2Client).end();
+          client.end();
         } catch {
           /* ignore */
         }
         try {
-          (client as Ssh2Client).destroy();
+          client.destroy();
         } catch {
           /* ignore */
         }
@@ -194,16 +196,16 @@ export class SshTestService {
             result.error?.code === 'auth_failed' &&
             connection.notifyOnAuthFailure
           ) {
-            this.dispatchAuthFailureNotification(connection).catch((err) => {
+            this.dispatchAuthFailureNotification(connection).catch((err: unknown) => {
               this.logger.warn(
-                `Auth-failure notification failed for SshConnection ${connId}: ${(err as Error).message}`,
+                `Auth-failure notification failed for SshConnection ${connId}: ${errorMessage(err)}`,
               );
             });
           }
         };
-        persist().catch((err) => {
+        persist().catch((err: unknown) => {
           this.logger.warn(
-            `Audit persistence failed for SshConnection ${connId}: ${(err as Error).message}`,
+            `Audit persistence failed for SshConnection ${connId}: ${errorMessage(err)}`,
           );
         });
         resolve(result);
@@ -324,13 +326,13 @@ export class SshTestService {
                 password: creds.password!,
               }),
         });
-      } catch (err) {
+      } catch (err: unknown) {
         // ssh2 throws synchronously on really broken inputs (bad key parse,
         // unsupported algorithm, …) before any event fires.
         finalize({
           ok: false,
           fingerprint: observedFingerprint,
-          error: this.classifyConnectError(err as Error),
+          error: this.classifyConnectError(err),
         });
       }
     });
@@ -401,13 +403,19 @@ export class SshTestService {
    * We avoid leaking raw error stack traces; only the lib's brief message
    * goes back to the caller.
    */
-  private classifyConnectError(err: Error & { level?: string; code?: string }): {
+  private classifyConnectError(err: unknown): {
     code: SshTestErrorCode;
     message: string;
   } {
-    const message = err?.message || 'unknown ssh error';
-    const lvl = err?.level;
-    const code = err?.code;
+    // `unknown` statt `Error & {...}`: ssh2 wirft/emittiert auch Nicht-Errors,
+    // und der synchrone connect()-catch liefert ohnehin nur `unknown`. Die drei
+    // Felder werden einzeln geprüft gelesen — dieselben Werte wie vorher
+    // (`err?.x`), nur ohne Behauptung. Reihenfolge der Klassifikation unverändert.
+    const message =
+      (isRecord(err) && typeof err.message === 'string' ? err.message : '') ||
+      'unknown ssh error';
+    const lvl = isRecord(err) && typeof err.level === 'string' ? err.level : undefined;
+    const code = isRecord(err) && typeof err.code === 'string' ? err.code : undefined;
 
     if (
       lvl === 'client-authentication' ||

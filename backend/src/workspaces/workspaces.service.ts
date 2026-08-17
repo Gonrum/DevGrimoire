@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
 import { Workspace, WorkspaceDocument, WorkspaceStatus } from './schemas/workspace.schema';
+import { isDuplicateKeyError } from '../common/narrow';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
@@ -36,8 +37,8 @@ export class WorkspacesService {
       });
       this.emit(ws, 'created', `Workspace "${ws.name}" erstellt`);
       return ws;
-    } catch (err) {
-      if ((err as { code?: number }).code === 11000) {
+    } catch (err: unknown) {
+      if (isDuplicateKeyError(err)) {
         throw new ConflictException(
           `Workspace "${dto.name}" already exists in project ${dto.projectId}`,
         );
@@ -79,8 +80,8 @@ export class WorkspacesService {
       if (!ws) throw new NotFoundException(`Workspace ${id} not found`);
       this.emit(ws, 'updated', `Workspace "${ws.name}" aktualisiert`);
       return ws;
-    } catch (err) {
-      if ((err as { code?: number }).code === 11000) {
+    } catch (err: unknown) {
+      if (isDuplicateKeyError(err)) {
         throw new ConflictException(
           `Workspace name "${dto.name}" already exists in this project`,
         );

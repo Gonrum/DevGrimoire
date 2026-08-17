@@ -25,6 +25,7 @@ import {
   CustomerProjectLinkDocument,
 } from '../customers/schemas/customer-project-link.schema';
 import { SecretsService } from '../secrets/secrets.service';
+import { errorMessage, isRecord } from '../common/narrow';
 import { CreateSshConnectionDto } from './dto/create-ssh-connection.dto';
 import { UpdateSshConnectionDto } from './dto/update-ssh-connection.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
@@ -109,8 +110,11 @@ export class SshService {
    * the signature because the spec mandates it and downstream PRs (audit
    * writes) will need it without breaking callers.
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async create(dto: CreateSshConnectionDto, userId: string): Promise<SshConnectionDocument> {
+    // Noch ungenutzt (siehe Doc-Block: reserviert für Scope-Check/Audit), aber
+    // Teil der vom Spec vorgegebenen Signatur. `void` markiert das absichtlich,
+    // statt es mit einer zeilenweisen Lint-Ausnahme zu verstecken.
+    void userId;
     this.validateScope(dto.customerId, dto.projectId);
     this.validateAuthInputs(dto);
 
@@ -208,14 +212,14 @@ export class SshService {
 
       this.emitConnectionChange(created, 'created', `SSH-Verbindung "${created.label}" angelegt`);
       return created;
-    } catch (err) {
+    } catch (err: unknown) {
       // Rollback any secrets we created in this transaction.
       if (createdSecrets.length > 0) {
-        await this.rollbackCreatedSecrets(createdSecrets).catch((cleanupErr) => {
+        await this.rollbackCreatedSecrets(createdSecrets).catch((cleanupErr: unknown) => {
           this.logger.error(
-            `Failed to roll back ${createdSecrets.length} secret(s) after SshConnection create error: ${
-              (cleanupErr as Error).message
-            }`,
+            `Failed to roll back ${createdSecrets.length} secret(s) after SshConnection create error: ${errorMessage(
+              cleanupErr,
+            )}`,
           );
         });
       }
@@ -311,7 +315,7 @@ export class SshService {
    */
   async update(id: string, dto: UpdateSshConnectionDto): Promise<SshConnectionDocument> {
     const doc = await this.findById(id);
-    const expectedVersion = (doc as unknown as { __v?: number }).__v ?? 0;
+    const expectedVersion = this.docVersion(doc);
 
     // Snapshot the original credential refs so we can restore them on the
     // in-memory `doc` if the conditional write fails (Important #4).
@@ -392,7 +396,6 @@ export class SshService {
       // partial index on `(scope, environmentId, key)`. We only delete
       // secrets that are actually owned by THIS connection — pick-existing
       // refs (no ownedBy stamp) survive.
-      let deletedOwnedIds: Types.ObjectId[] = [];
       if (oldOwnedIds.length > 0) {
         const ownedDocs = await this.secretModel
           .find({
@@ -400,7 +403,7 @@ export class SshService {
             ownedBySshConnectionId: doc._id,
           })
           .exec();
-        deletedOwnedIds = ownedDocs.map((s) => s._id);
+        const deletedOwnedIds = ownedDocs.map((s) => s._id);
         if (deletedOwnedIds.length > 0) {
           await this.secretModel
             .deleteMany({ _id: { $in: deletedOwnedIds } })
@@ -490,14 +493,14 @@ export class SshService {
 
         this.emitConnectionChange(updated, 'updated', `SSH-Verbindung "${updated.label}" rotiert`);
         return updated;
-      } catch (err) {
+      } catch (err: unknown) {
         // Rollback new secrets we just created so we don't leak orphans.
         if (newCreated.length > 0) {
-          await this.rollbackCreatedSecrets(newCreated).catch((cleanupErr) => {
+          await this.rollbackCreatedSecrets(newCreated).catch((cleanupErr: unknown) => {
             this.logger.error(
-              `Failed to roll back ${newCreated.length} secret(s) after credential rotation error: ${
-                (cleanupErr as Error).message
-              }`,
+              `Failed to roll back ${newCreated.length} secret(s) after credential rotation error: ${errorMessage(
+                cleanupErr,
+              )}`,
             );
           });
         }
@@ -815,6 +818,17 @@ export class SshService {
     await this.secretModel
       .deleteMany({ _id: { $in: refs.map((r) => r.id) } })
       .exec();
+  }
+
+  /**
+   * Mongoose-Versionskey (`__v`) eines Dokuments für den OCC-Filter in
+   * `update()`. Mongoose 8 deklariert `__v` nicht am `Document`-Typ, deshalb
+   * wird das Feld über `unknown` geprüft gelesen statt behauptet — Nicht-Zahlen
+   * und fehlendes Feld ergeben 0, genau wie das frühere `?? 0`.
+   */
+  private docVersion(doc: unknown): number {
+    if (isRecord(doc) && typeof doc.__v === 'number') return doc.__v;
+    return 0;
   }
 
   private toObjectId(id: string, label: string): Types.ObjectId {

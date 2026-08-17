@@ -1,8 +1,29 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
-import { AxiosError } from 'axios';
+import { isAxiosError } from 'axios';
 import { firstValueFrom } from 'rxjs';
 import { Readable } from 'node:stream';
+import { errorMessage, errorWithCause, isNullaryMethod, isRecord } from '../common/narrow';
+
+/**
+ * Fehler mit angehängter Ursache.
+ *
+ * `new Error(msg, { cause })` bräuchte `lib: es2022`; das Backend kompiliert
+ * gegen `target: ES2021`, wo die Überladung nicht existiert. Die Property
+ * direkt zu setzen ist zur Laufzeit dasselbe (Node 22 liest `err.cause`).
+ */
+/**
+ * `fetch()` liefert den DOM-`ReadableStream`, `Readable.fromWeb` erwartet den
+ * aus `node:stream/web`. Zur Laufzeit ist das dasselbe Objekt, die Typen sind
+ * aber nicht ineinander zuweisbar (`value` ist im Read-Result einmal optional,
+ * einmal erforderlich). Statt das per Assertion zu übergehen prüft dieses
+ * Prädikat die Eigenschaft, auf die `fromWeb` sich stützt: `getReader`.
+ */
+function isWebReadableStream(
+  value: unknown,
+): value is import('node:stream/web').ReadableStream {
+  return isRecord(value) && isNullaryMethod(value.getReader);
+}
 
 export interface SidecarProcessResult {
   exitCode: number | null;
@@ -74,15 +95,21 @@ export class WorkspaceClient {
         }),
       );
       return response.data;
-    } catch (err) {
-      const ax = err as AxiosError<{ error?: string }>;
-      if (ax.response) {
-        const remoteMsg = ax.response.data?.error || ax.response.statusText;
-        throw new Error(`sidecar ${ax.response.status} ${endpoint}: ${remoteMsg}`);
+    } catch (err: unknown) {
+      // `isAxiosError` ist die Laufzeitprüfung der Bibliothek selbst — vorher
+      // wurde der Fehler blind als AxiosError behauptet und nur an `.response`
+      // erkannt.
+      if (isAxiosError<{ error?: string }>(err) && err.response) {
+        const remoteMsg = err.response.data?.error || err.response.statusText;
+        throw errorWithCause(
+          `sidecar ${err.response.status} ${endpoint}: ${remoteMsg}`,
+          err,
+        );
       }
-      this.logger.warn(`sidecar transport error on ${endpoint}: ${(err as Error).message}`);
+      const msg = errorMessage(err);
+      this.logger.warn(`sidecar transport error on ${endpoint}: ${msg}`);
       throw new ServiceUnavailableException(
-        `workspace sidecar unreachable at ${this.baseUrl} (${(err as Error).message})`,
+        `workspace sidecar unreachable at ${this.baseUrl} (${msg})`,
       );
     }
   }
@@ -140,10 +167,11 @@ export class WorkspaceClient {
       throw new Error(`sidecar ${res.status} /read-stream: ${text}`);
     }
     if (!res.body) throw new Error('sidecar /read-stream: empty response body');
+    if (!isWebReadableStream(res.body)) {
+      throw new Error('sidecar /read-stream: response body is not a web stream');
+    }
     const size = Number.parseInt(res.headers.get('content-length') ?? '0', 10);
-    const stream = Readable.fromWeb(
-      res.body as import('node:stream/web').ReadableStream,
-    );
+    const stream = Readable.fromWeb(res.body);
     return { stream, size: Number.isNaN(size) ? 0 : size };
   }
 
@@ -229,14 +257,21 @@ export class WorkspaceClient {
           const trimmed = line.trim();
           if (!trimmed) continue;
           try {
-            onEvent(JSON.parse(trimmed));
+            // NDJSON-Events sind Objekte. Ein skalarer oder Array-Wert wäre
+            // kein Event und wird — wie eine kaputte Zeile — übersprungen,
+            // statt als `any` an onEvent durchzulaufen.
+            const parsed: unknown = JSON.parse(trimmed);
+            if (isRecord(parsed)) onEvent(parsed);
           } catch {
             // skip malformed line — sidecar should never produce them
           }
         }
       }
       if (buf.trim()) {
-        try { onEvent(JSON.parse(buf.trim())); } catch { /* skip */ }
+        try {
+          const parsed: unknown = JSON.parse(buf.trim());
+          if (isRecord(parsed)) onEvent(parsed);
+        } catch { /* skip */ }
       }
     } finally {
       try { reader.releaseLock(); } catch { /* noop */ }

@@ -17,6 +17,7 @@ import type { Request } from 'express';
 import Busboy from 'busboy';
 import { Types } from 'mongoose';
 import { SshService } from './ssh.service';
+import { errorMessage } from '../common/narrow';
 import { SshTestService } from './ssh-test.service';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -226,7 +227,10 @@ export class SshController {
       const settleReject = (reason: unknown) => {
         if (settled) return;
         settled = true;
-        reject(reason);
+        // HttpExceptions und ssh2-Fehler sind Errors und gehen unverändert
+        // durch; alles andere wird eingepackt, damit die Promise nie mit einem
+        // Nicht-Error rejected (Nest sähe dann nur ein leeres 500).
+        reject(reason instanceof Error ? reason : new Error(errorMessage(reason)));
       };
 
       bb.on('field', (name, val) => {
