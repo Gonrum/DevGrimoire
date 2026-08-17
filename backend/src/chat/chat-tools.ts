@@ -2610,7 +2610,7 @@ export class ChatToolsService {
           const items = await this.contacts.findByCustomer(args.customerId as string);
           return {
             success: true,
-            result: items.map((c: any) => ({
+            result: items.map((c) => ({
               id: c._id.toString(),
               customerId: c.customerId.toString(),
               name: c.name,
@@ -2625,14 +2625,16 @@ export class ChatToolsService {
           return {
             success: true,
             result: {
-              id: (c as any)._id.toString(),
-              customerId: (c as any).customerId?.toString(),
-              name: (c as any).name,
-              role: (c as any).role,
-              email: (c as any).email,
-              phone: (c as any).phone,
-              notes: (c as any).notes,
-              isPrimary: (c as any).isPrimary,
+              id: c._id.toString(),
+              // `?.` bleibt bewusst stehen: `customerId` ist im Schema required,
+              // aber das Laufzeitverhalten dieses Tools soll sich hier nicht ändern.
+              customerId: c.customerId?.toString(),
+              name: c.name,
+              role: c.role,
+              email: c.email,
+              phone: c.phone,
+              notes: c.notes,
+              isPrimary: c.isPrimary,
             },
           };
         }
@@ -2698,7 +2700,3 @@ export class ChatToolsService {
     }
   }
 }
-
-// Type helpers for TodosService / MilestonesService argument casting
-type TodoStatusArg = 'open' | 'in_progress' | 'review' | 'done' | undefined;
-type MilestoneStatusArg = 'open' | 'in_progress' | 'done' | undefined;

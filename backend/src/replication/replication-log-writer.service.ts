@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Connection, Model } from 'mongoose';
+import { Connection, Model, mongo } from 'mongoose';
 import { randomUUID } from 'crypto';
 import { SettingsService } from '../settings/settings.service';
 import { ReplicationLog, ReplicationLogDocument } from './schemas/replication-log.schema';
@@ -9,6 +9,54 @@ import { ReplicationCounterService } from './replication-counter.service';
 import { isReplicatedCollection, getReplicatedByCollection, replicatedCollectionNames } from './replication-collections';
 import { mapOperation, deriveEventId, makeAppliedKey } from './replication-log.helpers';
 import { REPL_WATCHER_RESUME_TOKEN, REPL_INSTANCE_ID, REPL_WATCHER_HEARTBEAT } from './replication.constants';
+
+/**
+ * Absichtlich offene Dokumentform: der Watcher sieht alle replizierten
+ * Collections, ein konkreter Typ wäre hier eine Lüge. Ohne explizites TSchema
+ * fällt der Treiber auf `Document` = `{[k: string]: any}` zurück — dann wäre
+ * jedes Feld wieder `any`.
+ */
+type ReplDoc = { _id?: unknown; [field: string]: unknown };
+type ReplChange = mongo.ChangeStreamDocument<ReplDoc>;
+
+/**
+ * Genau die vier Operationen, die `mapOperation()` abbildet. Alles andere
+ * (drop, rename, invalidate, Index-Events) wird verworfen — vorher über
+ * `mapOperation() === null`, jetzt schon am Guard. Gleiches Ergebnis, aber
+ * erst dieses Narrowing gibt typisierten Zugriff auf `ns`/`documentKey`.
+ */
+const DOCUMENT_OPERATIONS = ['insert', 'update', 'replace', 'delete'] as const;
+type ReplDocumentChange = Extract<
+  ReplChange,
+  { operationType: (typeof DOCUMENT_OPERATIONS)[number] }
+>;
+
+function isDocumentChange(change: ReplChange): change is ReplDocumentChange {
+  return DOCUMENT_OPERATIONS.some((operation) => operation === change.operationType);
+}
+
+/**
+ * Mongo-Id zu String. Nur String, Number und ObjectId-artige Werte gelten —
+ * ein blankes `String(value)` hätte für ein Objekt `[object Object]` als
+ * Dokument-Id ins Log geschrieben.
+ */
+function idToPlainString(value: unknown): string | undefined {
+  if (typeof value === 'string') return value || undefined;
+  if (typeof value === 'number') return String(value);
+  if (value instanceof mongo.ObjectId) return value.toHexString();
+  return undefined;
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
+/** Liest das `_data` des Resume-Tokens, das als Idempotenz-Disambiguator dient. */
+function resumeTokenData(token: unknown): string | undefined {
+  if (token === null || typeof token !== 'object') return undefined;
+  const data = (token as { _data?: unknown })._data;
+  return typeof data === 'string' ? data : undefined;
+}
 
 /** How often the watcher stamps its liveness heartbeat while consuming. */
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -27,8 +75,7 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 @Injectable()
 export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ReplicationLogWriterService.name);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private changeStream: any = null;
+  private changeStream: mongo.ChangeStream<ReplDoc, ReplChange> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private readonly standalone: boolean;
   private selfInstanceId: string | null = null;
@@ -55,7 +102,12 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
   onModuleDestroy() {
     this.closing = true;
     this.stopHeartbeat();
-    this.changeStream?.close();
+    // Fire-and-forget bleibt gewollt (der Shutdown soll nicht darauf warten),
+    // aber die Rejection war unbehandelt — beim Herunterfahren also eine
+    // potenzielle UnhandledRejection. Nur das `any` hat sie verdeckt.
+    this.changeStream?.close().catch((err: unknown) => {
+      this.logger.warn(`Closing change stream failed: ${(err as Error).message}`);
+    });
   }
 
   /** Stamp a liveness heartbeat now + every HEARTBEAT_INTERVAL_MS while the
@@ -103,11 +155,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
    * is logged (deletes for that collection won't replicate) but does not stop
    * the watcher.
    */
-  private async ensurePreImages(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    db: any,
-    collections: string[],
-  ): Promise<void> {
+  private async ensurePreImages(db: mongo.Db, collections: string[]): Promise<void> {
     for (const coll of collections) {
       try {
         await db.command({ collMod: coll, changeStreamPreAndPostImages: { enabled: true } });
@@ -135,8 +183,10 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
 
     // Resume from the persisted token if present.
     const tokenRaw = await this.settingsService.get(REPL_WATCHER_RESUME_TOKEN);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const options: any = { fullDocument: 'updateLookup', fullDocumentBeforeChange: 'whenAvailable' };
+    const options: mongo.ChangeStreamOptions = {
+      fullDocument: 'updateLookup',
+      fullDocumentBeforeChange: 'whenAvailable',
+    };
     if (tokenRaw) {
       try {
         options.resumeAfter = JSON.parse(tokenRaw);
@@ -163,8 +213,8 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
   /** Serial consumer loop. One handleChange at a time, in oplog order. */
   private async consume(): Promise<void> {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      for await (const change of this.changeStream as AsyncIterable<any>) {
+      if (!this.changeStream) return;
+      for await (const change of this.changeStream) {
         if (this.closing) break;
         await this.handleChange(change);
       }
@@ -181,17 +231,23 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleChange(change: any): Promise<void> {
+  private async handleChange(change: ReplChange): Promise<void> {
     if (this.closing) return;
     try {
-      const coll: string = change.ns?.coll;
+      // Erst auf die dokument-bezogenen Operationen verengen: vorher filterte
+      // `mapOperation() === null` dieselben Events heraus, nur eben nach dem
+      // ns-Zugriff. Beide Prüfungen sind nebenwirkungsfreie Early-Returns, die
+      // Reihenfolge ist also nicht beobachtbar.
+      if (!isDocumentChange(change)) return;
+
+      const coll = change.ns.coll;
       if (!coll || !isReplicatedCollection(coll)) return;
 
       const op = mapOperation(change.operationType);
       if (!op) return;
 
-      const documentId: string | undefined = (change.documentKey?._id || change.fullDocument?._id)?.toString();
+      const fullDocId = 'fullDocument' in change ? change.fullDocument?._id : undefined;
+      const documentId = idToPlainString(change.documentKey._id ?? fullDocId);
       if (!documentId) return;
 
       // clusterTime is a BSON Timestamp {t, i}; use seconds*1000 for ms epoch.
@@ -202,18 +258,19 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
       // has second granularity: two writes to the same doc within one second
       // would collide on eventId and the unique index would DROP the second —
       // silent data loss. The resume-token disambiguator prevents that.)
-      const resumeData: string | undefined = change._id?._data;
+      const resumeData = resumeTokenData(change._id);
       const eventId = resumeData
         ? `${coll}:${documentId}:${resumeData}`
         : deriveEventId(coll, documentId, clusterTimeMs);
 
-      const fullDoc = change.fullDocument ?? null;
+      const fullDoc = ('fullDocument' in change ? change.fullDocument : null) ?? null;
       // On a delete, fullDocument is null (updateLookup can't find the gone doc);
       // the pre-image carries the deleted doc → its projectId(s). Upserts keep
       // using fullDocument (unchanged). Without a pre-image (collection not
       // enabled / expired) refDoc is null → projectId null → the delete is
       // filtered out downstream, i.e. no worse than before this plan.
-      const preImage = change.fullDocumentBeforeChange ?? null;
+      const preImage =
+        ('fullDocumentBeforeChange' in change ? change.fullDocumentBeforeChange : null) ?? null;
       const refDoc = op === 'delete' ? preImage : fullDoc;
       const { projectId, projectIds } = this.extractProjectRefs(coll, refDoc, documentId);
       const updatedAtMs = this.toMs(fullDoc?.updatedAt);
@@ -268,8 +325,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
    *  `projectIds` null. Multi-project (multiProject registry flag): `projectId`
    *  null, `projectIds` = the doc's projectIds array. The projects collection
    *  itself uses its own _id as projectId. */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private extractProjectRefs(coll: string, doc: any, documentId: string): {
+  private extractProjectRefs(coll: string, doc: ReplDoc | null, documentId: string): {
     projectId: string | null;
     projectIds: string[] | null;
   } {
@@ -280,19 +336,34 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
       // (part of the run-scope object) rather than a top-level `projectIds[]`.
       // Entity-specific so a future top-level multiProject entity takes the
       // generic (top-level) path unchanged.
-      const raw = entry.entity === 'research-topic' ? doc?.scope?.projectIds : doc?.projectIds;
-      const arr = Array.isArray(raw) ? raw : [];
-      return { projectId: null, projectIds: arr.map((p: unknown) => String(p)) };
+      // ResearchTopic verschachtelt seine Opt-in-Liste unter `scope.projectIds[]`.
+      const scope = doc?.scope;
+      const nested =
+        scope !== null && typeof scope === 'object'
+          ? (scope as { projectIds?: unknown }).projectIds
+          : undefined;
+      const raw = entry.entity === 'research-topic' ? nested : doc?.projectIds;
+      // Ein eigenes Prädikat statt `Array.isArray`: das verengt ein `unknown`
+      // zu `any[]` und würde die unsafe-Findings auf den Elementen zurückholen.
+      const arr: unknown[] = isUnknownArray(raw) ? raw : [];
+      return {
+        projectId: null,
+        projectIds: arr.map((p) => idToPlainString(p) ?? '').filter((p) => p !== ''),
+      };
     }
-    const pid = doc?.projectId;
-    return { projectId: pid != null ? pid.toString() : null, projectIds: null };
+    return { projectId: idToPlainString(doc?.projectId) ?? null, projectIds: null };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private toMs(value: any): number | null {
+  private toMs(value: unknown): number | null {
     if (value == null) return null;
-    const d = value instanceof Date ? value : new Date(value);
-    const t = d.getTime();
+    if (value instanceof Date) {
+      const t = value.getTime();
+      return Number.isNaN(t) ? null : t;
+    }
+    // Nur String und Number sind sinnvolle Date-Eingaben; alles andere ergäbe
+    // ein Invalid Date, das über den NaN-Zweig ohnehin zu null geworden wäre.
+    if (typeof value !== 'string' && typeof value !== 'number') return null;
+    const t = new Date(value).getTime();
     return Number.isNaN(t) ? null : t;
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ProjectsService } from '../projects/projects.service';
@@ -16,7 +16,146 @@ import { DependenciesService } from '../dependencies/dependencies.service';
 import { FeaturesService } from '../features/features.service';
 import { CountersService } from '../counters/counters.service';
 import { Secret, SecretDocument } from '../secrets/schemas/secret.schema';
+import { CreateProjectDto } from '../projects/dto/create-project.dto';
+import { UpdateTodoDto } from '../todos/dto/update-todo.dto';
+import { TodoStatus, TodoPriority } from '../todos/schemas/todo.schema';
+import { MilestoneStatus } from '../milestones/schemas/milestone.schema';
+import { DbType } from '../schemas/schemas/db-schema.schema';
+import { PackageManager } from '../dependencies/schemas/dependency.schema';
+import { FeatureStatus, FeaturePriority } from '../features/schemas/feature.schema';
 import { ProjectExport } from './project-export.interface';
+
+/**
+ * Ein exportiertes bzw. zu importierendes Dokument. Export/Import laufen quer
+ * über ~13 Collections; ein konkreter Typ, der auf alle passt, wäre eine
+ * Erfindung. `PlainDoc` sagt genau das aus, was hier stimmt: Objekt mit
+ * String-Keys, Werte erst an der Zugriffsstelle verengt.
+ */
+type PlainDoc = Record<string, unknown>;
+
+/**
+ * Normalisiert Mongoose-Dokumente und Plain Objects (lean(), JSON.parse) auf
+ * dieselbe Form. Bewusst `toObject` per Duck-Typing statt `toJSON` — `toJSON`
+ * würde Schema-Transforms anwenden und damit den Export-Inhalt verändern.
+ *
+ * Die beiden Assertions bleiben auf diesen Helfer beschränkt; genau dieses
+ * Muster steht in `src/mcp-tools.ts` (dort mit `toJSON`) und hat drei
+ * `doc: any`-Helfer über 86 Aufrufstellen ersetzt.
+ */
+function toPlainDoc(doc: unknown): PlainDoc {
+  if (doc === null || typeof doc !== 'object') return {};
+  const toObject = (doc as { toObject?: unknown }).toObject;
+  if (typeof toObject === 'function') {
+    const plain: unknown = (toObject as () => unknown).call(doc);
+    if (plain !== null && typeof plain === 'object') return { ...(plain as PlainDoc) };
+  }
+  return { ...(doc as PlainDoc) };
+}
+
+/** Liest ein Feld eines PlainDoc als String — oder undefined, wenn es keiner ist. */
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * `Array.isArray()` verengt `unknown` zu `any[]` und schleppt damit `any` in
+ * jede Schleife darüber. Das Prädikat verengt zu `unknown[]`.
+ */
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
+/**
+ * ObjectId als Hex-String. JSON kennt keine ObjectId, deshalb muss jede ID beim
+ * Export zu einem String werden und beim Import wieder gecastet (das macht
+ * Mongoose beim Schreiben). Bereits konvertierte Strings kommen unverändert
+ * zurück; alles andere ergibt `undefined` statt eines '[object Object]'-Strings.
+ */
+function idAsString(value: unknown): string | undefined {
+  if (value instanceof Types.ObjectId) return value.toHexString();
+  return asString(value);
+}
+
+/**
+ * Map-Key für die Referenz-Umschreibung beim Import. Die exportierte `_id` ist
+ * immer ein String; fehlt sie, tritt die Array-Position als Ersatzschlüssel ein,
+ * damit zwei Einträge ohne `_id` sich nicht gegenseitig überschreiben. Ein
+ * `#`-Key kollidiert nie mit einer Hex-ObjectId.
+ */
+function exportKey(doc: PlainDoc, index: number): string {
+  return asString(doc._id) ?? `#${index}`;
+}
+
+/**
+ * Verengt einen exportierten Wert auf einen Enum-Wert — ohne Cast, weil
+ * `Object.values(Enum).find(...)` schon den Enum-Typ liefert. Unbekannte Werte
+ * ergeben `undefined`, ohne zu werfen.
+ */
+function matchEnum<T extends string>(values: readonly T[], value: unknown): T | undefined {
+  const raw = asString(value);
+  return raw === undefined ? undefined : values.find((candidate) => candidate === raw);
+}
+
+/**
+ * Wie `matchEnum`, aber laut: Fehlender Wert → `undefined`, damit der
+ * Schema-Default greift (wie vorher). Vorhandener, aber unbekannter Wert →
+ * Fehler, damit er nicht still auf den Default zurückfällt; vorher lief er in
+ * die Mongoose-Enum-Validierung und brach den Import ebenfalls ab.
+ */
+function asEnum<T extends string>(values: readonly T[], value: unknown, field: string): T | undefined {
+  if (value === undefined || value === null) return undefined;
+  const match = matchEnum(values, value);
+  if (match === undefined) {
+    throw new BadRequestException(`Invalid value for "${field}" in export: ${JSON.stringify(value)}`);
+  }
+  return match;
+}
+
+/**
+ * Reicht ein exportiertes Array verschachtelter Objekte **unverändert** an einen
+ * Service weiter.
+ *
+ * Hier sitzt eine unvermeidbare Behauptung, und zwar genau eine für alle drei
+ * Aufrufstellen (env.variables, schema.fields, schema.indexes): Der Export
+ * enthält die Felder so, wie das Mongoose-Schema sie geschrieben hat — das ist
+ * mehr, als die DTO-Klasse deklariert (und `EnvVariableDto` ist nicht einmal
+ * exportiert). Ein explizites Feld-Mapping würde beim Import genau die Felder
+ * verlieren, die das DTO nicht kennt. Zur Laufzeit wird geprüft, dass es
+ * überhaupt ein Array ist; die Feldvalidierung macht Mongoose beim Schreiben.
+ *
+ * Nicht-Objekte werden absichtlich NICHT herausgefiltert: Mongoose lehnt sie
+ * lautstark ab, still verwerfen würde Nutzerdaten verlieren.
+ */
+function asNestedArray<T>(value: unknown, field: string): T[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isUnknownArray(value)) {
+    throw new BadRequestException(`Field "${field}" must be an array`);
+  }
+  return value as T[];
+}
+
+/** Kopie ohne die genannten Felder, `_id` als String. */
+function stripFields(obj: PlainDoc, fields: string[]): PlainDoc {
+  const result = { ...obj };
+  for (const f of fields) delete result[f];
+  // Convert ObjectId to string
+  const id = idAsString(result._id);
+  if (id !== undefined) result._id = id;
+  return result;
+}
+
+const TODO_PRIORITIES = Object.values(TodoPriority);
+const TODO_STATUS_ORDER: readonly TodoStatus[] = [
+  TodoStatus.OPEN,
+  TodoStatus.IN_PROGRESS,
+  TodoStatus.REVIEW,
+  TodoStatus.DONE,
+];
+const MILESTONE_STATUSES = Object.values(MilestoneStatus);
+const DB_TYPES = Object.values(DbType);
+const PACKAGE_MANAGERS = Object.values(PackageManager);
+const FEATURE_STATUSES = Object.values(FeatureStatus);
+const FEATURE_PRIORITIES = Object.values(FeaturePriority);
 
 @Injectable()
 export class ProjectTransferService {
@@ -65,17 +204,20 @@ export class ProjectTransferService {
     // Fetch schema versions
     const schemasWithVersions = await Promise.all(
       schemas.map(async (s) => {
-        const obj = this.toPlain(s);
-        const versions = await this.schemasService.getVersions(obj._id as string);
-        obj._versions = versions.map((v) => this.stripFields(this.toPlain(v), ['__v']));
+        const obj = toPlainDoc(s);
+        // Die ID kommt vom typisierten Dokument, nicht aus dem PlainDoc: sonst
+        // hinge die Versions-Abfrage an einer Laufzeit-Prüfung, und ein Fehlschlag
+        // würde die Versionen still auf [] setzen statt laut zu scheitern.
+        const versions = await this.schemasService.getVersions(s._id.toString());
+        obj._versions = versions.map((v) => stripFields(toPlainDoc(v), ['__v']));
         return obj;
       }),
     );
 
-    const strip = (items: any[]) =>
-      items.map((item) => this.stripFields(this.toPlain(item), ['__v', 'projectId']));
+    const strip = (items: unknown[]) =>
+      items.map((item) => stripFields(toPlainDoc(item), ['__v', 'projectId']));
 
-    const projectObj = this.stripFields(this.toPlain(project), ['_id', '__v']);
+    const projectObj = stripFields(toPlainDoc(project), ['_id', '__v']);
 
     return {
       _exportVersion: 1,
@@ -89,7 +231,7 @@ export class ProjectTransferService {
       knowledge: strip(knowledge),
       research: strip(research),
       environments: strip(environments),
-      secrets: strip(includeSecretValues ? secrets : secrets),
+      secrets: strip(secrets),
       manuals: strip(manuals),
       schemas: strip(schemasWithVersions),
       dependencies: strip(dependencies),
@@ -106,18 +248,30 @@ export class ProjectTransferService {
     }
 
     // Create project
-    const projectData = { ...data.project } as any;
+    const projectData: PlainDoc = { ...data.project };
     if (nameOverride) projectData.name = nameOverride;
 
+    const baseName = asString(projectData.name);
+    if (!baseName) {
+      throw new BadRequestException('Invalid export format: project.name is missing');
+    }
+    projectData.name = baseName;
+
     // Check if name already exists
-    const existing = await this.projectsService.findByName(projectData.name);
+    const existing = await this.projectsService.findByName(baseName);
     if (existing) {
-      projectData.name = `${projectData.name} (Import)`;
+      projectData.name = `${baseName} (Import)`;
     }
 
     delete projectData.createdAt;
     delete projectData.updatedAt;
-    const project = await this.projectsService.create(projectData);
+    // Behauptung an der Service-Grenze: Das Projekt wird *vollständig*
+    // durchgereicht, auch mit Feldern, die CreateProjectDto nicht deklariert
+    // (components, replicationConfig, instructions-Erweiterungen …). Ein
+    // explizites Mapping würde beim Import genau diese Felder verlieren; welche
+    // davon geschrieben werden, entscheidet das Mongoose-Schema. `name` ist die
+    // einzige Pflicht-Property des DTO und direkt darüber als String geprüft.
+    const project = await this.projectsService.create(projectData as unknown as CreateProjectDto);
     const projectId = project._id.toString();
 
     const stats: Record<string, number> = {};
@@ -130,13 +284,13 @@ export class ProjectTransferService {
     const schemaIdMap = new Map<string, string>();
 
     // 1. Environments
-    for (const env of data.environments) {
-      const oldId = env._id as string;
+    for (const [index, env] of data.environments.entries()) {
+      const oldId = exportKey(env, index);
       const newEnv = await this.environmentsService.create({
         projectId,
         name: env.name as string,
-        variables: env.variables as any,
-        active: env.active as boolean ?? true,
+        variables: asNestedArray(env.variables, 'environments[].variables'),
+        active: typeof env.active === 'boolean' ? env.active : true,
       });
       envIdMap.set(oldId, newEnv._id.toString());
     }
@@ -163,8 +317,8 @@ export class ProjectTransferService {
     stats.secrets = data.secrets.filter((s) => s.encryptedValue).length;
 
     // 3. Changelog
-    for (const cl of data.changelog) {
-      const oldId = cl._id as string;
+    for (const [index, cl] of data.changelog.entries()) {
+      const oldId = exportKey(cl, index);
       const newCl = await this.changelogService.create({
         projectId,
         version: cl.version as string,
@@ -177,8 +331,8 @@ export class ProjectTransferService {
     stats.changelog = data.changelog.length;
 
     // 4. Milestones (remap changelogId)
-    for (const ms of data.milestones) {
-      const oldId = ms._id as string;
+    for (const [index, ms] of data.milestones.entries()) {
+      const oldId = exportKey(ms, index);
       const clId = ms.changelogId ? changelogIdMap.get(ms.changelogId as string) : undefined;
       const newMs = await this.milestonesService.create({
         projectId,
@@ -187,12 +341,23 @@ export class ProjectTransferService {
         dueDate: ms.dueDate as string,
       });
       // Update status + changelogId + archived directly
-      if (ms.status && ms.status !== 'open') {
+      // Unbekannte Status-Werte laufen wie vorher in den Zweig ohne
+      // Status-Änderung (nur changelogId/archived), statt den Import abzubrechen.
+      const rawStatus = asString(ms.status);
+      const oldStatus = matchEnum(MILESTONE_STATUSES, rawStatus);
+      if (rawStatus && oldStatus !== MilestoneStatus.OPEN) {
         await this.milestonesService.update(newMs._id.toString(), {
-          status: ms.status === 'done' && clId ? 'done' : ms.status === 'in_progress' ? 'in_progress' : undefined,
+          // `done` nur mit Changelog-Referenz — milestonesService.update lehnt es
+          // sonst ab. Ohne clId bleibt der Milestone bewusst auf `open`.
+          status:
+            oldStatus === MilestoneStatus.DONE && clId
+              ? MilestoneStatus.DONE
+              : oldStatus === MilestoneStatus.IN_PROGRESS
+                ? MilestoneStatus.IN_PROGRESS
+                : undefined,
           changelogId: clId,
           archived: ms.archived as boolean,
-        } as any);
+        });
       } else if (ms.archived) {
         await this.milestonesService.update(newMs._id.toString(), { archived: true });
       }
@@ -201,44 +366,52 @@ export class ProjectTransferService {
     stats.milestones = data.milestones.length;
 
     // 5. Todos (remap milestoneId, blockedBy)
-    for (const todo of data.todos) {
-      const oldId = todo._id as string;
+    for (const [index, todo] of data.todos.entries()) {
+      const oldId = exportKey(todo, index);
       const msId = todo.milestoneId ? milestoneIdMap.get(todo.milestoneId as string) : undefined;
       const newTodo = await this.todosService.create({
         projectId,
         title: todo.title as string,
         description: todo.description as string,
-        priority: todo.priority as any,
+        priority: asEnum(TODO_PRIORITIES, todo.priority, 'todos[].priority'),
         tags: todo.tags as string[],
         milestoneId: msId,
       });
       todoIdMap.set(oldId, newTodo._id.toString());
     }
     // Second pass: update blockedBy + status + comments + archived
-    for (const todo of data.todos) {
-      const newId = todoIdMap.get(todo._id as string)!;
-      const updates: any = {};
-      if (todo.blockedBy && (todo.blockedBy as string[]).length > 0) {
-        updates.blockedBy = (todo.blockedBy as string[]).map((id) => todoIdMap.get(id) || id);
+    for (const [index, todo] of data.todos.entries()) {
+      const newId = todoIdMap.get(exportKey(todo, index));
+      // Unerreichbar: der erste Durchlauf hat jeden Key gesetzt.
+      if (!newId) continue;
+      const updates: UpdateTodoDto = {};
+      if (isUnknownArray(todo.blockedBy) && todo.blockedBy.length > 0) {
+        // Nicht-String-Einträge gehen als '' weiter statt verworfen zu werden:
+        // Mongoose lehnt sie beim ObjectId-Cast lautstark ab, wie vorher auch.
+        updates.blockedBy = todo.blockedBy.map((entry) => {
+          const oldTodoId = asString(entry) ?? '';
+          return todoIdMap.get(oldTodoId) ?? oldTodoId;
+        });
       }
       if (todo.archived) updates.archived = true;
       if (Object.keys(updates).length > 0) {
         await this.todosService.update(newId, updates);
       }
       // Advance status step by step
-      const statuses = ['open', 'in_progress', 'review', 'done'];
-      const targetIdx = statuses.indexOf(todo.status as string);
+      const targetStatus = asString(todo.status);
+      const targetIdx = TODO_STATUS_ORDER.findIndex((s) => s === targetStatus);
       for (let i = 1; i <= targetIdx; i++) {
         try {
-          await this.todosService.update(newId, { status: statuses[i] as any });
+          await this.todosService.update(newId, { status: TODO_STATUS_ORDER[i] });
         } catch {
           break;
         }
       }
       // Import comments
-      if (todo.comments && Array.isArray(todo.comments)) {
+      if (isUnknownArray(todo.comments)) {
         for (const comment of todo.comments) {
-          await this.todosService.addComment(newId, comment.text, comment.author || 'import');
+          const c = toPlainDoc(comment);
+          await this.todosService.addComment(newId, asString(c.text) ?? '', asString(c.author) || 'import');
         }
       }
     }
@@ -293,16 +466,22 @@ export class ProjectTransferService {
     stats.manuals = data.manuals.length;
 
     // 10. Schemas + Versions
-    for (const s of data.schemas) {
-      const oldId = s._id as string;
+    for (const [index, s] of data.schemas.entries()) {
+      const oldId = exportKey(s, index);
+      const dbType = asEnum(DB_TYPES, s.dbType, 'schemas[].dbType');
+      if (!dbType) {
+        throw new BadRequestException(
+          `Invalid export format: schema "${asString(s.name) ?? '?'}" has no dbType`,
+        );
+      }
       const newSchema = await this.schemasService.create({
         projectId,
         name: s.name as string,
-        dbType: s.dbType as any,
+        dbType,
         database: s.database as string,
         description: s.description as string,
-        fields: s.fields as any,
-        indexes: s.indexes as any,
+        fields: asNestedArray(s.fields, 'schemas[].fields'),
+        indexes: asNestedArray(s.indexes, 'schemas[].indexes'),
         tags: s.tags as string[],
       });
       schemaIdMap.set(oldId, newSchema._id.toString());
@@ -312,11 +491,17 @@ export class ProjectTransferService {
 
     // 11. Dependencies
     for (const d of data.dependencies) {
+      const packageManager = asEnum(PACKAGE_MANAGERS, d.packageManager, 'dependencies[].packageManager');
+      if (!packageManager) {
+        throw new BadRequestException(
+          `Invalid export format: dependency "${asString(d.name) ?? '?'}" has no packageManager`,
+        );
+      }
       await this.dependenciesService.create({
         projectId,
         name: d.name as string,
         version: d.version as string,
-        packageManager: d.packageManager as any,
+        packageManager,
         description: d.description as string,
         devDependency: d.devDependency as boolean,
         category: d.category as string,
@@ -332,9 +517,9 @@ export class ProjectTransferService {
         name: f.name as string,
         description: f.description as string,
         category: f.category as string,
-        status: f.status as any,
+        status: asEnum(FEATURE_STATUSES, f.status, 'features[].status'),
         version: f.version as string,
-        priority: f.priority as any,
+        priority: asEnum(FEATURE_PRIORITIES, f.priority, 'features[].priority'),
         tags: f.tags as string[],
       });
     }
@@ -347,18 +532,5 @@ export class ProjectTransferService {
     if (maxMsNum > 0) await this.countersService.setSequence(projectId, 'milestone', maxMsNum);
 
     return { projectId, projectName: project.name, stats };
-  }
-
-  private toPlain(doc: any): Record<string, unknown> {
-    if (doc && typeof doc.toObject === 'function') return doc.toObject();
-    return { ...doc };
-  }
-
-  private stripFields(obj: Record<string, unknown>, fields: string[]): Record<string, unknown> {
-    const result = { ...obj };
-    for (const f of fields) delete result[f];
-    // Convert ObjectId to string
-    if (result._id) result._id = result._id.toString();
-    return result;
   }
 }

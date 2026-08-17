@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Note, NoteDocument } from './schemas/note.schema';
+import { Note, NoteDocument, type PromotedEntityType } from './schemas/note.schema';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
 
@@ -18,7 +18,7 @@ export interface NoteWithIdle {
   archived: boolean;
   archivedAt?: Date;
   promotedTo?: {
-    entityType: string;
+    entityType: PromotedEntityType;
     entityId: string;
     projectId?: string;
     customerId?: string;
@@ -28,6 +28,35 @@ export interface NoteWithIdle {
   createdAt: Date;
   updatedAt: Date;
   isIdle: boolean;
+}
+
+/**
+ * Eine Notiz als *plain object* — so, wie sie aus `.lean()` bzw. `.toObject()`
+ * herausfällt: ObjectIds und Dates statt Strings, ohne Document-Methoden.
+ *
+ * Beide Quellen erfüllen diese Form strukturell, deshalb braucht `withIdle`
+ * kein `any`. Optionale Felder sind absichtlich auch `null`-tolerant: Mongo
+ * kann sie explizit auf `null` gesetzt haben, und `promotionAttempts` fehlt in
+ * Dokumenten, die vor Einführung des Feldes geschrieben wurden.
+ */
+interface PlainNote {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  title: string;
+  content: string;
+  order: number;
+  archived: boolean;
+  archivedAt?: Date | null;
+  promotedTo?: {
+    entityType: PromotedEntityType;
+    entityId: Types.ObjectId;
+    projectId?: Types.ObjectId | null;
+    customerId?: Types.ObjectId | null;
+  } | null;
+  idleSnoozeUntil?: Date | null;
+  promotionAttempts?: number;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 @Injectable()
@@ -158,7 +187,7 @@ export class NotesService {
     userId: string,
     id: string,
     promotedTo: {
-      entityType: string;
+      entityType: PromotedEntityType;
       entityId: string;
       projectId?: string;
       customerId?: string;
@@ -168,7 +197,7 @@ export class NotesService {
     note.archived = true;
     note.archivedAt = new Date();
     note.promotedTo = {
-      entityType: promotedTo.entityType as any,
+      entityType: promotedTo.entityType,
       entityId: new Types.ObjectId(promotedTo.entityId),
       projectId: promotedTo.projectId ? new Types.ObjectId(promotedTo.projectId) : undefined,
       customerId: promotedTo.customerId ? new Types.ObjectId(promotedTo.customerId) : undefined,
@@ -179,14 +208,15 @@ export class NotesService {
 
   // ---------- helpers ----------
 
-  private withIdle(doc: any): NoteWithIdle {
+  private withIdle(doc: PlainNote): NoteWithIdle {
     const now = Date.now();
-    const updatedAt = doc.updatedAt instanceof Date ? doc.updatedAt : new Date(doc.updatedAt);
-    const snoozeUntil = doc.idleSnoozeUntil
-      ? doc.idleSnoozeUntil instanceof Date
-        ? doc.idleSnoozeUntil
-        : new Date(doc.idleSnoozeUntil)
-      : undefined;
+    // `timestamps: true` setzt updatedAt zur Laufzeit, am Typ ist es optional.
+    // Fehlt der Wert (oder ist er unlesbar), gilt die Notiz als eben angefasst
+    // statt als idle — vorher entstand daraus ein `Invalid Date`, das über die
+    // API als `null` beim Client landete.
+    const updatedAt = toDate(doc.updatedAt) ?? new Date(now);
+    const createdAt = toDate(doc.createdAt) ?? updatedAt;
+    const snoozeUntil = toDate(doc.idleSnoozeUntil);
     const isIdle =
       !doc.archived &&
       !doc.promotedTo &&
@@ -200,7 +230,7 @@ export class NotesService {
       content: doc.content,
       order: doc.order,
       archived: doc.archived,
-      archivedAt: doc.archivedAt,
+      archivedAt: toDate(doc.archivedAt),
       promotedTo: doc.promotedTo
         ? {
             entityType: doc.promotedTo.entityType,
@@ -211,9 +241,20 @@ export class NotesService {
         : undefined,
       idleSnoozeUntil: snoozeUntil,
       promotionAttempts: doc.promotionAttempts ?? 0,
-      createdAt: doc.createdAt,
-      updatedAt: updatedAt,
+      createdAt,
+      updatedAt,
       isIdle,
     };
   }
+}
+
+/**
+ * Normalisiert einen Zeitstempel aus Mongo. Fehlende, `null`-wertige oder
+ * unparsbare Werte werden zu `undefined` — nie zu einem `Invalid Date`, das
+ * sich stumm durch Vergleiche und JSON-Serialisierung schleppt.
+ */
+function toDate(value: Date | string | number | null | undefined): Date | undefined {
+  if (value === null || value === undefined) return undefined;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
 }

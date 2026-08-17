@@ -10,8 +10,27 @@ import { ProjectsService } from '../projects/projects.service';
 import { SecretsService } from '../secrets/secrets.service';
 import { projectIdFilter } from '../common/project-id-filter';
 import { GitProviderRegistry } from '../commits/providers/git-provider.registry';
+import { GitProvider, GitRepository } from '../commits/schemas/git-repository.schema';
 
-const FETCH_TIMEOUT = 30000;
+/**
+ * MongoDB duplicate-key error (E11000). Narrowing instead of casting: the
+ * driver throws `MongoServerError`, but the catch binding is `unknown` and we
+ * only care about that one numeric code.
+ */
+function isDuplicateKeyError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && 'code' in err && err.code === 11000;
+}
+
+/**
+ * Git provider → ReleaseType. `Record<GitProvider, …>` on purpose: a new
+ * provider in the union breaks the build here instead of silently producing
+ * `undefined` as releaseType.
+ */
+const RELEASE_TYPE_BY_PROVIDER: Record<GitProvider, ReleaseType> = {
+  github: ReleaseType.GITHUB,
+  gitlab: ReleaseType.GITLAB,
+  gitea: ReleaseType.GITEA,
+};
 
 @Injectable()
 export class ReleasesService implements OnApplicationBootstrap {
@@ -117,8 +136,8 @@ export class ReleasesService implements OnApplicationBootstrap {
 
   async syncReleases(projectId: string, repoIndex?: number): Promise<{ synced: number; created: number; updated: number }> {
     const project = await this.projectsService.findById(projectId);
-    const projectObj = project.toObject() as any;
-    const repos = projectObj.gitRepositories || [];
+    const projectObj = project.toObject();
+    const repos: GitRepository[] = projectObj.gitRepositories || [];
 
     if (repos.length === 0) {
       throw new BadRequestException('No git repositories configured for this project');
@@ -128,7 +147,7 @@ export class ReleasesService implements OnApplicationBootstrap {
     let totalUpdated = 0;
     let totalSynced = 0;
 
-    const indices = repoIndex !== undefined ? [repoIndex] : repos.map((_: any, i: number) => i);
+    const indices = repoIndex !== undefined ? [repoIndex] : repos.map((_, i) => i);
 
     for (const idx of indices) {
       if (idx < 0 || idx >= repos.length) {
@@ -143,7 +162,7 @@ export class ReleasesService implements OnApplicationBootstrap {
 
       const secret = await this.secretsService.findById(repoConfig.tokenSecretId);
       const token = secret.value;
-      const result = await this.fetchAndSyncReleases(projectId, repoConfig, token, idx);
+      const result = await this.fetchAndSyncReleases(projectId, repoConfig, token);
       totalCreated += result.created;
       totalUpdated += result.updated;
       totalSynced += result.synced;
@@ -163,9 +182,8 @@ export class ReleasesService implements OnApplicationBootstrap {
 
   private async fetchAndSyncReleases(
     projectId: string,
-    repoConfig: any,
+    repoConfig: GitRepository,
     token: string,
-    repoIndex: number,
   ): Promise<{ synced: number; created: number; updated: number }> {
     const provider = this.registry.get(repoConfig.provider);
     const releases = await provider.fetchReleases(repoConfig, token);
@@ -174,17 +192,11 @@ export class ReleasesService implements OnApplicationBootstrap {
     let updated = 0;
 
     for (const rel of releases) {
-      const releaseTypeMap = {
-        github: ReleaseType.GITHUB,
-        gitlab: ReleaseType.GITLAB,
-        gitea: ReleaseType.GITEA,
-      } as const;
-
       const releaseData = {
         version: rel.tagName,
         title: rel.name,
         description: rel.description || '',
-        releaseType: releaseTypeMap[repoConfig.provider as 'github' | 'gitlab' | 'gitea'],
+        releaseType: RELEASE_TYPE_BY_PROVIDER[repoConfig.provider],
         status: ReleaseStatus.PUBLISHED,
         provider: repoConfig.provider,
         providerReleaseId: rel.providerReleaseId,
@@ -206,8 +218,8 @@ export class ReleasesService implements OnApplicationBootstrap {
         try {
           await this.releaseModel.create({ projectId, ...releaseData });
           created++;
-        } catch (err: any) {
-          if (err.code === 11000) {
+        } catch (err: unknown) {
+          if (isDuplicateKeyError(err)) {
             await this.releaseModel.findOneAndUpdate(
               { projectId, version: rel.tagName },
               releaseData,

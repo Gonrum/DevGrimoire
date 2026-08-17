@@ -12,7 +12,7 @@ import { CountersService } from '../counters/counters.service';
 import { formatEntityNumber } from '../common/number-format';
 import { projectIdFilter } from '../common/project-id-filter';
 import { TodosService } from '../todos/todos.service';
-import { TodoDocument, TodoStatus } from '../todos/schemas/todo.schema';
+import { TodoDocument, TodoPriority, TodoStatus } from '../todos/schemas/todo.schema';
 import { ChatLlmService } from '../chat/chat-llm.service';
 
 // ── AI-Complete types ─────────────────────────────────────────────────────────
@@ -41,11 +41,16 @@ export interface ParsedAcceptanceCriterion {
   done: boolean;
 }
 
+/** Wire values accepted for `ParsedTodo.priority` — same strings as {@link TodoPriority}. */
+export type ParsedTodoPriority = 'low' | 'medium' | 'high' | 'critical';
+/** Wire values accepted for `ParsedTodo.status` — same strings as {@link TodoStatus}. */
+export type ParsedTodoStatus = 'open' | 'in_progress' | 'review' | 'done';
+
 export interface ParsedTodo {
   title: string;
   description?: string;
-  priority?: 'low' | 'medium' | 'high' | 'critical';
-  status?: 'open' | 'in_progress' | 'review' | 'done';
+  priority?: ParsedTodoPriority;
+  status?: ParsedTodoStatus;
   tags?: string[];
   userStories?: string;
   acceptanceCriteria?: ParsedAcceptanceCriterion[];
@@ -63,6 +68,61 @@ export interface ImportResult {
   milestone: MilestoneDocument;
   todos: TodoDocument[];
   warnings?: string[];
+}
+
+// ── Wire value ↔ schema enum ──────────────────────────────────────────────────
+
+const PARSED_PRIORITIES: readonly ParsedTodoPriority[] = ['low', 'medium', 'high', 'critical'];
+const PARSED_STATUSES: readonly ParsedTodoStatus[] = ['open', 'in_progress', 'review', 'done'];
+
+/**
+ * A ParsedTodo can arrive straight from an MCP caller, so its priority/status are
+ * untrusted strings while CreateTodoDto expects the schema enums. These maps are
+ * the single conversion point; `satisfies` makes them exhaustive, so a wire value
+ * without an enum counterpart is a compile error (a new enum member still has to
+ * be added to the union above by hand).
+ */
+const TODO_PRIORITY_BY_VALUE: ReadonlyMap<string, TodoPriority> = new Map(
+  Object.entries<TodoPriority>({
+    low: TodoPriority.LOW,
+    medium: TodoPriority.MEDIUM,
+    high: TodoPriority.HIGH,
+    critical: TodoPriority.CRITICAL,
+  } satisfies Record<ParsedTodoPriority, TodoPriority>),
+);
+
+const TODO_STATUS_BY_VALUE: ReadonlyMap<string, TodoStatus> = new Map(
+  Object.entries<TodoStatus>({
+    open: TodoStatus.OPEN,
+    in_progress: TodoStatus.IN_PROGRESS,
+    review: TodoStatus.REVIEW,
+    done: TodoStatus.DONE,
+  } satisfies Record<ParsedTodoStatus, TodoStatus>),
+);
+
+/** Unknown values are rejected (as the Mongoose enum validator did) instead of silently defaulting. */
+function toTodoPriority(raw: string | undefined): TodoPriority | undefined {
+  if (raw === undefined) return undefined;
+  const mapped = TODO_PRIORITY_BY_VALUE.get(raw);
+  if (!mapped) throw new BadRequestException(`Unknown priority "${raw}"`);
+  return mapped;
+}
+
+function toTodoStatus(raw: string | undefined): TodoStatus | undefined {
+  if (raw === undefined) return undefined;
+  const mapped = TODO_STATUS_BY_VALUE.get(raw);
+  if (!mapped) throw new BadRequestException(`Unknown status "${raw}"`);
+  return mapped;
+}
+
+// ── unknown-narrowing helpers (LLM responses are untrusted JSON) ──────────────
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
 }
 
 @Injectable()
@@ -308,14 +368,20 @@ export class MilestonesService {
     const isTodoSectionH2 = (text: string): boolean =>
       /todo|task|quest|aufgabe/i.test(text);
 
-    const H4_SECTION_MAP: Array<{ keys: RegExp; field: string }> = [
+    // H4 sections either collect free text into one of the string fields, or the
+    // checkbox list of acceptanceCriteria — keeping the keys as a union is what
+    // makes the write in flushH4() type-safe without a cast.
+    type H4TextField = 'userStories' | 'outOfScope' | 'edgeCases';
+    type H4Field = H4TextField | 'acceptanceCriteria';
+
+    const H4_SECTION_MAP: Array<{ keys: RegExp; field: H4Field }> = [
       { keys: /^(user\s+stor(y|ies))$/i, field: 'userStories' },
       { keys: /^(acceptance\s*(criteria)?|akzeptanzkriterien|akzeptanz)$/i, field: 'acceptanceCriteria' },
       { keys: /^(out\s+of\s+scope|oos|nicht\s+im\s+scope)$/i, field: 'outOfScope' },
       { keys: /^(edge\s+cases?|randf.lle)$/i, field: 'edgeCases' },
     ];
 
-    const resolveH4Field = (text: string): string | null => {
+    const resolveH4Field = (text: string): H4Field | null => {
       for (const entry of H4_SECTION_MAP) {
         if (entry.keys.test(text.trim())) return entry.field;
       }
@@ -328,14 +394,14 @@ export class MilestonesService {
       return { key: m[1].trim().toLowerCase(), value: m[2].trim() };
     };
 
-    const parsePriority = (v: string): ParsedTodo['priority'] | undefined => {
-      if (/^(low|medium|high|critical)$/i.test(v)) return v.toLowerCase() as ParsedTodo['priority'];
-      return undefined;
+    const parsePriority = (v: string): ParsedTodoPriority | undefined => {
+      const lowered = v.toLowerCase();
+      return PARSED_PRIORITIES.find((p) => p === lowered);
     };
 
-    const parseStatus = (v: string): ParsedTodo['status'] | undefined => {
-      if (/^(open|in_progress|review|done)$/i.test(v)) return v.toLowerCase() as ParsedTodo['status'];
-      return undefined;
+    const parseStatus = (v: string): ParsedTodoStatus | undefined => {
+      const lowered = v.toLowerCase();
+      return PARSED_STATUSES.find((s) => s === lowered);
     };
 
     const parseTags = (v: string): string[] =>
@@ -360,11 +426,10 @@ export class MilestonesService {
       | 'todo_h4';
 
     let state: State = 'before_h1';
-    let foundTodoSection = false;
 
     let currentTodo: ParsedTodo | null = null;
     let currentTodoBodyLines: string[] = [];
-    let currentH4Field: string | null = null;
+    let currentH4Field: H4Field | null = null;
     let currentH4Lines: string[] = [];
 
     const flushH4 = () => {
@@ -382,7 +447,7 @@ export class MilestonesService {
         }
         currentTodo.acceptanceCriteria = criteria;
       } else {
-        (currentTodo as any)[currentH4Field] = text;
+        currentTodo[currentH4Field] = text;
       }
       currentH4Field = null;
       currentH4Lines = [];
@@ -415,7 +480,6 @@ export class MilestonesService {
     // ── line loop ──────────────────────────────────────────────────────────
     for (const rawLine of lines) {
       const lvl = headingLevel(rawLine);
-      const line = rawLine; // keep original for content; use rawLine.trim() for checks
 
       if (state === 'before_h1') {
         if (lvl === 1) {
@@ -429,13 +493,11 @@ export class MilestonesService {
         if (lvl === 2) {
           const h2text = headingText(rawLine);
           if (isTodoSectionH2(h2text)) {
-            foundTodoSection = true;
             state = 'todos_section';
           }
           // else: another H2 — skip it (part of milestone description is already done)
         } else if (lvl === 3) {
           // No todos-section marker found — treat H3s directly as todos
-          state = 'todos_section';
           startTodo(headingText(rawLine));
           state = 'todo_body';
         } else {
@@ -499,8 +561,9 @@ export class MilestonesService {
           if (currentTodo !== null) {
             const meta = parseMetaLine(rawLine);
             if (meta) {
-              // Capture as typed const so TS doesn't narrow through closure calls below
-              const td = currentTodo as ParsedTodo;
+              // `currentTodo` is reassigned by the closures above — capturing it
+              // in a const keeps the null-check valid across their calls.
+              const td: ParsedTodo = currentTodo;
               if (meta.key === 'status') {
                 const s = parseStatus(meta.value);
                 if (s !== undefined) td.status = s;
@@ -570,7 +633,6 @@ export class MilestonesService {
   async importFromParsed(
     projectId: string,
     parsed: ParsedMilestone,
-    _opts?: unknown,
   ): Promise<ImportResult> {
     const milestone = await this.create({
       projectId,
@@ -588,8 +650,8 @@ export class MilestonesService {
           milestoneId: milestone._id.toString(),
           title: pt.title,
           description: pt.description,
-          priority: pt.priority as any,
-          status: pt.status as any,
+          priority: toTodoPriority(pt.priority),
+          status: toTodoStatus(pt.status),
           tags: pt.tags,
           userStories: pt.userStories,
           acceptanceCriteria: pt.acceptanceCriteria,
@@ -644,10 +706,20 @@ export class MilestonesService {
     const MAX_DESC_CHARS = 500;
     const MAX_AC_TEXT_CHARS = 200;
 
-    // Build a working copy so we don't mutate the originals
-    const cappedTodos = todos.map((t) => {
-      const raw = t as any;
-      let desc: string | undefined = raw.description;
+    // Build a working copy so we don't mutate the originals. Plain fields only —
+    // spreading a Mongoose document copies `_doc`/`$__` and none of the schema
+    // paths, which silently dropped displayNumber and the criteria `done` flags.
+    interface PromptTodo {
+      id: string;
+      displayNumber?: string;
+      title: string;
+      status: TodoStatus;
+      description?: string;
+      acceptanceCriteria: ParsedAcceptanceCriterion[];
+    }
+
+    const cappedTodos: PromptTodo[] = todos.map((t) => {
+      let desc: string | undefined = t.description;
       let truncated = false;
 
       if (desc && desc.length > MAX_DESC_CHARS) {
@@ -655,27 +727,32 @@ export class MilestonesService {
         truncated = true;
       }
 
-      const acceptanceCriteria = Array.isArray(raw.acceptanceCriteria)
-        ? raw.acceptanceCriteria.map((c: any) => {
-            const text = typeof c.text === 'string' && c.text.length > MAX_AC_TEXT_CHARS
-              ? c.text.slice(0, MAX_AC_TEXT_CHARS) + '…'
-              : c.text;
-            if (text !== c.text) truncated = true;
-            return { ...c, text };
-          })
-        : raw.acceptanceCriteria;
+      const acceptanceCriteria = (t.acceptanceCriteria ?? []).map((c) => {
+        const text = c.text.length > MAX_AC_TEXT_CHARS
+          ? c.text.slice(0, MAX_AC_TEXT_CHARS) + '…'
+          : c.text;
+        if (text !== c.text) truncated = true;
+        return { text, done: c.done };
+      });
 
-      if (truncated) warnings.push(`Todo content was truncated to fit LLM context window`);
-      return { ...raw, description: desc, acceptanceCriteria, _id: t._id, title: t.title, status: t.status };
+      if (truncated) warnings.push('Todo content was truncated to fit LLM context window');
+      return {
+        id: t._id.toString(),
+        displayNumber: t.displayNumber,
+        title: t.title,
+        status: t.status,
+        description: desc,
+        acceptanceCriteria,
+      };
     });
 
     const todoLines = cappedTodos
       .map((t) => {
-        const dn = t.displayNumber ?? t._id.toString();
-        const acceptance = Array.isArray(t.acceptanceCriteria) && t.acceptanceCriteria.length > 0
-          ? '\n  Acceptance: ' + t.acceptanceCriteria.map((c: any) => `[${c.done ? 'x' : ' '}] ${c.text}`).join('; ')
+        const dn = t.displayNumber ?? t.id;
+        const acceptance = t.acceptanceCriteria.length > 0
+          ? '\n  Acceptance: ' + t.acceptanceCriteria.map((c) => `[${c.done ? 'x' : ' '}] ${c.text}`).join('; ')
           : '';
-        return `- id: ${t._id} | number: ${dn} | title: ${t.title} | status: ${t.status}${acceptance}`;
+        return `- id: ${t.id} | number: ${dn} | title: ${t.title} | status: ${t.status}${acceptance}`;
       })
       .join('\n');
 
@@ -722,38 +799,56 @@ export class MilestonesService {
       })) {
         raw += chunk;
       }
-    } catch (err) {
+    } catch (err: unknown) {
       throw new BadRequestException(
-        `LLM call failed: ${(err as Error).message}`,
+        `LLM call failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
 
-    // 5. Parse JSON from LLM response
+    // 5. Parse JSON from LLM response. The payload is model output, so every field
+    //    is validated instead of asserted — entries without a usable todoId are
+    //    dropped, the rest keep their per-field defaults below.
     interface LlmSuggestionRaw {
       todoId: string;
-      suggestedStatus: string;
-      confidence: number;
-      reason: string;
+      suggestedStatus?: string;
+      confidence?: number;
+      reason?: string;
     }
-    interface LlmResponse {
-      suggestions: LlmSuggestionRaw[];
-    }
+
+    /** Returns null when the payload has no `suggestions` array at all. */
+    const readSuggestions = (payload: unknown): LlmSuggestionRaw[] | null => {
+      if (!isRecord(payload)) return null;
+      const list = payload.suggestions;
+      if (!isUnknownArray(list)) return null;
+      const result: LlmSuggestionRaw[] = [];
+      for (const item of list) {
+        if (!isRecord(item)) continue;
+        const todoId = item.todoId;
+        if (typeof todoId !== 'string' || !todoId) continue;
+        result.push({
+          todoId,
+          suggestedStatus: typeof item.suggestedStatus === 'string' ? item.suggestedStatus : undefined,
+          confidence: typeof item.confidence === 'number' ? item.confidence : undefined,
+          reason: typeof item.reason === 'string' ? item.reason : undefined,
+        });
+      }
+      return result;
+    };
 
     let llmSuggestions: LlmSuggestionRaw[] = [];
 
     try {
-      const parsed = JSON.parse(raw.trim()) as LlmResponse;
-      if (Array.isArray(parsed?.suggestions)) {
-        llmSuggestions = parsed.suggestions;
-      }
+      const parsed: unknown = JSON.parse(raw.trim());
+      llmSuggestions = readSuggestions(parsed) ?? [];
     } catch {
       // Try to extract a JSON block from the raw response
       const match = raw.match(/\{[\s\S]*\}/);
       if (match) {
         try {
-          const parsed = JSON.parse(match[0]) as LlmResponse;
-          if (Array.isArray(parsed?.suggestions)) {
-            llmSuggestions = parsed.suggestions;
+          const parsed: unknown = JSON.parse(match[0]);
+          const extracted = readSuggestions(parsed);
+          if (extracted) {
+            llmSuggestions = extracted;
             warnings.push('JSON extracted from non-pure LLM response');
           }
         } catch {
@@ -764,19 +859,16 @@ export class MilestonesService {
       }
     }
 
-    // Issue 2: derive from the canonical enum so drift is impossible
-    const VALID_STATUSES = new Set<string>(Object.values(TodoStatus));
-
     // 6. Map LLM suggestions back to todos by todoId
     const llmById = new Map<string, LlmSuggestionRaw>();
     for (const s of llmSuggestions) {
-      if (s.todoId) llmById.set(s.todoId, s);
+      llmById.set(s.todoId, s);
     }
 
     const suggestions: AiSuggestion[] = todos.map((t) => {
       const id = t._id.toString();
-      const dn = (t as any).displayNumber ?? id;
-      const currentStatus = t.status as 'open' | 'in_progress' | 'review' | 'done';
+      const dn = t.displayNumber ?? id;
+      const currentStatus = t.status;
       const llm = llmById.get(id);
 
       if (!llm) {
@@ -791,13 +883,15 @@ export class MilestonesService {
         };
       }
 
-      const suggestedStatus = VALID_STATUSES.has(llm.suggestedStatus)
-        ? (llm.suggestedStatus as TodoStatus)
-        : currentStatus;
+      // Issue 2: the status map is the canonical wire-value → enum table, so an
+      // unknown or missing suggestion falls back to the current status.
+      const mappedStatus =
+        llm.suggestedStatus === undefined ? undefined : TODO_STATUS_BY_VALUE.get(llm.suggestedStatus);
+      const suggestedStatus = mappedStatus ?? currentStatus;
 
-      const confidence = typeof llm.confidence === 'number'
-        ? Math.min(1, Math.max(0, llm.confidence))
-        : 0;
+      const confidence = llm.confidence === undefined
+        ? 0
+        : Math.min(1, Math.max(0, llm.confidence));
 
       return {
         todoId: id,
