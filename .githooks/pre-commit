@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+#
+# Lint-Gate (M-52 / T-456).
+#
+# Bricht den Commit ab, wenn eine gestagte TypeScript-Datei ESLint-Fehler hat.
+#
+# Einmalig zu aktivieren (steht auch in CLAUDE.md):
+#     git config core.hooksPath .githooks
+#
+# Warum ein Skript statt Husky: dieses Repo hat kein Root-`package.json`.
+# Husky bräuchte eins samt eigenem `node_modules` und einem `npm install` im
+# Wurzelverzeichnis, damit sein `prepare`-Schritt den Hook installiert — ein
+# Schritt, den hier niemand ausführt. Ein committetes Skript plus eine
+# `git config`-Zeile leistet dasselbe ohne Abhängigkeit.
+#
+# Laufzeit: ESLint mit typed linting hat rund 11 s Grundlast (TS-Programm
+# aufbauen), unabhängig von der Dateizahl — gemessen 11,4 s für eine Datei,
+# 14,0 s für fünf, 40,8 s für alles. Der Hook prüft deshalb nur die gestagten
+# Dateien und überspringt ein Paket ohne Treffer vollständig.
+#
+# Umgehen (bewusst möglich): `git commit --no-verify`. Der tägliche
+# Auto-Commit-Backup-Job nutzt das bereits und bleibt unberührt.
+
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+FAILED=0
+
+lint_package() {
+  local pkg="$1"
+  local files=()
+
+  # -z + read -d '' hält Pfade mit Leerzeichen zusammen.
+  # --diff-filter=d lässt gelöschte Dateien aus: die kann ESLint nicht lesen.
+  while IFS= read -r -d '' file; do
+    files+=("${file#"$pkg"/}")
+  done < <(git diff --cached --name-only --diff-filter=d -z -- "$pkg/src" \
+           | tr '\0' '\n' | grep -E '\.tsx?$' | tr '\n' '\0')
+
+  if [ ${#files[@]} -eq 0 ]; then
+    return 0
+  fi
+
+  echo "⏳ eslint: ${#files[@]} gestagte Datei(en) in $pkg/ …"
+  if ! (cd "$REPO_ROOT/$pkg" && NODE_OPTIONS=--max-old-space-size=8192 \
+        npx eslint --no-inline-config "${files[@]}"); then
+    FAILED=1
+  fi
+}
+
+lint_package backend
+lint_package frontend
+
+if [ "$FAILED" -ne 0 ]; then
+  cat >&2 <<'MSG'
+
+✖ Commit abgebrochen: ESLint-Fehler in gestagten Dateien.
+
+  Grundsatz aus M-52: Regel-Abschaltungen gehören in die jeweilige
+  eslint.config.mjs — mit Begründung. Zeilenweise `eslint-disable`-Kommentare
+  sind im Projekt nicht erwünscht und lösen dieses Gate nicht.
+
+  Wirklich unumgänglich: git commit --no-verify
+MSG
+  exit 1
+fi
+
+exit 0
