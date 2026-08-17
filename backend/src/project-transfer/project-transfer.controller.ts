@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
+import { asString } from '../common/tool-args';
 import { ProjectTransferService } from './project-transfer.service';
 
 @Controller('project-transfer')
@@ -28,7 +29,10 @@ export class ProjectTransferController {
       includeSecrets === 'true',
     );
 
-    const safeName = (data.project.name as string || 'project')
+    // `project` ist ein `Record<string, unknown>` — der Name ist erst dann ein
+    // String, wenn er einer ist. Vorher hätte ein Nicht-String-Name die Antwort
+    // mit einem TypeError beendet, statt auf 'project' zurückzufallen.
+    const safeName = (asString(data.project.name) || 'project')
       .replace(/[^a-zA-Z0-9_-]/g, '_');
     const date = new Date().toISOString().slice(0, 10);
     const filename = `${safeName}-export-${date}.json`;
@@ -48,7 +52,10 @@ export class ProjectTransferController {
       throw new BadRequestException('No file uploaded');
     }
 
-    let data: any;
+    // `unknown` statt `any`: der Inhalt der Datei ist ungeprüft, und
+    // `importProject` prüft ihn — ein `any` hätte diese Prüfung vor dem
+    // Compiler versteckt.
+    let data: unknown;
     try {
       data = JSON.parse(file.buffer.toString('utf-8'));
     } catch {
