@@ -7,6 +7,7 @@ import { ReplicationLog, ReplicationLogDocument } from './schemas/replication-lo
 import { REPL_LOG_RETENTION_DAYS, REPL_SYNC_DRIVER, REPL_CURSOR_OUTBOUND } from './replication.constants';
 import { resolveRetentionDays, logGcBound, deadletterGcCutoffs } from './replication-gc.helpers';
 import { ReplicationDeadletterService } from './replication-deadletter.service';
+import { errorMessage } from './replication-narrow.helpers';
 
 export interface GcResult {
   deleted: number;
@@ -58,7 +59,7 @@ export class ReplicationGcService {
         );
       }
     } catch (err) {
-      this.logger.error(`replication_log GC failed: ${(err as Error).message}`);
+      this.logger.error(`replication_log GC failed: ${errorMessage(err)}`);
     }
   }
 

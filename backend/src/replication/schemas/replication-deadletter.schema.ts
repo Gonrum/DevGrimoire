@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Schema as MongooseSchema } from 'mongoose';
+import { SyncLogEntry } from '../replication-sync.types';
 
 export type ReplicationDeadletterDocument = HydratedDocument<ReplicationDeadletter>;
 
@@ -32,9 +33,13 @@ export class ReplicationDeadletter {
   @Prop({ type: String, default: null })
   projectId: string | null;
 
-  /** Full SyncLogEntry payload — the source of truth for a replay. */
+  /** Full SyncLogEntry payload — the source of truth for a replay. Zur Laufzeit
+   *  Mixed (also beliebiges BSON); der TS-Typ ist die Absicht, damit Schreiber
+   *  und Replay-Pfad ohne Doppel-Cast arbeiten. Der Replay prüft die Felder
+   *  ohnehin selbst — ein Payload aus einer älteren Version scheitert dort mit
+   *  einem Outcome, nicht an einem Typ. */
   @Prop({ type: MongooseSchema.Types.Mixed, required: true })
-  payload: Record<string, unknown>;
+  payload: SyncLogEntry;
 
   @Prop({ required: true })
   reason: string;

@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
+import { isUnknownArray, asString, idToString } from '../common/tool-args';
 import { SettingsService } from '../settings/settings.service';
 import { MinioService } from '../minio/minio.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ReplicationPayload, REPL_INSTANCE_ID } from './replication.constants';
+import { ReplDoc, errorMessage, isRecord } from './replication-narrow.helpers';
 
 /** Maps entity types to MongoDB collection names */
 const ENTITY_COLLECTION: Record<string, string> = {
@@ -58,15 +60,13 @@ export class ReplicationReceiveService {
       return { allowed: false, reason: 'no projectId — global entities are not replicated' };
     }
 
-    // Bootstrap path: incoming `project` create with replicationConfig.enabled=true
-    if (
-      payload.event.entity === 'project' &&
-      payload.event.action === 'created' &&
-      payload.document?.replicationConfig &&
-      typeof payload.document.replicationConfig === 'object'
-    ) {
-      const cfg = payload.document.replicationConfig as { enabled?: boolean };
-      if (cfg.enabled === true) return { allowed: true };
+    // Bootstrap path: incoming `project` create with replicationConfig.enabled=true.
+    // `isRecord` ersetzt die bisherige typeof-Prüfung + Assertion und lässt
+    // dieselbe Menge Payloads durch (jedes Objekt, auch von einer älteren
+    // Gegenstelle mit zusätzlichen Feldern).
+    if (payload.event.entity === 'project' && payload.event.action === 'created') {
+      const cfg = payload.document?.replicationConfig;
+      if (isRecord(cfg) && cfg.enabled === true) return { allowed: true };
     }
 
     try {
@@ -108,7 +108,11 @@ export class ReplicationReceiveService {
     }
 
     const { ObjectId } = await import('mongodb');
-    const coll = db.collection(collection);
+    // Explizites TSchema: ohne das ist jedes Feld des gelesenen Dokuments `any`
+    // — und das ausgerechnet an der Grenze zu einer fremden Instanz. `ReplDoc`
+    // hält die Form bewusst offen (jedes Feld optional, `unknown`), verengt also
+    // nichts, erzwingt aber eine Prüfung pro Feldzugriff.
+    const coll = db.collection<ReplDoc>(collection);
 
     try {
       if (payload.event.action === 'deleted') {
@@ -118,9 +122,10 @@ export class ReplicationReceiveService {
         if (payload.event.entity === 'attachment' && this.minioService.isEnabled()) {
           // We need the storageKey — it might be in the document or we need to look it up
           // Since it's a delete, the document was already deleted. The storageKey should be in the payload if available.
-          if (payload.document?.storageKey) {
-            await this.minioService.removeObject(String(payload.document.storageKey)).catch((err) =>
-              this.logger.warn(`MinIO delete failed: ${(err as Error).message}`),
+          const storageKey = asString(payload.document?.storageKey);
+          if (storageKey) {
+            await this.minioService.removeObject(storageKey).catch((err: unknown) =>
+              this.logger.warn(`MinIO delete failed: ${errorMessage(err)}`),
             );
           }
         }
@@ -145,7 +150,7 @@ export class ReplicationReceiveService {
           { _id: new ObjectId(payload.event.entityId) },
           { projection: { updatedAt: 1 } },
         );
-        const localTs = local ? this.parseTimestamp((local as { updatedAt?: unknown }).updatedAt) : null;
+        const localTs = local ? this.parseTimestamp(local.updatedAt) : null;
         if (localTs && localTs > incomingTs) {
           this.logger.debug(
             `LWW skipped: local ${payload.event.entity}/${payload.event.entityId} is newer (${localTs.toISOString()} > ${incomingTs.toISOString()})`,
@@ -154,12 +159,16 @@ export class ReplicationReceiveService {
         }
       }
 
-      // Prepare document for upsert — convert _id string to ObjectId
-      const doc = { ...payload.document };
+      // Prepare document for upsert — convert _id string to ObjectId.
+      // `payload.document` ist JSON aus dem Request-Body (kein Mongoose-Dokument),
+      // die flache Kopie enthält also wirklich alle Felder.
+      const doc: Record<string, unknown> = { ...payload.document };
       const docId = doc._id;
       delete doc._id;
 
-      // Convert known ObjectId fields
+      // Convert known ObjectId fields. Die Truthiness-Prüfung bleibt vor dem
+      // typeof stehen: ein leerer String darf nicht in `new ObjectId('')`
+      // laufen (das wirft), sondern bleibt wie bisher unverändert.
       if (doc.projectId && typeof doc.projectId === 'string') {
         doc.projectId = new ObjectId(doc.projectId);
       }
@@ -169,8 +178,12 @@ export class ReplicationReceiveService {
       if (doc.entityId && typeof doc.entityId === 'string' && payload.event.entity === 'attachment') {
         doc.entityId = new ObjectId(doc.entityId);
       }
-      if (Array.isArray(doc.blockedBy)) {
-        doc.blockedBy = (doc.blockedBy as string[]).map((id) => {
+      if (isUnknownArray(doc.blockedBy)) {
+        // Wie bisher: nur Strings werden gecastet, alles andere bleibt
+        // unverändert stehen (vorher über den catch-Zweig, jetzt über die
+        // typeof-Prüfung — gleiche Menge, gleiche Reihenfolge, gleiche Länge).
+        doc.blockedBy = doc.blockedBy.map((id) => {
+          if (typeof id !== 'string') return id;
           try { return new ObjectId(id); } catch { return id; }
         });
       }
@@ -195,8 +208,8 @@ export class ReplicationReceiveService {
       this.logger.debug(`Replicated ${payload.event.action}: ${payload.event.entity}/${payload.event.entityId}`);
       return { applied: true };
     } catch (err) {
-      this.logger.error(`Replication apply failed: ${(err as Error).message}`);
-      return { applied: false, reason: (err as Error).message };
+      this.logger.error(`Replication apply failed: ${errorMessage(err)}`);
+      return { applied: false, reason: errorMessage(err) };
     }
   }
 
@@ -276,18 +289,30 @@ export class ReplicationReceiveService {
       const data = projectExport[key];
       if (!data) continue;
 
-      const coll = db.collection(collectionName);
-      const docs = Array.isArray(data) ? data : [data];
+      const coll = db.collection<ReplDoc>(collectionName);
+      // `isUnknownArray` statt `Array.isArray`: letzteres verengt ein `unknown`
+      // zu `any[]` und macht damit jedes Element wieder ungeprüft.
+      const docs: unknown[] = isUnknownArray(data) ? data : [data];
 
-      for (const doc of docs) {
+      for (const rawDoc of docs) {
         try {
-          const id = doc._id;
-          if (!id) continue;
+          // Verhalten 1:1 wie vorher: `null`/`undefined` liess `doc._id` eine
+          // TypeError werfen → errors++ mit Warnung (bleibt laut). Ein Primitive
+          // ergab `doc._id === undefined` → stiller `continue` (bleibt still).
+          if (rawDoc == null) throw new Error('null document in full-sync export');
+          if (!isRecord(rawDoc)) continue;
+          const rawId = rawDoc._id;
+          if (!rawId) continue;
+          // Vorher `new ObjectId(String(id))`: ein nicht lesbares `_id` wurde zu
+          // "[object Object]" und liess `new ObjectId` werfen → errors++. Genau
+          // dieses laute Scheitern bleibt (statt still zu überspringen).
+          const id = idToString(rawId);
+          if (!id) throw new Error('unusable _id in full-sync document');
 
-          const cleanDoc = { ...doc };
+          const cleanDoc: Record<string, unknown> = { ...rawDoc };
           delete cleanDoc._id;
 
-          // Convert string ObjectIds
+          // Convert string ObjectIds (Truthiness-Prüfung wie oben: '' wirft)
           if (cleanDoc.projectId && typeof cleanDoc.projectId === 'string') {
             cleanDoc.projectId = new ObjectId(cleanDoc.projectId);
           }
@@ -297,7 +322,7 @@ export class ReplicationReceiveService {
           // the incoming snapshot. Without this, a scheduled full-sync from an
           // instance with stale live-push queue would overwrite edits made on
           // the receiving side. Mirrors the check in applyChange().
-          const docObjectId = new ObjectId(String(id));
+          const docObjectId = new ObjectId(id);
           if (!lwwExemptCollections.has(collectionName)) {
             const incomingTs = this.parseTimestamp(cleanDoc.updatedAt);
             if (incomingTs) {
@@ -305,9 +330,7 @@ export class ReplicationReceiveService {
                 { _id: docObjectId },
                 { projection: { updatedAt: 1 } },
               );
-              const localTs = local
-                ? this.parseTimestamp((local as { updatedAt?: unknown }).updatedAt)
-                : null;
+              const localTs = local ? this.parseTimestamp(local.updatedAt) : null;
               if (localTs && localTs > incomingTs) {
                 skipped++;
                 continue;
@@ -322,17 +345,24 @@ export class ReplicationReceiveService {
           );
           entities++;
 
-          // Handle attachment binary
+          // Handle attachment binary. Ein vorhandenes, aber nicht string-artiges
+          // `_binaryBase64` (bzw. ein fehlender storageKey) wirft weiter statt
+          // still den Anhang zu überspringen: das landet im catch unten als
+          // errors++ mit Warnung, wie vorher über `Buffer.from`/putObject.
           if (key === 'attachments' && cleanDoc._binaryBase64 && this.minioService.isEnabled()) {
-            const buffer = Buffer.from(cleanDoc._binaryBase64 as string, 'base64');
+            const base64 = asString(cleanDoc._binaryBase64);
+            const storageKey = asString(cleanDoc.storageKey);
+            if (!base64) throw new Error('attachment _binaryBase64 is not a string');
+            if (!storageKey) throw new Error('attachment has no storageKey');
+            const buffer = Buffer.from(base64, 'base64');
             await this.minioService.putObject(
-              String(cleanDoc.storageKey),
+              storageKey,
               buffer,
-              String(cleanDoc.mimeType || 'application/octet-stream'),
+              asString(cleanDoc.mimeType) || 'application/octet-stream',
             );
           }
         } catch (err) {
-          this.logger.warn(`Full sync upsert failed: ${(err as Error).message}`);
+          this.logger.warn(`Full sync upsert failed: ${errorMessage(err)}`);
           errors++;
         }
       }

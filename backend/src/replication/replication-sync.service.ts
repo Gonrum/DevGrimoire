@@ -9,6 +9,7 @@ import { toSyncEntry, pullPage } from './replication-sync.helpers';
 import { isTerminalOutcome, isEntryOptedIn } from './replication-sync-cursor.helpers';
 import { SyncReceiveRequest, SyncReceiveResponse, SyncPullResponse, SyncEntryResult } from './replication-sync.types';
 import { REPL_INSTANCE_ID } from './replication.constants';
+import { toPlainDoc } from '../common/tool-args';
 
 /** Hard cap on a pull page (count). Byte-capping is the sender's concern. */
 const PULL_PAGE_LIMIT = 500;
@@ -94,7 +95,9 @@ export class ReplicationSyncService {
       .limit(cap)
       .lean()
       .exec();
-    const entries = docs.map((d) => toSyncEntry(d as unknown as Record<string, unknown>));
+    // `toPlainDoc` statt Doppel-Cast: lean-Dokumente sind POJOs, die flache
+    // Kopie enthält also wirklich alle Felder.
+    const entries = docs.map((d) => toSyncEntry(toPlainDoc(d)));
     const { page: originPage, nextSince, hasMore } = pullPage(entries, self, cap);
     const enabled = await this.getEnabledProjectIds();
     const page = originPage.filter((e) => isEntryOptedIn(e, enabled));

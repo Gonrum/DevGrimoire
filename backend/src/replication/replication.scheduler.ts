@@ -12,10 +12,10 @@ import {
   REPL_PULL_CRON,
   REPL_ENGINE,
   PUSHING_ROLES,
-  ReplicationRole,
   REPL_SYNC_INTERVAL_SEC,
 } from './replication.constants';
 import { legacyEngineEnabled } from './replication-engine.helpers';
+import { asReplicationRole, errorMessage } from './replication-narrow.helpers';
 
 const FULL_SYNC_JOB = 'replication.fullSync';
 const PULL_JOB = 'replication.pull';
@@ -62,7 +62,7 @@ export class ReplicationScheduler implements OnModuleInit {
   /** Process replication queue every 30 seconds (master + peer push backlog). */
   @Cron('*/30 * * * * *')
   async processQueue(): Promise<void> {
-    const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
+    const role = asReplicationRole(await this.settingsService.get(REPL_ROLE));
     if (!role || !PUSHING_ROLES.has(role)) return;
     if (!(await this.legacyOn())) return;
 
@@ -72,7 +72,7 @@ export class ReplicationScheduler implements OnModuleInit {
         this.logger.debug(`Processed ${sent} queued replication items`);
       }
     } catch (err) {
-      this.logger.error(`Queue processing failed: ${(err as Error).message}`);
+      this.logger.error(`Queue processing failed: ${errorMessage(err)}`);
     }
   }
 
@@ -99,7 +99,7 @@ export class ReplicationScheduler implements OnModuleInit {
       job = new CronJob(cronExpr, onTick);
     } catch (err) {
       throw new BadRequestException(
-        `Invalid cron expression "${cronExpr}": ${(err as Error).message}`,
+        `Invalid cron expression "${cronExpr}": ${errorMessage(err)}`,
       );
     }
     if (this.scheduler.doesExist('cron', name)) {
@@ -110,7 +110,7 @@ export class ReplicationScheduler implements OnModuleInit {
   }
 
   private async runScheduledFullSync(): Promise<void> {
-    const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
+    const role = asReplicationRole(await this.settingsService.get(REPL_ROLE));
     if (!role || !PUSHING_ROLES.has(role)) return;
     if (!(await this.legacyOn())) return;
 
@@ -121,12 +121,12 @@ export class ReplicationScheduler implements OnModuleInit {
         `Scheduled sync done: ${result.projects} projects, ${result.entities} entities, ${result.skipped} LWW-skipped, ${result.errors} errors`,
       );
     } catch (err) {
-      this.logger.error(`Scheduled full sync failed: ${(err as Error).message}`);
+      this.logger.error(`Scheduled full sync failed: ${errorMessage(err)}`);
     }
   }
 
   private async runScheduledPull(): Promise<void> {
-    const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
+    const role = asReplicationRole(await this.settingsService.get(REPL_ROLE));
     if (role !== 'peer') return;
     if (!(await this.legacyOn())) return;
 
@@ -140,7 +140,7 @@ export class ReplicationScheduler implements OnModuleInit {
         );
       }
     } catch (err) {
-      this.logger.error(`Scheduled pull failed: ${(err as Error).message}`);
+      this.logger.error(`Scheduled pull failed: ${errorMessage(err)}`);
     }
   }
 
@@ -161,7 +161,7 @@ export class ReplicationScheduler implements OnModuleInit {
     try {
       await this.syncDriver.runCycle('scheduled');
     } catch (err) {
-      this.logger.error(`Sync cycle failed: ${(err as Error).message}`);
+      this.logger.error(`Sync cycle failed: ${errorMessage(err)}`);
     }
   }
 }

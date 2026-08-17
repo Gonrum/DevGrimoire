@@ -20,6 +20,10 @@ import {
   ReplicationRole,
 } from './replication.constants';
 import { legacyEngineEnabled } from './replication-engine.helpers';
+import {
+  ReplDoc, asChangeAction, asReplicationRole, chunkToBuffer, errorMessage,
+} from './replication-narrow.helpers';
+import { asString } from '../common/tool-args';
 import { randomUUID } from 'crypto';
 
 /**
@@ -95,7 +99,7 @@ export class ReplicationPushService {
 
   @OnEvent(PROJECT_CHANGED)
   async handleProjectChange(event: ProjectChangeEvent): Promise<void> {
-    const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
+    const role = asReplicationRole(await this.settingsService.get(REPL_ROLE));
     if (!role || !PUSHING_ROLES.has(role)) return;
     // Migration gate: under the log engine the legacy on-emit push+enqueue is
     // off, so the replication_queue never fills (processQueue is off too).
@@ -117,7 +121,7 @@ export class ReplicationPushService {
         await this.enqueue(event, payload);
       }
     } catch (err) {
-      this.logger.warn(`Replication push failed: ${(err as Error).message}`);
+      this.logger.warn(`Replication push failed: ${errorMessage(err)}`);
       try {
         const payload = await this.buildPayload(event);
         if (payload) await this.enqueue(event, payload);
@@ -155,32 +159,36 @@ export class ReplicationPushService {
       if (!db) return null;
 
       const { ObjectId } = await import('mongodb');
-      document = await db.collection(collection).findOne({ _id: new ObjectId(event.entityId) });
+      // Explizites TSchema: ohne das wäre jedes Feld des gelesenen Dokuments
+      // `any` — und dieses Dokument geht 1:1 über die Leitung.
+      document = await db.collection<ReplDoc>(collection).findOne({ _id: new ObjectId(event.entityId) });
       if (!document) return null;
 
       // For attachments, also fetch the binary
       if (event.entity === 'attachment' && this.minioService.isEnabled()) {
         try {
-          const storageKey = String(document.storageKey || '');
+          // `asString` statt `String(...)`: für ein Objekt hätte letzteres
+          // "[object Object]" als Storage-Key benutzt.
+          const storageKey = asString(document.storageKey) ?? '';
           if (storageKey) {
             const stream = await this.minioService.getObject(storageKey);
             const chunks: Buffer[] = [];
             for await (const chunk of stream) {
-              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+              chunks.push(chunkToBuffer(chunk));
             }
             const buffer = Buffer.concat(chunks);
             // Only include if < 10MB inline, otherwise will be sent separately
             if (buffer.length < 10 * 1024 * 1024) {
               attachmentData = {
                 base64: buffer.toString('base64'),
-                fileName: String(document.originalName || ''),
-                mimeType: String(document.mimeType || 'application/octet-stream'),
+                fileName: asString(document.originalName) ?? '',
+                mimeType: asString(document.mimeType) || 'application/octet-stream',
                 storageKey,
               };
             }
           }
         } catch (err) {
-          this.logger.warn(`Failed to fetch attachment binary: ${(err as Error).message}`);
+          this.logger.warn(`Failed to fetch attachment binary: ${errorMessage(err)}`);
         }
       }
     }
@@ -244,7 +252,7 @@ export class ReplicationPushService {
 
   /** Process queued items — called by scheduler */
   async processQueue(): Promise<number> {
-    const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
+    const role = asReplicationRole(await this.settingsService.get(REPL_ROLE));
     if (!role || !PUSHING_ROLES.has(role)) return 0;
 
     const items = await this.queueModel
@@ -260,10 +268,15 @@ export class ReplicationPushService {
         event: {
           projectId: item.projectId,
           entity: item.entity,
-          action: item.action as 'created' | 'updated' | 'deleted',
+          // Das Schema erzwingt den Enum; `asChangeAction` bildet einen
+          // dennoch unbekannten Wert auf 'updated' ab — genau das Verhalten der
+          // Empfängerseite bisher (alles ausser 'deleted' ist ein Upsert). Ein
+          // Queue-Eintrag darf hier nicht verworfen werden: er ist die letzte
+          // Kopie eines fehlgeschlagenen Pushs.
+          action: asChangeAction(item.action),
           entityId: item.entityId,
         },
-        document: item.document as Record<string, unknown> | null,
+        document: item.document ?? null,
         attachmentData: item.attachmentData,
         timestamp: new Date().toISOString(),
         sourceInstanceId: instanceId,

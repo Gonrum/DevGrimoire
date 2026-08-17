@@ -12,9 +12,9 @@ import {
   REPL_PEER_API_KEY,
   REPL_LAST_PULL,
   RECEIVING_ROLES,
-  ReplicationRole,
   ReplicationPullResponse,
 } from './replication.constants';
+import { asReplicationRole, errorMessage } from './replication-narrow.helpers';
 
 /**
  * Inbound pull worker for asymmetric topologies. Use case: the local instance
@@ -51,7 +51,7 @@ export class ReplicationPullService {
    * the latest `until` as new `since` until count drops below the limit.
    */
   async runPull(): Promise<{ pulled: number; applied: number; skipped: number; rounds: number; error?: string }> {
-    const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
+    const role = asReplicationRole(await this.settingsService.get(REPL_ROLE));
     if (!role || !RECEIVING_ROLES.has(role) || role !== 'peer') {
       // Pull is currently only meaningful for peer role; slaves receive pushes.
       return { pulled: 0, applied: 0, skipped: 0, rounds: 0, error: 'Pull only runs in peer role' };
@@ -98,13 +98,15 @@ export class ReplicationPullService {
           );
           response = res.data;
         } catch (err) {
-          this.logger.warn(`Pull HTTP failed: ${(err as Error).message}`);
+          this.logger.warn(`Pull HTTP failed: ${errorMessage(err)}`);
           return {
             pulled: totalPulled, applied: totalApplied, skipped: totalSkipped, rounds,
-            error: (err as Error).message,
+            error: errorMessage(err),
           };
         }
 
+        // Prüfung bleibt: `response` kommt von einer fremden Instanz und kann
+        // ein fehlendes oder kaputtes `changes` haben.
         const changes = Array.isArray(response.changes) ? response.changes : [];
         totalPulled += changes.length;
 
@@ -114,7 +116,7 @@ export class ReplicationPullService {
             if (result.applied) totalApplied++;
             else totalSkipped++;
           } catch (err) {
-            this.logger.warn(`Pull apply failed for ${payload.event.entity}/${payload.event.entityId}: ${(err as Error).message}`);
+            this.logger.warn(`Pull apply failed for ${payload.event.entity}/${payload.event.entityId}: ${errorMessage(err)}`);
             totalSkipped++;
           }
         }
@@ -146,8 +148,10 @@ export class ReplicationPullService {
    *  per pull-round; cached projects on the server-side enforce the same filter. */
   private async getEnabledProjectIds(): Promise<string[]> {
     const all = await this.projectsService.findAll(true);
+    // `replicationConfig` ist ein echtes Feld des Project-Schemas — die
+    // doppelte Behauptung war überflüssig.
     return all
-      .filter((p) => (p as unknown as { replicationConfig?: { enabled?: boolean } }).replicationConfig?.enabled === true)
+      .filter((p) => p.replicationConfig?.enabled === true)
       .map((p) => p._id.toString());
   }
 }

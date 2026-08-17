@@ -55,23 +55,28 @@ export default tseslint.config(
   },
   {
     /*
-     * Einziger Override zu obiger Regel — und bewusst genau eine Datei.
+     * Der einzige Override zu obiger Regel, und er gilt einer klar umrissenen
+     * Rolle: **Grenz-Leser**. Das sind Funktionen, die ungeprüftes JSON in
+     * getypte Formen überführen und dabei zur Laufzeit nur die *Form* prüfen
+     * (String, Objekt, Array) — die Element-Struktur validiert erst die Schicht
+     * dahinter (class-validator, Mongoose).
      *
-     * `src/common/tool-args.ts` ist die Grenze zwischen ungeprüftem JSON (von
-     * einem LLM erzeugte Tool-Argumente) und getypten DTOs. Solange dort kein
-     * Schema-Validator dazwischensteht, ist eine Behauptung unvermeidbar: die
-     * Helfer prüfen zur Laufzeit die *Form* (String, Objekt, Array), die
-     * Element-Struktur validiert erst der Service über class-validator bzw.
-     * Mongoose.
+     * - `src/common/tool-args.ts` — von einem LLM erzeugte Tool-Argumente
+     * - `src/commits/providers/provider-responses.ts` — HTTP-Antworten von
+     *   GitHub/GitLab/Gitea (`readJsonArray`/`readJsonObject`)
      *
-     * Der Grundsatz aus M-52 bleibt damit gewahrt: die Ausnahme steht in der
-     * Config, ist begründet und betrifft eine Datei — statt als
-     * `eslint-disable` in den hundert Aufrufern zu verschwinden.
+     * Solange dort kein Schema-Validator dazwischensteht, ist eine Behauptung
+     * unvermeidbar. Der Grundsatz aus M-52 bleibt gewahrt: die Ausnahme steht
+     * begründet in der Config und betrifft zwei benannte Dateien — statt als
+     * `eslint-disable` in den hunderten Aufrufern zu verschwinden.
      *
-     * Wer das schließen will, braucht einen echten Validator an der Grenze
-     * (zod o.ä.), nicht mehr Casts.
+     * **Diese Liste ist keine Ablage für Unbequemlichkeiten.** Neue Einträge nur,
+     * wenn die Datei tatsächlich diese Rolle hat: eine Laufzeit-Formprüfung
+     * direkt vor der Behauptung, und ein Kommentar der begründet, warum keine
+     * echte Typisierung möglich ist. Wer die Ausnahme ganz schließen will,
+     * braucht einen Validator an der Grenze (zod o.ä.), nicht mehr Casts.
      */
-    files: ['src/common/tool-args.ts'],
+    files: ['src/common/tool-args.ts', 'src/commits/providers/provider-responses.ts'],
     rules: { '@typescript-eslint/no-unsafe-type-assertion': 'off' },
   },
 );

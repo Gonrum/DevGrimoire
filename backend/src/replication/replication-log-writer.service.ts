@@ -8,15 +8,16 @@ import { ReplicationApplied, ReplicationAppliedDocument } from './schemas/replic
 import { ReplicationCounterService } from './replication-counter.service';
 import { isReplicatedCollection, getReplicatedByCollection, replicatedCollectionNames } from './replication-collections';
 import { mapOperation, deriveEventId, makeAppliedKey } from './replication-log.helpers';
+import { ReplDoc, errorMessage, isRecord, mongoErrorCode } from './replication-narrow.helpers';
 import { REPL_WATCHER_RESUME_TOKEN, REPL_INSTANCE_ID, REPL_WATCHER_HEARTBEAT } from './replication.constants';
 
 /**
- * Absichtlich offene Dokumentform: der Watcher sieht alle replizierten
+ * Absichtlich offene Dokumentform (`ReplDoc`, siehe
+ * `replication-narrow.helpers.ts`): der Watcher sieht alle replizierten
  * Collections, ein konkreter Typ wäre hier eine Lüge. Ohne explizites TSchema
  * fällt der Treiber auf `Document` = `{[k: string]: any}` zurück — dann wäre
  * jedes Feld wieder `any`.
  */
-type ReplDoc = { _id?: unknown; [field: string]: unknown };
 type ReplChange = mongo.ChangeStreamDocument<ReplDoc>;
 
 /**
@@ -53,9 +54,8 @@ function isUnknownArray(value: unknown): value is unknown[] {
 
 /** Liest das `_data` des Resume-Tokens, das als Idempotenz-Disambiguator dient. */
 function resumeTokenData(token: unknown): string | undefined {
-  if (token === null || typeof token !== 'object') return undefined;
-  const data = (token as { _data?: unknown })._data;
-  return typeof data === 'string' ? data : undefined;
+  if (!isRecord(token)) return undefined;
+  return typeof token._data === 'string' ? token._data : undefined;
 }
 
 /** How often the watcher stamps its liveness heartbeat while consuming. */
@@ -106,7 +106,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
     // aber die Rejection war unbehandelt — beim Herunterfahren also eine
     // potenzielle UnhandledRejection. Nur das `any` hat sie verdeckt.
     this.changeStream?.close().catch((err: unknown) => {
-      this.logger.warn(`Closing change stream failed: ${(err as Error).message}`);
+      this.logger.warn(`Closing change stream failed: ${errorMessage(err)}`);
     });
   }
 
@@ -132,7 +132,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
     try {
       await this.settingsService.set(REPL_WATCHER_HEARTBEAT, new Date().toISOString());
     } catch (err) {
-      this.logger.warn(`Heartbeat stamp failed: ${(err as Error).message}`);
+      this.logger.warn(`Heartbeat stamp failed: ${errorMessage(err)}`);
     }
   }
 
@@ -160,10 +160,10 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
       try {
         await db.command({ collMod: coll, changeStreamPreAndPostImages: { enabled: true } });
       } catch (err) {
-        const e = err as { codeName?: string; message?: string };
-        if (e.codeName === 'NamespaceNotFound') continue; // created later → enabled on next start
+        const codeName = isRecord(err) && typeof err.codeName === 'string' ? err.codeName : undefined;
+        if (codeName === 'NamespaceNotFound') continue; // created later → enabled on next start
         this.logger.warn(
-          `Could not enable pre-images on ${coll} (deletes may not replicate): ${e.message}`,
+          `Could not enable pre-images on ${coll} (deletes may not replicate): ${errorMessage(err)}`,
         );
       }
     }
@@ -206,7 +206,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
       // event advance the token past a slow event still mid-write, losing it on crash.
       void this.consume();
     } catch (err) {
-      this.logger.warn(`Change streams unavailable — log writer inactive: ${(err as Error).message}`);
+      this.logger.warn(`Change streams unavailable — log writer inactive: ${errorMessage(err)}`);
     }
   }
 
@@ -222,7 +222,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
       // ChangeStreamHistoryLost (resume token aged out of oplog) → Plan 3 auto full-sync.
       // For now: log prominently; suppress noise during shutdown.
       if (!this.closing) {
-        this.logger.error(`Replication change stream error: ${(err as Error).message}`);
+        this.logger.error(`Replication change stream error: ${errorMessage(err)}`);
       }
     } finally {
       // Watcher loop ended (error or shutdown) → stop stamping so the heartbeat
@@ -305,7 +305,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
         });
       } catch (err) {
         // Duplicate eventId (idempotent re-process after resume) — safe to skip.
-        if ((err as { code?: number }).code === 11000) {
+        if (mongoErrorCode(err) === 11000) {
           this.logger.debug(`Duplicate eventId ${eventId} — skipped`);
         } else {
           throw err;
@@ -317,7 +317,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
         await this.settingsService.set(REPL_WATCHER_RESUME_TOKEN, JSON.stringify(change._id));
       }
     } catch (err) {
-      this.logger.error(`Failed to write replication log entry: ${(err as Error).message}`);
+      this.logger.error(`Failed to write replication log entry: ${errorMessage(err)}`);
     }
   }
 
@@ -338,10 +338,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
       // generic (top-level) path unchanged.
       // ResearchTopic verschachtelt seine Opt-in-Liste unter `scope.projectIds[]`.
       const scope = doc?.scope;
-      const nested =
-        scope !== null && typeof scope === 'object'
-          ? (scope as { projectIds?: unknown }).projectIds
-          : undefined;
+      const nested = isRecord(scope) ? scope.projectIds : undefined;
       const raw = entry.entity === 'research-topic' ? nested : doc?.projectIds;
       // Ein eigenes Prädikat statt `Array.isArray`: das verengt ein `unknown`
       // zu `any[]` und würde die unsafe-Findings auf den Elementen zurückholen.

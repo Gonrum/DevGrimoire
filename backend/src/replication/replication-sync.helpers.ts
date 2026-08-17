@@ -1,15 +1,27 @@
+import { isUnknownArray, idToString } from '../common/tool-args';
+import { asDate, isRecord } from './replication-narrow.helpers';
 import { SyncLogEntry } from './replication-sync.types';
 
-/** Parse a Mongo date-ish value to ms epoch, or null. */
+/** Parse a Mongo date-ish value to ms epoch, or null. Nur Date, String und
+ *  Number sind sinnvolle Eingaben — alles andere ergäbe ein Invalid Date, das
+ *  über den NaN-Zweig ohnehin zu `null` geworden wäre. Identisch zum `toMs()`
+ *  des Log-Writers. */
 export function toMs(value: unknown): number | null {
-  if (value == null) return null;
-  const d = value instanceof Date ? value : new Date(value as string | number);
-  const t = d.getTime();
-  return Number.isNaN(t) ? null : t;
+  return asDate(value)?.getTime() ?? null;
 }
 
-/** Map a raw replication_log document to the wire shape. Drops Mongo-internal
- *  fields (_id, createdAt, updatedAt) the receiver doesn't need. */
+/**
+ * Map a raw replication_log document to the wire shape. Drops Mongo-internal
+ * fields (_id, createdAt, updatedAt) the receiver doesn't need.
+ *
+ * Die Quelle ist immer das **lokale** replication_log, dessen Felder der
+ * Log-Writer schreibt: `projectId`/`projectIds` sind dort per Schema Strings,
+ * `document` ist ein Objekt oder null. Die Prüfungen hier verengen also nichts,
+ * was im Normalbetrieb vorkommt — sie ersetzen nur die bisherigen Behauptungen
+ * durch belegte Verengungen. Wichtig: `projectIds` behält seine Länge (nicht
+ * lesbare Elemente werden zu `''`, nicht weggefiltert), damit kein Projektbezug
+ * unbemerkt aus einem Multi-Projekt-Eintrag verschwindet.
+ */
 export function toSyncEntry(logDoc: Record<string, unknown>): SyncLogEntry {
   return {
     seq: Number(logDoc.seq),
@@ -17,11 +29,11 @@ export function toSyncEntry(logDoc: Record<string, unknown>): SyncLogEntry {
     op: logDoc.op === 'delete' ? 'delete' : 'upsert',
     collection: String(logDoc.collection),
     documentId: String(logDoc.documentId),
-    projectId: logDoc.projectId == null ? null : String(logDoc.projectId),
-    projectIds: Array.isArray(logDoc.projectIds)
-      ? (logDoc.projectIds as unknown[]).map((p) => String(p))
+    projectId: idToString(logDoc.projectId) ?? null,
+    projectIds: isUnknownArray(logDoc.projectIds)
+      ? logDoc.projectIds.map((p) => idToString(p) ?? '')
       : null,
-    document: (logDoc.document as Record<string, unknown> | null) ?? null,
+    document: isRecord(logDoc.document) ? logDoc.document : null,
     updatedAtMs: logDoc.updatedAtMs == null ? null : Number(logDoc.updatedAtMs),
     deletedAtMs: logDoc.deletedAtMs == null ? null : Number(logDoc.deletedAtMs),
     originInstanceId: String(logDoc.originInstanceId),

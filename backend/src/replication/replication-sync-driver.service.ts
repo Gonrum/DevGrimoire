@@ -25,6 +25,8 @@ import {
   directionAlert,
   ErrorClass,
 } from './replication-backoff.helpers';
+import { errorMessage, httpErrorStatus } from './replication-narrow.helpers';
+import { toPlainDoc } from '../common/tool-args';
 import { SyncCycleResult, SyncStatus, SyncLogEntry, SyncReceiveResponse, DirectionHealth } from './replication-sync.types';
 import {
   REPL_INSTANCE_ID,
@@ -207,7 +209,9 @@ export class ReplicationSyncDriverService {
       if (window.length === 0) break;
 
       const windowMaxSeq = Number(window[window.length - 1].seq);
-      const entries = window.map((d) => toSyncEntry(d as unknown as Record<string, unknown>));
+      // `toPlainDoc` statt Doppel-Cast: die lean-Dokumente sind POJOs (kein
+      // Mongoose-Dokument), die flache Kopie enthält also wirklich alle Felder.
+      const entries = window.map((d) => toSyncEntry(toPlainDoc(d)));
       const sendSet = selectSendSet(entries, self, enabled, excluded);
 
       let newCursor: number;
@@ -221,12 +225,12 @@ export class ReplicationSyncDriverService {
           resp = await this.client.pushReceive(self, sendSet);
         } catch (err) {
           // 413 Payload Too Large → shrink the push batch so the next cycle fits.
-          const status = (err as { response?: { status?: number } })?.response?.status;
+          const status = httpErrorStatus(err);
           if (status === 413) {
             this.outboundBatchLimit = Math.max(1, Math.floor(this.outboundBatchLimit / 2));
             this.logger.warn(`Push 413 — halving outbound batch limit to ${this.outboundBatchLimit}`);
           }
-          this.logger.warn(`Push failed at cursor ${cursor}: ${(err as Error).message}`);
+          this.logger.warn(`Push failed at cursor ${cursor}: ${errorMessage(err)}`);
           this.recordFailure(this.outbound, err);
           errored = true;
           break; // transient — cursor stays, retry after backoff
@@ -325,7 +329,7 @@ export class ReplicationSyncDriverService {
         nextSince = Number(resp.nextSince);
         hasMore = !!resp.hasMore;
       } catch (err) {
-        this.logger.warn(`Pull failed at since ${cursor}: ${(err as Error).message}`);
+        this.logger.warn(`Pull failed at since ${cursor}: ${errorMessage(err)}`);
         this.recordFailure(this.inbound, err);
         errored = true;
         break; // transient — cursor stays, retry after backoff
@@ -409,7 +413,7 @@ export class ReplicationSyncDriverService {
         );
       }
     } catch (err) {
-      this.logger.warn(`Replication alert (${label}) failed: ${(err as Error).message}`);
+      this.logger.warn(`Replication alert (${label}) failed: ${errorMessage(err)}`);
     }
   }
 
@@ -434,7 +438,7 @@ export class ReplicationSyncDriverService {
     ]);
     const active = driver === 'active';
     const top = await this.logModel.findOne().sort({ seq: -1 }).select('seq').lean().exec();
-    const localMaxSeq = top ? Number((top as { seq: number }).seq) : 0;
+    const localMaxSeq = top ? Number(top.seq) : 0;
     return {
       driver: driver ?? 'unset',
       outboundCursor,

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
-import { Connection } from 'mongoose';
+import { Connection, mongo } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
@@ -10,11 +10,22 @@ import { MinioService } from '../minio/minio.service';
 import {
   REPL_ROLE, REPL_SLAVE_URL, REPL_SLAVE_API_KEY,
   REPL_PEER_URL, REPL_PEER_API_KEY,
-  REPL_LAST_FULL_SYNC, REPL_INSTANCE_ID,
+  REPL_LAST_FULL_SYNC,
   PUSHING_ROLES,
-  ReplicationRole,
 } from './replication.constants';
-import { randomUUID } from 'crypto';
+import {
+  ReplDoc, asCount, asReplicationRole, chunkToBuffer, errorMessage,
+} from './replication-narrow.helpers';
+import { idToString } from '../common/tool-args';
+
+/** Was die Gegenstelle auf einen Full-Sync-Post antwortet. Die Felder sind
+ *  bewusst `unknown`: eine ältere/andere Version darf hier alles schicken, und
+ *  `asCount()` entscheidet zur Laufzeit, was als Zahl zählt. */
+interface FullSyncAck {
+  entities?: unknown;
+  errors?: unknown;
+  skipped?: unknown;
+}
 
 /** All collections to sync, grouped by export key */
 const SYNC_COLLECTIONS: Record<string, string> = {
@@ -61,7 +72,7 @@ export class ReplicationFullSyncService {
    *   enabled projects like before.
    */
   async runFullSync(onlyProjectId?: string): Promise<{ projects: number; entities: number; errors: number; skipped: number }> {
-    const role = (await this.settingsService.get(REPL_ROLE)) as ReplicationRole | null;
+    const role = asReplicationRole(await this.settingsService.get(REPL_ROLE));
     if (!role || !PUSHING_ROLES.has(role)) return { projects: 0, entities: 0, errors: 0, skipped: 0 };
     if (this.syncing) {
       this.logger.warn('Full sync already in progress');
@@ -99,7 +110,7 @@ export class ReplicationFullSyncService {
       // If a specific projectId was supplied (T-94 single-project trigger),
       // narrow to that one — still enforcing the enabled flag to prevent
       // accidental leaks via a misuse of the single-project path.
-      const filter: Record<string, unknown> = { 'replicationConfig.enabled': true };
+      const filter: mongo.Filter<ReplDoc> = { 'replicationConfig.enabled': true };
       if (onlyProjectId) {
         try {
           filter._id = new ObjectId(onlyProjectId);
@@ -109,10 +120,20 @@ export class ReplicationFullSyncService {
           return { projects: 0, entities: 0, errors: 0, skipped: 0 };
         }
       }
-      const projects = await db.collection('projects').find(filter).toArray();
+      // Explizites TSchema (`ReplDoc`): sonst ist jedes Feld ausser `_id` `any`.
+      const projects = await db.collection<ReplDoc>('projects').find(filter).toArray();
 
       for (const project of projects) {
-        const projectId = project._id;
+        // `_id` ist in einem gelesenen Mongo-Dokument immer vorhanden; die
+        // Prüfung ist reine Absicherung. Ohne sie wäre `new ObjectId(undefined)`
+        // eine NEU generierte Id — der Full-Sync würde stumm ein falsches
+        // Projekt exportieren.
+        const projectIdStr = idToString(project._id);
+        if (!projectIdStr) {
+          this.logger.warn('runFullSync: project document without usable _id — skipped');
+          totalErrors++;
+          continue;
+        }
         const exportData: Record<string, unknown> = {
           project: project,
         };
@@ -122,11 +143,10 @@ export class ReplicationFullSyncService {
         // documents). Mongo's raw .find() does not auto-cast, so we $in both
         // representations to catch every document. Without this the full-sync
         // would only ship the project document itself.
-        const projectIdOid = new ObjectId(String(projectId));
-        const projectIdStr = String(projectId);
+        const projectIdOid = new ObjectId(projectIdStr);
         for (const [key, collName] of Object.entries(SYNC_COLLECTIONS)) {
           try {
-            const docs = await db.collection(collName)
+            const docs = await db.collection<ReplDoc>(collName)
               .find({ projectId: { $in: [projectIdOid, projectIdStr] } })
               .toArray();
 
@@ -134,14 +154,20 @@ export class ReplicationFullSyncService {
             if (key === 'attachments' && this.minioService.isEnabled()) {
               for (const doc of docs) {
                 try {
-                  const storageKey = String(doc.storageKey || '');
-                  if (storageKey && (doc.size as number) < 10 * 1024 * 1024) {
+                  const storageKey = typeof doc.storageKey === 'string' ? doc.storageKey : '';
+                  // `Number(...)` reproduziert exakt die Koerzierung, die der
+                  // Vergleich `doc.size < 10MB` vorher selbst gemacht hat:
+                  // fehlend → NaN → false, "1000" → 1000 → true. Eine reine
+                  // `typeof === 'number'`-Prüfung hätte einen stringifizierten
+                  // `size` (und damit dessen Binary) still fallen lassen.
+                  const size = Number(doc.size);
+                  if (storageKey && size < 10 * 1024 * 1024) {
                     const stream = await this.minioService.getObject(storageKey);
                     const chunks: Buffer[] = [];
                     for await (const chunk of stream) {
-                      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+                      chunks.push(chunkToBuffer(chunk));
                     }
-                    (doc as any)._binaryBase64 = Buffer.concat(chunks).toString('base64');
+                    doc._binaryBase64 = Buffer.concat(chunks).toString('base64');
                   }
                 } catch {
                   // Skip binary if fetch fails
@@ -159,7 +185,7 @@ export class ReplicationFullSyncService {
         // Send to peer (slave or peer-peer)
         try {
           const result = await firstValueFrom(
-            this.httpService.post(`${peerUrl}/api/replication/full-sync`, exportData, {
+            this.httpService.post<FullSyncAck>(`${peerUrl}/api/replication/full-sync`, exportData, {
               headers: {
                 'Content-Type': 'application/json',
                 ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
@@ -169,12 +195,15 @@ export class ReplicationFullSyncService {
               maxBodyLength: 500 * 1024 * 1024,
             }),
           );
-          totalEntities += result.data?.entities || 0;
-          totalErrors += result.data?.errors || 0;
-          totalSkipped += result.data?.skipped || 0;
+          // `asCount` statt `|| 0`: ein stringifizierter Zähler ("5") hätte
+          // über `+=` aus der Summe einen String gemacht ("05") und alle
+          // Folgezählungen verfälscht.
+          totalEntities += asCount(result.data?.entities);
+          totalErrors += asCount(result.data?.errors);
+          totalSkipped += asCount(result.data?.skipped);
           totalProjects++;
         } catch (err) {
-          this.logger.error(`Full sync failed for project ${projectId}: ${(err as Error).message}`);
+          this.logger.error(`Full sync failed for project ${projectIdStr}: ${errorMessage(err)}`);
           totalErrors++;
         }
       }
@@ -183,7 +212,7 @@ export class ReplicationFullSyncService {
       this.eventEmitter.emit(REPLICATION_STATUS_CHANGED);
       this.logger.log(`Full sync completed: ${totalProjects} projects, ${totalEntities} entities, ${totalSkipped} LWW-skipped, ${totalErrors} errors`);
     } catch (err) {
-      this.logger.error(`Full sync failed: ${(err as Error).message}`);
+      this.logger.error(`Full sync failed: ${errorMessage(err)}`);
     } finally {
       this.syncing = false;
     }

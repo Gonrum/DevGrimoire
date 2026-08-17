@@ -1,4 +1,5 @@
 import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import type { Request } from 'express';
 import { SettingsService } from '../settings/settings.service';
 import { REPL_ROLE } from './replication.constants';
 
@@ -13,13 +14,19 @@ export class ReplicationReadonlyGuard implements CanActivate {
     const role = await this.getRole();
     if (role !== 'slave') return true;
 
-    const request = context.switchToHttp().getRequest();
+    // `getRequest<Request>()` ist ein Typparameter, keine Behauptung: der
+    // Express-Typ liefert `method`/`url` als String, damit fällt sowohl das
+    // `any` des Default-Parameters als auch das `as string` unten weg.
+    const request = context.switchToHttp().getRequest<Request>();
+    // `?.` bleibt absichtlich stehen: eine bestehende Laufzeitprüfung, auch wenn
+    // der Express-Typ `method` als non-nullable deklariert.
     const method = request.method?.toUpperCase();
 
-    // Allow all read operations
+    // Allow read operations. HEAD/OPTIONS werden von Express als eigene Methoden
+    // gemeldet und bleiben wie bisher erlaubt.
     if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return true;
 
-    const url = request.url as string;
+    const url = request.url;
 
     // Allow replication endpoints
     if (url.startsWith('/api/replication') || url.startsWith('/replication')) return true;

@@ -10,6 +10,8 @@ import { toMs } from './replication-sync.helpers';
 import { entryProjectIds } from './replication-sync-cursor.helpers';
 import { SyncLogEntry, SyncEntryResult } from './replication-sync.types';
 import { REPL_INSTANCE_ID } from './replication.constants';
+import { ReplDoc, errorMessage, isRecord } from './replication-narrow.helpers';
+import { isUnknownArray } from '../common/tool-args';
 
 /** ObjectId-typed fields that arrive as strings over JSON and must be cast back. */
 const OBJECTID_FIELDS = ['projectId', 'customerId', 'milestoneId', 'entityId', 'topicId', 'lastRunId', 'ownerUserId'];
@@ -40,8 +42,11 @@ export class ReplicationSyncApplyService {
     // Bootstrap: an incoming `projects` upsert enabling itself (project may not
     // exist locally yet).
     if (entry.collection === 'projects' && entry.op === 'upsert') {
-      const cfg = entry.document?.replicationConfig as { enabled?: boolean } | undefined;
-      if (cfg?.enabled === true) return { ok: true };
+      // `isRecord` prüft die Form, statt sie zu behaupten. Ein
+      // Nicht-Objekt-`replicationConfig` erfüllte `cfg?.enabled === true`
+      // vorher genauso wenig — gleiche Menge Bootstrap-Payloads.
+      const cfg = entry.document?.replicationConfig;
+      if (isRecord(cfg) && cfg.enabled === true) return { ok: true };
     }
     const pids = entryProjectIds(entry);
     if (pids.length === 0) return { ok: false, reason: 'no projectId' };
@@ -74,7 +79,10 @@ export class ReplicationSyncApplyService {
     const db = this.connection.db;
     if (!db) return { seq, applied: false, outcome: 'error_transient', reason: 'db unavailable' };
     const { ObjectId } = await import('mongodb');
-    const coll = db.collection(entry.collection);
+    // Explizites TSchema: ohne das ist jedes Feld des gelesenen Dokuments `any`
+    // — hier, an der Apply-Grenze zur fremden Instanz, der schlechteste Ort
+    // dafür. `ReplDoc` bleibt bewusst offen (alle Felder optional, `unknown`).
+    const coll = db.collection<ReplDoc>(entry.collection);
 
     let oid: InstanceType<typeof ObjectId>;
     try { oid = new ObjectId(entry.documentId); }
@@ -83,7 +91,7 @@ export class ReplicationSyncApplyService {
     try {
       // LWW: read the local doc's updatedAt once.
       const local = await coll.findOne({ _id: oid }, { projection: { updatedAt: 1 } });
-      const localMs = local ? toMs((local as { updatedAt?: unknown }).updatedAt) : null;
+      const localMs = local ? toMs(local.updatedAt) : null;
 
       if (entry.op === 'delete') {
         if (compareLww(localMs, entry.deletedAtMs) === 'skip') {
@@ -122,14 +130,21 @@ export class ReplicationSyncApplyService {
       for (const f of OBJECTID_FIELDS) {
         if (typeof doc[f] === 'string') doc[f] = toOid(doc[f]);
       }
-      if (Array.isArray(doc.blockedBy)) doc.blockedBy = (doc.blockedBy as unknown[]).map(toOid);
-      if (Array.isArray(doc.projectIds)) doc.projectIds = (doc.projectIds as unknown[]).map(toOid);
+      // `isUnknownArray` statt `Array.isArray`: letzteres verengt ein `unknown`
+      // zu `any[]` und macht damit jedes Element wieder ungeprüft. Die
+      // Cast-Logik selbst bleibt unverändert — `toOid` lässt Nicht-Strings und
+      // unparsebare Strings unangetastet, die Arrays behalten ihre Länge.
+      if (isUnknownArray(doc.blockedBy)) doc.blockedBy = doc.blockedBy.map(toOid);
+      if (isUnknownArray(doc.projectIds)) doc.projectIds = doc.projectIds.map(toOid);
       // ResearchTopic nests its ObjectId ref arrays under `scope` (scope.projectIds,
-      // scope.customerIds) rather than at the top level.
-      const scope = doc.scope as Record<string, unknown> | undefined;
-      if (scope && typeof scope === 'object' && !Array.isArray(scope)) {
+      // scope.customerIds) rather than at the top level. `scope` ist absichtlich
+      // dasselbe Objekt wie `entry.document.scope` (flache Kopie oben) — die
+      // Mutation muss dort ankommen, deshalb wird hier NICHT kopiert.
+      const scope = doc.scope;
+      if (isRecord(scope) && !Array.isArray(scope)) {
         for (const f of ['projectIds', 'customerIds']) {
-          if (Array.isArray(scope[f])) scope[f] = (scope[f] as unknown[]).map(toOid);
+          const nested = scope[f];
+          if (isUnknownArray(nested)) scope[f] = nested.map(toOid);
         }
       }
       this.normalizeTimestamps(doc);
@@ -137,8 +152,8 @@ export class ReplicationSyncApplyService {
       await coll.replaceOne({ _id: oid }, doc, { upsert: true });
       return { seq, applied: true, outcome: 'applied' };
     } catch (err) {
-      this.logger.error(`Sync apply failed (${entry.collection}/${entry.documentId}): ${(err as Error).message}`);
-      return { seq, applied: false, outcome: 'error_transient', reason: (err as Error).message };
+      this.logger.error(`Sync apply failed (${entry.collection}/${entry.documentId}): ${errorMessage(err)}`);
+      return { seq, applied: false, outcome: 'error_transient', reason: errorMessage(err) };
     }
   }
 

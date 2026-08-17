@@ -9,6 +9,7 @@ import {
 } from './schemas/replication-deadletter.schema';
 import { SyncLogEntry } from './replication-sync.types';
 import { MAX_APPLY_ATTEMPTS } from './replication.constants';
+import { errorMessage } from './replication-narrow.helpers';
 
 type Direction = 'inbound' | 'outbound';
 
@@ -50,7 +51,7 @@ export class ReplicationDeadletterService {
           collection: entry.collection,
           documentId: entry.documentId,
           projectId: entry.projectId,
-          payload: entry as unknown as Record<string, unknown>,
+          payload: entry,
           reason,
           lastFailedAt: now,
         },
@@ -73,7 +74,7 @@ export class ReplicationDeadletterService {
           '/settings',
           'replication_deadletter',
         )
-        .catch((err) => this.logger.warn(`Deadletter notification failed: ${(err as Error).message}`));
+        .catch((err: unknown) => this.logger.warn(`Deadletter notification failed: ${errorMessage(err)}`));
       return { attempts: doc.attempts, deadlettered: true };
     }
     return { attempts: doc.attempts, deadlettered: doc.status === 'pending' };
@@ -98,7 +99,7 @@ export class ReplicationDeadletterService {
       .find({ direction, status: 'pending' }, { eventId: 1 })
       .lean()
       .exec();
-    return new Set(rows.map((r) => String((r as { eventId: string }).eventId)));
+    return new Set(rows.map((r) => r.eventId));
   }
 
   /** Count of final (pending) deadletters — surfaced in /sync/status. */
@@ -115,7 +116,10 @@ export class ReplicationDeadletterService {
   async replay(id: string): Promise<{ ok: boolean; reason?: string }> {
     const doc = await this.model.findById(id).exec();
     if (!doc || doc.status !== 'pending') return { ok: false, reason: 'not a pending deadletter' };
-    const result = await this.applyService.applyEntry(doc.payload as unknown as SyncLogEntry);
+    // `payload` ist im Schema als `SyncLogEntry` typisiert (Mixed zur Laufzeit),
+    // der Doppel-Cast war nur nötig, solange dort `Record<string, unknown>` stand.
+    // Reine Typ-Änderung: `applyEntry` prüft die Felder ohnehin selbst.
+    const result = await this.applyService.applyEntry(doc.payload);
     if (result.applied || result.outcome !== 'error_transient') {
       doc.status = 'replayed';
       await doc.save();

@@ -1,13 +1,18 @@
 /** Transport-error classification + backoff math for the sync driver. Pure. */
+import { httpErrorStatus } from './replication-narrow.helpers';
 
 export type ErrorClass = 'terminal' | 'retryable';
 export type DirectionState = 'healthy' | 'degraded' | 'error' | 'paused';
 
 /** Terminal errors need admin action (auth/role/validation) — retrying as-is
  *  will never succeed. Everything else (5xx, 429, 404, network, timeout, no
- *  response) is transient and worth retrying with backoff. */
+ *  response) is transient and worth retrying with backoff.
+ *
+ *  `httpErrorStatus` prüft die Form zur Laufzeit (statt sie zu behaupten): ein
+ *  Fehler ohne `response.status` — Netzwerk, Timeout, geworfener Error — bleibt
+ *  wie bisher `retryable`. */
 export function classifyHttpError(err: unknown): ErrorClass {
-  const status = (err as { response?: { status?: number } } | undefined)?.response?.status;
+  const status = httpErrorStatus(err);
   if (status === 400 || status === 401 || status === 403 || status === 422) return 'terminal';
   return 'retryable';
 }

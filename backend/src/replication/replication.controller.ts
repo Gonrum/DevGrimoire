@@ -32,6 +32,10 @@ import {
   ReplicationPayload, ReplicationConfig, ReplicationStatus, ReplicationPullResponse,
 } from './replication.constants';
 import { resolveEngine, legacyEngineEnabled } from './replication-engine.helpers';
+import {
+  ReplDoc, asDate, asReplicationRole, errorMessage,
+} from './replication-narrow.helpers';
+import { asObjectArray, asString, idToString, isUnknownArray } from '../common/tool-args';
 import { randomUUID } from 'crypto';
 
 /** Maps entity types to MongoDB collection names — used by the pull endpoint
@@ -134,24 +138,29 @@ export class ReplicationController {
       );
     }
 
-    let remote: Array<{
-      _id: string;
-      name: string;
-      active: boolean;
-      favorite: boolean;
-      replicationEnabled: boolean;
-    }>;
+    // Die Antwort kommt von einer FREMDEN Instanz, potenziell anderer Version:
+    // `asObjectArray` prüft nur die Form (Array von Objekten) und filtert
+    // ausschliesslich Nicht-Objekte weg — jedes Objekt bleibt erhalten, auch mit
+    // unbekannten Zusatzfeldern. Die Felder werden unten einzeln gelesen.
+    let payload: unknown;
     try {
       const response = await firstValueFrom(
-        this.httpService.get(`${counterpartyUrl}/api/replication/projects`, {
+        this.httpService.get<unknown>(`${counterpartyUrl}/api/replication/projects`, {
           headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
           timeout: 15000,
         }),
       );
-      remote = response.data;
+      payload = response.data;
     } catch (err) {
-      throw new BadRequestException(`Peer unreachable: ${(err as Error).message}`);
+      throw new BadRequestException(`Peer unreachable: ${errorMessage(err)}`);
     }
+    // Keine stille leere Liste: eine Antwort, die gar kein Array ist, liess das
+    // bisherige `remote.map(...)` scheitern. Der Admin soll das sehen statt
+    // "Gegenstelle hat keine Projekte" zu lesen.
+    if (!isUnknownArray(payload)) {
+      throw new BadRequestException('Peer returned an unexpected project list (not an array)');
+    }
+    const remote = asObjectArray(payload);
 
     // Build a lookup of local projects (includeInactive=true to cover archived)
     const localProjects = await this.projectsService.findAll(true);
@@ -162,15 +171,18 @@ export class ReplicationController {
       ]),
     );
 
-    return remote.map((rp) => ({
-      _id: rp._id,
-      name: rp.name,
-      active: rp.active,
-      favorite: rp.favorite,
-      remoteReplicationEnabled: rp.replicationEnabled,
-      existsLocally: localMap.has(rp._id),
-      localReplicationEnabled: localMap.get(rp._id)?.enabled ?? false,
-    }));
+    return remote.map((rp) => {
+      const id = idToString(rp._id) ?? '';
+      return {
+        _id: id,
+        name: asString(rp.name) ?? '',
+        active: rp.active === true,
+        favorite: rp.favorite === true,
+        remoteReplicationEnabled: rp.replicationEnabled === true,
+        existsLocally: localMap.has(id),
+        localReplicationEnabled: localMap.get(id)?.enabled ?? false,
+      };
+    });
   }
 
   /**
@@ -211,7 +223,7 @@ export class ReplicationController {
         ),
       );
     } catch (err) {
-      throw new BadRequestException(`Failed to enable replication on peer: ${(err as Error).message}`);
+      throw new BadRequestException(`Failed to enable replication on peer: ${errorMessage(err)}`);
     }
 
     // If the project also exists locally, flip the local flag too. Keeps both
@@ -249,7 +261,10 @@ export class ReplicationController {
     ]);
 
     return {
-      role: role as ReplicationConfig['role'],
+      // Echte Prüfung statt Behauptung: ein unbekannter gespeicherter Wert wird
+      // als 'standalone' gemeldet statt als ungültige Rolle ins Frontend zu
+      // laufen (dessen Select ihn nicht darstellen könnte).
+      role: asReplicationRole(role) ?? 'standalone',
       slaveUrl: slaveUrl || undefined,
       slaveApiKey: slaveApiKey ? '***' : undefined,
       masterUrl: masterUrl || undefined,
@@ -408,7 +423,9 @@ export class ReplicationController {
 
     // Server-side filter: only enabled projects, and only the ones the caller asked for.
     // This prevents leaking data from projects the client somehow shouldn't access.
-    const enabledProjects = await db.collection('projects')
+    // Explizites TSchema: sonst ist jedes Feld ausser `_id` `any` — und diese
+    // Dokumente gehen 1:1 an die Gegenstelle.
+    const enabledProjects = await db.collection<ReplDoc>('projects')
       .find({
         _id: { $in: requestedOids },
         'replicationConfig.enabled': true,
@@ -420,11 +437,16 @@ export class ReplicationController {
     const changes: ReplicationPayload[] = [];
 
     for (const project of enabledProjects) {
-      const projectIdStr = String(project._id);
+      // `_id` ist in einem gelesenen Dokument immer gesetzt; ohne die Prüfung
+      // würde ein `undefined` als `$in: [undefined, "undefined"]` in den Filter
+      // laufen und dort NICHT "nichts", sondern Dokumente ohne projectId treffen.
+      const projectIdStr = idToString(project._id);
+      if (!projectIdStr) continue;
       const projectIdOid = project._id;
 
       // Project document itself if it changed
-      if (project.updatedAt && new Date(project.updatedAt as Date | string) > sinceDate) {
+      const projectUpdatedAt = asDate(project.updatedAt);
+      if (projectUpdatedAt && projectUpdatedAt > sinceDate) {
         changes.push({
           event: { projectId: projectIdStr, entity: 'project', action: 'updated', entityId: projectIdStr },
           document: project,
@@ -436,7 +458,7 @@ export class ReplicationController {
       for (const [entity, collName] of Object.entries(PULL_ENTITY_COLLECTIONS)) {
         if (changes.length >= PULL_MAX_DOCS) break;
         try {
-          const docs = await db.collection(collName)
+          const docs = await db.collection<ReplDoc>(collName)
             .find({
               projectId: { $in: [projectIdOid, projectIdStr] },
               updatedAt: { $gt: sinceDate },
@@ -445,12 +467,14 @@ export class ReplicationController {
             .limit(PULL_MAX_DOCS - changes.length)
             .toArray();
           for (const doc of docs) {
+            const entityId = idToString(doc._id);
+            if (!entityId) continue;
             changes.push({
               event: {
                 projectId: projectIdStr,
                 entity,
                 action: 'updated',
-                entityId: String(doc._id),
+                entityId,
               },
               document: doc,
               timestamp: until.toISOString(),
@@ -582,13 +606,15 @@ export class ReplicationController {
       );
       return { success: true, latency: Date.now() - start };
     } catch (err) {
-      return { success: false, latency: Date.now() - start, error: (err as Error).message };
+      return { success: false, latency: Date.now() - start, error: errorMessage(err) };
     }
   }
 
+  // Absichtlich synchron: der Full-Sync wird fire-and-forget gestartet, es gibt
+  // hier nichts zu erwarten. Als `async` ohne `await` war das nur Rauschen.
   @Post('trigger-full-sync')
   @HttpCode(200)
-  async triggerFullSync(@Query('projectId') projectId?: string) {
+  triggerFullSync(@Query('projectId') projectId?: string) {
     if (this.fullSyncService.isSyncing()) {
       return { started: false, reason: 'Already syncing' };
     }
