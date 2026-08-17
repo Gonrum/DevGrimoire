@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { CommitsService } from './commits.service';
 import { ProjectsService } from '../projects/projects.service';
+import { GitRepository } from './schemas/git-repository.schema';
 
 @Injectable()
 export class CommitsScheduler {
@@ -17,8 +18,11 @@ export class CommitsScheduler {
     const projects = await this.projectsService.findAll(true);
 
     for (const project of projects) {
-      const repos = (project.toObject() as any).gitRepositories || [];
-      const hasSyncEnabled = repos.some((r: any) => r.syncEnabled && r.tokenSecretId);
+      // `Project.gitRepositories` ist als `GitRepository[]` deklariert —
+      // `toObject()` liefert das Feld korrekt getypt, ein Cast wäre nur
+      // Typverlust.
+      const repos: GitRepository[] = project.toObject().gitRepositories || [];
+      const hasSyncEnabled = repos.some((r) => r.syncEnabled && Boolean(r.tokenSecretId));
       if (!hasSyncEnabled) continue;
 
       try {

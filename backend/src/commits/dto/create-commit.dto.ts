@@ -1,11 +1,13 @@
-import { IsString, IsOptional, IsMongoId, IsEnum, IsDateString, IsNumber } from 'class-validator';
-import { GitProvider } from '../schemas/commit.schema';
+import { IsString, IsOptional, IsMongoId, IsIn, IsDateString, IsNumber } from 'class-validator';
+import { GIT_PROVIDERS, GitProvider } from '../schemas/git-repository.schema';
 
 export class CreateCommitDto {
   @IsMongoId()
   projectId: string;
 
-  @IsEnum(GitProvider)
+  // `IsIn(GIT_PROVIDERS)` statt eines DTO-eigenen Enums: der Validator prüft
+  // damit genau die Werte, die Typ und Mongoose-Schema kennen.
+  @IsIn(GIT_PROVIDERS)
   provider: GitProvider;
 
   @IsString()

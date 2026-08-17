@@ -1,14 +1,14 @@
-import { IsString, IsOptional, IsEnum, IsBoolean } from 'class-validator';
-
-enum GitProviderEnum {
-  GITHUB = 'github',
-  GITLAB = 'gitlab',
-  GITEA = 'gitea',
-}
+import { IsString, IsOptional, IsIn, IsBoolean } from 'class-validator';
+import { GIT_PROVIDERS, GitProvider } from '../schemas/git-repository.schema';
 
 export class ValidateTokenDto {
-  @IsEnum(GitProviderEnum)
-  provider: string;
+  /**
+   * Deklariert als `GitProvider`, nicht als `string`: die Validierung lässt
+   * ohnehin nur diese drei Werte durch, und der Controller musste den Wert
+   * sonst per Assertion in den Repo-Typ zurückbehaupten.
+   */
+  @IsIn(GIT_PROVIDERS)
+  provider: GitProvider;
 
   @IsString()
   @IsOptional()

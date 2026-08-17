@@ -1,19 +1,21 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+import { GIT_PROVIDERS, GitProvider } from './git-repository.schema';
 
 export type CommitDocument = HydratedDocument<Commit>;
-
-export enum GitProvider {
-  GITHUB = 'github',
-  GITLAB = 'gitlab',
-}
 
 @Schema({ timestamps: true })
 export class Commit {
   @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
   projectId: Types.ObjectId;
 
-  @Prop({ required: true, enum: GitProvider })
+  /**
+   * Provider-Liste kommt aus `git-repository.schema.ts` — dort steht die
+   * einzige Definition. Früher stand hier ein eigenes `enum GitProvider` mit
+   * nur GITHUB/GITLAB: das Mongoose-Enum dieses Feldes kannte `gitea` nicht,
+   * obwohl der Sync es schreibt.
+   */
+  @Prop({ required: true, enum: [...GIT_PROVIDERS] })
   provider: GitProvider;
 
   @Prop({ required: true })

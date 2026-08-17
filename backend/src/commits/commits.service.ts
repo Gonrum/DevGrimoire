@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Model } from 'mongoose';
+import { FilterQuery, Model } from 'mongoose';
 import { Commit, CommitDocument } from './schemas/commit.schema';
 import { GitProviderInterface } from './providers/git-provider.interface';
 import { GitProviderRegistry } from './providers/git-provider.registry';
@@ -10,6 +10,32 @@ import { SecretsService } from '../secrets/secrets.service';
 import { ProjectsService } from '../projects/projects.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
+
+/**
+ * MongoDB-Duplikatsfehler (E11000). Verengung statt Cast: der Treiber wirft
+ * einen `MongoServerError`, die catch-Bindung ist aber ungetypt und uns
+ * interessiert nur dieser eine numerische Code.
+ *
+ * Gleiche Prüfung wie in `releases.service.ts` — das Muster steht rund zehnmal
+ * im Backend und gehört langfristig nach `src/common/`.
+ */
+function isDuplicateKeyError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && 'code' in err && err.code === 11000;
+}
+
+/**
+ * `since`/`until` kommen als Freitext herein (REST-Query-Parameter, MCP-Tool-
+ * Argument eines LLM). `new Date('morgen')` ergibt ein `Invalid Date`; Mongoose
+ * macht daraus beim Casten einen Fehler, der als 500 beim Aufrufer landet.
+ * Hier wird daraus eine klare 400-Antwort.
+ */
+function parseDateParam(value: string, field: string): Date {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new BadRequestException(`${field} is not a valid date: ${value}`);
+  }
+  return parsed;
+}
 
 @Injectable()
 export class CommitsService {
@@ -30,8 +56,7 @@ export class CommitsService {
 
   async syncRepository(projectId: string, repoIndex: number): Promise<{ newCommits: number }> {
     const project = await this.projectsService.findById(projectId);
-    const projectObj = project.toObject() as any;
-    const repos: GitRepository[] = projectObj.gitRepositories || [];
+    const repos: GitRepository[] = project.toObject().gitRepositories || [];
 
     if (repoIndex < 0 || repoIndex >= repos.length) {
       throw new BadRequestException(`Repository index ${repoIndex} out of range`);
@@ -93,9 +118,9 @@ export class CommitsService {
           newCommits++;
           newShas.push(commit.sha);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         // Duplicate key = already exists, skip
-        if (err.code === 11000) continue;
+        if (isDuplicateKeyError(err)) continue;
         throw err;
       }
     }
@@ -173,8 +198,7 @@ export class CommitsService {
 
   async syncAllForProject(projectId: string): Promise<{ totalNewCommits: number }> {
     const project = await this.projectsService.findById(projectId);
-    const projectObj = project.toObject() as any;
-    const repos: GitRepository[] = projectObj.gitRepositories || [];
+    const repos: GitRepository[] = project.toObject().gitRepositories || [];
 
     let totalNewCommits = 0;
     for (let i = 0; i < repos.length; i++) {
@@ -203,7 +227,7 @@ export class CommitsService {
       offset?: number;
     },
   ): Promise<CommitDocument[]> {
-    const filter: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
+    const filter: FilterQuery<CommitDocument> = { projectId: projectIdFilter(projectId) };
     if (options?.branch) filter.branch = options.branch;
     if (options?.repoLabel) filter.repoLabel = options.repoLabel;
     if (options?.author) {
@@ -214,10 +238,14 @@ export class CommitsService {
       ];
     }
     if (options?.provider) filter.provider = options.provider;
+    // Range als eigenes Objekt aufbauen und erst dann zuweisen: `filter.committedAt`
+    // ist als `Condition<Date>` effektiv `any` — ein `.$gte` darauf wäre wieder
+    // ungeprüft.
     if (options?.since || options?.until) {
-      filter.committedAt = {};
-      if (options.since) (filter.committedAt as any).$gte = new Date(options.since);
-      if (options.until) (filter.committedAt as any).$lte = new Date(options.until);
+      const range: { $gte?: Date; $lte?: Date } = {};
+      if (options.since) range.$gte = parseDateParam(options.since, 'since');
+      if (options.until) range.$lte = parseDateParam(options.until, 'until');
+      filter.committedAt = range;
     }
 
     const query = this.commitModel
@@ -235,9 +263,13 @@ export class CommitsService {
     searchQuery: string,
     limit?: number,
   ): Promise<CommitDocument[]> {
+    // `projectIdFilter` wie in `findByProject`/`countByProject`: die Collection
+    // enthält projectId historisch als ObjectId *und* als String. Ein rohes
+    // `{ projectId }` hätte in `commit_search` genau die Commits übersehen, die
+    // `commit_list` findet.
     return this.commitModel
       .find(
-        { projectId, $text: { $search: searchQuery } },
+        { projectId: projectIdFilter(projectId), $text: { $search: searchQuery } },
         { score: { $meta: 'textScore' } },
       )
       .sort({ score: { $meta: 'textScore' } })
@@ -252,13 +284,15 @@ export class CommitsService {
   }
 
   async countByProject(projectId: string, repoLabel?: string): Promise<number> {
-    const filter: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
+    const filter: FilterQuery<CommitDocument> = { projectId: projectIdFilter(projectId) };
     if (repoLabel) filter.repoLabel = repoLabel;
     return this.commitModel.countDocuments(filter).exec();
   }
 
   async removeByProject(projectId: string): Promise<void> {
-    await this.commitModel.deleteMany({ projectId }).exec();
+    // Ebenfalls beide Repräsentationen — sonst bleiben beim Projekt-Löschen
+    // string-gespeicherte Commits als Waisen liegen.
+    await this.commitModel.deleteMany({ projectId: projectIdFilter(projectId) }).exec();
   }
 
   async validateRepoToken(config: GitRepository, token: string): Promise<boolean> {
@@ -268,8 +302,7 @@ export class CommitsService {
 
   async fetchBranches(projectId: string, repoIndex: number) {
     const project = await this.projectsService.findById(projectId);
-    const projectObj = project.toObject() as any;
-    const repos: GitRepository[] = projectObj.gitRepositories || [];
+    const repos: GitRepository[] = project.toObject().gitRepositories || [];
 
     if (repoIndex < 0 || repoIndex >= repos.length) {
       throw new BadRequestException(`Repository index ${repoIndex} out of range`);

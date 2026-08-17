@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsMongoId } from 'class-validator';
+import { IsOptional, IsNumber, IsMongoId } from 'class-validator';
 
 export class SyncDto {
   @IsMongoId()

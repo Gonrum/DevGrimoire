@@ -1,10 +1,19 @@
 import { Schema as MongooseSchema } from 'mongoose';
 
-export type GitProvider = 'github' | 'gitlab' | 'gitea';
+/**
+ * Die **eine** Liste der unterstützten Git-Hosts. Typ, Mongoose-Enum und
+ * class-validator lesen alle von hier, damit sie nicht auseinanderlaufen
+ * können: `commit.schema.ts` hatte parallel ein eigenes `enum GitProvider`
+ * **ohne** `gitea` — Gitea-Commits gingen nur deshalb durch, weil
+ * `findOneAndUpdate` ohne `runValidators` keine Enum-Prüfung fährt.
+ */
+export const GIT_PROVIDERS = ['github', 'gitlab', 'gitea'] as const;
+
+export type GitProvider = (typeof GIT_PROVIDERS)[number];
 
 export const GitRepositorySchema = new MongooseSchema(
   {
-    provider: { type: String, enum: ['github', 'gitlab', 'gitea'], required: true },
+    provider: { type: String, enum: [...GIT_PROVIDERS], required: true },
     label: { type: String, default: '' },
     baseUrl: { type: String, default: '' },
     owner: { type: String, default: '' },

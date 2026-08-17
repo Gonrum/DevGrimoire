@@ -11,6 +11,7 @@ import {
 import { CommitsService } from './commits.service';
 import { SyncDto } from './dto/sync.dto';
 import { ValidateTokenDto } from './dto/validate-token.dto';
+import { GitRepository } from './schemas/git-repository.schema';
 
 @Controller('commits')
 export class CommitsController {
@@ -96,8 +97,8 @@ export class CommitsController {
   @Post('validate-token')
   @HttpCode(200)
   async validateToken(@Body() dto: ValidateTokenDto) {
-    const config = {
-      provider: dto.provider as 'github' | 'gitlab' | 'gitea',
+    const config: GitRepository = {
+      provider: dto.provider,
       label: '',
       baseUrl: dto.baseUrl || '',
       owner: dto.owner || '',
