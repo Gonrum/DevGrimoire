@@ -19,7 +19,10 @@ export function TemplatePicker({ options, onPick }: Props) {
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+      // `EventTarget` ist nicht zwingend ein `Node` (window, XHR, …);
+      // `contains(null)` ist false und schliesst genau wie ein Aussenklick.
+      const target = e.target instanceof Node ? e.target : null;
+      if (!ref.current?.contains(target)) setOpen(false);
     };
     window.addEventListener('mousedown', onClick);
     return () => window.removeEventListener('mousedown', onClick);

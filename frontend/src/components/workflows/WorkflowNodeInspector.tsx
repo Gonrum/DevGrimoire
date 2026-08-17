@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Trash2, Copy, ArrowRight, Plus, X } from 'lucide-react';
 import { WorkflowNodeMetadata, WorkflowEdge as WfEdge } from '../../api/workflows';
+import { isRecord } from '../../lib/narrow';
 import { SchemaField } from './SchemaField';
 import { SchemaObjectAccordion } from './SchemaObjectAccordion';
 import { TemplateOption } from './TemplatePicker';
@@ -53,7 +54,8 @@ export function WorkflowNodeInspector(props: Props) {
   if (selectedEdge) {
     const sourceNode = props.nodesById[selectedEdge.source];
     const sourceMeta = sourceNode ? props.catalog.find((c) => c.type === sourceNode.type) : undefined;
-    const sourceOutputs = (sourceMeta?.outputs as Record<string, string>) ?? {};
+    // Nur die Schlüssel werden benutzt; die Werte behauptet hier niemand mehr.
+    const sourceOutputs = sourceMeta?.outputs ?? {};
     return (
       <EdgeInspector
         edge={selectedEdge}
@@ -113,7 +115,7 @@ function NodeInspector(p: Props) {
         <section>
           <h3 className="mb-2 text-xs uppercase tracking-wide text-gray-500">Konfiguration</h3>
           {meta ? (
-            (meta.configJsonSchema as { type?: string }).type === 'object' ? (
+            meta.configJsonSchema.type === 'object' ? (
               <SchemaObjectAccordion
                 schema={meta.configJsonSchema}
                 value={node.config ?? {}}
@@ -125,7 +127,13 @@ function NodeInspector(p: Props) {
                 schema={meta.configJsonSchema}
                 path={['config']}
                 value={node.config}
-                onChange={(v) => p.onChangeConfig(v as Record<string, unknown>)}
+                onChange={(v) => {
+                  // `SchemaField` meldet `undefined`, wenn die letzte Zeile
+                  // einer additionalProperties-Map gelöscht wird. Vorher ging
+                  // dieses `undefined` als "Config" durch — hier wird daraus
+                  // die leere Config, die es meint.
+                  p.onChangeConfig(isRecord(v) ? v : {});
+                }}
                 templateOptions={templateOptions}
               />
             )
@@ -201,7 +209,8 @@ function NodeInspector(p: Props) {
 
 interface EdgeInspectorProps {
   edge: WfEdge;
-  sourceOutputs: Record<string, string>;
+  /** Nur `Object.keys` wird gelesen — die Werte sind ungeprüftes Katalog-JSON. */
+  sourceOutputs: Record<string, unknown>;
   onChangeBranch: (b: 'success' | 'failure' | 'custom' | 'always') => void;
   onChangePayloadMapping: (mapping: Record<string, string> | undefined) => void;
   onDelete: () => void;
@@ -209,7 +218,7 @@ interface EdgeInspectorProps {
 
 function EdgeInspector({ edge, sourceOutputs, onChangeBranch, onChangePayloadMapping, onDelete }: EdgeInspectorProps) {
   const branches: Array<'success' | 'failure' | 'custom' | 'always'> = ['success', 'failure', 'custom', 'always'];
-  const current = (edge.branch as 'success' | 'failure' | 'custom' | 'always') ?? 'always';
+  const current = edge.branch ?? 'always';
   const mapping = edge.payloadMapping ?? {};
   const isMapped = Object.keys(mapping).length > 0;
   const sourceKeys = Object.keys(sourceOutputs);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   api,
@@ -6,9 +6,11 @@ import {
   CustomerTemplate,
   CustomerTemplateApplyResult,
   CustomerTemplateItem,
+  CustomerTemplateItemKind,
   CustomerTemplatePreview,
   CustomerTemplateType,
 } from '../../api/client';
+import { isRecord, isUnknownArray, matchOption, optionOr } from '../../lib/narrow';
 import Button from '../ui/Button';
 import { FormInput, FormSelect, FormTextarea } from '../ui/FormField';
 import { SettingsSection, SettingsTabHeader } from '../ui/SettingsShell';
@@ -20,6 +22,15 @@ const TYPES: CustomerTemplateType[] = [
   'environment',
   'workflow',
   'contact_type',
+];
+
+const ITEM_KINDS: CustomerTemplateItemKind[] = [
+  'todo',
+  'monitoring_check',
+  'environment',
+  'workflow',
+  'contact_type',
+  'note',
 ];
 
 interface DraftTemplate {
@@ -56,10 +67,61 @@ function templateToDraft(t: CustomerTemplate): DraftTemplate {
   };
 }
 
+function toStringArray(value: unknown, where: string): string[] {
+  if (!isUnknownArray(value)) throw new Error(`${where} must be an array`);
+  return value.map((entry, i) => {
+    if (typeof entry !== 'string') throw new Error(`${where}[${i}] must be a string`);
+    return entry;
+  });
+}
+
+function toStringRecord(value: unknown, where: string): Record<string, string> {
+  if (!isRecord(value)) throw new Error(`${where} must be an object`);
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry !== 'string') throw new Error(`${where}.${key} must be a string`);
+    out[key] = entry;
+  }
+  return out;
+}
+
+/**
+ * Ein Item aus dem freien JSON-Textfeld.
+ *
+ * Vorher stand hier ein blosses `Array.isArray` plus impliziter `any`-Durchlauf:
+ * jedes `{}` galt als gültiges Item, und der Nutzer erfuhr erst über einen
+ * 400er des Backends, dass etwas fehlte — ohne zu wissen, welches Item.
+ * `payload` fehlt darf, das Backend setzt dort selbst `?? {}`.
+ */
+function toTemplateItem(value: unknown, where: string): CustomerTemplateItem {
+  if (!isRecord(value)) throw new Error(`${where} must be an object`);
+  const kind = typeof value.kind === 'string' ? matchOption(value.kind, ITEM_KINDS) : undefined;
+  if (!kind) throw new Error(`${where}.kind must be one of: ${ITEM_KINDS.join(', ')}`);
+  if (typeof value.title !== 'string') throw new Error(`${where}.title must be a string`);
+  if (value.description !== undefined && typeof value.description !== 'string') {
+    throw new Error(`${where}.description must be a string`);
+  }
+  if (value.payload !== undefined && !isRecord(value.payload)) {
+    throw new Error(`${where}.payload must be an object`);
+  }
+  return {
+    kind,
+    title: value.title,
+    ...(value.description !== undefined ? { description: value.description } : {}),
+    payload: value.payload ?? {},
+    ...(value.requiredSecretKeys !== undefined
+      ? { requiredSecretKeys: toStringArray(value.requiredSecretKeys, `${where}.requiredSecretKeys`) }
+      : {}),
+    ...(value.placeholders !== undefined
+      ? { placeholders: toStringRecord(value.placeholders, `${where}.placeholders`) }
+      : {}),
+  };
+}
+
 function parseDraftItems(json: string): CustomerTemplateItem[] {
-  const parsed = JSON.parse(json || '[]');
-  if (!Array.isArray(parsed)) throw new Error('items must be a JSON array');
-  return parsed;
+  const parsed: unknown = JSON.parse(json || '[]');
+  if (!isUnknownArray(parsed)) throw new Error('items must be a JSON array');
+  return parsed.map((entry, i) => toTemplateItem(entry, `items[${i}]`));
 }
 
 export default function CustomerTemplatesSettings() {
@@ -79,26 +141,33 @@ export default function CustomerTemplatesSettings() {
   const [applying, setApplying] = useState(false);
   const [applyResult, setApplyResult] = useState<CustomerTemplateApplyResult | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [list, custs] = await Promise.all([
-        api.customerTemplates.list(),
-        api.customers.list({ includeArchived: false }),
-      ]);
-      setTemplates(list);
-      setCustomers(custs);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'load failed');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // Der Fetch gehört dem Effect; Schreibpfade stossen ihn über den Token an,
+  // statt eine State-setzende Funktion synchron aus dem Effect zu rufen.
+  const [reloadToken, setReloadToken] = useState(0);
+  const reload = () => setReloadToken((n) => n + 1);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [list, custs] = await Promise.all([
+          api.customerTemplates.list(),
+          api.customers.list({ includeArchived: false }),
+        ]);
+        if (cancelled) return;
+        setTemplates(list);
+        setCustomers(custs);
+      } catch (e) {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : 'load failed');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [reloadToken]);
 
   const startNew = () => {
     setDraft({ ...EMPTY_DRAFT });
@@ -137,7 +206,7 @@ export default function CustomerTemplatesSettings() {
       }
       setDraft(null);
       setSuccess(t('customerTemplates.saved'));
-      await load();
+      reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'save failed');
     } finally {
@@ -150,7 +219,7 @@ export default function CustomerTemplatesSettings() {
     setError(null);
     try {
       await api.customerTemplates.remove(id);
-      await load();
+      reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'delete failed');
     }
@@ -241,7 +310,7 @@ export default function CustomerTemplatesSettings() {
                   <Button variant="secondary" onClick={() => startEdit(tpl)}>
                     {t('common.edit')}
                   </Button>
-                  <Button variant="danger" onClick={() => remove(tpl._id)}>
+                  <Button variant="danger" onClick={() => { void remove(tpl._id); }}>
                     {t('common.delete')}
                   </Button>
                 </div>
@@ -277,7 +346,7 @@ export default function CustomerTemplatesSettings() {
                 label={t('customerTemplates.type')}
                 value={draft.type}
                 onChange={(e) =>
-                  setDraft({ ...draft, type: e.target.value as CustomerTemplateType })
+                  setDraft({ ...draft, type: optionOr(e.target.value, TYPES, draft.type) })
                 }
               >
                 {TYPES.map((tp) => (
@@ -319,7 +388,7 @@ export default function CustomerTemplatesSettings() {
               <Button variant="secondary" onClick={() => setDraft(null)} disabled={savingDraft}>
                 {t('common.cancel')}
               </Button>
-              <Button variant="primary" onClick={saveDraft} disabled={savingDraft}>
+              <Button variant="primary" onClick={() => { void saveDraft(); }} disabled={savingDraft}>
                 {savingDraft ? t('common.saving') : t('common.save')}
               </Button>
             </div>
@@ -356,12 +425,12 @@ export default function CustomerTemplatesSettings() {
                 </FormSelect>
 
                 <div className="mt-3 flex gap-2">
-                  <Button variant="secondary" onClick={loadPreview} disabled={!applyCustomerId}>
+                  <Button variant="secondary" onClick={() => { void loadPreview(); }} disabled={!applyCustomerId}>
                     {t('customerTemplates.loadPreview')}
                   </Button>
                   <Button
                     variant="primary"
-                    onClick={doApply}
+                    onClick={() => { void doApply(); }}
                     disabled={!applyCustomerId || applying}
                   >
                     {applying ? t('common.saving') : t('customerTemplates.applyNow')}

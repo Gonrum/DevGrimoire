@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, Workspace, WorkspaceStatus, GitRepository } from '../api/client';
+import { optionOr } from '../lib/narrow';
 import { useToast } from './Toast';
 import Card from './ui/Card';
 import EmptyState from './ui/EmptyState';
@@ -80,6 +81,18 @@ interface Props {
   projectId: string;
 }
 
+/** Ergebnis eines Ladevorgangs — bewusst als Wert statt als State-Seiteneffekt. */
+type LoadResult =
+  | { ok: true; items: Workspace[]; repos: GitRepository[] }
+  | { ok: false; error: string };
+
+const FILTER_OPTIONS: readonly (WorkspaceStatus | 'all')[] = [
+  'active',
+  'archived',
+  'cleaning',
+  'all',
+];
+
 export default function WorkspaceList({ projectId }: Props) {
   const { t, i18n } = useTranslation();
   const { showSuccess, showError } = useToast();
@@ -90,21 +103,33 @@ export default function WorkspaceList({ projectId }: Props) {
   const [terminalFor, setTerminalFor] = useState<Workspace | null>(null);
   const [gitRepos, setGitRepos] = useState<GitRepository[]>([]);
 
-  const reload = useCallback(async () => {
+  /** Holt Liste + Repos und gibt sie zurück, ohne State anzufassen. */
+  const fetchState = useCallback(async (): Promise<LoadResult> => {
     try {
       const [list, project] = await Promise.all([
         api.workspaces.list(projectId),
         api.projects.get(projectId).catch(() => null),
       ]);
-      setItems(list);
-      setGitRepos(project?.gitRepositories ?? []);
-      setLoadError(null);
+      return { ok: true, items: list, repos: project?.gitRepositories ?? [] };
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : String(err));
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   }, [projectId]);
 
-  useEffect(() => { reload(); }, [reload]);
+  const applyState = useCallback((result: LoadResult) => {
+    if (!result.ok) {
+      setLoadError(result.error);
+      return;
+    }
+    setItems(result.items);
+    setGitRepos(result.repos);
+    setLoadError(null);
+  }, []);
+
+  /** Nie rejected: `fetchState` verpackt den Fehler in `LoadResult`. */
+  const reload = useCallback(() => fetchState().then(applyState), [fetchState, applyState]);
+
+  useEffect(() => { void reload(); }, [reload]);
 
   const visible = useMemo(() => {
     if (!items) return [];
@@ -118,7 +143,7 @@ export default function WorkspaceList({ projectId }: Props) {
     try {
       await api.workspaces.archive(id);
       showSuccess(t('workspaces.archived'));
-      reload();
+      void reload();
     } catch (err) {
       showError(err instanceof Error ? err.message : String(err));
     }
@@ -128,7 +153,7 @@ export default function WorkspaceList({ projectId }: Props) {
     try {
       await api.workspaces.delete(id);
       showSuccess(t('workspaces.deleted'));
-      reload();
+      void reload();
     } catch (err) {
       showError(err instanceof Error ? err.message : String(err));
     }
@@ -165,7 +190,7 @@ export default function WorkspaceList({ projectId }: Props) {
         <div className="flex items-center gap-2">
           <select
             value={filter}
-            onChange={(e) => setFilter(e.target.value as WorkspaceStatus | 'all')}
+            onChange={(e) => setFilter(optionOr(e.target.value, FILTER_OPTIONS, 'all'))}
             className="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded px-2 py-1.5"
           >
             <option value="active">{t('workspaces.filterActive')}</option>
@@ -221,7 +246,7 @@ export default function WorkspaceList({ projectId }: Props) {
                   <div className="mt-2">
                     <button
                       type="button"
-                      onClick={() => copyPath(ws.path)}
+                      onClick={() => { void copyPath(ws.path); }}
                       className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono"
                       title={ws.path}
                     >
@@ -272,7 +297,7 @@ export default function WorkspaceList({ projectId }: Props) {
                 onCancel={() => setShowCreate(false)}
                 onCreated={() => {
                   setShowCreate(false);
-                  reload();
+                  void reload();
                 }}
               />
             </div>
@@ -333,7 +358,7 @@ function CreateWorkspaceForm({
   };
 
   return (
-    <form onSubmit={submit} className="space-y-3">
+    <form onSubmit={(e) => { void submit(e); }} className="space-y-3">
       <FormInput
         label={t('workspaces.formName')}
         value={form.name}

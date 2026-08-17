@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Environment, SecretListItem } from '../api/client';
@@ -38,7 +38,12 @@ function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () 
   };
 
   const handleCopy = () => {
-    if (revealed) navigator.clipboard.writeText(revealed);
+    // `writeText` rejected ohne Clipboard-Berechtigung bzw. ausserhalb eines
+    // Secure Context — bisher blieb das stumm und der Nutzer hielt den Wert
+    // fälschlich für kopiert.
+    if (revealed) {
+      navigator.clipboard.writeText(revealed).catch((err: unknown) => { showError(errorMessage(err)); });
+    }
   };
 
   return (
@@ -59,7 +64,7 @@ function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () 
         )}
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        <Button type="button" size="xs" onClick={handleReveal}>{revealed ? t('environments.hide') : t('environments.reveal')}</Button>
+        <Button type="button" size="xs" onClick={() => { void handleReveal(); }}>{revealed ? t('environments.hide') : t('environments.reveal')}</Button>
         <ConfirmButton onConfirm={async () => { try { await api.secrets.delete(secret._id); onDelete(); } catch (err) { showError(errorMessage(err)); } }} label="X" confirmLabel={t('common.confirmDelete')} size="xs" />
       </div>
     </div>
@@ -113,13 +118,19 @@ function EnvironmentCard({ env, owner, onUpdate }: { env: Environment; owner: { 
   const [vars, setVars] = useState(env.variables);
   const ownerBase = owner.customerId ? `/customers/${owner.customerId}` : `/projects/${owner.projectId}`;
 
-  const loadSecrets = () => {
-    const loader = owner.customerId
-      ? api.secrets.listForCustomer(owner.customerId, env._id)
-      : api.secrets.list(owner.projectId!, env._id);
+  // `owner` ist ein Objekt-Literal der Aufrufstelle und damit bei jedem Render
+  // neu. In die Dependencies gehören deshalb die beiden Felder, nicht das Objekt
+  // — sonst refetcht der Effect in jedem Render.
+  const { projectId: ownerProjectId, customerId: ownerCustomerId } = owner;
+
+  const loadSecrets = useCallback(() => {
+    const loader = ownerCustomerId
+      ? api.secrets.listForCustomer(ownerCustomerId, env._id)
+      : api.secrets.list(ownerProjectId!, env._id);
     loader.then(setSecrets).catch(() => {});
-  };
-  useEffect(() => { if (expanded) loadSecrets(); }, [expanded]);
+  }, [ownerCustomerId, ownerProjectId, env._id]);
+
+  useEffect(() => { if (expanded) loadSecrets(); }, [expanded, loadSecrets]);
 
   const handleToggleActive = async () => {
     try { await api.environments.update(env._id, { active: !env.active }); onUpdate(); } catch (err) { showError(errorMessage(err)); }
@@ -147,7 +158,7 @@ function EnvironmentCard({ env, owner, onUpdate }: { env: Environment; owner: { 
           {t('environments.variableCount', { count: env.variables.length })}
         </span>
         <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          <button type="button" onClick={handleToggleActive} className={`text-xs px-2 py-0.5 rounded-full ${env.active ? 'bg-green-900/40 text-green-300' : 'bg-gray-800 text-gray-500'}`}>
+          <button type="button" onClick={() => { void handleToggleActive(); }} className={`text-xs px-2 py-0.5 rounded-full ${env.active ? 'bg-green-900/40 text-green-300' : 'bg-gray-800 text-gray-500'}`}>
             {env.active ? t('common.active') : t('common.inactive')}
           </button>
           <ConfirmButton onConfirm={async () => { try { await api.environments.delete(env._id); onUpdate(); } catch (err) { showError(errorMessage(err)); } }} label={t('common.remove')} size="xs" />
@@ -165,7 +176,7 @@ function EnvironmentCard({ env, owner, onUpdate }: { env: Environment; owner: { 
                 <button type="button" onClick={() => { setVars(env.variables); setEditingVars(true); }} className="text-xs text-cyan-400 hover:text-cyan-300">{t('common.edit')}</button>
               ) : (
                 <div className="flex gap-2">
-                  <button type="button" onClick={handleSaveVars} className="text-xs text-cyan-400 hover:text-cyan-300">{t('common.save')}</button>
+                  <button type="button" onClick={() => { void handleSaveVars(); }} className="text-xs text-cyan-400 hover:text-cyan-300">{t('common.save')}</button>
                   <button type="button" onClick={() => { setVars(env.variables); setEditingVars(false); }} className="text-xs text-gray-500">{t('common.cancel')}</button>
                 </div>
               )}
@@ -218,13 +229,14 @@ export function SecretsList({ projectId, customerId }: { projectId?: string; cus
   const [secrets, setSecrets] = useState<SecretListItem[]>([]);
   const ownerBase = customerId ? `/customers/${customerId}` : `/projects/${projectId}`;
 
-  const load = () => {
+  const load = useCallback(() => {
     const loader = customerId
       ? api.secrets.listForCustomer(customerId, '')
       : api.secrets.list(projectId!, '');
     loader.then(setSecrets).catch(() => {});
-  };
-  useEffect(() => { load(); }, [projectId, customerId]);
+  }, [customerId, projectId]);
+
+  useEffect(() => { load(); }, [load]);
 
   return (
     <div className="space-y-4">
@@ -249,14 +261,14 @@ export default function EnvironmentList({ projectId, customerId }: { projectId?:
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const ownerBase = customerId ? `/customers/${customerId}` : `/projects/${projectId}`;
 
-  const load = () => {
+  const load = useCallback(() => {
     const loader = customerId
       ? api.environments.listForCustomer(customerId)
       : api.environments.list(projectId!);
     loader.then(setEnvironments).catch(() => {});
-  };
+  }, [customerId, projectId]);
 
-  useEffect(() => { load(); }, [projectId, customerId]);
+  useEffect(() => { load(); }, [load]);
 
   return (
     <div className="space-y-4">

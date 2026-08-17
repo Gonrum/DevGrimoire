@@ -233,7 +233,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const getAccessToken = () => accessTokenRef.current;
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, authEnabled, loading, user, login, logout, getAccessToken }}>
+    <AuthContext.Provider
+      value={{
+        isAuthenticated,
+        authEnabled,
+        loading,
+        user,
+        login,
+        logout,
+        getAccessToken,
+        applyAccessToken: setTokenAndUser,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

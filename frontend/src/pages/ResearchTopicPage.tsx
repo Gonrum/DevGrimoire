@@ -12,6 +12,7 @@ import { SCOPE_GLOBAL_BADGE, SCOPE_PROJECT_BADGE } from '../components/ui/badge-
 import ArtifactList from '../components/research/ArtifactList';
 import RunLog, { RunLogHandle } from '../components/research/RunLog';
 import TopicSettings from '../components/research/TopicSettings';
+import { errorMessage, optionOr } from '../lib/narrow';
 
 const RUN_STATUS_COLORS: Record<ResearchRunStatus, string> = {
   queued: 'bg-gray-800 text-gray-400',
@@ -29,7 +30,19 @@ function isRunStatus(status: string | undefined): status is ResearchRunStatus {
 }
 
 type TopicTab = 'artifacts' | 'runs' | 'settings';
-const TABS: TopicTab[] = ['artifacts', 'runs', 'settings'];
+const TABS: readonly TopicTab[] = ['artifacts', 'runs', 'settings'];
+
+/*
+ * Die Tab-Beschriftungen als Tabelle statt als zusammengesetzter Schlüssel:
+ * `t(\`…tab${tab[0].toUpperCase()}…\` as never)` war nur deshalb nötig, weil der
+ * zusammengebaute Schlüssel für den Typ ein beliebiger `string` ist. Die Tabelle
+ * macht die drei Schlüssel greppbar und kommt ohne Behauptung aus.
+ */
+const TAB_LABEL_KEYS: Record<TopicTab, string> = {
+  artifacts: 'researchTopics.tabArtifacts',
+  runs: 'researchTopics.tabRuns',
+  settings: 'researchTopics.tabSettings',
+};
 
 /**
  * Header scope chips, resolved to project/customer names (unlike the
@@ -98,8 +111,7 @@ export default function ResearchTopicPage() {
 
   const runLogRef = useRef<RunLogHandle>(null);
 
-  const tabParam = searchParams.get('tab') as TopicTab | null;
-  const activeTab: TopicTab = tabParam && TABS.includes(tabParam) ? tabParam : 'artifacts';
+  const activeTab: TopicTab = optionOr(searchParams.get('tab') ?? '', TABS, 'artifacts');
   const setActiveTab = (tab: TopicTab) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -111,31 +123,38 @@ export default function ResearchTopicPage() {
   const projectsById = useMemo(() => new Map(projects.map((p) => [p._id, p])), [projects]);
   const customersById = useMemo(() => new Map(customers.map((c) => [c._id, c])), [customers]);
 
-  const load = async () => {
-    if (!id) return;
-    setLoading(true);
-    setNotFound(false);
-    try {
-      const [t0, p, c] = await Promise.all([
-        api.researchTopics.get(id),
-        api.projects.list({ active: true }),
-        api.customers.list(),
-      ]);
-      setTopic(t0);
-      setProjects(p);
-      setCustomers(c);
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : String(err));
-      setNotFound(true);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  /*
+   * Der Ladevorgang liegt im Effekt, damit der Cleanup ihn als veraltet
+   * markieren kann: bei einem Wechsel der Topic-ID schrieb sonst die spätere
+   * Antwort der alten ID das Topic der neuen wieder um.
+   */
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+    if (!id) return;
+    let cancelled = false;
+    async function run(topicId: string) {
+      setLoading(true);
+      setNotFound(false);
+      try {
+        const [t0, p, c] = await Promise.all([
+          api.researchTopics.get(topicId),
+          api.projects.list({ active: true }),
+          api.customers.list(),
+        ]);
+        if (cancelled) return;
+        setTopic(t0);
+        setProjects(p);
+        setCustomers(c);
+      } catch (err) {
+        if (cancelled) return;
+        showError(errorMessage(err));
+        setNotFound(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void run(id);
+    return () => { cancelled = true; };
+  }, [id, showError]);
 
   if (!id) return null;
   if (loading) return <LoadingText />;
@@ -213,9 +232,9 @@ export default function ResearchTopicPage() {
               type="text"
               value={titleDraft}
               onChange={(e) => setTitleDraft(e.target.value)}
-              onBlur={saveTitle}
+              onBlur={() => { void saveTitle(); }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') saveTitle();
+                if (e.key === 'Enter') void saveTitle();
                 if (e.key === 'Escape') setEditingTitle(false);
               }}
               className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-lg font-semibold text-gray-200 focus:outline-none focus:border-violet-500"
@@ -233,7 +252,7 @@ export default function ResearchTopicPage() {
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <Switch checked={topic.schedule.active} onChange={toggleActive} disabled={togglingActive} label={t('researchTopics.toggleActive')} />
+          <Switch checked={topic.schedule.active} onChange={() => { void toggleActive(); }} disabled={togglingActive} label={t('researchTopics.toggleActive')} />
           <span className="text-xs text-gray-500 mr-2">{t('researchTopics.toggleActive')}</span>
           <Button type="button" variant="primary" size="sm" onClick={handleRunNow}>
             <Play className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />
@@ -278,7 +297,7 @@ export default function ResearchTopicPage() {
                 : 'border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-700'
             }`}
           >
-            {t(`researchTopics.tab${tab.charAt(0).toUpperCase()}${tab.slice(1)}` as never)}
+            {t(TAB_LABEL_KEYS[tab])}
           </button>
         ))}
       </div>

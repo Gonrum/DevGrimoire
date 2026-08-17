@@ -255,7 +255,9 @@ export default function SshConnectionForm({
     return payload;
   };
 
-  const handleTestResult = async (connectionId: string, result: SshTestResult) => {
+  // Synchron: die Funktion wartet auf nichts, sie verteilt nur das Ergebnis
+  // auf Dialog / Inline-Fehler / Erfolgspfad.
+  const handleTestResult = (connectionId: string, result: SshTestResult) => {
     if (result.fingerprint) {
       setFpDialog({
         fingerprint: result.fingerprint,
@@ -288,7 +290,7 @@ export default function SshConnectionForm({
       setEditingId(created.id);
       setCredentialsUnlocked(false);
       const result = await testConnection(created.id);
-      await handleTestResult(created.id, result);
+      handleTestResult(created.id, result);
     } catch (err) {
       setInlineError(err instanceof Error ? err.message : String(err));
     }
@@ -349,7 +351,7 @@ export default function SshConnectionForm({
     setInlineError(null);
     try {
       const result = await testConnection(editingId);
-      await handleTestResult(editingId, result);
+      handleTestResult(editingId, result);
     } catch (err) {
       setInlineError(err instanceof Error ? err.message : String(err));
     }
@@ -650,7 +652,9 @@ export default function SshConnectionForm({
                   variant="success"
                   size="sm"
                   disabled={testState.pending}
-                  onClick={handleManualTest}
+                  onClick={() => {
+                    void handleManualTest();
+                  }}
                 >
                   {testState.pending ? '…' : t('ssh.form.test')}
                 </Button>
@@ -661,7 +665,9 @@ export default function SshConnectionForm({
               <Button
                 variant="primary"
                 disabled={submitDisabled}
-                onClick={isEdit ? submitEdit : submitCreate}
+                onClick={() => {
+                  void (isEdit ? submitEdit() : submitCreate());
+                }}
               >
                 {pending ? '…' : isEdit ? t('common.save') : t('common.create')}
               </Button>

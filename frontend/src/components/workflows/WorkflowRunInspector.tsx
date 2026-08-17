@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { workflowsApi, WorkflowRun, WorkflowNodeRun, WorkflowRunStatus } from '../../api/workflows';
 import { wsEventBus, isProjectChangeEvent } from '../../api/wsEventBus';
+import { errorMessage } from '../../lib/narrow';
 import { runStatusStyles } from './runStatusStyles';
 
 interface Props {
@@ -36,7 +37,7 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
         setRun(r);
         setNodeRuns(nrs);
       } catch (err) {
-        if (!cancelled) setError((err as Error).message);
+        if (!cancelled) setError(errorMessage(err, 'Run konnte nicht geladen werden'));
       }
     };
 
@@ -77,7 +78,7 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
     try {
       await workflowsApi.cancelRun(runId);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err, 'Abbrechen fehlgeschlagen'));
     }
   };
   const onRetry = async () => {
@@ -87,7 +88,7 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
       // re-execution rather than the unchanged parent.
       if (onNavigate && result.runId) onNavigate(result.runId);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err, 'Retry fehlgeschlagen'));
     }
   };
 
@@ -205,10 +206,10 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
 
             <div className="flex items-center justify-end gap-2 border-t border-gray-800 px-5 py-3">
               {!TERMINAL.includes(run.status) && (
-                <button onClick={onCancel} className="rounded bg-amber-900/50 px-3 py-1 text-xs text-amber-200 hover:bg-amber-900">Cancel</button>
+                <button onClick={() => { void onCancel(); }} className="rounded bg-amber-900/50 px-3 py-1 text-xs text-amber-200 hover:bg-amber-900">Cancel</button>
               )}
               {(run.status === 'failed' || run.status === 'cancelled') && (
-                <button onClick={onRetry} className="rounded bg-cyan-900/50 px-3 py-1 text-xs text-cyan-200 hover:bg-cyan-900">Retry</button>
+                <button onClick={() => { void onRetry(); }} className="rounded bg-cyan-900/50 px-3 py-1 text-xs text-cyan-200 hover:bg-cyan-900">Retry</button>
               )}
               <button onClick={onClose} className="rounded bg-gray-800 px-3 py-1 text-xs text-gray-200 hover:bg-gray-700">Schließen</button>
             </div>

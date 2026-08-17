@@ -1,10 +1,19 @@
 import { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, AiCompleteResult, AiSuggestion, Todo } from '../../api/client';
+import { errorMessage, matchOption } from '../../lib/narrow';
 import Button from '../ui/Button';
 import { Portal } from '../ui/Dialog';
 import MarkdownEditor from '../MarkdownEditor';
 import { useToast } from '../Toast';
+
+/**
+ * `AiSuggestion.suggestedStatus` ist in `api/client.ts` als `string` deklariert,
+ * obwohl das Backend nur diese vier Werte liefert. Statt den String zu einem
+ * `Todo['status']` zu erklären, wird er hier geprüft — ein unbekannter Wert
+ * ginge sonst ungefiltert an `todos.update` und käme als 400 zurück.
+ */
+const TODO_STATUSES: Todo['status'][] = ['open', 'in_progress', 'review', 'done'];
 
 interface Props {
   open: boolean;
@@ -122,8 +131,8 @@ export default function MilestoneAiCompleteDialog({ open, milestoneId, onClose, 
           .map((s) => s.todoId)
       );
       setSelected(preSelected);
-    } catch (err: any) {
-      showError(err.message || t('common.error'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.error')));
     } finally {
       setLoading(false);
     }
@@ -137,11 +146,16 @@ export default function MilestoneAiCompleteDialog({ open, milestoneId, onClose, 
     const errors: string[] = [];
 
     for (const suggestion of toApply) {
+      const status = matchOption(suggestion.suggestedStatus, TODO_STATUSES);
+      if (!status) {
+        errors.push(`${suggestion.title}: ${t('common.error')} (${suggestion.suggestedStatus})`);
+        continue;
+      }
       try {
-        await api.todos.update(suggestion.todoId, { status: suggestion.suggestedStatus as Todo['status'] });
+        await api.todos.update(suggestion.todoId, { status });
         successCount++;
-      } catch (err: any) {
-        errors.push(`${suggestion.title}: ${err.message}`);
+      } catch (err) {
+        errors.push(`${suggestion.title}: ${errorMessage(err, t('common.error'))}`);
       }
     }
 
@@ -186,7 +200,9 @@ export default function MilestoneAiCompleteDialog({ open, milestoneId, onClose, 
                 <Button
                   type="button"
                   variant="primary"
-                  onClick={handleGenerate}
+                  onClick={() => {
+                    void handleGenerate();
+                  }}
                   disabled={!summary.trim() || loading}
                 >
                   {loading ? t('common.loading', 'Generiere...') : t('milestone.ai.generate')}
@@ -254,7 +270,9 @@ export default function MilestoneAiCompleteDialog({ open, milestoneId, onClose, 
                 <Button
                   type="button"
                   variant="primary"
-                  onClick={handleApply}
+                  onClick={() => {
+                    void handleApply();
+                  }}
                   disabled={selected.size === 0 || applying}
                 >
                   {applying

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { workflowsApi, WorkflowNodeMetadata } from '../api/workflows';
+import { errorMessage } from '../lib/narrow';
 
 interface CachedCatalog {
   data: WorkflowNodeMetadata[];
@@ -45,19 +46,24 @@ export function useNodeTypesCatalog(): NodeTypesCatalog {
       const data = await fetchCatalog();
       setCatalog(data);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    if (!cache || Date.now() - cache.fetchedAt > REVALIDATE_AFTER_MS) {
-      void load();
-    } else {
-      setCatalog(cache.data);
-      setIsLoading(false);
-    }
+    // Laden bzw. Cache-Übernahme in einer im Effect definierten async-Funktion
+    // (React-Doku "Fetching data") — der Effect-Body selbst setzt keinen State.
+    const run = async () => {
+      if (cache && Date.now() - cache.fetchedAt <= REVALIDATE_AFTER_MS) {
+        setCatalog(cache.data);
+        setIsLoading(false);
+        return;
+      }
+      await load();
+    };
+    void run();
   }, []);
 
   const { byType, byCategory } = useMemo(() => {

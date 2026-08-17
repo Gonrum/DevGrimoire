@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { api, RecurringTask, RecurringFrequency, Todo } from '../api/client';
+import { errorMessage, optionOr } from '../lib/narrow';
 import Markdown from '../components/Markdown';
 import MarkdownEditor from '../components/MarkdownEditor';
 import Button from '../components/ui/Button';
@@ -12,6 +13,15 @@ import { useToast } from '../components/Toast';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 
 const FREQUENCIES: RecurringFrequency[] = ['daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'];
+
+/**
+ * Die im Prioritäts-`<select>` angebotenen Werte. Vorher war der State ein
+ * blosser `string` und wurde beim Speichern per `as any` in das DTO gedrückt —
+ * ein Tippfehler in einem `<option value>` wäre so bis zur Backend-Validierung
+ * durchgelaufen.
+ */
+const PRIORITIES = ['low', 'medium', 'high', 'critical'] as const;
+type TaskPriority = (typeof PRIORITIES)[number];
 
 export default function RecurringTaskDetailPage() {
   const { id, recurringTaskId } = useParams<{ id?: string; recurringTaskId: string }>();
@@ -47,7 +57,7 @@ export default function RecurringTaskDetailPage() {
   // Edit form state
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState('medium');
+  const [priority, setPriority] = useState<TaskPriority>('medium');
   const [tags, setTags] = useState('');
   const [frequency, setFrequency] = useState<RecurringFrequency>('weekly');
   const [dayOfWeek, setDayOfWeek] = useState(1);
@@ -55,7 +65,7 @@ export default function RecurringTaskDetailPage() {
   const [month, setMonth] = useState(1);
   const [hour, setHour] = useState(9);
 
-  const loadTask = async () => {
+  const loadTask = useCallback(async () => {
     if (!recurringTaskId) return;
     try {
       const rt = await api.recurringTasks.get(recurringTaskId);
@@ -76,16 +86,24 @@ export default function RecurringTaskDetailPage() {
         const todos = await Promise.all(
           lastIds.map((tid) => api.todos.get(tid).catch(() => null)),
         );
-        setCreatedTodos(todos.filter(Boolean) as Todo[]);
+        setCreatedTodos(todos.filter((todo) => todo !== null));
       }
     } catch {
       setTask(null);
     } finally {
       setLoading(false);
     }
-  };
+  }, [recurringTaskId]);
 
-  useEffect(() => { loadTask(); }, [recurringTaskId]);
+  /*
+   * Der Aufruf steckt in einer eigenen async-Funktion, damit der Effekt-Body
+   * selbst nichts synchron setzt (`react-hooks/set-state-in-effect`). `loadTask`
+   * ist `useCallback`-stabil, die vollständige Dep-Liste läuft also nicht im
+   * Kreis. Gleiches Muster wie in `Dashboard.tsx`.
+   */
+  useEffect(() => {
+    void (async () => { await loadTask(); })();
+  }, [loadTask]);
 
   const handleSave = async () => {
     if (!recurringTaskId) return;
@@ -98,7 +116,7 @@ export default function RecurringTaskDetailPage() {
       await api.recurringTasks.update(recurringTaskId, {
         title: title.trim(),
         description: description.trim() || undefined,
-        priority: priority as any,
+        priority,
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
         frequency,
         dayOfWeek: showDoW ? dayOfWeek : undefined,
@@ -109,8 +127,8 @@ export default function RecurringTaskDetailPage() {
       setEditing(false);
       await loadTask();
       showSuccess(t('common.saved'));
-    } catch (err: any) {
-      showError(err.message || t('common.errorSaving'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSaving(false);
     }
@@ -121,8 +139,8 @@ export default function RecurringTaskDetailPage() {
     try {
       await api.recurringTasks.update(recurringTaskId, { active: !task.active });
       await loadTask();
-    } catch (err: any) {
-      showError(err.message);
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     }
   };
 
@@ -133,8 +151,8 @@ export default function RecurringTaskDetailPage() {
       await api.recurringTasks.trigger(recurringTaskId);
       await loadTask();
       showSuccess(t('recurringTasks.triggered'));
-    } catch (err: any) {
-      showError(err.message);
+    } catch (err) {
+      showError(errorMessage(err, t('common.error')));
     } finally {
       setTriggering(false);
     }
@@ -144,9 +162,9 @@ export default function RecurringTaskDetailPage() {
     if (!recurringTaskId) return;
     try {
       await api.recurringTasks.delete(recurringTaskId);
-      navigate(backLink);
-    } catch (err: any) {
-      showError(err.message || t('common.errorDeleting'));
+      void navigate(backLink);
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorDeleting')));
     }
   };
 
@@ -179,10 +197,10 @@ export default function RecurringTaskDetailPage() {
       <div className="max-w-3xl space-y-6">
         {/* Actions */}
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={handleToggleActive}>
+          <Button size="sm" onClick={() => { void handleToggleActive(); }}>
             {task.active ? t('recurringTasks.pause') : t('recurringTasks.activate')}
           </Button>
-          <Button size="sm" variant="primary" onClick={handleTrigger} disabled={triggering}>
+          <Button size="sm" variant="primary" onClick={() => { void handleTrigger(); }} disabled={triggering}>
             {triggering ? t('common.saving') : t('recurringTasks.triggerNow')}
           </Button>
           <Button size="sm" onClick={() => setEditing(!editing)}>
@@ -200,7 +218,7 @@ export default function RecurringTaskDetailPage() {
               <MarkdownEditor value={description} onChange={setDescription} rows={3} />
             </div>
             <div className="flex flex-col sm:flex-row gap-4">
-              <FormSelect label={t('common.priority')} value={priority} onChange={(e) => setPriority(e.target.value)}>
+              <FormSelect label={t('common.priority')} value={priority} onChange={(e) => setPriority(optionOr(e.target.value, PRIORITIES, 'medium'))}>
                 <option value="low">{t('todoPriority.low')}</option>
                 <option value="medium">{t('todoPriority.medium')}</option>
                 <option value="high">{t('todoPriority.high')}</option>
@@ -213,7 +231,7 @@ export default function RecurringTaskDetailPage() {
               </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-4">
-              <FormSelect label={t('recurringTasks.frequency')} value={frequency} onChange={(e) => setFrequency(e.target.value as RecurringFrequency)}>
+              <FormSelect label={t('recurringTasks.frequency')} value={frequency} onChange={(e) => setFrequency(optionOr(e.target.value, FREQUENCIES, 'weekly'))}>
                 {FREQUENCIES.map((f) => (
                   <option key={f} value={f}>{t(`recurringTasks.freq_${f}`)}</option>
                 ))}
@@ -246,7 +264,7 @@ export default function RecurringTaskDetailPage() {
               </FormSelect>
             </div>
             <div className="flex gap-2">
-              <Button variant="primary" onClick={handleSave} disabled={saving || !title.trim()}>
+              <Button variant="primary" onClick={() => { void handleSave(); }} disabled={saving || !title.trim()}>
                 {saving ? t('common.saving') : t('common.save')}
               </Button>
               <Button onClick={() => setEditing(false)}>{t('common.cancel')}</Button>
@@ -298,7 +316,13 @@ export default function RecurringTaskDetailPage() {
           <div>
             <h2 className="text-sm font-semibold text-gray-300 mb-2">{t('recurringTasks.createdTodos')} ({task.createdTodoIds.length})</h2>
             <div className="space-y-1">
-              {createdTodos.reverse().map((todo) => (
+              {/*
+                * Kopie vor `reverse()`: die Methode dreht das State-Array an Ort
+                * und Stelle um. Jedes weitere Render (z.B. „Bearbeiten"-Toggle)
+                * drehte die Liste erneut — die Reihenfolge kippte hin und her,
+                * unter StrictMode schon beim ersten Rendern.
+                */}
+              {[...createdTodos].reverse().map((todo) => (
                 <Link
                   key={todo._id}
                   to={todoLinkBase ? `${todoLinkBase}/${todo._id}` : '#'}

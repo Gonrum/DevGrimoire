@@ -1,9 +1,15 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { isRecord, isUnknownArray } from '../../lib/narrow';
 import { SchemaField } from './SchemaField';
 import { TemplateOption } from './TemplatePicker';
 
 type JsonSchema = Record<string, unknown>;
+
+/** Ein Teil-Schema; alles, was kein Objekt ist, wird zum leeren Schema. */
+function asSchema(value: unknown): JsonSchema {
+  return isRecord(value) ? value : {};
+}
 
 interface Props {
   schema: JsonSchema;
@@ -21,8 +27,10 @@ interface Props {
  * to check schema.type first — this component assumes object).
  */
 export function SchemaObjectAccordion({ schema, value, onChange, templateOptions = [] }: Props) {
-  const properties = (schema.properties as Record<string, JsonSchema> | undefined) ?? {};
-  const required = Array.isArray(schema.required) ? (schema.required as string[]) : [];
+  const properties = isRecord(schema.properties) ? schema.properties : {};
+  const required = isUnknownArray(schema.required)
+    ? schema.required.filter((entry): entry is string => typeof entry === 'string')
+    : [];
 
   // sort required first, then by original property order
   const propNames = Object.keys(properties).sort((a, b) => {
@@ -33,7 +41,7 @@ export function SchemaObjectAccordion({ schema, value, onChange, templateOptions
 
   const propsWithMeta = propNames.map((name) => ({
     name,
-    schema: properties[name],
+    schema: asSchema(properties[name]),
     required: required.includes(name),
   }));
 
@@ -113,7 +121,7 @@ function describeValue(value: unknown, schema: JsonSchema): string {
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (Array.isArray(value)) {
     if (value.length === 0) return '[]';
-    if (schema.items && (schema.items as JsonSchema).type === 'string') return `[${value.length}: ${value.slice(0, 3).join(', ')}${value.length > 3 ? '…' : ''}]`;
+    if (isRecord(schema.items) && schema.items.type === 'string') return `[${value.length}: ${value.slice(0, 3).join(', ')}${value.length > 3 ? '…' : ''}]`;
     return `[${value.length} Einträge]`;
   }
   if (typeof value === 'object') {

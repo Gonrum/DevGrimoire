@@ -181,29 +181,49 @@ export default function OracleView({ projectId, basePath }: Props) {
   const { t } = useTranslation();
   const { showError, showSuccess } = useToast();
   const [suggestions, setSuggestions] = useState<OracleSuggestion[]>([]);
-  const [loading, setLoading] = useState(true);
+  /** Für welches Projekt die angezeigte Liste geholt wurde — `null` = noch keine. */
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  /** Nachladen nach einer Aktion; der Projektwechsel wird stattdessen abgeleitet. */
+  const [reloading, setReloading] = useState(false);
+  const loading = reloading || loadedFor !== projectId;
   const [analyzing, setAnalyzing] = useState(false);
   const [statusFilter, setStatusFilter] = useState<OracleSuggestionStatus | 'all'>('open');
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  /** Setzt State ausschliesslich in Promise-Callbacks — nie synchron. */
+  const fetchSuggestions = useCallback(
+    () =>
+      api.oracle
+        .list({ projectId, limit: 500 })
+        .then(setSuggestions)
+        .catch((err: unknown) => { showError(errorMessage(err, 'Failed to load Oracle')); })
+        .finally(() => {
+          setLoadedFor(projectId);
+          setReloading(false);
+        }),
+    [projectId, showError],
+  );
+
   const load = useCallback(() => {
-    setLoading(true);
-    api.oracle
-      .list({ projectId, limit: 500 })
-      .then(setSuggestions)
-      .catch((err) => showError(errorMessage(err, 'Failed to load Oracle')))
-      .finally(() => setLoading(false));
-  }, [projectId, showError]);
+    setReloading(true);
+    void fetchSuggestions();
+  }, [fetchSuggestions]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    void fetchSuggestions();
+  }, [fetchSuggestions]);
 
   const handleAnalyze = async () => {
     setAnalyzing(true);
     try {
       const res = await api.oracle.analyze(projectId);
-      showSuccess(t('oracle.analyzed', res as unknown as Record<string, number>));
+      // Vorher `res as unknown as Record<string, number>`: eine Doppel-Behauptung,
+      // die dem Template jedes Feld unterschob. Die Platzhalter sind benannt.
+      showSuccess(t('oracle.analyzed', {
+        discovered: res.discovered,
+        inserted: res.inserted,
+        resolved: res.resolved,
+      }));
       load();
     } catch (err) {
       showError(errorMessage(err, 'Analyze failed'));
@@ -307,7 +327,7 @@ export default function OracleView({ projectId, basePath }: Props) {
           size="sm"
           variant="primary"
           disabled={analyzing}
-          onClick={handleAnalyze}
+          onClick={() => { void handleAnalyze(); }}
           className="ml-auto"
         >
           {analyzing ? t('oracle.analyzing') : t('oracle.analyze')}
@@ -337,10 +357,10 @@ export default function OracleView({ projectId, basePath }: Props) {
                       suggestion={s}
                       basePath={basePath}
                       busy={busyId === s._id}
-                      onDismiss={() => handleDismiss(s._id)}
-                      onConvert={() => handleConvert(s._id)}
-                      onCommentOnTodo={() => handleCommentOnTodo(s._id)}
-                      onDelete={() => handleDelete(s._id)}
+                      onDismiss={() => { void handleDismiss(s._id); }}
+                      onConvert={() => { void handleConvert(s._id); }}
+                      onCommentOnTodo={() => { void handleCommentOnTodo(s._id); }}
+                      onDelete={() => { void handleDelete(s._id); }}
                       t={t}
                     />
                   ))}

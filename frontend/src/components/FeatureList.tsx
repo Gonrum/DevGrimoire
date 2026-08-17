@@ -126,7 +126,7 @@ function FeatureForm({
 
   return (
     <Card>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
         <h3 className="text-sm font-semibold mb-3">
           {editId ? t('features.editFeature') : t('features.newFeature')}
         </h3>

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { ToastContext, ToastItem } from './Toast';
 
 /**
@@ -34,8 +34,24 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const showError = useCallback((message: string) => addToast(message, 'error'), [addToast]);
   const showSuccess = useCallback((message: string) => addToast(message, 'success'), [addToast]);
 
+  /*
+   * Der Kontextwert muss stabil sein (M-52).
+   *
+   * Vorher stand hier `value={{ showError, showSuccess }}` — ein bei jedem
+   * Provider-Render neues Objekt. Damit ist das Ergebnis von `useToast()` als
+   * Hook-Dependency unbrauchbar, und genau das braucht man beim Auflösen von
+   * `exhaustive-deps`: ein Lade-Effect, der `showError` in seinen Deps führt,
+   * würde endlos laufen — Fehler → Toast → Provider-Render → neuer
+   * Kontextwert → erneutes Laden. Ein Agent musste deshalb bereits auf ein Ref
+   * ausweichen.
+   *
+   * `showError`/`showSuccess` sind schon `useCallback`-stabil; nur die Hülle
+   * fehlte.
+   */
+  const value = useMemo(() => ({ showError, showSuccess }), [showError, showSuccess]);
+
   return (
-    <ToastContext.Provider value={{ showError, showSuccess }}>
+    <ToastContext.Provider value={value}>
       {children}
       <div className="fixed bottom-4 left-4 right-4 sm:left-auto z-50 flex flex-col gap-2" aria-live="polite">
         {toasts.map((toast) => (

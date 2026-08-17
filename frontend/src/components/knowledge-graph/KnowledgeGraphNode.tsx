@@ -1,4 +1,4 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { ENTITY_TYPE_COLORS } from './entityTypeStyles';
 import type { KgEntityType } from '../../api/client';
 
@@ -8,8 +8,15 @@ type Data = {
   isFocal?: boolean;
 };
 
-export function KnowledgeGraphNode({ data, selected }: NodeProps) {
-  const d = data as unknown as Data;
+/** Der Knotentyp, den `buildGraph` in `KnowledgeGraphView` erzeugt. */
+export type KgNode = Node<Data, 'kgNode'>;
+
+/*
+ * Vorher stand hier `data as unknown as Data` — eine doppelte Behauptung, die
+ * jede Prüfung abschaltet. React Flow ist stattdessen über `NodeProps<KgNode>`
+ * parametrisierbar: `data` ist damit von vornherein `Data`.
+ */
+export function KnowledgeGraphNode({ data: d, selected }: NodeProps<KgNode>) {
   const colors = ENTITY_TYPE_COLORS[d.entityType] ?? ENTITY_TYPE_COLORS.session;
   return (
     <div

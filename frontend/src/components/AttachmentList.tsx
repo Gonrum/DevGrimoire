@@ -37,18 +37,41 @@ export default function AttachmentList({
 }: AttachmentListProps) {
   const { t } = useTranslation();
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [loading, setLoading] = useState(true);
+  /**
+   * Identität der aktuell angezeigten Abfrage. `loading` ist die Ableitung
+   * „das Geladene gehört nicht zur aktuellen Abfrage" — vorher setzte der
+   * Effect dafür synchron State.
+   */
+  const queryKey = JSON.stringify({
+    projectId,
+    entityType: entityType ?? null,
+    entityId: entityId ?? null,
+  });
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  /** Nachladen nach Upload/Löschen; der Wechsel der Abfrage wird abgeleitet. */
+  const [reloading, setReloading] = useState(false);
+  const loading = reloading || loadedKey !== queryKey;
+
+  /** Setzt State ausschliesslich in Promise-Callbacks — nie synchron. */
+  const fetchAttachments = useCallback(
+    () =>
+      api.attachments
+        .list(projectId, entityType, entityId)
+        .then(setAttachments)
+        .catch(() => {})
+        .finally(() => {
+          setLoadedKey(queryKey);
+          setReloading(false);
+        }),
+    [projectId, entityType, entityId, queryKey],
+  );
 
   const load = useCallback(() => {
-    setLoading(true);
-    api.attachments
-      .list(projectId, entityType, entityId)
-      .then(setAttachments)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [projectId, entityType, entityId]);
+    setReloading(true);
+    void fetchAttachments();
+  }, [fetchAttachments]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void fetchAttachments(); }, [fetchAttachments]);
 
   const handleDelete = async (id: string) => {
     await api.attachments.delete(id);

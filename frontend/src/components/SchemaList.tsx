@@ -180,7 +180,7 @@ function SchemaForm({
 
   return (
     <Card>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
         <h3 className="text-sm font-semibold mb-3">
           {editId ? t('schemas.editSchema') : t('schemas.newSchema')}
         </h3>
@@ -536,7 +536,7 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
             <Card key={schema._id}>
               <div
                 className="cursor-pointer"
-                onClick={() => toggleExpand(schema._id)}
+                onClick={() => { void toggleExpand(schema._id); }}
               >
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-1">
                   <div className="flex items-center gap-2">

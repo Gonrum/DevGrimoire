@@ -1,12 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, UserInfo } from '../api/client';
+import { errorMessage, optionOr } from '../lib/narrow';
 import { useToast } from '../components/Toast';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import ConfirmButton from '../components/ui/ConfirmButton';
 import UserScopeEditor from '../components/UserScopeEditor';
+
+/** Die im `<select>` angebotenen Rollen — Grundlage für `optionOr` statt Cast. */
+const USER_ROLES = ['user', 'admin'] as const;
 
 function CreateUserForm({ onCreated }: { onCreated: () => void }) {
   const { t } = useTranslation();
@@ -36,8 +40,8 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
       setRole('user');
       setOpen(false);
       onCreated();
-    } catch (err: any) {
-      showError(err.message || t('common.errorSaving'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSaving(false);
     }
@@ -52,7 +56,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mb-6 bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 max-w-md">
+    <form onSubmit={(e) => { void handleSubmit(e); }} className="mb-6 bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 max-w-md">
       <h3 className="text-sm font-semibold text-gray-300">{t('users.createUser')}</h3>
       <input
         type="text"
@@ -79,7 +83,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
       />
       <select
         value={role}
-        onChange={(e) => setRole(e.target.value as 'user' | 'admin')}
+        onChange={(e) => setRole(optionOr(e.target.value, USER_ROLES, 'user'))}
         className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
       >
         <option value="user">{t('users.roleUser')}</option>
@@ -129,28 +133,32 @@ export default function UserManagement() {
 
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
-  const loadUsers = async () => {
+  // `useCallback`, damit der Lade-Effect eine stabile Dependency hat statt eines
+  // leeren Dependency-Arrays. `showError` ist im ToastProvider selbst ein
+  // `useCallback`, `t` ein Snapshot von react-i18next — beide wechseln nur bei
+  // echtem Anlass (Sprachwechsel), nicht bei jedem Render.
+  const loadUsers = useCallback(async () => {
     try {
       const data = await api.users.list();
       setUsers(data);
-    } catch (err: any) {
-      showError(err.message || t('common.errorLoading', { error: '' }));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorLoading', { error: '' })));
     } finally {
       setLoading(false);
     }
-  };
+  }, [showError, t]);
 
   useEffect(() => {
-    loadUsers();
-  }, []);
+    void loadUsers();
+  }, [loadUsers]);
 
   const handleToggleActive = async (user: UserInfo) => {
     try {
       await api.users.update(user._id, { active: !user.active });
       showSuccess(user.active ? t('users.userDeactivated') : t('users.userActivated'));
-      loadUsers();
-    } catch (err: any) {
-      showError(err.message);
+      void loadUsers();
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     }
   };
 
@@ -158,9 +166,9 @@ export default function UserManagement() {
     try {
       await api.users.delete(user._id);
       showSuccess(t('users.userDeleted'));
-      loadUsers();
-    } catch (err: any) {
-      showError(err.message);
+      void loadUsers();
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorDeleting')));
     }
   };
 
@@ -175,9 +183,9 @@ export default function UserManagement() {
       await api.users.update(editingId, editData);
       showSuccess(t('users.userUpdated'));
       setEditingId(null);
-      loadUsers();
-    } catch (err: any) {
-      showError(err.message);
+      void loadUsers();
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     }
   };
 
@@ -185,7 +193,7 @@ export default function UserManagement() {
 
   return (
     <div>
-      <CreateUserForm onCreated={loadUsers} />
+      <CreateUserForm onCreated={() => { void loadUsers(); }} />
 
       <div className="space-y-2">
         {users.map((user) => (
@@ -212,13 +220,13 @@ export default function UserManagement() {
                 />
                 <select
                   value={editData.role || 'user'}
-                  onChange={(e) => setEditData({ ...editData, role: e.target.value as 'admin' | 'user' })}
+                  onChange={(e) => setEditData({ ...editData, role: optionOr(e.target.value, USER_ROLES, 'user') })}
                   className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
                 >
                   <option value="user">{t('users.roleUser')}</option>
                   <option value="admin">Admin</option>
                 </select>
-                <Button type="button" variant="primary" size="xs" onClick={saveEdit}>
+                <Button type="button" variant="primary" size="xs" onClick={() => { void saveEdit(); }}>
                   {t('common.save')}
                 </Button>
                 <Button type="button" size="xs" onClick={() => setEditingId(null)}>
@@ -262,7 +270,7 @@ export default function UserManagement() {
                   <Button
                     type="button"
                     size="xs"
-                    onClick={() => handleToggleActive(user)}
+                    onClick={() => { void handleToggleActive(user); }}
                     className={user.active
                       ? 'bg-yellow-900/40 hover:bg-yellow-900 text-yellow-300'
                       : 'bg-green-900/40 hover:bg-green-900 text-green-300'}

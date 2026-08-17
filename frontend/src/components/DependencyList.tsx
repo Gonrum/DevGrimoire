@@ -128,7 +128,7 @@ function DependencyForm({
 
   return (
     <Card>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
         <h3 className="text-sm font-semibold mb-3">
           {editId ? t('dependencies.editDependency') : t('dependencies.newDependency')}
         </h3>

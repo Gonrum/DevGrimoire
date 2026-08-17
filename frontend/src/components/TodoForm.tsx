@@ -1,11 +1,15 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, Milestone, Todo } from '../api/client';
+import { errorMessage, optionOr } from '../lib/narrow';
 import MarkdownEditor from './MarkdownEditor';
+import { useToast } from './Toast';
 import Button from './ui/Button';
 import { DictationButton } from './ui/DictationButton';
 import { FormInput, FormSelect } from './ui/FormField';
 import { SpeechConsentDialog } from './ui/SpeechConsentDialog';
+
+const PRIORITIES: readonly Todo['priority'][] = ['low', 'medium', 'high', 'critical'];
 
 interface TodoFormProps {
   /** Project context — set this OR customerId, not both. */
@@ -44,37 +48,46 @@ export default function TodoForm({
   const effectiveShowMilestone = showMilestoneSelect && !isCustomerScope;
   const effectiveAllowMilestoneCreate = allowMilestoneCreate && !isCustomerScope;
   const { t } = useTranslation();
+  const { showError } = useToast();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Todo['priority']>('medium');
   const [tags, setTags] = useState('');
-  const [milestoneId, setMilestoneId] = useState(initialMilestoneId);
+  /** `null` = der Nutzer hat nichts ausgewählt, es gilt die Prop. */
+  const [milestoneIdEdit, setMilestoneIdEdit] = useState<string | null>(null);
+  const milestoneId = milestoneIdEdit ?? initialMilestoneId;
   const [newMilestoneName, setNewMilestoneName] = useState('');
   const [creatingMilestone, setCreatingMilestone] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [storageEnabled, setStorageEnabled] = useState(false);
+  /** Antwort des Servers; ob der Upload-Block sichtbar ist, hängt zusätzlich am Scope. */
+  const [storageAvailable, setStorageAvailable] = useState(false);
+  const storageEnabled = !isCustomerScope && storageAvailable;
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [speechConsent, setSpeechConsent] = useState(localStorage.getItem('speech_consent') === 'true');
-  const [showConsentDialog, setShowConsentDialog] = useState(false);
+  const [consentDialogDismissed, setConsentDialogDismissed] = useState(false);
+  const showConsentDialog = enableDictation && !speechConsent && !consentDialogDismissed;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const shouldShowDictation = enableDictation && speechConsent;
 
-  useEffect(() => { setMilestoneId(initialMilestoneId); }, [initialMilestoneId]);
   useEffect(() => {
-    if (isCustomerScope) { setStorageEnabled(false); return; }
-    api.attachments.storageStatus().then((s) => setStorageEnabled(s.enabled)).catch(() => {});
+    if (isCustomerScope) return;
+    api.attachments.storageStatus().then((s) => setStorageAvailable(s.enabled)).catch(() => {});
   }, [isCustomerScope]);
-  useEffect(() => {
-    if (enableDictation && !speechConsent) setShowConsentDialog(true);
-  }, [enableDictation, speechConsent]);
 
   const handleCreateMilestone = async () => {
     if (!effectiveAllowMilestoneCreate || !projectId || !newMilestoneName.trim()) return;
     const milestone = await api.milestones.create({ projectId, name: newMilestoneName.trim() });
     setNewMilestoneName('');
     setCreatingMilestone(false);
-    setMilestoneId(milestone._id);
+    setMilestoneIdEdit(milestone._id);
     onMilestoneCreated?.(milestone);
+  };
+
+  /** Fehler beim Anlegen waren bisher eine stumme Unhandled Rejection. */
+  const createMilestone = () => {
+    handleCreateMilestone().catch((err: unknown) => {
+      showError(errorMessage(err, t('common.errorSaving')));
+    });
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -107,7 +120,14 @@ export default function TodoForm({
 
   return (
     <>
-      <form onSubmit={handleSubmit} className={`space-y-4 ${className}`}>
+      <form
+        onSubmit={(e) => {
+          handleSubmit(e).catch((err: unknown) => {
+            showError(errorMessage(err, t('common.errorSaving')));
+          });
+        }}
+        className={`space-y-4 ${className}`}
+      >
         <div className="flex flex-col sm:flex-row sm:items-end gap-2">
           <FormInput fieldClassName="flex-1 min-w-0 w-full" label={t('common.title')} required type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('common.title')} autoFocus />
           {shouldShowDictation && (
@@ -132,7 +152,7 @@ export default function TodoForm({
         </div>
 
         <div className="flex flex-col sm:flex-row gap-4 items-start">
-          <FormSelect fieldClassName="w-full sm:w-44 shrink-0" label={t('common.priority')} value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}>
+          <FormSelect fieldClassName="w-full sm:w-44 shrink-0" label={t('common.priority')} value={priority} onChange={(e) => setPriority(optionOr(e.target.value, PRIORITIES, priority))}>
             <option value="low">{t('todoPriority.low')}</option>
             <option value="medium">{t('todoPriority.medium')}</option>
             <option value="high">{t('todoPriority.high')}</option>
@@ -143,7 +163,7 @@ export default function TodoForm({
 
         {effectiveShowMilestone && (
           <div className="space-y-2">
-            <FormSelect fieldClassName="w-full" label={t('todoCreate.milestone')} value={milestoneId} onChange={(e) => setMilestoneId(e.target.value)}>
+            <FormSelect fieldClassName="w-full" label={t('todoCreate.milestone')} value={milestoneId} onChange={(e) => setMilestoneIdEdit(e.target.value)}>
               <option value="">{t('todoCreate.noMilestone')}</option>
               {milestones.map((ms) => (
                 <option key={ms._id} value={ms._id}>{ms.name}</option>
@@ -152,8 +172,12 @@ export default function TodoForm({
             {effectiveAllowMilestoneCreate && (creatingMilestone ? (
               <div className="flex flex-col sm:flex-row sm:items-end gap-2">
                 <FormInput fieldClassName="flex-1 min-w-0 w-full" type="text" value={newMilestoneName} onChange={(e) => setNewMilestoneName(e.target.value)}
-                  placeholder={t('common.name')} autoFocus onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleCreateMilestone())} />
-                <Button type="button" variant="primary" size="sm" disabled={!newMilestoneName.trim()} onClick={handleCreateMilestone}>
+                  placeholder={t('common.name')} autoFocus onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    createMilestone();
+                  }} />
+                <Button type="button" variant="primary" size="sm" disabled={!newMilestoneName.trim()} onClick={createMilestone}>
                   {t('common.create')}
                 </Button>
                 <Button type="button" size="sm" onClick={() => { setCreatingMilestone(false); setNewMilestoneName(''); }}>
@@ -223,11 +247,11 @@ export default function TodoForm({
       {enableDictation && (
         <SpeechConsentDialog
           isOpen={showConsentDialog}
-          onClose={() => setShowConsentDialog(false)}
+          onClose={() => setConsentDialogDismissed(true)}
           onConsent={() => {
             setSpeechConsent(true);
             localStorage.setItem('speech_consent', 'true');
-            setShowConsentDialog(false);
+            setConsentDialogDismissed(true);
           }}
         />
       )}

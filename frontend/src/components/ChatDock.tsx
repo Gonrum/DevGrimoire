@@ -15,6 +15,7 @@ import {
   Workspace,
 } from '../api/client';
 import { streamBrowserLlm, BrowserLlmMessage } from '../api/browserLlmClient';
+import { isRecord, optionOr } from '../lib/narrow';
 import Markdown from './Markdown';
 import Button from './ui/Button';
 
@@ -39,7 +40,15 @@ interface StreamingToolCall {
   summary?: string;
 }
 
-type StreamingPhase = 'queued' | 'context' | 'thinking' | 'tool_call' | 'responding';
+/*
+ * Laufzeit-Whitelist der Stream-Phasen. Das SSE-Feld `status.phase` ist auf der
+ * Leitung ein blosser `string`; vorher stand hier ein Cast auf die Union hinter
+ * einem `includes`-Test, der die Verengung nicht mitnahm. Der Typ wird jetzt aus
+ * der Liste abgeleitet, damit beide nicht auseinanderlaufen koennen.
+ */
+const STREAMING_PHASES = ['queued', 'context', 'thinking', 'tool_call', 'responding'] as const;
+
+type StreamingPhase = (typeof STREAMING_PHASES)[number];
 
 interface StreamingState {
   content: string;
@@ -96,6 +105,23 @@ function canonicalizeJsonArgs(raw: string | undefined | null): string {
   } catch {
     return '{}';
   }
+}
+
+/**
+ * Abbruch durch den Nutzer (`AbortController.abort()`).
+ *
+ * Vorher stand an beiden Aufrufstellen `(err as Error).name === 'AbortError'`.
+ * Der Cast behauptete `Error`, wo `unknown` steht — und der Property-Zugriff
+ * wirft bei einem geworfenen `null`/`undefined` **im catch-Block selbst**.
+ * Im aeusseren catch von `sendMessage` steht `setStreaming(null)` hinter genau
+ * dieser Zeile: der Dock bliebe dann dauerhaft im Streaming-Zustand (Textarea
+ * gesperrt, nur noch "Stop"), ohne dass eine Meldung erscheint.
+ *
+ * `isRecord` deckt beide realen Formen ab — `DOMException` aus `fetch` und
+ * `Error` aus `browserLlmClient`.
+ */
+function isAbortError(err: unknown): boolean {
+  return isRecord(err) && err.name === 'AbortError';
 }
 
 /** Max per-file size check (client-side — final check is server-side). */
@@ -393,13 +419,14 @@ export default function ChatDock() {
     setSession(null);
     setBriefingMode(false);
     const ownerKey = projectId || `c:${customerId}`;
-    loadSessions({ projectId, customerId }).then((list) => {
+    void (async () => {
+      const list = await loadSessions({ projectId, customerId });
       const lastId = localStorage.getItem(LAST_SESSION_KEY_PREFIX + ownerKey);
       const target = list.find((s) => s._id === lastId) ?? list[0];
       if (target) {
-        loadSession(target._id);
+        await loadSession(target._id);
       }
-    });
+    })();
   }, [open, projectId, customerId, loadSessions, loadSession]);
 
   // Persist selected session per owner
@@ -479,9 +506,7 @@ export default function ChatDock() {
             setStreaming((s) => s ? { ...s, contextRefs: refs, phase: 'context' } : s);
           },
           onStatus: (status) => {
-            const phase = ['queued', 'context', 'thinking', 'tool_call', 'responding'].includes(status.phase)
-              ? status.phase as StreamingPhase
-              : 'thinking';
+            const phase = optionOr(status.phase, STREAMING_PHASES, 'thinking');
             setStreaming((s) => s ? { ...s, phase, activeToolName: status.name } : s);
           },
           onToken: (token) => {
@@ -629,9 +654,17 @@ export default function ChatDock() {
             toolCalls: [...s.toolCalls, { id: tc.id, name: tc.name, arguments: tc.arguments }],
           } : s);
 
-          let parsedArgs: Record<string, unknown> = {};
+          /*
+           * Die Argumente kommen vom Modell, nicht von uns. Vorher behauptete
+           * ein Cast `Record<string, unknown>` — bei `"null"`, `"42"` oder
+           * `"[]"` (alles gueltiges JSON, das Modelle real emittieren) waere
+           * dieser Nicht-Objekt-Wert als `arguments` an die Tool-API gegangen.
+           * `isRecord` prueft, was der Cast nur behauptet hat.
+           */
+          let parsedArgs: Record<string, unknown>;
           try {
-            parsedArgs = tc.arguments ? (JSON.parse(tc.arguments) as Record<string, unknown>) : {};
+            const parsed: unknown = tc.arguments ? JSON.parse(tc.arguments) : {};
+            parsedArgs = isRecord(parsed) ? parsed : {};
           } catch {
             parsedArgs = {};
           }
@@ -732,11 +765,16 @@ export default function ChatDock() {
       return;
     }
     const content = draft.trim();
-    const readyAttachments = pendingAttachments.filter((p) => p.status === 'ready' && p.attachmentId);
-    const attachmentIds = readyAttachments.map((p) => p.attachmentId as string);
+    // Das Praedikat traegt die Verengung, die der `filter` vorher nur behauptet
+    // hat: danach ist `attachmentId` ein `string`, kein `string | undefined`.
+    const readyAttachments = pendingAttachments.filter(
+      (p): p is PendingAttachment & { attachmentId: string } =>
+        p.status === 'ready' && typeof p.attachmentId === 'string' && p.attachmentId.length > 0,
+    );
+    const attachmentIds = readyAttachments.map((p) => p.attachmentId);
     const attachmentRefsForUi: ChatAttachmentRef[] | undefined = readyAttachments.length > 0
       ? readyAttachments.map((p) => ({
-          attachmentId: p.attachmentId as string,
+          attachmentId: p.attachmentId,
           fileName: p.file.name,
           size: p.file.size,
           kind: isImageFile(p.file) ? 'image' : 'text',
@@ -774,7 +812,7 @@ export default function ChatDock() {
         try {
           await runBrowserStream(session._id, content, outgoingAttachmentIds, abort, userLlm, briefingMode);
         } catch (err) {
-          if ((err as Error).name === 'AbortError' || abort.signal.aborted) {
+          if (isAbortError(err) || abort.signal.aborted) {
             throw err;
           }
           if (!fallbackAllowed) {
@@ -793,7 +831,7 @@ export default function ChatDock() {
         loadSessions({ projectId, customerId }).catch(() => {});
       }
     } catch (err) {
-      if ((err as Error).name !== 'AbortError') {
+      if (!isAbortError(err)) {
         setError(err instanceof Error ? err.message : 'Stream failed');
         setRetryDraft(content);
       }
@@ -823,7 +861,8 @@ export default function ChatDock() {
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      // `sendMessage` meldet eigene Fehler ueber `setError`.
+      void sendMessage();
     }
   };
 
@@ -933,7 +972,7 @@ export default function ChatDock() {
                 <label className="text-xs text-gray-500 shrink-0 w-16">{t('chat.session')}</label>
                 <select
                   value={session?._id ?? ''}
-                  onChange={(e) => { if (e.target.value) { setBriefingMode(false); loadSession(e.target.value); } }}
+                  onChange={(e) => { if (e.target.value) { setBriefingMode(false); void loadSession(e.target.value); } }}
                   disabled={!projectId || loadingSessions}
                   className="flex-1 bg-gray-800 border border-gray-700 text-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
                 >
@@ -944,7 +983,7 @@ export default function ChatDock() {
                 </select>
                 <button
                   type="button"
-                  onClick={createNewSession}
+                  onClick={() => { void createNewSession(); }}
                   disabled={!projectId}
                   className="text-xs text-cyan-400 hover:text-cyan-300 px-2 disabled:opacity-50"
                   title={t('chat.newSession')}
@@ -954,7 +993,7 @@ export default function ChatDock() {
                 {session && (
                   <button
                     type="button"
-                    onClick={deleteCurrentSession}
+                    onClick={() => { void deleteCurrentSession(); }}
                     className="text-xs text-red-400 hover:text-red-300 px-1"
                     title={t('common.delete')}
                   >
@@ -1072,7 +1111,8 @@ export default function ChatDock() {
                 e.preventDefault();
                 setDragActive(false);
                 if (e.dataTransfer.files?.length) {
-                  uploadFiles(e.dataTransfer.files);
+                  // Fehler landen pro Datei im `status: 'error'` des Chips.
+                  void uploadFiles(e.dataTransfer.files);
                 }
               }}
             >
@@ -1145,7 +1185,7 @@ export default function ChatDock() {
                   accept={CHAT_ATTACHMENT_ACCEPT}
                   className="hidden"
                   onChange={(e) => {
-                    if (e.target.files?.length) uploadFiles(e.target.files);
+                    if (e.target.files?.length) void uploadFiles(e.target.files);
                     e.target.value = '';
                   }}
                 />
@@ -1178,7 +1218,7 @@ export default function ChatDock() {
                     }
                     if (imageFiles.length > 0) {
                       e.preventDefault();
-                      uploadFiles(imageFiles);
+                      void uploadFiles(imageFiles);
                     }
                   }}
                   placeholder={session ? t('chat.inputPlaceholder') : t('chat.selectOrCreateSession')}
@@ -1208,7 +1248,7 @@ export default function ChatDock() {
                   <Button
                     variant="primary"
                     size="md"
-                    onClick={sendMessage}
+                    onClick={() => { void sendMessage(); }}
                     disabled={!draft.trim() || !session}
                   >
                     {t('chat.send')}
@@ -1262,7 +1302,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         </span>
         <button
           type="button"
-          onClick={() => navigator.clipboard.writeText(message.content)}
+          onClick={() => { void navigator.clipboard.writeText(message.content); }}
           className="text-xs text-gray-600 hover:text-gray-400"
           title={t('common.copy')}
         >

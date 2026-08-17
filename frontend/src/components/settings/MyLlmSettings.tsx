@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, UserLlmConfig } from '../../api/client';
+import { isRecord, isUnknownArray } from '../../lib/narrow';
 import Button from '../ui/Button';
 import ConfirmButton from '../ui/ConfirmButton';
 import { FormInput, SecretInput } from '../ui/FormField';
@@ -16,7 +17,10 @@ export default function MyLlmSettings() {
     apiKey: '',
     fallbackEnabled: false,
   });
-  const [llmLoading, setLlmLoading] = useState(false);
+  // Startet auf `true`: mit `false` steht das Formular für die Dauer des
+  // Profil-Requests auf den Defaults — wer "browser" gespeichert hat, sieht
+  // solange fälschlich "server" ausgewählt und leere Felder.
+  const [llmLoading, setLlmLoading] = useState(true);
   const [llmSaving, setLlmSaving] = useState(false);
   const [llmSavedMsg, setLlmSavedMsg] = useState(false);
   const [llmHasStoredKey, setLlmHasStoredKey] = useState(false);
@@ -24,27 +28,26 @@ export default function MyLlmSettings() {
   const [llmTestMessage, setLlmTestMessage] = useState<string>('');
   const [llmSaveError, setLlmSaveError] = useState<string | null>(null);
 
-  const loadLlmConfig = useCallback(async () => {
-    setLlmLoading(true);
-    try {
-      const profile = await api.profile.get();
-      const cfg = profile.llmConfig || {};
-      const storedKey = cfg.apiKey === '***';
-      setLlmHasStoredKey(storedKey);
-      setLlmConfig({
-        mode: (cfg.mode) || 'server',
-        endpoint: cfg.endpoint || '',
-        model: cfg.model || '',
-        apiKey: '',
-        fallbackEnabled: !!cfg.fallbackEnabled,
-      });
-      setLlmTestState('idle');
-      setLlmTestMessage('');
-    } catch { /* ignore */ }
-    setLlmLoading(false);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const profile = await api.profile.get();
+        const cfg = profile.llmConfig || {};
+        const storedKey = cfg.apiKey === '***';
+        setLlmHasStoredKey(storedKey);
+        setLlmConfig({
+          mode: (cfg.mode) || 'server',
+          endpoint: cfg.endpoint || '',
+          model: cfg.model || '',
+          apiKey: '',
+          fallbackEnabled: !!cfg.fallbackEnabled,
+        });
+        setLlmTestState('idle');
+        setLlmTestMessage('');
+      } catch { /* ignore */ }
+      setLlmLoading(false);
+    })();
   }, []);
-
-  useEffect(() => { loadLlmConfig(); }, [loadLlmConfig]);
 
   const saveLlmConfig = async () => {
     setLlmSaving(true);
@@ -101,8 +104,11 @@ export default function MyLlmSettings() {
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
-      const data = await res.json();
-      const count = Array.isArray(data?.data) ? data.data.length : 0;
+      // Fremder, vom Nutzer konfigurierter Endpunkt — die Form der Antwort ist
+      // nicht zugesichert, deshalb geprüft statt behauptet.
+      const data: unknown = await res.json();
+      const models = isRecord(data) ? data.data : undefined;
+      const count = isUnknownArray(models) ? models.length : 0;
       setLlmTestState('ok');
       setLlmTestMessage(t('settings.myLlmTestOk', { count }));
     } catch (err) {
@@ -233,7 +239,7 @@ export default function MyLlmSettings() {
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={testLlmEndpoint}
+                  onClick={() => { void testLlmEndpoint(); }}
                   disabled={!llmConfig.endpoint?.trim() || llmTestState === 'testing'}
                 >
                   {llmTestState === 'testing' ? '...' : t('settings.myLlmTest')}
@@ -245,7 +251,7 @@ export default function MyLlmSettings() {
           )}
 
           <SettingsActions className="mt-0 border-t border-gray-800 pt-3">
-            <Button variant="primary" size="lg" onClick={saveLlmConfig} disabled={llmSaving}>
+            <Button variant="primary" size="lg" onClick={() => { void saveLlmConfig(); }} disabled={llmSaving}>
               {llmSaving ? t('common.saving') : t('common.save')}
             </Button>
             {llmSavedMsg && <span className="text-green-400 text-sm">✓ {t('settings.myLlmSaved')}</span>}

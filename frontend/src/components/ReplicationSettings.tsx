@@ -82,15 +82,25 @@ export default function ReplicationSettings() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  /*
+   * Der Fetch steckt in einer eigenen async-Funktion, damit der Effekt-Body
+   * selbst nichts synchron setzt (`react-hooks/set-state-in-effect`). `load`
+   * ist `useCallback`-stabil, die vollstaendige Dep-Liste laeuft also nicht
+   * im Kreis.
+   */
+  useEffect(() => {
+    void (async () => { await load(); })();
+  }, [load]);
 
   // Load project list when role isn't standalone
   useEffect(() => {
-    if (role !== 'standalone') {
-      loadProjects();
-    } else {
-      setProjects(null);
-    }
+    void (async () => {
+      if (role !== 'standalone') {
+        await loadProjects();
+      } else {
+        setProjects(null);
+      }
+    })();
   }, [role, loadProjects]);
 
   // T-351: Live-Push statt 5s-Polling. Backend emittet `replication-status`
@@ -300,7 +310,8 @@ export default function ReplicationSettings() {
     try {
       await api.replication.promote();
       setSuccess(t('replication.promoted'));
-      load();
+      // `load` meldet eigene Fehler ueber `setError` — hier ist nichts nachzureichen.
+      void load();
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -372,7 +383,7 @@ export default function ReplicationSettings() {
           <h2 className="text-sm font-medium text-gray-300 mb-3">{t('replication.engineTitle')}</h2>
           <select
             value={engine}
-            onChange={(e) => changeEngine(optionOr(e.target.value, REPLICATION_ENGINES, engine))}
+            onChange={(e) => { void changeEngine(optionOr(e.target.value, REPLICATION_ENGINES, engine)); }}
             className="bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
           >
             <option value="legacy">{t('replication.engineLegacy')}</option>
@@ -421,8 +432,8 @@ export default function ReplicationSettings() {
             </div>
           </div>
           <div className="flex gap-2">
-            <Button variant="primary" onClick={testConnection}>{t('replication.testConnection')}</Button>
-            <Button variant="secondary" onClick={triggerSync}>{t('replication.triggerSync')}</Button>
+            <Button variant="primary" onClick={() => { void testConnection(); }}>{t('replication.testConnection')}</Button>
+            <Button variant="secondary" onClick={() => { void triggerSync(); }}>{t('replication.triggerSync')}</Button>
           </div>
         </div>
       )}
@@ -466,9 +477,9 @@ export default function ReplicationSettings() {
             </div>
           </div>
           <div className="flex gap-2 flex-wrap">
-            <Button variant="primary" onClick={testConnection}>{t('replication.testConnection')}</Button>
-            <Button variant="secondary" onClick={triggerSync}>{t('replication.triggerSync')}</Button>
-            <Button variant="secondary" onClick={triggerPull}>{t('replication.triggerPull')}</Button>
+            <Button variant="primary" onClick={() => { void testConnection(); }}>{t('replication.testConnection')}</Button>
+            <Button variant="secondary" onClick={() => { void triggerSync(); }}>{t('replication.triggerSync')}</Button>
+            <Button variant="secondary" onClick={() => { void triggerPull(); }}>{t('replication.triggerPull')}</Button>
           </div>
           <p className="text-xs text-gray-500 mt-1">{t('replication.pullHint')}</p>
         </div>
@@ -529,7 +540,7 @@ export default function ReplicationSettings() {
                     {status.failedCount}
                   </span>
                   {status.failedCount > 0 && (
-                    <Button variant="ghost" size="xs" className="ml-2" onClick={clearFailed}>
+                    <Button variant="ghost" size="xs" className="ml-2" onClick={() => { void clearFailed(); }}>
                       {t('replication.clearFailed')}
                     </Button>
                   )}
@@ -568,7 +579,7 @@ export default function ReplicationSettings() {
         <div className="bg-gray-900 border border-gray-700 rounded-lg p-4">
           <div className="flex items-center justify-between mb-1">
             <h2 className="text-sm font-medium text-gray-300">{t('replication.projectSelectionTitle')}</h2>
-            <Button variant="ghost" size="xs" onClick={loadProjects} disabled={projectsLoading}>
+            <Button variant="ghost" size="xs" onClick={() => { void loadProjects(); }} disabled={projectsLoading}>
               ⟳
             </Button>
           </div>
@@ -588,7 +599,7 @@ export default function ReplicationSettings() {
                       type="checkbox"
                       id={`repl-${p._id}`}
                       checked={p.replicationEnabled}
-                      onChange={(e) => toggleProjectReplication(p._id, e.target.checked)}
+                      onChange={(e) => { void toggleProjectReplication(p._id, e.target.checked); }}
                       className="w-4 h-4 accent-violet-600 cursor-pointer"
                     />
                     <label htmlFor={`repl-${p._id}`} className="text-sm text-gray-200 flex-1 truncate cursor-pointer">
@@ -608,7 +619,7 @@ export default function ReplicationSettings() {
                     {p.replicationEnabled && (
                       <button
                         type="button"
-                        onClick={() => syncSingleProject(p._id)}
+                        onClick={() => { void syncSingleProject(p._id); }}
                         disabled={isSyncing}
                         className="text-xs text-gray-500 hover:text-cyan-400 disabled:opacity-40 disabled:cursor-not-allowed px-1"
                         title={t('replication.projectSyncNow')}
@@ -635,7 +646,7 @@ export default function ReplicationSettings() {
             <Button
               variant="ghost"
               size="xs"
-              onClick={loadRemoteProjects}
+              onClick={() => { void loadRemoteProjects(); }}
               disabled={remoteLoading}
             >
               {remoteLoading ? '…' : (remoteProjects ? '⟳' : t('replication.remoteProjectsLoad'))}
@@ -673,7 +684,7 @@ export default function ReplicationSettings() {
                       <Button
                         variant="secondary"
                         size="xs"
-                        onClick={() => importRemoteProject(rp._id)}
+                        onClick={() => { void importRemoteProject(rp._id); }}
                         disabled={isImporting}
                       >
                         {isImporting
@@ -691,7 +702,7 @@ export default function ReplicationSettings() {
 
       {/* Save Button */}
       <div className="flex gap-3">
-        <Button variant="primary" size="lg" onClick={save} disabled={saving}>
+        <Button variant="primary" size="lg" onClick={() => { void save(); }} disabled={saving}>
           {saving ? t('common.saving') : t('common.save')}
         </Button>
       </div>

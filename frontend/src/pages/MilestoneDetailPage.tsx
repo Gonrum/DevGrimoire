@@ -1,7 +1,8 @@
-import { useEffect, useState, FormEvent } from 'react';
+import { useCallback, useEffect, useState, FormEvent } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api, Milestone, Todo, ChangelogEntry, ImportResult } from '../api/client';
+import { api, Milestone, Todo, ChangelogEntry } from '../api/client';
+import { errorMessage } from '../lib/narrow';
 import Markdown from '../components/Markdown';
 import MilestoneForm from '../components/MilestoneForm';
 import TodoForm from '../components/TodoForm';
@@ -124,14 +125,14 @@ function ChangelogForm({ milestone, onCompleted, onCancel, showError }: { milest
       });
       await api.milestones.update(milestone._id, { status: 'done', changelogId: changelog._id });
       onCompleted();
-    } catch (err: any) {
-      showError(err.message || t('milestoneDetail.completeFailed'));
+    } catch (err) {
+      showError(errorMessage(err, t('milestoneDetail.completeFailed')));
     }
     setSubmitting(false);
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
       <p className="text-sm font-medium text-gray-300">{t('milestones.createChangelog')}</p>
       <p className="text-xs text-gray-500">{t('milestoneDetail.changelogRequired')}</p>
       <FormInput
@@ -182,10 +183,14 @@ export default function MilestoneDetailPage() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [aiDialogOpen, setAiDialogOpen] = useState(false);
 
-  const loadMilestone = () => {
+  const loadMilestone = useCallback(() => {
     if (!milestoneId) return;
     api.milestones.get(milestoneId)
       .then((ms) => {
+        // Vorher fehlte dieses Zurücksetzen: ein einziger fehlgeschlagener
+        // Refresh (Statuswechsel, Archivieren) setzte `error` dauerhaft, und
+        // die Seite blieb die Fehlerbox — auch nach erfolgreichem Nachladen.
+        setError(null);
         setMilestone(ms);
         if (ms.changelogId) {
           api.changelog.get(ms.changelogId).then(setChangelog).catch(() => setChangelog(null));
@@ -193,21 +198,26 @@ export default function MilestoneDetailPage() {
           setChangelog(null);
         }
       })
-      .catch((err) => setError(err.message))
+      .catch((err: unknown) => setError(errorMessage(err)))
       .finally(() => setLoading(false));
-  };
+  }, [milestoneId]);
 
-  useEffect(() => { loadMilestone(); }, [milestoneId]);
-  const loadTodos = () => { if (id) api.todos.list({ projectId: id }).then(setTodos); };
-  useEffect(() => { loadTodos(); }, [id]);
+  useEffect(() => { loadMilestone(); }, [loadMilestone]);
+  const loadTodos = useCallback(() => {
+    if (!id) return;
+    // Hintergrundliste: ein Fehlschlag lässt die Seite stehen, darf aber keine
+    // unbehandelte Rejection erzeugen — vorher fehlte das `catch` ganz.
+    void api.todos.list({ projectId: id }).then(setTodos).catch(() => undefined);
+  }, [id]);
+  useEffect(() => { loadTodos(); }, [loadTodos]);
 
   const handleStatusChange = async (newStatus: Milestone['status']) => {
     if (!milestoneId) return;
     try {
       await api.milestones.update(milestoneId, { status: newStatus });
       loadMilestone();
-    } catch (err: any) {
-      showError(err.message || t('milestoneDetail.statusChangeFailed'));
+    } catch (err) {
+      showError(errorMessage(err, t('milestoneDetail.statusChangeFailed')));
     }
   };
 
@@ -215,12 +225,31 @@ export default function MilestoneDetailPage() {
     if (!milestoneId) return;
     try {
       await api.milestones.exportRaw(milestoneId);
-    } catch (err: any) {
-      showError(err.message || t('common.error', 'Fehler'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.error', 'Fehler')));
     }
   };
 
-  const handleImported = (_result: ImportResult) => {
+  const handleToggleArchive = async (current: Milestone) => {
+    try {
+      await api.milestones.update(current._id, { archived: !current.archived });
+      loadMilestone();
+    } catch (err) {
+      showError(errorMessage(err, t('milestoneDetail.archiveFailed')));
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!milestoneId) return;
+    try {
+      await api.milestones.delete(milestoneId);
+      await navigate(`/projects/${id}`);
+    } catch (err) {
+      showError(errorMessage(err, t('milestoneDetail.deleteFailed')));
+    }
+  };
+
+  const handleImported = () => {
     // Import creates a new milestone in the same project; just close dialog
     setImportDialogOpen(false);
   };
@@ -376,13 +405,13 @@ export default function MilestoneDetailPage() {
           <DetailSection title={t('common.actions')} className="mb-8">
             <div className="flex flex-wrap items-center gap-2">
             {milestone.status === 'open' && (
-              <Button type="button" variant="warning" size="sm" onClick={() => handleStatusChange('in_progress')}>
+              <Button type="button" variant="warning" size="sm" onClick={() => { void handleStatusChange('in_progress'); }}>
                 {t('todoTransitions.start')}
               </Button>
             )}
             {milestone.status === 'in_progress' && (
               <>
-                <Button type="button" variant="neutral" size="sm" onClick={() => handleStatusChange('open')}>
+                <Button type="button" variant="neutral" size="sm" onClick={() => { void handleStatusChange('open'); }}>
                   {t('milestoneDetail.backToOpen')}
                 </Button>
                 <Button type="button" variant="success" size="sm" onClick={() => setShowChangelogForm(true)}>
@@ -391,7 +420,7 @@ export default function MilestoneDetailPage() {
               </>
             )}
             {milestone.status === 'done' && (
-              <Button type="button" variant="warning" size="sm" onClick={() => handleStatusChange('in_progress')}>
+              <Button type="button" variant="warning" size="sm" onClick={() => { void handleStatusChange('in_progress'); }}>
                 {t('milestoneDetail.reopenMilestone')}
               </Button>
             )}
@@ -399,17 +428,10 @@ export default function MilestoneDetailPage() {
               {t('common.edit')}
             </Button>
             <Button type="button" variant="neutral" size="sm"
-              onClick={async () => {
-                try {
-                  await api.milestones.update(milestone._id, { archived: !milestone.archived });
-                  loadMilestone();
-                } catch (err: any) {
-                  showError(err.message || t('milestoneDetail.archiveFailed'));
-                }
-              }}>
+              onClick={() => { void handleToggleArchive(milestone); }}>
               {milestone.archived ? t('common.restore') : t('common.archive')}
             </Button>
-            <Button type="button" variant="neutral" size="sm" onClick={handleExport}>
+            <Button type="button" variant="neutral" size="sm" onClick={() => { void handleExport(); }}>
               {t('milestone.actions.exportMarkdown')}
             </Button>
             <Button type="button" variant="neutral" size="sm" onClick={() => setImportDialogOpen(true)}>
@@ -419,14 +441,7 @@ export default function MilestoneDetailPage() {
               {t('milestone.actions.aiComplete')}
             </Button>
             <ConfirmButton
-              onConfirm={async () => {
-                try {
-                  await api.milestones.delete(milestoneId!);
-                  navigate(`/projects/${id}`);
-                } catch (err: any) {
-                  showError(err.message || t('milestoneDetail.deleteFailed'));
-                }
-              }}
+              onConfirm={handleDelete}
               size="sm"
               className="sm:ml-auto"
             />

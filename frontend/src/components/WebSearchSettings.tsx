@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, SetWebSearchConfig, SetWebSearchProvider, WebSearchProviderType } from '../api/client';
+import { optionOr } from '../lib/narrow';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
 import { FormInput, FormSelect, SecretInput } from './ui/FormField';
@@ -53,14 +54,19 @@ interface WebSearchSettingsState {
   maxResults: string;
 }
 
-const SETTING_KEYS: Record<keyof WebSearchSettingsState, string> = {
-  enabled: 'web_search_enabled',
-  searxngUrl: 'web_search_searxng_url',
-  defaultLanguage: 'web_search_default_language',
-  cacheTtlHours: 'web_search_cache_ttl_hours',
-  contentCacheTtlDays: 'web_search_content_cache_ttl_days',
-  maxResults: 'web_search_max_results',
-};
+/**
+ * Feld → Settings-Key. Bewusst als Tupel-Liste statt als Record: `Object.entries`
+ * liefert `[string, string][]` und musste vorher an zwei Stellen auf
+ * `[keyof WebSearchSettingsState, string][]` behauptet werden.
+ */
+const SETTING_ENTRIES: readonly [keyof WebSearchSettingsState, string][] = [
+  ['enabled', 'web_search_enabled'],
+  ['searxngUrl', 'web_search_searxng_url'],
+  ['defaultLanguage', 'web_search_default_language'],
+  ['cacheTtlHours', 'web_search_cache_ttl_hours'],
+  ['contentCacheTtlDays', 'web_search_content_cache_ttl_days'],
+  ['maxResults', 'web_search_max_results'],
+];
 
 const DEFAULTS: WebSearchSettingsState = {
   enabled: 'true',
@@ -107,7 +113,7 @@ export default function WebSearchSettings() {
     setError(null);
     try {
       const entries = await Promise.all(
-        (Object.entries(SETTING_KEYS) as [keyof WebSearchSettingsState, string][]).map(
+        SETTING_ENTRIES.map(
           async ([field, key]) => [field, (await api.settings.get(key)).value ?? DEFAULTS[field]] as const,
         ),
       );
@@ -150,9 +156,10 @@ export default function WebSearchSettings() {
   }, []);
 
   useEffect(() => {
-    loadSettings();
-    loadHealth();
-    loadProviderConfig();
+    // Alle drei melden ihre Fehler selbst über setError/setProviderError.
+    void loadSettings();
+    void loadHealth();
+    void loadProviderConfig();
   }, [loadSettings, loadHealth, loadProviderConfig]);
 
   const updateProviderField = (type: WebSearchProviderType, patch: Partial<ProviderFormEntry>) => {
@@ -214,9 +221,7 @@ export default function WebSearchSettings() {
     setSuccess(null);
     try {
       await Promise.all(
-        (Object.entries(SETTING_KEYS) as [keyof WebSearchSettingsState, string][]).map(
-          ([field, key]) => api.settings.set(key, values[field]),
-        ),
+        SETTING_ENTRIES.map(([field, key]) => api.settings.set(key, values[field])),
       );
       setSuccess(t('common.saved'));
       await loadHealth();
@@ -367,7 +372,7 @@ export default function WebSearchSettings() {
       </div>
 
       <div className="flex items-center gap-3 pt-2">
-        <Button variant="primary" size="lg" onClick={save} disabled={saving}>
+        <Button variant="primary" size="lg" onClick={() => { void save(); }} disabled={saving}>
           {saving ? t('common.saving') : t('common.save')}
         </Button>
         <ConfirmButton
@@ -403,7 +408,7 @@ export default function WebSearchSettings() {
               label={t('settings.webSearch.activeProvider')}
               value={activeProvider}
               onChange={(e) => {
-                setActiveProvider(e.target.value as WebSearchProviderType);
+                setActiveProvider(optionOr(e.target.value, PROVIDER_TYPES, activeProvider));
                 setProviderSuccess(null);
               }}
               fieldClassName="mb-4 max-w-xs"
@@ -486,7 +491,7 @@ export default function WebSearchSettings() {
                     )}
 
                     <div className="mt-3 flex flex-wrap items-center gap-3">
-                      <Button size="sm" onClick={() => testProviderConfig(type)} disabled={test?.testing === true}>
+                      <Button size="sm" onClick={() => { void testProviderConfig(type); }} disabled={test?.testing === true}>
                         {test?.testing ? t('settings.webSearch.testing') : t('settings.webSearch.test')}
                       </Button>
                       {test && !test.testing && (
@@ -503,7 +508,7 @@ export default function WebSearchSettings() {
             </div>
 
             <SettingsActions>
-              <Button variant="primary" onClick={saveProviderConfig} disabled={providerSaving}>
+              <Button variant="primary" onClick={() => { void saveProviderConfig(); }} disabled={providerSaving}>
                 {providerSaving ? t('common.saving') : t('common.save')}
               </Button>
             </SettingsActions>

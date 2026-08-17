@@ -21,6 +21,11 @@ i18n
       lookupLocalStorage: 'devgrimoire_language',
       caches: ['localStorage'],
     },
+  })
+  .catch((err: unknown) => {
+    // Schlägt die Initialisierung fehl, zeigt die Oberfläche nur noch
+    // Übersetzungsschlüssel. Das gehört in die Konsole statt still verschluckt.
+    console.error('i18n init failed', err);
   });
 
 export default i18n;

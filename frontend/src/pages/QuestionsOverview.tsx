@@ -21,6 +21,7 @@ import {
   QuestionAudienceBadge,
   QuestionResponsesList,
 } from '../components/questions/QuestionAudience';
+import { errorMessage, optionOr } from '../lib/narrow';
 
 const STATUS_OPTIONS: QuestionStatus[] = [
   'pending',
@@ -31,6 +32,17 @@ const STATUS_OPTIONS: QuestionStatus[] = [
   'superseded',
 ];
 const PAGE_SIZE = 25;
+
+/*
+ * `<select>`-Werte sind `string`. Die Liste macht aus dem früheren Cast eine
+ * echte Prüfung — ein umbenannter Options-Wert landet damit nicht mehr
+ * ungeprüft als `direction`-Filter in der API-Anfrage.
+ */
+const DIRECTION_OPTIONS: readonly (QuestionDirection | '')[] = [
+  '',
+  'agent_to_user',
+  'user_to_agent',
+];
 
 const STATUS_COLORS: Record<QuestionStatus, string> = {
   pending: 'bg-violet-900/40 text-violet-200 border-violet-700/50',
@@ -76,37 +88,61 @@ export default function QuestionsOverview() {
       .catch(() => { /* fall through */ });
   }, []);
 
-  const load = () => {
-    setLoading(true);
-    api.questions
-      .listAll({
-        status: Array.from(statusFilter),
-        direction: directionFilter || undefined,
-        projectId: projectFilter || undefined,
-        q: q.trim() || undefined,
-        limit: PAGE_SIZE,
-        offset,
-      })
-      .then((res) => {
-        setItems(res.items);
-        setTotal(res.total);
-      })
-      .catch((err) => {
-        showError(err instanceof Error ? err.message : t('questions.loadFailed'));
-        setItems([]);
-        setTotal(0);
-      })
-      .finally(() => setLoading(false));
+  /*
+   * `appliedQ` ist der Suchbegriff, der tatsächlich angefragt wird — das
+   * Eingabefeld `q` wirkt erst mit Enter. Vorher rief der Enter-Handler `load()`
+   * direkt auf, und zwar mit dem **alten** `offset` aus der Closure, während
+   * `setOffset(0)` parallel einen zweiten Ladevorgang auslöste. Auf Seite 2 gab
+   * es damit zwei konkurrierende Anfragen; kam die mit offset=25 später zurück,
+   * zeigte die Liste Seite 2 der neuen Suche, während die Blätterleiste Seite 1
+   * anzeigte.
+   *
+   * `reloadNonce` erhält das erzwungene Neuladen (Enter mit gleichem Begriff,
+   * Aktion im Detaildialog) ohne einen zweiten Ladepfad neben dem Effekt.
+   */
+  const [appliedQ, setAppliedQ] = useState('');
+  const [reloadNonce, setReloadNonce] = useState(0);
+
+  const submitSearch = () => {
+    setOffset(0);
+    setAppliedQ(q);
+    setReloadNonce((n) => n + 1);
   };
 
   useEffect(() => {
-    load();
+    let cancelled = false;
+    async function run() {
+      setLoading(true);
+      try {
+        const res = await api.questions.listAll({
+          status: Array.from(statusFilter),
+          direction: directionFilter || undefined,
+          projectId: projectFilter || undefined,
+          q: appliedQ.trim() || undefined,
+          limit: PAGE_SIZE,
+          offset,
+        });
+        if (cancelled) return;
+        setItems(res.items);
+        setTotal(res.total);
+      } catch (err) {
+        if (cancelled) return;
+        showError(errorMessage(err, t('questions.loadFailed')));
+        setItems([]);
+        setTotal(0);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void run();
     const unsub = wsEventBus.subscribe({ kind: 'global' }, (event) => {
-      if (isQuestionEvent(event)) load();
+      if (isQuestionEvent(event)) void run();
     });
-    return unsub;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, directionFilter, projectFilter, offset]);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [statusFilter, directionFilter, projectFilter, appliedQ, offset, reloadNonce, showError, t]);
 
   const toggleStatus = (s: QuestionStatus) => {
     setStatusFilter((prev) => {
@@ -121,7 +157,7 @@ export default function QuestionsOverview() {
   const onActionDone = (msg: string) => {
     showSuccess(msg);
     setActive(null);
-    load();
+    setReloadNonce((n) => n + 1);
   };
 
   return (
@@ -170,7 +206,7 @@ export default function QuestionsOverview() {
           </label>
           <select
             value={directionFilter}
-            onChange={(e) => { setDirectionFilter(e.target.value as QuestionDirection | ''); setOffset(0); }}
+            onChange={(e) => { setDirectionFilter(optionOr(e.target.value, DIRECTION_OPTIONS, '')); setOffset(0); }}
             className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
           >
             <option value="">{t('questions.filterDirectionAll')}</option>
@@ -203,7 +239,7 @@ export default function QuestionsOverview() {
             type="text"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { setOffset(0); load(); } }}
+            onKeyDown={(e) => { if (e.key === 'Enter') submitSearch(); }}
             placeholder={t('questionsPage.searchPlaceholder')}
             className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
           />
@@ -339,7 +375,7 @@ function QuestionDetailDialog({
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
     try { await fn(); } catch (err) {
-      showError(err instanceof Error ? err.message : String(err));
+      showError(errorMessage(err));
     } finally { setBusy(false); }
   };
 
@@ -413,13 +449,13 @@ function QuestionDetailDialog({
                     size="xs"
                     variant="secondary"
                     disabled={busy || !snoozeHours}
-                    onClick={() => run(async () => {
+                    onClick={() => { void run(async () => {
                       const hours = parseFloat(snoozeHours);
                       if (!Number.isFinite(hours) || hours <= 0) return;
                       const until = new Date(Date.now() + hours * 3600 * 1000).toISOString();
                       await api.questions.snooze(question._id, until);
                       onDone(t('questionsPage.snoozedToast'));
-                    })}
+                    }); }}
                   >
                     {t('questionsPage.snooze')}
                   </Button>
@@ -431,11 +467,11 @@ function QuestionDetailDialog({
                   size="xs"
                   variant="danger"
                   disabled={busy}
-                  onClick={() => run(async () => {
+                  onClick={() => { void run(async () => {
                     if (!window.confirm(t('questionsPage.cancelConfirm'))) return;
                     await api.questions.cancel(question._id);
                     onDone(t('questionsPage.cancelledToast'));
-                  })}
+                  }); }}
                 >
                   {t('questionsPage.cancel')}
                 </Button>
@@ -460,13 +496,13 @@ function QuestionDetailDialog({
               size="xs"
               variant="primary"
               disabled={busy}
-              onClick={() => run(async () => {
+              onClick={() => { void run(async () => {
                 await api.questions.createFollowupTodo(question._id, {
                   title: followupTitle.trim() || undefined,
                 });
                 setFollowupTitle('');
                 onDone(t('questionsPage.followupCreatedToast'));
-              })}
+              }); }}
             >
               {t('questionsPage.createFollowup')}
             </Button>
@@ -496,7 +532,7 @@ function QuestionDetailDialog({
               size="xs"
               variant="primary"
               disabled={busy || !decisionText.trim()}
-              onClick={() => run(async () => {
+              onClick={() => { void run(async () => {
                 await api.questions.markAsDecision(question._id, {
                   decision: decisionText.trim(),
                   rationale: decisionRationale.trim() || undefined,
@@ -504,7 +540,7 @@ function QuestionDetailDialog({
                 setDecisionText('');
                 setDecisionRationale('');
                 onDone(t('questionsPage.decisionRecordedToast'));
-              })}
+              }); }}
             >
               {t('questionsPage.recordDecision')}
             </Button>

@@ -4,6 +4,8 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 import { Workspace, getCurrentAccessToken } from '../api/client';
+import { parseJsonText } from '../api/http-boundary';
+import { isRecord, readApiBaseUrl } from '../lib/narrow';
 import { safeRandomUUID } from '../utils/randomId';
 import Button from './ui/Button';
 
@@ -12,9 +14,14 @@ interface Props {
   onClose: () => void;
 }
 
-const BASE_URL =
-  (typeof window !== 'undefined' && (window as unknown as { __DG_API_URL__?: string }).__DG_API_URL__) ||
-  '/api';
+/**
+ * Optionaler Laufzeit-Override `window.__DG_API_URL__` (gesetzt von einem
+ * Deployment, das die SPA von einem anderen Origin ausliefert als die API).
+ * Über ein Prädikat gelesen statt über `window as unknown as {…}`: nichts in
+ * diesem Repo deklariert oder schreibt das Global, seine Existenz und sein Typ
+ * sind zur Build-Zeit tatsächlich unbekannt.
+ */
+const BASE_URL = readApiBaseUrl();
 
 // Session id for the per-tab terminal map key on the sidecar. Uses the
 // secure-context-safe UUID helper so it also works over plain HTTP, where
@@ -84,9 +91,10 @@ export default function WorkspaceTerminal({ workspace, onClose }: Props) {
         // out of the agent's way (avoid weird ANSI). Only 'exit' messages
         // come through this path today.
         try {
-          const msg = JSON.parse(ev.data);
-          if (msg && msg.type === 'exit') {
-            term.write(`\r\n\x1b[2m# bash exited (code ${msg.exitCode ?? '?'})\x1b[0m\r\n`);
+          const msg = parseJsonText<unknown>(ev.data);
+          if (isRecord(msg) && msg.type === 'exit') {
+            const code = typeof msg.exitCode === 'number' ? String(msg.exitCode) : '?';
+            term.write(`\r\n\x1b[2m# bash exited (code ${code})\x1b[0m\r\n`);
             return;
           }
         } catch {

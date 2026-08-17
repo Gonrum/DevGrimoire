@@ -197,7 +197,7 @@ export default function ApiKeyScopeEditor({ apiKey, onSave, onClose }: Props) {
         <Button variant="secondary" onClick={onClose} disabled={saving}>
           {t('common.cancel')}
         </Button>
-        <Button variant="primary" onClick={handleSave} disabled={saving}>
+        <Button variant="primary" onClick={() => { void handleSave(); }} disabled={saving}>
           {saving ? t('common.saving') : t('common.save')}
         </Button>
       </div>

@@ -5,7 +5,7 @@ import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 import Button from '../ui/Button';
 import { parseJsonText } from '../../api/http-boundary';
-import { isRecord } from '../../lib/narrow';
+import { isRecord, readApiBaseUrl } from '../../lib/narrow';
 
 /**
  * Optional runtime override `window.__DG_API_URL__` (set by a deployment that
@@ -13,15 +13,6 @@ import { isRecord } from '../../lib/narrow';
  * predicate instead of a cast: nothing in this repo declares or writes the
  * global, so its presence and type are genuinely unknown at build time.
  */
-function readApiBaseUrl(): string {
-  const globals: unknown = globalThis;
-  if (isRecord(globals)) {
-    const configured = globals.__DG_API_URL__;
-    if (typeof configured === 'string' && configured.length > 0) return configured;
-  }
-  return '/api';
-}
-
 const BASE_URL = readApiBaseUrl();
 
 export interface SshTerminalProps {

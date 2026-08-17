@@ -43,7 +43,14 @@ export default function ReplicationSyncStatus() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  /*
+   * Der Fetch steckt in einer eigenen async-Funktion, damit der Effekt-Body
+   * selbst nichts synchron setzt (`react-hooks/set-state-in-effect`). `load`
+   * ist `useCallback`-stabil, die Dep-Liste laeuft also nicht im Kreis.
+   */
+  useEffect(() => {
+    void (async () => { await load(); })();
+  }, [load]);
 
   // Live refresh on replication-status pushes (debounced) + when the tab regains
   // focus — same pattern as the legacy status card.
@@ -51,12 +58,12 @@ export default function ReplicationSyncStatus() {
   useEffect(() => {
     const schedule = () => {
       if (timer.current !== null) return;
-      timer.current = window.setTimeout(() => { timer.current = null; load(); }, 300);
+      timer.current = window.setTimeout(() => { timer.current = null; void load(); }, 300);
     };
     const unsub = wsEventBus.subscribe({ kind: 'global' }, (event) => {
       if (isProjectChangeEvent(event) && event.entity === 'replication-status') schedule();
     });
-    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') void load(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       unsub();
@@ -64,6 +71,22 @@ export default function ReplicationSyncStatus() {
       if (timer.current !== null) { window.clearTimeout(timer.current); timer.current = null; }
     };
   }, [load]);
+
+  /*
+   * Uhr im State statt `Date.now()` im Render (`react-hooks/purity`).
+   *
+   * Der Tick ist hier nicht bloss Formsache: die Heartbeat-Warnung wurde vorher
+   * nur dann neu bewertet, wenn irgendein anderer Zustand ein Rendern ausloeste
+   * — und die einzigen Ausloeser sind `replication-status`-Events bzw. ein
+   * Tabwechsel. Genau wenn das Backend verstummt, bleiben beide aus: der
+   * Heartbeat blieb dann dauerhaft gruen, obwohl er laengst ueber 90s alt war.
+   * Das ist der Fall, den die Warnung anzeigen soll.
+   */
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => { setNowTick(Date.now()); }, 30_000);
+    return () => { window.clearInterval(id); };
+  }, []);
 
   const flash = (kind: 'ok' | 'err', text: string) => {
     setMsg({ kind, text });
@@ -77,7 +100,7 @@ export default function ReplicationSyncStatus() {
       flash('ok', r.skippedReason
         ? t('replication.syncNowSkipped', { reason: r.skippedReason })
         : t('replication.syncNowDone', { pushed: r.pushed, applied: r.applied }));
-      load();
+      void load();
     } catch (err) { flash('err', errorMessage(err)); }
     finally { setBusy(null); }
   };
@@ -87,7 +110,7 @@ export default function ReplicationSyncStatus() {
     try {
       const r = await api.replication.runGc();
       flash('ok', t('replication.gcDone', { deleted: r.deleted }));
-      load();
+      void load();
     } catch (err) { flash('err', errorMessage(err)); }
     finally { setBusy(null); }
   };
@@ -99,7 +122,7 @@ export default function ReplicationSyncStatus() {
       flash(r.ok ? 'ok' : 'err', r.ok
         ? t('replication.deadletterReplayed')
         : (r.reason || t('replication.deadletterReplayFailed')));
-      load();
+      void load();
     } catch (err) { flash('err', errorMessage(err)); }
     finally { setBusy(null); }
   };
@@ -109,7 +132,7 @@ export default function ReplicationSyncStatus() {
     try {
       await api.replication.discardDeadletter(id);
       flash('ok', t('replication.deadletterDiscarded'));
-      load();
+      void load();
     } catch (err) { flash('err', errorMessage(err)); }
     finally { setBusy(null); }
   };
@@ -136,7 +159,7 @@ export default function ReplicationSyncStatus() {
 
   const renderHeartbeat = (iso: string | null) => {
     if (!iso) return <span className="text-gray-500">—</span>;
-    const stale = Date.now() - new Date(iso).getTime() > 90_000;
+    const stale = nowTick - new Date(iso).getTime() > 90_000;
     return (
       <span className={stale ? 'text-amber-400' : 'text-green-400'}>
         {new Date(iso).toLocaleTimeString(dateLocale)}
@@ -152,8 +175,8 @@ export default function ReplicationSyncStatus() {
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-medium text-gray-300">{t('replication.syncEngineTitle')}</h2>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="xs" onClick={load}>⟳</Button>
-          <Button variant="secondary" size="xs" onClick={syncNow} disabled={busy === 'sync'}>
+          <Button variant="ghost" size="xs" onClick={() => { void load(); }}>⟳</Button>
+          <Button variant="secondary" size="xs" onClick={() => { void syncNow(); }} disabled={busy === 'sync'}>
             {busy === 'sync' ? '…' : t('replication.syncNow')}
           </Button>
           <ConfirmButton
@@ -237,7 +260,7 @@ export default function ReplicationSyncStatus() {
                 {d.collection}/{d.documentId.slice(0, 8)} · {d.reason}
               </span>
               <span className="text-gray-500 shrink-0">{t('replication.deadletterAttempts', { n: d.attempts })}</span>
-              <Button variant="ghost" size="xs" onClick={() => replay(d._id)} disabled={busy === d._id}>
+              <Button variant="ghost" size="xs" onClick={() => { void replay(d._id); }} disabled={busy === d._id}>
                 {t('replication.deadletterReplay')}
               </Button>
               <ConfirmButton

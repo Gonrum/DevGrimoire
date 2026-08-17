@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate, useLocation, Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Todo, Milestone, Question, AcceptanceCriterion } from '../api/client';
@@ -23,11 +23,34 @@ import TodoDocProposalsBanner from '../components/todo/TodoDocProposalsBanner';
 import AcceptanceCriteriaEditor from '../components/todo/AcceptanceCriteriaEditor';
 import AttachmentList from '../components/AttachmentList';
 import TodoActivityTimeline from '../components/todo/TodoActivityTimeline';
+import { errorMessage, optionOr } from '../lib/narrow';
 
-type DetailTab = 'general' | 'definition' | 'questions' | 'activities';
+/**
+ * Die Tab-Keys als Laufzeit-Liste, damit `?tab=` geprüft statt behauptet
+ * werden kann. Der Typ wird aus der Liste abgeleitet — beide können nicht
+ * mehr auseinanderlaufen.
+ */
+const DETAIL_TABS = ['general', 'definition', 'questions', 'activities'] as const;
+type DetailTab = (typeof DETAIL_TABS)[number];
+
+/** Dieselbe Rolle für das Prioritäts-Select: `HTMLSelectElement.value` ist `string`. */
+const TODO_PRIORITIES = ['low', 'medium', 'high', 'critical'] as const;
+
+/** Stabile Referenz für "in diesem Scope gibt es keine Milestones". */
+const NO_MILESTONES: Milestone[] = [];
+
+/**
+ * Begleitende Liste nachladen: schlägt sie fehl, bleibt die Seite stehen
+ * (die eigentliche Todo-Ladung meldet ihre Fehler über `error`). Vorher hatten
+ * diese Aufrufe gar kein `catch` und erzeugten unbehandelte Rejections.
+ */
+function backgroundLoad(p: Promise<unknown>): void {
+  void p.catch(() => undefined);
+}
 
 function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => void; onCancel: () => void }) {
   const { t } = useTranslation();
+  const { showError } = useToast();
   const [title, setTitle] = useState(todo.title);
   const [description, setDescription] = useState(todo.description || '');
   const [priority, setPriority] = useState(todo.priority);
@@ -43,23 +66,28 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
         title: title.trim(),
         description: description.trim() || undefined,
         priority,
-        tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
+        tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
       });
       onSaved();
+    } catch (err) {
+      // Vorher gab es hier nur `finally`: ein fehlgeschlagenes Speichern
+      // liess das Formular offen, ohne dass irgendetwas passierte — der
+      // Fehler ging als unbehandelte Rejection in die Konsole.
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
+    <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-5">
       <FormInput label={t('common.title')} required type="text" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
       <div>
         <label className="block text-xs text-gray-500 mb-1">{t('common.description')}</label>
         <MarkdownEditor value={description} onChange={setDescription} rows={4} placeholder={t('todos.descriptionPlaceholder')} />
       </div>
       <div className="flex flex-col gap-3 sm:flex-row">
-        <FormSelect fieldClassName="w-full sm:w-44 shrink-0" label={t('common.priority')} value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}>
+        <FormSelect fieldClassName="w-full sm:w-44 shrink-0" label={t('common.priority')} value={priority} onChange={(e) => setPriority((current) => optionOr(e.target.value, TODO_PRIORITIES, current))}>
           <option value="low">{t('todoPriority.low')}</option>
           <option value="medium">{t('todoPriority.medium')}</option>
           <option value="high">{t('todoPriority.high')}</option>
@@ -91,19 +119,27 @@ export default function TodoDetailPage() {
   const { showError, showSuccess } = useToast();
   const [todo, setTodo] = useState<Todo | null>(null);
   const [allTodos, setAllTodos] = useState<Todo[]>([]);
-  const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [savingComment, setSavingComment] = useState(false);
-  const [storageEnabled, setStorageEnabled] = useState(false);
   const [questions, setQuestions] = useState<Question[]>([]);
 
+  /*
+   * Milestones und Datei-Ablage gibt es nur im Projekt-Scope. Vorher setzte
+   * der Effect im Kunden-Zweig beide State-Werte synchron auf leer zurück
+   * (`set-state-in-effect`) — ein No-Op, weil `isCustomerScope` aus dem Pfad
+   * kommt und sich innerhalb einer Montierung nicht ändern kann. Jetzt ist
+   * die Scope-Abhängigkeit direkt im abgeleiteten Wert sichtbar.
+   */
+  const [projectMilestones, setProjectMilestones] = useState<Milestone[]>([]);
+  const [attachmentsEnabled, setAttachmentsEnabled] = useState(false);
+  const milestones = isCustomerScope ? NO_MILESTONES : projectMilestones;
+  const storageEnabled = !isCustomerScope && attachmentsEnabled;
+
   // Tab state — synced with ?tab= URL param
-  const tabParam = searchParams.get('tab') as DetailTab | null;
-  const validTabs: DetailTab[] = ['general', 'definition', 'questions', 'activities'];
-  const activeTab: DetailTab = tabParam && validTabs.includes(tabParam) ? tabParam : 'general';
+  const activeTab: DetailTab = optionOr(searchParams.get('tab') ?? '', DETAIL_TABS, 'general');
 
   const setActiveTab = (tab: DetailTab) => {
     setSearchParams((prev) => {
@@ -120,39 +156,41 @@ export default function TodoDetailPage() {
   const [edgeCases, setEdgeCases] = useState('');
   const [savingDefinition, setSavingDefinition] = useState(false);
 
-  const loadTodo = () => {
+  const loadTodo = useCallback(() => {
     if (!todoId) return;
     api.todos.get(todoId)
-      .then((t) => {
-        setTodo(t);
-        setUserStories(t.userStories || '');
-        setAcceptanceCriteria(t.acceptanceCriteria || []);
-        setOutOfScope(t.outOfScope || '');
-        setEdgeCases(t.edgeCases || '');
+      .then((data) => {
+        // Vorher fehlte dieses Zurücksetzen: ein einziger fehlgeschlagener
+        // Refresh (z.B. nach einem Statuswechsel) setzte `error` dauerhaft,
+        // und die Seite blieb auch nach erfolgreichem Nachladen die Fehlerbox.
+        setError(null);
+        setTodo(data);
+        setUserStories(data.userStories || '');
+        setAcceptanceCriteria(data.acceptanceCriteria || []);
+        setOutOfScope(data.outOfScope || '');
+        setEdgeCases(data.edgeCases || '');
       })
-      .catch((err) => setError(err.message))
+      .catch((err: unknown) => setError(errorMessage(err)))
       .finally(() => setLoading(false));
-  };
+  }, [todoId]);
 
-  const loadQuestions = () => {
+  const loadQuestions = useCallback(() => {
     if (!todoId) return;
     api.questions.byTodo(todoId, true)
       .then(setQuestions)
       .catch(() => setQuestions([]));
-  };
+  }, [todoId]);
 
-  useEffect(() => { loadTodo(); loadQuestions(); }, [todoId]);
+  useEffect(() => { loadTodo(); loadQuestions(); }, [loadTodo, loadQuestions]);
   useEffect(() => {
     if (!id) return;
     if (isCustomerScope) {
-      api.todos.list({ customerId: id }).then(setAllTodos);
-      setMilestones([]);
-      setStorageEnabled(false);
+      backgroundLoad(api.todos.list({ customerId: id }).then(setAllTodos));
       return;
     }
-    api.milestones.list(id).then(setMilestones);
-    api.todos.list({ projectId: id }).then(setAllTodos);
-    api.attachments.storageStatus().then((s) => setStorageEnabled(s.enabled)).catch(() => {});
+    backgroundLoad(api.milestones.list(id).then(setProjectMilestones));
+    backgroundLoad(api.todos.list({ projectId: id }).then(setAllTodos));
+    backgroundLoad(api.attachments.storageStatus().then((s) => { setAttachmentsEnabled(s.enabled); }));
   }, [id, isCustomerScope]);
 
   const handleStatusChange = async (newStatus: Todo['status']) => {
@@ -160,8 +198,8 @@ export default function TodoDetailPage() {
     try {
       await api.todos.update(todoId, { status: newStatus });
       loadTodo();
-    } catch (err: any) {
-      showError(err.message || t('todos.statusChangeFailed'));
+    } catch (err) {
+      showError(errorMessage(err, t('todos.statusChangeFailed')));
     }
   };
 
@@ -172,8 +210,41 @@ export default function TodoDetailPage() {
       await api.todos.addComment(todoId, commentText.trim());
       setCommentText('');
       loadTodo();
+    } catch (err) {
+      // Vorher nur `finally`: ein fehlgeschlagener Kommentar verschwand
+      // wortlos — der Text blieb zwar stehen, aber der Nutzer erfuhr nicht,
+      // dass nichts gespeichert wurde.
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSavingComment(false);
+    }
+  };
+
+  const handleToggleArchive = async (current: Todo) => {
+    try {
+      await api.todos.update(current._id, { archived: !current.archived });
+      loadTodo();
+    } catch (err) {
+      showError(errorMessage(err, t('todos.archiveFailed')));
+    }
+  };
+
+  const handleMilestoneChange = async (current: Todo, milestoneId: string) => {
+    try {
+      await api.todos.update(current._id, { milestoneId: milestoneId || undefined });
+      loadTodo();
+    } catch (err) {
+      showError(errorMessage(err, t('todoDetail.milestoneChangeFailed')));
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!todoId) return;
+    try {
+      await api.todos.delete(todoId);
+      await navigate(basePath);
+    } catch (err) {
+      showError(errorMessage(err, t('todos.deleteFailed')));
     }
   };
 
@@ -189,8 +260,8 @@ export default function TodoDetailPage() {
       });
       showSuccess(t('todoDetail.definitionSaved'));
       loadTodo();
-    } catch (err: any) {
-      showError(err.message || t('todoDetail.definitionSaveFailed'));
+    } catch (err) {
+      showError(errorMessage(err, t('todoDetail.definitionSaveFailed')));
     } finally {
       setSavingDefinition(false);
     }
@@ -277,14 +348,7 @@ export default function TodoDetailPage() {
                 <DetailSection title={t('todoCreate.milestone')} className="mb-5">
                   <FormSelect
                     value={todo.milestoneId || ''}
-                    onChange={async (e) => {
-                      try {
-                        await api.todos.update(todo._id, { milestoneId: e.target.value || undefined });
-                        loadTodo();
-                      } catch (err: any) {
-                        showError(err.message || t('todoDetail.milestoneChangeFailed'));
-                      }
-                    }}
+                    onChange={(e) => { void handleMilestoneChange(todo, e.target.value); }}
                   >
                     <option value="">{t('todoCreate.noMilestone')}</option>
                     {milestones.map((ms) => (
@@ -315,32 +379,18 @@ export default function TodoDetailPage() {
               <DetailSection title={t('common.actions')} className="mb-8">
                 <div className="flex flex-wrap items-center gap-2">
                   {STATUS_TRANSITIONS[todo.status].map((tr) => (
-                    <Button key={tr.next} type="button" variant={TRANSITION_BUTTON_VARIANT[tr.next]} size="sm" onClick={() => handleStatusChange(tr.next)}>
+                    <Button key={tr.next} type="button" variant={TRANSITION_BUTTON_VARIANT[tr.next]} size="sm" onClick={() => { void handleStatusChange(tr.next); }}>
                       {tr.label()}
                     </Button>
                   ))}
                   <Button type="button" variant="edit" size="sm" onClick={() => setEditing(true)}>
                     {t('common.edit')}
                   </Button>
-                  <Button type="button" variant="neutral" size="sm" onClick={async () => {
-                    try {
-                      await api.todos.update(todo._id, { archived: !todo.archived });
-                      loadTodo();
-                    } catch (err: any) {
-                      showError(err.message || t('todos.archiveFailed'));
-                    }
-                  }}>
+                  <Button type="button" variant="neutral" size="sm" onClick={() => { void handleToggleArchive(todo); }}>
                     {todo.archived ? t('common.restore') : t('common.archive')}
                   </Button>
                   <ConfirmButton
-                    onConfirm={async () => {
-                      try {
-                        await api.todos.delete(todoId!);
-                        navigate(basePath);
-                      } catch (err: any) {
-                        showError(err.message || t('todos.deleteFailed'));
-                      }
-                    }}
+                    onConfirm={handleDelete}
                     size="sm"
                     className="sm:ml-auto"
                   />
@@ -380,9 +430,9 @@ export default function TodoDetailPage() {
                     value={commentText}
                     onChange={(e) => setCommentText(e.target.value)}
                     placeholder={t('todoDetail.commentPlaceholder')}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void handleAddComment(); }}
                   />
-                  <Button type="button" variant="primary" onClick={handleAddComment} disabled={savingComment || !commentText.trim()}>
+                  <Button type="button" variant="primary" onClick={() => { void handleAddComment(); }} disabled={savingComment || !commentText.trim()}>
                     {savingComment ? '...' : t('common.send')}
                   </Button>
                 </div>
@@ -444,7 +494,7 @@ export default function TodoDetailPage() {
                   type="button"
                   variant="primary"
                   disabled={savingDefinition}
-                  onClick={handleSaveDefinition}
+                  onClick={() => { void handleSaveDefinition(); }}
                 >
                   {savingDefinition ? t('common.saving') : t('common.save')}
                 </Button>

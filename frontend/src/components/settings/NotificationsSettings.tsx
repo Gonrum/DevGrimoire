@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../../api/client';
 import Button from '../ui/Button';
@@ -46,7 +46,10 @@ const DEFAULT_QUIET_OVERRIDES = ['monitoring_unhealthy', 'workflow_failure', 'ba
 export default function NotificationsSettings() {
   const { t } = useTranslation();
   const [pushCategories, setPushCategories] = useState<Record<string, boolean>>({});
-  const [pushLoading, setPushLoading] = useState(false);
+  // Startet auf `true`: der Mount-Effect lädt sofort. Mit `false` rendert der
+  // erste Frame die Kategorien-Liste mit noch leerem `pushCategories`, also alle
+  // Schalter auf "aus" — sichtbar falsch für jeden default-ON-Kanal.
+  const [pushLoading, setPushLoading] = useState(true);
   const [pushSaving, setPushSaving] = useState(false);
   const [dictationEnabled, setDictationEnabled] = useState(
     () => localStorage.getItem('dg_dictation_enabled') !== 'false',
@@ -58,30 +61,29 @@ export default function NotificationsSettings() {
   const [quietOverrides, setQuietOverrides] = useState<string[]>(DEFAULT_QUIET_OVERRIDES);
   const [quietSaving, setQuietSaving] = useState(false);
 
-  const loadPushCategories = useCallback(async () => {
-    setPushLoading(true);
-    try {
-      const res = await api.settings.get('notification_push_categories');
-      const enabled = (
-        res.value ?? PUSH_CATEGORIES.filter((c) => c.default).map((c) => c.key).join(',')
-      )
-        .split(',')
-        .map((c) => c.trim())
-        .filter(Boolean);
-      const state: Record<string, boolean> = {};
-      for (const cat of PUSH_CATEGORIES) {
-        state[cat.key] = enabled.includes(cat.key);
-      }
-      setPushCategories(state);
-    } catch { /* ignore */ }
-    setPushLoading(false);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await api.settings.get('notification_push_categories');
+        const enabled = (
+          res.value ?? PUSH_CATEGORIES.filter((c) => c.default).map((c) => c.key).join(',')
+        )
+          .split(',')
+          .map((c) => c.trim())
+          .filter(Boolean);
+        const state: Record<string, boolean> = {};
+        for (const cat of PUSH_CATEGORIES) {
+          state[cat.key] = enabled.includes(cat.key);
+        }
+        setPushCategories(state);
+      } catch { /* ignore */ }
+      setPushLoading(false);
+    })();
   }, []);
-
-  useEffect(() => { loadPushCategories(); }, [loadPushCategories]);
 
   // T-340: load quiet-hours settings on mount
   useEffect(() => {
-    (async () => {
+    void (async () => {
       try {
         const [enabled, from, to, overrides] = await Promise.all([
           api.settings.get('notification_quiet_hours_enabled'),
@@ -126,7 +128,7 @@ export default function NotificationsSettings() {
     const next = quietOverrides.includes(key)
       ? quietOverrides.filter((k) => k !== key)
       : [...quietOverrides, key];
-    saveQuietHours({ overrides: next });
+    void saveQuietHours({ overrides: next });
   };
 
   const savePushCategories = async (updated: Record<string, boolean>) => {
@@ -140,7 +142,7 @@ export default function NotificationsSettings() {
   };
 
   const togglePushCategory = (key: string) => {
-    savePushCategories({ ...pushCategories, [key]: !pushCategories[key] });
+    void savePushCategories({ ...pushCategories, [key]: !pushCategories[key] });
   };
 
   const toggleAllInGroup = (group: string) => {
@@ -148,7 +150,7 @@ export default function NotificationsSettings() {
     const allOn = keys.every((k) => pushCategories[k]);
     const updated = { ...pushCategories };
     for (const k of keys) updated[k] = !allOn;
-    savePushCategories(updated);
+    void savePushCategories(updated);
   };
 
   const toggleDictation = (next: boolean) => {
@@ -243,7 +245,7 @@ export default function NotificationsSettings() {
               <div className="text-sm text-gray-300">{t('settings.quietHoursEnabled')}</div>
               <Switch
                 checked={quietEnabled}
-                onChange={(next) => saveQuietHours({ enabled: next })}
+                onChange={(next) => { void saveQuietHours({ enabled: next }); }}
                 disabled={quietSaving}
               />
             </div>
@@ -255,7 +257,7 @@ export default function NotificationsSettings() {
                     <input
                       type="time"
                       value={quietFrom}
-                      onChange={(e) => saveQuietHours({ from: e.target.value })}
+                      onChange={(e) => { void saveQuietHours({ from: e.target.value }); }}
                       disabled={quietSaving}
                       className="mt-1 block w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
                     />
@@ -265,7 +267,7 @@ export default function NotificationsSettings() {
                     <input
                       type="time"
                       value={quietTo}
-                      onChange={(e) => saveQuietHours({ to: e.target.value })}
+                      onChange={(e) => { void saveQuietHours({ to: e.target.value }); }}
                       disabled={quietSaving}
                       className="mt-1 block w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
                     />

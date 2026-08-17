@@ -54,7 +54,13 @@ export default function MonitoringTab({
   const { t } = useTranslation();
   const { showError, showSuccess } = useToast();
   const [checks, setChecks] = useState<Healthcheck[]>([]);
-  const [loading, setLoading] = useState(true);
+  /**
+   * Für welchen Kunden die angezeigte Liste geholt wurde — `null` = noch keine.
+   * Ersetzt ein `loading`-Flag, das der Effect synchron gesetzt hat: der Zustand
+   * „lädt" ist eine Ableitung, kein Effekt.
+   */
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const loading = loadedFor !== customerId;
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Healthcheck | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -62,20 +68,18 @@ export default function MonitoringTab({
   const [running, setRunning] = useState<string | null>(null);
   const [secrets, setSecrets] = useState<SecretListItem[]>([]);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      const list = await api.monitoring.list(customerId);
-      setChecks(list);
-    } catch (err) {
-      showError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [customerId, showError]);
+  const reload = useCallback(
+    () =>
+      api.monitoring
+        .list(customerId)
+        .then(setChecks)
+        .catch((err: unknown) => { showError(err instanceof Error ? err.message : String(err)); })
+        .finally(() => { setLoadedFor(customerId); }),
+    [customerId, showError],
+  );
 
   useEffect(() => {
-    reload();
+    void reload();
   }, [reload]);
 
   // T-352: Live-Update bei Status-Wechsel. Backend emittet healthcheck-Events
@@ -109,7 +113,9 @@ export default function MonitoringTab({
   // Load secrets reachable for this customer (customer-owned + project-owned of linked projects).
   useEffect(() => {
     const projectIds = linkedProjectIds;
-    Promise.all([
+    // Jeder Teil-Request hat sein eigenes `.catch` — die Sammel-Promise kann
+    // nicht mehr rejecten.
+    void Promise.all([
       api.secrets.listForCustomer(customerId).catch(() => [] as SecretListItem[]),
       ...projectIds.map((pid) =>
         api.secrets.list(pid).catch(() => [] as SecretListItem[]),
@@ -275,11 +281,11 @@ export default function MonitoringTab({
                       size="xs"
                       variant="success"
                       disabled={running === c._id}
-                      onClick={() => handleRun(c._id)}
+                      onClick={() => { void handleRun(c._id); }}
                     >
                       {running === c._id ? '…' : t('monitoring.runNow')}
                     </Button>
-                    <Button size="xs" variant="secondary" onClick={() => toggleExpanded(c._id)}>
+                    <Button size="xs" variant="secondary" onClick={() => { void toggleExpanded(c._id); }}>
                       {isExpanded ? t('monitoring.hideHistory') : t('monitoring.showHistory')}
                     </Button>
                     <Button
@@ -639,7 +645,7 @@ function HealthcheckForm({
         </Button>
         <Button
           variant="primary"
-          onClick={submit}
+          onClick={() => { void submit(); }}
           disabled={saving || !name.trim() || !url.trim()}
         >
           {saving ? '…' : initial ? t('common.save') : t('common.create')}

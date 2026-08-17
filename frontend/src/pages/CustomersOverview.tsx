@@ -8,6 +8,7 @@ import EmptyState from '../components/ui/EmptyState';
 import Markdown from '../components/Markdown';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { useToast } from '../components/Toast';
+import { errorMessage, optionOr } from '../lib/narrow';
 
 const statusColors: Record<CustomerStatus, string> = {
   lead: 'bg-blue-900/50 text-blue-300',
@@ -18,6 +19,22 @@ const statusColors: Record<CustomerStatus, string> = {
   cancelled: 'bg-red-900/50 text-red-300',
   archived: 'bg-gray-800 text-gray-500',
 };
+
+/*
+ * Die Werte des Status-`<select>`. `e.target.value` ist `string`; der frühere
+ * Cast auf die Union hätte einen umbenannten Options-Wert unbemerkt als
+ * `status`-Filter an die API weitergereicht.
+ */
+const STATUS_FILTERS: readonly (CustomerStatus | 'all')[] = [
+  'all',
+  'lead',
+  'onboarding',
+  'active',
+  'paused',
+  'offboarding',
+  'cancelled',
+  'archived',
+];
 
 interface DashboardStats {
   openTodoCount: number;
@@ -43,18 +60,28 @@ export default function CustomersOverview() {
   const navigate = useNavigate();
   const { showError, showSuccess } = useToast();
 
-  const loadCustomers = () => {
+  /*
+   * Beide Ladevorgänge liegen im Effekt (statt in Funktionen daneben), damit
+   * der Cleanup sie als veraltet markieren kann: bei schnellem Umschalten des
+   * Statusfilters gewann sonst die zuletzt eintreffende Antwort, nicht die des
+   * zuletzt gewählten Filters.
+   */
+  useEffect(() => {
+    let cancelled = false;
     api.customers
       .list({ includeArchived: status === 'archived', status: status === 'all' ? undefined : status })
-      .then(setCustomers)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  };
+      .then((rows) => { if (!cancelled) setCustomers(rows); })
+      .catch((err: unknown) => { if (!cancelled) setError(errorMessage(err)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [status]);
 
-  const loadDashboard = () => {
+  useEffect(() => {
+    let cancelled = false;
     api.customers
       .dashboard()
       .then((res) => {
+        if (cancelled) return;
         setSummary(res.summary);
         const map: Record<string, DashboardStats> = {};
         for (const entry of res.customers) {
@@ -67,18 +94,32 @@ export default function CustomersOverview() {
       })
       .catch(() => {
         // Dashboard ist non-critical: bei Fehler lädt der Rest weiterhin.
+        if (cancelled) return;
         setSummary(null);
         setStatsByCustomer({});
       });
-  };
-
-  useEffect(() => {
-    loadCustomers();
-  }, [status]);
-
-  useEffect(() => {
-    loadDashboard();
+    return () => { cancelled = true; };
   }, []);
+
+  const handleImportFile = async (input: HTMLInputElement) => {
+    const file = input.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const result = await api.customerTransfer.import(file);
+      if (result.warnings.length > 0) {
+        showSuccess(t('customers.importPartial', { count: result.warnings.length }));
+      } else {
+        showSuccess(t('customers.importSuccess'));
+      }
+      void navigate(`/customers/${result.customerId}`);
+    } catch (err) {
+      showError(errorMessage(err, t('customers.importFailed')));
+    } finally {
+      setImporting(false);
+      input.value = '';
+    }
+  };
 
   const filteredCustomers = customers.filter((customer) => {
     if (!search.trim()) return true;
@@ -143,29 +184,11 @@ export default function CustomersOverview() {
           type="file"
           accept=".json"
           className="hidden"
-          onChange={async (e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            setImporting(true);
-            try {
-              const result = await api.customerTransfer.import(file);
-              if (result.warnings.length > 0) {
-                showSuccess(t('customers.importPartial', { count: result.warnings.length }));
-              } else {
-                showSuccess(t('customers.importSuccess'));
-              }
-              navigate(`/customers/${result.customerId}`);
-            } catch (err) {
-              showError(err instanceof Error ? err.message : t('customers.importFailed'));
-            } finally {
-              setImporting(false);
-              e.target.value = '';
-            }
-          }}
+          onChange={(e) => { void handleImportFile(e.currentTarget); }}
         />
         <select
           value={status}
-          onChange={(e) => setStatus(e.target.value as CustomerStatus | 'all')}
+          onChange={(e) => setStatus(optionOr(e.target.value, STATUS_FILTERS, 'all'))}
           className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500 w-full sm:w-44"
         >
           <option value="all">{t('customers.status.all')}</option>

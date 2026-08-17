@@ -74,13 +74,16 @@ export default function FileUploadZone({
     setDragging(false);
     dragCounter.current = 0;
     if (e.dataTransfer.files.length > 0) {
-      uploadFiles(e.dataTransfer.files);
+      // `uploadFiles` meldet seinen Fehler selbst per alert().
+      void uploadFiles(e.dataTransfer.files);
     }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      uploadFiles(e.target.files);
+      // `Array.from(files)` läuft synchron im ersten Tick von `uploadFiles`,
+      // das Leeren des Inputs danach ist also unkritisch.
+      void uploadFiles(e.target.files);
       e.target.value = '';
     }
   };

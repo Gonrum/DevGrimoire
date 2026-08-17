@@ -14,5 +14,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 );
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js');
+  navigator.serviceWorker.register('/sw.js').catch((err: unknown) => {
+    // Ohne Service Worker läuft die App weiter (nur ohne Offline-Cache und
+    // Push) — die abgewiesene Registrierung darf trotzdem nicht unbehandelt
+    // als Unhandled Rejection enden.
+    console.error('Service worker registration failed', err);
+  });
 }

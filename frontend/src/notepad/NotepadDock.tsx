@@ -97,7 +97,7 @@ export default function NotepadDock() {
           : null;
       });
       return list;
-    } catch (err) {
+    } catch {
       showError(t('vermerke.errorLoad'));
       return [];
     } finally {
@@ -110,15 +110,24 @@ export default function NotepadDock() {
       idleShownThisOpenRef.current = false;
       return;
     }
-    void refresh().then((list) => {
+    void (async () => {
+      const list = await refresh();
       if (idleShownThisOpenRef.current) return;
       const idle = list.find((n) => n.isIdle);
       if (idle) {
         idleShownThisOpenRef.current = true;
         setIdleNote(idle);
       }
-    });
+    })();
   }, [open, refresh]);
+
+  // Custom Property für die Panel-Breite. `React.CSSProperties` kennt keine
+  // `--*`-Keys; der Schnittstellen-Typ deklariert sie, statt sie per `as any`
+  // an der Typprüfung vorbeizuschmuggeln.
+  const dockStyle: React.CSSProperties & Record<'--dock-w', string> = useMemo(
+    () => ({ '--dock-w': `${String(dockWidth)}px` }),
+    [dockWidth],
+  );
 
   const activeNote = useMemo(
     () => notes.find((n) => n._id === activeId) ?? null,
@@ -167,7 +176,9 @@ export default function NotepadDock() {
       // Optimistic: reorder local state immediately.
       setNotes((prev) => {
         const map = new Map(prev.map((n) => [n._id, n]));
-        return orderedIds.map((id) => map.get(id)).filter(Boolean) as Note[];
+        return orderedIds
+          .map((id) => map.get(id))
+          .filter((note): note is Note => note !== undefined);
       });
       try {
         await notesApi.reorder(orderedIds);
@@ -220,6 +231,17 @@ export default function NotepadDock() {
     }
   }, [idleNote, showError, t]);
 
+  // `IdleModal` erwartet `() => void` und hängt `onSnooze` in ein Dependency-
+  // Array (Esc-Handler). Die Wrapper bleiben deshalb `useCallback`-stabil —
+  // eine Inline-Arrow würde den Listener bei jedem Render neu registrieren.
+  const handleIdleArchiveClick = useCallback(() => {
+    void handleIdleArchive();
+  }, [handleIdleArchive]);
+
+  const handleIdleSnoozeClick = useCallback(() => {
+    void handleIdleSnooze();
+  }, [handleIdleSnooze]);
+
   const handleIdlePromote = useCallback(() => {
     if (!idleNote) return;
     setPromotionTarget(idleNote);
@@ -261,7 +283,7 @@ export default function NotepadDock() {
       {open && (
         <div
           className="fixed top-0 left-0 z-50 h-full w-full bg-gray-900 border-r border-gray-800 shadow-2xl flex flex-col sm:w-[var(--dock-w)]"
-          style={{ ['--dock-w' as any]: `${dockWidth}px` }}
+          style={dockStyle}
         >
           {/* Resize handle on the right edge (sm+ only) */}
           <div
@@ -320,10 +342,18 @@ export default function NotepadDock() {
                 notes={notes}
                 activeId={activeId}
                 onSelect={setActiveId}
-                onRename={handleRename}
-                onArchive={handleArchive}
-                onReorder={handleReorder}
-                onCreate={handleCreate}
+                onRename={(id, title) => {
+                  void handleRename(id, title);
+                }}
+                onArchive={(id) => {
+                  void handleArchive(id);
+                }}
+                onReorder={(orderedIds) => {
+                  void handleReorder(orderedIds);
+                }}
+                onCreate={() => {
+                  void handleCreate();
+                }}
               />
               <div className="flex-1 overflow-hidden">
                 {loading && notes.length === 0 ? (
@@ -334,7 +364,9 @@ export default function NotepadDock() {
                     <p className="text-sm text-gray-400">{t('vermerke.empty')}</p>
                     <button
                       type="button"
-                      onClick={handleCreate}
+                      onClick={() => {
+                        void handleCreate();
+                      }}
                       className="bg-amber-700 hover:bg-amber-600 text-white text-sm px-3 py-1.5 rounded flex items-center gap-1.5"
                     >
                       <Plus className="w-4 h-4" />
@@ -348,7 +380,9 @@ export default function NotepadDock() {
                     onLocalChange={handleContentChange}
                     onSaved={handleNoteSaved}
                     onPromote={setPromotionTarget}
-                    onArchive={handleArchive}
+                    onArchive={(id) => {
+                      void handleArchive(id);
+                    }}
                   />
                 ) : (
                   <div className="p-6 text-sm text-gray-500">
@@ -371,8 +405,8 @@ export default function NotepadDock() {
         <IdleModal
           note={idleNote}
           onPromote={handleIdlePromote}
-          onArchive={handleIdleArchive}
-          onSnooze={handleIdleSnooze}
+          onArchive={handleIdleArchiveClick}
+          onSnooze={handleIdleSnoozeClick}
         />
       )}
 

@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
 import { wsEventBus, isQuestionEvent } from '../api/wsEventBus';
+import { parseJsonResponse } from '../api/http-boundary';
 import Markdown from './Markdown';
 
 interface PendingQuestion {
@@ -33,7 +34,7 @@ export default function QuestionDialog() {
     try {
       const res = await fetch('/api/questions/pending', { headers });
       if (!res.ok) return;
-      const data: PendingQuestion[] = await res.json();
+      const data = await parseJsonResponse<PendingQuestion[]>(res);
       setQuestions((prev) => {
         // Play sound if there are new questions
         const prevIds = new Set(prev.map((q) => q._id));
@@ -53,8 +54,9 @@ export default function QuestionDialog() {
   }, [getAccessToken, authEnabled]);
 
   // Initial load — subsequent updates flow via the WS bus.
+  // `fetchPending` schluckt seine Fehler selbst.
   useEffect(() => {
-    fetchPending();
+    void fetchPending();
   }, [fetchPending]);
 
   // Live updates: a created question triggers a refetch (cheaper than
@@ -64,13 +66,26 @@ export default function QuestionDialog() {
     const unsub = wsEventBus.subscribe({ kind: 'global' }, (event) => {
       if (!isQuestionEvent(event)) return;
       if (event.type === 'question_created') {
-        fetchPending();
+        void fetchPending();
       } else if (event.type === 'question_answered') {
         setQuestions((prev) => prev.filter((q) => q._id !== event.questionId));
       }
     });
     return unsub;
   }, [fetchPending]);
+
+  // Der Countdown im Header las `Date.now()` während des Renderns. Er stand
+  // deshalb still und sprang nur, wenn ein anderer State die Komponente neu
+  // rendern liess (Tippen im Freitextfeld). Jetzt tickt eine Uhr im State.
+  const hasQuestions = questions.length > 0;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!hasQuestions) return;
+    const tick = () => { setNow(Date.now()); };
+    const initial = setTimeout(tick, 0);
+    const timer = setInterval(tick, 1000);
+    return () => { clearTimeout(initial); clearInterval(timer); };
+  }, [hasQuestions]);
 
   const submitAnswer = useCallback(
     async (questionId: string, answer: string) => {
@@ -103,7 +118,7 @@ export default function QuestionDialog() {
   const current = questions[0];
   const remaining = Math.max(
     0,
-    Math.floor((new Date(current.expiresAt).getTime() - Date.now()) / 1000),
+    Math.floor((new Date(current.expiresAt).getTime() - now) / 1000),
   );
   const minutes = Math.floor(remaining / 60);
   const seconds = remaining % 60;
@@ -156,7 +171,7 @@ export default function QuestionDialog() {
                   key={option}
                   type="button"
                   disabled={submitting}
-                  onClick={() => submitAnswer(current._id, option)}
+                  onClick={() => { void submitAnswer(current._id, option); }}
                   className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
                 >
                   {option}
@@ -171,7 +186,7 @@ export default function QuestionDialog() {
                 onChange={(e) => setFreeText(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && freeText.trim()) {
-                    submitAnswer(current._id, freeText.trim());
+                    void submitAnswer(current._id, freeText.trim());
                   }
                 }}
                 placeholder={t('question.placeholder', 'Antwort eingeben...')}
@@ -181,7 +196,7 @@ export default function QuestionDialog() {
               <button
                 type="button"
                 disabled={submitting || !freeText.trim()}
-                onClick={() => submitAnswer(current._id, freeText.trim())}
+                onClick={() => { void submitAnswer(current._id, freeText.trim()); }}
                 className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
               >
                 {t('question.send', 'Senden')}

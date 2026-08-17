@@ -1,5 +1,11 @@
 import { useEffect, useRef } from 'react';
-import { wsEventBus, isProjectChangeEvent, type BusEvent, type ProjectChangeEvent } from '../api/wsEventBus';
+import {
+  wsEventBus,
+  isProjectChangeEvent,
+  type BusEvent,
+  type ProjectChangeEvent,
+  type SubscriptionScope,
+} from '../api/wsEventBus';
 
 export type { ProjectChangeEvent };
 
@@ -10,12 +16,23 @@ type EventHandler = (event: ProjectChangeEvent) => void;
  * the same entity within the window collapse to one handler call — keeps
  * busy edit flows from triggering a refetch storm.
  */
-function useBus(scope: { kind: 'global' | 'project'; projectId?: string } | null, onEvent: EventHandler) {
+function useBus(kind: 'global' | 'project' | null, projectId: string | undefined, onEvent: EventHandler) {
+  // Ref-Zuweisung im Effect statt im Render: der Handler wird ohnehin erst
+  // nach dem Commit aufgerufen (frühestens 300ms später im Timer).
   const handlerRef = useRef(onEvent);
-  handlerRef.current = onEvent;
-
   useEffect(() => {
-    if (!scope) return;
+    handlerRef.current = onEvent;
+  });
+
+  /*
+   * Abhängig sind die beiden Primitiven, nicht das Scope-Objekt: die Aufrufer
+   * bauen es bei jedem Render neu, als Dependency wäre es bei jedem Render
+   * „geändert" und das Abo würde ständig neu aufgebaut. Vorher stand genau
+   * deshalb ein abgeschaltetes `exhaustive-deps` über dem Array.
+   */
+  useEffect(() => {
+    if (!kind) return;
+    const scope: SubscriptionScope = kind === 'project' ? { kind, projectId } : { kind };
     const pending = new Map<string, ProjectChangeEvent>();
     let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -35,17 +52,16 @@ function useBus(scope: { kind: 'global' | 'project'; projectId?: string } | null
       if (timer) clearTimeout(timer);
       pending.clear();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope?.kind, scope?.projectId]);
+  }, [kind, projectId]);
 }
 
 export function useProjectEvents(
   projectId: string | undefined,
   onEvent: EventHandler,
 ) {
-  useBus(projectId ? { kind: 'project', projectId } : null, onEvent);
+  useBus(projectId ? 'project' : null, projectId, onEvent);
 }
 
 export function useDashboardEvents(onEvent: EventHandler) {
-  useBus({ kind: 'global' }, onEvent);
+  useBus('global', undefined, onEvent);
 }

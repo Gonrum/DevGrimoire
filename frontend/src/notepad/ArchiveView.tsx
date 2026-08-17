@@ -53,7 +53,12 @@ export default function ArchiveView({ onClose, onRestoreRequest }: Props) {
   }, [showError, t]);
 
   useEffect(() => {
-    void load();
+    // Laden in einer im Effect definierten async-Funktion (React-Doku
+    // "Fetching data"): der Effect-Body selbst setzt keinen State synchron.
+    const run = async () => {
+      await load();
+    };
+    void run();
   }, [load]);
 
   const handleDelete = async (note: Note) => {
@@ -96,7 +101,9 @@ export default function ArchiveView({ onClose, onRestoreRequest }: Props) {
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleDelete(note)}
+                  onClick={() => {
+                    void handleDelete(note);
+                  }}
                   className="text-gray-500 hover:text-red-400 p-1 rounded"
                   aria-label={t('vermerke.delete')}
                   title={t('vermerke.delete')}

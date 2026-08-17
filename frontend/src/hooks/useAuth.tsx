@@ -24,6 +24,17 @@ export interface AuthState {
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   getAccessToken: () => string | null;
+  /**
+   * Neues Access-Token nach einem Refresh übernehmen.
+   *
+   * Ohne diesen Weg holte der Refresh-Handler in `App.tsx` zwar ein neues
+   * Token-Paar, legte aber nur das Refresh-Token ab — `accessTokenRef` im
+   * Provider blieb auf dem abgelaufenen Wert stehen. Der 401-Retry in
+   * `api/client.ts` fragt `getAccessToken()` erneut ab und wiederholte damit
+   * mit genau demselben toten Token: der Refresh meldete Erfolg, die
+   * Anfrage scheiterte trotzdem.
+   */
+  applyAccessToken: (accessToken: string) => void;
 }
 
 export const AuthContext = createContext<AuthState>(null!);

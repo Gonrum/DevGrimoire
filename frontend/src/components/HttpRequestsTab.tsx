@@ -77,7 +77,24 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
     setEnvironments(envs);
   }, [projectId]);
 
-  useEffect(() => { reload(); }, [reload]);
+  /*
+   * Der Fetch steckt in einer eigenen async-Funktion, damit der Effekt-Body
+   * selbst nichts synchron setzt (`react-hooks/set-state-in-effect`). `reload`
+   * ist `useCallback`-stabil, die Dep-Liste laeuft also nicht im Kreis.
+   *
+   * Der `catch` ist neu: schlug das erste Laden fehl (Backend weg, 401), blieb
+   * die Seitenleiste kommentarlos leer und die Ablehnung landete unbehandelt
+   * in der Konsole — jetzt steht der Grund im Fehlerbanner.
+   */
+  useEffect(() => {
+    void (async () => {
+      try {
+        await reload();
+      } catch (e) {
+        setError(errorMessage(e));
+      }
+    })();
+  }, [reload]);
 
   const selectedEnv = environments.find((e) => e._id === envId);
   const availableKeys = useMemo(
@@ -216,7 +233,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
   const sidebar = (
     <div className="w-64 shrink-0 border-r border-gray-700 pr-3 space-y-4 overflow-y-auto">
       <button
-        onClick={addCollection}
+        onClick={() => { addCollection().catch((e: unknown) => setError(errorMessage(e))); }}
         className="w-full text-xs px-2 py-1.5 rounded border border-gray-600 text-gray-200 hover:bg-gray-800 hover:border-indigo-500"
       >
         + Neue Collection
@@ -226,7 +243,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 truncate">{col.name}</span>
             <button
-              onClick={() => addRequest(col._id)}
+              onClick={() => { void addRequest(col._id); }}
               title="Request hinzufügen"
               className="shrink-0 text-[11px] px-1.5 py-0.5 rounded border border-gray-600 text-gray-300 hover:bg-gray-800 hover:border-indigo-500 hover:text-indigo-300"
             >
@@ -237,7 +254,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
             {requests.filter((r) => r.collectionId === col._id).map((r) => (
               <li key={r._id}>
                 <button
-                  onClick={() => selectRequest(r._id)}
+                  onClick={() => { selectRequest(r._id).catch((e: unknown) => setError(errorMessage(e))); }}
                   className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-2 hover:bg-gray-800 ${draft?._id === r._id ? 'bg-gray-800' : ''}`}
                 >
                   <span className={`font-mono text-[10px] ${methodColor(r.method)}`}>{r.method}</span>
@@ -269,10 +286,10 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
                 className="bg-transparent text-lg font-semibold text-gray-100 outline-none flex-1"
               />
               <button onClick={() => setShowCurl(true)} className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">curl importieren</button>
-              <button onClick={saveDraft} className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">Speichern</button>
-              {draft._id && <button onClick={streamDownload} title="Antwort ohne Größenlimit auf die Platte streamen" className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">Als Datei streamen</button>}
-              {draft._id && <button onClick={loadHistory} className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">History</button>}
-              {draft._id && <button onClick={() => deleteRequest(draft._id)} className="text-xs px-2 py-1 rounded border border-red-800 text-red-400 hover:bg-red-900/30">Löschen</button>}
+              <button onClick={() => { void saveDraft(); }} className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">Speichern</button>
+              {draft._id && <button onClick={() => { void streamDownload(); }} title="Antwort ohne Größenlimit auf die Platte streamen" className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">Als Datei streamen</button>}
+              {draft._id && <button onClick={() => { loadHistory().catch((e: unknown) => setError(errorMessage(e))); }} className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">History</button>}
+              {draft._id && <button onClick={() => { deleteRequest(draft._id).catch((e: unknown) => setError(errorMessage(e))); }} className="text-xs px-2 py-1 rounded border border-red-800 text-red-400 hover:bg-red-900/30">Löschen</button>}
             </div>
 
             {/* URL-Leiste */}
@@ -289,7 +306,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
                 <option value="">(kein Environment)</option>
                 {environments.map((e) => <option key={e._id} value={e._id}>{e.name}</option>)}
               </select>
-              <button onClick={send} disabled={sending}
+              <button onClick={() => { void send(); }} disabled={sending}
                 className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium">
                 {sending ? '…' : 'Senden'}
               </button>
@@ -392,7 +409,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
               className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-mono text-gray-100" />
             <div className="flex justify-end gap-2 mt-3">
               <button onClick={() => setShowCurl(false)} className="text-xs px-3 py-1 rounded border border-gray-600 text-gray-300">Abbrechen</button>
-              <button onClick={importCurl} className="text-xs px-3 py-1 rounded bg-indigo-600 text-white">In Editor übernehmen</button>
+              <button onClick={() => { void importCurl(); }} className="text-xs px-3 py-1 rounded bg-indigo-600 text-white">In Editor übernehmen</button>
             </div>
           </div>
         </div>

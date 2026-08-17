@@ -18,6 +18,7 @@ function ManualForm({ projectId, customerId, manual, categories, onSaved, onCanc
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
+  const { showError } = useToast();
   const [title, setTitle] = useState(manual?.title || '');
   const [content, setContent] = useState(manual?.content || '');
   const [category, setCategory] = useState(manual?.category || '');
@@ -53,7 +54,16 @@ function ManualForm({ projectId, customerId, manual, categories, onSaved, onCanc
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3">
+    <form
+      onSubmit={(e) => {
+        // `handleSubmit` hat kein eigenes catch: ein fehlgeschlagenes Speichern
+        // blieb bisher eine stumme Unhandled Rejection.
+        handleSubmit(e).catch((err: unknown) => {
+          showError(errorMessage(err, t('common.errorSaving')));
+        });
+      }}
+      className="space-y-3"
+    >
       <div>
         <label className="block text-xs text-gray-500 mb-1">{t('manuals.titleLabel')}</label>
         <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}

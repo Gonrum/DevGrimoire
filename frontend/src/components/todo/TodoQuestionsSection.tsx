@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { api, Question, UserInfo } from '../../api/client';
+import { errorMessage } from '../../lib/narrow';
 import Markdown from '../Markdown';
 import MarkdownEditor from '../MarkdownEditor';
 import Button from '../ui/Button';
@@ -57,7 +58,7 @@ export default function TodoQuestionsSection({ todoId, projectId, questions, onC
       setDraft('');
       onChanged();
     } catch (err) {
-      onError((err as Error).message || 'Failed to ask agent');
+      onError(errorMessage(err, 'Failed to ask agent'));
     } finally {
       setSubmitting(false);
     }
@@ -71,7 +72,9 @@ export default function TodoQuestionsSection({ todoId, projectId, questions, onC
           draft={draft}
           setDraft={setDraft}
           submitting={submitting}
-          onSubmit={handleAskAgent}
+          onSubmit={() => {
+            void handleAskAgent();
+          }}
         />
       </DetailSection>
     );
@@ -94,7 +97,7 @@ export default function TodoQuestionsSection({ todoId, projectId, questions, onC
                 await api.questions.answer(q._id, answer);
                 onChanged();
               } catch (err) {
-                onError((err as Error).message || 'Failed to answer question');
+                onError(errorMessage(err, 'Failed to answer question'));
               }
             }}
           />
@@ -126,7 +129,9 @@ export default function TodoQuestionsSection({ todoId, projectId, questions, onC
         draft={draft}
         setDraft={setDraft}
         submitting={submitting}
-        onSubmit={handleAskAgent}
+        onSubmit={() => {
+          void handleAskAgent();
+        }}
       />
     </DetailSection>
   );
@@ -204,7 +209,9 @@ function QuestionCard({
                   size="sm"
                   variant="primary"
                   disabled={submitting}
-                  onClick={() => submit(opt)}
+                  onClick={() => {
+                    void submit(opt);
+                  }}
                 >
                   {opt}
                 </Button>
@@ -223,7 +230,9 @@ function QuestionCard({
                 type="button"
                 variant="primary"
                 disabled={submitting || !answer.trim()}
-                onClick={() => submit(answer)}
+                onClick={() => {
+                  void submit(answer);
+                }}
               >
                 {submitting ? '...' : t('questions.answerSubmit')}
               </Button>
@@ -295,7 +304,7 @@ function AnsweredQuestionCard({
       setSaveContent(defaultContent);
       onChanged();
     } catch (err) {
-      onError((err as Error).message || t('questions.saveAsKnowledgeFailed'));
+      onError(errorMessage(err, t('questions.saveAsKnowledgeFailed')));
     } finally {
       setSaving(false);
     }
@@ -340,7 +349,9 @@ function AnsweredQuestionCard({
           </Button>
         )}
         {question.knowledgeId && knowledgePath && (
-          <Button type="button" size="xs" variant="ghost-blue" onClick={() => navigate(knowledgePath)}>
+          <Button type="button" size="xs" variant="ghost-blue" onClick={() => {
+            void navigate(knowledgePath);
+          }}>
             {t('questions.openKnowledge')}
           </Button>
         )}
@@ -349,14 +360,16 @@ function AnsweredQuestionCard({
             type="button"
             size="xs"
             variant="secondary"
-            onClick={async () => {
-              try {
-                const out = await api.questions.createFollowupTodo(question._id);
-                onChanged();
-                navigate(`/projects/${projectId}/todos/${out.todoId}`);
-              } catch (err) {
-                onError((err as Error).message || t('questionsPage.followupCreatedToast'));
-              }
+            onClick={() => {
+              void (async () => {
+                try {
+                  const out = await api.questions.createFollowupTodo(question._id);
+                  onChanged();
+                  void navigate(`/projects/${projectId}/todos/${out.todoId}`);
+                } catch (err) {
+                  onError(errorMessage(err, t('common.errorSaving')));
+                }
+              })();
             }}
           >
             {t('questionsPage.createFollowup')}
@@ -367,7 +380,9 @@ function AnsweredQuestionCard({
             type="button"
             size="xs"
             variant="ghost-blue"
-            onClick={() => navigate(`/projects/${projectId}/todos/${question.followupTodoId}`)}
+            onClick={() => {
+              void navigate(`/projects/${projectId}/todos/${question.followupTodoId}`);
+            }}
           >
             {t('questionsPage.linkFollowup')}
           </Button>
@@ -377,16 +392,18 @@ function AnsweredQuestionCard({
             type="button"
             size="xs"
             variant="secondary"
-            onClick={async () => {
+            onClick={() => {
               const decision = window.prompt(t('questionsPage.decisionPlaceholder'));
               if (!decision || !decision.trim()) return;
               const rationale = window.prompt(t('questionsPage.decisionRationalePlaceholder')) || undefined;
-              try {
-                await api.questions.markAsDecision(question._id, { decision: decision.trim(), rationale });
-                onChanged();
-              } catch (err) {
-                onError((err as Error).message || t('questionsPage.decisionRecordedToast'));
-              }
+              void (async () => {
+                try {
+                  await api.questions.markAsDecision(question._id, { decision: decision.trim(), rationale });
+                  onChanged();
+                } catch (err) {
+                  onError(errorMessage(err, t('common.errorSaving')));
+                }
+              })();
             }}
           >
             {t('questionsPage.recordDecision')}
@@ -436,7 +453,9 @@ function AnsweredQuestionCard({
             />
           </div>
           <div className="flex gap-2 pt-1">
-            <Button type="button" size="xs" variant="primary" disabled={saving || !saveTopic.trim()} onClick={handleSaveAsKnowledge}>
+            <Button type="button" size="xs" variant="primary" disabled={saving || !saveTopic.trim()} onClick={() => {
+              void handleSaveAsKnowledge();
+            }}>
               {saving ? t('questions.saveAsKnowledgeSaving') : t('common.save')}
             </Button>
             <Button type="button" size="xs" variant="secondary" onClick={() => { setShowSaveForm(false); setSaveContent(defaultContent); }}>

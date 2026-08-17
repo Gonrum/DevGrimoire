@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, CommitEntry, GitRepository } from '../api/client';
+import { errorMessage } from '../lib/narrow';
+import { useToast } from './Toast';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
 import EmptyState from './ui/EmptyState';
@@ -27,8 +29,8 @@ interface CommitListProps {
 
 export default function CommitList({ projectId, gitRepositories }: CommitListProps) {
   const { i18n } = useTranslation();
+  const { showError } = useToast();
   const [commits, setCommits] = useState<CommitEntry[]>([]);
-  const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [search, setSearch] = useState('');
   const [total, setTotal] = useState(0);
@@ -45,31 +47,41 @@ export default function CommitList({ projectId, gitRepositories }: CommitListPro
       .filter((l): l is string => !!l);
   }, [gitRepositories]);
 
-  const loadCommits = useCallback(async () => {
-    setLoading(true);
-    try {
-      if (search.trim()) {
-        const results = await api.commits.search(projectId, search, limit);
-        const filtered = activeRepoLabel ? results.filter((c) => c.repoLabel === activeRepoLabel) : results;
-        setCommits(filtered);
-        setTotal(filtered.length);
-      } else {
-        const [results, countRes] = await Promise.all([
+  /**
+   * Identität der aktuell angezeigten Abfrage. `loading` ist die Ableitung
+   * „das Geladene gehört nicht zur aktuellen Abfrage" — vorher setzte der
+   * Effect dafür synchron State.
+   */
+  const queryKey = JSON.stringify({ projectId, search, offset, activeRepoLabel });
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const loading = loadedKey !== queryKey;
+
+  const loadCommits = useCallback(() => {
+    const request: Promise<{ commits: CommitEntry[]; total: number }> = search.trim()
+      ? api.commits.search(projectId, search, limit).then((results) => {
+          const filtered = activeRepoLabel
+            ? results.filter((c) => c.repoLabel === activeRepoLabel)
+            : results;
+          return { commits: filtered, total: filtered.length };
+        })
+      : Promise.all([
           api.commits.list(projectId, { limit, offset, repoLabel: activeRepoLabel || undefined }),
           api.commits.count(projectId),
-        ]);
-        setCommits(results);
-        setTotal(countRes.count);
-      }
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, search, offset, activeRepoLabel]);
+        ]).then(([results, countRes]) => ({ commits: results, total: countRes.count }));
+
+    return request
+      .then((data) => {
+        setCommits(data.commits);
+        setTotal(data.total);
+      })
+      .catch(() => {
+        // silent — wie bisher
+      })
+      .finally(() => { setLoadedKey(queryKey); });
+  }, [projectId, search, offset, activeRepoLabel, queryKey]);
 
   useEffect(() => {
-    loadCommits();
+    void loadCommits();
   }, [loadCommits]);
 
   const handleSync = async () => {
@@ -109,7 +121,13 @@ export default function CommitList({ projectId, gitRepositories }: CommitListPro
         <Button
           variant="secondary"
           size="sm"
-          onClick={handleSync}
+          onClick={() => {
+            // `api.commits.sync` konnte bisher unbemerkt fehlschlagen: der
+            // Spinner ging aus, die Rejection blieb unbehandelt.
+            handleSync().catch((err: unknown) => {
+              showError(errorMessage(err, locale === 'de' ? 'Sync fehlgeschlagen' : 'Sync failed'));
+            });
+          }}
           disabled={syncing}
         >
           {syncing

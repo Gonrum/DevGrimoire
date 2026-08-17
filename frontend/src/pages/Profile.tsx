@@ -4,6 +4,7 @@ import { api, UserInfo } from '../api/client';
 import { useToast } from '../components/Toast';
 import Button from '../components/ui/Button';
 import { LoadingText } from '../components/ui/LoadingSpinner';
+import { errorMessage } from '../lib/narrow';
 
 export default function Profile() {
   const { t, i18n } = useTranslation();
@@ -20,22 +21,29 @@ export default function Profile() {
 
   const { showError, showSuccess } = useToast();
 
-  const loadProfile = async () => {
-    try {
-      const data = await api.profile.get();
-      setProfile(data);
-      setUsername(data.username);
-      setEmail(data.email || '');
-    } catch (err: any) {
-      showError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  /*
+   * Der Ladevorgang liegt im Effekt, damit der Cleanup ihn als veraltet
+   * markieren kann: ohne das schrieb ein spät zurückkommender Fetch nach dem
+   * Unmount noch in den State.
+   */
   useEffect(() => {
-    loadProfile();
-  }, []);
+    let cancelled = false;
+    async function run() {
+      try {
+        const data = await api.profile.get();
+        if (cancelled) return;
+        setProfile(data);
+        setUsername(data.username);
+        setEmail(data.email || '');
+      } catch (err) {
+        if (!cancelled) showError(errorMessage(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void run();
+    return () => { cancelled = true; };
+  }, [showError]);
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,8 +55,8 @@ export default function Profile() {
       });
       setProfile(updated);
       showSuccess(t('profile.profileUpdated'));
-    } catch (err: any) {
-      showError(err.message);
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSaving(false);
     }
@@ -71,8 +79,8 @@ export default function Profile() {
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
-    } catch (err: any) {
-      showError(err.message);
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setChangingPw(false);
     }
@@ -88,7 +96,7 @@ export default function Profile() {
       <h1 className="text-2xl font-bold mb-6">{t('profile.title')}</h1>
 
       {/* Profile Info */}
-      <form onSubmit={handleSaveProfile} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 mb-6">
+      <form onSubmit={(e) => { void handleSaveProfile(e); }} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 mb-6">
         <h2 className="text-sm font-semibold text-gray-300">{t('profile.userData')}</h2>
         <div>
           <label className="block text-xs text-gray-500 mb-1">{t('profile.username')}</label>
@@ -127,11 +135,11 @@ export default function Profile() {
             const lang = e.target.value;
             if (lang) {
               localStorage.setItem('devgrimoire_language', lang);
-              i18n.changeLanguage(lang);
+              void i18n.changeLanguage(lang);
             } else {
               localStorage.removeItem('devgrimoire_language');
               const browserLang = navigator.language.startsWith('de') ? 'de' : 'en';
-              i18n.changeLanguage(browserLang);
+              void i18n.changeLanguage(browserLang);
             }
           }}
           className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
@@ -143,7 +151,7 @@ export default function Profile() {
       </div>
 
       {/* Change Password */}
-      <form onSubmit={handleChangePassword} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+      <form onSubmit={(e) => { void handleChangePassword(e); }} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
         <h2 className="text-sm font-semibold text-gray-300">{t('profile.changePassword')}</h2>
         <input
           type="password"

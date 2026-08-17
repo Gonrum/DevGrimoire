@@ -96,7 +96,7 @@ function SnippetForm({
 
   return (
     <Card>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
         <h3 className="text-sm font-semibold mb-3">
           {editId ? t('snippets.editSnippet') : t('snippets.newSnippet')}
         </h3>
@@ -329,7 +329,7 @@ export default function SnippetList({ entries, projectId, customerId, onUpdate }
                       <code>{snippet.code}</code>
                     </pre>
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleCopy(snippet); }}
+                      onClick={(e) => { e.stopPropagation(); void handleCopy(snippet); }}
                       className="absolute top-2 right-2 px-2 py-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded transition-colors"
                       title={t('snippets.copyCode')}
                     >

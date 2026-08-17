@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Todo, Milestone, QuestionsByTodoSummary, api } from '../api/client';
-import { errorMessage } from '../lib/narrow';
+import { errorMessage, optionOr } from '../lib/narrow';
 import i18n from '../i18n';
 import Markdown from './Markdown';
 import MarkdownEditor from './MarkdownEditor';
@@ -26,7 +26,15 @@ interface Props {
   onUpdate: () => void;
 }
 
-type SortKey = 'updated' | 'created' | 'priority' | 'title';
+/*
+ * Laufzeit-Whitelists der beiden `<select>`s. `HTMLSelectElement.value` ist
+ * `string`; vorher behauptete ein Cast die Union, ohne sie zu pruefen. Die
+ * Typen werden aus den Listen abgeleitet, damit beide nicht auseinanderlaufen.
+ */
+const SORT_KEYS = ['updated', 'created', 'priority', 'title'] as const;
+const PRIORITIES = ['low', 'medium', 'high', 'critical'] as const satisfies readonly Todo['priority'][];
+
+type SortKey = (typeof SORT_KEYS)[number];
 type SortDir = 'asc' | 'desc';
 
 const PRIORITY_ORDER: Record<Todo['priority'], number> = {
@@ -35,6 +43,24 @@ const PRIORITY_ORDER: Record<Todo['priority'], number> = {
   medium: 2,
   low: 3,
 };
+
+const ARCHIVE_AFTER_DONE_MS = 24 * 60 * 60 * 1000;
+
+/** Stabile Identitaet, damit der Leerfall keinen neuen Render ausloest. */
+const EMPTY_QUESTION_MAP: Record<string, QuestionsByTodoSummary> = {};
+
+/**
+ * "Archiviert" heisst: explizit archiviert **oder** seit mehr als 24h erledigt.
+ *
+ * `now` kommt als Parameter herein, weil `Date.now()` im Render-Pfad gegen
+ * `react-hooks/purity` verstoesst — der Wert wechselt bei jedem Rendern und
+ * macht das Ergebnis instabil. Die Uhr liefert der Aufrufer (siehe `now` in
+ * `TodoBoard`).
+ */
+function isArchived(todo: Todo, now: number): boolean {
+  return todo.archived
+    || (todo.status === 'done' && now - new Date(todo.updatedAt).getTime() > ARCHIVE_AFTER_DONE_MS);
+}
 
 function sortTodos(todos: Todo[], sortKey: SortKey, sortDir: SortDir): Todo[] {
   const sorted = [...todos].sort((a, b) => {
@@ -49,7 +75,7 @@ function sortTodos(todos: Todo[], sortKey: SortKey, sortDir: SortDir): Todo[] {
   return sortDir === 'asc' ? sorted : sorted.reverse();
 }
 
-function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => void; onCancel: () => void }) {
+function TodoEditForm({ todo, onSaved, onCancel, showError }: { todo: Todo; onSaved: () => void; onCancel: () => void; showError: (msg: string) => void }) {
   const { t } = useTranslation();
   const [title, setTitle] = useState(todo.title);
   const [description, setDescription] = useState(todo.description || '');
@@ -69,18 +95,23 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
       });
       onSaved();
+    } catch (err) {
+      // Vorher gab es hier nur ein `finally`: schlug das Speichern fehl, blieb
+      // das Formular kommentarlos offen und die Ablehnung landete als
+      // unbehandelter Rejection in der Konsole.
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-2">
+    <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-2">
       <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
         className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-violet-500" autoFocus />
       <MarkdownEditor value={description} onChange={setDescription} rows={2} placeholder={t('todos.descriptionPlaceholder')} />
       <div className="flex gap-2 items-center">
-        <select value={priority} onChange={(e) => setPriority(e.target.value as Todo['priority'])}
+        <select value={priority} onChange={(e) => setPriority(optionOr(e.target.value, PRIORITIES, priority))}
           className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-violet-500">
           <option value="low">{t('todoPriority.low')}</option>
           <option value="medium">{t('todoPriority.medium')}</option>
@@ -102,7 +133,7 @@ function TodoEditForm({ todo, onSaved, onCancel }: { todo: Todo; onSaved: () => 
   );
 }
 
-function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) {
+function TodoComments({ todo, onUpdate, showError }: { todo: Todo; onUpdate: () => void; showError: (msg: string) => void }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [text, setText] = useState('');
@@ -115,6 +146,10 @@ function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) 
       await api.todos.addComment(todo._id, text.trim());
       setText('');
       onUpdate();
+    } catch (err) {
+      // Ohne diesen Zweig verschwand ein fehlgeschlagener Kommentar spurlos:
+      // der Text blieb stehen, aber niemand sagte, dass nichts gespeichert wurde.
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSaving(false);
     }
@@ -143,10 +178,10 @@ function TodoComments({ todo, onUpdate }: { todo: Todo; onUpdate: () => void }) 
           ))}
           <div className="flex gap-2">
             <input type="text" value={text} onChange={(e) => setText(e.target.value)}
-              placeholder={t('todos.commentPlaceholder')} onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+              placeholder={t('todos.commentPlaceholder')} onKeyDown={(e) => { if (e.key === 'Enter') void handleAdd(); }}
               aria-label={t('todos.commentPlaceholder')}
               className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
-            <Button type="button" size="xs" onClick={handleAdd} disabled={saving || !text.trim()}>
+            <Button type="button" size="xs" onClick={() => { void handleAdd(); }} disabled={saving || !text.trim()}>
               {saving ? '...' : t('common.send')}
             </Button>
           </div>
@@ -240,7 +275,7 @@ function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError, 
   if (editing) {
     return (
       <div className="bg-gray-900 border border-violet-800 rounded-lg p-3">
-        <TodoEditForm todo={todo} onSaved={() => { setEditing(false); onUpdate(); }} onCancel={() => setEditing(false)} />
+        <TodoEditForm todo={todo} onSaved={() => { setEditing(false); onUpdate(); }} onCancel={() => setEditing(false)} showError={showError} />
       </div>
     );
   }
@@ -290,13 +325,13 @@ function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError, 
           ))}
         </div>
       )}
-      <TodoComments todo={todo} onUpdate={onUpdate} />
+      <TodoComments todo={todo} onUpdate={onUpdate} showError={showError} />
       <div className="flex flex-wrap items-center gap-2 mt-2 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity" onClick={(e) => e.preventDefault()}>
         {STATUS_TRANSITIONS[todo.status].map((tr) => (
-          <Button key={tr.next} type="button" size="xs" onClick={() => handleStatusChange(tr.next)}>{tr.label()}</Button>
+          <Button key={tr.next} type="button" size="xs" onClick={() => { void handleStatusChange(tr.next); }}>{tr.label()}</Button>
         ))}
         <Button type="button" size="xs" onClick={() => setEditing(true)}>{t('common.edit')}</Button>
-        <Button type="button" size="xs" onClick={handleArchiveToggle}>{todo.archived ? t('common.restore') : t('common.archive')}</Button>
+        <Button type="button" size="xs" onClick={() => { void handleArchiveToggle(); }}>{todo.archived ? t('common.restore') : t('common.archive')}</Button>
         <ConfirmButton onConfirm={async () => {
           try {
             await api.todos.delete(todo._id);
@@ -381,7 +416,7 @@ function TodoListRow({ todo, basePath, onUpdate, showError, questionSummary }: {
       <td className="py-2.5 px-3">
         <div className="flex gap-1">
           {STATUS_TRANSITIONS[todo.status].map((tr) => (
-            <Button key={tr.next} type="button" size="xs" onClick={(e) => handleStatusChange(e, tr.next)}>{tr.label()}</Button>
+            <Button key={tr.next} type="button" size="xs" onClick={(e) => { void handleStatusChange(e, tr.next); }}>{tr.label()}</Button>
           ))}
         </div>
       </td>
@@ -407,16 +442,20 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
   const [confirmArchiveAll, setConfirmArchiveAll] = useState(false);
   const [dragTodoId, setDragTodoId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
-  const [questionMap, setQuestionMap] = useState<Record<string, QuestionsByTodoSummary>>({});
+  const [fetchedQuestionMap, setQuestionMap] = useState<Record<string, QuestionsByTodoSummary>>({});
+
+  /*
+   * Ohne Todos gibt es nichts zu annotieren. Das war vorher ein
+   * `setQuestionMap({})` im Effect — also ein State-Reset fuer einen Wert, der
+   * sich aus `todos` ableiten laesst (`react-hooks/set-state-in-effect`).
+   */
+  const questionMap = todos.length === 0 ? EMPTY_QUESTION_MAP : fetchedQuestionMap;
 
   // Fetch open-question counts for all currently-loaded todos. Used to render
   // the violet "Rückfrage offen" accent on todo cards/rows (M-30 / T-245).
   useEffect(() => {
     const ids = todos.map((todo) => todo._id);
-    if (ids.length === 0) {
-      setQuestionMap({});
-      return;
-    }
+    if (ids.length === 0) return;
     let cancelled = false;
     api.questions
       .byTodos(ids)
@@ -425,10 +464,19 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
     return () => { cancelled = true; };
   }, [todos]);
 
-  const now = Date.now();
-  const isArchived = (t: Todo) =>
-    t.archived || (t.status === 'done' && now - new Date(t.updatedAt).getTime() > 24 * 60 * 60 * 1000);
-  const archivedCount = useMemo(() => todos.filter(isArchived).length, [todos]);
+  /*
+   * Uhr im State statt `Date.now()` im Render (`react-hooks/purity`, dieselbe
+   * Loesung wie in QuestionDialog). Die 24h-Grenze steht damit ab dem Mount
+   * fest: ein Todo, das waehrend einer laufenden Sitzung die 24h ueberschreitet,
+   * wandert erst beim naechsten Mount in die Archiv-Ansicht. Bei einer
+   * 24h-Schwelle ist das folgenlos — und ruhiger, weil eine Karte nicht mitten
+   * im Lesen aus der Liste verschwindet.
+   */
+  const [now] = useState(() => Date.now());
+  const archivedCount = useMemo(
+    () => todos.filter((todo) => isArchived(todo, now)).length,
+    [todos, now],
+  );
   const archivableDone = useMemo(() => todos.filter((t) => t.status === 'done' && !t.archived), [todos]);
 
   const allTags = useMemo(() => {
@@ -440,7 +488,7 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
   const filtered = useMemo(() => {
     let result = todos;
     if (!showArchived) {
-      result = result.filter((t) => !isArchived(t));
+      result = result.filter((t) => !isArchived(t, now));
     }
     if (filterStatus) result = result.filter((t) => t.status === filterStatus);
     if (filterPriority) result = result.filter((t) => t.priority === filterPriority);
@@ -467,7 +515,7 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
       }
     }
     return sortTodos(result, sortKey, sortDir);
-  }, [todos, showArchived, searchQuery, filterStatus, filterPriority, filterMilestone, filterTag, sortKey, sortDir]);
+  }, [todos, now, showArchived, searchQuery, filterStatus, filterPriority, filterMilestone, filterTag, sortKey, sortDir]);
 
   const hasFilters = !!(searchQuery.trim() || filterStatus || filterPriority || filterMilestone || filterTag);
 
@@ -477,6 +525,17 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
     setFilterPriority('');
     setFilterMilestone('');
     setFilterTag('');
+  };
+
+  const archiveAllDone = async () => {
+    if (!confirmArchiveAll) { setConfirmArchiveAll(true); return; }
+    setConfirmArchiveAll(false);
+    try {
+      await Promise.all(archivableDone.map((todo) => api.todos.update(todo._id, { archived: true })));
+      onUpdate();
+    } catch (err) {
+      showError(errorMessage(err, t('todos.archiveFailed')));
+    }
   };
 
   const selectClass = 'bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500';
@@ -541,7 +600,7 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
                 {t('todos.list')}
               </button>
             </div>
-            <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} aria-label="Sortierung" className={selectClass}>
+            <select value={sortKey} onChange={(e) => setSortKey(optionOr(e.target.value, SORT_KEYS, sortKey))} aria-label="Sortierung" className={selectClass}>
               <option value="updated">{t('todos.sortUpdated')}</option>
               <option value="created">{t('todos.sortCreated')}</option>
               <option value="priority">{t('todos.sortPriority')}</option>
@@ -557,16 +616,7 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
         secondaryActions={(
           <>
             {archivableDone.length > 0 && (
-              <button type="button" onBlur={() => setConfirmArchiveAll(false)} onClick={async () => {
-                if (!confirmArchiveAll) { setConfirmArchiveAll(true); return; }
-                setConfirmArchiveAll(false);
-                try {
-                  await Promise.all(archivableDone.map((t) => api.todos.update(t._id, { archived: true })));
-                  onUpdate();
-                } catch (err) {
-                  showError(errorMessage(err, t('todos.archiveFailed')));
-                }
-              }}
+              <button type="button" onBlur={() => setConfirmArchiveAll(false)} onClick={() => { void archiveAllDone(); }}
                 className={`text-xs px-2 py-1 rounded transition-colors ${confirmArchiveAll ? 'bg-yellow-900/60 text-yellow-300' : 'text-gray-600 hover:text-gray-400'}`}>
                 {confirmArchiveAll ? t('todos.archiveConfirm', { count: archivableDone.length }) : t('todos.archiveCompleted', { count: archivableDone.length })}
               </button>
@@ -598,7 +648,7 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
                 className={`border-t-2 ${isOver ? (isValidDrop ? 'border-violet-500 bg-violet-900/10' : 'border-red-500/50 bg-red-900/5') : col.color} pt-3 rounded-b-lg transition-colors`}
                 onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverCol(col.key); }}
                 onDragLeave={() => setDragOverCol(null)}
-                onDrop={async (e) => {
+                onDrop={(e) => {
                   e.preventDefault();
                   setDragOverCol(null);
                   if (!dragTodoId) return;
@@ -607,12 +657,15 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
                   const allowed = STATUS_TRANSITIONS[todo.status].map((tr) => tr.next);
                   if (!allowed.includes(col.key)) { setDragTodoId(null); return; }
                   setDragTodoId(null);
-                  try {
-                    await api.todos.update(dragTodoId, { status: col.key });
-                    onUpdate();
-                  } catch (err) {
-                    showError(errorMessage(err, t('todos.statusChangeFailed')));
-                  }
+                  const droppedId = dragTodoId;
+                  void (async () => {
+                    try {
+                      await api.todos.update(droppedId, { status: col.key });
+                      onUpdate();
+                    } catch (err) {
+                      showError(errorMessage(err, t('todos.statusChangeFailed')));
+                    }
+                  })();
                 }}>
                 <h3 className="text-sm font-medium text-gray-400 mb-3">
                   {col.label()}{' '}

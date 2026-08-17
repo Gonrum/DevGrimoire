@@ -19,19 +19,29 @@ const SAVED_INDICATOR_MS = 1500;
 
 export default function NoteEditor({ note, onLocalChange, onSaved, onPromote, onArchive }: Props) {
   const { t } = useTranslation();
-  const [content, setContent] = useState(note.content);
+  /*
+   * `contentEdit === null` heisst: der Nutzer hat in diesem Editor noch nichts
+   * getippt — dann gilt der Servertext. Vorher lag der Text in State und ein
+   * Effect kopierte `note.content` hinein.
+   *
+   * Dieser Effect lief bei **jedem Tastendruck**: `onLocalChange` schreibt den
+   * Zwischenstand in die Notizliste des Docks, `note.content` änderte sich und
+   * der Effect setzte daraufhin `lastSavedRef.current` auf den *ungespeicherten*
+   * Text und den Status zurück auf `idle`. Damit war die Bedingung
+   * `status === 'dirty' && content !== lastSavedRef.current` nie erfüllt —
+   * weder der Flush beim Tab-Wechsel noch der `sendBeacon` beim Schliessen der
+   * Seite hat je ausgelöst, und der Status-Indikator sprang sofort auf leer.
+   *
+   * Ein Notizwechsel braucht hier keine Behandlung: `NotepadDock` rendert den
+   * Editor mit `key={note._id}`, ein anderer Tab ist also ein neuer Mount.
+   */
+  const [contentEdit, setContentEdit] = useState<string | null>(null);
+  const content = contentEdit ?? note.content;
   const [status, setStatus] = useState<SaveStatus>('idle');
   const lastSavedRef = useRef(note.content);
   const debounceRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
   const pendingFlushRef = useRef(false);
-
-  // Sync when the active note changes (e.g. user switches tab).
-  useEffect(() => {
-    setContent(note.content);
-    lastSavedRef.current = note.content;
-    setStatus('idle');
-  }, [note._id, note.content]);
 
   const flush = async (value: string) => {
     if (inFlightRef.current) {
@@ -65,7 +75,7 @@ export default function NoteEditor({ note, onLocalChange, onSaved, onPromote, on
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
-    setContent(value);
+    setContentEdit(value);
     onLocalChange(note._id, value);
     setStatus('dirty');
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
@@ -79,30 +89,47 @@ export default function NoteEditor({ note, onLocalChange, onSaved, onPromote, on
     void flush(content);
   };
 
-  // Flush on unmount / page-unload.
+  /*
+   * Der Unload-/Unmount-Pfad darf sich **nicht** bei jeder Änderung neu
+   * registrieren — sein Cleanup würde sonst bei jedem Tastendruck speichern.
+   * Er liest den aktuellen Stand deshalb aus Refs statt aus der Closure.
+   * (Vorher stand `[note._id]` mit abgeschaltetem `exhaustive-deps` im Array:
+   * die Closure war die des ersten Renders, ein tatsächlich ausgelöster Flush
+   * hätte den *Anfangstext* gespeichert.)
+   */
+  const pendingRef = useRef({ content, status });
+  const flushRef = useRef(flush);
   useEffect(() => {
+    pendingRef.current = { content, status };
+    flushRef.current = flush;
+  });
+
+  useEffect(() => {
+    const noteId = note._id;
+    const hasUnsavedChanges = () =>
+      pendingRef.current.status === 'dirty' &&
+      pendingRef.current.content !== lastSavedRef.current;
+
     const beforeUnload = () => {
-      if (status === 'dirty' && content !== lastSavedRef.current) {
-        // Use sendBeacon for reliable flush on page close.
-        try {
-          const blob = new Blob([JSON.stringify({ content })], {
-            type: 'application/json',
-          });
-          navigator.sendBeacon?.(`/api/notes/${note._id}`, blob);
-        } catch {
-          /* swallow */
-        }
+      if (!hasUnsavedChanges()) return;
+      // Use sendBeacon for reliable flush on page close.
+      try {
+        const blob = new Blob([JSON.stringify({ content: pendingRef.current.content })], {
+          type: 'application/json',
+        });
+        navigator.sendBeacon?.(`/api/notes/${noteId}`, blob);
+      } catch {
+        /* swallow */
       }
     };
     window.addEventListener('beforeunload', beforeUnload);
     return () => {
       window.removeEventListener('beforeunload', beforeUnload);
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
-      if (status === 'dirty' && content !== lastSavedRef.current) {
-        void flush(content);
+      if (hasUnsavedChanges()) {
+        void flushRef.current(pendingRef.current.content);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note._id]);
 
   const statusLabel: Record<SaveStatus, string> = {

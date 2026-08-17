@@ -44,6 +44,8 @@ import { LoadingText } from './components/ui/LoadingSpinner';
 import { AuthProvider } from './hooks/AuthProvider';
 import { useAuth } from './hooks/useAuth';
 import { configureAuth, api } from './api/client';
+import { parseJsonResponse } from './api/http-boundary';
+import { isRecord } from './lib/narrow';
 import { wsEventBus } from './api/wsEventBus';
 import ParticleBackground from './components/ParticleBackground';
 import QuestionDialog from './components/QuestionDialog';
@@ -81,7 +83,9 @@ function UserMenu() {
       </NavLink>
       <button
         type="button"
-        onClick={logout}
+        onClick={() => {
+          void logout();
+        }}
         className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
         title={t('nav.logout')}
       >
@@ -92,7 +96,7 @@ function UserMenu() {
 }
 
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, authEnabled, loading, getAccessToken } = useAuth();
+  const { isAuthenticated, authEnabled, loading, getAccessToken, applyAccessToken } = useAuth();
 
   useEffect(() => {
     const REFRESH_TOKEN_KEY = 'devgrimoire_refresh_token';
@@ -108,15 +112,29 @@ function AuthGate({ children }: { children: React.ReactNode }) {
             body: JSON.stringify({ refreshToken }),
           });
           if (!res.ok) return false;
-          const data = await res.json();
+          const data = await parseJsonResponse<unknown>(res);
+          // Ohne die Prüfung landete bei einer Antwort ohne `refreshToken`
+          // der String "undefined" im localStorage — der nächste Refresh
+          // schickte ihn mit und schlug dauerhaft fehl.
+          if (
+            !isRecord(data) ||
+            typeof data.refreshToken !== 'string' ||
+            typeof data.accessToken !== 'string'
+          ) {
+            return false;
+          }
           localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
+          // Das Access-Token wurde bisher verworfen: `accessTokenRef` im
+          // Provider blieb auf dem abgelaufenen Wert, und der 401-Retry in
+          // `api/client.ts` wiederholte mit genau demselben toten Token.
+          applyAccessToken(data.accessToken);
           return true;
         } catch {
           return false;
         }
       },
     );
-  }, [getAccessToken]);
+  }, [getAccessToken, applyAccessToken]);
 
   useEffect(() => {
     if (authEnabled === null) return;
@@ -146,14 +164,14 @@ function AppShell() {
   const { t } = useTranslation();
   const { user, authEnabled } = useAuth();
   const isAdmin = authEnabled && user?.role === 'admin';
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // Das Menü gehört zu genau einer Route: sobald sich der Pfad ändert, ist es
+  // wieder zu. Vorher kopierte ein Effect `false` in den State — dieselbe
+  // Information, nur einen Render später und mit einem zusätzlichen Rendern.
+  const [menuOpenPath, setMenuOpenPath] = useState<string | null>(null);
   const [isSlaveMode, setIsSlaveMode] = useState(false);
   const location = useLocation();
-
-  // Close mobile menu on route change
-  useEffect(() => {
-    setMobileMenuOpen(false);
-  }, [location.pathname]);
+  const mobileMenuOpen = menuOpenPath === location.pathname;
+  const closeMobileMenu = () => setMenuOpenPath(null);
 
   // Check replication role
   useEffect(() => {
@@ -176,7 +194,7 @@ function AppShell() {
           {/* Hamburger button - mobile only */}
           <button
             type="button"
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            onClick={() => setMenuOpenPath(mobileMenuOpen ? null : location.pathname)}
             className="md:hidden text-gray-400 hover:text-gray-200 p-1.5 -ml-1"
             aria-label="Menu"
           >
@@ -189,7 +207,7 @@ function AppShell() {
             </svg>
           </button>
 
-          <NavLink to="/" className="flex items-center gap-2 shrink-0" onClick={() => setMobileMenuOpen(false)}>
+          <NavLink to="/" className="flex items-center gap-2 shrink-0" onClick={closeMobileMenu}>
             <img src="/logo.png" alt="DevGrimoire" className="h-7 sm:h-8" />
             <span className="text-lg sm:text-xl font-bold text-white tracking-tight font-grimoire">DevGrimoire</span>
           </NavLink>
@@ -305,7 +323,7 @@ function AppShell() {
             <NavLink
               to="/"
               end
-              onClick={() => setMobileMenuOpen(false)}
+              onClick={closeMobileMenu}
               className={({ isActive }) =>
                 `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
               }
@@ -315,7 +333,7 @@ function AppShell() {
             <NavLink
               to="/projects"
               end
-              onClick={() => setMobileMenuOpen(false)}
+              onClick={closeMobileMenu}
               className={({ isActive }) =>
                 `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
               }
@@ -325,7 +343,7 @@ function AppShell() {
             <NavLink
               to="/customers"
               end
-              onClick={() => setMobileMenuOpen(false)}
+              onClick={closeMobileMenu}
               className={({ isActive }) =>
                 `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
               }
@@ -334,7 +352,7 @@ function AppShell() {
             </NavLink>
             <NavLink
               to="/recurring-tasks"
-              onClick={() => setMobileMenuOpen(false)}
+              onClick={closeMobileMenu}
               className={({ isActive }) =>
                 `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
               }
@@ -343,7 +361,7 @@ function AppShell() {
             </NavLink>
             <NavLink
               to="/workflows"
-              onClick={() => setMobileMenuOpen(false)}
+              onClick={closeMobileMenu}
               className={({ isActive }) =>
                 `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
               }
@@ -352,7 +370,7 @@ function AppShell() {
             </NavLink>
             <NavLink
               to="/research"
-              onClick={() => setMobileMenuOpen(false)}
+              onClick={closeMobileMenu}
               className={({ isActive }) =>
                 `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
               }
@@ -361,7 +379,7 @@ function AppShell() {
             </NavLink>
             <NavLink
               to="/stacks"
-              onClick={() => setMobileMenuOpen(false)}
+              onClick={closeMobileMenu}
               className={({ isActive }) =>
                 `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
               }
@@ -370,7 +388,7 @@ function AppShell() {
             </NavLink>
             <NavLink
               to="/questions"
-              onClick={() => setMobileMenuOpen(false)}
+              onClick={closeMobileMenu}
               className={({ isActive }) =>
                 `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
               }
@@ -380,7 +398,7 @@ function AppShell() {
             {isAdmin && (
               <NavLink
                 to="/logs"
-                onClick={() => setMobileMenuOpen(false)}
+                onClick={closeMobileMenu}
                 className={({ isActive }) =>
                   `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
                 }
@@ -390,7 +408,7 @@ function AppShell() {
             )}
             <NavLink
               to="/docs"
-              onClick={() => setMobileMenuOpen(false)}
+              onClick={closeMobileMenu}
               className={({ isActive }) =>
                 `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
               }
@@ -399,7 +417,7 @@ function AppShell() {
             </NavLink>
             <NavLink
               to="/settings"
-              onClick={() => setMobileMenuOpen(false)}
+              onClick={closeMobileMenu}
               className={({ isActive }) =>
                 `px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive ? 'text-cyan-400 bg-gray-800' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}`
               }

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, ImportResult, ParsedMilestone } from '../../api/client';
+import { errorMessage } from '../../lib/narrow';
 import Button from '../ui/Button';
 import { Dialog, Portal } from '../ui/Dialog';
 import { useToast } from '../Toast';
@@ -35,7 +36,10 @@ export default function MilestoneImportDialog({ open, projectId, onClose, onImpo
     }
     const reader = new FileReader();
     reader.onload = (ev) => {
-      setMarkdown(ev.target?.result as string ?? '');
+      // `readAsText` liefert immer `string`; `FileReader.result` ist trotzdem
+      // `string | ArrayBuffer | null` — geprüft statt behauptet.
+      const result = ev.target?.result;
+      setMarkdown(typeof result === 'string' ? result : '');
     };
     reader.readAsText(file);
   };
@@ -46,8 +50,8 @@ export default function MilestoneImportDialog({ open, projectId, onClose, onImpo
     try {
       const result = await api.milestones.importPreview(markdown);
       setParsed(result);
-    } catch (err: any) {
-      showError(err.message || t('common.error'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.error')));
     } finally {
       setLoadingPreview(false);
     }
@@ -60,8 +64,8 @@ export default function MilestoneImportDialog({ open, projectId, onClose, onImpo
       const result = await api.milestones.importApply(projectId, parsed);
       onImported(result);
       handleClose();
-    } catch (err: any) {
-      showError(err.message || t('common.error'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.error')));
     } finally {
       setApplying(false);
     }
@@ -113,7 +117,9 @@ export default function MilestoneImportDialog({ open, projectId, onClose, onImpo
                 <Button
                   type="button"
                   variant="primary"
-                  onClick={handlePreview}
+                  onClick={() => {
+                    void handlePreview();
+                  }}
                   disabled={!markdown.trim() || loadingPreview}
                 >
                   {loadingPreview ? t('common.loading', 'Lade...') : t('milestone.import.preview')}
@@ -163,7 +169,9 @@ export default function MilestoneImportDialog({ open, projectId, onClose, onImpo
                 <Button
                   type="button"
                   variant="primary"
-                  onClick={handleApply}
+                  onClick={() => {
+                    void handleApply();
+                  }}
                   disabled={applying}
                 >
                   {applying ? t('common.saving') : t('milestone.import.apply')}

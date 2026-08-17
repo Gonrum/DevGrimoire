@@ -9,6 +9,7 @@ import { LoadingText } from '../components/ui/LoadingSpinner';
 import { SettingsSection, SettingsShell } from '../components/ui/SettingsShell';
 import ProjectGitRepositorySettings from '../components/settings/ProjectGitRepositorySettings';
 import TagInput from '../components/ui/TagInput';
+import { errorMessage } from '../lib/narrow';
 
 const TEMPLATE_INSTRUCTIONS = `## Arbeitsweise
 1. Immer erst Planen und einen Überblick verschaffen
@@ -54,12 +55,19 @@ export default function ProjectSettings() {
   const [tab, setTab] = useState<ProjectSettingsTab>('general');
   const [gitRepos, setGitRepos] = useState<GitRepository[]>([]);
 
+  /*
+   * Cleanup markiert einen laufenden Ladevorgang als veraltet: bei einem
+   * Projektwechsel überschrieb sonst die spätere Antwort des alten Projekts das
+   * Formular des neuen — inklusive einer bereits begonnenen Eingabe.
+   */
   useEffect(() => {
     if (!id) return;
-    setLoading(true);
-    api.projects
-      .get(id)
-      .then((p) => {
+    let cancelled = false;
+    async function run(projectId: string) {
+      setLoading(true);
+      try {
+        const p = await api.projects.get(projectId);
+        if (cancelled) return;
         setProject(p);
         setName(p.name);
         setDescription(p.description || '');
@@ -72,13 +80,18 @@ export default function ProjectSettings() {
         setTodoNumberFormat(p.todoNumberFormat || '{type}-{n}');
         setMilestoneNumberFormat(p.milestoneNumberFormat || '{type}-{n}');
         setGitRepos(p.gitRepositories || []);
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      } catch (err) {
+        if (!cancelled) setError(errorMessage(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void run(id);
     api.projects
       .listTags()
-      .then((rows) => setTagSuggestions(rows.map((r) => r.name)))
-      .catch(() => setTagSuggestions([]));
+      .then((rows) => { if (!cancelled) setTagSuggestions(rows.map((r) => r.name)); })
+      .catch(() => { if (!cancelled) setTagSuggestions([]); });
+    return () => { cancelled = true; };
   }, [id]);
 
 
@@ -106,6 +119,15 @@ export default function ProjectSettings() {
       setError(err instanceof Error ? err.message : t('common.errorSaving'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!id) return;
+    try {
+      await api.transfer.export(id, includeSecrets);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('projectSettings.exportFailed'));
     }
   };
 
@@ -295,7 +317,7 @@ export default function ProjectSettings() {
 
       {showSaveBar && tab !== 'git' && (
         <div className="sticky bottom-0 z-10 -mx-4 mb-8 flex items-center gap-3 border-t border-gray-800 bg-gray-950/95 px-4 py-3 backdrop-blur md:-mx-0 md:rounded-lg md:border md:bg-gray-900/80">
-          <Button type="button" variant="primary" size="lg" onClick={handleSave} disabled={saving || !name.trim()}>
+          <Button type="button" variant="primary" size="lg" onClick={() => { void handleSave(); }} disabled={saving || !name.trim()}>
             {saving ? t('common.saving') : t('projectSettings.saveAll')}
           </Button>
           {saved && (
@@ -327,13 +349,7 @@ export default function ProjectSettings() {
         )}
         <Button
           variant="primary"
-          onClick={async () => {
-            try {
-              await api.transfer.export(id!, includeSecrets);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : t('projectSettings.exportFailed'));
-            }
-          }}
+          onClick={() => { void handleExport(); }}
         >
           {t('projectSettings.exportProject')}
         </Button>
@@ -357,7 +373,7 @@ export default function ProjectSettings() {
             ⚠ {t('projectSettings.deleteProjectWarning', { name: project.name })}
           </div>
           <ConfirmButton
-            onConfirm={async () => { if (id) { await api.projects.delete(id); navigate('/'); } }}
+            onConfirm={async () => { if (id) { await api.projects.delete(id); void navigate('/'); } }}
             label={t('projectSettings.deleteProject')}
             confirmLabel={t('projectSettings.confirmDeleteProjectFor', { name: project.name })}
             variant="danger-solid"

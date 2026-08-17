@@ -7,6 +7,7 @@ import {
 import { ArrowLeft, Save, Play, CheckCircle, Pause, Trash2, PanelLeftOpen, PanelRightOpen, X } from 'lucide-react';
 
 import { workflowsApi, WorkflowDefinition, WorkflowNode as WfNode, WorkflowEdge as WfEdge, WorkflowStatus, WorkflowNodeMetadata } from '../api/workflows';
+import { errorMessage, isRecord, isUnknownArray, optionOr } from '../lib/narrow';
 import { WorkflowCanvas } from '../components/workflows/WorkflowCanvas';
 import { WorkflowNodePalette } from '../components/workflows/WorkflowNodePalette';
 import { WorkflowNodeInspector } from '../components/workflows/WorkflowNodeInspector';
@@ -14,7 +15,7 @@ import { WorkflowValidationBanner } from '../components/workflows/WorkflowValida
 import { WorkflowRunInspector } from '../components/workflows/WorkflowRunInspector';
 import { WorkflowEditorMobileFallback } from '../components/workflows/WorkflowEditorMobileFallback';
 import { useNodeTypesCatalog } from '../hooks/useNodeTypesCatalog';
-import { useViewportBreakpoint } from '../hooks/useViewportBreakpoint';
+import { useViewportBreakpoint, ViewportBreakpoint } from '../hooks/useViewportBreakpoint';
 import { useWorkflowDirtyGuard } from '../hooks/useWorkflowDirtyGuard';
 import { parseValidationIssues, RemoteIssue } from '../components/workflows/parseValidationIssues';
 import { getDefaultsFromJsonSchema } from '../components/workflows/schemaDefaults';
@@ -27,6 +28,75 @@ export default function WorkflowEditorPage() {
       <EditorInner />
     </ReactFlowProvider>
   );
+}
+
+/** Erlaubte Branch-Werte einer Edge — Grundlage für `optionOr` statt Cast. */
+const EDGE_BRANCHES = ['success', 'failure', 'custom', 'always'] as const;
+type EdgeBranch = (typeof EDGE_BRANCHES)[number];
+
+/**
+ * xyflow führt `data` als `Record<string, unknown>`; was darin steht, weiss nur
+ * diese Datei. Vorher stand an einem Dutzend Stellen `n.data as { type: string }`
+ * — eine Behauptung, die bei einem Node ohne `data.type` (z.B. eine per
+ * `onNodesChange` eingefügte Kopie) `undefined` als `string` weiterreichte und
+ * erst weit später, im `byType[…]`-Lookup oder im Speichern-DTO, auffiel.
+ */
+interface NodeData {
+  type: string;
+  label?: string;
+  config: Record<string, unknown>;
+  secretRefs?: string[];
+}
+
+function readStringArray(value: unknown): string[] | undefined {
+  if (!isUnknownArray(value)) return undefined;
+  return value.filter((entry) => typeof entry === 'string');
+}
+
+function readStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === 'string') out[key] = entry;
+  }
+  return out;
+}
+
+function readNodeData(data: unknown): NodeData {
+  if (!isRecord(data)) return { type: '', config: {} };
+  return {
+    type: typeof data.type === 'string' ? data.type : '',
+    label: typeof data.label === 'string' ? data.label : undefined,
+    config: isRecord(data.config) ? data.config : {},
+    secretRefs: readStringArray(data.secretRefs),
+  };
+}
+
+interface EdgeData {
+  branch: EdgeBranch;
+  condition?: Record<string, unknown>;
+  payloadMapping?: Record<string, string>;
+}
+
+function readEdgeData(data: unknown): EdgeData {
+  if (!isRecord(data)) return { branch: 'always' };
+  return {
+    branch: typeof data.branch === 'string' ? optionOr(data.branch, EDGE_BRANCHES, 'always') : 'always',
+    condition: isRecord(data.condition) ? data.condition : undefined,
+    payloadMapping: readStringRecord(data.payloadMapping),
+  };
+}
+
+/**
+ * Panel-Sichtbarkeit: Default ist „am Desktop offen". Ein Klick auf Öffnen /
+ * Schliessen hinterlegt eine Ausnahme, die nur für den Breakpoint gilt, in dem
+ * sie gesetzt wurde — ein Wechsel Tablet↔Desktop fällt also auf den Default
+ * zurück, wie zuvor der Effect.
+ */
+type PanelOverride = { bp: ViewportBreakpoint; open: boolean } | null;
+
+function panelOpen(override: PanelOverride, bp: ViewportBreakpoint): boolean {
+  return override !== null && override.bp === bp ? override.open : bp === 'desktop';
 }
 
 function EditorInner() {
@@ -46,11 +116,22 @@ function EditorInner() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
-  const [paletteOpen, setPaletteOpen] = useState(bp === 'desktop');
-  const [inspectorOpen, setInspectorOpen] = useState(bp === 'desktop');
+  const [paletteOverride, setPaletteOverride] = useState<PanelOverride>(null);
+  const [inspectorOverride, setInspectorOverride] = useState<PanelOverride>(null);
   const draggedTypeRef = useRef<string | null>(null);
 
+  const paletteOpen = panelOpen(paletteOverride, bp);
+  const inspectorOpen = panelOpen(inspectorOverride, bp);
+  const setPaletteOpen = (open: boolean) => setPaletteOverride({ bp, open });
+  const setInspectorOpen = (open: boolean) => setInspectorOverride({ bp, open });
+
   useWorkflowDirtyGuard(dirty);
+
+  // Der Toast-Kontext liefert bei jedem Provider-Render ein neues Objekt. Als
+  // Dependency des Lade-Effects wäre das eine Schleife: Fehler → Toast →
+  // Provider-Render → neuer Kontext → erneutes Laden → Fehler.
+  const toastRef = useRef(toast);
+  useEffect(() => { toastRef.current = toast; }, [toast]);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,23 +140,17 @@ function EditorInner() {
       setWorkflow(wf);
       setNodes(wf.nodes.map((n) => toReactFlowNode(n, byType)));
       setEdges(wf.edges.map(toReactFlowEdge));
-    }).catch((err) => {
-      toast.showError(`Workflow nicht ladbar: ${(err as Error).message}`);
+    }).catch((err: unknown) => {
+      toastRef.current.showError(`Workflow nicht ladbar: ${errorMessage(err)}`);
     });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, byType]);
-
-  useEffect(() => {
-    setPaletteOpen(bp === 'desktop');
-    setInspectorOpen(bp === 'desktop' && !!selectedNodeId);
-  }, [bp, selectedNodeId]);
+  }, [id, byType, setNodes, setEdges]);
 
   const selectedNode = useMemo(() => nodes.find((n) => n.id === selectedNodeId) ?? null, [nodes, selectedNodeId]);
   const selectedEdge = useMemo(() => edges.find((e) => e.id === selectedEdgeId) ?? null, [edges, selectedEdgeId]);
 
   const onConnect = useCallback((conn: Connection) => {
-    const branch = (conn.sourceHandle ?? 'always') as 'success' | 'failure' | 'custom' | 'always';
+    const branch = optionOr(conn.sourceHandle ?? 'always', EDGE_BRANCHES, 'always');
     const newId = `e_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
     setEdges((eds) => addEdge({
       ...conn,
@@ -97,8 +172,7 @@ function EditorInner() {
     setNodes((ns) => {
       const orig = ns.find((n) => n.id === nid);
       if (!orig) return ns;
-      const data = orig.data as { type?: string };
-      const newId = generateNodeId(data.type ?? 'node', ns.map((n) => n.id));
+      const newId = generateNodeId(readNodeData(orig.data).type || 'node', ns.map((n) => n.id));
       const newNode: Node = {
         ...orig,
         id: newId,
@@ -126,22 +200,21 @@ function EditorInner() {
       ...e,
       data: { ...e.data, onDelete: handleDeleteEdge },
     })));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleDeleteNode, handleDuplicateNode, handleDeleteEdge]);
+  }, [handleDeleteNode, handleDuplicateNode, handleDeleteEdge, setNodes, setEdges]);
 
   const addNodeOfType = useCallback((type: string, position: { x: number; y: number }) => {
     const meta = byType[type];
     if (!meta) return;
     setNodes((ns) => {
       const newId = generateNodeId(type, ns.map((n) => n.id));
-      const defaultConfig = getDefaultsFromJsonSchema(meta.configJsonSchema) as Record<string, unknown> | undefined;
+      const defaults = getDefaultsFromJsonSchema(meta.configJsonSchema);
       const newNode: Node = {
         id: newId,
         type: 'workflowNode',
         position,
         data: {
           type,
-          config: defaultConfig ?? {},
+          config: isRecord(defaults) ? defaults : {},
           secretRefs: [],
           metadata: meta,
           onDelete: handleDeleteNode,
@@ -182,20 +255,23 @@ function EditorInner() {
     setSaving(true);
     try {
       const dto: UpdateDto = {
-        nodes: nodes.map((n) => ({
-          id: n.id,
-          type: (n.data as { type: string }).type,
-          position: n.position,
-          config: (n.data as { config?: Record<string, unknown> }).config ?? {},
-          secretRefs: (n.data as { secretRefs?: string[] }).secretRefs ?? [],
-        })),
+        nodes: nodes.map((n) => {
+          const d = readNodeData(n.data);
+          return {
+            id: n.id,
+            type: d.type,
+            position: n.position,
+            config: d.config,
+            secretRefs: d.secretRefs ?? [],
+          };
+        }),
         edges: edges.map((e) => ({
           id: e.id,
           source: e.source,
           target: e.target,
           sourcePort: e.sourceHandle ?? undefined,
           targetPort: e.targetHandle ?? undefined,
-          branch: ((e.data as { branch?: string })?.branch ?? 'always') as 'success' | 'failure' | 'custom' | 'always',
+          branch: readEdgeData(e.data).branch,
         })),
         ...extra,
       };
@@ -206,7 +282,7 @@ function EditorInner() {
       if (!silent) toast.showSuccess('Workflow gespeichert');
       return true;
     } catch (err) {
-      const msg = (err as Error).message;
+      const msg = errorMessage(err);
       if (msg.toLowerCase().includes('cannot') || msg.includes('400')) {
         setRemoteIssues(parseValidationIssues(msg));
       }
@@ -243,7 +319,7 @@ function EditorInner() {
       toast.showSuccess(`Run gestartet`);
       setRunId(run._id);
     } catch (err) {
-      toast.showError(`Run fehlgeschlagen: ${(err as Error).message}`);
+      toast.showError(`Run fehlgeschlagen: ${errorMessage(err)}`);
     }
   };
 
@@ -253,7 +329,7 @@ function EditorInner() {
       setWorkflow(updated);
       toast.showSuccess(`Status: ${status}`);
     } catch (err) {
-      toast.showError((err as Error).message);
+      toast.showError(errorMessage(err, 'Status nicht änderbar'));
     }
   };
 
@@ -262,16 +338,16 @@ function EditorInner() {
     try {
       await workflowsApi.delete(id);
       toast.showSuccess('Workflow gelöscht');
-      navigate('/workflows');
+      void navigate('/workflows');
     } catch (err) {
-      toast.showError((err as Error).message);
+      toast.showError(errorMessage(err, 'Löschen fehlgeschlagen'));
     }
   };
 
   const jumpToNode = (nodeId: string) => {
     setSelectedNodeId(nodeId);
     const node = nodes.find((n) => n.id === nodeId);
-    if (node) reactFlowApi.setCenter(node.position.x, node.position.y, { zoom: 1.2, duration: 400 });
+    if (node) void reactFlowApi.setCenter(node.position.x, node.position.y, { zoom: 1.2, duration: 400 });
   };
 
   const upstreamNodes = useMemo(() => {
@@ -290,8 +366,8 @@ function EditorInner() {
     return nodes
       .filter((n) => incoming.has(n.id))
       .map((n) => {
-        const d = n.data as { type: string; config?: Record<string, unknown>; secretRefs?: string[] };
-        return { id: n.id, type: d.type, config: d.config ?? {}, secretRefs: d.secretRefs };
+        const d = readNodeData(n.data);
+        return { id: n.id, type: d.type, config: d.config, secretRefs: d.secretRefs };
       });
   }, [nodes, edges, selectedNodeId]);
 
@@ -300,7 +376,7 @@ function EditorInner() {
     const map: Record<string, number> = {};
     for (const e of edges) {
       if (e.source !== selectedNodeId) continue;
-      const b = (e.data as { branch?: string })?.branch ?? 'always';
+      const b = readEdgeData(e.data).branch;
       map[b] = (map[b] ?? 0) + 1;
     }
     return map;
@@ -318,26 +394,27 @@ function EditorInner() {
   const nodesById = useMemo<Record<string, { id: string; type: string; label?: string }>>(() => {
     const out: Record<string, { id: string; type: string; label?: string }> = {};
     for (const n of nodes) {
-      const d = n.data as { type: string; label?: string };
+      const d = readNodeData(n.data);
       out[n.id] = { id: n.id, type: d.type, label: d.label };
     }
     return out;
   }, [nodes]);
 
+  const selectedNodeData = useMemo(() => readNodeData(selectedNode?.data), [selectedNode]);
+
   const localIssues = useMemo(() => {
     if (!selectedNode) return [];
-    const d = selectedNode.data as { type: string; config?: Record<string, unknown> };
-    const meta = byType[d.type];
+    const meta = byType[selectedNodeData.type];
     if (!meta) return ['Unbekannter Type — Schema nicht geladen.'];
     const issues: string[] = [];
-    const required = ((meta.configJsonSchema as { required?: string[] }).required ?? []);
-    const cfg = d.config ?? {};
+    const required = readStringArray(meta.configJsonSchema.required) ?? [];
+    const cfg = selectedNodeData.config;
     for (const r of required) {
       const v = cfg[r];
       if (v === undefined || v === null || v === '') issues.push(`config.${r}: required`);
     }
     return issues;
-  }, [selectedNode, byType]);
+  }, [selectedNode, selectedNodeData, byType]);
 
   if (!workflow) {
     return <div className="container mx-auto p-6 text-sm text-gray-500">Lädt…</div>;
@@ -347,8 +424,8 @@ function EditorInner() {
     return (
       <WorkflowEditorMobileFallback
         workflow={workflow}
-        onActivate={handleActivate}
-        onRun={handleRun}
+        onActivate={() => { void handleActivate(); }}
+        onRun={() => { void handleRun(); }}
       />
     );
   }
@@ -363,25 +440,25 @@ function EditorInner() {
           <span className="rounded bg-gray-800 px-2 py-0.5 text-[10px] text-gray-400">v{workflow.version}</span>
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={() => handleSave()} disabled={saving} className="inline-flex items-center gap-1 rounded bg-gray-800 px-3 py-1 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-50">
+          <button onClick={() => { void handleSave(); }} disabled={saving} className="inline-flex items-center gap-1 rounded bg-gray-800 px-3 py-1 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-50">
             <Save size={12} /> Speichern
           </button>
           {workflow.status !== 'active' && (
-            <button onClick={handleActivate} className="inline-flex items-center gap-1 rounded bg-cyan-600 px-3 py-1 text-xs text-white hover:bg-cyan-500">
+            <button onClick={() => { void handleActivate(); }} className="inline-flex items-center gap-1 rounded bg-cyan-600 px-3 py-1 text-xs text-white hover:bg-cyan-500">
               <CheckCircle size={12} /> Aktivieren
             </button>
           )}
           {workflow.status === 'active' && (
             <>
-              <button onClick={handleRun} className="inline-flex items-center gap-1 rounded bg-green-600 px-3 py-1 text-xs text-white hover:bg-green-500">
+              <button onClick={() => { void handleRun(); }} className="inline-flex items-center gap-1 rounded bg-green-600 px-3 py-1 text-xs text-white hover:bg-green-500">
                 <Play size={12} /> Run
               </button>
-              <button onClick={() => handleStatusChange('paused')} className="inline-flex items-center gap-1 rounded bg-amber-700 px-3 py-1 text-xs text-white hover:bg-amber-600">
+              <button onClick={() => { void handleStatusChange('paused'); }} className="inline-flex items-center gap-1 rounded bg-amber-700 px-3 py-1 text-xs text-white hover:bg-amber-600">
                 <Pause size={12} /> Pause
               </button>
             </>
           )}
-          <button onClick={handleDelete} className="inline-flex items-center gap-1 rounded bg-red-900/60 px-3 py-1 text-xs text-red-200 hover:bg-red-900">
+          <button onClick={() => { void handleDelete(); }} className="inline-flex items-center gap-1 rounded bg-red-900/60 px-3 py-1 text-xs text-red-200 hover:bg-red-900">
             <Trash2 size={12} />
           </button>
         </div>
@@ -446,9 +523,9 @@ function EditorInner() {
             <WorkflowNodeInspector
               selectedNode={selectedNode ? {
                 id: selectedNode.id,
-                type: (selectedNode.data as { type: string }).type,
-                config: ((selectedNode.data as { config?: Record<string, unknown> }).config) ?? {},
-                secretRefs: (selectedNode.data as { secretRefs?: string[] }).secretRefs,
+                type: selectedNodeData.type,
+                config: selectedNodeData.config,
+                secretRefs: selectedNodeData.secretRefs,
               } : null}
               selectedEdge={selectedEdge ? edgeToWf(selectedEdge) : null}
               catalog={catalog}
@@ -467,7 +544,8 @@ function EditorInner() {
                 if (!selectedNodeId) return;
                 const meta = byType[newType];
                 if (!meta) return;
-                const defaultConfig = (getDefaultsFromJsonSchema(meta.configJsonSchema) as Record<string, unknown>) ?? {};
+                const defaults = getDefaultsFromJsonSchema(meta.configJsonSchema);
+                const defaultConfig = isRecord(defaults) ? defaults : {};
                 setNodes((ns) => ns.map((n) => n.id === selectedNodeId ? { ...n, data: { ...n.data, type: newType, metadata: meta, config: defaultConfig } } : n));
                 setDirty(true);
               }}
@@ -537,15 +615,16 @@ function toReactFlowEdge(e: WfEdge): Edge {
 }
 
 function edgeToWf(e: Edge): WfEdge {
+  const d = readEdgeData(e.data);
   return {
     id: e.id,
     source: e.source,
     target: e.target,
     sourcePort: e.sourceHandle ?? undefined,
     targetPort: e.targetHandle ?? undefined,
-    branch: ((e.data as { branch?: WfEdge['branch'] })?.branch ?? 'always'),
-    condition: (e.data as { condition?: Record<string, unknown> })?.condition,
-    payloadMapping: (e.data as { payloadMapping?: Record<string, string> })?.payloadMapping,
+    branch: d.branch,
+    condition: d.condition,
+    payloadMapping: d.payloadMapping,
   };
 }
 

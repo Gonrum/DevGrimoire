@@ -20,6 +20,7 @@ import {
   KgEntityType,
   KgRelation,
 } from '../../api/client';
+import { errorMessage, matchOption } from '../../lib/narrow';
 import { useToast } from '../Toast';
 import Button from '../ui/Button';
 import EmptyState from '../ui/EmptyState';
@@ -131,17 +132,25 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
     onlyConfirmed: false,
   });
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
     setLoading(true);
-    api.knowledgeGraph
-      .listEdges({ projectId, limit: 5000 })
-      .then(setEdges)
-      .catch((err) => showError((err as Error).message || 'Failed to load graph'))
-      .finally(() => setLoading(false));
+    try {
+      setEdges(await api.knowledgeGraph.listEdges({ projectId, limit: 5000 }));
+    } catch (err) {
+      showError(errorMessage(err, 'Failed to load graph'));
+    } finally {
+      setLoading(false);
+    }
   }, [projectId, showError]);
 
   useEffect(() => {
-    load();
+    // Laden gehört in eine im Effect definierte async-Funktion (React-Doku
+    // "Fetching data"): der Effect-Body selbst setzt damit keinen State
+    // synchron, sondern stösst nur den Ladevorgang an.
+    const run = async () => {
+      await load();
+    };
+    void run();
   }, [load]);
 
   const graph = useMemo(() => buildGraph(edges, filter, focal), [edges, filter, focal]);
@@ -151,9 +160,9 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
     try {
       const res = await api.knowledgeGraph.discover(projectId);
       showSuccess(t('knowledgeGraph.discovered', res as Record<string, number>));
-      load();
+      void load(); // Fehler meldet `load` selbst; nicht darauf warten (wie bisher).
     } catch (err) {
-      showError((err as Error).message || 'Discover failed');
+      showError(errorMessage(err, 'Discover failed'));
     } finally {
       setDiscovering(false);
     }
@@ -161,10 +170,12 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
 
   const handleNodeClick = useCallback(
     async (_: unknown, node: Node) => {
-      const [type, id] = node.id.split(':', 2);
-      setFocal({ type: type as KgEntityType, id });
+      const [rawType, id] = node.id.split(':', 2);
+      const type = matchOption(rawType, ALL_ENTITY_TYPES);
+      if (!type || !id) return;
+      setFocal({ type, id });
       try {
-        const imp = await api.knowledgeGraph.impact(projectId, type as KgEntityType, id, 2);
+        const imp = await api.knowledgeGraph.impact(projectId, type, id, 2);
         setImpact(imp);
       } catch {
         setImpact(null);
@@ -177,18 +188,18 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
     try {
       await api.knowledgeGraph.deleteEdge(edgeId);
       showSuccess(t('knowledgeGraph.edgeDeleted'));
-      load();
+      void load(); // Fehler meldet `load` selbst; nicht darauf warten (wie bisher).
     } catch (err) {
-      showError((err as Error).message || 'Delete failed');
+      showError(errorMessage(err, 'Delete failed'));
     }
   };
 
   const handleEdgeConfirm = async (edgeId: string, confirmed: boolean) => {
     try {
       await api.knowledgeGraph.confirmEdge(edgeId, confirmed);
-      load();
+      void load(); // Fehler meldet `load` selbst; nicht darauf warten (wie bisher).
     } catch (err) {
-      showError((err as Error).message || 'Update failed');
+      showError(errorMessage(err, 'Update failed'));
     }
   };
 
@@ -242,7 +253,9 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
           size="sm"
           variant="primary"
           disabled={discovering}
-          onClick={handleDiscover}
+          onClick={() => {
+            void handleDiscover();
+          }}
           className="ml-auto"
         >
           {discovering ? t('knowledgeGraph.discovering') : t('knowledgeGraph.rebuild')}
@@ -371,7 +384,9 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
                         <button
                           type="button"
                           title={t('knowledgeGraph.confirmEdge')}
-                          onClick={() => handleEdgeConfirm(e._id, true)}
+                          onClick={() => {
+                            void handleEdgeConfirm(e._id, true);
+                          }}
                           className="text-green-400 hover:text-green-300"
                         >
                           ✓
@@ -380,7 +395,9 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
                       <button
                         type="button"
                         title={t('knowledgeGraph.deleteEdge')}
-                        onClick={() => handleEdgeDelete(e._id)}
+                        onClick={() => {
+                          void handleEdgeDelete(e._id);
+                        }}
                         className="text-red-400 hover:text-red-300"
                       >
                         ✕
@@ -425,7 +442,9 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
                   nodes={graph.nodes}
                   edges={graph.edges}
                   nodeTypes={nodeTypes}
-                  onNodeClick={handleNodeClick}
+                  onNodeClick={(event, node) => {
+                    void handleNodeClick(event, node);
+                  }}
                   fitView
                   fitViewOptions={{ padding: 0.15 }}
                   proOptions={{ hideAttribution: true }}

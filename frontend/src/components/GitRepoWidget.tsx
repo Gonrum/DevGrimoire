@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, GitRepository } from '../api/client';
+import { errorMessage } from '../lib/narrow';
+import { useToast } from './Toast';
 import { ProviderBadge } from './icons/ProviderIcon';
 
 interface RepoInfo {
@@ -17,17 +19,28 @@ interface GitRepoWidgetProps {
 
 export default function GitRepoWidget({ projectId, gitRepositories, onNavigateToCommits }: GitRepoWidgetProps) {
   const { i18n } = useTranslation();
+  const { showError } = useToast();
   const [repos, setRepos] = useState<RepoInfo[]>([]);
   const [syncing, setSyncing] = useState<number | null>(null);
+  // `formatSyncTime` rechnete mit `Date.now()` mitten im Render. Für die grobe
+  // Relativzeit reicht der Zeitpunkt des Mountens.
+  const [mountedAt] = useState(() => Date.now());
 
   const locale = i18n.language === 'de' ? 'de' : 'en';
 
   useEffect(() => {
-    Promise.all(
+    // Der Fehler wird pro Repo abgefangen: vorher riss ein einziger
+    // fehlschlagender count-Call die ganze `Promise.all` mit — dann bekam
+    // *kein* Repo eine Commit-Zahl und die Rejection blieb unbehandelt.
+    void Promise.all(
       gitRepositories.map(async (repo, index) => {
         if (!repo.label) return { repo, index, commitCount: -1 };
-        const { count } = await api.commits.count(projectId, repo.label);
-        return { repo, index, commitCount: count };
+        try {
+          const { count } = await api.commits.count(projectId, repo.label);
+          return { repo, index, commitCount: count };
+        } catch {
+          return { repo, index, commitCount: -1 };
+        }
       }),
     ).then(setRepos);
   }, [projectId, gitRepositories]);
@@ -76,8 +89,7 @@ export default function GitRepoWidget({ projectId, gitRepositories, onNavigateTo
   const formatSyncTime = (dateStr?: string): string => {
     if (!dateStr) return locale === 'de' ? 'Nie synchronisiert' : 'Never synced';
     const date = new Date(dateStr);
-    const now = Date.now();
-    const diff = Math.floor((now - date.getTime()) / 1000);
+    const diff = Math.floor((mountedAt - date.getTime()) / 1000);
     if (diff < 60) return locale === 'de' ? 'Gerade eben' : 'Just now';
     if (diff < 3600) return `${Math.floor(diff / 60)}m`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
@@ -151,7 +163,11 @@ export default function GitRepoWidget({ projectId, gitRepositories, onNavigateTo
                 )}
                 <button
                   type="button"
-                  onClick={() => handleSync(i)}
+                  onClick={() => {
+                    handleSync(i).catch((err: unknown) => {
+                      showError(errorMessage(err, locale === 'de' ? 'Sync fehlgeschlagen' : 'Sync failed'));
+                    });
+                  }}
                   disabled={syncing !== null || repo.syncEnabled === false}
                   className="text-xs text-gray-500 hover:text-violet-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors px-1.5 py-0.5"
                   title="Sync"

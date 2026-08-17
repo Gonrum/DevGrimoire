@@ -8,6 +8,7 @@ import {
   LlmEndpointProvider,
   LlmEndpointPurpose,
 } from '../../api/client';
+import { matchOption, optionOr } from '../../lib/narrow';
 import Button from '../ui/Button';
 import { FormInput, FormSelect, SecretInput } from '../ui/FormField';
 import { SettingsActions, SettingsSection, SettingsTabHeader } from '../ui/SettingsShell';
@@ -51,7 +52,8 @@ const HEALTH_BADGE_CLASS = {
 } as const;
 
 function purposeBadgeClass(purpose: string): string {
-  return PURPOSE_BADGE_CLASS[purpose as LlmEndpointPurpose] ?? 'bg-gray-800 text-gray-400 border-gray-700';
+  const known = matchOption(purpose, PURPOSES);
+  return known ? PURPOSE_BADGE_CLASS[known] : 'bg-gray-800 text-gray-400 border-gray-700';
 }
 
 interface FormState {
@@ -128,7 +130,8 @@ export default function LlmEndpointsSettings() {
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [editingId, setEditingId] = useState<string | 'new' | null>(null);
+  // `'new'` = Formular für einen neuen Endpunkt, sonst die Endpunkt-ID.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(blankForm());
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
   const [formProbe, setFormProbe] = useState<TestResult | null>(null);
@@ -150,7 +153,7 @@ export default function LlmEndpointsSettings() {
     }
   }, [t]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   const loadBalancer = useCallback(async () => {
     setBalancerLoading(true);
@@ -166,8 +169,8 @@ export default function LlmEndpointsSettings() {
   }, [t]);
 
   useEffect(() => {
-    loadBalancer();
-    const interval = setInterval(loadBalancer, 5000);
+    void loadBalancer();
+    const interval = setInterval(() => { void loadBalancer(); }, 5000);
     return () => clearInterval(interval);
   }, [loadBalancer]);
 
@@ -205,6 +208,12 @@ export default function LlmEndpointsSettings() {
       return next;
     });
     setSuccess(null);
+  };
+
+  /** Übersetzter Zweck-Name; ein vom Server gemeldeter unbekannter Zweck bleibt roh. */
+  const purposeLabel = (purpose: string): string => {
+    const known = matchOption(purpose, PURPOSES);
+    return known ? t(PURPOSE_LABEL_KEY[known]) : purpose;
   };
 
   const togglePurpose = (purpose: LlmEndpointPurpose) => {
@@ -298,15 +307,16 @@ export default function LlmEndpointsSettings() {
     }
   };
 
-  const groupedByPurpose = useMemo(() => {
-    const groups = {} as Record<LlmEndpointPurpose, LlmEndpoint[]>;
-    for (const purpose of PURPOSES) {
-      groups[purpose] = endpoints
+  const groupedByPurpose = useMemo<Record<LlmEndpointPurpose, LlmEndpoint[]>>(() => {
+    const forPurpose = (purpose: LlmEndpointPurpose) =>
+      endpoints
         .filter((endpoint) => endpoint.purposes.includes(purpose))
-        .slice()
         .sort((a, b) => a.priority - b.priority);
-    }
-    return groups;
+    return {
+      chat: forPurpose('chat'),
+      embedding: forPurpose('embedding'),
+      workflow: forPurpose('workflow'),
+    };
   }, [endpoints]);
 
   // Shared add/edit form — a plain closure (not a nested component) so re-renders
@@ -332,7 +342,7 @@ export default function LlmEndpointsSettings() {
           <FormSelect
             label={t('settings.llmFormProvider')}
             value={form.provider}
-            onChange={(e) => updateForm({ provider: e.target.value as LlmEndpointProvider })}
+            onChange={(e) => updateForm({ provider: optionOr(e.target.value, PROVIDERS, form.provider) })}
           >
             {PROVIDERS.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
           </FormSelect>
@@ -442,11 +452,11 @@ export default function LlmEndpointsSettings() {
 
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="primary" size="sm" onClick={saveForm} disabled={saving}>
+            <Button variant="primary" size="sm" onClick={() => { void saveForm(); }} disabled={saving}>
               {saving ? t('common.saving') : t('common.save')}
             </Button>
             <Button variant="ghost" size="sm" onClick={cancelEdit}>{t('common.cancel')}</Button>
-            <Button size="sm" onClick={probeForm} disabled={formProbe?.testing === true}>
+            <Button size="sm" onClick={() => { void probeForm(); }} disabled={formProbe?.testing === true}>
               {formProbe?.testing ? t('settings.llmProbing') : t('settings.llmProbe')}
             </Button>
             {formProbe && !formProbe.testing && (
@@ -551,7 +561,7 @@ export default function LlmEndpointsSettings() {
                       <span>{t('common.priority')}: {endpoint.priority}</span>
                       <button
                         type="button"
-                        onClick={() => toggleEnabled(endpoint)}
+                        onClick={() => { void toggleEnabled(endpoint); }}
                         className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors ${
                           endpoint.enabled
                             ? 'bg-green-900/50 text-green-300 hover:bg-green-800/50'
@@ -564,11 +574,11 @@ export default function LlmEndpointsSettings() {
                   </div>
 
                   <div className="mt-3 flex flex-wrap items-center gap-3">
-                    <Button size="sm" onClick={() => testEndpoint(endpoint.id)} disabled={test?.testing === true}>
+                    <Button size="sm" onClick={() => { void testEndpoint(endpoint.id); }} disabled={test?.testing === true}>
                       {test?.testing ? t('settings.llmTesting') : t('settings.llmTest')}
                     </Button>
                     <Button size="sm" onClick={() => startEdit(endpoint)}>{t('common.edit')}</Button>
-                    <Button size="sm" variant="danger" onClick={() => removeEndpoint(endpoint)}>{t('common.remove')}</Button>
+                    <Button size="sm" variant="danger" onClick={() => { void removeEndpoint(endpoint); }}>{t('common.remove')}</Button>
                     {test && !test.testing && (
                       <span className={`text-xs ${test.ok ? 'text-green-300' : 'text-red-300'}`}>
                         {test.ok ? t('settings.llmTestOk', { latency: test.latencyMs }) : t('settings.llmTestFail', { error: test.error })}
@@ -624,7 +634,7 @@ export default function LlmEndpointsSettings() {
         <SettingsSection title={t('settings.llmMonitorTitle')} description={t('settings.llmMonitorDescription')}>
           <div className="mb-3 flex items-center justify-between gap-3">
             {balancerError && <span className="text-xs text-red-300">{balancerError}</span>}
-            <Button size="sm" onClick={loadBalancer} disabled={balancerLoading} className="ml-auto">
+            <Button size="sm" onClick={() => { void loadBalancer(); }} disabled={balancerLoading} className="ml-auto">
               {balancerLoading ? t('common.loading') : t('settings.llmMonitorRefresh')}
             </Button>
           </div>
@@ -641,7 +651,7 @@ export default function LlmEndpointsSettings() {
                   {balancer.pools.map((pool) => (
                     <div key={pool.purpose} className="rounded border border-gray-800 bg-gray-950/40 p-2.5 text-xs">
                       <span className={`inline-flex items-center rounded-full border px-2 py-0.5 font-medium ${purposeBadgeClass(pool.purpose)}`}>
-                        {PURPOSE_LABEL_KEY[pool.purpose as LlmEndpointPurpose] ? t(PURPOSE_LABEL_KEY[pool.purpose as LlmEndpointPurpose]) : pool.purpose}
+                        {purposeLabel(pool.purpose)}
                       </span>
                       <div className="mt-2 grid grid-cols-3 gap-1 text-gray-400">
                         <div>

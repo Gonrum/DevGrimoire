@@ -37,8 +37,34 @@ import ProjectHeader from '../components/projects/ProjectHeader';
 import HttpRequestsTab from '../components/HttpRequestsTab';
 import ProjectOverview from '../components/projects/overview/ProjectOverview';
 import { useAuth } from '../hooks/useAuth';
-import type { Tab, NavGroup } from '../components/projects/tabs';
+import { TAB_ICON, type Tab, type NavGroup } from '../components/projects/tabs';
 import ProjectSidebar from '../components/projects/ProjectSidebar';
+import { errorMessage } from '../lib/narrow';
+
+/**
+ * `?tab=` kommt aus der URL und ist damit beliebiger Text.
+ *
+ * Vorher stand hier `searchParams.get('tab') as Tab`. Die Behauptung liess
+ * jeden Wert durch — und ein unbekannter Wert trifft *keinen* der
+ * `tab === …`-Blöcke weiter unten: die Seite rendert dann Kopf und Sidebar,
+ * aber einen leeren Inhaltsbereich. `TAB_ICON` ist ein `Record<Tab, …>` und
+ * damit die einzige Stelle, an der die gültigen Keys tatsächlich stehen.
+ */
+function isTab(value: string): value is Tab {
+  return Object.prototype.hasOwnProperty.call(TAB_ICON, value);
+}
+
+/**
+ * Hintergrund-Aktualisierung: SSE-Refetch oder das `onUpdate` eines Kindes.
+ *
+ * Ein Fehlschlag darf hier weder die bereits gerenderte Seite durch eine
+ * Fehlerbox ersetzen (der Nutzer hat gerade etwas anderes getan) noch eine
+ * unbehandelte Rejection erzeugen — genau das war vorher der Fall, ein Teil
+ * dieser Aufrufe hatte gar kein `catch`.
+ */
+function backgroundRefresh(p: Promise<unknown>): void {
+  void p.catch(() => undefined);
+}
 
 export default function ProjectDetail() {
   const { t } = useTranslation();
@@ -78,15 +104,36 @@ export default function ProjectDetail() {
   const [envKey, setEnvKey] = useState(0);
   const [commitsKey, setCommitsKey] = useState(0);
   const [secretsKey, setSecretsKey] = useState(0);
-  const [tab, setTab] = useState<Tab>(() => (searchParams.get('tab') as Tab) || 'overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  useEffect(() => {
-    if (searchParams.has('tab')) {
-      setTab(searchParams.get('tab') as Tab);
-      searchParams.delete('tab');
-      setSearchParams(searchParams, { replace: true });
-    }
-  }, [searchParams]);
+  /*
+   * Der aktive Tab wird aus der URL *abgeleitet* statt in State kopiert.
+   *
+   * Vorher hielt ein `useState` den Tab, und ein Effect schrieb `?tab=` in
+   * diesen State und löschte den Parameter danach aus der URL — Kopieren per
+   * Effect, genau das Muster hinter `set-state-in-effect`. Der Effect mutierte
+   * dabei auch die von `useSearchParams` gelieferte Instanz
+   * (`searchParams.delete(...)`), statt eine neue zu bauen.
+   *
+   * Sichtbarer Unterschied jetzt: `?tab=` bleibt in der Adresszeile stehen.
+   * Damit überlebt der Tab einen Reload — vorher landete man nach F5 wieder
+   * auf "overview", obwohl man dem Deep-Link gerade erst gefolgt war.
+   */
+  const tabParam = searchParams.get('tab');
+  const tab: Tab = tabParam !== null && isTab(tabParam) ? tabParam : 'overview';
+  const setTab = useCallback(
+    (next: Tab) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next === 'overview') params.delete('tab');
+          else params.set('tab', next);
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
   useEffect(() => {
     if (id) api.httpRequests.listRequests(id).then((r) => setHttpRequestCount(r.length)).catch(() => {});
   }, [id]);
@@ -100,15 +147,22 @@ export default function ProjectDetail() {
   useEffect(() => {
     if (id) workflowsApi.list({ scope: 'project', projectId: id }).then((w) => setWorkflowCount(w.length)).catch(() => {});
   }, [id]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  /*
+   * `loading` und `error` werden abgeleitet statt im Effect-Rumpf gesetzt
+   * (`set-state-in-effect`). `loadedId` hält, zu welchem Projekt die aktuell
+   * angezeigten Daten gehören — solange das nicht die Route-`id` ist, wird
+   * geladen. Der Fehler trägt seine `id` mit, damit beim Wechsel auf ein
+   * anderes Projekt nicht die Fehlerbox des vorigen stehen bleibt.
+   */
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ id: string; message: string } | null>(null);
+  const loading = id !== undefined && loadedId !== id;
+  const error = failure !== null && failure.id === id ? failure.message || t('common.error') : null;
 
   useEffect(() => {
     if (!id) return;
 
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
 
     Promise.all([
       api.projects.get(id),
@@ -138,6 +192,7 @@ export default function ProjectDetail() {
     ])
       .then(([p, t, s, k, cl, ms, act, res, env, sec, sch, deps, feat, man, sl, cc, rts, snip, storage, ls, rels, wss, dprops, oracleOpen]) => {
         if (controller.signal.aborted) return;
+        setFailure(null);
         setProject(p);
         setTodos(t);
         setSessions(s);
@@ -163,15 +218,17 @@ export default function ProjectDetail() {
         setOpenDocProposalsCount(dprops.length);
         setOpenOracleCount(oracleOpen.length);
         if (storage.enabled) {
-          api.attachments.list(id).then(setAttachments).catch(() => {});
+          backgroundRefresh(api.attachments.list(id).then(setAttachments));
         }
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         if (controller.signal.aborted) return;
-        setError(err.message);
+        // Leerer Fallback: die lokalisierte Ersatzmeldung setzt das Rendering
+        // ein, damit `t` keine Dependency dieses Effects werden muss.
+        setFailure({ id, message: errorMessage(err, '') });
       })
       .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!controller.signal.aborted) setLoadedId(id);
       });
 
     return () => controller.abort();
@@ -181,40 +238,40 @@ export default function ProjectDetail() {
     (event: ProjectChangeEvent) => {
       if (!id) return;
       const refetchers: Record<string, () => void> = {
-        todo: () => api.todos.list({ projectId: id }).then(setTodos),
-        session: () => api.sessions.list(id, 20).then(setSessions),
-        knowledge: () => api.knowledge.list(id).then(setKnowledge),
-        changelog: () => api.changelog.list(id).then(setChangelog),
-        milestone: () => api.milestones.list(id).then(setMilestones),
-        project: () => api.projects.get(id).then(setProject),
-        manual: () => api.manuals.list(id).then(setManuals),
-        research: () => api.research.list(id).then(setResearch),
-        environment: () => { api.environments.list(id).then(setEnvironments); setEnvKey((k) => k + 1); },
-        secret: () => { api.secrets.list(id).then(setSecrets); setSecretsKey((k) => k + 1); },
-        schema: () => api.schemas.list(id).then(setSchemas),
-        dependency: () => api.dependencies.list(id).then(setDependencies),
-        feature: () => api.features.list(id).then(setFeatures),
-        soul: () => api.souls.get(id).then(setSoul),
-        'recurring-task': () => api.recurringTasks.list({ projectId: id }).then(setRecurringTasks),
-        snippet: () => api.snippets.list(id).then(setSnippets),
-        attachment: () => api.attachments.list(id).then(setAttachments),
-        release: () => api.releases.list(id).then(setReleases),
-        log: () => { api.logs.stats(id).then(setLogStats); setLogsKey((k) => k + 1); },
-        commit: () => { api.commits.count(id).then((c) => setCommitCount(c.count)); setCommitsKey((k) => k + 1); },
-        workspace: () => api.workspaces.list(id, 'active').then((wss) => setWorkspaceCount(wss.length)).catch(() => undefined),
-        'ssh-connection': () => api.ssh.listForProject(id).then((c) => setSshCount(c.length)).catch(() => undefined),
-        'workflow-definition': () => workflowsApi.list({ scope: 'project', projectId: id }).then((w) => setWorkflowCount(w.length)).catch(() => undefined),
-        'doc-update-proposal': () => api.docUpdateProposals.list({ projectId: id, status: 'open', limit: 200 }).then((d) => setOpenDocProposalsCount(d.length)).catch(() => undefined),
-        oracle: () => api.oracle.list({ projectId: id, status: 'open', limit: 500 }).then((d) => setOpenOracleCount(d.length)).catch(() => undefined),
+        todo: () => backgroundRefresh(api.todos.list({ projectId: id }).then(setTodos)),
+        session: () => backgroundRefresh(api.sessions.list(id, 20).then(setSessions)),
+        knowledge: () => backgroundRefresh(api.knowledge.list(id).then(setKnowledge)),
+        changelog: () => backgroundRefresh(api.changelog.list(id).then(setChangelog)),
+        milestone: () => backgroundRefresh(api.milestones.list(id).then(setMilestones)),
+        project: () => backgroundRefresh(api.projects.get(id).then(setProject)),
+        manual: () => backgroundRefresh(api.manuals.list(id).then(setManuals)),
+        research: () => backgroundRefresh(api.research.list(id).then(setResearch)),
+        environment: () => { backgroundRefresh(api.environments.list(id).then(setEnvironments)); setEnvKey((k) => k + 1); },
+        secret: () => { backgroundRefresh(api.secrets.list(id).then(setSecrets)); setSecretsKey((k) => k + 1); },
+        schema: () => backgroundRefresh(api.schemas.list(id).then(setSchemas)),
+        dependency: () => backgroundRefresh(api.dependencies.list(id).then(setDependencies)),
+        feature: () => backgroundRefresh(api.features.list(id).then(setFeatures)),
+        soul: () => backgroundRefresh(api.souls.get(id).then(setSoul)),
+        'recurring-task': () => backgroundRefresh(api.recurringTasks.list({ projectId: id }).then(setRecurringTasks)),
+        snippet: () => backgroundRefresh(api.snippets.list(id).then(setSnippets)),
+        attachment: () => backgroundRefresh(api.attachments.list(id).then(setAttachments)),
+        release: () => backgroundRefresh(api.releases.list(id).then(setReleases)),
+        log: () => { backgroundRefresh(api.logs.stats(id).then(setLogStats)); setLogsKey((k) => k + 1); },
+        commit: () => { backgroundRefresh(api.commits.count(id).then((c) => setCommitCount(c.count))); setCommitsKey((k) => k + 1); },
+        workspace: () => backgroundRefresh(api.workspaces.list(id, 'active').then((wss) => setWorkspaceCount(wss.length))),
+        'ssh-connection': () => backgroundRefresh(api.ssh.listForProject(id).then((c) => setSshCount(c.length))),
+        'workflow-definition': () => backgroundRefresh(workflowsApi.list({ scope: 'project', projectId: id }).then((w) => setWorkflowCount(w.length))),
+        'doc-update-proposal': () => backgroundRefresh(api.docUpdateProposals.list({ projectId: id, status: 'open', limit: 200 }).then((d) => setOpenDocProposalsCount(d.length))),
+        oracle: () => backgroundRefresh(api.oracle.list({ projectId: id, status: 'open', limit: 500 }).then((d) => setOpenOracleCount(d.length))),
       };
       refetchers[event.entity]?.();
       // Cross-dependencies: todo changes affect milestone progress and vice versa
       if (event.entity === 'todo') {
-        api.milestones.list(id).then(setMilestones);
+        backgroundRefresh(api.milestones.list(id).then(setMilestones));
       } else if (event.entity === 'milestone') {
-        api.todos.list({ projectId: id }).then(setTodos);
+        backgroundRefresh(api.todos.list({ projectId: id }).then(setTodos));
       }
-      api.activities.list(id, 100).then(setActivities);
+      backgroundRefresh(api.activities.list(id, 100).then(setActivities));
     },
     [id],
   );
@@ -398,23 +455,23 @@ export default function ProjectDetail() {
                   todos={todos}
                   milestones={milestones}
                   projectId={id}
-                  onUpdate={() => api.todos.list({ projectId: id }).then(setTodos)}
+                  onUpdate={() => { backgroundRefresh(api.todos.list({ projectId: id }).then(setTodos)); }}
                 />
               </>
             )}
-            {tab === 'soul' && <SoulView projectId={id} soul={soul} onUpdate={() => api.souls.get(id!).then(setSoul)} />}
+            {tab === 'soul' && <SoulView projectId={id} soul={soul} onUpdate={() => { backgroundRefresh(api.souls.get(id!).then(setSoul)); }} />}
             {tab === 'milestones' && (
               <MilestoneList
                 milestones={milestones}
                 todos={todos}
                 projectId={id!}
-                onUpdate={() => api.milestones.list(id!).then(setMilestones)}
+                onUpdate={() => { backgroundRefresh(api.milestones.list(id!).then(setMilestones)); }}
               />
             )}
             {tab === 'sessions' && <SessionList sessions={sessions} />}
-            {tab === 'knowledge' && <KnowledgeList entries={knowledge} projectId={id} onUpdate={() => api.knowledge.list(id).then(setKnowledge)} />}
-            {tab === 'changelog' && <ChangelogList entries={changelog} projectId={id} project={project} onUpdate={() => api.changelog.list(id!).then(setChangelog)} />}
-            {tab === 'manual' && <ManualView projectId={id} entries={manuals} onUpdate={() => api.manuals.list(id!).then(setManuals)} />}
+            {tab === 'knowledge' && <KnowledgeList entries={knowledge} projectId={id} onUpdate={() => { backgroundRefresh(api.knowledge.list(id).then(setKnowledge)); }} />}
+            {tab === 'changelog' && <ChangelogList entries={changelog} projectId={id} project={project} onUpdate={() => { backgroundRefresh(api.changelog.list(id!).then(setChangelog)); }} />}
+            {tab === 'manual' && <ManualView projectId={id} entries={manuals} onUpdate={() => { backgroundRefresh(api.manuals.list(id!).then(setManuals)); }} />}
             {tab === 'docs-health' && <DocsHealthList projectId={id!} basePath={`/projects/${id!}`} />}
             {tab === 'graph' && <KnowledgeGraphView projectId={id!} basePath={`/projects/${id!}`} />}
             {tab === 'oracle' && <OracleView projectId={id!} basePath={`/projects/${id!}`} />}
@@ -423,7 +480,7 @@ export default function ProjectDetail() {
             {tab === 'dependencies' && <DependencyList entries={dependencies} projectId={id!} />}
             {tab === 'snippets' && <SnippetList entries={snippets} projectId={id} />}
             {tab === 'workspaces' && <WorkspaceList projectId={id!} />}
-            {tab === 'research' && <ResearchList entries={research} projectId={id} onUpdate={() => api.research.list(id!).then(setResearch)} />}
+            {tab === 'research' && <ResearchList entries={research} projectId={id} onUpdate={() => { backgroundRefresh(api.research.list(id!).then(setResearch)); }} />}
             {tab === 'environments' && <EnvironmentList key={envKey} projectId={id} />}
             {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id} />}
             {tab === 'http-requests' && <HttpRequestsTab projectId={id!} />}

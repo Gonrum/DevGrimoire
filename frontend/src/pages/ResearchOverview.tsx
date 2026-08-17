@@ -18,6 +18,7 @@ import { LoadingText } from '../components/ui/LoadingSpinner';
 import Switch from '../components/ui/Switch';
 import { SCOPE_GLOBAL_BADGE, SCOPE_PROJECT_BADGE } from '../components/ui/badge-tokens';
 import CreateTopicDialog from '../components/research/CreateTopicDialog';
+import { errorMessage, optionOr } from '../lib/narrow';
 
 const RUN_STATUS_COLORS: Record<ResearchRunStatus, string> = {
   queued: 'bg-gray-800 text-gray-400',
@@ -31,7 +32,8 @@ const NEVER_RUN_BADGE = 'bg-gray-800 text-gray-500';
 const SCHEDULE_ACTIVE_BADGE = 'bg-green-900/40 text-green-300';
 const SCHEDULE_PAUSED_BADGE = 'bg-gray-800 text-gray-500';
 
-type ActiveFilter = '' | 'active' | 'paused';
+const ACTIVE_FILTERS = ['', 'active', 'paused'] as const;
+type ActiveFilter = (typeof ACTIVE_FILTERS)[number];
 
 export default function ResearchOverview() {
   const { t } = useTranslation();
@@ -48,43 +50,58 @@ export default function ResearchOverview() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const [fetchedTopics, fetchedProjects, fetchedCustomers] = await Promise.all([
-        api.researchTopics.list({
-          active: activeFilter === '' ? undefined : activeFilter === 'active',
-          q: q.trim() || undefined,
-        }),
-        api.projects.list({ active: true }),
-        api.customers.list(),
-      ]);
-      setTopics(fetchedTopics);
-      setProjects(fetchedProjects);
-      setCustomers(fetchedCustomers);
+  /*
+   * Der Suchbegriff wirkt erst mit Enter. `applied` ist deshalb der tatsächlich
+   * angefragte Wert, getrennt vom Eingabefeld `q` — vorher hing der Effekt nur
+   * an `activeFilter` und griff über eine abgeschaltete `exhaustive-deps`-Regel
+   * auf `q` zu. `nonce` erhält das bisherige Verhalten, dass ein erneutes Enter
+   * mit gleichem Begriff neu lädt.
+   */
+  const [applied, setApplied] = useState<{ q: string; nonce: number }>({ q: '', nonce: 0 });
 
-      // Artifact counts aren't part of the list payload — fetch per topic in
-      // parallel, tolerating individual failures so one broken topic doesn't
-      // blank out the whole grid.
-      const results = await Promise.allSettled(
-        fetchedTopics.map((topic) => api.researchTopics.artifactsList(topic._id)),
-      );
-      const counts: Record<string, number> = {};
-      results.forEach((result, i) => {
-        if (result.status === 'fulfilled') counts[fetchedTopics[i]._id] = result.value.length;
-      });
-      setArtifactCounts(counts);
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
+  const submitSearch = () => {
+    setApplied((prev) => ({ q, nonce: prev.nonce + 1 }));
   };
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFilter]);
+    let cancelled = false;
+    async function run() {
+      setLoading(true);
+      try {
+        const [fetchedTopics, fetchedProjects, fetchedCustomers] = await Promise.all([
+          api.researchTopics.list({
+            active: activeFilter === '' ? undefined : activeFilter === 'active',
+            q: applied.q.trim() || undefined,
+          }),
+          api.projects.list({ active: true }),
+          api.customers.list(),
+        ]);
+        if (cancelled) return;
+        setTopics(fetchedTopics);
+        setProjects(fetchedProjects);
+        setCustomers(fetchedCustomers);
+
+        // Artifact counts aren't part of the list payload — fetch per topic in
+        // parallel, tolerating individual failures so one broken topic doesn't
+        // blank out the whole grid.
+        const results = await Promise.allSettled(
+          fetchedTopics.map((topic) => api.researchTopics.artifactsList(topic._id)),
+        );
+        if (cancelled) return;
+        const counts: Record<string, number> = {};
+        results.forEach((result, i) => {
+          if (result.status === 'fulfilled') counts[fetchedTopics[i]._id] = result.value.length;
+        });
+        setArtifactCounts(counts);
+      } catch (err) {
+        if (!cancelled) showError(errorMessage(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void run();
+    return () => { cancelled = true; };
+  }, [activeFilter, applied, showError]);
 
   const handleDelete = async (topic: ResearchTopic) => {
     if (!window.confirm(t('researchTopics.deleteConfirm', { title: topic.title }))) return;
@@ -139,13 +156,13 @@ export default function ResearchOverview() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') load();
+            if (e.key === 'Enter') submitSearch();
           }}
           className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 w-full sm:w-64"
         />
         <select
           value={activeFilter}
-          onChange={(e) => setActiveFilter(e.target.value as ActiveFilter)}
+          onChange={(e) => setActiveFilter(optionOr(e.target.value, ACTIVE_FILTERS, ''))}
           className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
         >
           <option value="">{t('researchTopics.filterAll')}</option>
@@ -218,7 +235,7 @@ export default function ResearchOverview() {
                 <div className="flex items-center gap-2">
                   <Switch
                     checked={topic.schedule.active}
-                    onChange={(next) => handleToggleActive(topic, next)}
+                    onChange={(next) => { void handleToggleActive(topic, next); }}
                     disabled={togglingId === topic._id}
                     label={t('researchTopics.toggleActive')}
                   />
@@ -228,7 +245,7 @@ export default function ResearchOverview() {
                   type="button"
                   variant="accent"
                   size="xs"
-                  onClick={() => navigate(`/research/${topic._id}`)}
+                  onClick={() => { void navigate(`/research/${topic._id}`); }}
                 >
                   {t('researchTopics.runNow')}
                 </Button>
@@ -239,7 +256,7 @@ export default function ResearchOverview() {
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  handleDelete(topic);
+                  void handleDelete(topic);
                 }}
                 disabled={deletingId === topic._id}
                 aria-label={t('researchTopics.delete')}
@@ -258,7 +275,7 @@ export default function ResearchOverview() {
           projects={projects}
           customers={customers}
           onCancel={() => setShowCreate(false)}
-          onCreated={(id) => navigate(`/research/${id}`)}
+          onCreated={(id) => { void navigate(`/research/${id}`); }}
         />
       )}
     </div>

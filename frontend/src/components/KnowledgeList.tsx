@@ -102,7 +102,7 @@ function KnowledgeForm({
 
   return (
     <Card>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
         <h3 className="text-sm font-semibold">
           {editId ? t('knowledge.editEntry') : t('knowledge.newEntry')}
         </h3>

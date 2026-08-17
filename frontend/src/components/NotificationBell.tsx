@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { api, Notification } from '../api/client';
+import { errorMessage } from '../lib/narrow';
 import { wsEventBus, isProjectChangeEvent } from '../api/wsEventBus';
+import { useToast } from './Toast';
 
 function timeAgo(date: string): string {
   const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
@@ -24,6 +26,13 @@ export default function NotificationBell() {
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  /*
+   * Die vier schreibenden Aktionen (lesen/alle lesen/loeschen/alles loeschen)
+   * hatten bisher gar keine Fehlerbehandlung: schlug der Aufruf fehl, blieb die
+   * Liste unveraendert und die Ablehnung landete unbehandelt in der Konsole.
+   * `useToast` faellt ausserhalb des Providers auf No-Ops zurueck.
+   */
+  const { showError } = useToast();
 
   const fetchUnreadCount = useCallback(async () => {
     try {
@@ -41,8 +50,12 @@ export default function NotificationBell() {
     setLoading(false);
   }, []);
 
+  /*
+   * Der Fetch steckt in einer eigenen async-Funktion, damit der Effekt-Body
+   * selbst nichts synchron setzt (`react-hooks/set-state-in-effect`).
+   */
   useEffect(() => {
-    fetchUnreadCount();
+    void (async () => { await fetchUnreadCount(); })();
   }, [fetchUnreadCount]);
 
   // Live updates via the WS bus. The bus handles reconnect/heartbeat for us;
@@ -51,8 +64,8 @@ export default function NotificationBell() {
     const unsub = wsEventBus.subscribe({ kind: 'global' }, (event) => {
       if (!isProjectChangeEvent(event)) return;
       if (event.entity === 'notification' && event.action === 'created') {
-        fetchUnreadCount();
-        if (open) fetchNotifications();
+        void fetchUnreadCount();
+        if (open) void fetchNotifications();
       }
     });
     return unsub;
@@ -61,7 +74,11 @@ export default function NotificationBell() {
   // Close on click outside
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      // `e.target` ist `EventTarget | null`. Der frühere Cast auf `Node` behauptete
+      // mehr, als der Typ hergibt; die Klammerung haelt das alte Verhalten fest:
+      // was kein Node ist, liegt auch nicht im Dropdown → schliessen.
+      const target = e.target;
+      if (dropdownRef.current && !(target instanceof Node && dropdownRef.current.contains(target))) {
         setOpen(false);
       }
     }
@@ -70,7 +87,9 @@ export default function NotificationBell() {
   }, [open]);
 
   const toggle = () => {
-    if (!open) fetchNotifications();
+    // Ladefehler bleiben still (wie in `fetchNotifications` selbst): die Liste
+    // zeigt dann den Leerzustand.
+    if (!open) void fetchNotifications();
     setOpen(!open);
   };
 
@@ -83,7 +102,7 @@ export default function NotificationBell() {
       setUnreadCount((c) => Math.max(0, c - 1));
     }
     if (n.url) {
-      navigate(n.url);
+      void navigate(n.url);
       setOpen(false);
     }
   };
@@ -134,7 +153,9 @@ export default function NotificationBell() {
             <div className="flex items-center gap-3">
               {unreadCount > 0 && (
                 <button
-                  onClick={markAllRead}
+                  onClick={() => {
+                    markAllRead().catch((err: unknown) => showError(errorMessage(err, t('common.error'))));
+                  }}
                   className="text-xs text-cyan-400 hover:text-cyan-300"
                 >
                   {t('notifications.markAllRead')}
@@ -142,7 +163,9 @@ export default function NotificationBell() {
               )}
               {notifications.length > 0 && (
                 <button
-                  onClick={deleteAll}
+                  onClick={() => {
+                    deleteAll().catch((err: unknown) => showError(errorMessage(err, t('common.errorDeleting'))));
+                  }}
                   className="text-xs text-red-400 hover:text-red-300"
                 >
                   {t('notifications.deleteAll')}
@@ -162,7 +185,9 @@ export default function NotificationBell() {
               notifications.map((n) => (
                 <div
                   key={n._id}
-                  onClick={() => handleClick(n)}
+                  onClick={() => {
+                    handleClick(n).catch((err: unknown) => showError(errorMessage(err, t('common.error'))));
+                  }}
                   className={`w-full text-left px-4 py-3 border-b border-gray-800 hover:bg-gray-800/50 transition-colors flex gap-3 group ${n.url ? 'cursor-pointer' : 'cursor-default'} ${
                     n.read ? 'opacity-60' : ''
                   }`}
@@ -176,7 +201,9 @@ export default function NotificationBell() {
                     <div className="text-[11px] text-gray-500 mt-1">{timeAgo(n.createdAt)}</div>
                   </div>
                   <button
-                    onClick={(e) => handleDelete(e, n._id)}
+                    onClick={(e) => {
+                      handleDelete(e, n._id).catch((err: unknown) => showError(errorMessage(err, t('common.errorDeleting'))));
+                    }}
                     className="shrink-0 opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 transition-all p-1 self-center"
                     title={t('notifications.delete')}
                   >

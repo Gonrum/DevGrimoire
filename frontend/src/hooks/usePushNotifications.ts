@@ -1,31 +1,54 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
 
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
+/**
+ * VAPID-Key (base64url) → Bytes für `pushManager.subscribe`.
+ *
+ * Rückgabetyp ist `Uint8Array<ArrayBuffer>`, nicht `Uint8Array`: `BufferSource`
+ * verlangt einen echten `ArrayBuffer` als Speicher, `Uint8Array.from` liefert
+ * aber `Uint8Array<ArrayBufferLike>`. Vorher überbrückte ein `as BufferSource`
+ * genau diese Lücke — der Puffer wird jetzt gleich passend angelegt.
+ */
+function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
   const rawData = atob(base64);
-  return Uint8Array.from(rawData, (char) => char.charCodeAt(0));
+  const bytes = new Uint8Array(new ArrayBuffer(rawData.length));
+  for (let i = 0; i < rawData.length; i++) bytes[i] = rawData.charCodeAt(i);
+  return bytes;
 }
 
 export function usePushNotifications() {
-  const [supported, setSupported] = useState(false);
-  const [permission, setPermission] = useState<NotificationPermission>('default');
+  // Beides steht schon beim ersten Render fest — der Lazy-Initializer läuft
+  // genau einmal, statt den Wert per Effect nachzureichen (was einen zweiten
+  // Render und ein sichtbares Flackern von "nicht unterstützt" bedeutete).
+  const [supported] = useState(
+    () => 'serviceWorker' in navigator && 'PushManager' in window,
+  );
+  const [permission, setPermission] = useState<NotificationPermission>(() =>
+    'Notification' in window ? Notification.permission : 'default',
+  );
   const [subscribed, setSubscribed] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const isSupported = 'serviceWorker' in navigator && 'PushManager' in window;
-    setSupported(isSupported);
-    if (isSupported) {
-      setPermission(Notification.permission);
-      navigator.serviceWorker.ready.then((reg) => {
-        reg.pushManager.getSubscription().then((sub) => {
-          setSubscribed(!!sub);
-        });
-      });
-    }
-  }, []);
+    if (!supported) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        if (!cancelled) setSubscribed(subscription !== null);
+      } catch {
+        // Kein erreichbarer Service Worker → als "nicht abonniert" behandeln.
+        // Vorher blieb dieselbe Rejection unbehandelt stehen.
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [supported]);
 
   const subscribe = useCallback(async () => {
     if (!supported) return;
@@ -35,7 +58,7 @@ export function usePushNotifications() {
       const { publicKey } = await api.push.getVapidKey();
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
       });
       await api.push.subscribe(sub.toJSON());
       setSubscribed(true);

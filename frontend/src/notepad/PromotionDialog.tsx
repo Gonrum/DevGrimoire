@@ -3,6 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { Sparkles, Loader2, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { api, getCurrentAccessToken } from '../api/client';
+import { parseJsonText, readErrorMessage } from '../api/http-boundary';
+import {
+  errorMessage as toErrorMessage,
+  isRecord,
+  isUnknownArray,
+  optionOr,
+} from '../lib/narrow';
 import { notesApi } from './api';
 import type {
   Note,
@@ -34,6 +41,33 @@ const ENTITY_TYPES: PromotedEntityType[] = [
   'research',
   'manual',
 ];
+
+/**
+ * Baut den Vorschlag aus einem SSE-Frame — prüfend statt behauptend.
+ *
+ * Vorher stand hier `payload.proposal as PromotionProposal | undefined`. Die
+ * Behauptung deckte auch den Fall ab, dass das LLM einen `entityType` liefert,
+ * den `PromotedEntityType` gar nicht kennt: der Wert landete unverändert im
+ * `<select>`, das dann auf keine Option passt (leere Auswahl), und ging beim
+ * Speichern so an die API weiter. Ein unbekannter Typ führt jetzt in denselben
+ * Zweig wie ein fehlender Vorschlag (`promoteParseError`).
+ */
+function readProposal(value: unknown): PromotionProposal | null {
+  if (!isRecord(value)) return null;
+  const entityType = ENTITY_TYPES.find((candidate) => candidate === value.entityType);
+  if (!entityType) return null;
+  const tags = isUnknownArray(value.tags)
+    ? value.tags.filter((tag): tag is string => typeof tag === 'string')
+    : undefined;
+  return {
+    entityType,
+    projectId: typeof value.projectId === 'string' ? value.projectId : null,
+    customerId: typeof value.customerId === 'string' ? value.customerId : null,
+    title: typeof value.title === 'string' ? value.title : '',
+    tags,
+    reasoning: typeof value.reasoning === 'string' ? value.reasoning : undefined,
+  };
+}
 
 export default function PromotionDialog({ note, onCancel, onDone }: Props) {
   const { t } = useTranslation();
@@ -90,13 +124,16 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
     let cancelled = false;
     const controller = new AbortController();
 
-    const handlePayload = (payload: { type?: string; [key: string]: unknown }) => {
+    const handlePayload = (payload: unknown) => {
+      if (!isRecord(payload)) return;
       switch (payload.type) {
-        case 'token':
-          setStreamingText((prev) => prev + String(payload.text ?? ''));
+        case 'token': {
+          const text = payload.text;
+          if (typeof text === 'string') setStreamingText((prev) => prev + text);
           break;
+        }
         case 'proposal': {
-          const p = payload.proposal as PromotionProposal | undefined;
+          const p = readProposal(payload.proposal);
           if (!p) {
             setPhase('error');
             setErrorMessage(t('vermerke.promoteParseError'));
@@ -112,17 +149,20 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
           setPhase('review');
           break;
         }
-        case 'error':
+        case 'error': {
+          const message = payload.message;
           setPhase('error');
           setErrorMessage(
-            String(payload.message ?? '') || t('vermerke.promoteLlmError'),
+            (typeof message === 'string' ? message : '') ||
+              t('vermerke.promoteLlmError'),
           );
           break;
+        }
         // status / done / unknown → ignore (done closes the stream naturally)
       }
     };
 
-    (async () => {
+    void (async () => {
       try {
         const headers: Record<string, string> = {};
         const token = getCurrentAccessToken();
@@ -133,13 +173,7 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
           signal: controller.signal,
         });
         if (!res.ok || !res.body) {
-          let msg = res.statusText;
-          try {
-            const errBody = await res.json();
-            if (errBody?.message) msg = errBody.message;
-          } catch {
-            /* ignore */
-          }
+          const msg = await readErrorMessage(res);
           if (cancelled) return;
           setPhase('error');
           setErrorMessage(msg || t('vermerke.promoteLlmError'));
@@ -162,16 +196,16 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
             const data = line.slice(5).trim();
             if (!data) continue;
             try {
-              handlePayload(JSON.parse(data));
+              handlePayload(parseJsonText<unknown>(data));
             } catch {
               /* ignore bad SSE chunk */
             }
           }
         }
-      } catch (err: any) {
-        if (cancelled || err?.name === 'AbortError') return;
+      } catch (err) {
+        if (cancelled || (isRecord(err) && err.name === 'AbortError')) return;
         setPhase('error');
-        setErrorMessage(err?.message || t('vermerke.promoteLlmError'));
+        setErrorMessage(toErrorMessage(err, t('vermerke.promoteLlmError')));
       }
     })();
 
@@ -342,7 +376,9 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
                   )}
                   <button
                     type="button"
-                    onClick={handleSnooze}
+                    onClick={() => {
+                      void handleSnooze();
+                    }}
                     className="text-xs text-gray-400 hover:text-gray-200 px-3 py-1.5 rounded"
                   >
                     {t('vermerke.promoteAskLater')}
@@ -357,7 +393,9 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
               </label>
               <select
                 value={entityType}
-                onChange={(e) => setEntityType(e.target.value as PromotedEntityType)}
+                onChange={(e) =>
+                  setEntityType(optionOr(e.target.value, ENTITY_TYPES, entityType))
+                }
                 className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm px-3 py-1.5 rounded outline-none"
               >
                 {ENTITY_TYPES.map((tp) => (
@@ -457,7 +495,9 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
               </button>
               <button
                 type="button"
-                onClick={handleSave}
+                onClick={() => {
+                  void handleSave();
+                }}
                 disabled={!canSubmit || phase === 'saving'}
                 className="bg-amber-700 hover:bg-amber-600 disabled:bg-gray-800 disabled:text-gray-600 text-white text-sm px-4 py-1.5 rounded flex items-center gap-2"
               >

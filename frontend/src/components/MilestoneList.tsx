@@ -58,6 +58,15 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
     }
   };
 
+  const toggleArchived = async () => {
+    try {
+      await api.milestones.update(milestone._id, { archived: !milestone.archived });
+      onUpdate();
+    } catch (err) {
+      showError(errorMessage(err, t('todos.archiveFailed')));
+    }
+  };
+
   const handleComplete = async (e: FormEvent) => {
     e.preventDefault();
     const changes = clChanges.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -142,7 +151,7 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
       )}
 
       {showChangelogForm && (
-        <form onSubmit={handleComplete} className="mt-3 pt-3 border-t border-gray-800 space-y-2">
+        <form onSubmit={(e) => { void handleComplete(e); }} className="mt-3 pt-3 border-t border-gray-800 space-y-2">
           <p className="text-xs font-medium text-gray-400">{t('milestones.createChangelog')}</p>
           <input
             type="text"
@@ -177,25 +186,18 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
 
       <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-800">
         {milestone.status === 'open' && (
-          <Button size="xs" onClick={() => handleStatusChange('in_progress')}>{t('todoTransitions.start')}</Button>
+          <Button size="xs" onClick={() => { void handleStatusChange('in_progress'); }}>{t('todoTransitions.start')}</Button>
         )}
         {milestone.status === 'in_progress' && (
           <>
-            <Button size="xs" onClick={() => handleStatusChange('open')}>{t('todoTransitions.back')}</Button>
+            <Button size="xs" onClick={() => { void handleStatusChange('open'); }}>{t('todoTransitions.back')}</Button>
             <Button size="xs" onClick={() => setShowChangelogForm(true)}>{t('milestones.complete')}</Button>
           </>
         )}
         {milestone.status === 'done' && (
-          <Button size="xs" onClick={() => handleStatusChange('in_progress')}>{t('todoTransitions.reopen')}</Button>
+          <Button size="xs" onClick={() => { void handleStatusChange('in_progress'); }}>{t('todoTransitions.reopen')}</Button>
         )}
-        <Button size="xs" onClick={async () => {
-          try {
-            await api.milestones.update(milestone._id, { archived: !milestone.archived });
-            onUpdate();
-          } catch (err) {
-            showError(errorMessage(err, t('todos.archiveFailed')));
-          }
-        }}>
+        <Button size="xs" onClick={() => { void toggleArchived(); }}>
           {milestone.archived ? t('common.restore') : t('common.archive')}
         </Button>
         <ConfirmButton onConfirm={async () => {
@@ -218,11 +220,25 @@ export default function MilestoneList({ milestones, todos, projectId, onUpdate }
   const [confirmArchiveAll, setConfirmArchiveAll] = useState(false);
   const unassignedTodos = todos.filter((t) => !t.milestoneId && t.status !== 'done');
 
+  // `Date.now()` stand direkt im Render-Pfad (`isArchived` filtert die Liste).
+  // Für eine 24-Stunden-Schwelle reicht der Zeitpunkt des Mountens; das Ergebnis
+  // ist damit über alle Renders eines Besuchs stabil statt pro Render neu.
+  const [mountedAt] = useState(() => Date.now());
+
   const isArchived = (ms: Milestone) =>
-    ms.archived || (ms.status === 'done' && Date.now() - new Date(ms.updatedAt).getTime() > 24 * 60 * 60 * 1000);
+    ms.archived || (ms.status === 'done' && mountedAt - new Date(ms.updatedAt).getTime() > 24 * 60 * 60 * 1000);
   const archivedCount = milestones.filter(isArchived).length;
   const archivableDone = milestones.filter((ms) => ms.status === 'done' && !ms.archived);
   const visible = showArchived ? milestones : milestones.filter((ms) => !isArchived(ms));
+
+  const archiveAllDone = async () => {
+    try {
+      await Promise.all(archivableDone.map((ms) => api.milestones.update(ms._id, { archived: true })));
+      onUpdate();
+    } catch (err) {
+      showError(errorMessage(err, t('todos.archiveFailed')));
+    }
+  };
 
   return (
     <div>
@@ -231,15 +247,10 @@ export default function MilestoneList({ milestones, todos, projectId, onUpdate }
           {t('milestones.newMilestone')}
         </ButtonLink>
         {archivableDone.length > 0 && (
-          <button type="button" onBlur={() => setConfirmArchiveAll(false)} onClick={async () => {
+          <button type="button" onBlur={() => setConfirmArchiveAll(false)} onClick={() => {
             if (!confirmArchiveAll) { setConfirmArchiveAll(true); return; }
             setConfirmArchiveAll(false);
-            try {
-              await Promise.all(archivableDone.map((ms) => api.milestones.update(ms._id, { archived: true })));
-              onUpdate();
-            } catch (err) {
-              showError(errorMessage(err, t('todos.archiveFailed')));
-            }
+            void archiveAllDone();
           }}
             className={`text-xs px-2 py-1 rounded transition-colors ${confirmArchiveAll ? 'bg-yellow-900/60 text-yellow-300' : 'text-gray-600 hover:text-gray-400'}`}>
             {confirmArchiveAll ? t('milestones.archiveConfirm', { count: archivableDone.length }) : t('milestones.archiveCompleted', { count: archivableDone.length })}

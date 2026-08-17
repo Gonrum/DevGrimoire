@@ -70,3 +70,24 @@ export function matchOption<T extends string>(value: string, options: readonly T
 export function optionOr<T extends string>(value: string, options: readonly T[], fallback: T): T {
   return matchOption(value, options) ?? fallback;
 }
+
+/**
+ * Basis-URL der API, wie sie zur Laufzeit gesetzt sein kann.
+ *
+ * `window.__DG_API_URL__` wird beim Deploy in die `index.html` injiziert; ohne
+ * Injektion gilt der relative Pfad, den nginx weiterreicht. Vorher stand an
+ * beiden Aufrufstellen ein `(window as unknown as {__DG_API_URL__?: string})` —
+ * eine Behauptung über ein Feld, das per Definition fehlen darf.
+ *
+ * Bewusst hier und nicht in `api/client.ts`: die beiden Terminal-Komponenten
+ * bauen ihre WebSocket-URL selbst und sollen dafür nicht den ganzen API-Client
+ * hereinziehen.
+ */
+export function readApiBaseUrl(): string {
+  const globals: unknown = globalThis;
+  if (isRecord(globals)) {
+    const configured = globals.__DG_API_URL__;
+    if (typeof configured === 'string' && configured.length > 0) return configured;
+  }
+  return '/api';
+}

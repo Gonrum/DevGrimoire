@@ -1,5 +1,5 @@
-import { memo } from 'react';
-import { Handle, Position, NodeToolbar, NodeProps } from '@xyflow/react';
+import { createElement, memo } from 'react';
+import { Handle, Position, NodeToolbar, type Node, type NodeProps } from '@xyflow/react';
 import { AlertTriangle, Copy, Trash2 } from 'lucide-react';
 import { WorkflowNodeMetadata, WorkflowNodeRunStatus } from '../../api/workflows';
 import { nodeCategoryStyles } from './nodeCategoryStyles';
@@ -18,12 +18,14 @@ export interface WorkflowNodeData {
   [key: string]: unknown;
 }
 
-function WorkflowCustomNodeImpl(props: NodeProps) {
-  const data = props.data as WorkflowNodeData;
+/** Der Node dieses Canvas — `data` ist damit getypt statt behauptet. */
+type WorkflowFlowNode = Node<WorkflowNodeData, 'workflowNode'>;
+
+function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
+  const data = props.data;
   const meta = data.metadata;
   const category = meta?.category ?? 'action';
   const style = nodeCategoryStyles[category];
-  const Icon = getNodeIcon(data.type);
   const status = runStatusStyles[data.runStatus ?? 'idle'];
   const isTrigger = category === 'trigger';
   const branches = meta?.branches ?? ['success'];
@@ -56,7 +58,10 @@ function WorkflowCustomNodeImpl(props: NodeProps) {
         <div className={`flex items-center justify-between rounded-t px-3 py-2 ${style.headerBg}`}>
           <div className="flex items-center gap-2">
             <span className={`h-2 w-2 rounded-full ${status.dotBg}`} />
-            <Icon size={14} className="text-gray-300" />
+            {/* Der Icon-Typ wird aus einer statischen Map geholt, nicht hier
+                erzeugt — deshalb `createElement` statt eines Grossbuchstaben-
+                Locals, das wie eine im Render definierte Komponente aussieht. */}
+            {createElement(getNodeIcon(data.type), { size: 14, className: 'text-gray-300' })}
             <span className="font-mono text-xs text-gray-300">{data.type}</span>
           </div>
           {issueCount > 0 && (

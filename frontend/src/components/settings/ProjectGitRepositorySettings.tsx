@@ -373,7 +373,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                 </div>
                 {editRepoError && <p className="text-sm text-red-400">{editRepoError}</p>}
                 <div className="flex gap-2">
-                  <Button type="button" variant="primary" size="sm" onClick={handleSaveEditRepo} disabled={editValidating || !editRepoUrl.trim()}>
+                  <Button type="button" variant="primary" size="sm" onClick={() => { void handleSaveEditRepo(); }} disabled={editValidating || !editRepoUrl.trim()}>
                     {editValidating ? t('projectGit.validating') : t('common.save')}
                   </Button>
                   <Button type="button" variant="ghost" size="sm" onClick={handleCancelEditRepo}>
@@ -404,7 +404,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                       ) : (
                         <select
                           value={repo.defaultBranch || 'main'}
-                          onChange={(e) => handleUpdateBranch(i, e.target.value)}
+                          onChange={(e) => { void handleUpdateBranch(i, e.target.value); }}
                           onBlur={() => { setEditingBranch(null); setBranchOptions([]); }}
                           autoFocus
                           className="bg-gray-800 border border-violet-500 rounded px-1.5 py-0.5 text-xs text-gray-200 focus:outline-none"
@@ -422,7 +422,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                     ) : (
                       <button
                         type="button"
-                        onClick={() => handleStartEditBranch(i)}
+                        onClick={() => { void handleStartEditBranch(i); }}
                         className="hover:text-violet-400 transition-colors cursor-pointer"
                         title={t('projectGit.changeBranch')}
                       >
@@ -438,7 +438,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleToggleSync(i)}
+                    onClick={() => { void handleToggleSync(i); }}
                     className={`text-xs px-2 py-1 rounded-full transition-colors ${
                       repo.syncEnabled !== false
                         ? 'bg-green-900/50 text-green-300 hover:bg-green-800/50'
@@ -447,7 +447,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                   >
                     {repo.syncEnabled !== false ? t('projectGit.statusActive') : t('projectGit.statusPaused')}
                   </button>
-                  <button type="button" onClick={() => handleRemoveRepo(i)} className="text-xs text-red-400 hover:text-red-300 px-2 py-1">
+                  <button type="button" onClick={() => { void handleRemoveRepo(i); }} className="text-xs text-red-400 hover:text-red-300 px-2 py-1">
                     {t('common.remove')}
                   </button>
                 </div>
@@ -535,7 +535,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
           </div>
           {repoError && <p className="text-sm text-red-400">{repoError}</p>}
           <div className="flex gap-2">
-            <Button type="button" variant="primary" size="sm" onClick={handleAddRepo} disabled={validating || !newRepoUrl.trim() || !newRepoToken.trim()}>
+            <Button type="button" variant="primary" size="sm" onClick={() => { void handleAddRepo(); }} disabled={validating || !newRepoUrl.trim() || !newRepoToken.trim()}>
               {validating ? t('projectGit.validating') : t('projectGit.connect')}
             </Button>
             <Button type="button" variant="ghost" size="sm" onClick={() => { setShowAddRepo(false); setRepoError(null); }}>

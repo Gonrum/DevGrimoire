@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, ChatConfig } from '../../api/client';
 import Button from '../ui/Button';
@@ -19,21 +19,22 @@ export default function ChatLlmSettings() {
     toolsAllowlist: [],
     toolsMaxIterations: 5,
   });
-  const [chatLoading, setChatLoading] = useState(false);
+  // Startet auf `true`: mit `false` rendert der erste Frame die Formularwerte
+  // aus den Defaults oben statt der gespeicherten Konfiguration.
+  const [chatLoading, setChatLoading] = useState(true);
   const [chatSaving, setChatSaving] = useState(false);
   const [chatSavedMsg, setChatSavedMsg] = useState(false);
   const [chatSaveError, setChatSaveError] = useState<string | null>(null);
 
-  const loadChatConfig = useCallback(async () => {
-    setChatLoading(true);
-    try {
-      const cfg = await api.chat.getConfig();
-      setChatConfig(cfg);
-    } catch { /* ignore */ }
-    setChatLoading(false);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const cfg = await api.chat.getConfig();
+        setChatConfig(cfg);
+      } catch { /* ignore */ }
+      setChatLoading(false);
+    })();
   }, []);
-
-  useEffect(() => { loadChatConfig(); }, [loadChatConfig]);
 
   const saveChatConfig = async () => {
     setChatSaving(true);
@@ -250,7 +251,7 @@ export default function ChatLlmSettings() {
           </SettingsSection>
 
           <SettingsActions className="mt-0">
-            <Button variant="primary" size="lg" onClick={saveChatConfig} disabled={chatSaving}>
+            <Button variant="primary" size="lg" onClick={() => { void saveChatConfig(); }} disabled={chatSaving}>
               {chatSaving ? t('common.saving') : t('common.save')}
             </Button>
             {chatSavedMsg && <span className="text-green-400 text-sm">✓ {t('settings.chatSaved')}</span>}

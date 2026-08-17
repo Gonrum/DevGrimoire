@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, EdgeProps } from '@xyflow/react';
+import { BaseEdge, EdgeLabelRenderer, getBezierPath, type Edge, type EdgeProps } from '@xyflow/react';
 import { X } from 'lucide-react';
 
 export interface WorkflowEdgeData {
@@ -9,9 +9,14 @@ export interface WorkflowEdgeData {
   [key: string]: unknown;
 }
 
-export function WorkflowCustomEdge(props: EdgeProps) {
+/** Die Edge dieses Canvas — `data` ist damit getypt statt behauptet. */
+type WorkflowFlowEdge = Edge<WorkflowEdgeData, 'workflowEdge'>;
+
+export function WorkflowCustomEdge(props: EdgeProps<WorkflowFlowEdge>) {
   const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, selected } = props;
-  const data = (props.data ?? {}) as WorkflowEdgeData;
+  // Annotation statt Assertion: `{}` erfüllt `WorkflowEdgeData` (alle Felder
+  // optional), das prüft der Compiler — `as` hätte es nur behauptet.
+  const data: WorkflowEdgeData = props.data ?? {};
   const [hovered, setHovered] = useState(false);
 
   const [edgePath, labelX, labelY] = getBezierPath({

@@ -152,24 +152,38 @@ export default function DocsHealthList({ projectId, basePath }: Props) {
   const { t } = useTranslation();
   const { showError, showSuccess } = useToast();
   const [proposals, setProposals] = useState<DocUpdateProposal[]>([]);
-  const [loading, setLoading] = useState(true);
+  /** Für welches Projekt die angezeigte Liste geholt wurde — `null` = noch keine. */
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  /** Nachladen nach einer Aktion; der Projektwechsel wird stattdessen abgeleitet. */
+  const [reloading, setReloading] = useState(false);
+  const loading = reloading || loadedFor !== projectId;
   const [statusFilter, setStatusFilter] = useState<DocProposalStatus | 'all'>('open');
   const [sourceFilter, setSourceFilter] = useState<DocProposalSourceType | 'all'>('all');
   const [targetFilter, setTargetFilter] = useState<DocProposalTargetType | 'all'>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  /** Setzt State ausschliesslich in Promise-Callbacks — nie synchron. */
+  const fetchProposals = useCallback(
+    () =>
+      api.docUpdateProposals
+        .list({ projectId, limit: 200 })
+        .then(setProposals)
+        .catch((err: unknown) => { showError(errorMessage(err, 'Failed to load proposals')); })
+        .finally(() => {
+          setLoadedFor(projectId);
+          setReloading(false);
+        }),
+    [projectId, showError],
+  );
+
   const load = useCallback(() => {
-    setLoading(true);
-    api.docUpdateProposals
-      .list({ projectId, limit: 200 })
-      .then(setProposals)
-      .catch((err) => showError(errorMessage(err, 'Failed to load proposals')))
-      .finally(() => setLoading(false));
-  }, [projectId, showError]);
+    setReloading(true);
+    void fetchProposals();
+  }, [fetchProposals]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    void fetchProposals();
+  }, [fetchProposals]);
 
   const filtered = useMemo(
     () =>
@@ -264,8 +278,8 @@ export default function DocsHealthList({ projectId, basePath }: Props) {
               proposal={p}
               basePath={basePath}
               busy={busyId === p._id}
-              onUpdateStatus={(s) => handleUpdateStatus(p._id, s)}
-              onConvertToTodo={() => handleConvertToTodo(p._id)}
+              onUpdateStatus={(s) => { void handleUpdateStatus(p._id, s); }}
+              onConvertToTodo={() => { void handleConvertToTodo(p._id); }}
               t={t}
             />
           ))}

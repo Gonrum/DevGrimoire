@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -40,6 +40,7 @@ import ResearchList from '../components/ResearchList';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { useToast } from '../components/Toast';
 import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
+import { errorMessage } from '../lib/narrow';
 
 type Tab =
   | 'overview'
@@ -111,18 +112,29 @@ export default function CustomerDetail() {
   const [customerSnippets, setCustomerSnippets] = useState<Snippet[]>([]);
   const [customerResearch, setCustomerResearch] = useState<ResearchEntry[]>([]);
   const [storageEnabled, setStorageEnabled] = useState<boolean>(false);
-  const [aggregate, setAggregate] = useState<AggregatedData>(emptyAggregate);
   const [tab, setTab] = useState<Tab>('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [aggLoading, setAggLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
 
-  const loadBase = () => {
+  /*
+   * `loading` und `error` werden abgeleitet statt im Effect gesetzt
+   * (`set-state-in-effect`). `loadedId` hält, zu welchem Kunden die aktuell
+   * angezeigten Daten gehören; der Fehler trägt seine `id` mit, damit beim
+   * Wechsel auf einen anderen Kunden nicht die Fehlerbox des vorigen bleibt.
+   *
+   * Nebeneffekt und Absicht: `loadBase` als `onUpdate` eines Kindes (Datei
+   * gelöscht, Kontakt angelegt, …) baut die Seite nicht mehr auf
+   * "Laden…" zurück. Vorher unmountete jeder solche Refresh den kompletten
+   * Tab-Inhalt — eine gerade aufgeklappte "auch in Kapiteln"-Sektion war
+   * danach wieder zu.
+   */
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ id: string; message: string } | null>(null);
+  const loading = id !== undefined && loadedId !== id;
+  const error = failure !== null && failure.id === id ? failure.message || t('common.error') : null;
+
+  const loadBase = useCallback(() => {
     if (!id) return;
-    setLoading(true);
-    setError(null);
     Promise.all([
       api.customers.get(id),
       api.customers.listProjectLinks(id),
@@ -160,6 +172,7 @@ export default function CustomerDetail() {
           snippetData,
           researchData,
         ]) => {
+          setFailure(null);
           setCustomer(customerData);
           setLinks(linkData);
           setProjects(projectData);
@@ -178,20 +191,38 @@ export default function CustomerDetail() {
           setCustomerResearch(researchData);
         },
       )
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  };
+      // Leerer Fallback: die lokalisierte Ersatzmeldung setzt das Rendering ein,
+      // damit `t` keine Dependency von `loadBase` werden muss.
+      .catch((err: unknown) => setFailure({ id, message: errorMessage(err, '') }))
+      .finally(() => setLoadedId(id));
+  }, [id]);
 
   useEffect(() => {
     loadBase();
-  }, [id]);
+  }, [loadBase]);
 
   const projectsById = useMemo(
     () => new Map(projects.map((project) => [project._id, project])),
     [projects],
   );
 
-  const linkedProjectIds = useMemo(() => links.map((link) => link.projectId), [links]);
+  /*
+   * Über den Join-Key memoisiert, nicht über `links`: `loadBase` liefert bei
+   * jedem Refresh ein neues Array, die Projekt-IDs darin sind aber fast immer
+   * dieselben. Vorher stand deshalb `linkedProjectIds.join('|')` direkt im
+   * Dependency-Array des Aggregations-Effects (`exhaustive-deps`: komplexer
+   * Ausdruck). Jetzt ist die *Identität* von `linkedProjectIds` selbst schon
+   * an die ID-Liste gebunden — der Effect darf sie normal als Dependency
+   * führen und feuert trotzdem nur, wenn sich die Liste wirklich ändert.
+   */
+  const linkedProjectIdsKey = useMemo(
+    () => links.map((link) => link.projectId).join('|'),
+    [links],
+  );
+  const linkedProjectIds = useMemo(
+    () => (linkedProjectIdsKey === '' ? [] : linkedProjectIdsKey.split('|')),
+    [linkedProjectIdsKey],
+  );
 
   const linkedEnvIdsByLink = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -201,13 +232,24 @@ export default function CustomerDetail() {
     return map;
   }, [links]);
 
+  /*
+   * Das Aggregat trägt den Schlüssel der Projektliste, aus der es stammt.
+   * Damit sind `aggregate` und `aggLoading` *abgeleitet* statt per Effect
+   * gesetzt (`set-state-in-effect`) — und ein Aggregat aus einer inzwischen
+   * veralteten Projektliste kann nicht mehr angezeigt werden. Vorher blieb
+   * nach dem Entfernen einer Projekt-Verknüpfung das alte Aggregat inklusive
+   * der Daten des entfernten Projekts stehen, bis der Nachlauf fertig war.
+   */
+  const [aggResult, setAggResult] = useState<{ key: string; data: AggregatedData }>({
+    key: '',
+    data: emptyAggregate,
+  });
+  const aggregate = aggResult.key === linkedProjectIdsKey ? aggResult.data : emptyAggregate;
+  const aggLoading = linkedProjectIdsKey !== '' && aggResult.key !== linkedProjectIdsKey;
+
   useEffect(() => {
-    if (linkedProjectIds.length === 0) {
-      setAggregate(emptyAggregate);
-      return;
-    }
+    if (linkedProjectIds.length === 0) return;
     let cancelled = false;
-    setAggLoading(true);
     Promise.all(
       linkedProjectIds.map(async (pid) => {
         const [todos, knowledge, recurring, environments, secrets, attachments, activity] =
@@ -246,15 +288,18 @@ export default function CustomerDetail() {
         merged.todos.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
         merged.knowledge.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
         merged.activity.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-        setAggregate(merged);
+        setAggResult({ key: linkedProjectIdsKey, data: merged });
       })
-      .finally(() => {
-        if (!cancelled) setAggLoading(false);
+      // Die Einzelabrufe fangen ihre Fehler schon selbst ab; dieses `catch`
+      // deckt nur den Rest. Es muss den Schlüssel trotzdem setzen, sonst
+      // bliebe `aggLoading` (jetzt abgeleitet) dauerhaft true.
+      .catch(() => {
+        if (!cancelled) setAggResult({ key: linkedProjectIdsKey, data: emptyAggregate });
       });
     return () => {
       cancelled = true;
     };
-  }, [linkedProjectIds.join('|')]);
+  }, [linkedProjectIds, linkedProjectIdsKey]);
 
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
@@ -366,8 +411,8 @@ export default function CustomerDetail() {
     try {
       await api.customers.deleteProjectLink(id, linkId);
       setLinks((current) => current.filter((link) => link._id !== linkId));
-    } catch (err: any) {
-      showError(err.message || t('customers.linkUnlinkFailed'));
+    } catch (err) {
+      showError(errorMessage(err, t('customers.linkUnlinkFailed')));
     }
   };
 
@@ -377,8 +422,8 @@ export default function CustomerDetail() {
     try {
       const updated = await api.customers.archive(id);
       setCustomer(updated);
-    } catch (err: any) {
-      showError(err.message || t('customers.archiveFailed'));
+    } catch (err) {
+      showError(errorMessage(err, t('customers.archiveFailed')));
     } finally {
       setArchiving(false);
     }
@@ -389,10 +434,19 @@ export default function CustomerDetail() {
     try {
       const updated = await api.customers.update(id, { status: 'active' });
       setCustomer(updated);
-    } catch (err: any) {
-      showError(err.message || t('customers.restoreFailed'));
+    } catch (err) {
+      showError(errorMessage(err, t('customers.restoreFailed')));
     } finally {
       setArchiving(false);
+    }
+  };
+
+  const exportCustomer = async () => {
+    try {
+      const includeSecrets = window.confirm(t('customers.exportIncludeSecretsPrompt'));
+      await api.customerTransfer.export(id, includeSecrets);
+    } catch (err) {
+      showError(errorMessage(err, t('common.error')));
     }
   };
 
@@ -419,7 +473,7 @@ export default function CustomerDetail() {
           {isArchived ? (
             <button
               type="button"
-              onClick={restoreCustomer}
+              onClick={() => { void restoreCustomer(); }}
               disabled={archiving}
               className="text-xs px-2 py-0.5 bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300 hover:text-emerald-200 rounded-full transition-colors disabled:opacity-50"
             >
@@ -428,7 +482,7 @@ export default function CustomerDetail() {
           ) : (
             <button
               type="button"
-              onClick={archiveCustomer}
+              onClick={() => { void archiveCustomer(); }}
               disabled={archiving}
               className="text-xs px-2 py-0.5 bg-amber-900/30 hover:bg-amber-800/50 text-amber-400 hover:text-amber-200 rounded-full transition-colors disabled:opacity-50"
             >
@@ -437,14 +491,7 @@ export default function CustomerDetail() {
           )}
           <button
             type="button"
-            onClick={async () => {
-              try {
-                const includeSecrets = window.confirm(t('customers.exportIncludeSecretsPrompt'));
-                await api.customerTransfer.export(id, includeSecrets);
-              } catch (err) {
-                showError(err instanceof Error ? err.message : String(err));
-              }
-            }}
+            onClick={() => { void exportCustomer(); }}
             className="text-xs px-2 py-0.5 bg-violet-900/30 hover:bg-violet-800/50 text-violet-300 hover:text-violet-100 rounded-full transition-colors"
             title={t('customers.exportTitle')}
           >
@@ -578,8 +625,8 @@ export default function CustomerDetail() {
                 customerId={id}
                 links={links}
                 projectsById={projectsById}
-                onUnlink={removeProjectLink}
-                onAddLink={() => navigate(`/customers/${id}/links/new`)}
+                onUnlink={(linkId) => { void removeProjectLink(linkId); }}
+                onAddLink={() => { void navigate(`/customers/${id}/links/new`); }}
                 allLinked={links.length >= projects.length}
               />
             )}
@@ -693,7 +740,12 @@ export default function CustomerDetail() {
               <SoulView
                 customerId={id}
                 soul={customerSoul}
-                onUpdate={() => api.souls.getForCustomer(id).then((s) => setCustomerSoul(s && s._id ? (s) : null))}
+                onUpdate={() => {
+                  void api.souls
+                    .getForCustomer(id)
+                    .then((s) => { setCustomerSoul(s?._id ? s : null); })
+                    .catch((err: unknown) => { showError(errorMessage(err, t('common.error'))); });
+                }}
               />
             )}
 
@@ -1246,27 +1298,37 @@ function CustomerManualTab({
 }) {
   const { t } = useTranslation();
   const [showAggregated, setShowAggregated] = useState(false);
-  const [aggregatedEntries, setAggregatedEntries] = useState<Manual[]>([]);
-  const [aggLoading, setAggLoading] = useState(false);
+  /*
+   * Wie im Eltern-Aggregat: das Ergebnis trägt den Schlüssel der Projektliste,
+   * aus der es stammt. `aggregatedEntries` und `aggLoading` sind damit
+   * abgeleitet (`set-state-in-effect`) und können keine Handbuch-Einträge
+   * eines inzwischen entfernten Projekts mehr zeigen.
+   */
+  const aggKey = linkedProjectIds.join('|');
+  const [aggResult, setAggResult] = useState<{ key: string; entries: Manual[] } | null>(null);
+  const aggregatedEntries = aggResult !== null && aggResult.key === aggKey ? aggResult.entries : [];
+  const aggLoading = showAggregated && aggKey !== '' && aggResult?.key !== aggKey;
 
   useEffect(() => {
     if (!showAggregated || linkedProjectIds.length === 0) return;
     let cancelled = false;
-    setAggLoading(true);
+    const key = linkedProjectIds.join('|');
     Promise.all(linkedProjectIds.map((pid) => api.manuals.list(pid).catch(() => [] as Manual[])))
       .then((results) => {
         if (cancelled) return;
         const merged = results.flat();
         merged.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
-        setAggregatedEntries(merged);
+        setAggResult({ key, entries: merged });
       })
-      .finally(() => {
-        if (!cancelled) setAggLoading(false);
+      // Muss den Schlüssel auch im Fehlerfall setzen, sonst bliebe das
+      // abgeleitete `aggLoading` dauerhaft true.
+      .catch(() => {
+        if (!cancelled) setAggResult({ key, entries: [] });
       });
     return () => {
       cancelled = true;
     };
-  }, [showAggregated, linkedProjectIds.join('|')]);
+  }, [showAggregated, linkedProjectIds]);
 
   return (
     <div className="space-y-6">
@@ -1340,7 +1402,7 @@ function CustomerFilesTab({
       await api.attachments.delete(file._id);
       onUpdate();
     } catch (err) {
-      showError((err as Error).message || t('common.errorDeleting'));
+      showError(errorMessage(err, t('common.errorDeleting')));
     }
   };
 
@@ -1474,8 +1536,8 @@ function ContactsTab({
     try {
       await api.contacts.remove(customerId, contactId);
       onChanged();
-    } catch (err: any) {
-      showError(err.message || t('contacts.deleteFailed'));
+    } catch (err) {
+      showError(errorMessage(err, t('contacts.deleteFailed')));
     }
   };
 
@@ -1485,7 +1547,7 @@ function ContactsTab({
         <Button
           type="button"
           variant="primary"
-          onClick={() => navigate(`/customers/${customerId}/contacts/new`)}
+          onClick={() => { void navigate(`/customers/${customerId}/contacts/new`); }}
         >
           {t('contacts.newContact')}
         </Button>
@@ -1561,7 +1623,7 @@ function ContactsTab({
                   </Link>
                   <button
                     type="button"
-                    onClick={() => removeContact(contact._id, contact.name)}
+                    onClick={() => { void removeContact(contact._id, contact.name); }}
                     className="text-xs text-gray-500 hover:text-red-300"
                   >
                     {t('common.delete')}

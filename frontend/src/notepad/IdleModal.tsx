@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Sparkles, Archive as ArchiveIcon, Clock } from 'lucide-react';
 import type { Note } from './types';
@@ -22,10 +22,15 @@ export default function IdleModal({ note, onPromote, onArchive, onSnooze }: Prop
     return () => window.removeEventListener('keydown', handler);
   }, [onSnooze]);
 
+  // Die Uhr einmal beim Öffnen lesen statt bei jedem Render: `Date.now()` im
+  // Render ist unrein (`react-hooks/purity`), und die Angabe "seit N Tagen"
+  // ändert sich in der Lebensdauer des Modals ohnehin nicht.
+  const [openedAt] = useState(() => Date.now());
+
   const daysIdle = useMemo(() => {
-    const ms = Date.now() - new Date(note.updatedAt).getTime();
+    const ms = openedAt - new Date(note.updatedAt).getTime();
     return Math.floor(ms / (24 * 60 * 60 * 1000));
-  }, [note.updatedAt]);
+  }, [note.updatedAt, openedAt]);
 
   const preview = note.content.slice(0, 200) + (note.content.length > 200 ? '…' : '');
 

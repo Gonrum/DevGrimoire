@@ -11,6 +11,12 @@ import { WorkflowCustomEdge } from './WorkflowCustomEdge';
 const nodeTypes = { workflowNode: WorkflowCustomNode };
 const edgeTypes = { workflowEdge: WorkflowCustomEdge };
 
+/** `Node.data` ist `Record<string, unknown>` — der Node-Typ daraus, geprüft statt behauptet. */
+function nodeTypeOf(node: Node | undefined): string | undefined {
+  const value = node?.data.type;
+  return typeof value === 'string' ? value : undefined;
+}
+
 interface Props {
   nodes: Node[];
   edges: Edge[];
@@ -28,7 +34,7 @@ function CanvasInner(p: Props) {
   const isValidConnection = useCallback<IsValidConnection>((conn) => {
     if (conn.source === conn.target) return false;
     const target = p.nodes.find((n) => n.id === conn.target);
-    const targetType = (target?.data as { type?: string })?.type;
+    const targetType = nodeTypeOf(target);
     if (targetType?.startsWith('trigger.')) return false;
     const duplicate = p.edges.some(
       (e) => e.source === conn.source && e.target === conn.target && e.sourceHandle === conn.sourceHandle,
@@ -69,14 +75,14 @@ function CanvasInner(p: Props) {
     if (clientX === undefined || clientY === undefined) return;
 
     const el = document.elementFromPoint(clientX, clientY);
-    const nodeEl = el?.closest('.react-flow__node') as HTMLElement | null;
+    const nodeEl = el?.closest('.react-flow__node');
     if (!nodeEl) return;
     const targetId = nodeEl.getAttribute('data-id');
     if (!targetId || targetId === sourceId) return;
 
     // Only auto-connect to nodes that have an input handle (i.e. not triggers)
     const targetNode = p.nodes.find((n) => n.id === targetId);
-    const targetType = (targetNode?.data as { type?: string })?.type;
+    const targetType = nodeTypeOf(targetNode);
     if (targetType?.startsWith('trigger.')) return;
 
     p.onConnect({

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   api,
@@ -9,6 +9,7 @@ import {
   UpdateResearchTopicPayload,
   WebSearchProviderType,
 } from '../../api/client';
+import { errorMessage, optionOr } from '../../lib/narrow';
 import { useToast } from '../Toast';
 import Button from '../ui/Button';
 import DetailSection from '../ui/DetailSection';
@@ -92,16 +93,27 @@ interface TopicSettingsProps {
 export default function TopicSettings({ topic, projects, customers, onSaved }: TopicSettingsProps) {
   const { t } = useTranslation();
   const { showError, showSuccess } = useToast();
-  const [form, setForm] = useState<FormState>(() => formFromTopic(topic));
   const [saving, setSaving] = useState(false);
 
-  // Reset local edits only when navigating to a DIFFERENT topic — a
-  // concurrent header title save (which patches the same `topic` object in
-  // the parent) should not clobber in-progress settings edits.
-  useEffect(() => {
-    setForm(formFromTopic(topic));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topic._id]);
+  /*
+   * Der angezeigte Formularzustand wird beim Rendern abgeleitet statt per
+   * Effect kopiert: `edit` hält die Eingaben des Nutzers **zusammen mit der
+   * Topic-Id**, zu der sie gehören. Beim Wechsel auf ein anderes Topic passt
+   * die Id nicht mehr, und das Formular zeigt sofort dessen Werte — vorher
+   * stand nach dem Wechsel für einen Render noch das alte Topic im Formular.
+   * Ein Patch am selben Topic (z.B. Titel-Speichern im Seitenkopf) überschreibt
+   * laufende Eingaben weiterhin nicht.
+   */
+  const [edit, setEdit] = useState<{ topicId: string; form: FormState } | null>(null);
+  const topicForm = useMemo(() => formFromTopic(topic), [topic]);
+  const form = edit && edit.topicId === topic._id ? edit.form : topicForm;
+
+  const setForm = (updater: (previous: FormState) => FormState) => {
+    setEdit((previous) => {
+      const base = previous && previous.topicId === topic._id ? previous.form : topicForm;
+      return { topicId: topic._id, form: updater(base) };
+    });
+  };
 
   const update = (patch: Partial<FormState>) => setForm((f) => ({ ...f, ...patch }));
 
@@ -160,8 +172,8 @@ export default function TopicSettings({ topic, projects, customers, onSaved }: T
       const updated = await api.researchTopics.update(topic._id, payload);
       showSuccess(t('researchTopics.settingsSaved'));
       onSaved(updated);
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : t('researchTopics.settingsSaveFailed'));
+    } catch (err) {
+      showError(errorMessage(err, t('researchTopics.settingsSaveFailed')));
     } finally {
       setSaving(false);
     }
@@ -238,7 +250,7 @@ export default function TopicSettings({ topic, projects, customers, onSaved }: T
             fieldClassName="w-full sm:flex-1 sm:min-w-[9rem]"
             label={t('recurringTasks.frequency')}
             value={form.frequency}
-            onChange={(e) => update({ frequency: e.target.value as ResearchFrequency })}
+            onChange={(e) => update({ frequency: optionOr(e.target.value, FREQUENCIES, form.frequency) })}
           >
             {FREQUENCIES.map((f) => (
               <option key={f} value={f}>{t(`recurringTasks.freq_${f}`)}</option>
@@ -323,7 +335,9 @@ export default function TopicSettings({ topic, projects, customers, onSaved }: T
       </DetailSection>
 
       <div className="flex gap-2 pt-2">
-        <Button type="button" variant="primary" size="md" disabled={saving || !canSave} onClick={handleSave}>
+        <Button type="button" variant="primary" size="md" disabled={saving || !canSave} onClick={() => {
+          void handleSave();
+        }}>
           {saving ? t('common.saving') : t('common.save')}
         </Button>
       </div>

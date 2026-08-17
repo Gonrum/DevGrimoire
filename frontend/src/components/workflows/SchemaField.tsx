@@ -1,7 +1,27 @@
 import { Plus, Trash2 } from 'lucide-react';
+import { isRecord, isUnknownArray } from '../../lib/narrow';
 import { TemplatePicker, TemplateOption } from './TemplatePicker';
 
 type JsonSchema = Record<string, unknown>;
+
+/**
+ * Ein Teil-Schema. Das Schema kommt als ungeprüftes JSON vom Node-Typ-Katalog;
+ * an Stellen, an denen ein Objekt erwartet wird, aber etwas anderes steht, ist
+ * das leere Schema die richtige Antwort — es rendert den Freitext-Fallback.
+ */
+function asSchema(value: unknown): JsonSchema {
+  return isRecord(value) ? value : {};
+}
+
+/** Nur die String-Einträge einer Liste; `null`, wenn gar keine Liste. */
+function stringList(value: unknown): string[] | null {
+  if (!isUnknownArray(value)) return null;
+  return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined;
+}
 
 interface Props {
   schema: JsonSchema;
@@ -23,7 +43,8 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
   const label = fieldKey ?? path[path.length - 1] ?? '';
   const labelText = hideLabel ? '' : String(label);
 
-  if (schema.type === 'string' && Array.isArray(schema.enum)) {
+  const enumOptions = stringList(schema.enum);
+  if (schema.type === 'string' && enumOptions) {
     return (
       <Labeled label={labelText} required={required}>
         <select
@@ -32,7 +53,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
           className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-none"
         >
           <option value="">— wählen —</option>
-          {(schema.enum as string[]).map((opt) => (
+          {enumOptions.map((opt) => (
             <option key={opt} value={opt}>{opt}</option>
           ))}
         </select>
@@ -90,8 +111,8 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
         <input
           type="number"
           value={typeof value === 'number' ? value : ''}
-          min={schema.minimum as number | undefined}
-          max={schema.maximum as number | undefined}
+          min={numberOrUndefined(schema.minimum)}
+          max={numberOrUndefined(schema.maximum)}
           step={schema.type === 'integer' ? 1 : 'any'}
           onChange={(e) => {
             const n = e.target.value === '' ? undefined : Number(e.target.value);
@@ -119,8 +140,8 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
   }
 
   if (schema.type === 'array') {
-    const items = (schema.items ?? {}) as JsonSchema;
-    const arr = Array.isArray(value) ? (value as unknown[]) : [];
+    const items = asSchema(schema.items);
+    const arr = isUnknownArray(value) ? value : [];
 
     if (items.type === 'string') {
       return (
@@ -178,17 +199,17 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
     );
   }
 
-  if (schema.type === 'object' && schema.properties) {
-    const props = schema.properties as Record<string, JsonSchema>;
-    const subReq = Array.isArray(schema.required) ? (schema.required as string[]) : [];
-    const obj = (value as Record<string, unknown> | undefined) ?? {};
+  if (schema.type === 'object' && isRecord(schema.properties)) {
+    const props = schema.properties;
+    const subReq = stringList(schema.required) ?? [];
+    const obj = isRecord(value) ? value : {};
     return (
       <Labeled label={labelText} required={subReq.length > 0}>
         <fieldset className="rounded border border-gray-700 bg-gray-900/30 p-3 space-y-3">
           {Object.entries(props).map(([k, sub]) => (
             <SchemaField
               key={k}
-              schema={sub}
+              schema={asSchema(sub)}
               path={[...path, k]}
               value={obj[k]}
               onChange={(v) => onChange({ ...obj, [k]: v })}
@@ -205,14 +226,10 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
   // Record / map: object with additionalProperties but no fixed properties.
   // Render as a key/value table where each row uses the additionalProperties
   // schema for the value. Used e.g. by action.user-question's `branchMap`.
-  if (
-    schema.type === 'object' &&
-    !schema.properties &&
-    schema.additionalProperties &&
-    typeof schema.additionalProperties === 'object'
-  ) {
-    const valueSchema = schema.additionalProperties as JsonSchema;
-    const obj = (value as Record<string, unknown> | undefined) ?? {};
+  const additional = schema.additionalProperties;
+  if (schema.type === 'object' && !schema.properties && isRecord(additional)) {
+    const valueSchema = additional;
+    const obj = isRecord(value) ? value : {};
     const entries = Object.entries(obj);
     const setEntries = (next: Array<[string, unknown]>) => {
       const out: Record<string, unknown> = {};
@@ -279,15 +296,22 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
     );
   }
 
-  if (Array.isArray(schema.anyOf) || Array.isArray(schema.oneOf)) {
-    const variants = (schema.anyOf ?? schema.oneOf) as JsonSchema[];
+  // `anyOf ?? oneOf` statt der Prüfung selbst zu folgen war ein latenter Crash:
+  // bei `anyOf: "x"` (nicht-Array, aber nicht nullish) und gesetztem `oneOf`
+  // griff `??` das `anyOf` und `.map` war keine Funktion.
+  const variants = isUnknownArray(schema.anyOf)
+    ? schema.anyOf
+    : isUnknownArray(schema.oneOf)
+      ? schema.oneOf
+      : null;
+  if (variants) {
     return (
       <Labeled label={labelText} required={required}>
         <div className="space-y-2">
           {variants.map((variant, idx) => (
             <SchemaField
               key={idx}
-              schema={variant}
+              schema={asSchema(variant)}
               path={[...path, `variant-${idx}`]}
               value={value}
               onChange={onChange}
@@ -380,9 +404,10 @@ function TagInput({ tags, onChange }: { tags: string[]; onChange: (tags: string[
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ',') {
             e.preventDefault();
-            const v = (e.target as HTMLInputElement).value.trim();
+            const input = e.currentTarget;
+            const v = input.value.trim();
             if (v && !tags.includes(v)) onChange([...tags, v]);
-            (e.target as HTMLInputElement).value = '';
+            input.value = '';
           }
         }}
         className="flex-1 bg-transparent text-sm text-gray-200 focus:outline-none"

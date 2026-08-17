@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { api, LogEntry, LogStats, Project } from '../api/client';
@@ -50,8 +50,10 @@ export default function LogList({ projectId, projects }: LogListProps) {
   const { i18n } = useTranslation();
   const globalMode = !projectId;
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [stats, setStats] = useState<LogStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Stats gibt es nur pro Projekt. Im globalen Modus wird `null` abgeleitet,
+  // statt es per Effect in den State zu kopieren.
+  const [projectStats, setProjectStats] = useState<LogStats | null>(null);
+  const stats = globalMode ? null : projectStats;
   const [levelFilter, setLevelFilter] = useState<string | null>(null);
   const [serviceFilter, setServiceFilter] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -64,8 +66,22 @@ export default function LogList({ projectId, projects }: LogListProps) {
     return map;
   }, [projects]);
 
-  const loadLogs = () => {
-    setLoading(true);
+  /**
+   * Identität der aktuell angezeigten Abfrage. `loading` ist die Ableitung
+   * „das Geladene gehört nicht zur aktuellen Abfrage" — vorher setzte der
+   * Effect dafür synchron State.
+   */
+  const queryKey = JSON.stringify({
+    projectId: projectId ?? null,
+    projectFilter,
+    levelFilter,
+    serviceFilter,
+    searchActive,
+  });
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const loading = loadedKey !== queryKey;
+
+  const loadLogs = useCallback(() => {
     const fetch = globalMode
       ? api.logs.listGlobal({
           projectIds: projectFilter.length > 0 ? projectFilter : undefined,
@@ -80,21 +96,21 @@ export default function LogList({ projectId, projects }: LogListProps) {
           search: searchActive || undefined,
           limit: 100,
         });
-    fetch
+    return fetch
       .then(setLogs)
       .catch(() => {})
-      .finally(() => setLoading(false));
-  };
+      .finally(() => { setLoadedKey(queryKey); });
+  }, [globalMode, projectId, projectFilter, levelFilter, serviceFilter, searchActive, queryKey]);
 
   useEffect(() => {
     // Stats are per-project only — skip in global mode.
-    if (globalMode) { setStats(null); return; }
-    api.logs.stats(projectId).then(setStats).catch(() => {});
+    if (globalMode) return;
+    api.logs.stats(projectId).then(setProjectStats).catch(() => {});
   }, [projectId, globalMode]);
 
   useEffect(() => {
-    loadLogs();
-  }, [projectId, levelFilter, serviceFilter, searchActive, projectFilter.join(',')]);
+    void loadLogs();
+  }, [loadLogs]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
