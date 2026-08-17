@@ -1,7 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { GitProviderInterface, NormalizedCommit, FetchCommitsResult, GitBranch, CommitStats, NormalizedRelease } from './git-provider.interface';
+import { GitProviderInterface, NormalizedCommit, FetchCommitsResult, GitBranch, CommitStats, NormalizedRelease, NormalizedReleaseAsset } from './git-provider.interface';
 import { GitRepository } from '../schemas/git-repository.schema';
 import { validateGitBaseUrl } from './url-validator';
+import {
+  GitHubBranch,
+  GitHubRelease,
+  GitHubStyleCommit,
+  readJsonArray,
+  readJsonObject,
+} from './provider-responses';
 
 const MAX_PAGES = 10;
 const FETCH_TIMEOUT = 30000;
@@ -78,16 +85,29 @@ export class GitHubProviderService implements GitProviderInterface {
         newEtag = response.headers.get('etag') || undefined;
       }
 
-      const data = await response.json();
-      if (!Array.isArray(data) || data.length === 0) break;
+      // Fehlerfall/Fremdform ist ein Objekt, kein Array — dann ist nichts mehr
+      // zu paginieren.
+      const data = await readJsonArray<GitHubStyleCommit>(response);
+      if (!data || data.length === 0) break;
 
       for (const item of data) {
+        const committedAt = item.commit?.author?.date || item.commit?.committer?.date;
+        // Ohne SHA oder Datum ist der Commit nicht speicherbar: beide Felder
+        // sind im Commit-Schema `required`, und `new Date(undefined)` ergibt
+        // ein Invalid Date, das den kompletten Sync mit einem Cast-Fehler
+        // abbricht. Einzelnen Datensatz überspringen statt alles verlieren.
+        if (!item.sha || !committedAt) {
+          this.logger.warn(
+            `Skipping GitHub commit without sha/date (sha=${item.sha ?? 'none'})`,
+          );
+          continue;
+        }
         allCommits.push({
           sha: item.sha,
           message: item.commit?.message || '',
           authorName: item.commit?.author?.name || item.author?.login || 'Unknown',
           authorEmail: item.commit?.author?.email,
-          committedAt: new Date(item.commit?.author?.date || item.commit?.committer?.date),
+          committedAt: new Date(committedAt),
           url: item.html_url || '',
           additions: item.stats?.additions,
           deletions: item.stats?.deletions,
@@ -111,7 +131,8 @@ export class GitHubProviderService implements GitProviderInterface {
     const url = `${baseUrl}/repos/${config.owner}/${config.repo}/commits/${sha}`;
     const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
     if (!response.ok) return {};
-    const data = await response.json();
+    const data = await readJsonObject<GitHubStyleCommit>(response);
+    if (!data) return {};
     return {
       additions: data.stats?.additions,
       deletions: data.stats?.deletions,
@@ -127,8 +148,19 @@ export class GitHubProviderService implements GitProviderInterface {
     if (!response.ok) {
       throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
     }
-    const data = await response.json();
-    return (data as any[]).map((b) => ({ name: b.name, isDefault: b.protected === true }));
+    // Ein Objekt-Body (Fehler-Payload mit HTTP 200, Antwort eines Proxy) darf
+    // nicht als Liste durchgehen — sonst scheitert erst `.map()` mit einem
+    // nichtssagenden "is not a function".
+    const data = await readJsonArray<GitHubBranch>(response);
+    if (!data) {
+      throw new Error('GitHub API error: branch list response was not an array');
+    }
+    const branches: GitBranch[] = [];
+    for (const b of data) {
+      if (!b.name) continue;
+      branches.push({ name: b.name, isDefault: b.protected === true });
+    }
+    return branches;
   }
 
   async validateToken(config: GitRepository, token: string): Promise<boolean> {
@@ -159,23 +191,48 @@ export class GitHubProviderService implements GitProviderInterface {
     if (!response.ok) {
       throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
     }
-    const data = await response.json();
-    if (!Array.isArray(data)) return [];
+    const data = await readJsonArray<GitHubRelease>(response);
+    if (!data) return [];
 
-    return data.map((ghRelease: any): NormalizedRelease => ({
-      providerReleaseId: String(ghRelease.id),
-      tagName: ghRelease.tag_name,
-      name: ghRelease.name || ghRelease.tag_name,
-      description: ghRelease.body || '',
-      releasedAt: new Date(ghRelease.published_at || ghRelease.created_at),
-      url: ghRelease.html_url,
-      draft: ghRelease.draft === true,
-      prerelease: ghRelease.prerelease === true,
-      assets: (ghRelease.assets ?? []).map((a: any) => ({
-        name: a.name,
-        url: a.browser_download_url,
-        format: a.content_type,
-      })),
-    }));
+    const releases: NormalizedRelease[] = [];
+    for (const ghRelease of data) {
+      const tagName = ghRelease.tag_name;
+      // `tagName` landet als `version` in einem `required`-Feld des
+      // Release-Schemas — ohne Tag würde `create()` die ganze Sync-Runde
+      // mit einem ValidationError abbrechen.
+      if (!tagName) {
+        this.logger.warn('Skipping GitHub release without tag_name');
+        continue;
+      }
+
+      const assets: NormalizedReleaseAsset[] = [];
+      for (const a of ghRelease.assets ?? []) {
+        // ReleaseAsset.name/url sind im Schema `required`.
+        if (!a.name || !a.browser_download_url) continue;
+        assets.push({
+          name: a.name,
+          url: a.browser_download_url,
+          format: a.content_type,
+        });
+      }
+
+      const releasedAt = ghRelease.published_at || ghRelease.created_at;
+      releases.push({
+        // `id` ist bei GitHub numerisch; fehlt sie, ist der Tag-Name der
+        // stabilste Ersatz-Schlüssel (String(undefined) === "undefined" hätte
+        // alle Releases auf denselben Unique-Key gemappt).
+        providerReleaseId: ghRelease.id != null ? String(ghRelease.id) : tagName,
+        tagName,
+        name: ghRelease.name || tagName,
+        description: ghRelease.body || '',
+        // Epoch statt Invalid Date, falls beide Datumsfelder fehlen.
+        releasedAt: releasedAt ? new Date(releasedAt) : new Date(0),
+        url: ghRelease.html_url || '',
+        draft: ghRelease.draft === true,
+        prerelease: ghRelease.prerelease === true,
+        assets,
+      });
+    }
+    return releases;
   }
 }

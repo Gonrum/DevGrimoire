@@ -60,6 +60,7 @@
     "check:stack-markdown": "node scripts/stack-markdown-check.cjs",
     "check:stack-chat-tools": "node scripts/stack-chat-tools-check.cjs",
     "check:ssh-upload-integrity": "node scripts/ssh-upload-integrity-check.cjs",
+    "check:git-providers": "node scripts/git-providers-behaviour-check.cjs",
     "check:harness-schema": "node scripts/harness-schema-check.cjs",
     "check:harness-resolve": "node scripts/harness-resolve-units-check.cjs"
   },

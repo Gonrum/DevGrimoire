@@ -21,8 +21,11 @@ export class GitProviderRegistry {
         return this.gitlab;
       case 'gitea':
         return this.gitea;
-      default:
-        throw new BadRequestException(`Unknown provider: ${provider}`);
     }
+    // Der `switch` ist über GitProvider vollständig, für TS ist `provider` hier
+    // also `never` — ein Template-Literal darauf wird abgelehnt. Die Defensive
+    // bleibt trotzdem: ein Aufruf aus untypisiertem Code (MCP-Argument, DB-Wert
+    // aus einer älteren Version) landet zur Laufzeit sehr wohl hier.
+    throw new BadRequestException(`Unknown provider: ${String(provider)}`);
   }
 }

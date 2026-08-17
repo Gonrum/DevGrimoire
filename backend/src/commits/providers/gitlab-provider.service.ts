@@ -1,7 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { GitProviderInterface, NormalizedCommit, FetchCommitsResult, GitBranch, CommitStats, NormalizedRelease } from './git-provider.interface';
+import { GitProviderInterface, NormalizedCommit, FetchCommitsResult, GitBranch, CommitStats, NormalizedRelease, NormalizedReleaseAsset } from './git-provider.interface';
 import { GitRepository } from '../schemas/git-repository.schema';
 import { validateGitBaseUrl } from './url-validator';
+import {
+  GitLabBranch,
+  GitLabCommit,
+  GitLabCommitDetail,
+  GitLabRelease,
+  readJsonArray,
+  readJsonObject,
+} from './provider-responses';
 
 const MAX_PAGES = 10;
 const FETCH_TIMEOUT = 30000;
@@ -69,16 +77,29 @@ export class GitLabProviderService implements GitProviderInterface {
         throw new Error(`GitLab API error: ${response.status} ${response.statusText}`);
       }
 
-      const data = await response.json();
-      if (!Array.isArray(data) || data.length === 0) break;
+      // Fehlerfall/Fremdform ist ein Objekt, kein Array — dann ist nichts mehr
+      // zu paginieren.
+      const data = await readJsonArray<GitLabCommit>(response);
+      if (!data || data.length === 0) break;
 
       for (const item of data) {
+        const committedAt = item.authored_date || item.committed_date || item.created_at;
+        // Ohne SHA (`id`) oder Datum ist der Commit nicht speicherbar: beide
+        // Felder sind im Commit-Schema `required`, und `new Date(undefined)`
+        // ergibt ein Invalid Date, das den kompletten Sync mit einem
+        // Cast-Fehler abbricht. Einzelnen Datensatz überspringen.
+        if (!item.id || !committedAt) {
+          this.logger.warn(
+            `Skipping GitLab commit without id/date (id=${item.id ?? 'none'})`,
+          );
+          continue;
+        }
         allCommits.push({
           sha: item.id,
           message: item.message || '',
           authorName: item.author_name || 'Unknown',
           authorEmail: item.author_email,
-          committedAt: new Date(item.authored_date || item.committed_date || item.created_at),
+          committedAt: new Date(committedAt),
           url: item.web_url || '',
           additions: item.stats?.additions,
           deletions: item.stats?.deletions,
@@ -105,14 +126,16 @@ export class GitLabProviderService implements GitProviderInterface {
     const diffResp = await fetch(diffUrl, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
     let changedFiles: number | undefined;
     if (diffResp.ok) {
-      const diffs = await diffResp.json();
-      changedFiles = Array.isArray(diffs) ? diffs.length : undefined;
+      // Vom Diff brauchen wir nur die Anzahl der Einträge, keine Feldform.
+      const diffs = await readJsonArray<unknown>(diffResp);
+      changedFiles = diffs?.length;
     }
     // Fetch single commit for stats (additions/deletions)
     const commitUrl = `${baseUrl}/api/v4/projects/${projectPath}/repository/commits/${sha}?stats=true`;
     const commitResp = await fetch(commitUrl, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
     if (!commitResp.ok) return { changedFiles };
-    const data = await commitResp.json();
+    const data = await readJsonObject<GitLabCommitDetail>(commitResp);
+    if (!data) return { changedFiles };
     return {
       additions: data.stats?.additions,
       deletions: data.stats?.deletions,
@@ -129,8 +152,19 @@ export class GitLabProviderService implements GitProviderInterface {
     if (!response.ok) {
       throw new Error(`GitLab API error: ${response.status} ${response.statusText}`);
     }
-    const data = await response.json();
-    return (data as any[]).map((b) => ({ name: b.name, isDefault: b.default === true }));
+    // Ein Objekt-Body (Fehler-Payload mit HTTP 200, Antwort eines Proxy) darf
+    // nicht als Liste durchgehen — sonst scheitert erst `.map()` mit einem
+    // nichtssagenden "is not a function".
+    const data = await readJsonArray<GitLabBranch>(response);
+    if (!data) {
+      throw new Error('GitLab API error: branch list response was not an array');
+    }
+    const branches: GitBranch[] = [];
+    for (const b of data) {
+      if (!b.name) continue;
+      branches.push({ name: b.name, isDefault: b.default === true });
+    }
+    return branches;
   }
 
   async validateToken(config: GitRepository, token: string): Promise<boolean> {
@@ -162,34 +196,50 @@ export class GitLabProviderService implements GitProviderInterface {
     if (!response.ok) {
       throw new Error(`GitLab API error: ${response.status} ${response.statusText}`);
     }
-    const data = await response.json();
-    if (!Array.isArray(data)) return [];
+    const data = await readJsonArray<GitLabRelease>(response);
+    if (!data) return [];
 
-    return data.map((glRelease: any): NormalizedRelease => {
-      const assets: { name: string; url: string; format?: string }[] = [];
+    const releases: NormalizedRelease[] = [];
+    for (const glRelease of data) {
+      const tagName = glRelease.tag_name;
+      // GitLab-Releases haben keine numerische ID — der Tag-Name IST der
+      // Schlüssel (`providerReleaseId`) und landet als `version` in einem
+      // `required`-Feld. Ohne Tag gibt es nichts zu speichern.
+      if (!tagName) {
+        this.logger.warn('Skipping GitLab release without tag_name');
+        continue;
+      }
+
+      const assets: NormalizedReleaseAsset[] = [];
       for (const link of glRelease.assets?.links ?? []) {
-        assets.push({
-          name: link.name,
-          url: link.direct_asset_url || link.url,
-          format: link.link_type,
-        });
+        // `direct_asset_url` fehlt ohne konfigurierten direct_asset_path.
+        const url = link.direct_asset_url || link.url;
+        // ReleaseAsset.name/url sind im Schema `required`.
+        if (!link.name || !url) continue;
+        assets.push({ name: link.name, url, format: link.link_type });
       }
       for (const source of glRelease.assets?.sources ?? []) {
+        // Ohne `format` gäbe es nur einen "source.undefined"-Eintrag.
+        if (!source.format || !source.url) continue;
         assets.push({
           name: `source.${source.format}`,
           url: source.url,
           format: source.format,
         });
       }
-      return {
-        providerReleaseId: String(glRelease.tag_name),
-        tagName: glRelease.tag_name,
-        name: glRelease.name || glRelease.tag_name,
+
+      const releasedAt = glRelease.released_at || glRelease.created_at;
+      releases.push({
+        providerReleaseId: tagName,
+        tagName,
+        name: glRelease.name || tagName,
         description: glRelease.description || '',
-        releasedAt: new Date(glRelease.released_at || glRelease.created_at),
-        url: glRelease._links?.self || `${baseUrl}/-/releases/${glRelease.tag_name}`,
+        // Epoch statt Invalid Date, falls beide Datumsfelder fehlen.
+        releasedAt: releasedAt ? new Date(releasedAt) : new Date(0),
+        url: glRelease._links?.self || `${baseUrl}/-/releases/${tagName}`,
         assets,
-      };
-    });
+      });
+    }
+    return releases;
   }
 }
