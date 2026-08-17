@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { api, GitRepository } from '../../api/client';
 import Button from '../ui/Button';
 import { FormInput, SecretInput } from '../ui/FormField';
-import { ProviderBadge, type GitProvider } from '../icons/ProviderIcon';
+import { ProviderBadge } from '../icons/ProviderIcon';
 
 type Provider = 'github' | 'gitlab' | 'gitea';
 
@@ -89,7 +89,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
   };
 
   const persist = async (next: GitRepository[]) => {
-    await api.projects.update(projectId, { gitRepositories: next } as any);
+    await api.projects.update(projectId, { gitRepositories: next });
     onChange(next);
   };
 
@@ -192,7 +192,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
   const handleStartEditRepo = (index: number) => {
     const repo = gitRepos[index];
     setEditingRepoIndex(index);
-    setEditRepoProvider(repo.provider as Provider);
+    setEditRepoProvider(repo.provider);
     setEditRepoUrl(
       repo.provider === 'github' || repo.provider === 'gitea'
         ? `${repo.owner}/${repo.repo}`
@@ -383,7 +383,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
               </div>
             ) : (
               <div key={i} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
-                <ProviderBadge provider={repo.provider as GitProvider} />
+                <ProviderBadge provider={repo.provider} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     {repo.label && (

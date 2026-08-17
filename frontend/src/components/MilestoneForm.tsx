@@ -43,7 +43,7 @@ export default function MilestoneForm({
         dueDate: dueDate || undefined,
       };
       const saved = milestone
-        ? await api.milestones.update(milestone._id, payload as Partial<Milestone>)
+        ? await api.milestones.update(milestone._id, payload)
         : await api.milestones.create({ projectId, ...payload });
       onSaved(saved);
     } finally {

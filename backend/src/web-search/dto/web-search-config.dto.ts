@@ -30,7 +30,7 @@ export interface PublicWebSearchConfig {
 }
 
 export class ProviderConfigDto {
-  @IsIn(SEARCH_PROVIDER_TYPES as unknown as string[])
+  @IsIn(SEARCH_PROVIDER_TYPES)
   type: SearchProviderType;
 
   @IsOptional()
@@ -48,7 +48,7 @@ export class ProviderConfigDto {
 }
 
 export class UpdateWebSearchConfigDto {
-  @IsIn(SEARCH_PROVIDER_TYPES as unknown as string[])
+  @IsIn(SEARCH_PROVIDER_TYPES)
   activeProvider: SearchProviderType;
 
   @IsArray()

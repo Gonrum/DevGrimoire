@@ -64,8 +64,8 @@ function CanvasInner(p: Props) {
     if (!sourceId) return;
 
     // Locate the node DOM element under the cursor
-    const clientX = 'clientX' in event ? event.clientX : (event as TouchEvent).changedTouches?.[0]?.clientX;
-    const clientY = 'clientY' in event ? event.clientY : (event as TouchEvent).changedTouches?.[0]?.clientY;
+    const clientX = 'clientX' in event ? event.clientX : event.changedTouches?.[0]?.clientX;
+    const clientY = 'clientY' in event ? event.clientY : event.changedTouches?.[0]?.clientY;
     if (clientX === undefined || clientY === undefined) return;
 
     const el = document.elementFromPoint(clientX, clientY);

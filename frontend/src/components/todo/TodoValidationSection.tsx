@@ -188,7 +188,7 @@ export default function TodoValidationSection({ todoId, projectId, basePath, onE
 
   if (latest === undefined) return null;
 
-  const bugTodoIdFromMeta = (latest?.metadata?.bugTodoId as string | undefined) || undefined;
+  const bugTodoIdFromMeta = (latest?.metadata?.bugTodoId) || undefined;
 
   return (
     <DetailSection title={t('validation.sectionTitle')} className="mb-5">

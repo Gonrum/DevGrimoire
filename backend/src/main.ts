@@ -3,7 +3,6 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { randomUUID } from 'node:crypto';
 import helmet from 'helmet';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { json } = require('express');
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
@@ -610,7 +609,7 @@ async function bootstrap() {
 
     let userId: string | undefined;
     try {
-      const payload = jwt.verify(token) as { sub?: string; userId?: string };
+      const payload = jwt.verify(token);
       // Auth signs JWTs with the standard `sub` claim (user id) plus a
       // legacy `userId` field on some paths — accept either.
       userId = payload.sub || payload.userId;
@@ -726,7 +725,7 @@ async function bootstrap() {
 
     let userId: string | undefined;
     try {
-      const payload = jwt.verify(token) as { sub?: string; userId?: string };
+      const payload = jwt.verify(token);
       userId = payload.sub || payload.userId;
     } catch {
       return rejectUpgrade(401, 'Unauthorized');
@@ -872,7 +871,7 @@ async function bootstrap() {
           try { channel.write(text); } catch { /* noop */ }
           return;
         }
-        try { channel.write(data as Buffer); } catch { /* noop */ }
+        try { channel.write(data); } catch { /* noop */ }
       });
 
       clientWs.on('close', () => closeAll());
@@ -929,7 +928,7 @@ async function bootstrap() {
       const token = url.searchParams.get('token');
       if (!token) return reject(401, 'Unauthorized');
       try {
-        const payload = jwt.verify(token) as { sub?: string; userId?: string };
+        const payload = jwt.verify(token);
         userId = payload.sub || payload.userId;
       } catch {
         return reject(401, 'Unauthorized');

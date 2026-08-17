@@ -4,7 +4,7 @@ import { api, CommitEntry, GitRepository } from '../api/client';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
 import EmptyState from './ui/EmptyState';
-import { ProviderBadge, type GitProvider } from './icons/ProviderIcon';
+import { ProviderBadge } from './icons/ProviderIcon';
 
 function timeAgo(dateStr: string, locale: string): string {
   const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -168,7 +168,7 @@ export default function CommitList({ projectId, gitRepositories }: CommitListPro
                   key={commit._id}
                   className="flex items-start gap-3 py-2 px-3 rounded-lg hover:bg-gray-800/50 transition-colors group"
                 >
-                  <ProviderBadge provider={commit.provider as GitProvider} />
+                  <ProviderBadge provider={commit.provider} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       {commit.url ? (

@@ -115,7 +115,7 @@ export default function UserManagement() {
       allowedCustomerIds?: string[];
     },
   ) => {
-    await api.users.update(userId, payload as Partial<UserInfo>);
+    await api.users.update(userId, payload);
     await loadUsers();
   };
 

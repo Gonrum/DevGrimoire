@@ -535,7 +535,7 @@ export class KnowledgeGraphService {
       entity: 'knowledge-graph',
       action: 'updated',
       summary: `Wissensgraph aktualisiert: ${edges.size} Kanten, ${inserted} neu, ${pruned} entfernt`,
-    } as ProjectChangeEvent);
+    });
 
     return { discovered: edges.size, inserted, pruned };
   }

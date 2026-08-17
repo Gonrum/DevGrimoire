@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, GitRepository } from '../api/client';
-import { ProviderBadge, type GitProvider } from './icons/ProviderIcon';
+import { ProviderBadge } from './icons/ProviderIcon';
 
 interface RepoInfo {
   repo: GitRepository;
@@ -108,7 +108,7 @@ export default function GitRepoWidget({ projectId, gitRepositories, onNavigateTo
           const repoUrl = getRepoUrl(repo);
           return (
             <div key={repo._id || i} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800/30 transition-colors">
-              <ProviderBadge provider={repo.provider as GitProvider} />
+              <ProviderBadge provider={repo.provider} />
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">

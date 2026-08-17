@@ -194,7 +194,7 @@ export default function ProjectDetail() {
         schema: () => api.schemas.list(id).then(setSchemas),
         dependency: () => api.dependencies.list(id).then(setDependencies),
         feature: () => api.features.list(id).then(setFeatures),
-        soul: () => api.souls.get(id!).then(setSoul),
+        soul: () => api.souls.get(id).then(setSoul),
         'recurring-task': () => api.recurringTasks.list({ projectId: id }).then(setRecurringTasks),
         snippet: () => api.snippets.list(id).then(setSnippets),
         attachment: () => api.attachments.list(id).then(setAttachments),
@@ -393,16 +393,16 @@ export default function ProjectDetail() {
             )}
             {tab === 'todos' && (
               <>
-                <PendingQuestionsWidget projectId={id!} className="mb-4" />
+                <PendingQuestionsWidget projectId={id} className="mb-4" />
                 <TodoBoard
                   todos={todos}
                   milestones={milestones}
-                  projectId={id!}
+                  projectId={id}
                   onUpdate={() => api.todos.list({ projectId: id }).then(setTodos)}
                 />
               </>
             )}
-            {tab === 'soul' && <SoulView projectId={id!} soul={soul} onUpdate={() => api.souls.get(id!).then(setSoul)} />}
+            {tab === 'soul' && <SoulView projectId={id} soul={soul} onUpdate={() => api.souls.get(id!).then(setSoul)} />}
             {tab === 'milestones' && (
               <MilestoneList
                 milestones={milestones}
@@ -412,30 +412,30 @@ export default function ProjectDetail() {
               />
             )}
             {tab === 'sessions' && <SessionList sessions={sessions} />}
-            {tab === 'knowledge' && <KnowledgeList entries={knowledge} projectId={id!} onUpdate={() => api.knowledge.list(id!).then(setKnowledge)} />}
-            {tab === 'changelog' && <ChangelogList entries={changelog} projectId={id!} project={project} onUpdate={() => api.changelog.list(id!).then(setChangelog)} />}
-            {tab === 'manual' && <ManualView projectId={id!} entries={manuals} onUpdate={() => api.manuals.list(id!).then(setManuals)} />}
+            {tab === 'knowledge' && <KnowledgeList entries={knowledge} projectId={id} onUpdate={() => api.knowledge.list(id).then(setKnowledge)} />}
+            {tab === 'changelog' && <ChangelogList entries={changelog} projectId={id} project={project} onUpdate={() => api.changelog.list(id!).then(setChangelog)} />}
+            {tab === 'manual' && <ManualView projectId={id} entries={manuals} onUpdate={() => api.manuals.list(id!).then(setManuals)} />}
             {tab === 'docs-health' && <DocsHealthList projectId={id!} basePath={`/projects/${id!}`} />}
             {tab === 'graph' && <KnowledgeGraphView projectId={id!} basePath={`/projects/${id!}`} />}
             {tab === 'oracle' && <OracleView projectId={id!} basePath={`/projects/${id!}`} />}
             {tab === 'features' && <FeatureList entries={features} projectId={id!} />}
             {tab === 'schemas' && <SchemaList entries={schemas} projectId={id!} />}
             {tab === 'dependencies' && <DependencyList entries={dependencies} projectId={id!} />}
-            {tab === 'snippets' && <SnippetList entries={snippets} projectId={id!} />}
+            {tab === 'snippets' && <SnippetList entries={snippets} projectId={id} />}
             {tab === 'workspaces' && <WorkspaceList projectId={id!} />}
-            {tab === 'research' && <ResearchList entries={research} projectId={id!} onUpdate={() => api.research.list(id!).then(setResearch)} />}
-            {tab === 'environments' && <EnvironmentList key={envKey} projectId={id!} />}
-            {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id!} />}
+            {tab === 'research' && <ResearchList entries={research} projectId={id} onUpdate={() => api.research.list(id!).then(setResearch)} />}
+            {tab === 'environments' && <EnvironmentList key={envKey} projectId={id} />}
+            {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id} />}
             {tab === 'http-requests' && <HttpRequestsTab projectId={id!} />}
             {tab === 'ssh' && <SshConnectionsTab scope={{ projectId: id! }} />}
-            {tab === 'recurring-tasks' && <RecurringTaskList entries={recurringTasks} projectId={id!} />}
+            {tab === 'recurring-tasks' && <RecurringTaskList entries={recurringTasks} projectId={id} />}
             {tab === 'workflows' && (
-              <WorkflowProjectTab scope="project" projectId={id!} />
+              <WorkflowProjectTab scope="project" projectId={id} />
             )}
             {tab === 'commits' && <CommitList key={commitsKey} projectId={id!} gitRepositories={project.gitRepositories} />}
             {tab === 'files' && <AttachmentList projectId={id!} showUpload />}
             {tab === 'releases' && <ReleaseList entries={releases} projectId={id!} />}
-            {tab === 'logs' && <LogList key={logsKey} projectId={id!} />}
+            {tab === 'logs' && <LogList key={logsKey} projectId={id} />}
             {tab === 'activity' && <ActivityList activities={activities} />}
             {tab === 'access' && isAdmin && <ProjectAccessTab projectId={id!} />}
           </ProjectTabShell>

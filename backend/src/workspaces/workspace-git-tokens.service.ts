@@ -195,7 +195,7 @@ function pickRepoForUrl<T extends RepoLike>(
 function idToString(id: unknown): string | null {
   if (!id) return null;
   if (typeof id === 'string') return id;
-  if (typeof id === 'object' && 'toString' in (id as object)) {
+  if (typeof id === 'object' && 'toString' in (id)) {
     return (id as { toString(): string }).toString();
   }
   return null;

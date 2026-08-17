@@ -32,7 +32,7 @@ export class WorkflowDelayScheduler {
       .exec();
     for (const nr of due) {
       try {
-        await this.engine.resumeDelayedNode(nr._id as never);
+        await this.engine.resumeDelayedNode(nr._id);
       } catch (err) {
         this.logger.warn(`resumeDelayedNode failed for ${nr._id}: ${(err as Error).message}`);
       }

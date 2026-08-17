@@ -91,7 +91,7 @@ export default function TodoForm({
         status: 'open',
         tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
         milestoneId: milestoneId || undefined,
-      } as Partial<Todo> & { milestoneId?: string });
+      });
 
       if (projectId && pendingFiles.length > 0 && todo._id) {
         for (const file of pendingFiles) {

@@ -141,6 +141,6 @@ export function redactLogs(
         knownTokens,
         maxStringLength: 1024,
         maxDepth: 4,
-      }).value as Record<string, unknown>,
+      }).value,
   );
 }

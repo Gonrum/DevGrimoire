@@ -91,7 +91,7 @@ export class ProjectTransferService {
       environments: strip(environments),
       secrets: strip(includeSecretValues ? secrets : secrets),
       manuals: strip(manuals),
-      schemas: strip(schemasWithVersions) as ProjectExport['schemas'],
+      schemas: strip(schemasWithVersions),
       dependencies: strip(dependencies),
       features: strip(features),
     };
@@ -194,7 +194,7 @@ export class ProjectTransferService {
           archived: ms.archived as boolean,
         } as any);
       } else if (ms.archived) {
-        await this.milestonesService.update(newMs._id.toString(), { archived: true } as any);
+        await this.milestonesService.update(newMs._id.toString(), { archived: true });
       }
       milestoneIdMap.set(oldId, newMs._id.toString());
     }
@@ -237,7 +237,7 @@ export class ProjectTransferService {
       }
       // Import comments
       if (todo.comments && Array.isArray(todo.comments)) {
-        for (const comment of todo.comments as any[]) {
+        for (const comment of todo.comments) {
           await this.todosService.addComment(newId, comment.text, comment.author || 'import');
         }
       }

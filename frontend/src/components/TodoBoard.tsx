@@ -229,7 +229,7 @@ function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError, 
 
   const handleArchiveToggle = async () => {
     try {
-      await api.todos.update(todo._id, { archived: !todo.archived } as Partial<Todo>);
+      await api.todos.update(todo._id, { archived: !todo.archived });
       onUpdate();
     } catch (err: any) {
       showError(err.message || t('todos.archiveFailed'));
@@ -270,7 +270,7 @@ function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError, 
           </span>
         </div>
       </div>
-      {hasOpenQuestion && <QuestionFlag summary={questionSummary!} className="mt-1.5" />}
+      {hasOpenQuestion && <QuestionFlag summary={questionSummary} className="mt-1.5" />}
       {todo.description && (
         <div className="mt-1 max-h-20 overflow-hidden text-gray-500">
           <Markdown>{todo.description}</Markdown>
@@ -358,7 +358,7 @@ function TodoListRow({ todo, basePath, onUpdate, showError, questionSummary }: {
             {todo.displayNumber && <span className="text-gray-500 mr-1">{todo.displayNumber}</span>}
             <span>{todo.title}</span>
             <QuestDefinedIcon todo={todo} />
-            {hasOpenQuestion && <QuestionFlag summary={questionSummary!} compact />}
+            {hasOpenQuestion && <QuestionFlag summary={questionSummary} compact />}
             <AcceptanceProgressBadge todo={todo} />
           </div>
           {todo.description && <div className="text-xs text-gray-600 line-clamp-1 mt-0.5">{todo.description}</div>}
@@ -560,7 +560,7 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
                 if (!confirmArchiveAll) { setConfirmArchiveAll(true); return; }
                 setConfirmArchiveAll(false);
                 try {
-                  await Promise.all(archivableDone.map((t) => api.todos.update(t._id, { archived: true } as Partial<Todo>)));
+                  await Promise.all(archivableDone.map((t) => api.todos.update(t._id, { archived: true })));
                   onUpdate();
                 } catch (err: any) {
                   showError(err.message || t('todos.archiveFailed'));
@@ -607,7 +607,7 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
                   if (!allowed.includes(col.key)) { setDragTodoId(null); return; }
                   setDragTodoId(null);
                   try {
-                    await api.todos.update(dragTodoId, { status: col.key as Todo['status'] });
+                    await api.todos.update(dragTodoId, { status: col.key });
                     onUpdate();
                   } catch (err: any) {
                     showError(err.message || t('todos.statusChangeFailed'));

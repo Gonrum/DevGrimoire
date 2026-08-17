@@ -91,7 +91,7 @@ export function isLegacyProvider(value: string): value is LegacyChatProvider {
 }
 
 export class ChatEndpointDto {
-  @IsIn(CHAT_PROVIDERS as unknown as string[])
+  @IsIn(CHAT_PROVIDERS)
   provider: ChatProvider;
 
   @IsString()

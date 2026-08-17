@@ -42,7 +42,7 @@ export class ActionChangelogAddExecutor implements NodeExecutor {
         summary: expanded.summary as string | undefined,
         changes: (expanded.changes as string[]) ?? [],
         component: expanded.component as string | undefined,
-      } as never);
+      });
       return {
         status: 'success',
         output: {

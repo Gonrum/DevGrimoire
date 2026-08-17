@@ -72,7 +72,7 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
         summary: clSummary || undefined,
         changes,
       });
-      await api.milestones.update(milestone._id, { status: 'done', changelogId: changelog._id } as Partial<Milestone>);
+      await api.milestones.update(milestone._id, { status: 'done', changelogId: changelog._id });
       setShowChangelogForm(false);
       onUpdate();
     } catch (err: any) {
@@ -189,7 +189,7 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
         )}
         <Button size="xs" onClick={async () => {
           try {
-            await api.milestones.update(milestone._id, { archived: !milestone.archived } as Partial<Milestone>);
+            await api.milestones.update(milestone._id, { archived: !milestone.archived });
             onUpdate();
           } catch (err: any) {
             showError(err.message || t('todos.archiveFailed'));
@@ -234,7 +234,7 @@ export default function MilestoneList({ milestones, todos, projectId, onUpdate }
             if (!confirmArchiveAll) { setConfirmArchiveAll(true); return; }
             setConfirmArchiveAll(false);
             try {
-              await Promise.all(archivableDone.map((ms) => api.milestones.update(ms._id, { archived: true } as Partial<Milestone>)));
+              await Promise.all(archivableDone.map((ms) => api.milestones.update(ms._id, { archived: true })));
               onUpdate();
             } catch (err: any) {
               showError(err.message || t('todos.archiveFailed'));

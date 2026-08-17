@@ -40,7 +40,7 @@ export default function TodoDependenciesSection({ todo, allTodos, projectId, onC
     try {
       await api.todos.update(todo._id, {
         blockedBy: (todo.blockedBy || []).filter((b) => b !== depId),
-      } as Partial<Todo>);
+      });
       onChanged();
     } catch (err: any) {
       onError(err?.message || t('todoDetail.removeDependencyFailed'));
@@ -52,7 +52,7 @@ export default function TodoDependenciesSection({ todo, allTodos, projectId, onC
     try {
       await api.todos.update(todo._id, {
         blockedBy: [...(todo.blockedBy || []), depId],
-      } as Partial<Todo>);
+      });
       onChanged();
     } catch (err: any) {
       onError(err?.message || t('todoDetail.addDependencyFailed'));

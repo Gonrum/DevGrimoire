@@ -106,7 +106,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
       const saved = draft._id
         ? await api.httpRequests.updateRequest(draft._id, toPayload(draft))
         : await api.httpRequests.createRequest(draft.collectionId, toPayload(draft));
-      const full = await api.httpRequests.getRequest((saved as SavedRequest)._id || draft._id);
+      const full = await api.httpRequests.getRequest(saved._id || draft._id);
       setDraft(full);
       await reload();
       return full;

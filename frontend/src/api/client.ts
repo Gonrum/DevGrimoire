@@ -3171,7 +3171,7 @@ export const api = {
               else if (event.type === 'tool_status') handlers.onStatus?.({ phase: event.phase ?? 'tool_call', name: event.name, state: event.state });
               else if (event.type === 'metrics') {
                 const { type: _t, ...metrics } = event;
-                handlers.onMetrics?.(metrics as ChatResponseMetrics);
+                handlers.onMetrics?.(metrics);
               }
               else if (event.type === 'done') handlers.onDone?.(event.reason);
               else if (event.type === 'error') handlers.onError?.(event.message);

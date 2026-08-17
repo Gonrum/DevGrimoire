@@ -1863,7 +1863,7 @@ export class ChatToolsService {
         }
         case 'changelog_add': {
           if (!projectId) return { success: false, error: 'projectId required' };
-          const changes = args.changes as unknown;
+          const changes = args.changes;
           if (!Array.isArray(changes) || changes.length === 0) {
             return { success: false, error: 'changes (non-empty array) required' };
           }
@@ -1884,8 +1884,8 @@ export class ChatToolsService {
           const dto: Record<string, unknown> = {
             topic,
             content,
-            tags: args.tags as string[] | undefined,
-            category: args.category as string | undefined,
+            tags: args.tags,
+            category: args.category,
             scope,
           };
           if (projectId) dto.projectId = projectId;
@@ -2272,7 +2272,7 @@ export class ChatToolsService {
             status: args.status as never,
             downloadUrl: args.downloadUrl as string | undefined,
             tags: args.tags as string[] | undefined,
-          } as never);
+          });
           return { success: true, result: { id: r._id.toString(), version: r.version } };
         }
         case 'release_update': {

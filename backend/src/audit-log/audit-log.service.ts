@@ -133,7 +133,7 @@ export class AuditLogService {
       query.actorUserId = new Types.ObjectId(filters.actorUserId);
     }
     if (filters.actorType === 'user') {
-      query.actorUserId = { ...((query.actorUserId as object | undefined) ?? {}), $exists: true };
+      query.actorUserId = { ...((query.actorUserId) ?? {}), $exists: true };
     } else if (filters.actorType === 'apikey') {
       query.actorApiKeyId = { $exists: true };
     } else if (filters.actorType === 'system') {

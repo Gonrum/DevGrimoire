@@ -198,7 +198,7 @@ export class WorkflowsService {
     if (dto.tags !== undefined) existing.tags = dto.tags;
     if (dto.trigger !== undefined) existing.trigger = dto.trigger;
     if (dto.nodes !== undefined) existing.nodes = dto.nodes as never;
-    if (dto.edges !== undefined) existing.edges = dto.edges as never;
+    if (dto.edges !== undefined) existing.edges = dto.edges;
     if (dto.ui !== undefined) existing.ui = dto.ui;
 
     if ((existing.nodes?.length ?? 0) > WORKFLOW_RUNTIME_LIMITS.maxNodesPerDefinition) {
@@ -212,8 +212,8 @@ export class WorkflowsService {
         scope: existing.scope,
         projectId: existing.projectId?.toString(),
         customerId: existing.customerId?.toString(),
-        nodes: existing.nodes as never,
-        edges: existing.edges as never,
+        nodes: existing.nodes,
+        edges: existing.edges,
       });
       if (!validation.valid) {
         await this.audit('workflow.validation.failed', existing, undefined, {
@@ -223,7 +223,7 @@ export class WorkflowsService {
       }
       const secIssues = workflowSecurityIssues({
         scope: existing.scope,
-        nodes: existing.nodes as never,
+        nodes: existing.nodes,
       });
       if (secIssues.length > 0) {
         await this.audit('workflow.activation.denied', existing, undefined, {
@@ -259,7 +259,7 @@ export class WorkflowsService {
       (previousStatus !== WorkflowStatus.ACTIVE || willBump);
     if (becameActive) {
       const actor = RequestContext.getUser();
-      const risk = summarizeRisk(existing.nodes as never);
+      const risk = summarizeRisk(existing.nodes);
       existing.approvals = [
         ...(existing.approvals ?? []),
         {
@@ -270,7 +270,7 @@ export class WorkflowsService {
           approvedByUsername: actor?.username,
           approvedByRole: actor?.role,
           riskSummary: risk,
-        } as never,
+        },
       ];
     }
 
@@ -409,7 +409,7 @@ export class WorkflowsService {
         parentRunId: run.parentRunId?.toString(),
         retryFromNodeId: run.retryFromNodeId,
         retries: childRuns.map((c) => ({
-          id: (c._id as Types.ObjectId).toString(),
+          id: c._id.toString(),
           status: c.status,
           createdAt: c.createdAt,
           retryFromNodeId: (c as { retryFromNodeId?: string }).retryFromNodeId,
@@ -576,13 +576,13 @@ export class WorkflowsService {
         position: n.position,
         config: n.config ?? {},
         secretRefs: n.secretRefs ?? [],
-      })) as never,
+      })),
       edges: template.edges.map((e) => ({
         id: e.id,
         source: e.source,
         target: e.target,
         branch: e.branch ?? 'success',
-      })) as never,
+      })),
     });
   }
 

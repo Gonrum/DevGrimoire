@@ -236,7 +236,7 @@ export class ResearchAgentService {
       throw new NotFoundException(`Research topic owner ${ownerUserId} not found`);
     }
     return {
-      userId: (owner._id as Types.ObjectId).toString(),
+      userId: owner._id.toString(),
       username: owner.username,
       role: owner.role,
       permissions: owner.permissions ?? [],
@@ -256,7 +256,7 @@ export class ResearchAgentService {
     // If createRun itself throws, there is no run yet to finalize/attribute
     // the failure to — let it propagate.
     const run = await this.runService.createRun(topic._id.toString(), trigger);
-    const runId = (run._id as Types.ObjectId).toString();
+    const runId = run._id.toString();
 
     // MUST fire synchronously here, before `resolveScope`/the scope-note
     // `onStep` call below — see the doc comment on `run()`.
@@ -377,8 +377,8 @@ export class ResearchAgentService {
       this.customersService.findAll(),
     ]);
     const visible: VisibleIds = {
-      projectIds: visibleProjects.map((p) => (p._id as Types.ObjectId).toString()),
-      customerIds: visibleCustomers.map((c) => (c._id as Types.ObjectId).toString()),
+      projectIds: visibleProjects.map((p) => p._id.toString()),
+      customerIds: visibleCustomers.map((c) => c._id.toString()),
     };
     return resolveRequestScope(topic, visible);
   }

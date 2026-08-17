@@ -160,7 +160,7 @@ export class MonitoringService {
     ): void => {
       if (dto[key] === undefined) return;
       if (dto[key]) {
-        $set[key] = this.objectId(dto[key] as string, label);
+        $set[key] = this.objectId(dto[key], label);
       } else {
         $unset[key] = '';
       }

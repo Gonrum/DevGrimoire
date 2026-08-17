@@ -268,7 +268,7 @@ export class RecurringTasksService {
         $push: { createdTodoIds: todo._id },
       }).exec();
     } else {
-      const url = `/recurring-tasks/${(task._id as Types.ObjectId).toString()}`;
+      const url = `/recurring-tasks/${task._id.toString()}`;
       await this.notificationsService.create(
         task.title,
         task.description || task.title,
@@ -304,7 +304,7 @@ export class RecurringTasksService {
         userId,
         `${task.title} — ${new Date().toISOString().slice(0, 10)}`,
       );
-      sessionId = (created._id as Types.ObjectId).toString();
+      sessionId = created._id.toString();
       await this.recurringTaskModel
         .findByIdAndUpdate(task._id, { $push: { chatSessionIds: created._id } })
         .exec();
@@ -337,15 +337,15 @@ export class RecurringTasksService {
     // echo back values returned by tools (e.g. an API key surfaced via a read
     // tool) — masking here is the last line of defense before the data lands
     // in MongoDB and the RAG index.
-    const redactedResponse = redactValue(result.response) as string;
+    const redactedResponse = redactValue(result.response);
     const toolCalls = (result.toolCalls ?? []).map((tc) => {
       const argsStr = typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args ?? null);
       const resultStr = typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result ?? null);
       return {
         id: '',
         name: tc.tool,
-        arguments: redactValue(argsStr) as string,
-        result: redactValue(resultStr) as string,
+        arguments: redactValue(argsStr),
+        result: redactValue(resultStr),
         success: true,
       };
     });

@@ -119,7 +119,7 @@ export class SshTestService {
       const msg = (err as Error).message || 'credential_missing';
       await this.sshService.recordConnectError(connId, msg).catch(() => {});
       await this.writeAudit({
-        connectionId: connection._id as Types.ObjectId,
+        connectionId: connection._id,
         sourceContext,
         userId: opts.userId,
         agentRoleId: opts.agentRoleId,
@@ -179,7 +179,7 @@ export class SshTestService {
             // either way.
           }
           await this.writeAudit({
-            connectionId: connection._id as Types.ObjectId,
+            connectionId: connection._id,
             sourceContext,
             userId: opts.userId,
             agentRoleId: opts.agentRoleId,

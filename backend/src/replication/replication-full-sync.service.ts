@@ -169,9 +169,9 @@ export class ReplicationFullSyncService {
               maxBodyLength: 500 * 1024 * 1024,
             }),
           );
-          totalEntities += (result.data as any)?.entities || 0;
-          totalErrors += (result.data as any)?.errors || 0;
-          totalSkipped += (result.data as any)?.skipped || 0;
+          totalEntities += result.data?.entities || 0;
+          totalErrors += result.data?.errors || 0;
+          totalSkipped += result.data?.skipped || 0;
           totalProjects++;
         } catch (err) {
           this.logger.error(`Full sync failed for project ${projectId}: ${(err as Error).message}`);

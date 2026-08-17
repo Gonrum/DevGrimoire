@@ -591,7 +591,7 @@ export class QuestionsService implements OnModuleInit {
     // Soft-flag as expired but DO NOT delete (M-30: user must still be able
     // to answer post-hoc from the todo detail view).
     await this.questionModel
-      .findByIdAndUpdate(id, { status: 'expired' as QuestionStatus })
+      .findByIdAndUpdate(id, { status: 'expired' })
       .exec();
     return { answered: false, questionId: id };
   }
@@ -646,7 +646,7 @@ export class QuestionsService implements OnModuleInit {
     });
 
     // Bidirectional link: stamp the question with the new knowledge entry's ID
-    question.knowledgeId = knowledge._id as Types.ObjectId;
+    question.knowledgeId = knowledge._id;
     await question.save();
 
     return knowledge;
@@ -696,7 +696,7 @@ export class QuestionsService implements OnModuleInit {
       priority: overrides.priority ?? 'medium',
     } as Parameters<TodosService['create']>[0]);
 
-    entry.followupTodoId = todo._id as Types.ObjectId;
+    entry.followupTodoId = todo._id;
     await entry.save();
 
     this.eventEmitter.emit('question.followup_created', {
@@ -763,9 +763,9 @@ export class QuestionsService implements OnModuleInit {
       customerId: !projectIdStr ? customerIdStr : undefined,
       tags: dto.tags,
       sourceQuestionId: questionId,
-    } as Parameters<KnowledgeService['create']>[0]);
+    });
 
-    entry.decisionKnowledgeId = knowledge._id as Types.ObjectId;
+    entry.decisionKnowledgeId = knowledge._id;
     await entry.save();
 
     this.eventEmitter.emit('question.decision_recorded', {
@@ -1015,7 +1015,7 @@ export class QuestionsService implements OnModuleInit {
       action,
       entityId: entry._id.toString(),
       summary,
-    } as ProjectChangeEvent);
+    });
   }
 
   @OnEvent(PROJECT_CHANGED)

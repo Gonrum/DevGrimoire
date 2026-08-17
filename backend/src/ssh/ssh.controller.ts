@@ -214,13 +214,19 @@ export class SshController {
       const fields: Record<string, string> = {};
       let fileSeen = false;
       let settled = false;
-      const settle = (
-        fn: (v: never) => void,
-        arg: unknown,
-      ) => {
+      // Zwei getrennte Funktionen statt einer gemeinsamen: ein geteiltes
+      // `settle(fn, arg)` müsste `fn` als `(v: never) => void` typisieren, damit
+      // resolve und reject beide hineinpassen — und bräuchte dann einen Cast am
+      // Aufruf. So bleibt beides typisiert und der Once-Guard trotzdem geteilt.
+      const settleResolve = (value: { bytesWritten: number; remotePath: string }) => {
         if (settled) return;
         settled = true;
-        (fn as (v: unknown) => void)(arg);
+        resolve(value);
+      };
+      const settleReject = (reason: unknown) => {
+        if (settled) return;
+        settled = true;
+        reject(reason);
       };
 
       bb.on('field', (name, val) => {
@@ -232,8 +238,7 @@ export class SshController {
         const remotePath = fields.remotePath;
         if (!remotePath) {
           fileStream.resume(); // drain so busboy can finish
-          settle(
-            reject,
+          settleReject(
             new BadRequestException(
               'remotePath field is required (send it before the file part)',
             ),
@@ -252,20 +257,20 @@ export class SshController {
             sourceContext: 'rest',
             userId,
           })
-          .then((res) => settle(resolve, res))
+          .then((res) => settleResolve(res))
           .catch((err) => {
             fileStream.resume();
-            settle(reject, err);
+            settleReject(err);
           });
       });
 
       bb.on('close', () => {
         if (!fileSeen) {
-          settle(reject, new BadRequestException('no file part in multipart body'));
+          settleReject(new BadRequestException('no file part in multipart body'));
         }
       });
 
-      bb.on('error', (err) => settle(reject, err));
+      bb.on('error', (err) => settleReject(err));
       req.pipe(bb);
     });
   }
@@ -362,7 +367,7 @@ export class SshController {
     const inheritedFromCustomerId = (doc as SshConnectionWithInheritance)
       .inheritedFromCustomerId;
     return {
-      id: (doc._id as Types.ObjectId).toString(),
+      id: doc._id.toString(),
       label: doc.label,
       slug: doc.slug,
       customerId: doc.customerId?.toString(),

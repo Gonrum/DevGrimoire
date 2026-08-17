@@ -100,7 +100,7 @@ export class ValidationReportsService {
       );
     }
 
-    const existingId = (report.metadata as Record<string, unknown> | undefined)?.bugTodoId;
+    const existingId = report.metadata?.bugTodoId;
     if (typeof existingId === 'string' && Types.ObjectId.isValid(existingId)) {
       try {
         const existing = await this.todosService.findById(existingId);

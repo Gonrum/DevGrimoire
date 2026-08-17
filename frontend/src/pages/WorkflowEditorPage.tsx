@@ -543,7 +543,7 @@ function edgeToWf(e: Edge): WfEdge {
     target: e.target,
     sourcePort: e.sourceHandle ?? undefined,
     targetPort: e.targetHandle ?? undefined,
-    branch: ((e.data as { branch?: WfEdge['branch'] })?.branch ?? 'always') as WfEdge['branch'],
+    branch: ((e.data as { branch?: WfEdge['branch'] })?.branch ?? 'always'),
     condition: (e.data as { condition?: Record<string, unknown> })?.condition,
     payloadMapping: (e.data as { payloadMapping?: Record<string, string> })?.payloadMapping,
   };

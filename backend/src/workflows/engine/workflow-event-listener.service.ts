@@ -40,7 +40,7 @@ export class WorkflowEventListener {
     for (const def of candidates) {
       for (const node of def.nodes) {
         if (node.type !== triggerType) continue;
-        if (!this.matches(node.config as Record<string, unknown>, payload)) continue;
+        if (!this.matches(node.config, payload)) continue;
         try {
           await this.workflowsService.startRun({
             definitionId: (def._id as { toString(): string }).toString(),

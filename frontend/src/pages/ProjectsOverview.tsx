@@ -219,7 +219,7 @@ export default function ProjectsOverview() {
     if (useSemantic) {
       // Keep RAG ordering by mapping over Set insertion order, then look up projects.
       const byId = new Map(projects.map((p) => [p._id, p]));
-      return [...semanticHits!].map((id) => byId.get(id)).filter((p): p is Project => !!p);
+      return [...semanticHits].map((id) => byId.get(id)).filter((p): p is Project => !!p);
     }
 
     return [...projects]

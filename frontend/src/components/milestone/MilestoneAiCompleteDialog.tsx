@@ -92,7 +92,7 @@ function SuggestionRow({ suggestion, checked, onToggle }: SuggestionRowProps) {
 
 export default function MilestoneAiCompleteDialog({ open, milestoneId, onClose, onApplied }: Props) {
   const { t } = useTranslation();
-  const { showError, showSuccess } = useToast() as { showError: (msg: string) => void; showSuccess: (msg: string) => void };
+  const { showError, showSuccess } = useToast();
 
   const [summary, setSummary] = useState('');
   const [result, setResult] = useState<AiCompleteResult | null>(null);

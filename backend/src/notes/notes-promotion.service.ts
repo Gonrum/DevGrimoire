@@ -190,7 +190,7 @@ export class NotesPromotionService {
           topic: payload.title,
           content,
           tags,
-        } as any);
+        });
         entityId = (created as any)._id.toString();
         entityLink = projectId
           ? `/projects/${projectId}?tab=knowledge&knowledgeId=${entityId}`
@@ -207,7 +207,7 @@ export class NotesPromotionService {
           language: 'text',
           code: content,
           tags,
-        } as any);
+        });
         entityId = (created as any)._id.toString();
         entityLink = projectId
           ? `/projects/${projectId}?tab=snippets&snippetId=${entityId}`
@@ -224,7 +224,7 @@ export class NotesPromotionService {
           title: payload.title,
           description: content,
           tags,
-        } as any);
+        });
         entityId = (created as any)._id.toString();
         entityLink = `/todos/${entityId}`;
         break;
@@ -236,7 +236,7 @@ export class NotesPromotionService {
           title: payload.title,
           content,
           tags,
-        } as any);
+        });
         entityId = (created as any)._id.toString();
         entityLink = projectId
           ? `/projects/${projectId}?tab=research&researchId=${entityId}`
@@ -249,7 +249,7 @@ export class NotesPromotionService {
           customerId,
           title: payload.title,
           content,
-        } as any);
+        });
         entityId = (created as any)._id.toString();
         entityLink = projectId
           ? `/projects/${projectId}?tab=manual&manualId=${entityId}`

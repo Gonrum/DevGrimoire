@@ -170,7 +170,7 @@ export class DocUpdateProposalsService {
   ): Promise<{ proposal: DocUpdateProposalDocument; todo: TodoDocument; reused: boolean }> {
     const proposal = await this.findById(id);
     if (proposal.status === DocProposalStatus.CONVERTED_TO_TODO) {
-      const existingId = (proposal.metadata as Record<string, unknown> | undefined)?.todoId;
+      const existingId = proposal.metadata?.todoId;
       if (typeof existingId === 'string' && Types.ObjectId.isValid(existingId)) {
         try {
           const existing = await this.todosService.findById(existingId);

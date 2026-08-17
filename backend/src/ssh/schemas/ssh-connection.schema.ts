@@ -170,7 +170,7 @@ function validateSshConnectionInvariants(doc: {
 
 SshConnectionSchema.pre('save', function (next) {
   try {
-    validateSshConnectionInvariants(this as unknown as Parameters<typeof validateSshConnectionInvariants>[0]);
+    validateSshConnectionInvariants(this);
     next();
   } catch (err) {
     next(err as Error);

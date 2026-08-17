@@ -74,7 +74,7 @@ export default function LogList({ projectId, projects }: LogListProps) {
           search: searchActive || undefined,
           limit: 100,
         })
-      : api.logs.list(projectId!, {
+      : api.logs.list(projectId, {
           level: levelFilter || undefined,
           service: serviceFilter || undefined,
           search: searchActive || undefined,
@@ -89,7 +89,7 @@ export default function LogList({ projectId, projects }: LogListProps) {
   useEffect(() => {
     // Stats are per-project only — skip in global mode.
     if (globalMode) { setStats(null); return; }
-    api.logs.stats(projectId!).then(setStats).catch(() => {});
+    api.logs.stats(projectId).then(setStats).catch(() => {});
   }, [projectId, globalMode]);
 
   useEffect(() => {

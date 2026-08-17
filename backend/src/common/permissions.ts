@@ -53,7 +53,7 @@ export const Permission = {
 
 export type PermissionId = (typeof Permission)[keyof typeof Permission];
 
-export const ALL_PERMISSIONS: PermissionId[] = Object.values(Permission) as PermissionId[];
+export const ALL_PERMISSIONS: PermissionId[] = Object.values(Permission);
 
 /**
  * Per-axis access mode. See knowledge entry T-210 for the rationale why

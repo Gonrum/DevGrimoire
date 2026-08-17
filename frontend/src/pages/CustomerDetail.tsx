@@ -172,7 +172,7 @@ export default function CustomerDetail() {
           setStorageEnabled(!!storageData?.enabled);
           setCustomerEnvironments(environmentData);
           setCustomerSecrets(secretData);
-          setCustomerSoul(soulData && (soulData as Soul)._id ? (soulData as Soul) : null);
+          setCustomerSoul(soulData && soulData._id ? (soulData) : null);
           setCustomerActivity(activityData);
           setCustomerSnippets(snippetData);
           setCustomerResearch(researchData);
@@ -440,7 +440,7 @@ export default function CustomerDetail() {
             onClick={async () => {
               try {
                 const includeSecrets = window.confirm(t('customers.exportIncludeSecretsPrompt'));
-                await api.customerTransfer.export(id!, includeSecrets);
+                await api.customerTransfer.export(id, includeSecrets);
               } catch (err) {
                 showError(err instanceof Error ? err.message : String(err));
               }
@@ -693,7 +693,7 @@ export default function CustomerDetail() {
               <SoulView
                 customerId={id}
                 soul={customerSoul}
-                onUpdate={() => api.souls.getForCustomer(id).then((s) => setCustomerSoul(s && (s as Soul)._id ? (s as Soul) : null))}
+                onUpdate={() => api.souls.getForCustomer(id).then((s) => setCustomerSoul(s && s._id ? (s) : null))}
               />
             )}
 

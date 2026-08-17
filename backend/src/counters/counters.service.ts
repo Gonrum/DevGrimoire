@@ -43,7 +43,7 @@ export class CountersService {
       { $inc: { seq: 1 } },
       { upsert: true, returnDocument: 'after' },
     ).exec();
-    return counter!.seq;
+    return counter.seq;
   }
 
   async setSequence(

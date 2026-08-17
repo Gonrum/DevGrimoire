@@ -346,7 +346,7 @@ export class AuthService {
     });
     const result = user.toObject();
     delete (result as any).passwordHash;
-    return result as UserDocument;
+    return result;
   }
 
   async updateUser(id: string, data: {
@@ -396,7 +396,7 @@ export class AuthService {
     ];
     const securityChanges: Record<string, unknown> = {};
     for (const f of securityFields) {
-      if (f in update) securityChanges[f] = (update as Record<string, unknown>)[f];
+      if (f in update) securityChanges[f] = (update)[f];
     }
 
     const result = await this.userModel

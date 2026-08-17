@@ -4421,7 +4421,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
       return errorResult(`Tool ${name} is not allowed for the current API key.`);
     }
 
-    const a = args as Record<string, unknown>;
+    const a = args;
     try {
 
       // Global chat-feature gate: chat_* tools refuse when admin disabled chat.
@@ -5092,7 +5092,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             throw new Error(`Invalid targetRole: ${targetRole}`);
           }
           const broadcast = optionalBoolean(a, 'broadcast') ?? undefined;
-          const escalationChainRaw = (a as Record<string, unknown>)?.['escalationChain'];
+          const escalationChainRaw = a?.['escalationChain'];
           const escalationChain = Array.isArray(escalationChainRaw)
             ? (escalationChainRaw as Array<Record<string, unknown>>).map((step) => ({
                 kind: step.kind as 'user' | 'role' | 'broadcast',
@@ -5506,7 +5506,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               scope: optionalObject(a, 'scope') as any,
               webSearch: optionalObject(a, 'webSearch') as any,
               schedule: requireObject(a, 'schedule') as any,
-              guardrails: optionalObject(a, 'guardrails') as any,
+              guardrails: optionalObject(a, 'guardrails'),
               notifyOnComplete: optionalBoolean(a, 'notifyOnComplete'),
             },
             requireUserId(),
@@ -5552,7 +5552,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             scope: optionalObject(a, 'scope') as any,
             webSearch: optionalObject(a, 'webSearch') as any,
             schedule: optionalObject(a, 'schedule') as any,
-            guardrails: optionalObject(a, 'guardrails') as any,
+            guardrails: optionalObject(a, 'guardrails'),
             notifyOnComplete: optionalBoolean(a, 'notifyOnComplete'),
           });
           result = compactUpdateResult(updatedTopic);
@@ -5727,7 +5727,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           if (a.indexes !== undefined) updateData.indexes = a.indexes;
           if (a.tags !== undefined) updateData.tags = a.tags;
           if (a.changeNote !== undefined) updateData.changeNote = a.changeNote;
-          result = compactUpdateResult(await schemasService.update(requireString(a, 'id'), updateData as any));
+          result = compactUpdateResult(await schemasService.update(requireString(a, 'id'), updateData));
           break;
         }
         case 'schema_delete':
@@ -6949,8 +6949,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               scope: def.scope,
               projectId: def.projectId?.toString(),
               customerId: def.customerId?.toString(),
-              nodes: def.nodes as never,
-              edges: def.edges as never,
+              nodes: def.nodes,
+              edges: def.edges,
             });
           } else {
             result = workflowsService.validateGraph({
@@ -7025,8 +7025,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = await workflowEngineService.testNode({
             node: requireObject(a, 'node') as never,
             scope: optionalString(a, 'scope') as WorkflowScope | undefined,
-            input: optionalObject(a, 'input') as Record<string, unknown> | undefined,
-            runContext: optionalObject(a, 'runContext') as Record<string, unknown> | undefined,
+            input: optionalObject(a, 'input'),
+            runContext: optionalObject(a, 'runContext'),
           });
           break;
         }
@@ -7284,7 +7284,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             limit: optionalNumber(a, 'limit'),
             offset: optionalNumber(a, 'offset'),
           });
-          result = (logs as any[]).map((l: any) => ({
+          result = logs.map((l: any) => ({
             _id: l._id,
             level: l.level,
             message: snippet(l.message, 300),
@@ -7303,7 +7303,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             level: optionalString(a, 'level'),
             limit: optionalNumber(a, 'limit'),
           });
-          result = (searchLogs as any[]).map((l: any) => ({
+          result = searchLogs.map((l: any) => ({
             _id: l._id,
             level: l.level,
             message: snippet(l.message, 300),

@@ -186,7 +186,7 @@ export default function TodoDetailPage() {
         acceptanceCriteria,
         outOfScope: outOfScope.trim() || undefined,
         edgeCases: edgeCases.trim() || undefined,
-      } as Partial<Todo>);
+      });
       showSuccess(t('todoDetail.definitionSaved'));
       loadTodo();
     } catch (err: any) {
@@ -279,7 +279,7 @@ export default function TodoDetailPage() {
                     value={todo.milestoneId || ''}
                     onChange={async (e) => {
                       try {
-                        await api.todos.update(todo._id, { milestoneId: e.target.value || undefined } as Partial<Todo>);
+                        await api.todos.update(todo._id, { milestoneId: e.target.value || undefined });
                         loadTodo();
                       } catch (err: any) {
                         showError(err.message || t('todoDetail.milestoneChangeFailed'));
@@ -324,7 +324,7 @@ export default function TodoDetailPage() {
                   </Button>
                   <Button type="button" variant="neutral" size="sm" onClick={async () => {
                     try {
-                      await api.todos.update(todo._id, { archived: !todo.archived } as Partial<Todo>);
+                      await api.todos.update(todo._id, { archived: !todo.archived });
                       loadTodo();
                     } catch (err: any) {
                       showError(err.message || t('todos.archiveFailed'));
@@ -393,7 +393,7 @@ export default function TodoDetailPage() {
                   <AttachmentList
                     projectId={id!}
                     entityType="todo"
-                    entityId={todoId!}
+                    entityId={todoId}
                     showUpload
                   />
                 </DetailSection>

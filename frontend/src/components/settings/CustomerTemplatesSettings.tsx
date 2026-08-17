@@ -131,9 +131,9 @@ export default function CustomerTemplatesSettings() {
         items,
       };
       if (draft._id) {
-        await api.customerTemplates.update(draft._id, payload as never);
+        await api.customerTemplates.update(draft._id, payload);
       } else {
-        await api.customerTemplates.create(payload as never);
+        await api.customerTemplates.create(payload);
       }
       setDraft(null);
       setSuccess(t('customerTemplates.saved'));

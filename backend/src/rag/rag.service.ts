@@ -722,7 +722,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       const { ObjectId } = await import('mongodb');
       const doc = await db.collection(collection).findOne({ _id: new ObjectId(event.entityId) });
       if (doc) {
-        await this.upsertDocument(entity, doc as Record<string, unknown>);
+        await this.upsertDocument(entity, doc);
       }
     } catch (err) {
       this.logger.warn(`RAG upsert failed for ${entity}/${event.entityId}: ${(err as Error).message}`);
@@ -771,11 +771,11 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       const rowProjectId = (row.projectId as string) || '';
       const rowCustomerId = (row.customerId as string) || '';
       if (enforceProjectScope && rowProjectId && !allowedProjectIds.has(rowProjectId)) {
-        if (actor!.projectScopeMode === 'none') continue;
+        if (actor.projectScopeMode === 'none') continue;
         continue;
       }
       if (enforceCustomerScope && rowCustomerId && !allowedCustomerIds.has(rowCustomerId)) {
-        if (actor!.customerScopeMode === 'none') continue;
+        if (actor.customerScopeMode === 'none') continue;
         continue;
       }
 
@@ -893,7 +893,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       // Process in batches (with chunking)
       const batch: RagDocument[] = [];
       for await (const doc of cursor) {
-        const extracted = this.extractText(entity, doc as Record<string, unknown>);
+        const extracted = this.extractText(entity, doc);
         if (!extracted || (!extracted.title && !extracted.content)) continue;
 
         const docId = String(doc._id);

@@ -155,7 +155,7 @@ export class ReplicationPushService {
       if (!db) return null;
 
       const { ObjectId } = await import('mongodb');
-      document = await db.collection(collection).findOne({ _id: new ObjectId(event.entityId) }) as Record<string, unknown> | null;
+      document = await db.collection(collection).findOne({ _id: new ObjectId(event.entityId) });
       if (!document) return null;
 
       // For attachments, also fetch the binary
@@ -264,7 +264,7 @@ export class ReplicationPushService {
           entityId: item.entityId,
         },
         document: item.document as Record<string, unknown> | null,
-        attachmentData: item.attachmentData as ReplicationPayload['attachmentData'],
+        attachmentData: item.attachmentData,
         timestamp: new Date().toISOString(),
         sourceInstanceId: instanceId,
       };

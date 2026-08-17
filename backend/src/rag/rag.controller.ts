@@ -37,7 +37,7 @@ export class RagController {
 
   @Get('status')
   async status(): Promise<Record<string, unknown>> {
-    return this.ragService.status() as any;
+    return this.ragService.status();
   }
 
   @Get('config')

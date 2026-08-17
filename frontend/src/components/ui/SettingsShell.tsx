@@ -60,7 +60,7 @@ export function SettingsShell<T extends string>({
                 <li key={tab.key}>
                   <button
                     type="button"
-                    onClick={() => onTabChange!(tab.key)}
+                    onClick={() => onTabChange(tab.key)}
                     className={`w-full rounded px-3 py-1.5 text-left text-sm transition-colors ${
                       activeTab === tab.key
                         ? 'bg-gray-800 font-medium text-cyan-400'
@@ -81,7 +81,7 @@ export function SettingsShell<T extends string>({
           <button
             key={tab.key}
             type="button"
-            onClick={() => onTabChange!(tab.key)}
+            onClick={() => onTabChange(tab.key)}
             className={`whitespace-nowrap rounded px-3 py-1.5 text-xs transition-colors ${
               activeTab === tab.key
                 ? 'bg-gray-800 font-medium text-cyan-400'

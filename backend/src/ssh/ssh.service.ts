@@ -87,7 +87,7 @@ export class SshService {
       customerId: doc.customerId?.toString() || null,
       entity: 'ssh-connection',
       action,
-      entityId: (doc._id as Types.ObjectId).toString(),
+      entityId: doc._id.toString(),
       summary,
     });
   }
@@ -277,7 +277,7 @@ export class SshService {
       .lean()
       .exec();
     if (links.length === 0) {
-      return ownConnections as SshConnectionWithInheritance[];
+      return ownConnections;
     }
 
     const linkedCustomerIds = links.map((l) => l.customerId);
@@ -400,7 +400,7 @@ export class SshService {
             ownedBySshConnectionId: doc._id,
           })
           .exec();
-        deletedOwnedIds = ownedDocs.map((s) => s._id as Types.ObjectId);
+        deletedOwnedIds = ownedDocs.map((s) => s._id);
         if (deletedOwnedIds.length > 0) {
           await this.secretModel
             .deleteMany({ _id: { $in: deletedOwnedIds } })
@@ -525,7 +525,7 @@ export class SshService {
             ownedBySshConnectionId: doc._id,
           })
           .exec();
-        const deletedIds = ownedDocs.map((s) => s._id as Types.ObjectId);
+        const deletedIds = ownedDocs.map((s) => s._id);
         if (deletedIds.length > 0) {
           await this.secretModel.deleteMany({ _id: { $in: deletedIds } }).exec();
         }
@@ -723,7 +723,7 @@ export class SshService {
       return this.sshModel
         .find(filter)
         .sort({ label: 1 })
-        .exec() as Promise<SshConnectionWithInheritance[]>;
+        .exec();
     }
     return [];
   }

@@ -98,7 +98,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     run.startedAt ??= new Date();
     await run.save();
     this.audit('workflow.run.started', {
-      runId: (run._id as Types.ObjectId).toString(),
+      runId: run._id.toString(),
       definitionId: run.definitionId.toString(),
       definitionVersion: run.definitionVersion,
       scope: run.scope,
@@ -136,8 +136,8 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       status: WorkflowNodeRunStatus.QUEUED,
     });
     const job: NodeJob = {
-      runId: (run._id as Types.ObjectId).toString(),
-      nodeRunId: (nodeRun._id as Types.ObjectId).toString(),
+      runId: run._id.toString(),
+      nodeRunId: nodeRun._id.toString(),
       definitionId: run.definitionId.toString(),
       nodeId: node.id,
       nodeType: node.type,
@@ -173,7 +173,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     });
     if (!policyCheck.ok) {
       this.audit('workflow.permission.denied', {
-        runId: (run._id as Types.ObjectId).toString(),
+        runId: run._id.toString(),
         nodeId: node.id,
         nodeType: node.type,
         code: policyCheck.code,
@@ -200,7 +200,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     });
     if (!budget.ok) {
       this.audit('workflow.run.budget_exceeded', {
-        runId: (run._id as Types.ObjectId).toString(),
+        runId: run._id.toString(),
         nodeId: node.id,
         code: budget.code,
         message: budget.message,
@@ -240,14 +240,14 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       .exec();
     if (incremented) run.executedNodeCount = incremented.executedNodeCount;
     this.audit('workflow.node.started', {
-      runId: (run._id as Types.ObjectId).toString(),
+      runId: run._id.toString(),
       nodeId: node.id,
       nodeType: node.type,
       attempt: nodeRun.attempt,
     });
-    this.eventEmitter.emit(WORKFLOW_RUN_PROGRESS, { runId: (run._id as Types.ObjectId).toString() });
+    this.eventEmitter.emit(WORKFLOW_RUN_PROGRESS, { runId: run._id.toString() });
 
-    const timeoutMs = Number(((node.config ?? {}) as Record<string, unknown>).timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const timeoutMs = Number(((node.config ?? {})).timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const ctx = this.buildContext(run, nodeRun, node);
     let result: NodeResult;
     try {
@@ -356,7 +356,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
           status: WorkflowNodeRunStatus.RUNNING,
           startedAt: now,
           logs,
-        } as never,
+        },
         node: node as never,
         config: parsed.data as Record<string, unknown>,
         secretRefs: node.secretRefs ?? [],
@@ -422,7 +422,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       run: run.toObject() as never,
       nodeRun: nodeRun.toObject() as never,
       node,
-      config: (node.config as Record<string, unknown>) ?? {},
+      config: (node.config) ?? {},
       secretRefs: node.secretRefs ?? [],
       runContext: { ...baseContext, incoming },
       logger: {
@@ -439,9 +439,9 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
           projectId,
           direction: 'agent_to_user',
           agentName: 'workflow',
-          agentRunId: (run._id as Types.ObjectId).toString(),
+          agentRunId: run._id.toString(),
         });
-        return { refId: question._id as Types.ObjectId };
+        return { refId: question._id };
       },
     };
   }
@@ -461,7 +461,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       ctx.nodes = ctx.nodes ?? {};
       // Persist redacted output to run.context so downstream nodes can read
       // upstream output without re-leaking secrets via the context object.
-      const redactedOutput = redactValue(result.output ?? {}) as Record<string, unknown>;
+      const redactedOutput = redactValue(result.output ?? {});
       ctx.nodes[node.id] = redactedOutput;
 
       const snapshot = run.definitionSnapshot as { nodes: WorkflowNode[]; edges: WorkflowEdge[] };
@@ -487,7 +487,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       const succs = nextNodes(
         node.id,
         result.branch ?? 'success',
-        { nodes: snapshot.nodes, edges: snapshot.edges as never },
+        { nodes: snapshot.nodes, edges: snapshot.edges },
       );
       for (const succ of succs) await this.enqueueNode(run, succ, 1);
       await this.maybeFinishRun(run);
@@ -501,7 +501,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       const isTimer = result.waitingFor?.type === 'delay';
       run.status = isTimer ? WorkflowRunStatus.WAITING_FOR_TIMER : WorkflowRunStatus.WAITING_FOR_USER;
       await run.save();
-      this.eventEmitter.emit(WORKFLOW_RUN_PROGRESS, { runId: (run._id as Types.ObjectId).toString() });
+      this.eventEmitter.emit(WORKFLOW_RUN_PROGRESS, { runId: run._id.toString() });
       return;
     }
 
@@ -530,10 +530,10 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     // Redact at WRITE time, not just on read: anyone reading the raw mongo
     // document (replication peer, db dump, RAG indexer) must never see secrets.
     if (result.output !== undefined) {
-      nodeRun.outputSnapshot = redactValue(result.output) as Record<string, unknown>;
+      nodeRun.outputSnapshot = redactValue(result.output);
     }
     if (result.error) {
-      nodeRun.error = redactValue(result.error) as Record<string, unknown>;
+      nodeRun.error = redactValue(result.error);
     }
     if (nodeRun.logs?.length) {
       nodeRun.logs = redactLogs(nodeRun.logs);
@@ -573,9 +573,9 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     run.status = WorkflowRunStatus.SUCCEEDED;
     run.finishedAt = new Date();
     await run.save();
-    this.eventEmitter.emit('workflow.run.finished', { runId: (run._id as Types.ObjectId).toString(), status: run.status });
+    this.eventEmitter.emit('workflow.run.finished', { runId: run._id.toString(), status: run.status });
     this.audit('workflow.run.succeeded', {
-      runId: (run._id as Types.ObjectId).toString(),
+      runId: run._id.toString(),
       definitionId: run.definitionId?.toString(),
       executedNodeCount: run.executedNodeCount,
       durationMs:
@@ -586,21 +586,21 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
   }
 
   private async failRun(run: WorkflowRunDocument, error: { code: string; message: string }): Promise<void> {
-    this.queue.removeRun((run._id as Types.ObjectId).toString());
+    this.queue.removeRun(run._id.toString());
     run.status = WorkflowRunStatus.FAILED;
-    run.error = redactValue(error) as { code: string; message: string };
+    run.error = redactValue(error);
     run.finishedAt = new Date();
     await run.save();
-    this.eventEmitter.emit('workflow.run.finished', { runId: (run._id as Types.ObjectId).toString(), status: run.status });
+    this.eventEmitter.emit('workflow.run.finished', { runId: run._id.toString(), status: run.status });
     this.audit('workflow.run.failed', {
-      runId: (run._id as Types.ObjectId).toString(),
+      runId: run._id.toString(),
       definitionId: run.definitionId?.toString(),
       errorCode: run.error?.code,
       executedNodeCount: run.executedNodeCount,
     });
     // Fire-and-forget user-facing notification — never let dispatch errors
     // bubble back into the engine.
-    const runId = (run._id as Types.ObjectId).toString();
+    const runId = run._id.toString();
     const defId = run.definitionId?.toString();
     const errCode = typeof error?.code === 'string' ? error.code : 'unknown';
     const errMsgRaw = typeof error?.message === 'string' ? error.message : 'Workflow-Run fehlgeschlagen';
@@ -735,7 +735,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       scope: parent.scope,
       projectId: parent.projectId,
       customerId: parent.customerId,
-      trigger: { type: 'retry', input: { parentRunId: (parent._id as Types.ObjectId).toString() } },
+      trigger: { type: 'retry', input: { parentRunId: parent._id.toString() } },
       status: WorkflowRunStatus.RUNNING,
       currentNodeIds: [],
       startedAt: new Date(),
@@ -749,8 +749,8 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     });
 
     this.audit('workflow.run.retry_started', {
-      runId: (child._id as Types.ObjectId).toString(),
-      parentRunId: (parent._id as Types.ObjectId).toString(),
+      runId: child._id.toString(),
+      parentRunId: parent._id.toString(),
       fromNodeId: resolvedFromNodeId,
       definitionId: parent.definitionId.toString(),
     });
@@ -773,13 +773,13 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
         .exec();
       run.status = WorkflowRunStatus.QUEUED;
       await run.save();
-      this.eventEmitter.emit('workflow.run.queued', { runId: (run._id as Types.ObjectId).toString() });
-      this.logger.warn(`Recovered interrupted run ${(run._id as Types.ObjectId).toString()}`);
+      this.eventEmitter.emit('workflow.run.queued', { runId: run._id.toString() });
+      this.logger.warn(`Recovered interrupted run ${run._id.toString()}`);
     }
 
     const queued = await this.runModel.find({ status: WorkflowRunStatus.QUEUED }).exec();
     for (const run of queued) {
-      this.eventEmitter.emit('workflow.run.queued', { runId: (run._id as Types.ObjectId).toString() });
+      this.eventEmitter.emit('workflow.run.queued', { runId: run._id.toString() });
     }
   }
 }

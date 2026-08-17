@@ -244,7 +244,7 @@ function SnapshotBlock({
       >
         <span>{open ? '▾' : '▸'} {title}</span>
         {hasData && (
-          <span className="text-gray-500 normal-case">{Object.keys(data!).length} Felder</span>
+          <span className="text-gray-500 normal-case">{Object.keys(data).length} Felder</span>
         )}
       </button>
       {open && (

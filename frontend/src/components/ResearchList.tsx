@@ -194,7 +194,7 @@ export default function ResearchList({
         editId={editing?._id}
         projectId={projectId}
         customerId={customerId}
-        onDone={() => { setShowForm(false); setEditing(null); onUpdate!(); }}
+        onDone={() => { setShowForm(false); setEditing(null); onUpdate(); }}
         onCancel={() => { setShowForm(false); setEditing(null); }}
       />
     );

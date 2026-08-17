@@ -271,7 +271,7 @@ export class ApiKeysService {
     ];
     const securityChanges: Record<string, unknown> = {};
     for (const f of securityFields) {
-      if (f in patch) securityChanges[f] = (patch as Record<string, unknown>)[f];
+      if (f in patch) securityChanges[f] = (patch)[f];
       if (f in unset) securityChanges[`${f}_unset`] = true;
     }
     if (Object.keys(securityChanges).length > 0) {

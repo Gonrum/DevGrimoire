@@ -187,7 +187,7 @@ export class WorkflowAgentService {
           apiKey: endpoint.apiKey,
           body,
         });
-        json = resp.json as typeof json;
+        json = resp.json;
       } catch (e) {
         // Prefix preserved as `llm_error_...` (not just `llm_error:`) so
         // agent-task.executor.ts's `msg.startsWith('llm_error_')` categorization
@@ -299,7 +299,7 @@ export class WorkflowAgentService {
           apiKey: endpoint.apiKey,
           body,
         });
-        json = resp.json as typeof json;
+        json = resp.json;
       } catch (e) {
         throw new Error(`llm_error_upstream: ${(e as Error).message}`);
       }

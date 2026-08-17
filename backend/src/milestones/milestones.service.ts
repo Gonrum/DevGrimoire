@@ -349,8 +349,8 @@ export class MilestonesService {
 
     // ── state ──────────────────────────────────────────────────────────────
     let milestoneName = '';
-    let milestoneDescLines: string[] = [];
-    let todos: ParsedTodo[] = [];
+    const milestoneDescLines: string[] = [];
+    const todos: ParsedTodo[] = [];
 
     type State =
       | 'before_h1'
@@ -592,7 +592,7 @@ export class MilestonesService {
           status: pt.status as any,
           tags: pt.tags,
           userStories: pt.userStories,
-          acceptanceCriteria: pt.acceptanceCriteria as any,
+          acceptanceCriteria: pt.acceptanceCriteria,
           outOfScope: pt.outOfScope,
           edgeCases: pt.edgeCases,
         });
@@ -655,7 +655,7 @@ export class MilestonesService {
         truncated = true;
       }
 
-      let acceptanceCriteria = Array.isArray(raw.acceptanceCriteria)
+      const acceptanceCriteria = Array.isArray(raw.acceptanceCriteria)
         ? raw.acceptanceCriteria.map((c: any) => {
             const text = typeof c.text === 'string' && c.text.length > MAX_AC_TEXT_CHARS
               ? c.text.slice(0, MAX_AC_TEXT_CHARS) + '…'
@@ -671,9 +671,9 @@ export class MilestonesService {
 
     const todoLines = cappedTodos
       .map((t) => {
-        const dn = (t as any).displayNumber ?? t._id.toString();
-        const acceptance = Array.isArray((t as any).acceptanceCriteria) && (t as any).acceptanceCriteria.length > 0
-          ? '\n  Acceptance: ' + (t as any).acceptanceCriteria.map((c: any) => `[${c.done ? 'x' : ' '}] ${c.text}`).join('; ')
+        const dn = t.displayNumber ?? t._id.toString();
+        const acceptance = Array.isArray(t.acceptanceCriteria) && t.acceptanceCriteria.length > 0
+          ? '\n  Acceptance: ' + t.acceptanceCriteria.map((c: any) => `[${c.done ? 'x' : ' '}] ${c.text}`).join('; ')
           : '';
         return `- id: ${t._id} | number: ${dn} | title: ${t.title} | status: ${t.status}${acceptance}`;
       })
@@ -716,7 +716,7 @@ export class MilestonesService {
         temperature: 0.1,
         maxTokens: 2048,
         onEndpointSelected: (ep) => {
-          selectedEndpoint = ep as typeof selectedEndpoint;
+          selectedEndpoint = ep;
           this.logger.log(`AI-complete using ${ep.provider} @ ${ep.url} (${ep.model})`);
         },
       })) {

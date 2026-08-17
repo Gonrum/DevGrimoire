@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { api, LlmMode, UserLlmConfig } from '../../api/client';
+import { api, UserLlmConfig } from '../../api/client';
 import Button from '../ui/Button';
 import ConfirmButton from '../ui/ConfirmButton';
 import { FormInput, SecretInput } from '../ui/FormField';
@@ -32,7 +32,7 @@ export default function MyLlmSettings() {
       const storedKey = cfg.apiKey === '***';
       setLlmHasStoredKey(storedKey);
       setLlmConfig({
-        mode: (cfg.mode as LlmMode) || 'server',
+        mode: (cfg.mode) || 'server',
         endpoint: cfg.endpoint || '',
         model: cfg.model || '',
         apiKey: '',

@@ -27,6 +27,6 @@ export class SettingsService {
       { key },
       { value },
       { new: true, upsert: true },
-    ).exec() as Promise<SettingDocument>;
+    ).exec();
   }
 }

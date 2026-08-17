@@ -64,7 +64,7 @@ export class ResearchScheduler {
   }
 
   private async fireTopic(topic: ResearchTopicDocument, ranAt: Date): Promise<void> {
-    const topicId = (topic._id as Types.ObjectId).toString();
+    const topicId = topic._id.toString();
 
     // Advance nextRun FIRST — see invariant (1) in the class doc comment.
     await this.topicService.markRun(topicId, ranAt, 'running');

@@ -93,7 +93,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
         ownerAllowedCustomerIds,
       );
       const ownerPerms: string[] = ((owner as any).permissions || []) as string[];
-      const keyPerms: string[] = (validated.permissions || []) as string[];
+      const keyPerms: string[] = (validated.permissions || []);
       // Permissions: admin role bypasses the list. For non-admin owners, the
       // effective permission set is the intersection of key + owner perms; an
       // empty key.permissions falls through to the owner's set (legacy keys).

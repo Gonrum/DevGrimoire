@@ -172,7 +172,7 @@ export class NotesService {
       entityId: new Types.ObjectId(promotedTo.entityId),
       projectId: promotedTo.projectId ? new Types.ObjectId(promotedTo.projectId) : undefined,
       customerId: promotedTo.customerId ? new Types.ObjectId(promotedTo.customerId) : undefined,
-    } as any;
+    };
     await note.save();
     return this.withIdle(note.toObject());
   }

@@ -5,11 +5,11 @@ import { LLM_PROVIDER_KINDS, LLM_PURPOSES, LlmProviderKind, LlmPurpose } from '.
 
 export class LlmEndpointDto {
   @IsString() label: string;
-  @IsIn(LLM_PROVIDER_KINDS as unknown as string[]) provider: LlmProviderKind;
+  @IsIn(LLM_PROVIDER_KINDS) provider: LlmProviderKind;
   @IsString() baseUrl: string;
   @IsString() model: string;
   @IsOptional() @IsString() apiKey?: string;
-  @IsArray() @IsIn(LLM_PURPOSES as unknown as string[], { each: true }) purposes: LlmPurpose[];
+  @IsArray() @IsIn(LLM_PURPOSES, { each: true }) purposes: LlmPurpose[];
   @IsOptional() @IsBoolean() visionCapable?: boolean;
   @IsOptional() @IsInt() @Min(0) @Max(16) concurrency?: number;
   @IsOptional() @IsInt() priority?: number;
@@ -24,7 +24,7 @@ export class LlmEndpointDto {
  * without re-entering the key.
  */
 export class ProbeEndpointDto {
-  @IsIn(LLM_PROVIDER_KINDS as unknown as string[]) provider: LlmProviderKind;
+  @IsIn(LLM_PROVIDER_KINDS) provider: LlmProviderKind;
   @IsString() baseUrl: string;
   @IsOptional() @IsString() apiKey?: string;
   @IsOptional() @IsString() id?: string;

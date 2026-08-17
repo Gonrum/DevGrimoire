@@ -168,7 +168,7 @@ export class ResearchAgentController {
     if (activeRun) {
       res.status(409).json({
         message: `Topic ${id} already has an active run (#${activeRun.number})`,
-        runId: (activeRun._id as Types.ObjectId).toString(),
+        runId: activeRun._id.toString(),
       });
       return;
     }
@@ -353,6 +353,6 @@ export class ResearchAgentController {
   async listArtifactVersions(@Param('id') id: string, @Param('slug') slug: string) {
     const artifact = await this.artifactService.getBySlug(id, slug);
     if (!artifact) throw new NotFoundException(`Artifact "${slug}" not found for topic ${id}`);
-    return this.artifactService.listVersions((artifact._id as Types.ObjectId).toString());
+    return this.artifactService.listVersions(artifact._id.toString());
   }
 }

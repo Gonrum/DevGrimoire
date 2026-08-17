@@ -101,7 +101,7 @@ export class CustomerTransferService {
     }
 
     const warnings: string[] = [];
-    const customerSrc = exp.customer as Record<string, unknown>;
+    const customerSrc = exp.customer;
     const targetName = nameOverride?.trim() || (customerSrc.name as string);
     if (!targetName) throw new BadRequestException('Customer name missing in export');
 
@@ -126,7 +126,7 @@ export class CustomerTransferService {
       primaryContactPhone: customerSrc.primaryContactPhone as string | undefined,
       website: customerSrc.website as string | undefined,
       notes: customerSrc.notes as string | undefined,
-    } as never);
+    });
     const newCustomerId = created._id;
 
     const counts = {

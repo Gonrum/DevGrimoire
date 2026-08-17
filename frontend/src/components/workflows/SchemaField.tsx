@@ -95,7 +95,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
           step={schema.type === 'integer' ? 1 : 'any'}
           onChange={(e) => {
             const n = e.target.value === '' ? undefined : Number(e.target.value);
-            onChange(Number.isFinite(n as number) ? n : undefined);
+            onChange(Number.isFinite(n) ? n : undefined);
           }}
           className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-none"
         />

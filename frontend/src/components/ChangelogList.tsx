@@ -210,9 +210,9 @@ export default function ChangelogList({
       <ChangelogForm
         initial={editing ? fromEntry(editing) : emptyForm()}
         editId={editing?._id}
-        projectId={projectId!}
+        projectId={projectId}
         components={components}
-        onDone={() => { setShowForm(false); setEditing(null); onUpdate!(); }}
+        onDone={() => { setShowForm(false); setEditing(null); onUpdate(); }}
         onCancel={() => { setShowForm(false); setEditing(null); }}
       />
     );

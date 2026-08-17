@@ -140,7 +140,7 @@ export class OracleService {
         affectedEntities: [
           { entityType: 'milestone', entityId: m._id.toString(), label: mLabel },
           ...incomplete.slice(0, 10).map((t) => ({
-            entityType: 'todo' as KgEntityType,
+            entityType: 'todo' as const,
             entityId: t._id.toString(),
             label: t.displayNumber ? `${t.displayNumber}: ${t.title}` : t.title,
           })),
@@ -177,7 +177,7 @@ export class OracleService {
       const affected: Array<{ entityType: KgEntityType; entityId: string; label?: string }> = group
         .slice(0, 10)
         .map((r) => ({
-          entityType: 'validation_report' as KgEntityType,
+          entityType: 'validation_report' as const,
           entityId: r._id.toString(),
           label: r.name,
         }));
@@ -190,7 +190,7 @@ export class OracleService {
         const t = ctx.todoById.get(tid);
         if (t) {
           affected.push({
-            entityType: 'todo',
+            entityType: 'todo' as const,
             entityId: tid,
             label: t.displayNumber ? `${t.displayNumber}: ${t.title}` : t.title,
           });
@@ -262,7 +262,7 @@ export class OracleService {
         affectedEntities: [
           { entityType: 'todo', entityId: start, label },
           ...chain.slice(0, 10).map((b) => ({
-            entityType: 'todo' as KgEntityType,
+            entityType: 'todo' as const,
             entityId: b._id.toString(),
             label: b.displayNumber ? `${b.displayNumber}: ${b.title}` : b.title,
           })),
@@ -371,7 +371,7 @@ export class OracleService {
       entity: 'oracle',
       action: 'updated',
       summary: `Oracle-Analyse: ${detected.length} Risiken, ${inserted} neu, ${resolved} behoben`,
-    } as ProjectChangeEvent);
+    });
 
     return { discovered: detected.length, inserted, refreshed, resolved };
   }
@@ -453,7 +453,7 @@ export class OracleService {
   ): Promise<{ suggestion: OracleSuggestionDocument; todo: TodoDoc; reused: boolean }> {
     const suggestion = await this.findById(id);
     if (suggestion.status === OracleSuggestionStatus.CONVERTED_TO_TODO) {
-      const existingId = (suggestion.metadata as Record<string, unknown> | undefined)?.todoId;
+      const existingId = suggestion.metadata?.todoId;
       if (typeof existingId === 'string' && Types.ObjectId.isValid(existingId)) {
         try {
           const existing = await this.todosService.findById(existingId);

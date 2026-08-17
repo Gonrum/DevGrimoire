@@ -351,7 +351,6 @@ export class SshSessionService {
    * `'host_key_mismatch'` on fingerprint divergence, `'credential_missing'`
    * when referenced secrets are gone.
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async connect(
     connId: string,
     _opts: { ptyCols?: number; ptyRows?: number } = {},
@@ -388,7 +387,7 @@ export class SshSessionService {
       } catch (err) {
         await this.recordError(connId, 'credential_missing', err as Error);
         void this.writeAudit({
-          connectionId: connection._id as Types.ObjectId,
+          connectionId: connection._id,
           action: 'exec',
           sourceContext,
           userId: opts.userId,
@@ -434,7 +433,7 @@ export class SshSessionService {
         : undefined;
 
       void this.writeAudit({
-        connectionId: connection._id as Types.ObjectId,
+        connectionId: connection._id,
         action: 'exec',
         sourceContext,
         userId: opts.userId,
@@ -591,7 +590,7 @@ export class SshSessionService {
       } catch (err) {
         await this.recordError(job.connectionId, 'credential_missing', err as Error);
         void this.writeAudit({
-          connectionId: connection._id as Types.ObjectId,
+          connectionId: connection._id,
           action: 'exec',
           sourceContext: job.sourceContext,
           userId: job.userId,
@@ -661,7 +660,7 @@ export class SshSessionService {
         : undefined;
 
       void this.writeAudit({
-        connectionId: connection._id as Types.ObjectId,
+        connectionId: connection._id,
         action: 'exec',
         sourceContext: job.sourceContext,
         userId: job.userId,
@@ -697,7 +696,7 @@ export class SshSessionService {
     if (stream === 'stdout') {
       job.stdoutTailBytes += chunk.length;
       while (job.stdoutTailBytes > cap && tail.length > 0) {
-        const first = tail[0]!;
+        const first = tail[0];
         if (job.stdoutTailBytes - first.length >= cap) {
           tail.shift();
           job.stdoutTailBytes -= first.length;
@@ -710,7 +709,7 @@ export class SshSessionService {
     } else {
       job.stderrTailBytes += chunk.length;
       while (job.stderrTailBytes > cap && tail.length > 0) {
-        const first = tail[0]!;
+        const first = tail[0];
         if (job.stderrTailBytes - first.length >= cap) {
           tail.shift();
           job.stderrTailBytes -= first.length;
@@ -823,7 +822,7 @@ export class SshSessionService {
       result.sha256 = sha256Hex(content);
 
       void this.writeAudit({
-        connectionId: connection._id as Types.ObjectId,
+        connectionId: connection._id,
         action: 'upload',
         sourceContext,
         userId: opts.userId,
@@ -884,7 +883,7 @@ export class SshSessionService {
       );
 
       void this.writeAudit({
-        connectionId: connection._id as Types.ObjectId,
+        connectionId: connection._id,
         action: 'upload',
         sourceContext,
         userId: opts.userId,
@@ -924,7 +923,7 @@ export class SshSessionService {
       const result = await this.runSftpRead(sftp, remotePath, maxBytes);
 
       void this.writeAudit({
-        connectionId: connection._id as Types.ObjectId,
+        connectionId: connection._id,
         action: 'download',
         sourceContext,
         userId: opts.userId,
@@ -969,7 +968,7 @@ export class SshSessionService {
       );
 
       void this.writeAudit({
-        connectionId: connection._id as Types.ObjectId,
+        connectionId: connection._id,
         action: 'list_files',
         sourceContext,
         userId: opts.userId,
@@ -1076,7 +1075,7 @@ export class SshSessionService {
         // doesn't pin the failure surface.
         this.sshService
           .recordConnectError(
-            (connection._id as Types.ObjectId).toString(),
+            connection._id.toString(),
             err.message,
           )
           .catch(() => { /* noop */ });
@@ -1090,7 +1089,7 @@ export class SshSessionService {
         ) {
           this.dispatchAuthFailureNotification(connection).catch((nerr) => {
             this.logger.warn(
-              `Auth-failure notification failed for SshConnection ${(connection._id as Types.ObjectId).toString()}: ${(nerr as Error).message}`,
+              `Auth-failure notification failed for SshConnection ${connection._id.toString()}: ${(nerr as Error).message}`,
             );
           });
         }
@@ -1107,7 +1106,7 @@ export class SshSessionService {
         }
         settled = true;
         this.sshService
-          .recordConnectSuccess((connection._id as Types.ObjectId).toString())
+          .recordConnectSuccess(connection._id.toString())
           .catch(() => { /* noop */ });
         resolve(client);
       });
@@ -1161,7 +1160,7 @@ export class SshSessionService {
       }
 
       try {
-        client.connect({ ...config, ...authPatch } as ConnectConfig);
+        client.connect({ ...config, ...authPatch });
       } catch (err) {
         finishWithError(err as Error);
       }
@@ -1712,7 +1711,7 @@ export class SshSessionService {
       return await this.resolveCredentials(connection);
     } catch (err) {
       await this.recordError(
-        (connection._id as Types.ObjectId).toString(),
+        connection._id.toString(),
         'credential_missing',
         err as Error,
       );

@@ -16,7 +16,7 @@ export const Sensitivity = {
 
 export type SensitivityLevel = (typeof Sensitivity)[keyof typeof Sensitivity];
 
-export const ALL_SENSITIVITY_LEVELS: SensitivityLevel[] = Object.values(Sensitivity) as SensitivityLevel[];
+export const ALL_SENSITIVITY_LEVELS: SensitivityLevel[] = Object.values(Sensitivity);
 
 /**
  * Levels that bar an entity from RAG ingestion. Secrets are doubly-protected

@@ -42,7 +42,7 @@ export class ActionManualCreateExecutor implements NodeExecutor {
         sortOrder: expanded.sortOrder as number | undefined,
         projectId,
         customerId,
-      } as never);
+      });
       return {
         status: 'success',
         output: { manualId: String((m as { _id: unknown })._id) },

@@ -129,7 +129,7 @@ export default function ProjectSettings() {
     { key: 'instructions', label: t('projectSettings.tabInstructions') },
     { key: 'git', label: t('projectSettings.tabGit') },
     { key: 'export', label: t('projectSettings.tabExport'), group: t('projectSettings.groupAdvanced') },
-    { key: 'danger', label: t('projectSettings.tabDanger'), group: t('projectSettings.groupAdvanced') as string },
+    { key: 'danger', label: t('projectSettings.tabDanger'), group: t('projectSettings.groupAdvanced') },
   ];
 
   const showSaveBar = tab === 'general' || tab === 'instructions' || tab === 'git';

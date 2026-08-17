@@ -215,7 +215,6 @@ class WsEventBus {
             } catch (err) {
               // Subscriber bugs must not kill the bus. Surface in console for
               // debugging without crashing other handlers.
-              // eslint-disable-next-line no-console
               console.error('[wsEventBus] handler threw', err);
             }
           }

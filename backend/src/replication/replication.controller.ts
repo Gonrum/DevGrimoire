@@ -427,7 +427,7 @@ export class ReplicationController {
       if (project.updatedAt && new Date(project.updatedAt as Date | string) > sinceDate) {
         changes.push({
           event: { projectId: projectIdStr, entity: 'project', action: 'updated', entityId: projectIdStr },
-          document: project as Record<string, unknown>,
+          document: project,
           timestamp: until.toISOString(),
           sourceInstanceId: instanceId,
         });
@@ -452,7 +452,7 @@ export class ReplicationController {
                 action: 'updated',
                 entityId: String(doc._id),
               },
-              document: doc as Record<string, unknown>,
+              document: doc,
               timestamp: until.toISOString(),
               sourceInstanceId: instanceId,
             });

@@ -260,7 +260,7 @@ const RunLog = forwardRef<RunLogHandle, RunLogProps>(function RunLog({ topicId, 
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
-        const body = await res.json().catch(() => ({}) as { message?: string });
+        const body = await res.json().catch(() => ({}));
         throw new Error(body.message || res.statusText);
       }
       await pumpSse(res.body, controller.signal, handleEvent);
@@ -288,7 +288,7 @@ const RunLog = forwardRef<RunLogHandle, RunLogProps>(function RunLog({ topicId, 
         signal: controller.signal,
       });
       if (res.status === 409) {
-        const body = await res.json().catch(() => ({}) as { runId?: string });
+        const body = await res.json().catch(() => ({}));
         showError(t('researchTopics.runAlreadyActive'));
         if (body.runId) {
           void attachToRun(body.runId);
@@ -298,7 +298,7 @@ const RunLog = forwardRef<RunLogHandle, RunLogProps>(function RunLog({ topicId, 
         return;
       }
       if (!res.ok || !res.body) {
-        const body = await res.json().catch(() => ({}) as { message?: string });
+        const body = await res.json().catch(() => ({}));
         throw new Error(body.message || res.statusText);
       }
       await pumpSse(res.body, controller.signal, handleEvent);

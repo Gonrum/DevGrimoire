@@ -74,7 +74,7 @@ export class SecretsService {
       { new: true, upsert: true },
     ).exec();
 
-    return this.toListItem(secret!);
+    return this.toListItem(secret);
   }
 
   async findByProject(projectId: string, environmentId?: string): Promise<SecretListItem[]> {

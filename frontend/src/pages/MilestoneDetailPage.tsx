@@ -122,7 +122,7 @@ function ChangelogForm({ milestone, onCompleted, onCancel, showError }: { milest
         summary: clSummary || undefined,
         changes,
       });
-      await api.milestones.update(milestone._id, { status: 'done', changelogId: changelog._id } as Partial<Milestone>);
+      await api.milestones.update(milestone._id, { status: 'done', changelogId: changelog._id });
       onCompleted();
     } catch (err: any) {
       showError(err.message || t('milestoneDetail.completeFailed'));
@@ -401,7 +401,7 @@ export default function MilestoneDetailPage() {
             <Button type="button" variant="neutral" size="sm"
               onClick={async () => {
                 try {
-                  await api.milestones.update(milestone._id, { archived: !milestone.archived } as Partial<Milestone>);
+                  await api.milestones.update(milestone._id, { archived: !milestone.archived });
                   loadMilestone();
                 } catch (err: any) {
                   showError(err.message || t('milestoneDetail.archiveFailed'));
