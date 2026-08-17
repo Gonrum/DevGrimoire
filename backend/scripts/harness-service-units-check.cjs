@@ -357,6 +357,34 @@ async function main() {
     assert.strictEqual(finds, 1, `zwei Kunden duerfen eine find()-Abfrage kosten, nicht ${finds}`);
   });
 
+  await check('ownerFilter fragt projectId/customerId als $in beider Darstellungen ab', async () => {
+    // Regression zu einem real aufgetretenen Fehler: mit dem rohen String fand
+    // `findOne` ein Dokument NICHT, dessen projectId als ObjectId mit exakt
+    // diesem Wert in Mongo lag. Die Attrappe kann das nicht nachstellen (sie
+    // normalisiert beide Formen), deshalb wird hier die FORM des Filters
+    // geprueft — das ist die Eigenschaft, an der es haengt.
+    const harnesses = harnessModel([]);
+    const svc = new HarnessService(harnesses, linkModel([]), projectModel());
+
+    await svc.findByOwner({ scope: 'project', projectId: PROJECT });
+    const projectFilter = harnesses.calls.at(-1);
+    assert.ok(
+      projectFilter.projectId && Array.isArray(projectFilter.projectId.$in),
+      'scope project muss ueber $in abfragen, nicht ueber den rohen String',
+    );
+    assert.strictEqual(projectFilter.projectId.$in.length, 2, 'String UND ObjectId muessen drin sein');
+
+    await svc.findByOwner({ scope: 'customer', customerId: PROJECT });
+    const customerFilter = harnesses.calls.at(-1);
+    assert.ok(
+      customerFilter.customerId && Array.isArray(customerFilter.customerId.$in),
+      'scope customer muss ebenfalls ueber $in abfragen',
+    );
+
+    await svc.findByOwner({ scope: 'global' });
+    assert.deepStrictEqual(harnesses.calls.at(-1), { scope: 'global' }, 'global braucht keinen Owner');
+  });
+
   await check('sectionSet ist idempotent — zweimal gleicher Input, gleicher Zustand', async () => {
     const harnesses = harnessModel([]);
     const svc = new HarnessService(harnesses, linkModel([]), projectModel());

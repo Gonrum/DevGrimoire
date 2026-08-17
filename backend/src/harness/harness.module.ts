@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Harness, HarnessSchema } from './schemas/harness.schema';
 import { HarnessService } from './harness.service';
+import { HarnessController } from './harness.controller';
 import {
   CustomerProjectLink,
   CustomerProjectLinkSchema,
@@ -9,7 +10,7 @@ import {
 import { Project, ProjectSchema } from '../projects/schemas/project.schema';
 
 /**
- * Harness definitions (M-51 / H1). Controllers land in T-439.
+ * Harness definitions (M-51 / H1).
  *
  * `CustomerProjectLink` and `Project` are registered as schemas rather than by
  * importing CustomersModule/ProjectsModule: resolution only reads the link's
@@ -25,6 +26,7 @@ import { Project, ProjectSchema } from '../projects/schemas/project.schema';
       { name: Project.name, schema: ProjectSchema },
     ]),
   ],
+  controllers: [HarnessController],
   providers: [HarnessService],
   exports: [HarnessService],
 })

@@ -287,12 +287,20 @@ export class HarnessService {
         if (!owner.projectId) {
           throw new BadRequestException("projectId is required for scope 'project'");
         }
-        return { scope: 'project', projectId: owner.projectId };
+        // `projectIdFilter` statt des rohen Strings — empirisch nötig, nicht
+        // vorsorglich: mit `{ projectId: '69c1…' }` fand `findOne` ein Dokument
+        // **nicht**, dessen `projectId` als ObjectId mit exakt diesem Wert in
+        // Mongo liegt (direkt in der DB gegengeprüft). Mongoose castet den
+        // Query-Wert hier nicht auf den Schematyp. `resolve()` fiel nicht auf,
+        // weil es diesen Helfer von Anfang an benutzt hat.
+        return { scope: 'project', projectId: projectIdFilter(owner.projectId) };
       case 'customer':
         if (!owner.customerId) {
           throw new BadRequestException("customerId is required for scope 'customer'");
         }
-        return { scope: 'customer', customerId: owner.customerId };
+        // Gleiche Klasse; der Helfer heisst nach seinem ersten Anwendungsfall,
+        // baut aber nur `$in: [string, ObjectId]`.
+        return { scope: 'customer', customerId: projectIdFilter(owner.customerId) };
       default:
         throw new BadRequestException(`Unknown harness scope '${String(owner.scope)}'`);
     }
