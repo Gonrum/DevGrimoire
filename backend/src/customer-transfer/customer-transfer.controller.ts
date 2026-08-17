@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
+import { asString } from '../common/tool-args';
 import { CustomerTransferService } from './customer-transfer.service';
 
 @Controller('customer-transfer')
@@ -28,7 +29,10 @@ export class CustomerTransferController {
       includeSecretValues === 'true',
     );
 
-    const safeName = ((data.customer.name as string) || 'customer').replace(/[^a-zA-Z0-9_-]/g, '_');
+    // `customer` ist ein `Record<string, unknown>` — der Name ist erst dann ein
+    // String, wenn er einer ist. Vorher hätte ein Nicht-String-Name die Antwort
+    // mit einem TypeError beendet, statt auf 'customer' zurückzufallen.
+    const safeName = (asString(data.customer.name) || 'customer').replace(/[^a-zA-Z0-9_-]/g, '_');
     const date = new Date().toISOString().slice(0, 10);
     const filename = `${safeName}-customer-export-${date}.json`;
 

@@ -19,7 +19,7 @@ export interface CustomerExport {
   knowledge: Record<string, unknown>[];
   todos: Record<string, unknown>[];
   environments: Record<string, unknown>[];
-  /** When _includesSecretValues=false, items have `value: null` and `_redacted: true`. */
+  /** When _includesSecretValues=false, items have `encryptedValue: null` and `_redacted: true`. */
   secrets: Record<string, unknown>[];
   research: Record<string, unknown>[];
   recurringTasks: Record<string, unknown>[];
