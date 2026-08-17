@@ -32,6 +32,7 @@ import { SchemasService } from './schemas/schemas.service';
 import { DependenciesService } from './dependencies/dependencies.service';
 import { FeaturesService } from './features/features.service';
 import { SoulsService } from './souls/souls.service';
+import { HarnessService } from './harness/harness.service';
 import { CommitsService } from './commits/commits.service';
 import { RagService } from './rag/rag.service';
 import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
@@ -220,6 +221,7 @@ async function bootstrap() {
     dependenciesService: app.get(DependenciesService),
     featuresService: app.get(FeaturesService),
     soulsService: app.get(SoulsService),
+    harnessService: app.get(HarnessService),
     commitsService: app.get(CommitsService),
     ragService: app.get(RagService),
     recurringTasksService: app.get(RecurringTasksService),

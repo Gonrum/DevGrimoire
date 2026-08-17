@@ -29,6 +29,8 @@ import { SchemasService } from './schemas/schemas.service';
 import { DependenciesService } from './dependencies/dependencies.service';
 import { FeaturesService } from './features/features.service';
 import { SoulsService } from './souls/souls.service';
+import { HarnessService } from './harness/harness.service';
+import { HARNESS_SCOPES, HARNESS_SECTION_KINDS, HARNESS_MERGE_STRATEGIES } from './harness/harness.types';
 import { CommitsService } from './commits/commits.service';
 import { RagService } from './rag/rag.service';
 import { RecurringTasksService } from './recurring-tasks/recurring-tasks.service';
@@ -473,6 +475,7 @@ export interface McpServices {
   dependenciesService: DependenciesService;
   featuresService: FeaturesService;
   soulsService: SoulsService;
+  harnessService: HarnessService;
   commitsService: CommitsService;
   ragService: RagService;
   recurringTasksService: RecurringTasksService;
@@ -2541,6 +2544,74 @@ const tools = [
     },
   },
   {
+    name: 'harness_get',
+    description:
+      "Get the harness for a project — the agreed way of working: process rules, bootstrap recipe, constraints. " +
+      "Harnesses live on three levels that are merged in order global -> customer(s) -> project, so a project can extend a company-wide convention instead of restating it. " +
+      "Without `raw` this returns the RESOLVED result: `sections[]` (already merged), `resolvedFrom[]` (which levels contributed), `suppressed[]` (sections a lower level switched off) and `markdown` (the rendered view to drop into context). " +
+      "With `raw: true` plus a `scope` it returns that single level unchanged, which is what you want before editing. " +
+      "A project without any harness yields an empty but well-formed result, not an error.",
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Project MongoDB ID — required unless raw is used with scope global/customer' },
+        raw: { type: 'boolean', description: 'Return one unmerged level instead of the resolved result (default false)' },
+        scope: { type: 'string', enum: [...HARNESS_SCOPES], description: 'Which level to return when raw is true' },
+        customerId: { type: 'string', description: 'Customer MongoDB ID — required for raw reads with scope customer' },
+      },
+    },
+  },
+  {
+    name: 'harness_list',
+    description:
+      'List existing harnesses — metadata only (scope, owner, section count, last change), never the section bodies. Use harness_get to read content.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        scope: { type: 'string', enum: [...HARNESS_SCOPES], description: 'Restrict to one level' },
+      },
+    },
+  },
+  {
+    name: 'harness_section_set',
+    description:
+      "Create or update ONE section of a harness level, addressed by its `key`. Idempotent: the same input twice leaves the same state. " +
+      "The level is created on first write, so you do not have to create the harness separately. " +
+      "`mergeStrategy` decides what happens when a level below inherits this section: `replace` (default) overrides the inherited body, `append` adds to it, `prepend` puts this text first — the strategy of the INCOMING section wins, so a project can extend a company rule instead of only being able to overwrite it. " +
+      "Set `enabled: false` to switch off a section inherited from a higher level without editing that level (a tombstone).",
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        scope: { type: 'string', enum: [...HARNESS_SCOPES], description: 'Which level to write to' },
+        projectId: { type: 'string', description: 'Required for scope project' },
+        customerId: { type: 'string', description: 'Required for scope customer' },
+        key: { type: 'string', description: 'kebab-case identifier, unique per level — this is the join key when levels are merged' },
+        kind: { type: 'string', enum: [...HARNESS_SECTION_KINDS], description: "prose (rules/conventions) or bootstrap (session start recipe). block and constraint are reserved for later phases" },
+        title: { type: 'string', description: 'Heading. Leave empty to inherit the title from the level above' },
+        body: { type: 'string', description: 'Markdown content' },
+        mergeStrategy: { type: 'string', enum: [...HARNESS_MERGE_STRATEGIES], description: 'How this section combines with an inherited one (default replace)' },
+        order: { type: 'number', description: 'Sort order in the rendered result (default 0)' },
+        enabled: { type: 'boolean', description: 'false tombstones an inherited section (default true)' },
+      },
+      required: ['scope', 'key'],
+    },
+  },
+  {
+    name: 'harness_section_delete',
+    description:
+      'Remove a section from one harness level. This removes it from that level only — a section inherited from a higher level comes back. To suppress an inherited section, use harness_section_set with enabled: false instead.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        scope: { type: 'string', enum: [...HARNESS_SCOPES], description: 'Which level to remove from' },
+        projectId: { type: 'string', description: 'Required for scope project' },
+        customerId: { type: 'string', description: 'Required for scope customer' },
+        key: { type: 'string', description: 'Section key to remove' },
+      },
+      required: ['scope', 'key'],
+    },
+  },
+  {
     name: 'soul_get',
     description: 'Get a soul (identity, principles, conventions, boundaries) scoped to either a project or a customer. The soul defines how the agent should work with this owner. Returns an empty object if no soul is defined yet.',
     inputSchema: {
@@ -4387,7 +4458,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, environmentsService, secretsService, manualsService, researchService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService, stackService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, environmentsService, secretsService, manualsService, researchService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, harnessService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService, stackService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -5927,6 +5998,62 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             dependencies: optionalObjectArray(a, 'dependencies') ?? [],
           });
           result = scanResult;
+          break;
+        }
+        case 'harness_get': {
+          if (optionalBoolean(a, 'raw') === true) {
+            const scope = requireEnum(a, 'scope', HARNESS_SCOPES);
+            const level = await harnessService.findByOwner({
+              scope,
+              projectId: optionalString(a, 'projectId'),
+              customerId: optionalString(a, 'customerId'),
+            });
+            result = level ?? {
+              message: `No harness defined yet for scope '${scope}'. Use harness_section_set to create one.`,
+            };
+            break;
+          }
+          result = await harnessService.resolve(requireString(a, 'projectId'));
+          break;
+        }
+        case 'harness_list': {
+          result = await harnessService.list(optionalEnum(a, 'scope', HARNESS_SCOPES));
+          break;
+        }
+        case 'harness_section_set': {
+          /*
+           * Die Enum-Prüfungen stehen hier und nicht nur im DTO: dieser Pfad
+           * geht am Controller und damit an class-validator vorbei. Ohne sie
+           * landete ein erfundenes `kind` still im Dokument — und der Resolver
+           * reicht unbekannte Kinds bewusst durch, es fiele also nirgends auf.
+           */
+          const owner = {
+            scope: requireEnum(a, 'scope', HARNESS_SCOPES),
+            projectId: optionalString(a, 'projectId'),
+            customerId: optionalString(a, 'customerId'),
+          };
+          const harness = await harnessService.sectionSet(owner, {
+            key: requireString(a, 'key'),
+            kind: optionalEnum(a, 'kind', HARNESS_SECTION_KINDS) ?? 'prose',
+            title: optionalString(a, 'title'),
+            body: optionalString(a, 'body'),
+            mergeStrategy: optionalEnum(a, 'mergeStrategy', HARNESS_MERGE_STRATEGIES),
+            order: optionalNumber(a, 'order'),
+            enabled: optionalBoolean(a, 'enabled'),
+          });
+          result = { id: harness._id.toString(), scope: harness.scope, sections: harness.sections.length };
+          break;
+        }
+        case 'harness_section_delete': {
+          const harness = await harnessService.sectionDelete(
+            {
+              scope: requireEnum(a, 'scope', HARNESS_SCOPES),
+              projectId: optionalString(a, 'projectId'),
+              customerId: optionalString(a, 'customerId'),
+            },
+            requireString(a, 'key'),
+          );
+          result = { id: harness._id.toString(), scope: harness.scope, sections: harness.sections.length };
           break;
         }
         case 'soul_get': {
