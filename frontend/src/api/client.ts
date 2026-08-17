@@ -1394,6 +1394,75 @@ export interface Dependency {
   updatedAt: string;
 }
 
+
+// --- Harness (M-51/H1) ------------------------------------------------------
+
+export type HarnessScope = 'global' | 'customer' | 'project';
+export type HarnessSectionKind = 'prose' | 'bootstrap' | 'block' | 'constraint';
+export type HarnessMergeStrategy = 'replace' | 'append' | 'prepend';
+
+export interface HarnessSection {
+  key: string;
+  /**
+   * Bewusst `string` und nicht die Union: eine von einer neueren Instanz
+   * replizierte Section kann ein `kind` tragen, das dieser Build nicht kennt.
+   * Das Backend reicht solche Werte durch, das UI muss sie anzeigen können.
+   */
+  kind: string;
+  title: string;
+  body: string;
+  mergeStrategy: HarnessMergeStrategy;
+  order: number;
+  enabled: boolean;
+}
+
+export interface Harness {
+  _id: string;
+  scope: HarnessScope;
+  projectId?: string;
+  customerId?: string;
+  description?: string;
+  enabled: boolean;
+  sections: HarnessSection[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** Welche Ebene an einer aufgelösten Section beteiligt war, in Merge-Reihenfolge. */
+export interface ResolvedSectionOrigin {
+  scope: HarnessScope;
+  customerId?: string;
+  mergeStrategy: HarnessMergeStrategy;
+}
+
+export interface ResolvedHarnessSection {
+  key: string;
+  kind: string;
+  title: string;
+  body: string;
+  order: number;
+  origin: ResolvedSectionOrigin[];
+}
+
+export interface ResolvedHarness {
+  sections: ResolvedHarnessSection[];
+  /** Sections, die eine tiefere Ebene per Tombstone abgeschaltet hat. */
+  suppressed: { key: string; scope: HarnessScope }[];
+  resolvedFrom: { scope: HarnessScope; projectId?: string; customerId?: string }[];
+  markdown: string;
+}
+
+export interface HarnessSummary {
+  id: string;
+  scope: HarnessScope;
+  projectId?: string;
+  customerId?: string;
+  description?: string;
+  enabled: boolean;
+  sectionCount: number;
+  updatedAt?: string;
+}
+
 export interface Soul {
   _id: string;
   projectId?: string;
@@ -2711,6 +2780,45 @@ export const api = {
       request<Snippet>(`/snippets/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/snippets/${id}`, { method: 'DELETE' }),
+  },
+  harness: {
+    /**
+     * Die rohe Ebene. Das Backend liefert `{}` statt `null`, wenn es sie noch
+     * nicht gibt (Nest serialisiert `null` als leeren Body, woran `res.json()`
+     * scheitert) — daran erkennt der Aufrufer den Fall am fehlenden `_id`.
+     */
+    get: (owner: { scope: HarnessScope; projectId?: string; customerId?: string }) => {
+      const params = new URLSearchParams({ scope: owner.scope });
+      if (owner.projectId) params.set('projectId', owner.projectId);
+      if (owner.customerId) params.set('customerId', owner.customerId);
+      return request<Harness | Record<string, never>>(`/harness?${params.toString()}`);
+    },
+    resolve: (projectId: string) => request<ResolvedHarness>(`/harness/resolve/${projectId}`),
+    list: (scope?: HarnessScope) =>
+      request<HarnessSummary[]>(`/harness/list${scope ? `?scope=${scope}` : ''}`),
+    sectionSet: (
+      owner: { scope: HarnessScope; projectId?: string; customerId?: string },
+      section: Partial<HarnessSection> & { key: string; kind: string },
+    ) => {
+      const params = new URLSearchParams({ scope: owner.scope });
+      if (owner.projectId) params.set('projectId', owner.projectId);
+      if (owner.customerId) params.set('customerId', owner.customerId);
+      return request<Harness>(`/harness/sections/${encodeURIComponent(section.key)}?${params.toString()}`, {
+        method: 'PUT',
+        body: JSON.stringify(section),
+      });
+    },
+    sectionDelete: (
+      owner: { scope: HarnessScope; projectId?: string; customerId?: string },
+      key: string,
+    ) => {
+      const params = new URLSearchParams({ scope: owner.scope });
+      if (owner.projectId) params.set('projectId', owner.projectId);
+      if (owner.customerId) params.set('customerId', owner.customerId);
+      return request<Harness>(`/harness/sections/${encodeURIComponent(key)}?${params.toString()}`, {
+        method: 'DELETE',
+      });
+    },
   },
   souls: {
     get: (projectId: string) => request<Soul | null>(`/souls?projectId=${projectId}`),

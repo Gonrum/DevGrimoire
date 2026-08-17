@@ -1814,7 +1814,10 @@
     "pushCategory_ssh_auth_failure_desc": "An SSH connection with \"Notify on auth failure\" enabled reported an authentication error.",
     "pushCategory_recurring": "Recurring tasks",
     "pushCategory_recurring_desc": "When a recurring task fires a notification action.",
-    "tabSsh": "SSH"
+    "tabSsh": "SSH",
+    "tabHarness": "Harness (global)",
+    "harnessTitle": "Global harness",
+    "harnessHint": "The top level. Every customer and project level inherits these sections and can extend or override them."
   },
   "chat": {
     "open": "Open chat",
@@ -2557,6 +2560,52 @@
       "done": "Uploaded ({{bytes}} bytes).",
       "noFile": "Please choose a file.",
       "noPath": "Please enter a remote path."
+    }
+  },
+  "harness": {
+    "tabEdit": "Edit",
+    "tabResolved": "Resolved",
+    "addSection": "Add section",
+    "emptyLevel": "This level has no harness yet.",
+    "emptyLevelHint": "The inherited version is under \"Resolved\". Add a section here to extend or override it.",
+    "sectionEmpty": "No content.",
+    "tombstone": "switched off",
+    "disable": "Switch off",
+    "enable": "Switch on",
+    "fieldKey": "Key",
+    "fieldKeyHint": "kebab-case, unique per level — levels are joined on this",
+    "fieldTitle": "Title",
+    "fieldTitleHint": "Leave empty to inherit the title from the level above",
+    "fieldKind": "Kind",
+    "fieldMerge": "Merge",
+    "fieldBodyPlaceholder": "Content in Markdown …",
+    "noPreview": "Resolution only exists from a project's point of view.",
+    "chainLabel": "Levels involved, in order",
+    "chainEmpty": "No level contributes anything.",
+    "suppressedLabel": "Switched off by a lower level",
+    "resolvedEmpty": "No section remains after merging.",
+    "ownScopeHint": "You are editing the level: {{scope}}",
+    "scope": {
+      "global": "Global",
+      "customer": "Customer",
+      "project": "Project"
+    },
+    "kind": {
+      "prose": "Prose",
+      "bootstrap": "Bootstrap",
+      "block": "Block",
+      "constraint": "Constraint"
+    },
+    "merge": {
+      "replace": "Replace",
+      "append": "Append",
+      "prepend": "Prepend",
+      "replaceShort": "replaces",
+      "appendShort": "appends",
+      "prependShort": "prepends",
+      "replaceHint": "Overrides the inherited text completely.",
+      "appendHint": "Appends this text to the inherited one — the higher level stays.",
+      "prependHint": "Puts this text before the inherited one — the higher level stays."
     }
   }
 }

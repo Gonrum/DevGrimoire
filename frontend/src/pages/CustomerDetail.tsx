@@ -34,7 +34,7 @@ import FileUploadZone from '../components/FileUploadZone';
 import EnvironmentList, { SecretsList } from '../components/EnvironmentList';
 import MonitoringTab from '../components/MonitoringTab';
 import SshConnectionsTab from '../components/ssh/SshConnectionsTab';
-import SoulView from '../components/SoulView';
+import HarnessView from '../components/HarnessView';
 import SnippetList from '../components/SnippetList';
 import ResearchList from '../components/ResearchList';
 import { LoadingText } from '../components/ui/LoadingSpinner';
@@ -736,18 +736,12 @@ export default function CustomerDetail() {
               />
             )}
 
-            {tab === 'soul' && (
-              <SoulView
-                customerId={id}
-                soul={customerSoul}
-                onUpdate={() => {
-                  void api.souls
-                    .getForCustomer(id)
-                    .then((s) => { setCustomerSoul(s?._id ? s : null); })
-                    .catch((err: unknown) => { showError(errorMessage(err, t('common.error'))); });
-                }}
-              />
-            )}
+            {/*
+              Kundenebene: kein `resolveProjectId` — eine Auflösung gibt es nur
+              aus Sicht eines Projekts, nicht aus Sicht eines Kunden. Die
+              Komponente zeigt hier folgerichtig nur den Editor.
+            */}
+            {tab === 'soul' && <HarnessView owner={{ scope: 'customer', customerId: id }} />}
 
             {tab === 'snippets' && (
               <SnippetList

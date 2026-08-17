@@ -1814,7 +1814,10 @@
     "pushCategory_ssh_auth_failure_desc": "Wenn eine SSH-Verbindung mit aktiviertem \"Bei Auth-Failure benachrichtigen\" einen Authentifizierungsfehler meldet.",
     "pushCategory_recurring": "Wiederkehrende Aufgaben",
     "pushCategory_recurring_desc": "Wenn eine Rite eine Notification-Action ausführt.",
-    "tabSsh": "SSH"
+    "tabSsh": "SSH",
+    "tabHarness": "Harness (global)",
+    "harnessTitle": "Globaler Harness",
+    "harnessHint": "Die oberste Ebene. Jede Kunden- und Projektebene erbt diese Abschnitte und kann sie ergänzen oder überschreiben."
   },
   "chat": {
     "open": "Chat öffnen",
@@ -2556,6 +2559,52 @@
       "done": "Hochgeladen ({{bytes}} Bytes).",
       "noFile": "Bitte eine Datei auswählen.",
       "noPath": "Bitte einen Ziel-Pfad angeben."
+    }
+  },
+  "harness": {
+    "tabEdit": "Bearbeiten",
+    "tabResolved": "Aufgelöst",
+    "addSection": "Abschnitt hinzufügen",
+    "emptyLevel": "Für diese Ebene gibt es noch keinen Harness.",
+    "emptyLevelHint": "Die geerbte Fassung siehst du unter „Aufgelöst\". Lege hier einen Abschnitt an, um sie zu ergänzen oder zu überschreiben.",
+    "sectionEmpty": "Kein Inhalt.",
+    "tombstone": "abgeschaltet",
+    "disable": "Abschalten",
+    "enable": "Anschalten",
+    "fieldKey": "Schlüssel",
+    "fieldKeyHint": "kebab-case, eindeutig pro Ebene — darüber werden die Ebenen zusammengeführt",
+    "fieldTitle": "Überschrift",
+    "fieldTitleHint": "Leer lassen, um die Überschrift der höheren Ebene zu erben",
+    "fieldKind": "Art",
+    "fieldMerge": "Zusammenführung",
+    "fieldBodyPlaceholder": "Inhalt in Markdown …",
+    "noPreview": "Eine Auflösung gibt es nur aus Sicht eines Projekts.",
+    "chainLabel": "Beteiligte Ebenen, in Reihenfolge",
+    "chainEmpty": "Keine Ebene trägt etwas bei.",
+    "suppressedLabel": "Von einer tieferen Ebene abgeschaltet",
+    "resolvedEmpty": "Nach der Zusammenführung bleibt kein Abschnitt übrig.",
+    "ownScopeHint": "Du bearbeitest die Ebene: {{scope}}",
+    "scope": {
+      "global": "Global",
+      "customer": "Kunde",
+      "project": "Projekt"
+    },
+    "kind": {
+      "prose": "Text",
+      "bootstrap": "Startrezept",
+      "block": "Baustein",
+      "constraint": "Regel"
+    },
+    "merge": {
+      "replace": "Ersetzen",
+      "append": "Anhängen",
+      "prepend": "Voranstellen",
+      "replaceShort": "ersetzt",
+      "appendShort": "hängt an",
+      "prependShort": "stellt voran",
+      "replaceHint": "Überschreibt den geerbten Text vollständig.",
+      "appendHint": "Hängt diesen Text an den geerbten an — die höhere Ebene bleibt erhalten.",
+      "prependHint": "Stellt diesen Text vor den geerbten — die höhere Ebene bleibt erhalten."
     }
   }
 }

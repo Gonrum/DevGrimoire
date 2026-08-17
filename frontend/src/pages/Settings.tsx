@@ -10,6 +10,7 @@ import BackupSettings from '../components/settings/BackupSettings';
 import CustomerTemplatesSettings from '../components/settings/CustomerTemplatesSettings';
 import ChatLogSettings from '../components/settings/ChatLogSettings';
 import InstructionsSettings from '../components/settings/InstructionsSettings';
+import HarnessSettings from '../components/settings/HarnessSettings';
 import ApiKeysSettings from '../components/settings/ApiKeysSettings';
 import MyLlmSettings from '../components/settings/MyLlmSettings';
 import LlmEndpointsSettings from '../components/settings/LlmEndpointsSettings';
@@ -26,7 +27,7 @@ import { matchOption } from '../lib/narrow';
  * rendert (leere Settings-Seite), sondern still ignoriert wird.
  */
 const SETTINGS_TABS = [
-  'instructions', 'apikeys', 'notifications', 'myllm', 'llmEndpoints', 'chatlog',
+  'instructions', 'harness', 'apikeys', 'notifications', 'myllm', 'llmEndpoints', 'chatlog',
   'websearch', 'users', 'auditlog', 'replication', 'backups', 'customerTemplates', 'ssh',
 ] as const;
 
@@ -44,6 +45,7 @@ export default function Settings() {
   // movement & templating. Observe groups notification + log surfaces.
   const tabs: { key: SettingsTab; label: string; group?: string; adminOnly?: boolean }[] = [
     { key: 'instructions', label: t('settings.tabInstructions'), group: t('settings.groupAgentStack') },
+    { key: 'harness', label: t('settings.tabHarness'), group: t('settings.groupAgentStack'), adminOnly: true },
     { key: 'myllm', label: t('settings.tabMyLlm'), group: t('settings.groupAgentStack') },
     { key: 'llmEndpoints', label: t('settings.tabLlmEndpoints'), group: t('settings.groupAgentStack'), adminOnly: true },
     { key: 'websearch', label: t('settings.tabWebSearch'), group: t('settings.groupAgentStack'), adminOnly: true },
@@ -74,6 +76,7 @@ export default function Settings() {
         />
       )}
       {tab === 'instructions' && <InstructionsSettings />}
+      {tab === 'harness' && isAdmin && <HarnessSettings />}
       {tab === 'apikeys' && <ApiKeysSettings />}
       {tab === 'notifications' && <NotificationsSettings />}
       {tab === 'myllm' && <MyLlmSettings />}

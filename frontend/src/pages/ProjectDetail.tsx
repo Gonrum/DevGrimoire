@@ -15,7 +15,7 @@ import ResearchList from '../components/ResearchList';
 import SchemaList from '../components/SchemaList';
 import DependencyList from '../components/DependencyList';
 import FeatureList from '../components/FeatureList';
-import SoulView from '../components/SoulView';
+import HarnessView from '../components/HarnessView';
 import CommitList from '../components/CommitList';
 import RecurringTaskList from '../components/RecurringTaskList';
 import SnippetList from '../components/SnippetList';
@@ -459,7 +459,15 @@ export default function ProjectDetail() {
                 />
               </>
             )}
-            {tab === 'soul' && <SoulView projectId={id} soul={soul} onUpdate={() => { backgroundRefresh(api.souls.get(id!).then(setSoul)); }} />}
+            {/*
+              Harness ersetzt Soul an dieser Stelle (T-444). Der Tab-Schlüssel
+              bleibt `soul`, damit bestehende Deep-Links und gespeicherte
+              `?tab=`-Werte weiter funktionieren; die Beschriftung kommt aus
+              der Tab-Tabelle.
+            */}
+            {tab === 'soul' && (
+              <HarnessView owner={{ scope: 'project', projectId: id }} resolveProjectId={id} />
+            )}
             {tab === 'milestones' && (
               <MilestoneList
                 milestones={milestones}
