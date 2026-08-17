@@ -53,4 +53,25 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-type-assertion': 'error',
     },
   },
+  {
+    /*
+     * Einziger Override zu obiger Regel — und bewusst genau eine Datei.
+     *
+     * `src/common/tool-args.ts` ist die Grenze zwischen ungeprüftem JSON (von
+     * einem LLM erzeugte Tool-Argumente) und getypten DTOs. Solange dort kein
+     * Schema-Validator dazwischensteht, ist eine Behauptung unvermeidbar: die
+     * Helfer prüfen zur Laufzeit die *Form* (String, Objekt, Array), die
+     * Element-Struktur validiert erst der Service über class-validator bzw.
+     * Mongoose.
+     *
+     * Der Grundsatz aus M-52 bleibt damit gewahrt: die Ausnahme steht in der
+     * Config, ist begründet und betrifft eine Datei — statt als
+     * `eslint-disable` in den hundert Aufrufern zu verschwinden.
+     *
+     * Wer das schließen will, braucht einen echten Validator an der Grenze
+     * (zod o.ä.), nicht mehr Casts.
+     */
+    files: ['src/common/tool-args.ts'],
+    rules: { '@typescript-eslint/no-unsafe-type-assertion': 'off' },
+  },
 );
