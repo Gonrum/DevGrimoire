@@ -33,7 +33,13 @@ export class DependenciesService {
     let updated = 0;
 
     for (const item of dto.dependencies) {
-      const result = await this.dependencyModel.findOneAndUpdate(
+      // Vorher: findOneAndUpdate mit `rawResult: true` und `as any`, um an
+      // `lastErrorObject.updatedExisting` zu kommen — das erzeugte Dokument
+      // wurde nie benutzt. `updateOne` liefert dieselbe Auskunft typisiert:
+      // `upsertedCount > 0` heisst neu angelegt, `matchedCount > 0` heisst
+      // vorhanden (auch dann, wenn sich die Version nicht geändert hat und
+      // `modifiedCount` deshalb 0 bleibt).
+      const result = await this.dependencyModel.updateOne(
         { projectId: dto.projectId, name: item.name, packageManager: dto.packageManager },
         {
           $set: {
@@ -47,12 +53,12 @@ export class DependenciesService {
             tags: [],
           },
         },
-        { upsert: true, new: true, rawResult: true },
-      ) as any;
-      if (result.lastErrorObject?.updatedExisting) {
-        updated++;
-      } else {
+        { upsert: true },
+      );
+      if (result.upsertedCount > 0) {
         created++;
+      } else {
+        updated++;
       }
     }
 

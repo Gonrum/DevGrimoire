@@ -1,9 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { errorMessage } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { FlattenMaps, Model, Types } from 'mongoose';
 import { AuditLog, AuditLogDocument } from './schemas/audit-log.schema';
 import { RequestContext } from '../common/request-context';
+
+/**
+ * Ergebnisform von `.lean()` — Plain Objects, keine Mongoose-Dokumente.
+ *
+ * Vorher stand am Export `Promise<AuditLogDocument[]>` und darunter ein
+ * `as unknown as AuditLogDocument[]`: die Signatur versprach Dokumente mit
+ * `.save()`, geliefert wurden Plain Objects. Für den Export-Endpunkt, der das
+ * Ergebnis nur serialisiert, war das unauffällig — für jeden künftigen Aufrufer
+ * nicht.
+ */
+export type AuditLogLean = FlattenMaps<AuditLog> & { _id: Types.ObjectId };
 
 export interface AuditRecordInput {
   action: string;
@@ -107,15 +118,15 @@ export class AuditLogService {
    * filter doesn't drag the whole collection through the API. Caller
    * (frontend) shows a hint when this limit hits.
    */
-  async exportAll(filters: AuditQueryFilters = {}): Promise<{ items: AuditLogDocument[]; truncated: boolean }> {
+  async exportAll(filters: AuditQueryFilters = {}): Promise<{ items: AuditLogLean[]; truncated: boolean }> {
     const EXPORT_CAP = 10_000;
     const query = this.buildQuery(filters);
     const items = await this.auditLogModel
       .find(query)
       .sort({ timestamp: -1 })
       .limit(EXPORT_CAP + 1)
-      .lean()
-      .exec() as unknown as AuditLogDocument[];
+      .lean<AuditLogLean[]>()
+      .exec();
     const truncated = items.length > EXPORT_CAP;
     return { items: truncated ? items.slice(0, EXPORT_CAP) : items, truncated };
   }

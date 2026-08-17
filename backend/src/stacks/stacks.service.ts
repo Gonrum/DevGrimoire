@@ -8,7 +8,6 @@ import { CreateStackEntryDto } from './dto/create-stack-entry.dto';
 import { UpdateStackEntryDto } from './dto/update-stack-entry.dto';
 import { stackToMarkdown, entryToMarkdown, slugifyFilename } from './stack-markdown';
 
-type EntrySub = Types.Subdocument<Types.ObjectId> & StackEntry;
 
 @Injectable()
 export class StacksService {
@@ -16,8 +15,8 @@ export class StacksService {
     @InjectModel(Stack.name) private readonly stackModel: Model<StackDocument>,
   ) {}
 
-  private entriesOf(stack: StackDocument) {
-    return stack.entries as unknown as Types.DocumentArray<EntrySub>;
+  private entriesOf(stack: StackDocument): Types.DocumentArray<StackEntry> {
+    return stack.entries;
   }
 
   private sorted(stack: StackDocument) {
@@ -67,7 +66,7 @@ export class StacksService {
     if (!stack) throw new NotFoundException('Stack not found');
     const entries = this.entriesOf(stack);
     const maxOrder = entries.reduce((m, e) => Math.max(m, e.order), -1);
-    entries.push({ title: dto.title, content: dto.content ?? '', order: maxOrder + 1 } as EntrySub);
+    entries.push({ title: dto.title, content: dto.content ?? '', order: maxOrder + 1 });
     await stack.save();
     return this.sorted(stack);
   }

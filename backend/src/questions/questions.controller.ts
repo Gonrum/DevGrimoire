@@ -9,6 +9,7 @@ import {
   Req,
   BadRequestException,
 } from '@nestjs/common';
+import { pickAllowed } from '../common/narrow';
 import { QuestionsService } from './questions.service';
 import { AnswerQuestionDto } from './dto/answer-question.dto';
 import { CreateQuestionDto } from './dto/create-question.dto';
@@ -52,15 +53,22 @@ export class QuestionsController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
-    if (direction && !VALID_DIRECTIONS.includes(direction as QuestionDirection)) {
+    // pickAllowed prüft UND verengt in einem Schritt; das frühere
+    // `includes(direction as QuestionDirection)` setzte den Cast vor die Prüfung
+    // und behauptete damit genau das, was geprüft werden sollte.
+    const dir = direction ? pickAllowed(VALID_DIRECTIONS, direction) : undefined;
+    if (direction && !dir) {
       throw new BadRequestException(`Invalid direction: ${direction}`);
     }
     const statuses = statusParam
-      ? statusParam.split(',').map((s) => s.trim()).filter((s) => VALID_STATUSES.includes(s as QuestionStatus)) as QuestionStatus[]
+      ? statusParam
+          .split(',')
+          .map((entry) => pickAllowed(VALID_STATUSES, entry.trim()))
+          .filter((entry): entry is QuestionStatus => entry !== undefined)
       : undefined;
     return this.questionsService.findAll({
       statuses,
-      direction: direction as QuestionDirection | undefined,
+      direction: dir,
       projectId,
       customerId,
       todoId,
@@ -84,14 +92,18 @@ export class QuestionsController {
     @Query('direction') direction?: string,
   ) {
     const userId = req.user?.userId;
-    if (direction && !VALID_DIRECTIONS.includes(direction as QuestionDirection)) {
+    // pickAllowed prüft UND verengt in einem Schritt; das frühere
+    // `includes(direction as QuestionDirection)` setzte den Cast vor die Prüfung
+    // und behauptete damit genau das, was geprüft werden sollte.
+    const dir = direction ? pickAllowed(VALID_DIRECTIONS, direction) : undefined;
+    if (direction && !dir) {
       throw new BadRequestException(`Invalid direction: ${direction}`);
     }
     // Default to agent_to_user: the global "Agent-Rückfrage"-Modal must only
     // surface questions the user is meant to answer. user_to_agent questions
     // belong to the agent-side inbox (or the todo detail view) and must not
     // pop up the answer dialog for the asker themselves.
-    const effectiveDirection = (direction as QuestionDirection | undefined) ?? 'agent_to_user';
+    const effectiveDirection = dir ?? 'agent_to_user';
     return this.questionsService.findPending(userId, effectiveDirection);
   }
 
@@ -107,12 +119,16 @@ export class QuestionsController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
-    if (direction && !VALID_DIRECTIONS.includes(direction as QuestionDirection)) {
+    // pickAllowed prüft UND verengt in einem Schritt; das frühere
+    // `includes(direction as QuestionDirection)` setzte den Cast vor die Prüfung
+    // und behauptete damit genau das, was geprüft werden sollte.
+    const dir = direction ? pickAllowed(VALID_DIRECTIONS, direction) : undefined;
+    if (direction && !dir) {
       throw new BadRequestException(`Invalid direction: ${direction}`);
     }
     return this.questionsService.findOpen({
       projectId,
-      direction: direction as QuestionDirection | undefined,
+      direction: dir,
       todoId,
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,

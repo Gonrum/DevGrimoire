@@ -45,7 +45,7 @@ export class RagController {
     const [endpoints, managedViaSettings, status] = await Promise.all([
       this.ragService.getEndpointsPublic(),
       this.ragService.isManagedViaSettings(),
-      this.ragService.status() as any,
+      this.ragService.status(),
     ]);
     return { endpoints, managedViaSettings, status };
   }

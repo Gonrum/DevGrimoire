@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { pickAllowed } from '../common/narrow';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
@@ -176,14 +177,42 @@ export function mergeScopeHits(hitLists: RagSearchHit[][], limit: number): RagSe
     .slice(0, limit);
 }
 
-type EmbeddingProvider = 'ollama' | 'openai-compatible';
-const EMBEDDING_PROVIDERS: readonly EmbeddingProvider[] = ['ollama', 'openai-compatible'] as const;
+const EMBEDDING_PROVIDERS = ['ollama', 'openai-compatible'] as const;
+type EmbeddingProvider = (typeof EMBEDDING_PROVIDERS)[number];
+
+/**
+ * Zahlenvektor aus einer Embedding-Antwort.
+ *
+ * Vorher stand an beiden Aufrufstellen `(await res.json()) as { … }` und direkt
+ * dahinter ein `data.data[0].embedding`. Antwortet der Endpunkt mit 200 und
+ * einem Fehlerobjekt — bei LM Studio real, wenn das Modell nicht geladen ist —
+ * war das ein `TypeError: Cannot read properties of undefined`, der nichts über
+ * die Ursache sagte und obendrein die Fallback-Kette weiterreichte.
+ */
+function requireVector(value: unknown, url: string, path: string): number[] {
+  if (isUnknownArray(value) && value.length > 0 && value.every((n): n is number => typeof n === 'number')) {
+    return [...value];
+  }
+  throw new Error(
+    `Embedding-Antwort von ${url} hat nicht die erwartete Form: ${path} ist kein nicht-leeres number[]`,
+  );
+}
 
 interface EmbeddingEndpoint {
   provider: EmbeddingProvider;
   url: string;
   model: string;
   apiKey?: string;
+}
+
+/** Interne Endpunkte auf die Form ohne Geheimnis abbilden. */
+function toPublicEndpoints(endpoints: readonly EmbeddingEndpoint[]): EmbeddingEndpointPublic[] {
+  return endpoints.map((e) => ({
+    provider: e.provider,
+    url: e.url,
+    model: e.model,
+    hasApiKey: typeof e.apiKey === 'string' && e.apiKey.length > 0,
+  }));
 }
 
 export interface EmbeddingEndpointPublic {
@@ -280,12 +309,12 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         .split(',')
         .map((entry) => {
           const [provider, url, model] = entry.trim().split('|');
-          return { provider: provider as EmbeddingProvider, url, model };
+          return { provider: pickAllowed(EMBEDDING_PROVIDERS, provider), url, model };
         })
-        .filter((e) => this.isValidProvider(e.provider) && e.url && e.model);
+        .filter((e): e is EmbeddingEndpoint => e.provider !== undefined && !!e.url && !!e.model);
     }
 
-    const provider = (process.env.RAG_EMBEDDING_PROVIDER || 'ollama') as EmbeddingProvider;
+    const provider = pickAllowed(EMBEDDING_PROVIDERS, process.env.RAG_EMBEDDING_PROVIDER) ?? 'ollama';
     const model = process.env.RAG_EMBEDDING_MODEL || 'nomic-embed-text';
     const url = provider === 'openai-compatible'
       ? (process.env.RAG_EMBEDDING_URL || 'http://localhost:1234')
@@ -295,10 +324,10 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     if (process.env.RAG_EMBEDDING_API_KEY) primary.apiKey = process.env.RAG_EMBEDDING_API_KEY;
     const endpoints = [primary];
 
-    const fallbackProvider = process.env.RAG_FALLBACK_PROVIDER as EmbeddingProvider | undefined;
+    const fallbackProvider = pickAllowed(EMBEDDING_PROVIDERS, process.env.RAG_FALLBACK_PROVIDER);
     const fallbackUrl = process.env.RAG_FALLBACK_URL;
     const fallbackModel = process.env.RAG_FALLBACK_MODEL;
-    if (fallbackProvider && fallbackUrl && fallbackModel && this.isValidProvider(fallbackProvider)) {
+    if (fallbackProvider && fallbackUrl && fallbackModel) {
       const fb: EmbeddingEndpoint = { provider: fallbackProvider, url: fallbackUrl, model: fallbackModel };
       if (process.env.RAG_FALLBACK_API_KEY) fb.apiKey = process.env.RAG_FALLBACK_API_KEY;
       endpoints.push(fb);
@@ -323,8 +352,12 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     const out: EmbeddingEndpoint[] = [];
     for (const entry of parsed) {
       if (!entry || typeof entry !== 'object') continue;
-      const { provider, url, model, apiKeyEnc } = entry as Partial<StoredEndpoint>;
-      if (!this.isValidProvider(provider) || !url || !model) continue;
+      if (!isRecord(entry)) continue;
+      const provider = pickAllowed(EMBEDDING_PROVIDERS, entry.provider);
+      const url = typeof entry.url === 'string' ? entry.url : '';
+      const model = typeof entry.model === 'string' ? entry.model : '';
+      const apiKeyEnc = typeof entry.apiKeyEnc === 'string' ? entry.apiKeyEnc : '';
+      if (!provider || !url || !model) continue;
       const ep: EmbeddingEndpoint = { provider, url, model };
       if (apiKeyEnc) {
         try {
@@ -347,13 +380,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
   /** Public-safe view of configured endpoints — never returns API keys. */
   async getEndpointsPublic(): Promise<EmbeddingEndpointPublic[]> {
-    const endpoints = await this.loadEndpoints();
-    return endpoints.map((e) => ({
-      provider: e.provider,
-      url: e.url,
-      model: e.model,
-      hasApiKey: typeof e.apiKey === 'string' && e.apiKey.length > 0,
-    }));
+    return toPublicEndpoints(await this.loadEndpoints());
   }
 
   /** Returns true if endpoints came from the Settings DB (i.e. UI-managed). */
@@ -538,8 +565,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       if (!res.ok) {
         throw new Error(`Embedding API failed (${res.status}): ${await res.text()}`);
       }
-      const data = (await res.json()) as { data: Array<{ embedding: number[] }> };
-      return data.data[0].embedding;
+      const body: unknown = await res.json();
+      const first = isRecord(body) && isUnknownArray(body.data) ? body.data[0] : undefined;
+      return requireVector(isRecord(first) ? first.embedding : undefined, endpoint.url, 'data[0].embedding');
     } else {
       const res = await fetch(`${endpoint.url}/api/embed`, {
         method: 'POST',
@@ -550,8 +578,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       if (!res.ok) {
         throw new Error(`Ollama embed failed (${res.status}): ${await res.text()}`);
       }
-      const data = (await res.json()) as { embeddings: number[][] };
-      return data.embeddings[0];
+      const body: unknown = await res.json();
+      const first = isRecord(body) && isUnknownArray(body.embeddings) ? body.embeddings[0] : undefined;
+      return requireVector(first, endpoint.url, 'embeddings[0]');
     }
   }
 
@@ -1125,7 +1154,12 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   async status(): Promise<{
     ready: boolean;
     activeEndpoint: { provider: string; model: string; url: string };
-    endpoints: EmbeddingEndpoint[];
+    // `EmbeddingEndpointPublic`, nicht `EmbeddingEndpoint`: der interne Typ
+    // trägt den **entschlüsselten** `apiKey`. Über `GET /api/rag/status`,
+    // `GET /api/rag/config` und das MCP-Tool `rag_status` ging der damit an
+    // jeden angemeldeten Aufrufer heraus — sichtbar wurde das erst, als der
+    // `as any` im Controller fiel.
+    endpoints: EmbeddingEndpointPublic[];
     dimensions: number;
     documentCount: number;
     chunkCount: number;
@@ -1137,7 +1171,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       return {
         ready: false,
         activeEndpoint: { provider: this.embeddingProvider, model: this.embeddingModel, url: this.embeddingUrl },
-        endpoints: this.endpoints,
+        endpoints: toPublicEndpoints(this.endpoints),
         dimensions: 0,
         documentCount: 0,
         chunkCount: 0,
@@ -1164,7 +1198,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return {
       ready: true,
       activeEndpoint: { provider: this.embeddingProvider, model: this.embeddingModel, url: this.embeddingUrl },
-      endpoints: this.endpoints,
+      endpoints: toPublicEndpoints(this.endpoints),
       dimensions: this.dimensions,
       documentCount: uniqueSources.size,
       chunkCount: validRows.length,

@@ -5,7 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { errorMessage } from '../common/narrow';
+import { errorMessage, streamToBuffer } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model } from 'mongoose';
@@ -213,11 +213,7 @@ export class AttachmentsService {
     const attachment = await this.attachmentModel.findById(id).select('-textContent').exec();
     if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
     const stream = await this.minioService.getObject(attachment.storageKey);
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    return { buffer: Buffer.concat(chunks), attachment };
+    return { buffer: await streamToBuffer(stream), attachment };
   }
 
   /**
@@ -228,7 +224,7 @@ export class AttachmentsService {
   async getText(id: string): Promise<{ text: string | null; attachment: AttachmentDocument }> {
     const attachment = await this.attachmentModel.findById(id).exec();
     if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
-    const raw = (attachment as unknown as { textContent?: string }).textContent;
+    const raw = attachment.textContent;
     return { text: raw && raw.length > 0 ? raw : null, attachment };
   }
 

@@ -1,11 +1,12 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { errorMessage, isDuplicateKeyError } from '../common/narrow';
+import { errorMessage, isDuplicateKeyError, pickAllowed } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { CreateKgEdgeDto, ListKgEdgesDto } from './dto/knowledge-graph.dto';
 import {
+  KG_ENTITY_TYPES,
   KgEntityType,
   KgRelation,
   KnowledgeGraphEdge,
@@ -21,6 +22,7 @@ import {
   ValidationReportDocument,
 } from '../validation-reports/schemas/validation-report.schema';
 import {
+  DocProposalSourceType,
   DocUpdateProposal,
   DocUpdateProposalDocument,
 } from '../doc-update-proposals/schemas/doc-update-proposal.schema';
@@ -229,8 +231,13 @@ export class KnowledgeGraphService {
       .filter(([key]) => key !== focalKey)
       .map(([key, v]) => {
         const [t, idStr] = key.split(':', 2);
-        return { entityType: t as KgEntityType, entityId: idStr, label: v.label, depth: v.depth };
-      });
+        // Der Key wurde oben als `${entityType}:${id}` gebaut; die Prüfung macht
+        // das explizit statt es zu behaupten.
+        const entityType = pickAllowed(KG_ENTITY_TYPES, t);
+        if (!entityType) return undefined;
+        return { entityType, entityId: idStr, label: v.label, depth: v.depth };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
 
     // Dedup edges (same edge may have been added twice when both endpoints were in frontier)
     const seenEdgeIds = new Set<string>();
@@ -427,7 +434,7 @@ export class KnowledgeGraphService {
       push({
         source: { entityType: 'doc_update_proposal', entityId: p._id.toString(), label: p.target.title },
         target: {
-          entityType: p.target.type as KgEntityType,
+          entityType: pickAllowed(KG_ENTITY_TYPES, p.target.type) ?? 'manual',
           entityId: p.target.id ? p.target.id.toString() : p._id.toString(),
           label: p.target.title,
         },
@@ -436,7 +443,10 @@ export class KnowledgeGraphService {
         confidence: 0.7,
       });
       // And the source (todo/commit/etc.) → doc_update_proposal
-      const srcType = (p.source.type === 'workflow_run' ? 'workflow' : p.source.type) as KgEntityType;
+      // `workflow_run` ist der Wert der Proposal-Quelle, `workflow` der Knotentyp
+      // im Graphen — die Abbildung war schon vorher da, nur ungeprüft.
+      const rawSrc = p.source.type === DocProposalSourceType.WORKFLOW_RUN ? 'workflow' : p.source.type;
+      const srcType = pickAllowed(KG_ENTITY_TYPES, rawSrc) ?? 'todo';
       push({
         source: { entityType: srcType, entityId: p.source.id, label: p.source.title },
         target: { entityType: 'doc_update_proposal', entityId: p._id.toString(), label: p.target.title },

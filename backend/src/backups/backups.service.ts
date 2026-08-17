@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { errorMessage } from '../common/narrow';
+import { errorMessage, isRecord, isUnknownArray, streamToBuffer } from '../common/narrow';
 import { Cron } from '@nestjs/schedule';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model } from 'mongoose';
@@ -17,14 +17,22 @@ interface BackupArtifact {
   contentType: string;
 }
 
-interface BackupManifest {
-  format?: string;
-  jobId?: string;
-  bucket?: string;
-  objectPrefix?: string;
-  artifacts?: BackupArtifact[];
-  includes?: Record<string, unknown>;
-  [key: string]: unknown;
+/**
+ * Artefaktliste aus einem Mixed-Feld bzw. einer eingelesenen Manifest-Datei.
+ *
+ * Beide Quellen sind ungeprüft: `BackupJob.manifest` ist `Record<string,
+ * unknown>`, die Manifest-Datei kommt aus dem Objektspeicher. Vorher stand an
+ * beiden Stellen `Array.isArray(x) ? x as BackupArtifact[] : []` — die Prüfung
+ * galt dem Array, behauptet wurde der Elementtyp.
+ */
+function artifactsOf(value: unknown): BackupArtifact[] {
+  if (!isUnknownArray(value)) return [];
+  return value.filter((entry): entry is BackupArtifact =>
+    isRecord(entry) &&
+    typeof entry.key === 'string' &&
+    typeof entry.size === 'number' &&
+    typeof entry.sha256 === 'string' &&
+    typeof entry.contentType === 'string');
 }
 
 interface RetentionCandidate {
@@ -98,7 +106,7 @@ export class BackupsService {
 
   async applyRetention(confirm: string): Promise<Record<string, unknown>> {
     if (confirm !== RETENTION_CONFIRMATION) {
-      throw new BadRequestException(`Retention cleanup requires confirm=\"${RETENTION_CONFIRMATION}\"`);
+      throw new BadRequestException(`Retention cleanup requires confirm="${RETENTION_CONFIRMATION}"`);
     }
     if (!this.minioService.isEnabled()) throw new BadRequestException('MinIO is not configured; retention cleanup needs backup storage');
 
@@ -133,8 +141,9 @@ export class BackupsService {
     }
 
     const manifestKey = `${job.objectPrefix}/manifest.json`;
-    const manifest = await this.readJsonObject<BackupManifest>(job.bucket, manifestKey);
-    const artifacts = Array.isArray(manifest.artifacts) ? manifest.artifacts : [];
+    const manifestRaw = await this.readJsonObject(job.bucket, manifestKey);
+    const manifest = isRecord(manifestRaw) ? manifestRaw : {};
+    const artifacts = artifactsOf(manifest.artifacts);
     const checks = await Promise.all(artifacts.map(async (artifact) => this.verifyArtifact(job.bucket, artifact)));
 
     return {
@@ -143,8 +152,8 @@ export class BackupsService {
       bucket: job.bucket,
       objectPrefix: job.objectPrefix,
       manifestKey,
-      manifestFormat: manifest.format || null,
-      includes: manifest.includes || {},
+      manifestFormat: typeof manifest.format === 'string' ? manifest.format : null,
+      includes: isRecord(manifest.includes) ? manifest.includes : {},
       artifactCount: artifacts.length,
       checks,
       ok: checks.every((check) => check.exists && check.sizeMatches && check.sha256Matches),
@@ -203,11 +212,16 @@ export class BackupsService {
       artifacts.push(await this.writeArtifact(bucket, `${objectPrefix}/manifest.json`, manifestPayload, 'application/json'));
       await this.writeLatestPointer(bucket, objectPrefix, manifest);
 
-      return this.backupJobModel.findByIdAndUpdate(job._id, {
+      const completed = await this.backupJobModel.findByIdAndUpdate(job._id, {
         status: BackupStatus.COMPLETED,
         manifest: { ...manifest, artifacts },
         finishedAt: new Date(),
-      }, { new: true }).exec() as Promise<BackupJobDocument>;
+      }, { new: true }).exec();
+      // Der frühere `as Promise<BackupJobDocument>` behauptete, dass hier nie
+      // null steht. Wenn der Job zwischendurch gelöscht wurde, wäre der
+      // Aufrufer auf einem null gelandet, das der Typ ausschloss.
+      if (!completed) throw new NotFoundException(`Backup job ${job._id.toString()} disappeared while running`);
+      return completed;
     } catch (err) {
       const message = errorMessage(err);
       await this.backupJobModel.findByIdAndUpdate(job._id, {
@@ -344,7 +358,7 @@ export class BackupsService {
       })
       .map((job) => {
         const createdAt = (job as BackupJobDocument & { createdAt?: Date }).createdAt;
-        const artifacts = Array.isArray(job.manifest?.artifacts) ? job.manifest.artifacts as BackupArtifact[] : [];
+        const artifacts = artifactsOf(job.manifest?.artifacts);
         const artifactKeys = artifacts.map((artifact) => artifact.key).filter(Boolean);
         if (job.objectPrefix && !artifactKeys.includes(`${job.objectPrefix}/manifest.json`)) {
           artifactKeys.push(`${job.objectPrefix}/manifest.json`);
@@ -402,19 +416,21 @@ export class BackupsService {
     }
   }
 
-  private async readJsonObject<T>(bucket: string, key: string): Promise<T> {
+  /**
+   * JSON aus einem Backup-Objekt. Liefert bewusst `unknown`: die Datei kommt aus
+   * dem Objektspeicher und kann aus einer älteren Formatversion stammen oder
+   * beschädigt sein. Vorher stand hier `JSON.parse(body) as T` — ein frei vom
+   * Aufrufer gewählter Typ auf einem ungeprüften Wert.
+   */
+  private async readJsonObject(bucket: string, key: string): Promise<unknown> {
     const payload = await this.readObjectBuffer(bucket, key);
     const body = key.endsWith('.gz') ? gunzipSync(payload).toString('utf-8') : payload.toString('utf-8');
-    return JSON.parse(body) as T;
+    return JSON.parse(body);
   }
 
   private async readObjectBuffer(bucket: string, key: string): Promise<Buffer> {
     const stream = await this.minioService.getObjectInBucket(bucket, key);
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    return Buffer.concat(chunks);
+    return streamToBuffer(stream);
   }
 
   private getBackupBucket(): string {

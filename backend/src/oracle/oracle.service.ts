@@ -1,9 +1,9 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { errorMessage, isDuplicateKeyError } from '../common/narrow';
+import { errorMessage, isDuplicateKeyError, pickAllowed } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
-import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
+import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
 import { Todo, TodoDocument, TodoStatus } from '../todos/schemas/todo.schema';
 import { Milestone, MilestoneDocument, MilestoneStatus } from '../milestones/schemas/milestone.schema';
@@ -491,7 +491,7 @@ export class OracleService {
       description,
       status: TodoStatus.OPEN,
       priority:
-        (overrides?.priority as TodoPriority) ??
+        pickAllowed(Object.values(TodoPriority), overrides?.priority) ??
         (suggestion.severity === OracleSeverity.CRITICAL ? TodoPriority.HIGH : TodoPriority.MEDIUM),
       tags: overrides?.tags ?? ['oracle', suggestion.type],
       milestoneId: overrides?.milestoneId,

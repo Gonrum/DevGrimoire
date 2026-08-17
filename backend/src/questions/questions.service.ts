@@ -7,7 +7,7 @@ import {
   BadRequestException,
   OnModuleInit,
 } from '@nestjs/common';
-import { errorMessage } from '../common/narrow';
+import { errorMessage, pickAllowed } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { FilterQuery, Model, Types } from 'mongoose';
@@ -20,6 +20,7 @@ import {
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { ConvertToKnowledgeDto } from './dto/convert-to-knowledge.dto';
 import { TodosService } from '../todos/todos.service';
+import { TodoPriority } from '../todos/schemas/todo.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { KnowledgeDocument } from '../knowledge/schemas/knowledge.schema';
@@ -89,8 +90,8 @@ export class QuestionsService implements OnModuleInit {
       const indexes = await this.questionModel.collection.indexes();
       let droppedTtl = false;
       for (const idx of indexes) {
-        if ((idx as { expireAfterSeconds?: number }).expireAfterSeconds !== undefined) {
-          await this.questionModel.collection.dropIndex(idx.name as string);
+        if (idx.expireAfterSeconds !== undefined && typeof idx.name === 'string') {
+          await this.questionModel.collection.dropIndex(idx.name);
           this.logger.log(`Dropped legacy TTL index on questions: ${idx.name}`);
           droppedTtl = true;
         }
@@ -193,7 +194,7 @@ export class QuestionsService implements OnModuleInit {
           ? entry.question.slice(0, 97) + '...'
           : entry.question;
       const url = entry.todoId
-        ? `/projects/${projectId}/todos/${entry.todoId}`
+        ? `/projects/${projectId}/todos/${entry.todoId.toString()}`
         : undefined;
       await this.notificationsService
         .create(title, body, url, 'ask_user')
@@ -694,8 +695,8 @@ export class QuestionsService implements OnModuleInit {
       description,
       projectId: projectIdStr,
       customerId: !projectIdStr ? customerIdStr : undefined,
-      priority: overrides.priority ?? 'medium',
-    } as Parameters<TodosService['create']>[0]);
+      priority: pickAllowed(Object.values(TodoPriority), overrides.priority) ?? TodoPriority.MEDIUM,
+    });
 
     entry.followupTodoId = todo._id;
     await entry.save();
@@ -968,7 +969,7 @@ export class QuestionsService implements OnModuleInit {
       const title = 'Agent-Rückfrage (eskaliert)';
       const body = entry.question.length > 100 ? entry.question.slice(0, 97) + '...' : entry.question;
       const url = entry.todoId
-        ? `/projects/${entry.projectId?.toString()}/todos/${entry.todoId}`
+        ? `/projects/${entry.projectId?.toString()}/todos/${entry.todoId.toString()}`
         : undefined;
       await this.notificationsService
         .create(title, body, url, 'ask_user')

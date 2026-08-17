@@ -379,20 +379,21 @@ export class ProjectsService {
 
     const projects = projectHits
       .map((hit) => {
-        const doc = docById.get(hit.id) as
-          | (Record<string, unknown> & { _id: unknown; name: string })
-          | undefined;
+        // `.lean()` liefert bereits den Schematyp; die sieben Behauptungen
+        // hier haben ihn nur nachgebaut — und dabei `active`/`favorite` als
+        // nicht-optional ausgegeben, obwohl beide am Schema optional sind.
+        const doc = docById.get(hit.id);
         if (!doc) return null;
-        const createdAt = doc.createdAt as Date | string | undefined;
-        const updatedAt = doc.updatedAt as Date | string | undefined;
+        const createdAt = doc.createdAt;
+        const updatedAt = doc.updatedAt;
         return {
           _id: String(doc._id),
           name: doc.name,
-          description: doc.description as string | undefined,
-          techStack: (doc.techStack as string[] | undefined) ?? [],
-          tags: (doc.tags as string[] | undefined) ?? [],
-          active: doc.active as boolean,
-          favorite: doc.favorite as boolean,
+          description: doc.description,
+          techStack: doc.techStack ?? [],
+          tags: doc.tags ?? [],
+          active: doc.active ?? false,
+          favorite: doc.favorite ?? false,
           score: hit.score,
           createdAt: createdAt ? new Date(createdAt).toISOString() : '',
           updatedAt: updatedAt ? new Date(updatedAt).toISOString() : '',

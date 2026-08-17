@@ -91,8 +91,10 @@ export class NotesController {
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
-    const flush = (res as Response & { flushHeaders?: () => void }).flushHeaders;
-    if (typeof flush === 'function') flush.call(res);
+    // `Response` erbt von `http.ServerResponse`, `flushHeaders` ist also immer
+    // da. Das vorherige `const f = (res as …).flushHeaders; f.call(res)` löste
+    // die Methode von ihrem Objekt und band `this` per Hand wieder an.
+    res.flushHeaders();
 
     const send = (event: Record<string, unknown>) => {
       if (res.writableEnded) return;

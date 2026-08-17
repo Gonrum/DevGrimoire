@@ -4,7 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { errorMessage } from '../common/narrow';
+import { errorMessage, pickAllowed } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
@@ -207,7 +207,7 @@ export class DocUpdateProposalsService {
       title,
       description,
       status: TodoStatus.OPEN,
-      priority: (overrides?.priority as TodoPriority) ?? TodoPriority.MEDIUM,
+      priority: pickAllowed(Object.values(TodoPriority), overrides?.priority) ?? TodoPriority.MEDIUM,
       tags: overrides?.tags ?? ['documentation', 'living-doc'],
       milestoneId: overrides?.milestoneId,
     });

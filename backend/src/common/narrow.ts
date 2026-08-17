@@ -82,3 +82,49 @@ export function errorWithCause(message: string, cause: unknown): Error {
   err.cause = cause;
   return err;
 }
+
+/**
+ * Wert gegen eine erlaubte Liste prüfen und dabei verengen.
+ *
+ * `allowed.find()` liefert `T | undefined` — der enge Typ entsteht also aus einer
+ * echten Laufzeitprüfung statt aus einer Behauptung. Das ersetzt das verbreitete
+ * `ALLOWED.includes(v as T)`, bei dem der Cast **vor** der Prüfung steht und
+ * damit genau das behauptet, was geprüft werden soll.
+ *
+ * Generisch über `T extends string` gehalten: für einen echten TS-Enum würde ein
+ * direkter Vergleich `enumWert === beliebigerString` von
+ * `no-unsafe-enum-comparison` beanstandet, hier nicht.
+ *
+ * Für Tool-Argumente aus einem `Record<string, unknown>` gibt es die werfende
+ * Variante `optionalEnum` in `tool-args.ts`; diese hier ist die stille
+ * Wert-Ebene.
+ */
+export function pickAllowed<T extends string>(
+  allowed: readonly T[],
+  value: unknown,
+): T | undefined {
+  if (typeof value !== 'string') return undefined;
+  return allowed.find((candidate) => candidate === value);
+}
+
+/**
+ * Node-Stream vollständig in einen `Buffer` lesen.
+ *
+ * Die Schleife stand zweimal fast gleich im Projekt (Attachments, Backups), und
+ * beide Male war `chunk` ein `any`: `Readable` implementiert
+ * `AsyncIterableIterator<any>`, das `Buffer.from(chunk)` bekam also ein
+ * ungeprüftes Argument. Die Umleitung über ein `unknown` und drei echte
+ * Prüfungen kostet nichts und macht aus dem stillen `any` einen klaren Fehler,
+ * falls ein Stream je etwas anderes liefert.
+ */
+export async function streamToBuffer(stream: AsyncIterable<unknown>): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const raw of stream) {
+    const chunk: unknown = raw;
+    if (Buffer.isBuffer(chunk)) chunks.push(chunk);
+    else if (typeof chunk === 'string') chunks.push(Buffer.from(chunk, 'utf-8'));
+    else if (chunk instanceof Uint8Array) chunks.push(Buffer.from(chunk));
+    else throw new Error(`Unerwarteter Stream-Chunk vom Typ ${typeof chunk}`);
+  }
+  return Buffer.concat(chunks);
+}
