@@ -33,7 +33,12 @@
  * an einer Stelle — und nicht als `eslint-disable` in hundert Aufrufer.
  */
 
+import { isNullaryMethod, isRecord, isUnknownArray } from './narrow';
+
 export type ToolArgs = Record<string, unknown>;
+
+// Re-Export, damit Aufrufer nicht zwei Dateien importieren müssen.
+export { errorMessage, isDuplicateKeyError, isNullaryMethod, isRecord, isUnknownArray } from './narrow';
 
 /** Plain, serialisierbare Form eines Dokuments. */
 export type PlainDoc = Record<string, unknown>;
@@ -95,14 +100,6 @@ export function requireEnum<T extends string>(
 // ---------------------------------------------------------------------------
 // Arrays und Objekte
 // ---------------------------------------------------------------------------
-
-/**
- * Typprädikat statt `Array.isArray`: letzteres verengt ein `unknown` zu `any[]`
- * und holt damit die unsafe-Findings auf den Elementen zurück.
- */
-export function isUnknownArray(value: unknown): value is unknown[] {
-  return Array.isArray(value);
-}
 
 function isStringArray(value: unknown): value is string[] {
   return isUnknownArray(value) && value.every((entry) => typeof entry === 'string');
@@ -211,13 +208,17 @@ export function requireNumber(args: ToolArgs, field: string): number {
  * `project-transfer.service.ts`, das deshalb eine eigene Variante hat.
  */
 export function toPlainDoc(doc: unknown): PlainDoc {
-  if (doc === null || typeof doc !== 'object') return {};
-  const toJSON = (doc as { toJSON?: unknown }).toJSON;
-  if (typeof toJSON === 'function') {
-    const json: unknown = (toJSON as () => unknown).call(doc);
-    if (json !== null && typeof json === 'object') return json as PlainDoc;
+  if (!isRecord(doc)) return {};
+  // Zwei Prädikate statt drei Assertions: `isRecord` erlaubt den Feldzugriff,
+  // und `isNullaryMethod` sagt das Schwächste, worauf wir uns verlassen — ein
+  // blankes `typeof === 'function'` verengt nur zu `Function`, dessen `.call()`
+  // wieder `any` liefert und die unsafe-Findings zurückholt.
+  const toJSON = doc.toJSON;
+  if (isNullaryMethod(toJSON)) {
+    const json: unknown = toJSON.call(doc);
+    if (isRecord(json)) return json;
   }
-  return { ...(doc as PlainDoc) };
+  return { ...doc };
 }
 
 /** Liest ein Feld eines PlainDoc als String — oder undefined, wenn es keiner ist. */
