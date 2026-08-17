@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, BackupJob, BackupMode, BackupRestorePreview, BackupRetentionPreview, BackupSystemStatus } from '../../api/client';
+import { optionOr } from '../../lib/narrow';
 import Button from '../ui/Button';
 import { FormSelect } from '../ui/FormField';
 import { SettingsActions, SettingsSection } from '../ui/SettingsShell';
+
+/** Die Werte der `<option>`s unten — geprüft statt behauptet (`no-unsafe-type-assertion`). */
+const BACKUP_MODES = ['full-system', 'database'] as const satisfies readonly BackupMode[];
 
 function formatDate(value?: string) {
   if (!value) return '—';
@@ -81,7 +85,9 @@ export default function BackupSettings() {
   }, [t]);
 
   useEffect(() => {
-    load();
+    void (async () => {
+      await load();
+    })();
   }, [load]);
 
   const createBackup = async () => {
@@ -183,7 +189,7 @@ export default function BackupSettings() {
             label={t('settings.backups.mode')}
             value={mode}
             onChange={(e) => {
-              const nextMode = e.target.value as BackupMode;
+              const nextMode = optionOr(e.target.value, BACKUP_MODES, 'full-system');
               setMode(nextMode);
               if (nextMode === 'full-system') setIncludeAttachments(true);
             }}
@@ -200,7 +206,7 @@ export default function BackupSettings() {
             />
             {t('settings.backups.includeAttachments')}
           </label>
-          <Button onClick={createBackup} disabled={creating || status?.running || !status?.minioEnabled} variant="primary">
+          <Button onClick={() => void createBackup()} disabled={creating || status?.running || !status?.minioEnabled} variant="primary">
             {creating ? t('settings.backups.starting') : t('settings.backups.startBackup')}
           </Button>
         </div>
@@ -209,7 +215,7 @@ export default function BackupSettings() {
       <SettingsSection
         title={t('settings.backups.retentionPreviewTitle')}
         description={t('settings.backups.retentionPreviewDescription')}
-        meta={<Button size="sm" onClick={previewRetention} disabled={previewingRetention || !status?.minioEnabled}>{previewingRetention ? '…' : t('settings.backups.runRetentionPreview')}</Button>}
+        meta={<Button size="sm" onClick={() => void previewRetention()} disabled={previewingRetention || !status?.minioEnabled}>{previewingRetention ? '…' : t('settings.backups.runRetentionPreview')}</Button>}
       >
         {retentionPreview ? (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -234,7 +240,7 @@ export default function BackupSettings() {
       <SettingsSection
         title={t('settings.backups.jobsTitle')}
         description={t('settings.backups.jobsDescription')}
-        meta={<Button size="sm" onClick={() => load(true)} disabled={refreshing}>{refreshing ? '…' : t('common.update')}</Button>}
+        meta={<Button size="sm" onClick={() => void load(true)} disabled={refreshing}>{refreshing ? '…' : t('common.update')}</Button>}
       >
         {jobs.length === 0 ? (
           <div className="py-8 text-center text-sm text-gray-500">{t('settings.backups.noJobs')}</div>
@@ -308,7 +314,7 @@ export default function BackupSettings() {
                 </div>
                 <Button
                   size="sm"
-                  onClick={previewRestore}
+                  onClick={() => void previewRestore()}
                   disabled={previewingRestore || selectedJob.status !== 'completed' || !status?.minioEnabled}
                 >
                   {previewingRestore ? '…' : t('settings.backups.runRestorePreview')}

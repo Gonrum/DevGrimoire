@@ -7,6 +7,16 @@ import Button from '../components/ui/Button';
 import { FormInput, FormSelect, FormTextarea } from '../components/ui/FormField';
 import { WorkflowPageShell } from '../components/ui/WorkflowShell';
 import { LoadingText } from '../components/ui/LoadingSpinner';
+import { errorMessage, optionOr } from '../lib/narrow';
+
+/**
+ * Die Statuswerte als Laufzeit-Liste. `CustomerStatus` allein ist nur ein Typ;
+ * `e.target.value as CustomerStatus` haette behauptet, was `HTMLSelectElement`
+ * nicht garantiert (`value` ist `string`). Mit der Liste wird geprueft.
+ */
+const CUSTOMER_STATUSES: readonly CustomerStatus[] = [
+  'lead', 'onboarding', 'active', 'paused', 'offboarding', 'cancelled', 'archived',
+];
 
 export default function CustomerEditPage() {
   const { t } = useTranslation();
@@ -42,9 +52,9 @@ export default function CustomerEditPage() {
         setWebsite(data.website ?? '');
         setNotes(data.notes ?? '');
       })
-      .catch((err) => showError(err.message))
+      .catch((err: unknown) => showError(errorMessage(err)))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, showError]);
 
   if (loading) return <LoadingText />;
   if (!customer || !id) return <p className="text-red-400">{t('customers.notFound')}</p>;
@@ -65,9 +75,9 @@ export default function CustomerEditPage() {
         website: website.trim() || undefined,
         notes: notes.trim() || undefined,
       });
-      navigate(`/customers/${id}`);
-    } catch (err: any) {
-      showError(err.message || t('customers.updateFailed'));
+      await navigate(`/customers/${id}`);
+    } catch (err) {
+      showError(errorMessage(err) || t('customers.updateFailed'));
     } finally {
       setSaving(false);
     }
@@ -79,7 +89,7 @@ export default function CustomerEditPage() {
       backLabel={customer.name}
       title={t('customers.editCustomer')}
     >
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-6">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormInput
             label={t('customers.customerName')}
@@ -89,7 +99,7 @@ export default function CustomerEditPage() {
             autoFocus
             fieldClassName="sm:col-span-2"
           />
-          <FormSelect label={t('common.status')} value={status} onChange={(e) => setStatus(e.target.value as CustomerStatus)}>
+          <FormSelect label={t('common.status')} value={status} onChange={(e) => setStatus(optionOr(e.target.value, CUSTOMER_STATUSES, 'active'))}>
             <option value="lead">{t('customers.status.lead')}</option>
             <option value="onboarding">{t('customers.status.onboarding')}</option>
             <option value="active">{t('customers.status.active')}</option>
@@ -154,7 +164,7 @@ export default function CustomerEditPage() {
           <Button type="submit" variant="primary" size="lg" disabled={saving || !name.trim()}>
             {saving ? t('common.saving') : t('common.save')}
           </Button>
-          <Button type="button" size="lg" onClick={() => navigate(`/customers/${id}`)}>
+          <Button type="button" size="lg" onClick={() => { void navigate(`/customers/${id}`); }}>
             {t('common.cancel')}
           </Button>
         </div>

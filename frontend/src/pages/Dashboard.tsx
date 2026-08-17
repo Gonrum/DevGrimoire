@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Project, Todo } from '../api/client';
@@ -10,6 +10,7 @@ import Markdown from '../components/Markdown';
 import PendingQuestionsWidget from '../components/dashboard/PendingQuestionsWidget';
 import ActivityFeed from '../components/dashboard/ActivityFeed';
 import { LoadingText } from '../components/ui/LoadingSpinner';
+import { errorMessage } from '../lib/narrow';
 
 export default function Dashboard() {
   const { t, i18n } = useTranslation();
@@ -21,7 +22,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const { showError } = useToast();
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const [favProjects, allProjects, todos] = await Promise.all([
         api.projects.list({ favorite: true }),
@@ -39,29 +40,35 @@ export default function Dashboard() {
       setProjectMap(map);
       setProjectsById(byId);
       setActiveTodos(todos);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const toggleFavorite = async (e: React.MouseEvent, project: Project) => {
     e.preventDefault();
     e.stopPropagation();
     try {
       await api.projects.update(project._id, { favorite: !project.favorite });
-      loadData();
-    } catch (err: any) {
-      showError(err.message || t('dashboard.favoriteError'));
+      await loadData();
+    } catch (err) {
+      showError(errorMessage(err) || t('dashboard.favoriteError'));
     }
   };
 
+  /*
+   * Der Aufruf steckt in einer eigenen async-Funktion, damit der Effekt-Body
+   * selbst nichts synchron setzt (`react-hooks/set-state-in-effect`). `loadData`
+   * ist `useCallback`-stabil, die vollstaendige Dep-Liste laeuft also nicht
+   * im Kreis.
+   */
   useEffect(() => {
-    loadData();
-  }, []);
+    void (async () => { await loadData(); })();
+  }, [loadData]);
 
-  useDashboardEvents(() => loadData());
+  useDashboardEvents(() => { void loadData(); });
 
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
@@ -110,7 +117,7 @@ export default function Dashboard() {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={(e) => toggleFavorite(e, p)}
+                      onClick={(e) => { void toggleFavorite(e, p); }}
                       className="text-lg leading-none text-yellow-400 hover:text-yellow-300 transition-colors"
                       title={t('dashboard.removeFavorite')}
                       aria-label={t('dashboard.removeFavorite')}

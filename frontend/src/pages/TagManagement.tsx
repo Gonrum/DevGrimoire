@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Project, ProjectTag } from '../api/client';
@@ -7,6 +7,7 @@ import { LoadingText } from '../components/ui/LoadingSpinner';
 import { SettingsShell } from '../components/ui/SettingsShell';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
+import { errorMessage } from '../lib/narrow';
 
 type SortKey = 'name' | 'usage';
 type DialogState =
@@ -26,7 +27,7 @@ export default function TagManagement() {
   const [dialog, setDialog] = useState<DialogState>({ kind: 'none' });
   const [working, setWorking] = useState(false);
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     setLoading(true);
     try {
       const [tagRows, projectRows] = await Promise.all([
@@ -35,16 +36,21 @@ export default function TagManagement() {
       ]);
       setTags(tagRows);
       setProjects(projectRows);
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : String(err));
+    } catch (err) {
+      showError(errorMessage(err));
     } finally {
       setLoading(false);
     }
-  };
+  }, [showError]);
 
+  /*
+   * `reload` wird auch von den Dialog-Aktionen aufgerufen und bleibt deshalb als
+   * `useCallback` daneben stehen. Der Aufruf im Effekt liegt in einer eigenen
+   * async-Funktion, damit der Effekt-Body selbst nichts synchron setzt.
+   */
   useEffect(() => {
-    reload();
-  }, []);
+    void (async () => { await reload(); })();
+  }, [reload]);
 
   const sortedTags = [...tags].sort((a, b) => {
     if (sortKey === 'usage') {
@@ -68,8 +74,8 @@ export default function TagManagement() {
       closeDialog();
       await reload();
       showSuccess(t('tagManagement.renameSuccess', { count: modified }));
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : String(err));
+    } catch (err) {
+      showError(errorMessage(err));
     } finally {
       setWorking(false);
     }
@@ -84,8 +90,8 @@ export default function TagManagement() {
       closeDialog();
       await reload();
       showSuccess(t('tagManagement.mergeSuccess', { count: modified }));
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : String(err));
+    } catch (err) {
+      showError(errorMessage(err));
     } finally {
       setWorking(false);
     }
@@ -99,8 +105,8 @@ export default function TagManagement() {
       closeDialog();
       await reload();
       showSuccess(t('tagManagement.deleteSuccess', { count: modified }));
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : String(err));
+    } catch (err) {
+      showError(errorMessage(err));
     } finally {
       setWorking(false);
     }
@@ -220,9 +226,9 @@ export default function TagManagement() {
           tags={tags}
           projectsCount={projectsForTag(dialog.tag).length}
           onCancel={closeDialog}
-          onRename={handleRename}
-          onMerge={handleMerge}
-          onDelete={handleDelete}
+          onRename={(to) => { void handleRename(to); }}
+          onMerge={(target) => { void handleMerge(target); }}
+          onDelete={() => { void handleDelete(); }}
           working={working}
         />
       )}

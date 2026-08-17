@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Button from '../ui/Button';
 import { Dialog, Portal } from '../ui/Dialog';
+import { errorMessage } from '../../lib/narrow';
 
 interface SshFingerprintDialogProps {
   host: string;
@@ -31,11 +32,21 @@ export default function SshFingerprintDialog({
 }: SshFingerprintDialogProps) {
   const { t } = useTranslation();
   const [accepting, setAccepting] = useState(false);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
 
+  /**
+   * `onAccept` is typed `() => Promise<void> | void`, so a caller that does
+   * *not* catch internally would previously have produced an unhandled
+   * rejection and a silently stuck dialog. The rejection is caught here and
+   * rendered, which is what makes the `void` at the call site honest.
+   */
   const handleAccept = async () => {
     setAccepting(true);
+    setAcceptError(null);
     try {
       await onAccept();
+    } catch (err) {
+      setAcceptError(errorMessage(err));
     } finally {
       setAccepting(false);
     }
@@ -66,12 +77,17 @@ export default function SshFingerprintDialog({
             </pre>
           </div>
           <p className="text-xs text-gray-500">{t('ssh.fingerprint.hint')}</p>
+          {acceptError && (
+            <div className="rounded border border-red-700 bg-red-900/40 px-3 py-2 text-xs text-red-200">
+              {acceptError}
+            </div>
+          )}
         </div>
         <div className="border-t border-gray-800 px-5 py-3 flex justify-end gap-2">
           <Button variant="secondary" onClick={onCancel} disabled={accepting}>
             {t('common.cancel')}
           </Button>
-          <Button variant="primary" onClick={handleAccept} disabled={accepting}>
+          <Button variant="primary" onClick={() => void handleAccept()} disabled={accepting}>
             {accepting ? '…' : t('ssh.fingerprint.accept')}
           </Button>
         </div>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Environment, SecretListItem } from '../api/client';
+import { errorMessage } from '../lib/narrow';
 import { useToast } from './Toast';
 import Button from './ui/Button';
 import Card from './ui/Card';
@@ -31,8 +32,8 @@ function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () 
       const s = await api.secrets.get(secret._id);
       setRevealed(s.value);
       setTimeout(() => setRevealed(null), 10000);
-    } catch (err: any) {
-      showError(err.message || t('environments.decryptError'));
+    } catch (err) {
+      showError(errorMessage(err, t('environments.decryptError')));
     }
   };
 
@@ -59,7 +60,7 @@ function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () 
       </div>
       <div className="flex items-center gap-1 shrink-0">
         <Button type="button" size="xs" onClick={handleReveal}>{revealed ? t('environments.hide') : t('environments.reveal')}</Button>
-        <ConfirmButton onConfirm={async () => { try { await api.secrets.delete(secret._id); onDelete(); } catch (err: any) { showError(err.message); } }} label="X" confirmLabel={t('common.confirmDelete')} size="xs" />
+        <ConfirmButton onConfirm={async () => { try { await api.secrets.delete(secret._id); onDelete(); } catch (err) { showError(errorMessage(err)); } }} label="X" confirmLabel={t('common.confirmDelete')} size="xs" />
       </div>
     </div>
   );
@@ -121,11 +122,11 @@ function EnvironmentCard({ env, owner, onUpdate }: { env: Environment; owner: { 
   useEffect(() => { if (expanded) loadSecrets(); }, [expanded]);
 
   const handleToggleActive = async () => {
-    try { await api.environments.update(env._id, { active: !env.active }); onUpdate(); } catch (err: any) { showError(err.message); }
+    try { await api.environments.update(env._id, { active: !env.active }); onUpdate(); } catch (err) { showError(errorMessage(err)); }
   };
 
   const handleSaveVars = async () => {
-    try { await api.environments.update(env._id, { variables: vars }); setEditingVars(false); onUpdate(); } catch (err: any) { showError(err.message); }
+    try { await api.environments.update(env._id, { variables: vars }); setEditingVars(false); onUpdate(); } catch (err) { showError(errorMessage(err)); }
   };
 
   const addVar = () => setVars([...vars, { key: '', value: '' }]);
@@ -149,7 +150,7 @@ function EnvironmentCard({ env, owner, onUpdate }: { env: Environment; owner: { 
           <button type="button" onClick={handleToggleActive} className={`text-xs px-2 py-0.5 rounded-full ${env.active ? 'bg-green-900/40 text-green-300' : 'bg-gray-800 text-gray-500'}`}>
             {env.active ? t('common.active') : t('common.inactive')}
           </button>
-          <ConfirmButton onConfirm={async () => { try { await api.environments.delete(env._id); onUpdate(); } catch (err: any) { showError(err.message); } }} label={t('common.remove')} size="xs" />
+          <ConfirmButton onConfirm={async () => { try { await api.environments.delete(env._id); onUpdate(); } catch (err) { showError(errorMessage(err)); } }} label={t('common.remove')} size="xs" />
         </div>
       </div>
 

@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import { useToast } from '../components/Toast';
 import Button from '../components/ui/Button';
 import { FormInput, FormTextarea } from '../components/ui/FormField';
+import { errorMessage } from '../lib/narrow';
 
 const ENV_PRESETS = [
   { name: 'development', label: 'Development', color: 'bg-green-900/40 text-green-300' },
@@ -56,9 +57,9 @@ export default function EnvironmentCreatePage() {
         url: url.trim() || undefined,
         variables: validVars.length > 0 ? validVars : undefined,
       });
-      navigate(ownerBackUrl);
-    } catch (err: any) {
-      showError(err.message || t('envCreate.errorCreating'));
+      await navigate(ownerBackUrl);
+    } catch (err) {
+      showError(errorMessage(err) || t('envCreate.errorCreating'));
     } finally {
       setSaving(false);
     }
@@ -70,7 +71,7 @@ export default function EnvironmentCreatePage() {
 
       <h1 className="text-xl font-bold mb-6">{t('envCreate.title')}</h1>
 
-      <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-6">
+      <form onSubmit={(e) => { void handleSubmit(e); }} className="max-w-3xl mx-auto space-y-6">
         {/* Name with presets */}
         <div>
           <FormInput label={t('common.name')} required type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('envCreate.namePlaceholder')} autoFocus />
@@ -126,7 +127,7 @@ export default function EnvironmentCreatePage() {
           <Button type="submit" variant="primary" size="lg" disabled={saving || !name.trim()}>
             {saving ? t('common.creating') : t('envCreate.createEnvironment')}
           </Button>
-          <Button type="button" size="lg" onClick={() => navigate(ownerBackUrl)}>
+          <Button type="button" size="lg" onClick={() => { void navigate(ownerBackUrl); }}>
             {t('common.cancel')}
           </Button>
         </div>

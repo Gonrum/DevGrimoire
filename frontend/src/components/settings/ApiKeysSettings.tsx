@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, ApiKeyInfo } from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
+import { errorMessage } from '../../lib/narrow';
 import ApiKeyToolEditor from '../ApiKeyToolEditor';
 import ApiKeyScopeEditor from '../ApiKeyScopeEditor';
 import Button from '../ui/Button';
@@ -26,21 +27,36 @@ export default function ApiKeysSettings() {
   const [editingApiKeyId, setEditingApiKeyId] = useState<string | null>(null);
   const [editingApiKeyScopeId, setEditingApiKeyScopeId] = useState<string | null>(null);
 
-  const loadApiKeys = useCallback(async () => {
+  /*
+   * `isCancelled` lässt den aufrufenden Effect ein veraltetes Ergebnis
+   * verwerfen: `isAdmin` löst asynchron auf (Auth-Status, Token-Refresh), und
+   * die beiden Zweige liefern *unterschiedliche* Listen. Ohne den Guard könnte
+   * die langsamere Antwort die neuere überschreiben — der Nutzer sähe dann die
+   * falsche Sicht (alle Keys statt nur seiner, oder umgekehrt).
+   */
+  const loadApiKeys = useCallback(async (isCancelled: () => boolean = () => false) => {
     setApiKeysLoading(true);
     try {
       // T-337: admins see ALL keys + owner column; non-admins keep the
       // per-user view (they only see their own).
       const keys = isAdmin ? await api.apiKeys.listAll() : await api.apiKeys.list();
-      setApiKeys(keys);
+      if (!isCancelled()) setApiKeys(keys);
     } catch (e) {
-      setApiKeyError(e instanceof Error ? e.message : t('common.errorLoading', { error: '' }));
+      if (!isCancelled()) {
+        setApiKeyError(e instanceof Error ? e.message : t('common.errorLoading', { error: '' }));
+      }
     } finally {
-      setApiKeysLoading(false);
+      if (!isCancelled()) setApiKeysLoading(false);
     }
   }, [t, isAdmin]);
 
-  useEffect(() => { loadApiKeys(); }, [loadApiKeys]);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await loadApiKeys(() => cancelled);
+    })();
+    return () => { cancelled = true; };
+  }, [loadApiKeys]);
 
   const saveApiKeyTools = async (id: string, tools: string[] | null) => {
     await api.apiKeys.update(id, { allowedTools: tools });
@@ -90,9 +106,17 @@ export default function ApiKeysSettings() {
   };
 
   const copyToClipboard = async (text: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      // `navigator.clipboard` lehnt in unsicherem Kontext (kein HTTPS) oder bei
+      // verweigerter Berechtigung ab. Vorher wurde die Ablehnung verschluckt:
+      // kein "Kopiert!", keine Meldung — der Nutzer hielt den Key für kopiert,
+      // obwohl er nur einmal angezeigt wird. Der Fehlertext enthält den Key nicht.
+      setApiKeyError(errorMessage(e, t('common.error')));
+    }
   };
 
   return (
@@ -118,7 +142,7 @@ export default function ApiKeysSettings() {
             <code className="flex-1 break-all rounded bg-gray-950 px-3 py-2 font-mono text-sm text-green-400">
               {revealedKey}
             </code>
-            <Button variant="primary" size="sm" onClick={() => copyToClipboard(revealedKey)}>
+            <Button variant="primary" size="sm" onClick={() => void copyToClipboard(revealedKey)}>
               {copied ? t('common.copied') : t('common.copy')}
             </Button>
           </div>
@@ -149,7 +173,7 @@ export default function ApiKeysSettings() {
           />
           <Button
             variant="primary"
-            onClick={createApiKey}
+            onClick={() => void createApiKey()}
             disabled={apiKeyCreating || !apiKeyName.trim()}
           >
             {apiKeyCreating ? t('common.creating') : t('common.create')}

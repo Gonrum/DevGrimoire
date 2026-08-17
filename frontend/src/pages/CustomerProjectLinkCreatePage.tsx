@@ -7,6 +7,7 @@ import Button from '../components/ui/Button';
 import { FormInput, FormSelect, FormTextarea } from '../components/ui/FormField';
 import { WorkflowPageShell } from '../components/ui/WorkflowShell';
 import { LoadingText } from '../components/ui/LoadingSpinner';
+import { errorMessage } from '../lib/narrow';
 
 export default function CustomerProjectLinkCreatePage() {
   const { t } = useTranslation();
@@ -36,9 +37,9 @@ export default function CustomerProjectLinkCreatePage() {
         setExistingLinks(linkData);
         setProjects(projectData);
       })
-      .catch((err) => showError(err.message))
+      .catch((err: unknown) => showError(errorMessage(err)))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, showError]);
 
   const linkedProjectIds = useMemo(
     () => new Set(existingLinks.map((link) => link.projectId)),
@@ -50,22 +51,42 @@ export default function CustomerProjectLinkCreatePage() {
     [projects, linkedProjectIds],
   );
 
-  useEffect(() => {
-    if (!projectId && availableProjects[0]) setProjectId(availableProjects[0]._id);
-  }, [availableProjects, projectId]);
+  /*
+   * Die Vorauswahl war ein Effekt, der `projectId` nachtraeglich setzte, sobald
+   * die Projektliste eintraf — abgeleiteter Zustand, doppelt gehalten und einen
+   * Render zu spaet. Sie ist jetzt berechnet: leerer State heisst "noch nichts
+   * gewaehlt", und dann gilt das erste verfuegbare Projekt.
+   */
+  const effectiveProjectId = projectId || availableProjects[0]?._id || '';
 
   useEffect(() => {
-    if (!projectId) {
-      setEnvironments([]);
+    let cancelled = false;
+    async function run() {
       setSelectedEnvironmentIds([]);
-      return;
+      if (!effectiveProjectId) {
+        setEnvironments([]);
+        return;
+      }
+      try {
+        const envs = await api.environments.list(effectiveProjectId);
+        if (!cancelled) setEnvironments(envs);
+      } catch (err) {
+        /*
+         * Vorher `.catch(() => setEnvironments([]))`: der Nutzer sah "keine
+         * Umgebungen" und verknuepfte das Projekt ohne Umgebungen, obwohl nur
+         * der Request gescheitert war. Der `cancelled`-Guard verhindert
+         * zusaetzlich, dass beim schnellen Umschalten die Antwort des vorher
+         * gewaehlten Projekts die aktuelle Liste ueberschreibt.
+         */
+        if (!cancelled) {
+          setEnvironments([]);
+          showError(errorMessage(err));
+        }
+      }
     }
-    api.environments
-      .list(projectId)
-      .then(setEnvironments)
-      .catch(() => setEnvironments([]));
-    setSelectedEnvironmentIds([]);
-  }, [projectId]);
+    void run();
+    return () => { cancelled = true; };
+  }, [effectiveProjectId, showError]);
 
   if (loading) return <LoadingText />;
   if (!customer || !id) return <p className="text-red-400">{t('customers.notFound')}</p>;
@@ -78,18 +99,18 @@ export default function CustomerProjectLinkCreatePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!projectId) return;
+    if (!effectiveProjectId) return;
     setSaving(true);
     try {
       await api.customers.createProjectLink(id, {
-        projectId,
+        projectId: effectiveProjectId,
         role: role.trim() || undefined,
         notes: notes.trim() || undefined,
         environmentIds: selectedEnvironmentIds,
       });
-      navigate(`/customers/${id}`);
-    } catch (err: any) {
-      showError(err.message || t('customers.linkFailed'));
+      await navigate(`/customers/${id}`);
+    } catch (err) {
+      showError(errorMessage(err) || t('customers.linkFailed'));
     } finally {
       setSaving(false);
     }
@@ -104,13 +125,13 @@ export default function CustomerProjectLinkCreatePage() {
       {availableProjects.length === 0 ? (
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center">
           <p className="text-gray-400">{t('customers.allProjectsLinked')}</p>
-          <Button type="button" size="lg" className="mt-4" onClick={() => navigate(`/customers/${id}`)}>
+          <Button type="button" size="lg" className="mt-4" onClick={() => { void navigate(`/customers/${id}`); }}>
             {t('common.back')}
           </Button>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <FormSelect label={t('customers.project')} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+        <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-6">
+          <FormSelect label={t('customers.project')} value={effectiveProjectId} onChange={(e) => setProjectId(e.target.value)}>
             {availableProjects.map((project) => (
               <option key={project._id} value={project._id}>{project.name}</option>
             ))}
@@ -154,10 +175,10 @@ export default function CustomerProjectLinkCreatePage() {
           </div>
 
           <div className="flex gap-2 pt-2">
-            <Button type="submit" variant="primary" size="lg" disabled={saving || !projectId}>
+            <Button type="submit" variant="primary" size="lg" disabled={saving || !effectiveProjectId}>
               {saving ? t('common.saving') : t('customers.linkProjectAction')}
             </Button>
-            <Button type="button" size="lg" onClick={() => navigate(`/customers/${id}`)}>
+            <Button type="button" size="lg" onClick={() => { void navigate(`/customers/${id}`); }}>
               {t('common.cancel')}
             </Button>
           </div>

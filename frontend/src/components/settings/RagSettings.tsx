@@ -37,7 +37,7 @@ export default function RagSettings() {
         </div>
 
         <SettingsActions>
-          <Button variant="primary" onClick={reindex} disabled={reindexing}>
+          <Button variant="primary" onClick={() => void reindex()} disabled={reindexing}>
             {reindexing ? t('settings.ragReindexing') : t('settings.ragReindexNow')}
           </Button>
         </SettingsActions>

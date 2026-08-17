@@ -25,7 +25,7 @@ export default function OnboardingBanner({ onJumpTo }: OnboardingBannerProps) {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    void (async () => {
       // T-Task17: chat/RAG endpoints now live in the central LLM-Endpoints
       // registry (purposes 'chat' / 'embedding') rather than the legacy
       // per-feature config endpoints, which the runtime no longer reads.

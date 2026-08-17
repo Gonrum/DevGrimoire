@@ -6,6 +6,16 @@ import { useToast } from '../components/Toast';
 import Button from '../components/ui/Button';
 import { FormInput, FormSelect, FormTextarea } from '../components/ui/FormField';
 import { WorkflowPageShell } from '../components/ui/WorkflowShell';
+import { errorMessage, optionOr } from '../lib/narrow';
+
+/**
+ * Die Statuswerte als Laufzeit-Liste. `CustomerStatus` allein ist nur ein Typ;
+ * `e.target.value as CustomerStatus` hätte behauptet, was `HTMLSelectElement`
+ * nicht garantiert (`value` ist `string`). Mit der Liste wird geprüft.
+ */
+const CUSTOMER_STATUSES: readonly CustomerStatus[] = [
+  'lead', 'onboarding', 'active', 'paused', 'offboarding', 'cancelled', 'archived',
+];
 
 export default function CustomerCreatePage() {
   const { t } = useTranslation();
@@ -38,9 +48,9 @@ export default function CustomerCreatePage() {
         website: website.trim() || undefined,
         notes: notes.trim() || undefined,
       });
-      navigate(`/customers/${customer._id}`);
-    } catch (err: any) {
-      showError(err.message || t('customers.createFailed'));
+      await navigate(`/customers/${customer._id}`);
+    } catch (err) {
+      showError(errorMessage(err) || t('customers.createFailed'));
     } finally {
       setSaving(false);
     }
@@ -48,7 +58,7 @@ export default function CustomerCreatePage() {
 
   return (
     <WorkflowPageShell backTo="/customers" backLabel={t('customers.allCustomers')} title={t('customers.createCustomer')}>
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-6">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormInput
             label={t('customers.customerName')}
@@ -58,7 +68,7 @@ export default function CustomerCreatePage() {
             autoFocus
             fieldClassName="sm:col-span-2"
           />
-          <FormSelect label={t('common.status')} value={status} onChange={(e) => setStatus(e.target.value as CustomerStatus)}>
+          <FormSelect label={t('common.status')} value={status} onChange={(e) => setStatus(optionOr(e.target.value, CUSTOMER_STATUSES, 'active'))}>
             <option value="lead">{t('customers.status.lead')}</option>
             <option value="onboarding">{t('customers.status.onboarding')}</option>
             <option value="active">{t('customers.status.active')}</option>
@@ -123,7 +133,7 @@ export default function CustomerCreatePage() {
           <Button type="submit" variant="primary" size="lg" disabled={saving || !name.trim()}>
             {saving ? t('common.creating') : t('customers.createCustomerAction')}
           </Button>
-          <Button type="button" size="lg" onClick={() => navigate('/customers')}>
+          <Button type="button" size="lg" onClick={() => { void navigate('/customers'); }}>
             {t('common.cancel')}
           </Button>
         </div>

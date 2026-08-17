@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChangelogEntry, Project, api } from '../api/client';
+import { errorMessage } from '../lib/narrow';
 import Card from './ui/Card';
 import EmptyState from './ui/EmptyState';
 import ListCardHeader from './ui/ListCardHeader';
@@ -88,8 +89,8 @@ function ChangelogForm({
         showSuccess(t('changelog.created'));
       }
       onDone();
-    } catch (err: any) {
-      showError(err.message || t('common.errorSaving'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSaving(false);
     }
@@ -200,8 +201,8 @@ export default function ChangelogList({
       await api.changelog.delete(entry._id);
       showSuccess(t('changelog.deleted'));
       onUpdate?.();
-    } catch (err: any) {
-      showError(err.message || t('common.errorDeleting'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorDeleting')));
     }
   };
 

@@ -57,7 +57,11 @@ export default function InstructionsSettings() {
     }
   }, [t]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    void (async () => {
+      await load();
+    })();
+  }, [load]);
 
   const save = async () => {
 
@@ -110,7 +114,7 @@ export default function InstructionsSettings() {
           </div>
 
           <SettingsActions>
-            <Button variant="primary" size="lg" onClick={save} disabled={saving || saved}>
+            <Button variant="primary" size="lg" onClick={() => void save()} disabled={saving || saved}>
               {saving ? t('common.saving') : t('common.save')}
             </Button>
             <Button size="lg" onClick={reset}>

@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Dependency, PackageManager, api } from '../api/client';
+import { errorMessage, optionOr } from '../lib/narrow';
 import { useToast } from './Toast';
 import Card from './ui/Card';
 import EmptyState from './ui/EmptyState';
@@ -20,6 +21,19 @@ const pmColors: Record<PackageManager, string> = {
   nuget: 'bg-purple-900/40 text-purple-300',
   gem: 'bg-pink-900/40 text-pink-300',
 };
+
+/**
+ * Die anwählbaren Paketmanager, in Anzeigereihenfolge.
+ *
+ * `satisfies` beweist zur Compile-Zeit, dass hier nur echte `PackageManager`
+ * stehen; `as const` behält die Literale, damit `optionOr` unten den Union-Typ
+ * zurückgibt statt `string`. Damit ist die Liste zugleich die Laufzeit-Whitelist
+ * für den `<select>`-Wert — vorher stand dort ein blankes
+ * `e.target.value as PackageManager`.
+ */
+const PACKAGE_MANAGERS = [
+  'npm', 'composer', 'pip', 'cargo', 'go', 'maven', 'nuget', 'gem',
+] as const satisfies readonly PackageManager[];
 
 const pmLabels: Record<PackageManager, string> = {
   npm: 'npm',
@@ -105,8 +119,8 @@ function DependencyForm({
         showSuccess(t('dependencies.depCreated', { name: form.name }));
       }
       onDone();
-    } catch (err: any) {
-      showError(err.message || t('common.errorSaving'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSaving(false);
     }
@@ -137,10 +151,12 @@ function DependencyForm({
             label={t('dependencies.packageManager')}
             required
             value={form.packageManager}
-            onChange={(e) => update({ packageManager: e.target.value as PackageManager })}
+            onChange={(e) =>
+              update({ packageManager: optionOr(e.target.value, PACKAGE_MANAGERS, form.packageManager) })
+            }
           >
-            {Object.entries(pmLabels).map(([key, label]) => (
-              <option key={key} value={key}>{label}</option>
+            {PACKAGE_MANAGERS.map((key) => (
+              <option key={key} value={key}>{pmLabels[key]}</option>
             ))}
           </FormSelect>
         </div>
@@ -216,8 +232,8 @@ export default function DependencyList({ entries, projectId }: { entries: Depend
     try {
       await api.dependencies.delete(dep._id);
       showSuccess(t('dependencies.depDeleted', { name: dep.name }));
-    } catch (err: any) {
-      showError(err.message || t('common.errorDeleting'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorDeleting')));
     }
   };
 

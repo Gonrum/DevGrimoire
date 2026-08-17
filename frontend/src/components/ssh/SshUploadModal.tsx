@@ -91,7 +91,9 @@ export default function SshUploadModal({ connectionId, connectionLabel, onClose 
             <Button variant="secondary" onClick={onClose} disabled={busy}>
               {t('common.cancel')}
             </Button>
-            <Button variant="primary" onClick={submit} disabled={busy}>
+            {/* `submit()` catches everything and reports via `showError` → the
+                error path is inside, `void` only discards the settled promise. */}
+            <Button variant="primary" onClick={() => void submit()} disabled={busy}>
               {busy ? t('ssh.upload.uploading') : t('ssh.upload.submit')}
             </Button>
           </div>

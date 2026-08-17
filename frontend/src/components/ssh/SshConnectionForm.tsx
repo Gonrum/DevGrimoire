@@ -8,6 +8,7 @@ import {
   SshConnectionUpdateInput,
   SshTestResult,
 } from '../../api/client';
+import { errorMessage } from '../../lib/narrow';
 import Button from '../ui/Button';
 import ConfirmButton from '../ui/ConfirmButton';
 import { Dialog, Portal } from '../ui/Dialog';
@@ -29,6 +30,11 @@ const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 /** kebab-case, 3–60 chars, [a-z0-9-]. Matches backend `SSH_SLUG_REGEX`. */
 function isValidSlug(slug: string): boolean {
   return slug.length >= 3 && slug.length <= 60 && SLUG_RE.test(slug);
+}
+
+/** Bytes → whole MB as a form string; empty string when the cap is unset. */
+function mbFromBytes(bytes: number | undefined): string {
+  return bytes ? String(Math.round(bytes / (1024 * 1024))) : '';
 }
 
 function slugifyLabel(label: string): string {
@@ -93,16 +99,22 @@ export default function SshConnectionForm({
   const [host, setHost] = useState(initial?.host ?? '');
   const [port, setPort] = useState<number>(initial?.port ?? 22);
   const [username, setUsername] = useState(initial?.username ?? '');
-  // `detail` is always null at mount (async fetch). The useEffect below
-  // syncs the description once the detail-fetch resolves.
-  const [description, setDescription] = useState('');
   const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
   const [notifyOnAuthFailure, setNotifyOnAuthFailure] = useState<boolean>(
     initial?.notifyOnAuthFailure ?? false,
   );
-  const [maxUploadMb, setMaxUploadMb] = useState<string>(
-    initial?.maxUploadBytes ? String(Math.round(initial.maxUploadBytes / (1024 * 1024))) : '',
-  );
+
+  // `description` and the upload cap only exist on the *detail* shape, which
+  // is fetched (always `null` at mount). Both are therefore server values with
+  // a local override: `null` = "the user hasn't typed here", so the displayed
+  // value follows the detail-fetch as it resolves — computed, not copied into
+  // state by an effect. The previous effect-copy both duplicated the value and
+  // clobbered whatever the user had typed while the fetch was in flight.
+  const [descriptionEdit, setDescriptionEdit] = useState<string | null>(null);
+  const [maxUploadMbEdit, setMaxUploadMbEdit] = useState<string | null>(null);
+  const description = descriptionEdit ?? detail?.description ?? '';
+  const maxUploadMb =
+    maxUploadMbEdit ?? mbFromBytes(detail ? detail.maxUploadBytes : initial?.maxUploadBytes);
 
   const [authTab, setAuthTab] = useState<AuthTab>(initial?.authMethod ?? 'key');
   // In create-mode the user picks inline-vs-pick. In edit-mode credentials are
@@ -120,36 +132,30 @@ export default function SshConnectionForm({
   const [passphraseSecretId, setPassphraseSecretId] = useState<string>('');
   const [passwordSecretId, setPasswordSecretId] = useState<string>('');
 
-  // Sync description + upload override once the detail-fetch resolves in edit-mode.
-  useEffect(() => {
-    if (detail) {
-      setDescription(detail.description ?? '');
-      setMaxUploadMb(
-        detail.maxUploadBytes
-          ? String(Math.round(detail.maxUploadBytes / (1024 * 1024)))
-          : '',
-      );
-    }
-  }, [detail]);
-
   // ----- Secrets dropdown (Pick-Existing) -----------------------------------
   const [secrets, setSecrets] = useState<SecretListItem[]>([]);
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    void (async () => {
       try {
         const list = scope.customerId
           ? await api.secrets.listForCustomer(scope.customerId)
           : await api.secrets.list(scope.projectId!);
         if (!cancelled) setSecrets(list);
-      } catch {
-        if (!cancelled) setSecrets([]);
+      } catch (err) {
+        // Used to be swallowed: an empty list is indistinguishable from
+        // "no secrets exist", which pushes the user into inline-credentials
+        // without ever telling them the lookup failed.
+        if (!cancelled) {
+          setSecrets([]);
+          showError(t('common.errorLoading', { error: errorMessage(err) }));
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [scope.customerId, scope.projectId]);
+  }, [scope.customerId, scope.projectId, showError, t]);
 
   // Backend creates inline secrets as `type='ssh_key'` for the private key and
   // `type='password'` for both the passphrase and the password (the SecretType
@@ -451,7 +457,7 @@ export default function SshConnectionForm({
               label={t('common.description')}
               rows={2}
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => setDescriptionEdit(e.target.value)}
             />
 
             <div>
@@ -475,7 +481,7 @@ export default function SshConnectionForm({
                 min={1}
                 max={500}
                 value={maxUploadMb}
-                onChange={(e) => setMaxUploadMb(e.target.value)}
+                onChange={(e) => setMaxUploadMbEdit(e.target.value)}
                 helpText={t('ssh.form.maxUploadHint')}
               />
             )}

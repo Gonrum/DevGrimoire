@@ -11,6 +11,7 @@ import {
   SecretListItem,
   api,
 } from '../api/client';
+import { optionOr } from '../lib/narrow';
 import { wsEventBus, isProjectChangeEvent } from '../api/wsEventBus';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
@@ -29,7 +30,15 @@ const STATUS_COLORS: Record<HealthcheckStatus, string> = {
   unknown: 'bg-gray-800 text-gray-400',
 };
 
-const METHODS: HealthcheckMethod[] = ['GET', 'POST', 'HEAD', 'PUT', 'PATCH', 'DELETE'];
+/*
+ * `as const satisfies` statt `: HealthcheckMethod[]`: die Literale bleiben
+ * erhalten, damit `optionOr` unten den Union-Typ liefert und der Cast
+ * `e.target.value as HealthcheckMethod` entfällt. Die Liste ist damit zugleich
+ * die Laufzeit-Whitelist des `<select>`.
+ */
+const METHODS = [
+  'GET', 'POST', 'HEAD', 'PUT', 'PATCH', 'DELETE',
+] as const satisfies readonly HealthcheckMethod[];
 
 interface MonitoringTabProps {
   customerId: string;
@@ -454,7 +463,7 @@ function HealthcheckForm({
           <FormSelect
             label={t('monitoring.field.method')}
             value={method}
-            onChange={(e) => setMethod(e.target.value as HealthcheckMethod)}
+            onChange={(e) => setMethod(optionOr(e.target.value, METHODS, method))}
           >
             {METHODS.map((m) => (
               <option key={m} value={m}>{m}</option>

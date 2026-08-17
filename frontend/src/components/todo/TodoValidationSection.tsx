@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, ValidationReport, ValidationReportStatus } from '../../api/client';
+import { errorMessage } from '../../lib/narrow';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import DetailSection from '../ui/DetailSection';
@@ -136,51 +137,78 @@ function ReportCard({
 
 export default function TodoValidationSection({ todoId, projectId, basePath, onError }: Props) {
   const { t } = useTranslation();
-  const [latest, setLatest] = useState<ValidationReport | null | undefined>(undefined);
+  /*
+   * Bericht, Historie und die Nummer des angelegten Bug-Todos gehören alle zu
+   * *einer* `todoId`. Vorher setzte ein Effect sie beim Wechsel zurück
+   * (setState im Effect-Body → Kaskaden-Render), und zwischen Wechsel und
+   * Antwort stand noch der Bericht des vorigen Todos auf dem Schirm. Jetzt
+   * trägt jeder dieser Zustände seine `todoId` mit sich und wird beim Lesen
+   * verglichen: kein Reset-Effect, kein Fremdbericht, und eine verspätete
+   * Antwort des Vorgängers kann den aktuellen Stand nicht überschreiben.
+   */
+  const [loadedLatest, setLoadedLatest] = useState<{ todoId: string; report: ValidationReport | null } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [history, setHistory] = useState<ValidationReport[] | null>(null);
+  const [loadedHistory, setLoadedHistory] = useState<{ todoId: string; reports: ValidationReport[] } | null>(null);
   const [proposing, setProposing] = useState(false);
-  const [bugTodoNumber, setBugTodoNumber] = useState<string | undefined>(undefined);
+  const [bugTodo, setBugTodo] = useState<{ todoId: string; displayNumber: string | undefined } | null>(null);
 
-  const loadLatest = useCallback(() => {
-    api.validationReports.latestForTodo(todoId)
-      .then(setLatest)
-      .catch(() => setLatest(null));
+  const latest = loadedLatest?.todoId === todoId ? loadedLatest.report : undefined;
+  const history = loadedHistory?.todoId === todoId ? loadedHistory.reports : null;
+  const bugTodoNumber = bugTodo?.todoId === todoId ? bugTodo.displayNumber : undefined;
+
+  /*
+   * `isStale` statt `AbortSignal`: die typisierten `api.*`-Methoden nehmen kein
+   * Signal. Der Effect gibt sein Cancel-Flag herein, der Klick-Pfad (Bug-Todo
+   * anlegen → neu laden) ruft ohne Argument auf.
+   */
+  const fetchLatest = useCallback(async (isStale?: () => boolean) => {
+    try {
+      const report = await api.validationReports.latestForTodo(todoId);
+      if (!isStale?.()) setLoadedLatest({ todoId, report });
+    } catch {
+      if (!isStale?.()) setLoadedLatest({ todoId, report: null });
+    }
   }, [todoId]);
 
   useEffect(() => {
-    loadLatest();
-    setHistory(null);
-    setHistoryOpen(false);
-    setBugTodoNumber(undefined);
-  }, [todoId, loadLatest]);
+    let cancelled = false;
+    void (async () => {
+      await fetchLatest(() => cancelled);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchLatest]);
 
-  const loadHistory = useCallback(async () => {
-    try {
-      const list = await api.validationReports.list({ todoId, limit: 20 });
-      setHistory(list);
-    } catch (err) {
-      onError((err as Error).message || 'Failed to load validation history');
-    }
-  }, [todoId, onError]);
-
-  const toggleHistory = () => {
-    if (!historyOpen && history === null) {
-      loadHistory();
-    }
-    setHistoryOpen((v) => !v);
-  };
+  // Die Historie wird geladen, wenn sie offen ist und für dieses Todo fehlt.
+  // Damit braucht weder der Toggle noch das Anlegen eines Bug-Todos einen
+  // eigenen Ladeaufruf: `setLoadedHistory(null)` genügt als Nachlade-Signal.
+  useEffect(() => {
+    if (!historyOpen || history !== null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const reports = await api.validationReports.list({ todoId, limit: 20 });
+        if (!cancelled) setLoadedHistory({ todoId, reports });
+      } catch (err) {
+        if (!cancelled) onError(errorMessage(err, 'Failed to load validation history'));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [historyOpen, history, todoId, onError]);
 
   const handleProposeBugTodo = async () => {
     if (!latest) return;
     setProposing(true);
     try {
       const res = await api.validationReports.proposeBugTodo(latest._id);
-      setBugTodoNumber(res.todo.displayNumber);
-      loadLatest();
-      if (historyOpen) loadHistory();
+      setBugTodo({ todoId, displayNumber: res.todo.displayNumber });
+      setLoadedHistory(null);
+      await fetchLatest();
     } catch (err) {
-      onError((err as Error).message || t('validation.proposeFailed'));
+      onError(errorMessage(err, t('validation.proposeFailed')));
     } finally {
       setProposing(false);
     }
@@ -203,7 +231,7 @@ export default function TodoValidationSection({ todoId, projectId, basePath, onE
               basePath={basePath}
               bugTodoId={bugTodoIdFromMeta}
               bugTodoDisplay={bugTodoNumber}
-              onProposeBugTodo={projectId ? handleProposeBugTodo : undefined}
+              onProposeBugTodo={projectId ? () => { void handleProposeBugTodo(); } : undefined}
               proposing={proposing}
               t={t}
             />
@@ -212,7 +240,7 @@ export default function TodoValidationSection({ todoId, projectId, basePath, onE
           <div>
             <button
               type="button"
-              onClick={toggleHistory}
+              onClick={() => setHistoryOpen((v) => !v)}
               className="text-xs text-gray-500 hover:text-gray-300"
             >
               {historyOpen ? t('validation.hideHistory') : t('validation.showHistory')}

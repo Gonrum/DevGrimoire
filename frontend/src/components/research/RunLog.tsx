@@ -1,7 +1,9 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronRight, Loader2, Play } from 'lucide-react';
 import { api, getCurrentAccessToken, ResearchRun, ResearchRunStatus, RunStep } from '../../api/client';
+import { parseJsonText, readErrorMessage } from '../../api/http-boundary';
+import { errorMessage, isRecord } from '../../lib/narrow';
 import { useToast } from '../Toast';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
@@ -28,9 +30,54 @@ interface LiveState {
 
 const IDLE_LIVE: LiveState = { runId: null, status: 'idle', steps: [] };
 
-interface SseEvent {
-  type?: string;
-  [k: string]: unknown;
+/**
+ * Ein SSE-Frame, so wie er über die Leitung kommt: ein Objekt mit unbekannten
+ * Feldern. Vorher stand hier ein `interface SseEvent { type?: string; … }` und
+ * `JSON.parse(data) as SseEvent` — die Behauptung, das Fremdformat sei schon
+ * geprüft. Sie war an vier Stellen die Wurzel weiterer Casts (`evt.step as
+ * RunStep`, `evt.summary as string | undefined`). Jetzt lesen die `read*`-Helfer
+ * jedes Feld einzeln und prüfen dabei.
+ */
+type SseFrame = Record<string, unknown>;
+
+/** Feld als String, oder `undefined` wenn es fehlt/kein String ist. */
+function readString(frame: SseFrame, key: string): string | undefined {
+  const value = frame[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+const RUN_STEP_TYPES: readonly RunStep['type'][] = ['tool_call', 'tool_result', 'note'];
+
+function isRunStepType(value: unknown): value is RunStep['type'] {
+  return RUN_STEP_TYPES.some((known) => known === value);
+}
+
+/**
+ * Baut einen `RunStep` aus einem SSE-Frame-Feld — konstruieren statt behaupten.
+ *
+ * `ts` ist im Frontend-Typ verpflichtend, im Frame aber nicht garantiert (das
+ * Backend fächert bei `attach` die persistierten Schritte aus, bei einem Live-Run
+ * das gerade gebaute Objekt). Ein Prädikat müsste einen Schritt ohne `ts`
+ * verwerfen und damit eine Zeile aus dem Log schlucken, die der Nutzer sehen
+ * soll — deshalb ein Fallback-Zeitstempel statt eines Verwurfs. Verworfen wird
+ * nur, was gar keinen bekannten `type` hat: dafür hat die Liste keine Darstellung.
+ */
+function readRunStep(value: unknown): RunStep | null {
+  if (!isRecord(value)) return null;
+  const type = value.type;
+  if (!isRunStepType(type)) return null;
+  return {
+    type,
+    ts: typeof value.ts === 'string' ? value.ts : new Date().toISOString(),
+    tool: typeof value.tool === 'string' ? value.tool : undefined,
+    argsSummary: typeof value.argsSummary === 'string' ? value.argsSummary : undefined,
+    resultSummary: typeof value.resultSummary === 'string' ? value.resultSummary : undefined,
+  };
+}
+
+/** Ein abgebrochenes `fetch` wirft eine `DOMException` mit diesem Namen. */
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError';
 }
 
 function authHeaders(): Record<string, string> {
@@ -47,7 +94,7 @@ function authHeaders(): Record<string, string> {
  * `data:` line, `JSON.parse` it, ignore anything that fails to parse
  * (`: ping` heartbeats included — they never start with `data:`).
  */
-async function pumpSse(body: ReadableStream<Uint8Array>, signal: AbortSignal, onEvent: (evt: SseEvent) => void): Promise<void> {
+async function pumpSse(body: ReadableStream<Uint8Array>, signal: AbortSignal, onEvent: (evt: SseFrame) => void): Promise<void> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -64,11 +111,20 @@ async function pumpSse(body: ReadableStream<Uint8Array>, signal: AbortSignal, on
         if (!line) continue;
         const data = line.slice(5).trim();
         if (!data) continue;
+        /*
+         * Ein einzelner kaputter Frame darf verworfen werden — die Verbindung
+         * aber nicht mitnehmen. Deshalb liegt das `try` **um den Frame** und
+         * nicht um die Schleife: `parseJsonText` wirft bei ungültigem JSON, und
+         * `onEvent` selbst darf hier nicht mit hineingezogen werden, sonst
+         * würde ein Render-Fehler als „kaputter Frame" durchgehen.
+         */
+        let parsed: unknown;
         try {
-          onEvent(JSON.parse(data) as SseEvent);
+          parsed = parseJsonText<unknown>(data);
         } catch {
-          // ignore malformed event
+          continue;
         }
+        if (isRecord(parsed)) onEvent(parsed);
       }
     }
   } finally {
@@ -93,13 +149,19 @@ function parseArtifactWrites(steps: RunStep[]): ArtifactChange[] {
   const out: ArtifactChange[] = [];
   for (const s of steps) {
     if (s.type !== 'tool_result' || s.tool !== 'artifact_write' || !s.resultSummary) continue;
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(s.resultSummary) as { slug?: string; version?: number; action?: string };
-      if (parsed.slug && typeof parsed.version === 'number' && (parsed.action === 'created' || parsed.action === 'updated')) {
-        out.push({ slug: parsed.slug, version: parsed.version, action: parsed.action });
-      }
+      parsed = parseJsonText<unknown>(s.resultSummary);
     } catch {
       // truncated/non-JSON summary — skip this one, not fatal
+      continue;
+    }
+    if (!isRecord(parsed)) continue;
+    const slug = parsed.slug;
+    const version = parsed.version;
+    const action = parsed.action;
+    if (typeof slug === 'string' && slug.length > 0 && typeof version === 'number' && (action === 'created' || action === 'updated')) {
+      out.push({ slug, version, action });
     }
   }
   return out;
@@ -196,58 +258,81 @@ const RunLog = forwardRef<RunLogHandle, RunLogProps>(function RunLog({ topicId, 
   // captured at stream-start time (state updates don't mutate old closures).
   const runIdRef = useRef<string | null>(null);
 
-  const load = async (): Promise<ResearchRun[]> => {
+  /*
+   * Reihenfolge der Callbacks ist bindend: `useCallback`-Dep-Listen werden beim
+   * Render **sofort** ausgewertet. Vorher standen `handleEvent` und
+   * `finalizeLive` in umgekehrter Reihenfolge — als reine Closures ging das
+   * gut, mit Dep-Listen wäre `[finalizeLive]` ein Zugriff in der Temporal Dead
+   * Zone und hätte beim ersten Render geworfen. Kette: load → finalizeLive →
+   * handleEvent → attachToRun → startRun.
+   */
+  const load = useCallback(async (): Promise<ResearchRun[]> => {
     setLoading(true);
     try {
       const list = await api.researchTopics.runsList(topicId);
       setRuns(list);
       return list;
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : String(err));
+    } catch (err) {
+      showError(errorMessage(err));
       return [];
     } finally {
       setLoading(false);
     }
-  };
+  }, [topicId, showError]);
 
-  const handleEvent = (evt: SseEvent) => {
-    switch (evt.type) {
-      case 'run_started': {
-        const runId = String(evt.runId ?? '');
-        if (!runId) return;
-        runIdRef.current = runId;
-        setLive({ runId, status: 'running', steps: [] });
-        break;
+  const finalizeLive = useCallback(
+    async (status: 'done' | 'error', summary?: string, error?: string) => {
+      const finishedId = runIdRef.current;
+      setLive((s) => ({ ...s, status, summary, error }));
+      onRunFinished?.();
+      await load();
+      if (finishedId) setExpandedRunId(finishedId);
+      runIdRef.current = null;
+      setLive(IDLE_LIVE);
+    },
+    [load, onRunFinished],
+  );
+
+  const handleEvent = useCallback(
+    (evt: SseFrame) => {
+      switch (evt.type) {
+        case 'run_started': {
+          const runId = readString(evt, 'runId');
+          if (!runId) return;
+          runIdRef.current = runId;
+          setLive({ runId, status: 'running', steps: [] });
+          break;
+        }
+        case 'step': {
+          const step = readRunStep(evt.step);
+          if (!step) return;
+          setLive((s) => ({ ...s, steps: [...s.steps, step] }));
+          break;
+        }
+        case 'artifact':
+          // Reserved event type — see `parseArtifactWrites` doc: not emitted
+          // by the backend today, handled here only for forward-compat.
+          break;
+        case 'done':
+          // `finalizeLive` fängt seine Fehler über `load` selbst und zeigt sie
+          // als Toast — deshalb genügt `void`.
+          void finalizeLive('done', readString(evt, 'summary'), undefined);
+          break;
+        case 'error':
+          void finalizeLive(
+            'error',
+            readString(evt, 'summary'),
+            readString(evt, 'error') ?? readString(evt, 'message'),
+          );
+          break;
+        default:
+          break;
       }
-      case 'step':
-        setLive((s) => ({ ...s, steps: [...s.steps, evt.step as RunStep] }));
-        break;
-      case 'artifact':
-        // Reserved event type — see `parseArtifactWrites` doc: not emitted
-        // by the backend today, handled here only for forward-compat.
-        break;
-      case 'done':
-        void finalizeLive('done', evt.summary as string | undefined, undefined);
-        break;
-      case 'error':
-        void finalizeLive('error', evt.summary as string | undefined, (evt.error as string | undefined) ?? (evt.message as string | undefined));
-        break;
-      default:
-        break;
-    }
-  };
+    },
+    [finalizeLive],
+  );
 
-  const finalizeLive = async (status: 'done' | 'error', summary?: string, error?: string) => {
-    const finishedId = runIdRef.current;
-    setLive((s) => ({ ...s, status, summary, error }));
-    onRunFinished?.();
-    await load();
-    if (finishedId) setExpandedRunId(finishedId);
-    runIdRef.current = null;
-    setLive(IDLE_LIVE);
-  };
-
-  const attachToRun = async (runId: string) => {
+  const attachToRun = useCallback(async (runId: string) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -259,22 +344,28 @@ const RunLog = forwardRef<RunLogHandle, RunLogProps>(function RunLog({ topicId, 
         headers: authHeaders(),
         signal: controller.signal,
       });
-      if (!res.ok || !res.body) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || res.statusText);
+      /*
+       * Vorher: `if (!res.ok || !res.body)` und dann `res.json()` auf beiden
+       * Wegen. Bei einer *erfolgreichen* Antwort ohne Body scheiterte das
+       * `res.json()`, der Fallback griff und der Nutzer sah als Fehlermeldung
+       * das nackte `statusText` („OK"). Die beiden Fälle sind jetzt getrennt.
+       */
+      if (!res.ok) {
+        throw new Error((await readErrorMessage(res)) || t('researchTopics.runStreamError'));
       }
+      if (!res.body) throw new Error(t('researchTopics.runStreamError'));
       await pumpSse(res.body, controller.signal, handleEvent);
-    } catch (err: unknown) {
-      if ((err as Error)?.name === 'AbortError') return;
+    } catch (err) {
+      if (isAbortError(err)) return;
       const message = err instanceof Error ? err.message : t('researchTopics.runStreamError');
       showError(message);
       setLive((s) => (s.runId === runId ? { ...s, status: 'error', error: message } : s));
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
     }
-  };
+  }, [handleEvent, showError, t]);
 
-  const startRun = async () => {
+  const startRun = useCallback(async () => {
     if (live.status === 'connecting' || live.status === 'running') return;
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -288,22 +379,24 @@ const RunLog = forwardRef<RunLogHandle, RunLogProps>(function RunLog({ topicId, 
         signal: controller.signal,
       });
       if (res.status === 409) {
-        const body = await res.json().catch(() => ({}));
+        const body: unknown = await res.json().catch(() => null);
         showError(t('researchTopics.runAlreadyActive'));
-        if (body.runId) {
-          void attachToRun(body.runId);
+        const activeRunId = isRecord(body) ? readString(body, 'runId') : undefined;
+        if (activeRunId) {
+          // `attachToRun` zeigt seine Fehler selbst als Toast.
+          void attachToRun(activeRunId);
         } else {
           setLive(IDLE_LIVE);
         }
         return;
       }
-      if (!res.ok || !res.body) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || res.statusText);
+      if (!res.ok) {
+        throw new Error((await readErrorMessage(res)) || t('researchTopics.runStartFailed'));
       }
+      if (!res.body) throw new Error(t('researchTopics.runStartFailed'));
       await pumpSse(res.body, controller.signal, handleEvent);
-    } catch (err: unknown) {
-      if ((err as Error)?.name === 'AbortError') return;
+    } catch (err) {
+      if (isAbortError(err)) return;
       const message = err instanceof Error ? err.message : t('researchTopics.runStartFailed');
       showError(message);
       // Functional update — preserves any steps already streamed in before
@@ -312,27 +405,51 @@ const RunLog = forwardRef<RunLogHandle, RunLogProps>(function RunLog({ topicId, 
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
     }
-  };
+  }, [topicId, live.status, attachToRun, handleEvent, showError, t]);
 
-  useImperativeHandle(ref, () => ({
-    startRun: () => {
-      void startRun();
-    },
-  }));
+  useImperativeHandle(
+    ref,
+    () => ({
+      startRun: () => {
+        // `startRun` zeigt seine Fehler selbst als Toast.
+        void startRun();
+      },
+    }),
+    [startRun],
+  );
+
+  /*
+   * Bootstrap: Lauf-Historie holen und an einen noch laufenden Lauf andocken.
+   * Soll **ausschliesslich** bei einem Themenwechsel passieren.
+   *
+   * `load`/`attachToRun` gehören deshalb nicht in die Dep-Liste, sondern über
+   * Refs herein: `attachToRun` hängt (über `handleEvent` → `finalizeLive`) an
+   * `onRunFinished`, und der Elternteil übergibt dort einen Inline-Arrow
+   * (`ResearchTopicPage`: `onRunFinished={() => setArtifactsRefreshToken(…)}`).
+   * Eine „vollständige" Dep-Liste würde den SSE-Stream also bei **jedem**
+   * Render des Elternteils abbrechen und neu aufbauen — und weil ein neuer
+   * Stream Schritte nachliefert, die wieder Render auslösen, wäre das eine
+   * Schleife. Vorher versteckte ein `eslint-disable` genau das.
+   */
+  const loadRef = useRef(load);
+  const attachToRunRef = useRef(attachToRun);
+  useEffect(() => {
+    loadRef.current = load;
+    attachToRunRef.current = attachToRun;
+  }, [load, attachToRun]);
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      const list = await load();
+    void (async () => {
+      const list = await loadRef.current();
       if (cancelled) return;
       const active = list.find((r) => r.status === 'running' || r.status === 'queued');
-      if (active) void attachToRun(active._id);
+      if (active) await attachToRunRef.current(active._id);
     })();
     return () => {
       cancelled = true;
       abortRef.current?.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topicId]);
 
   const liveArtifactChanges = parseArtifactWrites(live.steps);

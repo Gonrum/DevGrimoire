@@ -7,6 +7,7 @@ import Button from '../components/ui/Button';
 import { FormInput, FormTextarea } from '../components/ui/FormField';
 import { WorkflowPageShell } from '../components/ui/WorkflowShell';
 import TagInput from '../components/ui/TagInput';
+import { errorMessage } from '../lib/narrow';
 
 export default function ProjectCreatePage() {
   const { t } = useTranslation();
@@ -41,9 +42,9 @@ export default function ProjectCreatePage() {
         techStack: techStack.split(',').map((s) => s.trim()).filter(Boolean),
         tags,
       });
-      navigate(`/projects/${project._id}`);
-    } catch (err: any) {
-      showError(err.message || t('projects.createFailed'));
+      await navigate(`/projects/${project._id}`);
+    } catch (err) {
+      showError(errorMessage(err) || t('projects.createFailed'));
     } finally {
       setSaving(false);
     }
@@ -51,7 +52,7 @@ export default function ProjectCreatePage() {
 
   return (
     <WorkflowPageShell backTo="/projects" backLabel={t('common.allProjects')} title={t('projects.createProject')}>
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-6">
         <FormInput
           label={t('projects.projectName')}
           required
@@ -100,7 +101,7 @@ export default function ProjectCreatePage() {
           <Button type="submit" variant="primary" size="lg" disabled={saving || !name.trim()}>
             {saving ? t('common.creating') : t('projects.createProjectAction')}
           </Button>
-          <Button type="button" size="lg" onClick={() => navigate('/projects')}>
+          <Button type="button" size="lg" onClick={() => { void navigate('/projects'); }}>
             {t('common.cancel')}
           </Button>
         </div>

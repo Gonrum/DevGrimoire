@@ -47,8 +47,8 @@ export default function ApiKeyScopeEditor({ apiKey, onSave, onClose }: Props) {
     ])
       .then(([projs, custs]) => {
         if (cancelled) return;
-        setProjects(projs.map((p: any) => ({ _id: p._id, name: p.name })));
-        setCustomers(custs.map((c: any) => ({ _id: c._id, name: c.name })));
+        setProjects(projs.map((p) => ({ _id: p._id, name: p.name })));
+        setCustomers(custs.map((c) => ({ _id: c._id, name: c.name })));
       })
       .catch((e) => { if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e)); });
     return () => { cancelled = true; };

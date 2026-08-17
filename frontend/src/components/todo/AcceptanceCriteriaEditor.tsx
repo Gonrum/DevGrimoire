@@ -1,7 +1,5 @@
-import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AcceptanceCriterion } from '../../api/client';
-import { safeRandomUUID } from '../../utils/randomId';
 import Button from '../ui/Button';
 
 interface Props {
@@ -9,25 +7,26 @@ interface Props {
   onChange: (value: AcceptanceCriterion[]) => void;
 }
 
+/**
+ * Die Liste hatte einen State mit einer UUID pro Kriterium, nur um daraus
+ * React-Keys zu bauen — abgeleiteter Zustand, der sich bei jeder externen
+ * Längenänderung (Todo-Reload) **komplett** neu würfelte: alle Inputs wurden
+ * dabei neu gemountet und der Fokus/IME-Zustand ging mitten im Tippen verloren.
+ *
+ * `AcceptanceCriterion` hat keine eigene ID, und die Liste kennt kein Sortieren
+ * oder Verschieben — nur Anhängen, Löschen und Editieren. Der Index ist damit
+ * die stabile Identität: die Inputs sind vollständig kontrolliert (`value=`) und
+ * halten keinen eigenen State, den ein Index-Key durcheinanderbringen könnte.
+ */
 export default function AcceptanceCriteriaEditor({ value, onChange }: Props) {
   const { t } = useTranslation();
-  const [keys, setKeys] = useState<string[]>(() => value.map(() => safeRandomUUID()));
-
-  // Sync keys when value length changes externally (e.g. todo reloads)
-  useEffect(() => {
-    if (keys.length !== value.length) {
-      setKeys(value.map(() => safeRandomUUID()));
-    }
-  }, [value.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const add = () => {
     onChange([...value, { text: '', done: false }]);
-    setKeys((prev) => [...prev, safeRandomUUID()]);
   };
 
   const remove = (index: number) => {
     onChange(value.filter((_, i) => i !== index));
-    setKeys((prev) => prev.filter((_, i) => i !== index));
   };
 
   const toggle = (index: number) => {
@@ -52,7 +51,7 @@ export default function AcceptanceCriteriaEditor({ value, onChange }: Props) {
   return (
     <div className="space-y-2">
       {value.map((criterion, index) => (
-        <div key={keys[index]} className="flex items-start gap-2">
+        <div key={index} className="flex items-start gap-2">
           <button
             type="button"
             onClick={() => toggle(index)}

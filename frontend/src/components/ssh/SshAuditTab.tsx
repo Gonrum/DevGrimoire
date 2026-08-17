@@ -11,12 +11,23 @@ import Button from '../ui/Button';
 import EmptyState from '../ui/EmptyState';
 import { LoadingText } from '../ui/LoadingSpinner';
 import { Portal } from '../ui/Dialog';
+import { optionOr } from '../../lib/narrow';
 import { useSshAudit } from './hooks/useSshAudit';
 
 const PAGE_SIZE = 50;
 const DETAIL_TRUNCATE = 80;
 
 const SOURCE_CONTEXT_VALUES = ['terminal', 'mcp', 'rest'] as const satisfies readonly SshAuditSourceContext[];
+
+/**
+ * The filter select adds an empty "all" option on top of the API values. Kept
+ * as a value list so the change handler can *match* the incoming string
+ * instead of asserting it — `HTMLSelectElement.value` is a plain `string`.
+ */
+const SOURCE_FILTER_VALUES = ['', ...SOURCE_CONTEXT_VALUES] as const satisfies readonly (
+  | SshAuditSourceContext
+  | ''
+)[];
 
 /**
  * Static (Tailwind-purge-safe) badge styling per source context. Spec §5.8
@@ -160,7 +171,7 @@ export default function SshAuditTab({ open, onClose, connection }: SshAuditTabPr
             </label>
             <select
               value={sourceContext}
-              onChange={(e) => setSourceContext(e.target.value as SshAuditSourceContext | '')}
+              onChange={(e) => setSourceContext(optionOr(e.target.value, SOURCE_FILTER_VALUES, ''))}
               className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
             >
               {sourceOptions.map((opt) => (
@@ -184,7 +195,9 @@ export default function SshAuditTab({ open, onClose, connection }: SshAuditTabPr
           {error && !loading && (
             <div className="rounded border border-red-700 bg-red-900/40 px-3 py-2 text-xs text-red-200 flex items-center justify-between gap-2">
               <span>{t('common.errorLoading', { error })}</span>
-              <Button size="xs" variant="secondary" onClick={() => reload()}>
+              {/* `reload()` surfaces its own failure via the `error` state that
+                  renders this very banner → `void` is enough. */}
+              <Button size="xs" variant="secondary" onClick={() => void reload()}>
                 {t('ssh.audit.retry')}
               </Button>
             </div>

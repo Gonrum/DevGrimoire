@@ -16,8 +16,21 @@ import LlmEndpointsSettings from '../components/settings/LlmEndpointsSettings';
 import OnboardingBanner from '../components/settings/OnboardingBanner';
 import SshSettings from '../components/settings/SshSettings';
 import { SettingsShell } from '../components/ui/SettingsShell';
+import { matchOption } from '../lib/narrow';
 
-type SettingsTab = 'instructions' | 'apikeys' | 'notifications' | 'myllm' | 'llmEndpoints' | 'chatlog' | 'websearch' | 'users' | 'auditlog' | 'replication' | 'backups' | 'customerTemplates' | 'ssh';
+/**
+ * Die Tab-Schlüssel als Laufzeit-Liste, nicht nur als Typ: `OnboardingBanner`
+ * liefert `onJumpTo(tab: string)`, und ein `as SettingsTab` darauf wäre eine
+ * Behauptung. Mit der Liste lässt sich der Wert prüfen (`matchOption`), womit
+ * ein umbenannter Tab-Key nicht mehr in einen State läuft, den kein Zweig
+ * rendert (leere Settings-Seite), sondern still ignoriert wird.
+ */
+const SETTINGS_TABS = [
+  'instructions', 'apikeys', 'notifications', 'myllm', 'llmEndpoints', 'chatlog',
+  'websearch', 'users', 'auditlog', 'replication', 'backups', 'customerTemplates', 'ssh',
+] as const;
+
+type SettingsTab = (typeof SETTINGS_TABS)[number];
 
 export default function Settings() {
   const { t } = useTranslation();
@@ -52,7 +65,14 @@ export default function Settings() {
 
   return (
     <SettingsShell title={t('settings.title')} tabs={visibleTabs} activeTab={tab} onTabChange={setTab}>
-      {isAdmin && <OnboardingBanner onJumpTo={(t) => setTab(t as SettingsTab)} />}
+      {isAdmin && (
+        <OnboardingBanner
+          onJumpTo={(key) => {
+            const next = matchOption(key, SETTINGS_TABS);
+            if (next) setTab(next);
+          }}
+        />
+      )}
       {tab === 'instructions' && <InstructionsSettings />}
       {tab === 'apikeys' && <ApiKeysSettings />}
       {tab === 'notifications' && <NotificationsSettings />}

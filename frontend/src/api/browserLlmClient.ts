@@ -7,6 +7,8 @@
  * is hosted remotely.
  */
 
+import { parseJsonResponse, parseJsonText } from './http-boundary';
+
 export interface BrowserLlmMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
@@ -161,7 +163,16 @@ export async function* streamBrowserLlm(req: BrowserLlmRequest): AsyncGenerator<
   } catch (err) {
     // fetch throws on network errors (DNS, CORS, mixed-content, refused)
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Connection failed: ${msg}`);
+    // Der gefangene Fehler bleibt als `cause` erhalten (ohne ihn wäre nur noch
+    // die Textmeldung da, kein Stacktrace der Netzwerkschicht).
+    //
+    // Warum nicht `new Error(msg, { cause: err })`: die tsconfig fährt
+    // `lib: ["ES2020", …]`, und `ErrorOptions` kommt erst mit `ES2022.Error`.
+    // Das zweite Konstruktor-Argument ist dort schlicht nicht typisiert. Zur
+    // Laufzeit ist das Setzen danach identisch.
+    const wrapped: Error & { cause?: unknown } = new Error(`Connection failed: ${msg}`);
+    wrapped.cause = err;
+    throw wrapped;
   }
 
   if (!res.ok || !res.body) {
@@ -196,7 +207,8 @@ export async function* streamBrowserLlm(req: BrowserLlmRequest): AsyncGenerator<
 
         let parsed: OpenAiStreamChunk;
         try {
-          parsed = JSON.parse(data) as OpenAiStreamChunk;
+          // Ein defektes Frame wird verworfen, der Stream läuft weiter.
+          parsed = parseJsonText<OpenAiStreamChunk>(data);
         } catch {
           continue;
         }
@@ -238,6 +250,32 @@ export async function* streamBrowserLlm(req: BrowserLlmRequest): AsyncGenerator<
 }
 
 /**
+ * `Array.isArray` verengt `unknown` zu `any[]` und liefert damit wieder `any` —
+ * dieses Prädikat verengt zu `unknown[]`, sodass jedes Element geprüft werden muss.
+ */
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
+/**
+ * Model-IDs aus einer `/v1/models`-Antwort lesen, ohne der Form zu trauen — der
+ * Endpunkt gehört dem Nutzer, nicht uns, und muss nicht OpenAI-konform antworten.
+ * Alles, was nicht `{ data: [{ id: string }, …] }` ist, ergibt eine leere Liste.
+ */
+function readModelIds(body: unknown): string[] {
+  if (body === null || typeof body !== 'object' || !('data' in body)) return [];
+  const data: unknown = body.data;
+  if (!isUnknownArray(data)) return [];
+  const ids: string[] = [];
+  for (const entry of data) {
+    if (entry === null || typeof entry !== 'object' || !('id' in entry)) continue;
+    const id: unknown = entry.id;
+    if (typeof id === 'string' && id.length > 0) ids.push(id);
+  }
+  return ids;
+}
+
+/**
  * Quick reachability test against /v1/models. Used by Settings UI to verify
  * the user's endpoint configuration before they save.
  */
@@ -257,11 +295,8 @@ export async function testBrowserLlmEndpoint(
     if (!res.ok) {
       return { ok: false, error: `HTTP ${res.status}` };
     }
-    const data = await res.json().catch(() => ({}));
-    const models: string[] = Array.isArray(data?.data)
-      ? (data.data as Array<{ id?: string }>).map((m) => m.id || '').filter(Boolean)
-      : [];
-    return { ok: true, models };
+    const body = await parseJsonResponse<unknown>(res).catch(() => null);
+    return { ok: true, models: readModelIds(body) };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg };

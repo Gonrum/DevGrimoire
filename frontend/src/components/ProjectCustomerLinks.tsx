@@ -32,8 +32,12 @@ export default function ProjectCustomerLinks({
         if (cancelled) return;
         setLinks(linkData);
         setCustomers(customerData);
+        setLoaded(true);
       })
-      .finally(() => {
+      .catch(() => {
+        // Beide Aufrufe fangen ihren eigenen Fehler und liefern `[]` — hier
+        // landet nur ein Fehler *aus dem then-Block*. `loaded` muss trotzdem
+        // gesetzt werden, sonst bleibt das Panel für immer im Ladezustand.
         if (!cancelled) setLoaded(true);
       });
     return () => {

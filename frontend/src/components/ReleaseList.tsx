@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Release, ReleaseStatus, ReleasePlatform, ReleaseType, api } from '../api/client';
+import { errorMessage, optionOr } from '../lib/narrow';
 import { useToast } from './Toast';
 import Card from './ui/Card';
 import EmptyState from './ui/EmptyState';
@@ -24,6 +25,17 @@ const platformColors: Record<ReleasePlatform, string> = {
   docker: 'bg-sky-900/40 text-sky-300',
   other: 'bg-gray-700 text-gray-400',
 };
+
+/*
+ * Laufzeit-Whitelists der beiden `<select>`s. `satisfies` prüft die Literale
+ * gegen die Union, `as const` erhält sie — damit liefert `optionOr` den
+ * Union-Typ statt `string` und die Casts entfallen.
+ */
+const RELEASE_PLATFORMS = [
+  'android', 'ios', 'web', 'desktop', 'docker', 'other',
+] as const satisfies readonly ReleasePlatform[];
+
+const RELEASE_STATUSES = ['draft', 'published', 'archived'] as const satisfies readonly ReleaseStatus[];
 
 const platformLabels: Record<ReleasePlatform, string> = {
   android: 'Android',
@@ -108,8 +120,8 @@ function ReleaseForm({
         showSuccess(`Release ${form.version} erstellt`);
       }
       onDone();
-    } catch (err: any) {
-      showError(err.message || t('common.errorSaving'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSaving(false);
     }
@@ -140,16 +152,16 @@ function ReleaseForm({
           <FormSelect
             label="Plattform"
             value={form.platform}
-            onChange={(e) => update({ platform: e.target.value as ReleasePlatform })}
+            onChange={(e) => update({ platform: optionOr(e.target.value, RELEASE_PLATFORMS, form.platform) })}
           >
-            {Object.entries(platformLabels).map(([key, label]) => (
-              <option key={key} value={key}>{label}</option>
+            {RELEASE_PLATFORMS.map((key) => (
+              <option key={key} value={key}>{platformLabels[key]}</option>
             ))}
           </FormSelect>
           <FormSelect
             label={t('common.status')}
             value={form.status}
-            onChange={(e) => update({ status: e.target.value as ReleaseStatus })}
+            onChange={(e) => update({ status: optionOr(e.target.value, RELEASE_STATUSES, form.status) })}
           >
             <option value="draft">Entwurf</option>
             <option value="published">Veröffentlicht</option>
@@ -222,8 +234,8 @@ export default function ReleaseList({ entries, projectId }: { entries: Release[]
     try {
       await api.releases.delete(release._id);
       showSuccess(`Release ${release.version} gelöscht`);
-    } catch (err: any) {
-      showError(err.message || t('common.errorDeleting'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorDeleting')));
     }
   };
 

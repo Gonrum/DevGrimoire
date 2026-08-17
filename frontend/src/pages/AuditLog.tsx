@@ -7,8 +7,17 @@ import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import { LoadingText } from '../components/ui/LoadingSpinner';
+import { errorMessage, matchOption } from '../lib/narrow';
 
 const PAGE_SIZE = 50;
+
+/**
+ * Die Akteurstypen als Laufzeit-Liste. Der Wert kommt aus der URL bzw. einem
+ * `<select>` — beides `string`. Ein `as AuditLogFilters['actorType']` haette das
+ * behauptet und einen fremden `?actorType=`-Parameter unveraendert an das
+ * Backend weitergegeben; geprueft wird er jetzt zu `undefined`.
+ */
+const ACTOR_TYPES = ['user', 'apikey', 'system'] as const;
 
 /**
  * Admin-only audit-log viewer. Lists events newest-first with action, actor,
@@ -24,7 +33,7 @@ export default function AuditLog() {
   const filters: AuditLogFilters = useMemo(() => ({
     action: searchParams.get('action') || undefined,
     actionPrefix: searchParams.get('actionPrefix') || undefined,
-    actorType: (searchParams.get('actorType') as AuditLogFilters['actorType']) || undefined,
+    actorType: matchOption(searchParams.get('actorType') ?? '', ACTOR_TYPES),
     since: searchParams.get('since') || undefined,
     until: searchParams.get('until') || undefined,
   }), [searchParams]);
@@ -52,25 +61,39 @@ export default function AuditLog() {
 
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const res = await api.auditLog.list({
-        ...filters,
-        limit: PAGE_SIZE,
-        offset: page * PAGE_SIZE,
-      });
-      setEntries(res.items);
-      setTotal(res.total);
-    } catch (err) {
-      showError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
+  /*
+   * Der Ladevorgang liegt im Effekt statt in einer `load`-Funktion daneben:
+   * damit kann der Cleanup ihn als veraltet markieren. Vorher konnten zwei
+   * schnell aufeinanderfolgende Filterwechsel in umgekehrter Reihenfolge
+   * zurueckkommen und die aeltere Antwort die neuere ueberschreiben — die Liste
+   * passte dann nicht zu den angezeigten Filtern.
+   *
+   * Die frueher unterdrueckte Dep-Liste zaehlte die Filterfelder einzeln auf.
+   * `filters` selbst ist `useMemo`-stabil (Abhaengigkeit `searchParams`), die
+   * vollstaendige Liste dreht also keine Schleife.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      setLoading(true);
+      try {
+        const res = await api.auditLog.list({
+          ...filters,
+          limit: PAGE_SIZE,
+          offset: page * PAGE_SIZE,
+        });
+        if (cancelled) return;
+        setEntries(res.items);
+        setTotal(res.total);
+      } catch (err) {
+        if (!cancelled) showError(errorMessage(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
-  };
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [filters.action, filters.actionPrefix, filters.actorType, filters.since, filters.until, page]);
+    void run();
+    return () => { cancelled = true; };
+  }, [filters, page, showError]);
   useEffect(() => {
     api.auditLog.actions().then(setActions).catch(() => setActions([]));
   }, []);
@@ -103,7 +126,7 @@ export default function AuditLog() {
           : t('auditLog.exportSuccess', { count: res.items.length }),
       );
     } catch (err) {
-      showError(err instanceof Error ? err.message : String(err));
+      showError(errorMessage(err));
     } finally {
       setExporting(false);
     }
@@ -126,7 +149,7 @@ export default function AuditLog() {
           <h1 className="text-xl sm:text-2xl font-bold font-grimoire">{t('auditLog.title')}</h1>
           <p className="text-sm text-gray-500 mt-1">{t('auditLog.description')}</p>
         </div>
-        <Button variant="secondary" size="sm" onClick={handleExport} disabled={exporting}>
+        <Button variant="secondary" size="sm" onClick={() => { void handleExport(); }} disabled={exporting}>
           {exporting ? t('auditLog.exportRunning') : t('auditLog.exportButton')}
         </Button>
       </div>
@@ -156,7 +179,7 @@ export default function AuditLog() {
         </select>
         <select
           value={filters.actorType || ''}
-          onChange={(e) => updateFilter({ actorType: (e.target.value as AuditLogFilters['actorType']) || undefined })}
+          onChange={(e) => updateFilter({ actorType: matchOption(e.target.value, ACTOR_TYPES) })}
           className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
         >
           <option value="">{t('auditLog.allActors')}</option>

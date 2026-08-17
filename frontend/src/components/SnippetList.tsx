@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Snippet, api } from '../api/client';
+import { errorMessage } from '../lib/narrow';
 import { useToast } from './Toast';
 import Card from './ui/Card';
 import EmptyState from './ui/EmptyState';
@@ -86,8 +87,8 @@ function SnippetForm({
         showSuccess(t('snippets.snippetCreated', { title: form.title }));
       }
       onDone();
-    } catch (err: any) {
-      showError(err.message || t('common.errorSaving'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSaving(false);
     }
@@ -200,8 +201,8 @@ export default function SnippetList({ entries, projectId, customerId, onUpdate }
       await api.snippets.delete(snippet._id);
       showSuccess(t('snippets.snippetDeleted', { title: snippet.title }));
       onUpdate?.();
-    } catch (err: any) {
-      showError(err.message || t('common.errorDeleting'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorDeleting')));
     }
   };
 

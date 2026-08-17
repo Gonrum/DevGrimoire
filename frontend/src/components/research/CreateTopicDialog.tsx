@@ -8,6 +8,7 @@ import {
   ResearchFrequency,
   WebSearchProviderType,
 } from '../../api/client';
+import { optionOr } from '../../lib/narrow';
 import { useToast } from '../Toast';
 import Button from '../ui/Button';
 import { Dialog, Portal } from '../ui/Dialog';
@@ -278,7 +279,7 @@ export default function CreateTopicDialog({
                 fieldClassName="w-full sm:flex-1 sm:min-w-[9rem]"
                 label={t('recurringTasks.frequency')}
                 value={frequency}
-                onChange={(e) => setFrequency(e.target.value as ResearchFrequency)}
+                onChange={(e) => setFrequency(optionOr(e.target.value, FREQUENCIES, frequency))}
               >
                 {FREQUENCIES.map((f) => (
                   <option key={f} value={f}>{t(`recurringTasks.freq_${f}`)}</option>
@@ -400,7 +401,7 @@ export default function CreateTopicDialog({
             <Button
               type="button"
               variant="primary"
-              onClick={handleCreate}
+              onClick={() => void handleCreate()}
               disabled={saving || !title.trim() || !brief.trim()}
             >
               {saving ? t('common.creating') : t('researchTopics.createAction')}

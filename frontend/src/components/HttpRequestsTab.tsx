@@ -3,8 +3,22 @@ import {
   api, RequestCollection, SavedRequest, SendResult, WerkbankHistoryEntry,
   WkKeyValue, WkHeader, WerkbankMethod, Environment,
 } from '../api/client';
+import { errorMessage, optionOr } from '../lib/narrow';
 
-const METHODS: WerkbankMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+const METHODS = [
+  'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS',
+] as const satisfies readonly WerkbankMethod[];
+
+/*
+ * Laufzeit-Whitelists für die drei `<select>`s unten. `satisfies` prüft die
+ * Literale gegen die Union, `as const` erhält sie — damit liefert `optionOr` den
+ * Union-Typ statt `string` und die Casts `e.target.value as …` entfallen.
+ */
+const AUTH_TYPES = ['none', 'basic', 'bearer'] as const satisfies readonly SavedRequest['auth']['type'][];
+
+const BODY_MODES = [
+  'none', 'raw', 'form-urlencoded', 'multipart',
+] as const satisfies readonly SavedRequest['body']['mode'][];
 
 function methodColor(m: string): string {
   switch (m) {
@@ -88,7 +102,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
       setDraft(created);
       setResponse(null);
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     }
   }
 
@@ -111,7 +125,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
       await reload();
       return full;
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
       return null;
     }
   }
@@ -131,7 +145,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
       });
       setResponse(res);
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     } finally {
       setSending(false);
     }
@@ -163,7 +177,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
       setCurlText('');
       if (parsed.warnings.length) setError('Import-Hinweise: ' + parsed.warnings.join('; '));
     } catch (e) {
-      setError('curl-Import fehlgeschlagen: ' + (e as Error).message);
+      setError('curl-Import fehlgeschlagen: ' + errorMessage(e));
     }
   }
 
@@ -181,7 +195,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
       a.click();
       a.remove();
     } catch (e) {
-      setError('Download fehlgeschlagen: ' + (e as Error).message);
+      setError('Download fehlgeschlagen: ' + errorMessage(e));
     }
   }
 
@@ -263,7 +277,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
 
             {/* URL-Leiste */}
             <div className="flex gap-2">
-              <select value={draft.method} onChange={(e) => patch({ method: e.target.value as WerkbankMethod })}
+              <select value={draft.method} onChange={(e) => patch({ method: optionOr(e.target.value, METHODS, draft.method) })}
                 className={`bg-gray-800 border border-gray-700 rounded px-2 py-2 font-mono text-sm ${methodColor(draft.method)}`}>
                 {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
@@ -434,7 +448,7 @@ function HeaderEditor({ rows, onChange }: { rows: WkHeader[]; onChange: (r: WkHe
 function AuthEditor({ value, onChange }: { value: SavedRequest['auth']; onChange: (a: SavedRequest['auth']) => void }) {
   return (
     <div className="space-y-2 text-xs">
-      <select value={value.type} onChange={(e) => onChange({ ...value, type: e.target.value as SavedRequest['auth']['type'] })}
+      <select value={value.type} onChange={(e) => onChange({ ...value, type: optionOr(e.target.value, AUTH_TYPES, value.type) })}
         className="bg-gray-800 border border-gray-700 rounded px-2 py-1">
         <option value="none">Keine</option>
         <option value="basic">Basic</option>
@@ -459,7 +473,7 @@ function AuthEditor({ value, onChange }: { value: SavedRequest['auth']; onChange
 function BodyEditor({ value, onChange }: { value: SavedRequest['body']; onChange: (b: SavedRequest['body']) => void }) {
   return (
     <div className="space-y-2 text-xs">
-      <select value={value.mode} onChange={(e) => onChange({ ...value, mode: e.target.value as SavedRequest['body']['mode'] })}
+      <select value={value.mode} onChange={(e) => onChange({ ...value, mode: optionOr(e.target.value, BODY_MODES, value.mode) })}
         className="bg-gray-800 border border-gray-700 rounded px-2 py-1">
         <option value="none">Kein Body</option>
         <option value="raw">Raw</option>

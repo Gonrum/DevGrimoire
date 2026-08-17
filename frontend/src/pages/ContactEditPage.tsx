@@ -7,6 +7,7 @@ import Button from '../components/ui/Button';
 import { FormInput, FormTextarea } from '../components/ui/FormField';
 import { WorkflowPageShell } from '../components/ui/WorkflowShell';
 import { LoadingText } from '../components/ui/LoadingSpinner';
+import { errorMessage } from '../lib/narrow';
 
 export default function ContactEditPage() {
   const { t } = useTranslation();
@@ -39,9 +40,9 @@ export default function ContactEditPage() {
         setIsPrimary(contactData.isPrimary);
         setSortOrder(String(contactData.sortOrder ?? 0));
       })
-      .catch((err) => showError(err.message))
+      .catch((err: unknown) => showError(errorMessage(err)))
       .finally(() => setLoading(false));
-  }, [id, contactId]);
+  }, [id, contactId, showError]);
 
   if (loading) return <LoadingText />;
   if (!customer || !contact || !id || !contactId) {
@@ -62,9 +63,9 @@ export default function ContactEditPage() {
         isPrimary,
         sortOrder: Number.parseInt(sortOrder, 10) || 0,
       });
-      navigate(`/customers/${id}`);
-    } catch (err: any) {
-      showError(err.message || t('contacts.updateFailed'));
+      await navigate(`/customers/${id}`);
+    } catch (err) {
+      showError(errorMessage(err) || t('contacts.updateFailed'));
     } finally {
       setSaving(false);
     }
@@ -76,7 +77,7 @@ export default function ContactEditPage() {
       backLabel={customer.name}
       title={`${t('contacts.editContact')} — ${contact.name}`}
     >
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-6">
         <FormInput
           label={t('contacts.name')}
           required
@@ -131,7 +132,7 @@ export default function ContactEditPage() {
           <Button type="submit" variant="primary" size="lg" disabled={saving || !name.trim()}>
             {saving ? t('common.saving') : t('common.save')}
           </Button>
-          <Button type="button" size="lg" onClick={() => navigate(`/customers/${id}`)}>
+          <Button type="button" size="lg" onClick={() => { void navigate(`/customers/${id}`); }}>
             {t('common.cancel')}
           </Button>
         </div>

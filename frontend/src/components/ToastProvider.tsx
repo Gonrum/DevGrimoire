@@ -1,35 +1,34 @@
-import { createContext, useContext, useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { ToastContext, ToastItem } from './Toast';
 
-interface ToastItem {
-  id: number;
-  message: string;
-  type: 'error' | 'success';
-}
-
-interface ToastContextType {
-  showError: (message: string) => void;
-  showSuccess: (message: string) => void;
-}
-
-const ToastContext = createContext<ToastContextType>({
-  showError: () => {},
-  showSuccess: () => {},
-});
-
-export function useToast() {
-  return useContext(ToastContext);
-}
-
+/**
+ * Rendert die Toast-Liste und stellt `showError`/`showSuccess` bereit.
+ *
+ * Kontext und Hook liegen in `Toast.ts` — Begründung dort.
+ */
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const idRef = useRef(0);
+  // Offene Timer, damit ein Unmount sie abräumt statt in ein setState auf einer
+  // abgebauten Komponente zu laufen.
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(
+    () => () => {
+      for (const timer of timersRef.current) clearTimeout(timer);
+      timersRef.current = [];
+    },
+    [],
+  );
 
   const addToast = useCallback((message: string, type: 'error' | 'success') => {
     const id = ++idRef.current;
     setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
+      timersRef.current = timersRef.current.filter((t) => t !== timer);
     }, 4000);
+    timersRef.current.push(timer);
   }, []);
 
   const showError = useCallback((message: string) => addToast(message, 'error'), [addToast]);

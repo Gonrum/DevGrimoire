@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { NavGroup, Tab, TAB_ICON } from './tabs';
+import { parseJsonText } from '../../api/http-boundary';
+import { isRecord } from '../../lib/narrow';
 
 const LS_COLLAPSED = 'dg.projectSidebar.collapsed';
 const LS_GROUPS = 'dg.projectSidebar.groups';
@@ -9,8 +11,33 @@ const LS_GROUPS = 'dg.projectSidebar.groups';
 function readBool(key: string): boolean {
   try { return localStorage.getItem(key) === '1'; } catch { return false; }
 }
+/*
+ * `localStorage` ist fremder Speicher: der Inhalt kann von einer älteren
+ * Version stammen oder von Hand verändert sein. Vorher stand hier
+ * `JSON.parse(...)` direkt im Return — dessen `any` floss ungeprüft in
+ * `Record<string, boolean>` und von dort in `groupState`. Ein `{"foo": "bar"}`
+ * im Storage hätte einen String als Boolean in den State gelegt.
+ */
 function readGroups(): Record<string, boolean> {
-  try { return JSON.parse(localStorage.getItem(LS_GROUPS) || '{}'); } catch { return {}; }
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(LS_GROUPS);
+  } catch {
+    return {};
+  }
+  if (!raw) return {};
+  let parsed: unknown;
+  try {
+    parsed = parseJsonText<unknown>(raw);
+  } catch {
+    return {};
+  }
+  if (!isRecord(parsed)) return {};
+  const out: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value === 'boolean') out[key] = value;
+  }
+  return out;
 }
 
 interface Props {

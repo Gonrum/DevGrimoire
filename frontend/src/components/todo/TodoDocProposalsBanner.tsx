@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, DocUpdateProposal } from '../../api/client';
@@ -11,22 +11,37 @@ interface Props {
 
 export default function TodoDocProposalsBanner({ todoId, todoStatus, basePath }: Props) {
   const { t } = useTranslation();
-  const [proposals, setProposals] = useState<DocUpdateProposal[]>([]);
+  // Zusammen mit der `todoId` gespeichert: eine verspätete Antwort zum vorigen
+  // Todo darf die Liste des aktuellen nicht überschreiben, und beim Wechsel
+  // sollen nicht kurz die Vorschläge des Vorgängers stehen.
+  const [loaded, setLoaded] = useState<{ todoId: string; proposals: DocUpdateProposal[] } | null>(null);
 
-  const load = useCallback(() => {
-    api.docUpdateProposals
-      .list({ sourceType: 'todo', sourceId: todoId, status: 'open', limit: 20 })
-      .then(setProposals)
-      .catch(() => setProposals([]));
-  }, [todoId]);
+  // Vorschläge entstehen erst in Review/Done. Das frühere "leeren" im Effect war
+  // abgeleiteter Zustand — der Status entscheidet direkt im Render.
+  const relevant = todoStatus === 'review' || todoStatus === 'done';
 
   useEffect(() => {
-    if (todoStatus !== 'review' && todoStatus !== 'done') {
-      setProposals([]);
-      return;
-    }
-    load();
-  }, [todoId, todoStatus, load]);
+    if (todoStatus !== 'review' && todoStatus !== 'done') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const list = await api.docUpdateProposals.list({
+          sourceType: 'todo',
+          sourceId: todoId,
+          status: 'open',
+          limit: 20,
+        });
+        if (!cancelled) setLoaded({ todoId, proposals: list });
+      } catch {
+        if (!cancelled) setLoaded({ todoId, proposals: [] });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [todoId, todoStatus]);
+
+  const proposals = relevant && loaded?.todoId === todoId ? loaded.proposals : [];
 
   if (proposals.length === 0) return null;
 

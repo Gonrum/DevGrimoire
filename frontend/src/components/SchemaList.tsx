@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SchemaObject, SchemaVersion, SchemaField, SchemaIndex, DbType, api } from '../api/client';
+import { errorMessage, optionOr } from '../lib/narrow';
 import { useToast } from './Toast';
 import Card from './ui/Card';
 import EmptyState from './ui/EmptyState';
@@ -16,6 +17,13 @@ const dbTypeColors: Record<DbType, string> = {
   mongodb: 'bg-green-900/40 text-green-300',
   postgresql: 'bg-blue-900/40 text-blue-300',
 };
+
+/**
+ * Laufzeit-Whitelist des DB-Typ-`<select>`, in Anzeigereihenfolge. `satisfies`
+ * prüft die Literale gegen `DbType`, `as const` erhält sie — damit liefert
+ * `optionOr` den Union-Typ und der Cast `e.target.value as DbType` entfällt.
+ */
+const DB_TYPES = ['postgresql', 'mongodb', 'mysql', 'mssql'] as const satisfies readonly DbType[];
 
 const dbTypeLabels: Record<DbType, string> = {
   mssql: 'MSSQL',
@@ -163,8 +171,8 @@ function SchemaForm({
         showSuccess(t('schemas.schemaCreated', { name: form.name }));
       }
       onDone();
-    } catch (err: any) {
-      showError(err.message || t('common.errorSaving'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSaving(false);
     }
@@ -190,12 +198,11 @@ function SchemaForm({
             label={t('schemas.dbType')}
             required
             value={form.dbType}
-            onChange={(e) => update({ dbType: e.target.value as DbType })}
+            onChange={(e) => update({ dbType: optionOr(e.target.value, DB_TYPES, form.dbType) })}
           >
-            <option value="postgresql">PostgreSQL</option>
-            <option value="mongodb">MongoDB</option>
-            <option value="mysql">MySQL</option>
-            <option value="mssql">MSSQL</option>
+            {DB_TYPES.map((value) => (
+              <option key={value} value={value}>{dbTypeLabels[value]}</option>
+            ))}
           </FormSelect>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -460,8 +467,8 @@ export default function SchemaList({ entries, projectId }: { entries: SchemaObje
     try {
       await api.schemas.delete(schema._id);
       showSuccess(t('schemas.schemaDeleted', { name: schema.name }));
-    } catch (err: any) {
-      showError(err.message || t('common.errorDeleting'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorDeleting')));
     }
   };
 

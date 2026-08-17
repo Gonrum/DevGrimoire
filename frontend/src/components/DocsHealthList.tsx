@@ -9,6 +9,7 @@ import {
   DocProposalTargetType,
   DocUpdateProposal,
 } from '../api/client';
+import { errorMessage, optionOr } from '../lib/narrow';
 import { useToast } from './Toast';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
@@ -27,6 +28,28 @@ const STATUS_COLORS: Record<DocProposalStatus, string> = {
   dismissed: 'bg-gray-800 text-gray-400',
   superseded: 'bg-gray-800 text-gray-500',
 };
+
+/*
+ * Laufzeit-Whitelists für die drei Filter-`<select>`s. Vorher stand an jeder
+ * `onChange`-Stelle ein `e.target.value as DocProposal…Type | 'all'` — eine
+ * Behauptung über einen `string`. `satisfies` prüft hier zur Compile-Zeit, dass
+ * nur echte Werte drinstehen; `optionOr` fällt zur Laufzeit auf `'all'` zurück,
+ * falls doch ein unbekannter Wert ankommt.
+ *
+ * `STATUS_FILTERS` enthält bewusst nicht alle sechs `DocProposalStatus` — die
+ * Optionsliste im UI bietet nur diese vier an.
+ */
+const STATUS_FILTERS = [
+  'all', 'open', 'accepted', 'converted_to_todo', 'dismissed',
+] as const satisfies readonly (DocProposalStatus | 'all')[];
+
+const SOURCE_FILTERS = [
+  'all', 'todo', 'commit', 'release', 'workflow_run', 'manual',
+] as const satisfies readonly (DocProposalSourceType | 'all')[];
+
+const TARGET_FILTERS = [
+  'all', 'knowledge', 'manual', 'doc_file',
+] as const satisfies readonly (DocProposalTargetType | 'all')[];
 
 const MODE_LABELS: Record<DocProposalChangeMode, string> = {
   patch: 'patch',
@@ -140,7 +163,7 @@ export default function DocsHealthList({ projectId, basePath }: Props) {
     api.docUpdateProposals
       .list({ projectId, limit: 200 })
       .then(setProposals)
-      .catch((err) => showError((err as Error).message || 'Failed to load proposals'))
+      .catch((err) => showError(errorMessage(err, 'Failed to load proposals')))
       .finally(() => setLoading(false));
   }, [projectId, showError]);
 
@@ -167,7 +190,7 @@ export default function DocsHealthList({ projectId, basePath }: Props) {
       await api.docUpdateProposals.updateStatus(id, { status });
       load();
     } catch (err) {
-      showError((err as Error).message || 'Update failed');
+      showError(errorMessage(err, 'Update failed'));
     } finally {
       setBusyId(null);
     }
@@ -180,7 +203,7 @@ export default function DocsHealthList({ projectId, basePath }: Props) {
       showSuccess(t('docsHealth.todoCreated', { displayNumber: res.todo.displayNumber }));
       load();
     } catch (err) {
-      showError((err as Error).message || 'Convert failed');
+      showError(errorMessage(err, 'Convert failed'));
     } finally {
       setBusyId(null);
     }
@@ -195,7 +218,7 @@ export default function DocsHealthList({ projectId, basePath }: Props) {
         <div className="ml-auto flex flex-wrap gap-2">
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as DocProposalStatus | 'all')}
+            onChange={(e) => setStatusFilter(optionOr(e.target.value, STATUS_FILTERS, 'all'))}
             className="bg-gray-900 border border-gray-800 rounded text-xs px-2 py-1 text-gray-300"
           >
             <option value="all">{t('docsHealth.filter.allStatus')}</option>
@@ -206,7 +229,7 @@ export default function DocsHealthList({ projectId, basePath }: Props) {
           </select>
           <select
             value={sourceFilter}
-            onChange={(e) => setSourceFilter(e.target.value as DocProposalSourceType | 'all')}
+            onChange={(e) => setSourceFilter(optionOr(e.target.value, SOURCE_FILTERS, 'all'))}
             className="bg-gray-900 border border-gray-800 rounded text-xs px-2 py-1 text-gray-300"
           >
             <option value="all">{t('docsHealth.filter.allSources')}</option>
@@ -218,7 +241,7 @@ export default function DocsHealthList({ projectId, basePath }: Props) {
           </select>
           <select
             value={targetFilter}
-            onChange={(e) => setTargetFilter(e.target.value as DocProposalTargetType | 'all')}
+            onChange={(e) => setTargetFilter(optionOr(e.target.value, TARGET_FILTERS, 'all'))}
             className="bg-gray-900 border border-gray-800 rounded text-xs px-2 py-1 text-gray-300"
           >
             <option value="all">{t('docsHealth.filter.allTargets')}</option>

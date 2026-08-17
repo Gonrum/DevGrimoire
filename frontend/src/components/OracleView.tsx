@@ -9,6 +9,7 @@ import {
   OracleSuggestion,
   OracleSuggestionStatus,
 } from '../api/client';
+import { errorMessage, optionOr } from '../lib/narrow';
 import { useToast } from './Toast';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
@@ -167,6 +168,15 @@ function SuggestionCard({
   );
 }
 
+/**
+ * Laufzeit-Whitelist des Status-Filters. Vorher stand dort
+ * `e.target.value as OracleSuggestionStatus | 'all'` — eine Behauptung über
+ * einen `string`; `optionOr` fällt bei einem unbekannten Wert auf `'all'` zurück.
+ */
+const ORACLE_STATUS_FILTERS = [
+  'all', 'open', 'dismissed', 'converted_to_todo', 'addressed',
+] as const satisfies readonly (OracleSuggestionStatus | 'all')[];
+
 export default function OracleView({ projectId, basePath }: Props) {
   const { t } = useTranslation();
   const { showError, showSuccess } = useToast();
@@ -181,7 +191,7 @@ export default function OracleView({ projectId, basePath }: Props) {
     api.oracle
       .list({ projectId, limit: 500 })
       .then(setSuggestions)
-      .catch((err) => showError((err as Error).message || 'Failed to load Oracle'))
+      .catch((err) => showError(errorMessage(err, 'Failed to load Oracle')))
       .finally(() => setLoading(false));
   }, [projectId, showError]);
 
@@ -196,7 +206,7 @@ export default function OracleView({ projectId, basePath }: Props) {
       showSuccess(t('oracle.analyzed', res as unknown as Record<string, number>));
       load();
     } catch (err) {
-      showError((err as Error).message || 'Analyze failed');
+      showError(errorMessage(err, 'Analyze failed'));
     } finally {
       setAnalyzing(false);
     }
@@ -208,7 +218,7 @@ export default function OracleView({ projectId, basePath }: Props) {
       await api.oracle.updateStatus(id, { status: 'dismissed' });
       load();
     } catch (err) {
-      showError((err as Error).message || 'Update failed');
+      showError(errorMessage(err, 'Update failed'));
     } finally {
       setBusyId(null);
     }
@@ -221,7 +231,7 @@ export default function OracleView({ projectId, basePath }: Props) {
       showSuccess(t('oracle.todoCreated', { displayNumber: res.todo.displayNumber }));
       load();
     } catch (err) {
-      showError((err as Error).message || 'Convert failed');
+      showError(errorMessage(err, 'Convert failed'));
     } finally {
       setBusyId(null);
     }
@@ -234,7 +244,7 @@ export default function OracleView({ projectId, basePath }: Props) {
       showSuccess(t('oracle.commented'));
       load();
     } catch (err) {
-      showError((err as Error).message || 'Comment failed');
+      showError(errorMessage(err, 'Comment failed'));
     } finally {
       setBusyId(null);
     }
@@ -246,7 +256,7 @@ export default function OracleView({ projectId, basePath }: Props) {
       await api.oracle.remove(id);
       load();
     } catch (err) {
-      showError((err as Error).message || 'Delete failed');
+      showError(errorMessage(err, 'Delete failed'));
     } finally {
       setBusyId(null);
     }
@@ -284,7 +294,7 @@ export default function OracleView({ projectId, basePath }: Props) {
         )}
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as OracleSuggestionStatus | 'all')}
+          onChange={(e) => setStatusFilter(optionOr(e.target.value, ORACLE_STATUS_FILTERS, 'all'))}
           className="bg-gray-900 border border-gray-800 rounded text-xs px-2 py-1 text-gray-300"
         >
           <option value="all">{t('oracle.filter.allStatus')}</option>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
 import Button from '../components/ui/Button';
+import { errorMessage } from '../lib/narrow';
 
 export default function Login() {
   const { t } = useTranslation();
@@ -18,8 +19,8 @@ export default function Login() {
     setLoading(true);
     try {
       await login(username.trim(), password);
-    } catch (err: any) {
-      setError(err.message || t('auth.loginFailed'));
+    } catch (err) {
+      setError(errorMessage(err) || t('auth.loginFailed'));
     } finally {
       setLoading(false);
     }
@@ -39,7 +40,7 @@ export default function Login() {
           <p className="text-gray-500 text-sm text-center mt-1">{t('auth.loginSubtitle')}</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-lg p-6 space-y-4">
+        <form onSubmit={(e) => { void handleSubmit(e); }} className="bg-gray-900 border border-gray-800 rounded-lg p-6 space-y-4">
           {error && (
             <div className="bg-red-900/20 border border-red-800 rounded px-3 py-2 text-sm text-red-400">
               {error}

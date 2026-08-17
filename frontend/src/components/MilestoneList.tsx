@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Milestone, Todo } from '../api/client';
+import { errorMessage } from '../lib/narrow';
 import { useToast } from './Toast';
 import Button from './ui/Button';
 import ButtonLink from './ui/ButtonLink';
@@ -52,8 +53,8 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
     try {
       await api.milestones.update(milestone._id, { status });
       onUpdate();
-    } catch (err: any) {
-      showError(err.message || t('todos.statusChangeFailed'));
+    } catch (err) {
+      showError(errorMessage(err, t('todos.statusChangeFailed')));
     }
   };
 
@@ -75,8 +76,8 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
       await api.milestones.update(milestone._id, { status: 'done', changelogId: changelog._id });
       setShowChangelogForm(false);
       onUpdate();
-    } catch (err: any) {
-      showError(err.message || t('milestones.completeFailed'));
+    } catch (err) {
+      showError(errorMessage(err, t('milestones.completeFailed')));
     }
     setSubmitting(false);
   };
@@ -191,8 +192,8 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
           try {
             await api.milestones.update(milestone._id, { archived: !milestone.archived });
             onUpdate();
-          } catch (err: any) {
-            showError(err.message || t('todos.archiveFailed'));
+          } catch (err) {
+            showError(errorMessage(err, t('todos.archiveFailed')));
           }
         }}>
           {milestone.archived ? t('common.restore') : t('common.archive')}
@@ -201,8 +202,8 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
           try {
             await api.milestones.delete(milestone._id);
             onUpdate();
-          } catch (err: any) {
-            showError(err.message || t('todos.deleteFailed'));
+          } catch (err) {
+            showError(errorMessage(err, t('todos.deleteFailed')));
           }
         }} className="ml-auto" />
       </div>
@@ -236,8 +237,8 @@ export default function MilestoneList({ milestones, todos, projectId, onUpdate }
             try {
               await Promise.all(archivableDone.map((ms) => api.milestones.update(ms._id, { archived: true })));
               onUpdate();
-            } catch (err: any) {
-              showError(err.message || t('todos.archiveFailed'));
+            } catch (err) {
+              showError(errorMessage(err, t('todos.archiveFailed')));
             }
           }}
             className={`text-xs px-2 py-1 rounded transition-colors ${confirmArchiveAll ? 'bg-yellow-900/60 text-yellow-300' : 'text-gray-600 hover:text-gray-400'}`}>

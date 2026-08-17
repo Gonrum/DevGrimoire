@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import i18n from '../../i18n';
 import Button from './Button';
+import { useToast } from '../Toast';
+import { errorMessage } from '../../lib/narrow';
 
 interface ConfirmButtonProps {
   onConfirm: () => void | Promise<void>;
@@ -27,6 +29,7 @@ export default function ConfirmButton({
 }: ConfirmButtonProps) {
   const [confirming, setConfirming] = useState(false);
   const mountedRef = useRef(true);
+  const { showError } = useToast();
 
   useEffect(() => {
     return () => { mountedRef.current = false; };
@@ -57,7 +60,18 @@ export default function ConfirmButton({
       type="button"
       variant={confirming ? confirmVariant : variant}
       size={size}
-      onClick={handleClick}
+      onClick={() => {
+        /*
+         * `onConfirm` darf ein Promise liefern. Die meisten Aufrufer fangen ihre
+         * Fehler selbst und zeigen einen Toast; wer das **nicht** tut, dessen
+         * Fehler verschwand hier bisher restlos — der Nutzer sah nur, dass der
+         * Button zurückspringt. Deshalb der Toast als Auffangnetz: er feuert nur,
+         * wenn `onConfirm` wirklich abgelehnt hat, also nie doppelt.
+         */
+        handleClick().catch((err: unknown) => {
+          showError(errorMessage(err));
+        });
+      }}
       onBlur={() => setConfirming(false)}
       className={className}
       disabled={disabled}

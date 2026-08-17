@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
+import { errorMessage } from '../lib/narrow';
 
 interface FileUploadZoneProps {
   projectId?: string;
@@ -39,7 +40,7 @@ export default function FileUploadZone({
         }
         onUploadComplete();
       } catch (err) {
-        alert((err as Error).message);
+        alert(errorMessage(err));
       } finally {
         setUploading(false);
         setProgress('');

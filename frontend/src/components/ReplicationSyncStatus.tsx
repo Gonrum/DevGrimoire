@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, ReplSyncStatus, ReplDirectionHealth, ReplDeadletter } from '../api/client';
+import { errorMessage } from '../lib/narrow';
 import { wsEventBus, isProjectChangeEvent } from '../api/wsEventBus';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
@@ -36,7 +37,7 @@ export default function ReplicationSyncStatus() {
       setStatus(st);
       setDeadletters(dl.items);
     } catch (err) {
-      setMsg({ kind: 'err', text: (err as Error).message });
+      setMsg({ kind: 'err', text: errorMessage(err) });
     } finally {
       setLoading(false);
     }
@@ -77,7 +78,7 @@ export default function ReplicationSyncStatus() {
         ? t('replication.syncNowSkipped', { reason: r.skippedReason })
         : t('replication.syncNowDone', { pushed: r.pushed, applied: r.applied }));
       load();
-    } catch (err) { flash('err', (err as Error).message); }
+    } catch (err) { flash('err', errorMessage(err)); }
     finally { setBusy(null); }
   };
 
@@ -87,7 +88,7 @@ export default function ReplicationSyncStatus() {
       const r = await api.replication.runGc();
       flash('ok', t('replication.gcDone', { deleted: r.deleted }));
       load();
-    } catch (err) { flash('err', (err as Error).message); }
+    } catch (err) { flash('err', errorMessage(err)); }
     finally { setBusy(null); }
   };
 
@@ -99,7 +100,7 @@ export default function ReplicationSyncStatus() {
         ? t('replication.deadletterReplayed')
         : (r.reason || t('replication.deadletterReplayFailed')));
       load();
-    } catch (err) { flash('err', (err as Error).message); }
+    } catch (err) { flash('err', errorMessage(err)); }
     finally { setBusy(null); }
   };
 
@@ -109,7 +110,7 @@ export default function ReplicationSyncStatus() {
       await api.replication.discardDeadletter(id);
       flash('ok', t('replication.deadletterDiscarded'));
       load();
-    } catch (err) { flash('err', (err as Error).message); }
+    } catch (err) { flash('err', errorMessage(err)); }
     finally { setBusy(null); }
   };
 

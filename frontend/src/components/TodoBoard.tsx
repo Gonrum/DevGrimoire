@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Todo, Milestone, QuestionsByTodoSummary, api } from '../api/client';
+import { errorMessage } from '../lib/narrow';
 import i18n from '../i18n';
 import Markdown from './Markdown';
 import MarkdownEditor from './MarkdownEditor';
@@ -222,8 +223,8 @@ function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError, 
     try {
       await api.todos.update(todo._id, { status: newStatus });
       onUpdate();
-    } catch (err: any) {
-      showError(err.message || t('todos.statusChangeFailed'));
+    } catch (err) {
+      showError(errorMessage(err, t('todos.statusChangeFailed')));
     }
   };
 
@@ -231,8 +232,8 @@ function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError, 
     try {
       await api.todos.update(todo._id, { archived: !todo.archived });
       onUpdate();
-    } catch (err: any) {
-      showError(err.message || t('todos.archiveFailed'));
+    } catch (err) {
+      showError(errorMessage(err, t('todos.archiveFailed')));
     }
   };
 
@@ -300,8 +301,8 @@ function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError, 
           try {
             await api.todos.delete(todo._id);
             onUpdate();
-          } catch (err: any) {
-            showError(err.message || t('todos.deleteFailed'));
+          } catch (err) {
+            showError(errorMessage(err, t('todos.deleteFailed')));
           }
         }} className="ml-auto" />
       </div>
@@ -331,8 +332,8 @@ function TodoListRow({ todo, basePath, onUpdate, showError, questionSummary }: {
     try {
       await api.todos.update(todo._id, { status: newStatus });
       onUpdate();
-    } catch (err: any) {
-      showError(err.message || t('todos.statusChangeFailed'));
+    } catch (err) {
+      showError(errorMessage(err, t('todos.statusChangeFailed')));
     }
   };
 
@@ -562,8 +563,8 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
                 try {
                   await Promise.all(archivableDone.map((t) => api.todos.update(t._id, { archived: true })));
                   onUpdate();
-                } catch (err: any) {
-                  showError(err.message || t('todos.archiveFailed'));
+                } catch (err) {
+                  showError(errorMessage(err, t('todos.archiveFailed')));
                 }
               }}
                 className={`text-xs px-2 py-1 rounded transition-colors ${confirmArchiveAll ? 'bg-yellow-900/60 text-yellow-300' : 'text-gray-600 hover:text-gray-400'}`}>
@@ -609,8 +610,8 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
                   try {
                     await api.todos.update(dragTodoId, { status: col.key });
                     onUpdate();
-                  } catch (err: any) {
-                    showError(err.message || t('todos.statusChangeFailed'));
+                  } catch (err) {
+                    showError(errorMessage(err, t('todos.statusChangeFailed')));
                   }
                 }}>
                 <h3 className="text-sm font-medium text-gray-400 mb-3">

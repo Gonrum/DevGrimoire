@@ -106,8 +106,11 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
     setFormOpen(true);
   };
 
-  const handleSaved = async () => {
-    await reload();
+  // `reload()` never rejects — it stores its failure in the hook's `error`
+  // state, which renders as the banner above the list. So `void` here is the
+  // whole error path, not a swallowed one.
+  const handleSaved = () => {
+    void reload();
   };
 
   // Split into "own" vs "inherited from linked customer" (T-386). Inherited
@@ -214,7 +217,7 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
             size="xs"
             variant="secondary"
             disabled={testingId === conn.id}
-            onClick={() => handleQuickTest(conn)}
+            onClick={() => void handleQuickTest(conn)}
           >
             {testingId === conn.id ? '…' : t('ssh.tab.test')}
           </Button>
@@ -338,7 +341,7 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
           onClose={() => {
             setOpenTerminalConn(null);
             // refresh so lastConnectedAt + audit-driven status update reflect.
-            reload();
+            void reload();
           }}
           connection={openTerminalConn}
           authToken={getCurrentAccessToken()}

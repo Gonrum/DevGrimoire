@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, Manual } from '../api/client';
+import { errorMessage } from '../lib/narrow';
 import Markdown from './Markdown';
 import MarkdownEditor from './MarkdownEditor';
 import { useToast } from './Toast';
@@ -128,8 +129,8 @@ function ManualArticle({ manual, onUpdate, onEdit }: {
           try {
             await api.manuals.delete(manual._id);
             onUpdate();
-          } catch (err: any) {
-            showError(err.message || t('manuals.deleteFailed'));
+          } catch (err) {
+            showError(errorMessage(err, t('manuals.deleteFailed')));
           }
         }} />
       </div>

@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, Milestone } from '../api/client';
+import { errorMessage } from '../lib/narrow';
 import MarkdownEditor from './MarkdownEditor';
 import Button from './ui/Button';
 import { FormInput } from './ui/FormField';
@@ -31,11 +32,19 @@ export default function MilestoneForm({
   const [description, setDescription] = useState(milestone?.description || '');
   const [dueDate, setDueDate] = useState(milestone?.dueDate ? milestone.dueDate.slice(0, 10) : '');
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Vorher lief der Fehlerfall komplett ins Leere: nur ein `finally`, kein
+   * `catch`. Ein abgelehntes `api.milestones.create` (Validierung, 403, Netz)
+   * setzte `saving` zurück und sonst nichts — für den Nutzer sah das aus wie
+   * „Button gedrückt, nichts passiert".
+   */
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
     setSaving(true);
+    setError(null);
     try {
       const payload = {
         name: name.trim(),
@@ -46,13 +55,25 @@ export default function MilestoneForm({
         ? await api.milestones.update(milestone._id, payload)
         : await api.milestones.create({ projectId, ...payload });
       onSaved(saved);
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className={`space-y-5 ${className}`}>
+    <form
+      onSubmit={(e) => {
+        void handleSubmit(e);
+      }}
+      className={`space-y-5 ${className}`}
+    >
+      {error && (
+        <div className="bg-red-900/20 border border-red-800 rounded px-3 py-2 text-sm text-red-400">
+          {error}
+        </div>
+      )}
       <FormInput label={t('common.name')} required type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('common.name')} autoFocus />
       <div>
         <label className="block text-xs text-gray-500 mb-1">{t('common.description')}</label>

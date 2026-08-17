@@ -7,6 +7,7 @@ import {
   ResearchArtifactVersion,
   WriteResearchArtifactPayload,
 } from '../../api/client';
+import { errorMessage } from '../../lib/narrow';
 import { useToast } from '../Toast';
 import Markdown from '../Markdown';
 import MarkdownEditor from '../MarkdownEditor';
@@ -87,30 +88,31 @@ export default function ArtifactViewer({ topicId, slug, onDeleted, onSaved }: Ar
     changeNote: '',
   });
 
+  /*
+   * `showError` steht jetzt in der Dep-Liste (stabil aus `ToastProvider`) —
+   * vorher unterdrückte ein `eslint-disable` die Meldung.
+   */
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setShowVersions(false);
-    setVersions(null);
-    api.researchTopics
-      .artifactGet(topicId, slug)
-      .then((a) => {
+    void (async () => {
+      setLoading(true);
+      setShowVersions(false);
+      setVersions(null);
+      try {
+        const a = await api.researchTopics.artifactGet(topicId, slug);
         if (cancelled) return;
         setArtifact(a);
         setForm(formFromArtifact(a));
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        showError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
+      } catch (err) {
+        if (!cancelled) showError(errorMessage(err));
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topicId, slug]);
+  }, [topicId, slug, showError]);
 
   const update = (patch: Partial<FormState>) => setForm((f) => ({ ...f, ...patch }));
   const updateSource = (i: number, value: string) =>
@@ -253,7 +255,7 @@ export default function ArtifactViewer({ topicId, slug, onDeleted, onSaved }: Ar
           placeholder={t('researchTopics.artifactChangeNotePlaceholder')}
         />
         <div className="flex gap-2 pt-2">
-          <Button type="button" variant="primary" size="md" disabled={saving || !canSave} onClick={handleSave}>
+          <Button type="button" variant="primary" size="md" disabled={saving || !canSave} onClick={() => void handleSave()}>
             {saving ? t('common.saving') : t('common.save')}
           </Button>
           <Button type="button" variant="secondary" size="md" onClick={() => setEditing(false)} disabled={saving}>
@@ -317,7 +319,7 @@ export default function ArtifactViewer({ topicId, slug, onDeleted, onSaved }: Ar
           size="xs"
           disabled={deleting}
         />
-        <Button size="xs" variant="ghost" onClick={toggleVersions}>
+        <Button size="xs" variant="ghost" onClick={() => void toggleVersions()}>
           {showVersions ? t('researchTopics.artifactVersionsToggleHide') : t('researchTopics.artifactVersionsToggleShow')}
         </Button>
       </div>

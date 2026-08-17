@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Feature, FeatureStatus, FeaturePriority, api } from '../api/client';
+import { errorMessage, optionOr } from '../lib/narrow';
 import { useToast } from './Toast';
 import Card from './ui/Card';
 import EmptyState from './ui/EmptyState';
@@ -12,6 +13,23 @@ import FilterPill from './ui/FilterPill';
 import TabToolbar from './ui/TabToolbar';
 import Markdown from './Markdown';
 import { CATEGORY_BADGE, featureStatusBadge, priorityBadge } from './ui/badge-tokens';
+
+/*
+ * Laufzeit-Whitelists der `<select>`-Werte. `satisfies` prüft die Literale gegen
+ * die Union, `as const` erhält sie — damit liefert `optionOr` den Union-Typ
+ * statt `string` und der Cast `e.target.value as FeatureStatus` entfällt.
+ * Zugleich die Anzeigereihenfolge der Optionen.
+ */
+const FEATURE_STATUSES = [
+  'planned', 'in_development', 'released', 'deprecated',
+] as const satisfies readonly FeatureStatus[];
+
+const FEATURE_PRIORITIES = ['low', 'medium', 'high'] as const satisfies readonly FeaturePriority[];
+
+/** Wie `FEATURE_PRIORITIES`, plus der leere „keine Priorität"-Wert des Formulars. */
+const FEATURE_PRIORITY_OPTIONS = [
+  '', 'low', 'medium', 'high',
+] as const satisfies readonly (FeaturePriority | '')[];
 
 interface FeatureFormData {
   name: string;
@@ -99,8 +117,8 @@ function FeatureForm({
         showSuccess(t('features.featureCreated', { name: form.name }));
       }
       onDone();
-    } catch (err: any) {
-      showError(err.message || t('common.errorSaving'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSaving(false);
     }
@@ -131,20 +149,20 @@ function FeatureForm({
           <FormSelect
             label={t('common.status')}
             value={form.status}
-            onChange={(e) => update({ status: e.target.value as FeatureStatus })}
+            onChange={(e) => update({ status: optionOr(e.target.value, FEATURE_STATUSES, form.status) })}
           >
-            {Object.entries(statusLabels).map(([key, label]) => (
-              <option key={key} value={key}>{label}</option>
+            {FEATURE_STATUSES.map((key) => (
+              <option key={key} value={key}>{statusLabels[key]}</option>
             ))}
           </FormSelect>
           <FormSelect
             label={t('common.priority')}
             value={form.priority}
-            onChange={(e) => update({ priority: e.target.value as FeaturePriority | '' })}
+            onChange={(e) => update({ priority: optionOr(e.target.value, FEATURE_PRIORITY_OPTIONS, '') })}
           >
             <option value="">{t('common.none')}</option>
-            {Object.entries(priorityLabels).map(([key, label]) => (
-              <option key={key} value={key}>{label}</option>
+            {FEATURE_PRIORITIES.map((key) => (
+              <option key={key} value={key}>{priorityLabels[key]}</option>
             ))}
           </FormSelect>
           <FormInput
@@ -227,8 +245,8 @@ export default function FeatureList({ entries, projectId }: { entries: Feature[]
     try {
       await api.features.delete(feature._id);
       showSuccess(t('features.featureDeleted', { name: feature.name }));
-    } catch (err: any) {
-      showError(err.message || t('common.errorDeleting'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorDeleting')));
     }
   };
 

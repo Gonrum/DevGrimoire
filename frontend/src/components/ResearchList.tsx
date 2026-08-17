@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ResearchEntry, api } from '../api/client';
+import { errorMessage } from '../lib/narrow';
 import Markdown from './Markdown';
 import MarkdownEditor from './MarkdownEditor';
 import Card from './ui/Card';
@@ -82,8 +83,8 @@ function ResearchForm({
         showSuccess(t('research.created'));
       }
       onDone();
-    } catch (err: any) {
-      showError(err.message || t('common.errorSaving'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSaving(false);
     }
@@ -182,8 +183,8 @@ export default function ResearchList({
       await api.research.delete(entry._id);
       showSuccess(t('research.deleted'));
       onUpdate?.();
-    } catch (err: any) {
-      showError(err.message || t('common.errorDeleting'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorDeleting')));
     }
   };
 

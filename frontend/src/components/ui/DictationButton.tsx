@@ -2,6 +2,8 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import Button from './Button';
 import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
+import { useToast } from '../Toast';
+import { errorMessage } from '../../lib/narrow';
 
 interface DictationButtonProps {
   onTextUpdate: (text: string, isFinal: boolean) => void;
@@ -28,6 +30,7 @@ const MicIcon: React.FC<{ className?: string }> = ({ className }) => (
 
 export const DictationButton: React.FC<DictationButtonProps> = ({ onTextUpdate }) => {
   const { t } = useTranslation();
+  const { showError } = useToast();
   const dictationEnabled = localStorage.getItem('dg_dictation_enabled') !== 'false';
 
   const { isListening, isSupported, startListening, stopListening } = useSpeechRecognition({
@@ -58,7 +61,21 @@ export const DictationButton: React.FC<DictationButtonProps> = ({ onTextUpdate }
       type="button"
       variant={isListening ? 'danger' : 'secondary'}
       size="sm"
-      onClick={() => (isListening ? stopListening() : startListening())}
+      onClick={() => {
+        if (isListening) {
+          stopListening();
+          return;
+        }
+        /*
+         * `startListening` ist `async`; `recognition.start()` wirft z.B. einen
+         * InvalidStateError, wenn schon eine Erkennung läuft. Diese Ablehnung
+         * verschwand bisher — der Nutzer drückte den Knopf und nichts passierte,
+         * ohne Meldung.
+         */
+        startListening().catch((err: unknown) => {
+          showError(errorMessage(err));
+        });
+      }}
       className={`p-2 transition-all ${isListening ? 'animate-pulse' : ''}`}
       title={isListening ? t('common.speech.stopDictation') : t('common.speech.dictation')}
     >

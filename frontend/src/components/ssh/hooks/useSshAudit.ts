@@ -10,6 +10,13 @@ interface UseSshAuditResult {
 }
 
 /**
+ * `isActive` for a caller that always wants the result applied (manual
+ * `reload()` from a retry button). The effect below passes a cancel-flag
+ * probe instead — see there.
+ */
+const ALWAYS_ACTIVE = () => true;
+
+/**
  * Loads paginated audit entries for a single SSH connection. When
  * `connectionId === null` the hook stays idle and returns `data: null`
  * (no fetch is issued) — used so the parent can mount the audit modal
@@ -29,38 +36,57 @@ export function useSshAudit(
   const [loading, setLoading] = useState<boolean>(!!connectionId);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    if (!connectionId) {
-      setData(null);
-      setLoading(false);
+  /**
+   * `isActive` decides whether a resolved request may still write state.
+   * Pagination and the source-context filter change `offset`/`sourceContext`,
+   * so two fetches can be in flight at once and the slower (older) answer
+   * would otherwise overwrite the newer page.
+   */
+  const load = useCallback(
+    async (isActive: () => boolean) => {
+      if (!connectionId) {
+        setData(null);
+        setLoading(false);
+        setError(null);
+        return;
+      }
+      setLoading(true);
       setError(null);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await api.ssh.getAudit(connectionId, {
-        limit,
-        offset,
-        sourceContext,
-      });
-      setData(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [connectionId, limit, offset, sourceContext]);
+      try {
+        const result = await api.ssh.getAudit(connectionId, {
+          limit,
+          offset,
+          sourceContext,
+        });
+        if (isActive()) setData(result);
+      } catch (err) {
+        if (isActive()) setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (isActive()) setLoading(false);
+      }
+    },
+    [connectionId, limit, offset, sourceContext],
+  );
+
+  const reload = useCallback(() => load(ALWAYS_ACTIVE), [load]);
 
   useEffect(() => {
-    reload();
-  }, [reload]);
+    let cancelled = false;
+    void (async () => {
+      await load(() => !cancelled);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [load]);
 
   // Live updates (T-385). ssh-audit rows broadcast (projectId=null because
   // the audit collection doesn't carry scope) — we filter client-side by
   // connectionId so foreign-audit events don't trigger refetches.
   const reloadRef = useRef(reload);
-  reloadRef.current = reload;
+  useEffect(() => {
+    reloadRef.current = reload;
+  }, [reload]);
   useEffect(() => {
     if (!connectionId) return;
     let timer: ReturnType<typeof setTimeout> | undefined;

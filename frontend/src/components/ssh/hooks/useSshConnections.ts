@@ -14,6 +14,9 @@ interface UseSshConnectionsResult {
   reload: () => Promise<void>;
 }
 
+/** `isActive` for callers that always want the result applied — see `load`. */
+const ALWAYS_ACTIVE = () => true;
+
 /**
  * Lists SSH connections for the given scope. Exactly one of `customerId` or
  * `projectId` must be set (mirrors backend `/api/customers/:id/ssh-connections`
@@ -31,36 +34,54 @@ export function useSshConnections(scope: UseSshConnectionsScope): UseSshConnecti
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    if (!customerId && !projectId) {
-      setData([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const list = customerId
-        ? await api.ssh.listForCustomer(customerId)
-        : await api.ssh.listForProject(projectId!);
-      setData(list);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [customerId, projectId]);
+  /**
+   * `isActive` gates the state write: the scope can switch (customer tab →
+   * project tab) while a list request is still in flight, and the older
+   * answer must not overwrite the newer scope's list.
+   */
+  const load = useCallback(
+    async (isActive: () => boolean) => {
+      if (!customerId && !projectId) {
+        setData([]);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const list = customerId
+          ? await api.ssh.listForCustomer(customerId)
+          : await api.ssh.listForProject(projectId!);
+        if (isActive()) setData(list);
+      } catch (err) {
+        if (isActive()) setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (isActive()) setLoading(false);
+      }
+    },
+    [customerId, projectId],
+  );
+
+  const reload = useCallback(() => load(ALWAYS_ACTIVE), [load]);
 
   useEffect(() => {
-    reload();
-  }, [reload]);
+    let cancelled = false;
+    void (async () => {
+      await load(() => !cancelled);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [load]);
 
   // Live updates (T-385): subscribe to ssh-connection events on the WS bus.
   // Customer-scoped events come in with projectId=null (broadcast), so we
   // filter client-side by matching customerId on the payload. Project-scoped
   // subscriptions use the existing `project` scope filter on the bus.
   const reloadRef = useRef(reload);
-  reloadRef.current = reload;
+  useEffect(() => {
+    reloadRef.current = reload;
+  }, [reload]);
   useEffect(() => {
     if (!customerId && !projectId) return;
     const scopeArg = projectId

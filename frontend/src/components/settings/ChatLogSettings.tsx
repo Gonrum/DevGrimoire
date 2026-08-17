@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   api,
@@ -7,6 +7,7 @@ import {
   ChatActivityStats,
   Project,
 } from '../../api/client';
+import { errorMessage, optionOr } from '../../lib/narrow';
 import { useToast } from '../Toast';
 import Button from '../ui/Button';
 import { SettingsSection, SettingsTabHeader } from '../ui/SettingsShell';
@@ -14,6 +15,10 @@ import { LoadingText } from '../ui/LoadingSpinner';
 
 const PAGE_SIZE = 50;
 const STATS_DAYS = 30;
+
+/** Werte des Outcome-Filters (`''` = kein Filter) — geprüft statt behauptet. */
+const OUTCOME_FILTERS = ['', 'completed', 'failed', 'aborted', 'no_endpoint'] as const satisfies
+  readonly (ChatActivityOutcome | '')[];
 
 /**
  * Admin-only chat-log viewer. Shows every chat invocation (server- and
@@ -35,7 +40,6 @@ export default function ChatLogSettings() {
   const [searchDraft, setSearchDraft] = useState('');
   const [projects, setProjects] = useState<Project[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [offset, setOffset] = useState(0);
 
   useEffect(() => {
     api.projects.list({ active: true })
@@ -43,40 +47,61 @@ export default function ChatLogSettings() {
       .catch(() => setProjects([]));
   }, []);
 
-  const load = async (resetOffset: boolean) => {
-    setLoading(true);
-    const nextOffset = resetOffset ? 0 : offset;
-    try {
-      const [list, statsRes] = await Promise.all([
-        api.chatActivity.list({
-          outcome: outcomeFilter || undefined,
-          projectId: projectFilter || undefined,
-          search: search || undefined,
-          limit: PAGE_SIZE,
-          offset: nextOffset,
-        }),
-        api.chatActivity.stats({
-          projectId: projectFilter || undefined,
-          days: STATS_DAYS,
-        }),
-      ]);
-      setItems((prev) => (resetOffset ? list.items : [...prev, ...list.items]));
-      setTotal(list.total);
-      setStats(statsRes);
-      if (resetOffset) setOffset(PAGE_SIZE);
-      else setOffset(nextOffset + PAGE_SIZE);
-    } catch (err) {
-      showError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  };
+  /*
+   * Ursache des früheren `exhaustive-deps`-Disables: `load` war eine bei jedem
+   * Render neu erzeugte Funktion. Eine vollständige Dep-Liste hätte den Effect
+   * bei jedem Render laufen lassen — Endlosschleife. Behoben durch eine stabile
+   * Referenz (`useCallback`), nicht durch eine gekürzte Liste.
+   *
+   * Der Offset kommt jetzt als Parameter statt aus einem State. Das war nötig,
+   * weil ein `offset`-State in den Deps von `load` genau dieselbe Schleife
+   * erzeugt hätte (load setzt offset -> load ändert sich -> Effect läuft neu).
+   * Nebeneffekt: `items.length` als Offset ist auch korrekter als der alte
+   * `offset + PAGE_SIZE`, der auch dann um eine ganze Seite weitersprang, wenn
+   * der Server weniger als PAGE_SIZE Einträge geliefert hat.
+   *
+   * `isCancelled` gehört dazu, weil ein Filterwechsel den Effect neu startet:
+   * ohne den Guard könnte die langsamere Antwort der alten Filter die neuere
+   * überschreiben (bzw. beim Append doppelte Zeilen anhängen).
+   */
+  const load = useCallback(
+    async (nextOffset: number, isCancelled: () => boolean = () => false) => {
+      setLoading(true);
+      try {
+        const [list, statsRes] = await Promise.all([
+          api.chatActivity.list({
+            outcome: outcomeFilter || undefined,
+            projectId: projectFilter || undefined,
+            search: search || undefined,
+            limit: PAGE_SIZE,
+            offset: nextOffset,
+          }),
+          api.chatActivity.stats({
+            projectId: projectFilter || undefined,
+            days: STATS_DAYS,
+          }),
+        ]);
+        if (isCancelled()) return;
+        setItems((prev) => (nextOffset === 0 ? list.items : [...prev, ...list.items]));
+        setTotal(list.total);
+        setStats(statsRes);
+      } catch (err) {
+        if (!isCancelled()) showError(errorMessage(err));
+      } finally {
+        if (!isCancelled()) setLoading(false);
+      }
+    },
+    [outcomeFilter, projectFilter, search, showError],
+  );
 
   // Reload when filters change
   useEffect(() => {
-    load(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outcomeFilter, projectFilter, search]);
+    let cancelled = false;
+    void (async () => {
+      await load(0, () => cancelled);
+    })();
+    return () => { cancelled = true; };
+  }, [load]);
 
   const projectMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -191,7 +216,7 @@ export default function ChatLogSettings() {
         <div className="flex flex-wrap gap-2 mb-3">
           <select
             value={outcomeFilter}
-            onChange={(e) => setOutcomeFilter(e.target.value as ChatActivityOutcome | '')}
+            onChange={(e) => setOutcomeFilter(optionOr(e.target.value, OUTCOME_FILTERS, ''))}
             className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-violet-500"
           >
             <option value="">{t('chatLog.filterAll')}</option>
@@ -225,7 +250,7 @@ export default function ChatLogSettings() {
               className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-violet-500"
             />
           </form>
-          <Button size="sm" onClick={() => load(true)} disabled={loading}>
+          <Button size="sm" onClick={() => void load(0)} disabled={loading}>
             {t('chatLog.refresh')}
           </Button>
         </div>
@@ -375,7 +400,7 @@ export default function ChatLogSettings() {
 
         {items.length < total && (
           <div className="mt-3 text-center">
-            <Button size="sm" onClick={() => load(false)} disabled={loading}>
+            <Button size="sm" onClick={() => void load(items.length)} disabled={loading}>
               {loading ? t('chatLog.loading') : t('chatLog.loadMore')} ({items.length} / {total})
             </Button>
           </div>

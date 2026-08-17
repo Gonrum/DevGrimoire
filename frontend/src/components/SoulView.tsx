@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, Soul } from '../api/client';
+import { errorMessage } from '../lib/narrow';
 import Markdown from '../components/Markdown';
 import MarkdownEditor from '../components/MarkdownEditor';
 import Button from '../components/ui/Button';
@@ -29,22 +30,32 @@ export default function SoulView({ projectId, customerId, soul, onUpdate }: Prop
   const [editing, setEditing] = useState<SectionKey | null>(null);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const definedCount = SECTIONS.filter((s) => soul?.[s.key]?.trim()).length;
 
   const handleEdit = (key: SectionKey) => {
     setEditing(key);
     setDraft(soul?.[key] || '');
+    setError(null);
   };
 
+  /**
+   * `catch` statt nur `finally`: vorher blieb ein fehlgeschlagenes `upsert`
+   * unsichtbar — der Editor blieb offen, der Text stand noch da, und der Nutzer
+   * hatte keinen Hinweis, dass nichts gespeichert wurde.
+   */
   const handleSave = async () => {
     if (!editing) return;
     setSaving(true);
+    setError(null);
     try {
       await api.souls.upsert({ projectId, customerId, [editing]: draft });
       onUpdate();
       setEditing(null);
       setDraft('');
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -53,6 +64,7 @@ export default function SoulView({ projectId, customerId, soul, onUpdate }: Prop
   const handleCancel = () => {
     setEditing(null);
     setDraft('');
+    setError(null);
   };
 
   const allEmpty = definedCount === 0;
@@ -106,11 +118,18 @@ export default function SoulView({ projectId, customerId, soul, onUpdate }: Prop
                     rows={6}
                     placeholder={t(`soul.${section.key}Placeholder`)}
                   />
+                  {error && (
+                    <div className="mt-2 bg-red-900/20 border border-red-800 rounded px-3 py-2 text-sm text-red-400">
+                      {error}
+                    </div>
+                  )}
                   <div className="flex gap-2 mt-2">
                     <Button
                       variant="primary"
                       size="sm"
-                      onClick={handleSave}
+                      onClick={() => {
+                        void handleSave();
+                      }}
                       disabled={saving}
                     >
                       {saving ? t('common.saving') : t('common.save')}

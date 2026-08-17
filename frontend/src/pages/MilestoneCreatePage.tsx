@@ -15,8 +15,8 @@ export default function MilestoneCreatePage() {
           projectId={id}
           submitLabel={t('common.create')}
           savingLabel={t('common.creating')}
-          onSaved={() => navigate(`/projects/${id}?tab=milestones`)}
-          onCancel={() => navigate(`/projects/${id}`)}
+          onSaved={() => { void navigate(`/projects/${id}?tab=milestones`); }}
+          onCancel={() => { void navigate(`/projects/${id}`); }}
         />
       )}
     </WorkflowPageShell>

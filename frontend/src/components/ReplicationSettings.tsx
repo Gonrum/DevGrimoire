@@ -1,10 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, ReplicationConfig, ReplicationStatus, ReplicationProjectEntry, RemoteProjectEntry } from '../api/client';
+import { errorMessage, optionOr } from '../lib/narrow';
 import { wsEventBus, isProjectChangeEvent } from '../api/wsEventBus';
 import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
 import ReplicationSyncStatus from './ReplicationSyncStatus';
+
+/*
+ * Laufzeit-Whitelists der beiden `<select>`s. Vorher stand an beiden Stellen ein
+ * Cast auf einen `string` — hier prüft `satisfies` die Literale gegen die Union
+ * und `optionOr` fällt zur Laufzeit auf den aktuellen Wert zurück.
+ */
+const REPLICATION_ROLES = [
+  'standalone', 'master', 'slave', 'peer',
+] as const satisfies readonly ReplicationConfig['role'][];
+
+const REPLICATION_ENGINES = ['legacy', 'log'] as const;
 
 export default function ReplicationSettings() {
   const { t, i18n } = useTranslation();
@@ -41,7 +53,7 @@ export default function ReplicationSettings() {
       const list = await api.replication.listProjects();
       setProjects(list);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setProjectsLoading(false);
     }
@@ -64,7 +76,7 @@ export default function ReplicationSettings() {
       setFullSyncCron(cfg.fullSyncCron);
       setEngine(cfg.engine ?? 'legacy');
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -143,7 +155,7 @@ export default function ReplicationSettings() {
       // Refresh status
       api.replication.getStatus().then(setStatus).catch(() => {});
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -180,7 +192,7 @@ export default function ReplicationSettings() {
     } catch (err) {
       // Roll back on failure
       setProjects((prev) => prev?.map((p) => p._id === id ? { ...p, replicationEnabled: !enabled } : p) ?? null);
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   };
 
@@ -189,7 +201,7 @@ export default function ReplicationSettings() {
     try {
       await api.replication.triggerFullSync(id);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setTimeout(() => {
         setSyncingProjects((prev) => {
@@ -208,7 +220,7 @@ export default function ReplicationSettings() {
       const list = await api.replication.listRemoteProjects();
       setRemoteProjects(list);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setRemoteLoading(false);
     }
@@ -227,7 +239,7 @@ export default function ReplicationSettings() {
         loadProjects().catch(() => {});
       }, 2500);
     } catch (err) {
-      setError(`${t('replication.remoteProjectImportFailed')}: ${(err as Error).message}`);
+      setError(`${t('replication.remoteProjectImportFailed')}: ${errorMessage(err)}`);
     } finally {
       setTimeout(() => {
         setImportingIds((prev) => {
@@ -250,7 +262,7 @@ export default function ReplicationSettings() {
         setError(`${t('replication.connectionFailed')}: ${result.error || 'Unknown'}`);
       }
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   };
 
@@ -260,7 +272,7 @@ export default function ReplicationSettings() {
       setSuccess(t('replication.syncStarted'));
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   };
 
@@ -280,7 +292,7 @@ export default function ReplicationSettings() {
         api.replication.getStatus().then(setStatus).catch(() => {});
       }
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   };
 
@@ -290,7 +302,7 @@ export default function ReplicationSettings() {
       setSuccess(t('replication.promoted'));
       load();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   };
 
@@ -300,7 +312,7 @@ export default function ReplicationSettings() {
       setSuccess(`${result.cleared} ${t('replication.cleared')}`);
       api.replication.getStatus().then(setStatus).catch(() => {});
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   };
 
@@ -315,7 +327,7 @@ export default function ReplicationSettings() {
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
       setEngine(prev); // roll back
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   };
 
@@ -341,7 +353,7 @@ export default function ReplicationSettings() {
         <h2 className="text-sm font-medium text-gray-300 mb-3">{t('replication.role')}</h2>
         <select
           value={role}
-          onChange={(e) => setRole(e.target.value as ReplicationConfig['role'])}
+          onChange={(e) => setRole(optionOr(e.target.value, REPLICATION_ROLES, role))}
           className="bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
         >
           <option value="standalone">Standalone</option>
@@ -360,7 +372,7 @@ export default function ReplicationSettings() {
           <h2 className="text-sm font-medium text-gray-300 mb-3">{t('replication.engineTitle')}</h2>
           <select
             value={engine}
-            onChange={(e) => changeEngine(e.target.value as 'legacy' | 'log')}
+            onChange={(e) => changeEngine(optionOr(e.target.value, REPLICATION_ENGINES, engine))}
             className="bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
           >
             <option value="legacy">{t('replication.engineLegacy')}</option>

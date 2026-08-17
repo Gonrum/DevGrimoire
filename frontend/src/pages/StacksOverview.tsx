@@ -7,6 +7,7 @@ import Button from '../components/ui/Button';
 import EmptyState from '../components/ui/EmptyState';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import CreateStackDialog from '../components/stacks/CreateStackDialog';
+import { errorMessage } from '../lib/narrow';
 
 export default function StacksOverview() {
   const { t } = useTranslation();
@@ -16,17 +17,27 @@ export default function StacksOverview() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      setStacks(await api.stacks.list());
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
+  /*
+   * Der Ladevorgang liegt im Effekt, damit der Cleanup ihn als veraltet
+   * markieren kann. `String(err)` ist raus: bei einem geworfenen Objekt stand da
+   * "[object Object]" im Toast.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      setLoading(true);
+      try {
+        const list = await api.stacks.list();
+        if (!cancelled) setStacks(list);
+      } catch (err) {
+        if (!cancelled) showError(errorMessage(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
-  };
-  useEffect(() => { load(); }, []);
+    void run();
+    return () => { cancelled = true; };
+  }, [showError]);
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
@@ -35,8 +46,8 @@ export default function StacksOverview() {
       await api.stacks.delete(id);
       setStacks((prev) => prev.filter((s) => s._id !== id));
       showSuccess(t('stacks.deleted'));
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : String(err));
+    } catch (err) {
+      showError(errorMessage(err));
     }
   };
 
@@ -56,12 +67,12 @@ export default function StacksOverview() {
           {stacks.map((s) => (
             <div
               key={s._id}
-              onClick={() => navigate(`/stacks/${s._id}`)}
+              onClick={() => { void navigate(`/stacks/${s._id}`); }}
               className="bg-gray-900 border border-gray-800 rounded-lg p-4 hover:border-cyan-700 transition cursor-pointer"
             >
               <div className="flex items-start justify-between gap-2">
                 <h2 className="text-lg font-semibold text-gray-100">{s.name}</h2>
-                <Button variant="ghost" onClick={(e) => handleDelete(e, s._id)}>{t('common.delete')}</Button>
+                <Button variant="ghost" onClick={(e) => { void handleDelete(e, s._id); }}>{t('common.delete')}</Button>
               </div>
               {s.description && <p className="text-sm text-gray-400 mt-1 line-clamp-2">{s.description}</p>}
               <p className="text-xs text-gray-500 mt-3">{t('stacks.sectionCount', { count: s.entryCount })}</p>
@@ -73,7 +84,7 @@ export default function StacksOverview() {
       {showCreate && (
         <CreateStackDialog
           onCancel={() => setShowCreate(false)}
-          onCreated={(id) => { setShowCreate(false); navigate(`/stacks/${id}`); }}
+          onCreated={(id) => { setShowCreate(false); void navigate(`/stacks/${id}`); }}
         />
       )}
     </div>

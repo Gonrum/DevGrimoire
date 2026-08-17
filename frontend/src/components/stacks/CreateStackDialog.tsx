@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../../api/client';
+import { errorMessage } from '../../lib/narrow';
 import { useToast } from '../Toast';
 import { Dialog, Portal } from '../ui/Dialog';
 import { FormInput, FormTextarea } from '../ui/FormField';
@@ -26,8 +27,8 @@ export default function CreateStackDialog({ onCancel, onCreated }: Props) {
         description: description.trim() || undefined,
       });
       onCreated(stack._id);
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : String(err));
+    } catch (err) {
+      showError(errorMessage(err));
       setSaving(false);
     }
   };
@@ -40,7 +41,7 @@ export default function CreateStackDialog({ onCancel, onCreated }: Props) {
           <FormTextarea label={t('stacks.description')} value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button>
-            <Button variant="primary" onClick={handleCreate} disabled={saving || !name.trim()}>
+            <Button variant="primary" onClick={() => void handleCreate()} disabled={saving || !name.trim()}>
               {saving ? t('common.creating') : t('stacks.createAction')}
             </Button>
           </div>

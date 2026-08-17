@@ -4,10 +4,25 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 import Button from '../ui/Button';
+import { parseJsonText } from '../../api/http-boundary';
+import { isRecord } from '../../lib/narrow';
 
-const BASE_URL =
-  (typeof window !== 'undefined' && (window as unknown as { __DG_API_URL__?: string }).__DG_API_URL__) ||
-  '/api';
+/**
+ * Optional runtime override `window.__DG_API_URL__` (set by a deployment that
+ * serves the SPA from a different origin than the API). Read through a
+ * predicate instead of a cast: nothing in this repo declares or writes the
+ * global, so its presence and type are genuinely unknown at build time.
+ */
+function readApiBaseUrl(): string {
+  const globals: unknown = globalThis;
+  if (isRecord(globals)) {
+    const configured = globals.__DG_API_URL__;
+    if (typeof configured === 'string' && configured.length > 0) return configured;
+  }
+  return '/api';
+}
+
+const BASE_URL = readApiBaseUrl();
 
 export interface SshTerminalProps {
   connectionId: string;
@@ -73,6 +88,35 @@ function describeCloseCode(
     default:
       return reason ? `${code}: ${reason}` : String(code);
   }
+}
+
+/** Control frame the gateway sends as a text message (Spec §4.3). */
+interface SshControlFrame {
+  type: string;
+  exitCode?: number;
+}
+
+/**
+ * Read a text WS message as a control frame.
+ *
+ * Returns `null` for anything that isn't a well-formed frame — invalid JSON,
+ * a JSON scalar, or a missing `type`. The caller then writes the payload to
+ * the terminal as raw text. Deliberately non-throwing: a bad frame may be
+ * discarded, but it must not escape the `onmessage` handler and tear down the
+ * session.
+ */
+function parseControlFrame(text: string): SshControlFrame | null {
+  let parsed: unknown;
+  try {
+    parsed = parseJsonText<unknown>(text);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed) || typeof parsed.type !== 'string') return null;
+  return {
+    type: parsed.type,
+    exitCode: typeof parsed.exitCode === 'number' ? parsed.exitCode : undefined,
+  };
 }
 
 /**
@@ -187,18 +231,14 @@ export default function SshTerminal({
     ws.onmessage = (ev) => {
       if (typeof ev.data === 'string') {
         // Control frame from the gateway. Today only 'exit' uses this path.
-        try {
-          const msg = JSON.parse(ev.data);
-          if (msg && msg.type === 'exit') {
-            const code = msg.exitCode ?? '?';
-            term.write(
-              `\r\n\x1b[2m# ${t('ssh.terminal.exited')} (exit code ${code})\x1b[0m\r\n`,
-            );
-            notifyState('exited');
-            return;
-          }
-        } catch {
-          // not JSON — write raw text
+        const frame = parseControlFrame(ev.data);
+        if (frame?.type === 'exit') {
+          const code = frame.exitCode ?? '?';
+          term.write(
+            `\r\n\x1b[2m# ${t('ssh.terminal.exited')} (exit code ${code})\x1b[0m\r\n`,
+          );
+          notifyState('exited');
+          return;
         }
         term.write(ev.data);
       } else {

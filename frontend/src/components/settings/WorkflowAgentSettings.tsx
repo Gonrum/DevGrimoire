@@ -36,7 +36,11 @@ export default function WorkflowAgentSettings() {
     setWaLoading(false);
   }, []);
 
-  useEffect(() => { loadWorkflowAgentConfig(); }, [loadWorkflowAgentConfig]);
+  useEffect(() => {
+    void (async () => {
+      await loadWorkflowAgentConfig();
+    })();
+  }, [loadWorkflowAgentConfig]);
 
   const saveWorkflowAgentConfig = async () => {
     if (!waConfig) return;
@@ -97,7 +101,7 @@ export default function WorkflowAgentSettings() {
           </div>
 
           <SettingsActions className="mt-0 border-t border-gray-800 pt-3">
-            <Button variant="primary" size="lg" onClick={saveWorkflowAgentConfig} disabled={waSaving}>
+            <Button variant="primary" size="lg" onClick={() => void saveWorkflowAgentConfig()} disabled={waSaving}>
               {waSaving ? t('common.saving') : t('settings.workflowAgentSave')}
             </Button>
             {waSavedMsg && <span className="text-green-400 text-sm">✓ {t('settings.workflowAgentSaved')}</span>}

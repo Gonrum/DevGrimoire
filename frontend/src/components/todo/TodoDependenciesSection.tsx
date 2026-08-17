@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Todo } from '../../api/client';
+import { errorMessage } from '../../lib/narrow';
 import DetailSection from '../ui/DetailSection';
 import { FormSelect } from '../ui/FormField';
 
@@ -29,9 +30,14 @@ interface Props {
 export default function TodoDependenciesSection({ todo, allTodos, projectId, onChanged, onError, className }: Props) {
   const { t } = useTranslation();
 
-  const blockedBy = (todo.blockedBy || [])
-    .map((bid) => allTodos.find((entry) => entry._id === bid))
-    .filter(Boolean) as Todo[];
+  // `flatMap` statt `map(...).filter(Boolean) as Todo[]`: die Assertion behauptete
+  // nur, dass keine `undefined` mehr drin sind. Blocker-IDs, die nicht in
+  // `allTodos` stehen (z.B. Todo eines anderen Projekts), fallen hier weiterhin
+  // still weg — dann zeigt der Abschnitt sie nicht und `hasBlockers` bleibt false.
+  const blockedBy = (todo.blockedBy || []).flatMap((bid) => {
+    const dep = allTodos.find((entry) => entry._id === bid);
+    return dep ? [dep] : [];
+  });
   const blocks = allTodos.filter((entry) => (entry.blockedBy || []).includes(todo._id));
   const availableDeps = allTodos.filter((entry) => entry._id !== todo._id && !(todo.blockedBy || []).includes(entry._id));
   const hasBlockers = blockedBy.some((b) => b.status !== 'done');
@@ -42,8 +48,8 @@ export default function TodoDependenciesSection({ todo, allTodos, projectId, onC
         blockedBy: (todo.blockedBy || []).filter((b) => b !== depId),
       });
       onChanged();
-    } catch (err: any) {
-      onError(err?.message || t('todoDetail.removeDependencyFailed'));
+    } catch (err) {
+      onError(errorMessage(err, t('todoDetail.removeDependencyFailed')));
     }
   };
 
@@ -54,8 +60,8 @@ export default function TodoDependenciesSection({ todo, allTodos, projectId, onC
         blockedBy: [...(todo.blockedBy || []), depId],
       });
       onChanged();
-    } catch (err: any) {
-      onError(err?.message || t('todoDetail.addDependencyFailed'));
+    } catch (err) {
+      onError(errorMessage(err, t('todoDetail.addDependencyFailed')));
     }
   };
 
@@ -78,9 +84,9 @@ export default function TodoDependenciesSection({ todo, allTodos, projectId, onC
               trailing={(
                 <button
                   type="button"
-                  onClick={() => removeDependency(dep._id)}
+                  onClick={() => { void removeDependency(dep._id); }}
                   className="shrink-0 text-gray-600 transition-colors hover:text-red-400"
-                  aria-label={t('todoDetail.removeDependencyFailed')}
+                  aria-label={t('common.remove')}
                 >
                   &times;
                 </button>
@@ -100,7 +106,7 @@ export default function TodoDependenciesSection({ todo, allTodos, projectId, onC
         <FormSelect
           fieldClassName="mt-3"
           value=""
-          onChange={(e) => addDependency(e.target.value)}
+          onChange={(e) => { void addDependency(e.target.value); }}
         >
           <option value="">{t('todoDetail.addDependency')}</option>
           {availableDeps.map((entry) => (

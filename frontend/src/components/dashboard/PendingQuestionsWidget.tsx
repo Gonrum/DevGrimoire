@@ -57,32 +57,45 @@ export default function PendingQuestionsWidget({ projectId, initialDirection, cl
       .catch(() => setUsersById({}));
   }, []);
 
-  const load = () => {
-    setLoading(true);
-    api.questions
-      .open({
-        projectId,
-        direction: direction || undefined,
-        limit: PAGE_SIZE,
-      })
-      .then((res) => {
-        setItems(res.items);
-        setTotal(res.total);
-      })
-      .catch(() => {
-        setItems([]);
-        setTotal(0);
-      })
-      .finally(() => setLoading(false));
-  };
-
+  // Laden gehört in den Effect: der Filter (`direction`) und `projectId` sind
+  // Teil der Anfrage, also kann bei einem Wechsel eine ältere Antwort nach der
+  // neueren eintreffen. `cancelled` verwirft die veraltete Antwort — auch die
+  // der WS-getriggerten Nachladung, denn `unsub` läuft im selben Cleanup.
   useEffect(() => {
-    load();
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const res = await api.questions.open({
+          projectId,
+          direction: direction || undefined,
+          limit: PAGE_SIZE,
+        });
+        if (!cancelled) {
+          setItems(res.items);
+          setTotal(res.total);
+        }
+      } catch {
+        if (!cancelled) {
+          setItems([]);
+          setTotal(0);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void (async () => {
+      await load();
+    })();
+
     const unsub = wsEventBus.subscribe({ kind: 'global' }, (event) => {
-      if (isQuestionEvent(event)) load();
+      if (isQuestionEvent(event)) void load();
     });
-    return unsub;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, [projectId, direction]);
 
   const dateLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
@@ -323,7 +336,7 @@ function AnswerQuestionModal({
                 variant="primary"
                 size="sm"
                 disabled={submitting}
-                onClick={() => submit(opt)}
+                onClick={() => { void submit(opt); }}
               >
                 {opt}
               </Button>
@@ -348,7 +361,7 @@ function AnswerQuestionModal({
               type="button"
               variant="primary"
               disabled={submitting || !freeText.trim()}
-              onClick={() => submit(freeText)}
+              onClick={() => { void submit(freeText); }}
             >
               {submitting ? '...' : t('questions.answerSubmit')}
             </Button>

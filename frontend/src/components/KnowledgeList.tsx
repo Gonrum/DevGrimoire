@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Knowledge, api } from '../api/client';
+import { errorMessage, optionOr } from '../lib/narrow';
 import Markdown from './Markdown';
 import MarkdownEditor from './MarkdownEditor';
 import { useToast } from './Toast';
@@ -13,9 +14,12 @@ import { FormInput, FormSelect } from './ui/FormField';
 import FilterPill from './ui/FilterPill';
 import TabToolbar from './ui/TabToolbar';
 
+/** Laufzeit-Whitelist des Scope-`<select>` — vorher ein blanker Cast. */
+const KNOWLEDGE_SCOPES = ['project', 'customer', 'global'] as const;
+
 interface KnowledgeFormData {
   topic: string;
-  scope: 'project' | 'global' | 'customer';
+  scope: (typeof KNOWLEDGE_SCOPES)[number];
   category: string;
   tags: string;
   content: string;
@@ -89,8 +93,8 @@ function KnowledgeForm({
         showSuccess(t('knowledge.created', { topic: payload.topic }));
       }
       onDone();
-    } catch (err: any) {
-      showError(err.message || t('common.errorSaving'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorSaving')));
     } finally {
       setSaving(false);
     }
@@ -126,7 +130,7 @@ function KnowledgeForm({
           label={t('knowledge.scope')}
           value={form.scope}
           disabled={!!editId}
-          onChange={(e) => update({ scope: e.target.value as KnowledgeFormData['scope'] })}
+          onChange={(e) => update({ scope: optionOr(e.target.value, KNOWLEDGE_SCOPES, form.scope) })}
         >
           {projectId && <option value="project">{t('knowledge.scopeProject')}</option>}
           {customerId && <option value="customer">{t('knowledge.scopeCustomer')}</option>}
@@ -206,8 +210,8 @@ export default function KnowledgeList({
       await api.knowledge.delete(entry._id);
       showSuccess(t('knowledge.deleted', { topic: entry.topic }));
       onUpdate();
-    } catch (err: any) {
-      showError(err.message || t('common.errorDeleting'));
+    } catch (err) {
+      showError(errorMessage(err, t('common.errorDeleting')));
     }
   };
 

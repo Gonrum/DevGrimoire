@@ -104,7 +104,14 @@ export interface WorkflowNodeMetadata {
   branches: Branch[];
 }
 
-export interface ListFilter {
+/*
+ * Bewusst `type` statt `interface`: nur ein Objekt-Literal-Typ bekommt von TS
+ * eine implizite Index-Signatur und ist damit an `Record<string, QueryValue>`
+ * zuweisbar. Vorher stand an der Aufrufstelle `filter as Record<string, unknown>` —
+ * eine Behauptung, die zugleich jeden Wert zu `unknown` machte und damit
+ * `String(v)` auf potenzielle Objekte losliess.
+ */
+export type ListFilter = {
   scope?: WorkflowScope;
   projectId?: string;
   customerId?: string;
@@ -113,7 +120,7 @@ export interface ListFilter {
   limit?: number;
   offset?: number;
   includeArchived?: boolean;
-}
+};
 
 export interface CreateWorkflowDto {
   scope: WorkflowScope;
@@ -140,7 +147,8 @@ export interface UpdateWorkflowDto {
   publish?: boolean;
 }
 
-export interface RunFilter {
+/* `type` statt `interface` — Begründung siehe `ListFilter`. */
+export type RunFilter = {
   definitionId?: string;
   scope?: WorkflowScope;
   projectId?: string;
@@ -148,9 +156,12 @@ export interface RunFilter {
   status?: WorkflowRunStatus;
   limit?: number;
   offset?: number;
-}
+};
 
-function toQuery(p: Record<string, unknown>): string {
+/** Was sinnvoll in einen Query-String passt. */
+type QueryValue = string | number | boolean | null | undefined;
+
+function toQuery(p: Record<string, QueryValue>): string {
   const u = new URLSearchParams();
   for (const [k, v] of Object.entries(p)) {
     if (v === undefined || v === null) continue;
@@ -163,7 +174,7 @@ function toQuery(p: Record<string, unknown>): string {
 export const workflowsApi = {
   listNodeTypes: () => request<WorkflowNodeMetadata[]>('/workflows/node-types'),
   list: (filter: ListFilter = {}) =>
-    request<WorkflowDefinition[]>(`/workflows${toQuery(filter as Record<string, unknown>)}`),
+    request<WorkflowDefinition[]>(`/workflows${toQuery(filter)}`),
   get: (id: string) => request<WorkflowDefinition>(`/workflows/${id}`),
   create: (dto: CreateWorkflowDto) =>
     request<WorkflowDefinition>('/workflows', { method: 'POST', body: JSON.stringify(dto) }),
@@ -177,7 +188,7 @@ export const workflowsApi = {
       body: JSON.stringify({ definitionId, input }),
     }),
   listRuns: (filter: RunFilter = {}) =>
-    request<WorkflowRun[]>(`/workflows/runs/list${toQuery(filter as Record<string, unknown>)}`),
+    request<WorkflowRun[]>(`/workflows/runs/list${toQuery(filter)}`),
   getRun: (id: string) => request<WorkflowRun>(`/workflows/runs/${id}`),
   cancelRun: (id: string, reason?: string) =>
     request<WorkflowRun>(`/workflows/runs/${id}/cancel`, {

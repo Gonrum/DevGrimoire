@@ -108,12 +108,17 @@ export default function ActivityFeed({ projectsById }: Props) {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    void (async () => {
+      await load();
+    })();
+  }, [load]);
 
   // The dashboard event hook already fires on any project-scoped change.
   // Activity rows are written from PROJECT_CHANGED, so a fresh load on
   // any event gives us live-update parity with PendingQuestionsWidget.
-  useDashboardEvents(() => load());
+  // `load` swallows its own errors (see above), deshalb genügt `void`.
+  useDashboardEvents(() => { void load(); });
 
   if (loading) return null;
   if (items.length === 0) return null;

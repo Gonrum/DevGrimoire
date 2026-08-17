@@ -61,7 +61,7 @@ export default function SshSettings() {
         helpText={t('ssh.settings.limitHint', { max: hardMaxMb })}
       />
       <SettingsActions>
-        <Button variant="primary" onClick={save} disabled={saving}>
+        <Button variant="primary" onClick={() => void save()} disabled={saving}>
           {saving ? t('common.saving') : t('common.save')}
         </Button>
       </SettingsActions>

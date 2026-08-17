@@ -40,4 +40,20 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-type-assertion': 'error',
     },
   },
+  {
+    /*
+     * Der einzige Override, und er gilt derselben Rolle wie im Backend:
+     * **Grenz-Leser**. `src/api/http-boundary.ts` ist die eine Stelle, an der
+     * aus einer ungeprüften JSON-Antwort ein getypter Wert wird.
+     *
+     * Bewusst eine eigene Mini-Datei statt `client.ts`: dort hängen 3.833 Zeilen
+     * API-Oberfläche dran, die keine Ausnahme brauchen sollen.
+     *
+     * Diese Liste ist keine Ablage für Unbequemlichkeiten. Wer die Ausnahme
+     * schliessen will, braucht einen Schema-Validator an der Grenze (zod o.ä.),
+     * nicht mehr Casts.
+     */
+    files: ['src/api/http-boundary.ts'],
+    rules: { '@typescript-eslint/no-unsafe-type-assertion': 'off' },
+  },
 );

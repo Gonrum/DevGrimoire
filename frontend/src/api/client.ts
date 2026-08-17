@@ -1,3 +1,11 @@
+import {
+  mergeHeaders,
+  parseEmptyResponse,
+  parseJsonResponse,
+  parseJsonText,
+  readErrorMessage,
+  readErrorMessageFromText,
+} from './http-boundary';
 const BASE_URL = '/api';
 
 let getAccessToken: (() => string | null) | null = null;
@@ -26,7 +34,7 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
 
   let res = await fetch(`${BASE_URL}${path}`, {
     ...options,
-    headers: { ...headers, ...(options?.headers as Record<string, string>) },
+    headers: mergeHeaders(headers, options?.headers),
   });
 
   // Auto-refresh on 401
@@ -37,17 +45,18 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
       if (newToken) headers['Authorization'] = `Bearer ${newToken}`;
       res = await fetch(`${BASE_URL}${path}`, {
         ...options,
-        headers: { ...headers, ...(options?.headers as Record<string, string>) },
+        headers: mergeHeaders(headers, options?.headers),
       });
     }
   }
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(error.message || res.statusText);
+    throw new Error(await readErrorMessage(res));
   }
-  if (res.status === 204) return undefined as unknown as T;
-  return res.json();
+  // 204 hat keinen Body. Der Aufrufer deklariert dort typischerweise `void`;
+  // die Grenze liegt in http-boundary.ts, nicht hier.
+  if (res.status === 204) return parseEmptyResponse<T>();
+  return parseJsonResponse<T>(res);
 }
 
 /**
@@ -75,8 +84,7 @@ export async function requestMarkdown(path: string): Promise<{ text: string; fil
   }
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(err.message || res.statusText);
+    throw new Error(await readErrorMessage(res));
   }
 
   const disposition = res.headers.get('Content-Disposition') || '';
@@ -2101,8 +2109,7 @@ export const api = {
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`${BASE_URL}/milestones/${id}/export.md`, { headers });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: res.statusText }));
-        throw new Error(err.message || res.statusText);
+        throw new Error(await readErrorMessage(res));
       }
       const blob = await res.blob();
       const disposition = res.headers.get('Content-Disposition') || '';
@@ -2230,17 +2237,12 @@ export const api = {
         xhr.onload = () => {
           if (xhr.status >= 200 && xhr.status < 300) {
             try {
-              resolve(JSON.parse(xhr.responseText));
+              resolve(parseJsonText<{ bytesWritten: number; remotePath: string }>(xhr.responseText));
             } catch {
               resolve({ bytesWritten: 0, remotePath });
             }
           } else {
-            let msg = xhr.responseText;
-            try {
-              msg = JSON.parse(xhr.responseText).message || msg;
-            } catch {
-              /* keep raw */
-            }
+            const msg = readErrorMessageFromText(xhr.responseText) ?? xhr.responseText;
             reject(new Error(msg || `upload failed (${xhr.status})`));
           }
         };
@@ -2652,8 +2654,7 @@ export const api = {
         signal,
       });
       if (!res.ok || !res.body) {
-        const err = await res.json().catch(() => ({ message: res.statusText }));
-        throw new Error(err.message || res.statusText);
+        throw new Error(await readErrorMessage(res));
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -2671,7 +2672,7 @@ export const api = {
             const data = line.slice(5).trim();
             if (!data) continue;
             try {
-              onEvent(JSON.parse(data) as WorkspaceStreamEvent);
+              onEvent(parseJsonText<WorkspaceStreamEvent>(data));
             } catch {
               // skip malformed
             }
@@ -2772,8 +2773,7 @@ export const api = {
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`${BASE_URL}/project-transfer/${id}/export${params}`, { headers });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: res.statusText }));
-        throw new Error(err.message || res.statusText);
+        throw new Error(await readErrorMessage(res));
       }
       const blob = await res.blob();
       const disposition = res.headers.get('Content-Disposition') || '';
@@ -2799,10 +2799,9 @@ export const api = {
         body: formData,
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: res.statusText }));
-        throw new Error(err.message || res.statusText);
+        throw new Error(await readErrorMessage(res));
       }
-      return res.json() as Promise<{ projectId: string; projectName: string; stats: Record<string, number> }>;
+      return parseJsonResponse<{ projectId: string; projectName: string; stats: Record<string, number> }>(res);
     },
   },
   auditLog: {
@@ -2834,8 +2833,7 @@ export const api = {
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`${BASE_URL}/customer-transfer/${customerId}/export${params}`, { headers });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: res.statusText }));
-        throw new Error(err.message || res.statusText);
+        throw new Error(await readErrorMessage(res));
       }
       const blob = await res.blob();
       const disposition = res.headers.get('Content-Disposition') || '';
@@ -2861,14 +2859,13 @@ export const api = {
         body: formData,
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: res.statusText }));
-        throw new Error(err.message || res.statusText);
+        throw new Error(await readErrorMessage(res));
       }
-      return res.json() as Promise<{
+      return parseJsonResponse<{
         customerId: string;
         imported: Record<string, number>;
         warnings: string[];
-      }>;
+      }>(res);
     },
   },
   attachments: {
@@ -2909,10 +2906,9 @@ export const api = {
         body: formData,
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: res.statusText }));
-        throw new Error(err.message || res.statusText);
+        throw new Error(await readErrorMessage(res));
       }
-      return res.json() as Promise<Attachment>;
+      return parseJsonResponse<Attachment>(res);
     },
     update: (id: string, data: { description?: string; tags?: string[]; entityType?: string; entityId?: string }) =>
       request<Attachment>(`/attachments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -3091,10 +3087,9 @@ export const api = {
         body: form,
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: res.statusText }));
-        throw new Error(err.message || res.statusText);
+        throw new Error(await readErrorMessage(res));
       }
-      return res.json();
+      return parseJsonResponse(res);
     },
     persistMessage: (sessionId: string, data: ChatPersistInput) =>
       request<ChatSession>(`/chat/sessions/${sessionId}/persist`, {
@@ -3134,8 +3129,7 @@ export const api = {
         signal,
       });
       if (!res.ok || !res.body) {
-        const error = await res.json().catch(() => ({ message: res.statusText }));
-        throw new Error(error.message || res.statusText);
+        throw new Error(await readErrorMessage(res));
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -3153,16 +3147,9 @@ export const api = {
             const data = line.slice(5).trim();
             if (!data) continue;
             try {
-              const event = JSON.parse(data) as
-                | { type: 'context'; refs: ChatContextRef[] }
-                | { type: 'token'; content: string }
-                | { type: 'tool_call'; id: string; name: string; arguments: string }
-                | { type: 'tool_result'; id: string; success: boolean; summary: string }
-                | { type: 'status'; phase: string; name?: string; state?: string }
-                | { type: 'tool_status'; phase?: string; name?: string; state?: string }
-                | ({ type: 'metrics' } & ChatResponseMetrics)
-                | { type: 'done'; reason?: string }
-                | { type: 'error'; message: string };
+              // Ein defektes Frame darf verworfen werden — der `catch` unten
+              // fängt den Parse-Fehler, der Stream läuft weiter.
+              const event = parseJsonText<ChatStreamEvent>(data);
               if (event.type === 'context') handlers.onContext?.(event.refs);
               else if (event.type === 'token') handlers.onToken?.(event.content);
               else if (event.type === 'tool_call') handlers.onToolCall?.({ id: event.id, name: event.name, arguments: event.arguments });
@@ -3170,8 +3157,16 @@ export const api = {
               else if (event.type === 'status') handlers.onStatus?.({ phase: event.phase, name: event.name, state: event.state });
               else if (event.type === 'tool_status') handlers.onStatus?.({ phase: event.phase ?? 'tool_call', name: event.name, state: event.state });
               else if (event.type === 'metrics') {
-                const { type: _t, ...metrics } = event;
-                handlers.onMetrics?.(metrics);
+                // Felder explizit übernehmen statt `type` per Rest-Destructuring
+                // wegzuwerfen — dann bleibt keine ungenutzte Variable übrig.
+                handlers.onMetrics?.({
+                  outputTokens: event.outputTokens,
+                  durationMs: event.durationMs,
+                  firstTokenMs: event.firstTokenMs,
+                  tokensPerSecond: event.tokensPerSecond,
+                  totalDurationMs: event.totalDurationMs,
+                  estimated: event.estimated,
+                });
               }
               else if (event.type === 'done') handlers.onDone?.(event.reason);
               else if (event.type === 'error') handlers.onError?.(event.message);
@@ -3613,6 +3608,23 @@ export interface ChatResponseMetrics {
   totalDurationMs?: number;
   estimated: boolean;
 }
+
+/**
+ * Die SSE-Frames von `POST /chat/sessions/:id/message`. Nur ein Namensdach über
+ * dem, was der Server sendet — `parseJsonText` behauptet diesen Typ, geprüft
+ * wird er nicht. Ein Frame, der nicht passt, landet im `default`-Zweig des
+ * Dispatchers und wird ignoriert.
+ */
+export type ChatStreamEvent =
+  | { type: 'context'; refs: ChatContextRef[] }
+  | { type: 'token'; content: string }
+  | { type: 'tool_call'; id: string; name: string; arguments: string }
+  | { type: 'tool_result'; id: string; success: boolean; summary: string }
+  | { type: 'status'; phase: string; name?: string; state?: string }
+  | { type: 'tool_status'; phase?: string; name?: string; state?: string }
+  | ({ type: 'metrics' } & ChatResponseMetrics)
+  | { type: 'done'; reason?: string }
+  | { type: 'error'; message: string };
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';

@@ -14,6 +14,10 @@ import Button from '../components/ui/Button';
 import { FormInput, FormSelect, FormTextarea } from '../components/ui/FormField';
 import { WorkflowPageShell } from '../components/ui/WorkflowShell';
 import { LoadingText } from '../components/ui/LoadingSpinner';
+import { errorMessage, optionOr } from '../lib/narrow';
+
+/** Laufzeit-Liste zu `CustomerProjectLinkStatus`, damit der Select-Wert geprueft statt behauptet wird. */
+const LINK_STATUSES: readonly CustomerProjectLinkStatus[] = ['active', 'paused', 'archived'];
 
 export default function CustomerProjectLinkEditPage() {
   const { t } = useTranslation();
@@ -52,9 +56,9 @@ export default function CustomerProjectLinkEditPage() {
         setNotes(found.notes ?? '');
         setSelectedEnvIds(found.environmentIds);
       })
-      .catch((err) => showError(err.message))
+      .catch((err: unknown) => showError(errorMessage(err)))
       .finally(() => setLoading(false));
-  }, [id, linkId]);
+  }, [id, linkId, showError]);
 
   if (loading) return <LoadingText />;
   if (!customer || !link || !project || !id || !linkId) {
@@ -77,9 +81,9 @@ export default function CustomerProjectLinkEditPage() {
         notes: notes.trim() || undefined,
         environmentIds: selectedEnvIds,
       });
-      navigate(`/customers/${id}`);
-    } catch (err: any) {
-      showError(err.message || t('customers.linkSaveFailed'));
+      await navigate(`/customers/${id}`);
+    } catch (err) {
+      showError(errorMessage(err) || t('customers.linkSaveFailed'));
     } finally {
       setSaving(false);
     }
@@ -91,11 +95,11 @@ export default function CustomerProjectLinkEditPage() {
       backLabel={customer.name}
       title={`${t('customers.editLink')} — ${project.name}`}
     >
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-6">
         <FormSelect
           label={t('common.status')}
           value={status}
-          onChange={(e) => setStatus(e.target.value as CustomerProjectLinkStatus)}
+          onChange={(e) => setStatus(optionOr(e.target.value, LINK_STATUSES, 'active'))}
         >
           <option value="active">active</option>
           <option value="paused">paused</option>
@@ -142,7 +146,7 @@ export default function CustomerProjectLinkEditPage() {
           <Button type="submit" variant="primary" size="lg" disabled={saving}>
             {saving ? t('common.saving') : t('common.save')}
           </Button>
-          <Button type="button" size="lg" onClick={() => navigate(`/customers/${id}`)}>
+          <Button type="button" size="lg" onClick={() => { void navigate(`/customers/${id}`); }}>
             {t('common.cancel')}
           </Button>
         </div>

@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { api, Milestone } from '../api/client';
 import TodoForm from '../components/TodoForm';
 import { WorkflowPageShell } from '../components/ui/WorkflowShell';
+import { useToast } from '../components/Toast';
+import { errorMessage } from '../lib/narrow';
 
 export default function TodoCreatePage() {
   const { id } = useParams<{ id: string }>();
@@ -12,16 +14,25 @@ export default function TodoCreatePage() {
   const basePath = isCustomerScope ? `/customers/${id}` : `/projects/${id}`;
   const backLabelKey = isCustomerScope ? 'todoDetail.backToCustomer' : 'todoDetail.backToProject';
   const { t } = useTranslation();
+  const { showError } = useToast();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [milestoneId, setMilestoneId] = useState(searchParams.get('milestoneId') || '');
   const [milestones, setMilestones] = useState<Milestone[]>([]);
 
-  const loadMilestones = () => {
+  /*
+   * `.catch` war vorher nicht da: schlug die Milestone-Liste fehl, blieb das
+   * Auswahlfeld einfach leer — der Nutzer hätte "dieses Projekt hat keine
+   * Milestones" gelesen, wo tatsächlich der Request gescheitert war.
+   */
+  const loadMilestones = useCallback(() => {
     if (!id || isCustomerScope) return;
-    api.milestones.list(id).then(setMilestones);
-  };
-  useEffect(() => { loadMilestones(); }, [id, isCustomerScope]);
+    api.milestones
+      .list(id)
+      .then(setMilestones)
+      .catch((err: unknown) => showError(errorMessage(err)));
+  }, [id, isCustomerScope, showError]);
+  useEffect(() => { loadMilestones(); }, [loadMilestones]);
 
   return (
     <WorkflowPageShell backTo={basePath} backLabel={t(backLabelKey)} title={t('todoCreate.title')}>
@@ -35,8 +46,8 @@ export default function TodoCreatePage() {
           allowMilestoneCreate={!isCustomerScope}
           enableDictation
           onMilestoneCreated={(milestone) => { setMilestoneId(milestone._id); loadMilestones(); }}
-          onCreated={() => navigate(basePath)}
-          onCancel={() => navigate(basePath)}
+          onCreated={() => { void navigate(basePath); }}
+          onCancel={() => { void navigate(basePath); }}
         />
       )}
     </WorkflowPageShell>

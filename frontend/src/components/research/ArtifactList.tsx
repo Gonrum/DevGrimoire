@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, ResearchArtifact, ResearchArtifactSummary } from '../../api/client';
+import { errorMessage } from '../../lib/narrow';
 import { useToast } from '../Toast';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
@@ -26,28 +27,31 @@ export default function ArtifactList({ topicId, refreshToken }: ArtifactListProp
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  /*
+   * `showError` steht jetzt in der Dep-Liste — vorher unterdrückte ein
+   * `eslint-disable` die Meldung. Die Referenz ist stabil (`ToastProvider`
+   * baut sie mit `useCallback`), der Effect läuft also weiterhin nur bei
+   * `topicId`/`refreshToken`.
+   */
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    api.researchTopics
-      .artifactsList(topicId)
-      .then((list) => {
+    void (async () => {
+      setLoading(true);
+      try {
+        const list = await api.researchTopics.artifactsList(topicId);
         if (cancelled) return;
         setArtifacts(list);
         setSelectedSlug((prev) => (prev && list.some((a) => a.slug === prev) ? prev : list[0]?.slug ?? null));
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        showError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
+      } catch (err) {
+        if (!cancelled) showError(errorMessage(err));
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topicId, refreshToken]);
+  }, [topicId, refreshToken, showError]);
 
   const handleSaved = (updated: ResearchArtifact) => {
     setArtifacts((prev) => {

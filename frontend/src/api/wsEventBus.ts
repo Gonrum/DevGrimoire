@@ -14,6 +14,8 @@
  * is server-driven (ws.ping every 25s; browser auto-pongs at protocol
  * level), so background-tab throttling cannot break liveness.
  */
+import { parseJsonText } from './http-boundary';
+
 export type WsConnectionState = 'connecting' | 'open' | 'reconnecting' | 'closed';
 
 export interface ProjectChangeEvent {
@@ -196,10 +198,18 @@ class WsEventBus {
       for (const sub of this.subs.values()) this.sendSubscribe(sub);
     };
 
-    ws.onmessage = (msg) => {
+    // `MessageEvent<any>` aus der DOM-Lib würde `msg.data` als `any` in den
+    // Parser tragen; `unknown` erzwingt die Prüfung darunter.
+    ws.onmessage = (msg: MessageEvent<unknown>) => {
+      // Der Server sendet ausschliesslich JSON-Text. Binärframes (Blob,
+      // ArrayBuffer) sind keine gültige Nachricht und werden verworfen —
+      // vorher lief das über den Parse-Fehler von `JSON.parse(String(blob))`
+      // auf denselben `return`.
+      if (typeof msg.data !== 'string') return;
       let env: ServerEnvelope;
       try {
-        env = JSON.parse(msg.data) as ServerEnvelope;
+        // Eine ungültige Nachricht wird verworfen, die Verbindung bleibt offen.
+        env = parseJsonText<ServerEnvelope>(msg.data);
       } catch {
         return;
       }

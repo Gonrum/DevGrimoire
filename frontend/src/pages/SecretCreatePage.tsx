@@ -5,6 +5,7 @@ import { api, Environment, SecretType } from '../api/client';
 import { useToast } from '../components/Toast';
 import Button from '../components/ui/Button';
 import { FormInput, FormSelect } from '../components/ui/FormField';
+import { errorMessage } from '../lib/narrow';
 
 export default function SecretCreatePage() {
   const { id } = useParams<{ id: string }>();
@@ -38,8 +39,13 @@ export default function SecretCreatePage() {
     const loader = isCustomer
       ? api.environments.listForCustomer(id)
       : api.environments.list(id);
-    loader.then(setEnvironments).catch(() => {});
-  }, [id, isCustomer]);
+    /*
+     * Vorher: `.catch(() => {})`. Schlug die Umgebungsliste fehl, blieb das
+     * Auswahlfeld leer und der Nutzer legte das Secret projekt-global an,
+     * obwohl er es einer Umgebung zuordnen wollte — ohne jeden Hinweis.
+     */
+    loader.then(setEnvironments).catch((err: unknown) => showError(errorMessage(err)));
+  }, [id, isCustomer, showError]);
 
   const isMultiline = type === 'ssh_key' || type === 'certificate' || type === 'file';
 
@@ -57,9 +63,9 @@ export default function SecretCreatePage() {
         type,
         environmentId: environmentId || undefined,
       });
-      navigate(ownerListPath(environmentId ? 'environments' : 'secrets'));
-    } catch (err: any) {
-      showError(err.message || t('secretCreate.errorCreating'));
+      await navigate(ownerListPath(environmentId ? 'environments' : 'secrets'));
+    } catch (err) {
+      showError(errorMessage(err) || t('secretCreate.errorCreating'));
     } finally {
       setSaving(false);
     }
@@ -71,7 +77,7 @@ export default function SecretCreatePage() {
 
       <h1 className="text-xl font-bold mb-6">{t('secretCreate.title')}</h1>
 
-      <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-6">
+      <form onSubmit={(e) => { void handleSubmit(e); }} className="max-w-3xl mx-auto space-y-6">
         {/* Type selection */}
         <div>
           <label className="block text-xs text-gray-500 mb-2">{t('secretCreate.typeLabel')}</label>
@@ -127,7 +133,7 @@ export default function SecretCreatePage() {
           <Button type="submit" variant="primary" size="lg" disabled={saving || !key.trim() || !value}>
             {saving ? t('common.creating') : t('secretCreate.createSecret')}
           </Button>
-          <Button type="button" size="lg" onClick={() => navigate(ownerListPath('secrets'))}>
+          <Button type="button" size="lg" onClick={() => { void navigate(ownerListPath('secrets')); }}>
             {t('common.cancel')}
           </Button>
         </div>
