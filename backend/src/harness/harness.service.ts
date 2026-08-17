@@ -101,6 +101,20 @@ export class HarnessService {
   }
 
   /**
+   * Nur die globale Ebene, aufgelöst.
+   *
+   * Für Aufrufer ohne Projektbezug — `system_instructions_get` ohne
+   * `projectId` etwa. Geht bewusst durch denselben Resolver statt die Sections
+   * roh zurückzugeben: so ist die Ergebnisform identisch zu `resolve()`
+   * (`sections`/`resolvedFrom`/`suppressed`/`markdown`), und der Aufrufer
+   * braucht keine Fallunterscheidung.
+   */
+  async resolveGlobal(): Promise<ResolvedHarness> {
+    const global = await this.harnessModel.findOne({ scope: 'global' }).exec();
+    return resolveHarness(global ? [toLevelInput(global)] : []);
+  }
+
+  /**
    * Customers linked to the project, in link-creation order.
    *
    * The order matters: with two customers contributing the same section key

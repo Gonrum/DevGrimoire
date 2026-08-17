@@ -154,6 +154,24 @@ const KNOWLEDGE_SCOPES: readonly NonNullable<CreateKnowledgeDto['scope']>[] = [
   'customer',
 ];
 const QUESTION_KNOWLEDGE_SCOPES = ['global', 'project'] as const;
+
+/*
+ * Section-Keys, die die Migration (T-442) aus den bisherigen Quellen erzeugt.
+ * `system_instructions_get` liest sie unter genau diesen Namen wieder aus —
+ * beide Seiten müssen sich einig sein, sonst fällt der Wrapper still auf die
+ * alten Quellen zurück und die Migration sieht wirkungslos aus.
+ */
+const HARNESS_KEY_TOOL_USAGE = 'tool-usage';
+const HARNESS_KEY_INSTRUCTIONS = 'instructions';
+const SOUL_SECTIONS: ReadonlyArray<{ key: string; label: string }> = [
+  { key: 'vision', label: 'Vision' },
+  { key: 'principles', label: 'Principles' },
+  { key: 'conventions', label: 'Conventions' },
+  { key: 'communication', label: 'Communication' },
+  { key: 'boundaries', label: 'Boundaries' },
+  { key: 'workflow', label: 'Workflow' },
+  { key: 'quality', label: 'Quality' },
+];
 /*
  * Drei DTOs (question_create_followup_todo, doc_update_proposal_convert_to_todo,
  * oracle_convert_to_todo) tippen die Todo-Priorität als String-Literal-Union
@@ -5743,34 +5761,63 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = { deleted: true, topicId: a.topicId, slug: a.slug };
           break;
         case 'system_instructions_get': {
-          const instructions = await settingsService.getOrDefault(
-            AGENT_INSTRUCTIONS_KEY,
-            DEFAULT_AGENT_INSTRUCTIONS,
-          );
+          /*
+           * Dünner Wrapper um `harnessService.resolve()` (T-441).
+           *
+           * Die Antwortstruktur bleibt exakt erhalten — `globalInstructions`,
+           * `projectInstructions`, `projectSoul` —, damit laufende
+           * Agenten-Sessions und die dokumentierte Session-Start-Sequenz nicht
+           * brechen. Neu ist nur das Feld `harness` mit der vollständigen
+           * aufgelösten Fassung.
+           *
+           * **Rückfall auf die alten Quellen, solange nicht migriert ist**
+           * (T-442 läuft danach): fehlt die jeweilige Harness-Section, kommt der
+           * Wert weiterhin aus Settings / `project.instructions` / Soul. Ohne
+           * das gäbe der Wrapper auf einer nicht migrierten Instanz leere
+           * Anweisungen zurück — schlimmer als der alte Zustand, weil es
+           * aussieht, als gäbe es keine.
+           */
           const projectId = optionalString(a, 'projectId');
-          const res: Record<string, unknown> = { globalInstructions: instructions };
+          const res: Record<string, unknown> = {};
+
+          const resolved = projectId
+            ? await harnessService.resolve(projectId)
+            : await harnessService.resolveGlobal();
+          res.harness = resolved;
+
+          const sectionBody = (key: string): string | undefined => {
+            const found = resolved.sections.find((section) => section.key === key);
+            return found && found.body ? found.body : undefined;
+          };
+
+          res.globalInstructions =
+            sectionBody(HARNESS_KEY_TOOL_USAGE) ??
+            (await settingsService.getOrDefault(AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS));
+
           if (projectId) {
-            const project = await projectsService.findById(projectId);
-            if (project?.instructions) {
-              res.projectInstructions = project.instructions;
+            const fromHarness = sectionBody(HARNESS_KEY_INSTRUCTIONS);
+            if (fromHarness) {
+              res.projectInstructions = fromHarness;
+            } else {
+              const project = await projectsService.findById(projectId);
+              if (project?.instructions) res.projectInstructions = project.instructions;
             }
-            const soul = await soulsService.findByProject(projectId);
-            if (soul) {
-              const soulObj = toPlainDoc(soul.toObject());
-              const sections = [
-                { key: 'vision', label: 'Vision' },
-                { key: 'principles', label: 'Principles' },
-                { key: 'conventions', label: 'Conventions' },
-                { key: 'communication', label: 'Communication' },
-                { key: 'boundaries', label: 'Boundaries' },
-                { key: 'workflow', label: 'Workflow' },
-                { key: 'quality', label: 'Quality' },
-              ];
-              const soulParts = sections
-                .filter((s) => soulObj[s.key])
-                .map((s) => `### ${s.label}\n${asString(soulObj[s.key]) ?? ''}`);
-              if (soulParts.length > 0) {
-                res.projectSoul = `## Project Soul\n\n${soulParts.join('\n\n')}`;
+
+            const harnessSoul = SOUL_SECTIONS.filter((s) => sectionBody(s.key)).map(
+              (s) => `### ${s.label}\n${sectionBody(s.key) ?? ''}`,
+            );
+            if (harnessSoul.length > 0) {
+              res.projectSoul = `## Project Soul\n\n${harnessSoul.join('\n\n')}`;
+            } else {
+              const soul = await soulsService.findByProject(projectId);
+              if (soul) {
+                const soulObj = toPlainDoc(soul.toObject());
+                const soulParts = SOUL_SECTIONS.filter((s) => soulObj[s.key]).map(
+                  (s) => `### ${s.label}\n${asString(soulObj[s.key]) ?? ''}`,
+                );
+                if (soulParts.length > 0) {
+                  res.projectSoul = `## Project Soul\n\n${soulParts.join('\n\n')}`;
+                }
               }
             }
           }
