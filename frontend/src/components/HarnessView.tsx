@@ -241,6 +241,7 @@ export default function HarnessView({ owner, resolveProjectId }: Props) {
         <SectionEditor
           sections={sections}
           harness={harness}
+          hasPreview={!!resolveProjectId}
           editingKey={editingKey}
           draft={draft}
           setDraft={setDraft}
@@ -272,6 +273,7 @@ export default function HarnessView({ owner, resolveProjectId }: Props) {
 function SectionEditor({
   sections,
   harness,
+  hasPreview,
   editingKey,
   draft,
   setDraft,
@@ -285,6 +287,8 @@ function SectionEditor({
 }: {
   sections: HarnessSection[];
   harness: Harness | null;
+  /** Gibt es auf dieser Ebene einen "Aufgelöst"-Tab? Nur mit Projektbezug. */
+  hasPreview: boolean;
   editingKey: string | null;
   draft: Draft;
   setDraft: (d: Draft) => void;
@@ -304,7 +308,14 @@ function SectionEditor({
       {!harness && !isCreating && (
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center">
           <p className="text-gray-400 mb-1">{t('harness.emptyLevel')}</p>
-          <p className="text-gray-500 text-sm">{t('harness.emptyLevelHint')}</p>
+          {/*
+            Der Verweis auf den Tab "Aufgelöst" darf nur dort stehen, wo es ihn
+            gibt. Auf der globalen und der Kundenebene existiert er nicht — bei
+            der visuellen Abnahme fiel auf, dass der Hinweis dort ins Leere zeigte.
+          */}
+          <p className="text-gray-500 text-sm">
+            {t(hasPreview ? 'harness.emptyLevelHint' : 'harness.emptyLevelHintNoPreview')}
+          </p>
         </div>
       )}
 

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature, Manual, Soul, RecurringTask, Snippet, Attachment, LogStats, Release, Workspace } from '../api/client';
+import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature, Manual, RecurringTask, Snippet, Attachment, LogStats, Release, Workspace } from '../api/client';
 import TodoBoard from '../components/TodoBoard';
 import PendingQuestionsWidget from '../components/dashboard/PendingQuestionsWidget';
 import SessionList from '../components/SessionList';
@@ -16,6 +16,7 @@ import SchemaList from '../components/SchemaList';
 import DependencyList from '../components/DependencyList';
 import FeatureList from '../components/FeatureList';
 import HarnessView from '../components/HarnessView';
+import { harnessSectionCount } from '../lib/harness';
 import CommitList from '../components/CommitList';
 import RecurringTaskList from '../components/RecurringTaskList';
 import SnippetList from '../components/SnippetList';
@@ -89,7 +90,10 @@ export default function ProjectDetail() {
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
   const [features, setFeatures] = useState<Feature[]>([]);
   const [manuals, setManuals] = useState<Manual[]>([]);
-  const [soul, setSoul] = useState<Soul | null>(null);
+  // Zählt die Abschnitte der EIGENEN Ebene — die Entsprechung zum früheren
+  // "wie viele Soul-Felder sind hier gefüllt". Geerbtes zählt nicht mit,
+  // sonst zeigte jedes Projekt dieselbe Zahl.
+  const [harnessSections, setHarnessSections] = useState(0);
   const [recurringTasks, setRecurringTasks] = useState<RecurringTask[]>([]);
   const [snippets, setSnippets] = useState<Snippet[]>([]);
   const [commitCount, setCommitCount] = useState(0);
@@ -179,7 +183,7 @@ export default function ProjectDetail() {
       api.dependencies.list(id),
       api.features.list(id),
       api.manuals.list(id),
-      api.souls.get(id),
+      api.harness.get({ scope: 'project', projectId: id }),
       api.commits.count(id),
       api.recurringTasks.list({ projectId: id }),
       api.snippets.list(id),
@@ -207,7 +211,7 @@ export default function ProjectDetail() {
         setDependencies(deps);
         setFeatures(feat);
         setManuals(man);
-        setSoul(sl);
+        setHarnessSections(harnessSectionCount(sl));
         setCommitCount(cc?.count || 0);
         setRecurringTasks(rts);
         setSnippets(snip);
@@ -251,7 +255,7 @@ export default function ProjectDetail() {
         schema: () => backgroundRefresh(api.schemas.list(id).then(setSchemas)),
         dependency: () => backgroundRefresh(api.dependencies.list(id).then(setDependencies)),
         feature: () => backgroundRefresh(api.features.list(id).then(setFeatures)),
-        soul: () => backgroundRefresh(api.souls.get(id).then(setSoul)),
+        harness: () => backgroundRefresh(api.harness.get({ scope: 'project', projectId: id }).then((h) => { setHarnessSections(harnessSectionCount(h)); })),
         'recurring-task': () => backgroundRefresh(api.recurringTasks.list({ projectId: id }).then(setRecurringTasks)),
         snippet: () => backgroundRefresh(api.snippets.list(id).then(setSnippets)),
         attachment: () => backgroundRefresh(api.attachments.list(id).then(setAttachments)),
@@ -330,7 +334,7 @@ export default function ProjectDetail() {
     {
       label: t('sidebar.system'),
       items: [
-        { key: 'soul', label: t('projectDetail.tab.soul'), count: (['vision', 'principles', 'conventions', 'communication', 'boundaries', 'workflow', 'quality'] as const).filter((k) => soul?.[k]?.trim()).length },
+        { key: 'soul', label: t('projectDetail.tab.soul'), count: harnessSections },
         { key: 'workspaces', label: t('projectDetail.tab.workspaces'), count: workspaceCount },
         { key: 'environments', label: t('projectDetail.tab.environments'), count: environments.length },
         { key: 'secrets', label: t('projectDetail.tab.secrets'), count: secrets.length },

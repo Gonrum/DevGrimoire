@@ -2605,6 +2605,7 @@
       "replaceHint": "Überschreibt den geerbten Text vollständig.",
       "appendHint": "Hängt diesen Text an den geerbten an — die höhere Ebene bleibt erhalten.",
       "prependHint": "Stellt diesen Text vor den geerbten — die höhere Ebene bleibt erhalten."
-    }
+    },
+    "emptyLevelHintNoPreview": "Lege einen Abschnitt an. Er wird an alle Ebenen darunter vererbt und kann dort ergänzt oder überschrieben werden."
   }
 }

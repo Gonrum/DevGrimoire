@@ -16,7 +16,6 @@ import {
   ResearchEntry,
   SecretListItem,
   Snippet,
-  Soul,
   Todo,
   api,
 } from '../api/client';
@@ -35,6 +34,7 @@ import EnvironmentList, { SecretsList } from '../components/EnvironmentList';
 import MonitoringTab from '../components/MonitoringTab';
 import SshConnectionsTab from '../components/ssh/SshConnectionsTab';
 import HarnessView from '../components/HarnessView';
+import { harnessSectionCount } from '../lib/harness';
 import SnippetList from '../components/SnippetList';
 import ResearchList from '../components/ResearchList';
 import { LoadingText } from '../components/ui/LoadingSpinner';
@@ -107,7 +107,8 @@ export default function CustomerDetail() {
   const [customerAttachments, setCustomerAttachments] = useState<Attachment[]>([]);
   const [customerEnvironments, setCustomerEnvironments] = useState<Environment[]>([]);
   const [customerSecrets, setCustomerSecrets] = useState<SecretListItem[]>([]);
-  const [customerSoul, setCustomerSoul] = useState<Soul | null>(null);
+  // Abschnitte der eigenen Kundenebene — siehe ProjectDetail.
+  const [harnessSections, setHarnessSections] = useState(0);
   const [customerActivity, setCustomerActivity] = useState<Activity[]>([]);
   const [customerSnippets, setCustomerSnippets] = useState<Snippet[]>([]);
   const [customerResearch, setCustomerResearch] = useState<ResearchEntry[]>([]);
@@ -148,7 +149,7 @@ export default function CustomerDetail() {
       api.attachments.storageStatus().catch(() => ({ enabled: false })),
       api.environments.listForCustomer(id).catch(() => [] as Environment[]),
       api.secrets.listForCustomer(id).catch(() => [] as SecretListItem[]),
-      api.souls.getForCustomer(id).catch(() => null),
+      api.harness.get({ scope: 'customer', customerId: id }).catch(() => null),
       api.activities.listForCustomer(id, 100).catch(() => [] as Activity[]),
       api.snippets.listForCustomer(id).catch(() => [] as Snippet[]),
       api.research.listForCustomer(id).catch(() => [] as ResearchEntry[]),
@@ -167,7 +168,7 @@ export default function CustomerDetail() {
           storageData,
           environmentData,
           secretData,
-          soulData,
+          harnessData,
           activityData,
           snippetData,
           researchData,
@@ -185,7 +186,7 @@ export default function CustomerDetail() {
           setStorageEnabled(!!storageData?.enabled);
           setCustomerEnvironments(environmentData);
           setCustomerSecrets(secretData);
-          setCustomerSoul(soulData && soulData._id ? (soulData) : null);
+          setHarnessSections(harnessSectionCount(harnessData));
           setCustomerActivity(activityData);
           setCustomerSnippets(snippetData);
           setCustomerResearch(researchData);
@@ -342,7 +343,7 @@ export default function CustomerDetail() {
         { key: 'manual', label: t('customers.tab.manual'), count: customerManuals.length },
         { key: 'workflows', label: t('customers.tab.workflows'), count: customerRecurring.filter((rt) => rt.active).length },
         { key: 'files', label: t('customers.tab.files'), count: customerAttachments.length },
-        { key: 'soul', label: t('customers.tab.soul'), count: (['vision', 'principles', 'conventions', 'communication', 'boundaries', 'workflow', 'quality'] as const).filter((k) => customerSoul?.[k]?.trim()).length },
+        { key: 'soul', label: t('customers.tab.soul'), count: harnessSections },
         { key: 'snippets', label: t('customers.tab.snippets'), count: customerSnippets.length },
         { key: 'research', label: t('customers.tab.research'), count: customerResearch.length },
       ],

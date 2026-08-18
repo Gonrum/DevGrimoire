@@ -2606,6 +2606,7 @@
       "replaceHint": "Overrides the inherited text completely.",
       "appendHint": "Appends this text to the inherited one — the higher level stays.",
       "prependHint": "Puts this text before the inherited one — the higher level stays."
-    }
+    },
+    "emptyLevelHintNoPreview": "Add a section. It is inherited by every level below and can be extended or overridden there."
   }
 }
