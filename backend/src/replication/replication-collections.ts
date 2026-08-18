@@ -95,6 +95,23 @@ export const EXCLUDED_COLLECTIONS: { className: string; reason: string }[] = [
   { className: 'Workspace', reason: 'Lokaler Sidecar-Container-State (Clones, Scratch) — instanzgebunden' },
 ];
 
+/**
+ * Entity → physische Collection. Abgeleitet, nicht gepflegt: push, receive und
+ * der Pull-Endpoint führten bis T-465 je eine eigene handgeschriebene Tabelle,
+ * und alle drei hinkten der Registry um acht Entity-Typen hinterher (harness,
+ * question, oracle, validation-report, doc-update-proposal,
+ * knowledge-graph-edge, research-artifact, research-topic).
+ *
+ * Der Ausfall war lautlos: `buildPayload()` liefert für ein unbekanntes Entity
+ * `null`, worauf der Push-Handler ohne Log und ohne Warteschlangen-Eintrag
+ * zurückkehrt. Die Änderung galt als verschickt und war nirgends.
+ *
+ * `check:replication-entity-maps` hält die drei Pfade an dieser Ableitung fest.
+ */
+export const ENTITY_COLLECTION: Record<string, string> = Object.fromEntries(
+  REPLICATED_COLLECTIONS.map((c) => [c.entity, c.collection]),
+);
+
 const COLLECTION_SET = new Set(REPLICATED_COLLECTIONS.map((c) => c.collection));
 const BY_COLLECTION = new Map(REPLICATED_COLLECTIONS.map((c) => [c.collection, c]));
 const APPEND_ONLY = new Set(REPLICATED_COLLECTIONS.filter((c) => c.appendOnly).map((c) => c.collection));

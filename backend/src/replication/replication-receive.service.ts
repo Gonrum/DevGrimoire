@@ -7,30 +7,8 @@ import { MinioService } from '../minio/minio.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ReplicationPayload, REPL_INSTANCE_ID } from './replication.constants';
 import { ReplDoc, errorMessage, isRecord } from './replication-narrow.helpers';
+import { ENTITY_COLLECTION } from './replication-collections';
 
-/** Maps entity types to MongoDB collection names */
-const ENTITY_COLLECTION: Record<string, string> = {
-  project: 'projects',
-  todo: 'todos',
-  session: 'sessions',
-  knowledge: 'knowledges',
-  changelog: 'changelogs',
-  milestone: 'milestones',
-  manual: 'manuals',
-  research: 'researches',
-  environment: 'environments',
-  secret: 'secrets',
-  schema: 'dbschemas',
-  dependency: 'dependencies',
-  feature: 'features',
-  soul: 'souls',
-  commit: 'commits',
-  'recurring-task': 'recurringtasks',
-  snippet: 'snippets',
-  attachment: 'attachments',
-  activity: 'activities',
-  release: 'releases',
-};
 
 @Injectable()
 export class ReplicationReceiveService {

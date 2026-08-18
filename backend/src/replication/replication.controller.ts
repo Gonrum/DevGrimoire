@@ -19,6 +19,7 @@ import { ReplicationSyncService } from './replication-sync.service';
 import { ReplicationSyncDriverService } from './replication-sync-driver.service';
 import { ReplicationDeadletterService } from './replication-deadletter.service';
 import { ReplicationGcService, GcResult } from './replication-gc.service';
+import { ENTITY_COLLECTION } from './replication-collections';
 import {
   SyncReceiveRequest, SyncReceiveResponse, SyncPullResponse, SyncCycleResult, SyncStatus,
 } from './replication-sync.types';
@@ -38,28 +39,6 @@ import {
 import { asObjectArray, asString, idToString, isUnknownArray } from '../common/tool-args';
 import { randomUUID } from 'crypto';
 
-/** Maps entity types to MongoDB collection names — used by the pull endpoint
- *  for delta lookups. Mirrors the table in the push/receive services. */
-const PULL_ENTITY_COLLECTIONS: Record<string, string> = {
-  todo: 'todos',
-  session: 'sessions',
-  knowledge: 'knowledges',
-  changelog: 'changelogs',
-  milestone: 'milestones',
-  manual: 'manuals',
-  research: 'researches',
-  environment: 'environments',
-  secret: 'secrets',
-  schema: 'dbschemas',
-  dependency: 'dependencies',
-  feature: 'features',
-  soul: 'souls',
-  commit: 'commits',
-  'recurring-task': 'recurringtasks',
-  snippet: 'snippets',
-  attachment: 'attachments',
-  release: 'releases',
-};
 
 /** Hard cap on entities per pull response — keeps payloads bounded. The client
  *  re-pulls until it sees count < limit, so a backlog catches up over multiple
@@ -455,8 +434,12 @@ export class ReplicationController {
         });
       }
 
-      for (const [entity, collName] of Object.entries(PULL_ENTITY_COLLECTIONS)) {
+      for (const [entity, collName] of Object.entries(ENTITY_COLLECTION)) {
         if (changes.length >= PULL_MAX_DOCS) break;
+        // Das Projekt-Dokument ist oben schon behandelt. Es hier nochmal zu
+        // holen ginge ins Leere — `projects` trägt kein `projectId`-Feld —,
+        // wäre also eine Abfrage, die per Konstruktion nichts findet.
+        if (entity === 'project') continue;
         try {
           const docs = await db.collection<ReplDoc>(collName)
             .find({

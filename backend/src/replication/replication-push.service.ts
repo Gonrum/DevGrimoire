@@ -20,43 +20,21 @@ import {
   ReplicationRole,
 } from './replication.constants';
 import { legacyEngineEnabled } from './replication-engine.helpers';
+import { ENTITY_COLLECTION } from './replication-collections';
 import {
   ReplDoc, asChangeAction, asReplicationRole, chunkToBuffer, errorMessage,
 } from './replication-narrow.helpers';
 import { asString } from '../common/tool-args';
 import { randomUUID } from 'crypto';
 
-/**
- * Maps entity types to MongoDB collection names.
+/*
+ * Entity→Collection kommt aus `replication-collections` — der Registry, die
+ * sich selbst als single source of truth führt. Bis T-465 stand hier eine
+ * eigene Tabelle, der acht registrierte Entity-Typen fehlten (u.a. `harness`).
  *
- * NOTE: `workspace` is intentionally absent — workspaces represent local
- * sidecar-container state (clones, scratch files) that is not replicated
- * across instances. Pushed workspace events are silently dropped here
- * (`buildPayload` returns null when the entity has no collection mapping).
+ * `workspace` fehlt weiterhin bewusst: Sidecar-State, laut Registry
+ * ausgeschlossen. `buildPayload` liefert für unbekannte Entities `null`.
  */
-const ENTITY_COLLECTION: Record<string, string> = {
-  project: 'projects',
-  todo: 'todos',
-  session: 'sessions',
-  knowledge: 'knowledges',
-  changelog: 'changelogs',
-  milestone: 'milestones',
-  manual: 'manuals',
-  research: 'researches',
-  environment: 'environments',
-  secret: 'secrets',
-  schema: 'dbschemas',
-  dependency: 'dependencies',
-  feature: 'features',
-  soul: 'souls',
-  commit: 'commits',
-  'recurring-task': 'recurringtasks',
-  snippet: 'snippets',
-  attachment: 'attachments',
-  activity: 'activities',
-  notification: 'notifications',
-  release: 'releases',
-};
 
 const MAX_ATTEMPTS = 5;
 const MAX_QUEUE_SIZE = 1000;
