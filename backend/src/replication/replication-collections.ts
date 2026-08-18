@@ -19,20 +19,25 @@ export interface ReplicatedCollection {
    *  `projectId`). The log-writer populates the log entry's `projectIds`, and
    *  opt-in is "any of them enabled" (spec: "alles was ein Projekt enthält"). */
   multiProject?: boolean;
+  /** Schlüssel im Full-Sync-Payload. Fehlt er, gilt der Collection-Name.
+   *  Gesetzt wird er nur dort, wo der historisch gewachsene Key davon
+   *  abweicht — diese Keys sind Übertragungsformat und dürfen sich nicht
+   *  ändern (`check:replication-entity-maps` friert sie ein). */
+  exportKey?: string;
 }
 
 export const REPLICATED_COLLECTIONS: ReplicatedCollection[] = [
-  { className: 'Project', entity: 'project', collection: 'projects', appendOnly: false },
+  { className: 'Project', entity: 'project', collection: 'projects', appendOnly: false, exportKey: 'project' },
   { className: 'Todo', entity: 'todo', collection: 'todos', appendOnly: false },
   { className: 'Session', entity: 'session', collection: 'sessions', appendOnly: false },
-  { className: 'Knowledge', entity: 'knowledge', collection: 'knowledges', appendOnly: false },
-  { className: 'Changelog', entity: 'changelog', collection: 'changelogs', appendOnly: false },
+  { className: 'Knowledge', entity: 'knowledge', collection: 'knowledges', appendOnly: false, exportKey: 'knowledge' },
+  { className: 'Changelog', entity: 'changelog', collection: 'changelogs', appendOnly: false, exportKey: 'changelog' },
   { className: 'Milestone', entity: 'milestone', collection: 'milestones', appendOnly: false },
   { className: 'Manual', entity: 'manual', collection: 'manuals', appendOnly: false },
-  { className: 'Research', entity: 'research', collection: 'researches', appendOnly: false },
+  { className: 'Research', entity: 'research', collection: 'researches', appendOnly: false, exportKey: 'research' },
   { className: 'Environment', entity: 'environment', collection: 'environments', appendOnly: false },
   { className: 'Secret', entity: 'secret', collection: 'secrets', appendOnly: false },
-  { className: 'DbSchema', entity: 'schema', collection: 'dbschemas', appendOnly: false },
+  { className: 'DbSchema', entity: 'schema', collection: 'dbschemas', appendOnly: false, exportKey: 'schemas' },
   { className: 'Dependency', entity: 'dependency', collection: 'dependencies', appendOnly: false },
   { className: 'Feature', entity: 'feature', collection: 'features', appendOnly: false },
   { className: 'Soul', entity: 'soul', collection: 'souls', appendOnly: false },
@@ -57,7 +62,7 @@ export const REPLICATED_COLLECTIONS: ReplicatedCollection[] = [
    */
   { className: 'Harness', entity: 'harness', collection: 'harnesses', appendOnly: false },
   { className: 'Commit', entity: 'commit', collection: 'commits', appendOnly: true },
-  { className: 'RecurringTask', entity: 'recurring-task', collection: 'recurringtasks', appendOnly: false },
+  { className: 'RecurringTask', entity: 'recurring-task', collection: 'recurringtasks', appendOnly: false, exportKey: 'recurringTasks' },
   { className: 'Snippet', entity: 'snippet', collection: 'snippets', appendOnly: false },
   { className: 'Attachment', entity: 'attachment', collection: 'attachments', appendOnly: false },
   { className: 'Activity', entity: 'activity', collection: 'activities', appendOnly: true },
@@ -110,6 +115,25 @@ export const EXCLUDED_COLLECTIONS: { className: string; reason: string }[] = [
  */
 export const ENTITY_COLLECTION: Record<string, string> = Object.fromEntries(
   REPLICATED_COLLECTIONS.map((c) => [c.entity, c.collection]),
+);
+
+/**
+ * Export-Key → Collection, für den Full-Sync. Eigener Namensraum als
+ * {@link ENTITY_COLLECTION}: die Keys stehen als Objektschlüssel im
+ * Payload zwischen zwei Instanzen und sind damit Übertragungsformat.
+ *
+ * Bis T-466 pflegten Sender (`SYNC_COLLECTIONS`) und Empfänger
+ * (`exportCollectionMap`) je eine eigene Tabelle; beiden fehlten dieselben
+ * neun Collections. Der Full-Sync ist der Bootstrap-Pfad — ein erstmalig
+ * übertragenes Projekt kam ohne sie an.
+ *
+ * Unbekannte Keys sind unkritisch: der Empfänger iteriert über SEINE Tabelle
+ * und greift sich `payload[key]`, überspringt also alles, was er nicht kennt,
+ * statt den Batch abzulehnen. Eine neuere Sender-Version darf deshalb mehr
+ * schicken als die Gegenstelle versteht.
+ */
+export const EXPORT_COLLECTION: Record<string, string> = Object.fromEntries(
+  REPLICATED_COLLECTIONS.map((c) => [c.exportKey ?? c.collection, c.collection]),
 );
 
 const COLLECTION_SET = new Set(REPLICATED_COLLECTIONS.map((c) => c.collection));

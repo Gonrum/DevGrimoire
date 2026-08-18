@@ -17,6 +17,7 @@ import {
   ReplDoc, asCount, asReplicationRole, chunkToBuffer, errorMessage,
 } from './replication-narrow.helpers';
 import { idToString } from '../common/tool-args';
+import { EXPORT_COLLECTION } from './replication-collections';
 
 /** Was die Gegenstelle auf einen Full-Sync-Post antwortet. Die Felder sind
  *  bewusst `unknown`: eine ältere/andere Version darf hier alles schicken, und
@@ -27,28 +28,6 @@ interface FullSyncAck {
   skipped?: unknown;
 }
 
-/** All collections to sync, grouped by export key */
-const SYNC_COLLECTIONS: Record<string, string> = {
-  todos: 'todos',
-  sessions: 'sessions',
-  knowledge: 'knowledges',
-  changelog: 'changelogs',
-  milestones: 'milestones',
-  manuals: 'manuals',
-  research: 'researches',
-  environments: 'environments',
-  secrets: 'secrets',
-  schemas: 'dbschemas',
-  dependencies: 'dependencies',
-  features: 'features',
-  souls: 'souls',
-  commits: 'commits',
-  recurringTasks: 'recurringtasks',
-  snippets: 'snippets',
-  attachments: 'attachments',
-  activities: 'activities',
-  releases: 'releases',
-};
 
 @Injectable()
 export class ReplicationFullSyncService {
@@ -144,7 +123,11 @@ export class ReplicationFullSyncService {
         // representations to catch every document. Without this the full-sync
         // would only ship the project document itself.
         const projectIdOid = new ObjectId(projectIdStr);
-        for (const [key, collName] of Object.entries(SYNC_COLLECTIONS)) {
+        for (const [key, collName] of Object.entries(EXPORT_COLLECTION)) {
+          // Das Projekt-Dokument selbst hängt schon unter `project` am Export.
+          // In der Schleife würde `projects` nach einem `projectId`-Feld
+          // durchsucht, das es dort nicht gibt.
+          if (collName === 'projects') continue;
           try {
             const docs = await db.collection<ReplDoc>(collName)
               .find({ projectId: { $in: [projectIdOid, projectIdStr] } })

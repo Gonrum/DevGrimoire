@@ -48,6 +48,43 @@ const KEYED_BY_ENTITY = [
   'replication.controller.ts',
 ];
 
+/** Pfade, die nach Export-Key schlüsseln (Full-Sync). Eigener Namensraum,
+ *  aber dieselbe Lücke — T-466. */
+const KEYED_BY_EXPORT = [
+  'replication-full-sync.service.ts',
+  'replication-receive.service.ts',
+];
+
+/**
+ * Die Export-Keys sind Übertragungsformat: sie stehen als Objektschlüssel im
+ * Full-Sync-Payload zwischen zwei Instanzen. Wer einen davon umbenennt, bricht
+ * den Sync gegen jede nicht gleichzeitig aktualisierte Gegenstelle — und zwar
+ * still, weil der Empfänger unbekannte Keys überspringt. Diese Tabelle friert
+ * den Bestand ein.
+ */
+const WIRE_KEYS = {
+  project: 'projects',
+  todos: 'todos',
+  sessions: 'sessions',
+  knowledge: 'knowledges',
+  changelog: 'changelogs',
+  milestones: 'milestones',
+  manuals: 'manuals',
+  research: 'researches',
+  environments: 'environments',
+  secrets: 'secrets',
+  schemas: 'dbschemas',
+  dependencies: 'dependencies',
+  features: 'features',
+  souls: 'souls',
+  commits: 'commits',
+  recurringTasks: 'recurringtasks',
+  snippets: 'snippets',
+  attachments: 'attachments',
+  activities: 'activities',
+  releases: 'releases',
+};
+
 let failed = 0;
 function check(name, fn) {
   try {
@@ -101,6 +138,48 @@ for (const file of KEYED_BY_ENTITY) {
       src,
       /ENTITY_COLLECTION[\s\S]*from '\.\/replication-collections'/,
       'kein Import von ENTITY_COLLECTION aus replication-collections',
+    );
+  });
+}
+
+// 4) Full-Sync: dieselbe Ableitung, eigener Namensraum.
+check('registry exportiert EXPORT_COLLECTION', () => {
+  assert.ok(reg.EXPORT_COLLECTION, 'EXPORT_COLLECTION wird nicht exportiert');
+});
+
+check('EXPORT_COLLECTION deckt jede registrierte Collection ab', () => {
+  const map = reg.EXPORT_COLLECTION || {};
+  const covered = new Set(Object.values(map));
+  const missing = reg.REPLICATED_COLLECTIONS
+    .map((c) => c.collection)
+    .filter((c) => !covered.has(c));
+  assert.deepEqual(missing, [], `nicht abgedeckt: ${missing.join(', ')}`);
+});
+
+check('bestehende Export-Keys unverändert (Übertragungsformat)', () => {
+  const map = reg.EXPORT_COLLECTION || {};
+  const broken = [];
+  for (const [key, coll] of Object.entries(WIRE_KEYS)) {
+    if (map[key] !== coll) broken.push(`${key}: ${map[key] ?? '<fehlt>'} statt ${coll}`);
+  }
+  assert.deepEqual(broken, [], `Wire-Format verletzt — ${broken.join('; ')}`);
+});
+
+check('Export-Keys sind eindeutig', () => {
+  const map = reg.EXPORT_COLLECTION || {};
+  const colls = Object.values(map);
+  const dup = colls.filter((c, i) => colls.indexOf(c) !== i);
+  assert.deepEqual(dup, [], `zwei Keys auf dieselbe Collection: ${dup.join(', ')}`);
+});
+
+for (const file of KEYED_BY_EXPORT) {
+  check(`${file} führt keine eigene Export-Tabelle`, () => {
+    const src = fs.readFileSync(path.join(SRC, file), 'utf8');
+    const literal = /const\s+(SYNC_COLLECTIONS|exportCollectionMap)\s*:\s*Record<string,\s*string>\s*=\s*\{/.exec(src);
+    assert.equal(
+      literal,
+      null,
+      `lokales Literal ${literal && literal[1]} — muss aus replication-collections stammen`,
     );
   });
 }

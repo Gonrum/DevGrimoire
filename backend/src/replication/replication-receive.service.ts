@@ -7,7 +7,7 @@ import { MinioService } from '../minio/minio.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ReplicationPayload, REPL_INSTANCE_ID } from './replication.constants';
 import { ReplDoc, errorMessage, isRecord } from './replication-narrow.helpers';
-import { ENTITY_COLLECTION } from './replication-collections';
+import { ENTITY_COLLECTION, EXPORT_COLLECTION } from './replication-collections';
 
 
 @Injectable()
@@ -239,31 +239,8 @@ export class ReplicationReceiveService {
     // different fields) — always upsert without LWW check.
     const lwwExemptCollections = new Set(['activities', 'commits']);
 
-    // Map of export key → collection name
-    const exportCollectionMap: Record<string, string> = {
-      project: 'projects',
-      todos: 'todos',
-      sessions: 'sessions',
-      knowledge: 'knowledges',
-      changelog: 'changelogs',
-      milestones: 'milestones',
-      manuals: 'manuals',
-      research: 'researches',
-      environments: 'environments',
-      secrets: 'secrets',
-      schemas: 'dbschemas',
-      dependencies: 'dependencies',
-      features: 'features',
-      souls: 'souls',
-      commits: 'commits',
-      recurringTasks: 'recurringtasks',
-      snippets: 'snippets',
-      attachments: 'attachments',
-      activities: 'activities',
-      releases: 'releases',
-    };
 
-    for (const [key, collectionName] of Object.entries(exportCollectionMap)) {
+    for (const [key, collectionName] of Object.entries(EXPORT_COLLECTION)) {
       const data = projectExport[key];
       if (!data) continue;
 
