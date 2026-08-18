@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model, Types } from 'mongoose';
 import { Harness, HarnessDocument, HarnessSection } from './schemas/harness.schema';
@@ -14,6 +15,7 @@ import {
 } from '../customers/schemas/customer-project-link.schema';
 import { Project, ProjectDocument } from '../projects/schemas/project.schema';
 import { projectIdFilter } from '../common/project-id-filter';
+import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { isDuplicateKeyError } from '../common/narrow';
 
 export interface HarnessOwner {
@@ -42,7 +44,58 @@ export class HarnessService {
     private linkModel: Model<CustomerProjectLinkDocument>,
     @InjectModel(Project.name)
     private projectModel: Model<ProjectDocument>,
+    // EventEmitter2 ist global registriert — das bricht die bewusste
+    // Modulgrenze nicht auf (kein Import von Projects-/CustomersModule).
+    private eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * Meldet eine Änderung an einer Harness-Ebene (T-463).
+   *
+   * Ein Ereignis bedient drei Abnehmer auf einmal: die Activity-Chronik (der
+   * Listener dort verbucht **jedes** `PROJECT_CHANGED` generisch), die
+   * SSE-Aktualisierung im Frontend (Tab-Zähler) und künftige Interessenten.
+   *
+   * Die globale Ebene hat weder `projectId` noch `customerId`. Das Ereignis
+   * geht trotzdem raus — die Chronik verbucht es dann ohne Owner, und die
+   * SSE-Filter routen es niemandem zu. Das ist gewollt: eine Änderung an der
+   * obersten Ebene soll nachvollziehbar sein, auch wenn keine Projektansicht
+   * sie live nachladen kann.
+   */
+  private emitChange(
+    harness: Pick<HarnessDocument, '_id' | 'scope' | 'projectId' | 'customerId'>,
+    action: ProjectChangeEvent['action'],
+    summary: string,
+  ): void {
+    this.eventEmitter.emit(PROJECT_CHANGED, {
+      projectId: harness.projectId?.toString() ?? null,
+      customerId: harness.customerId?.toString() ?? null,
+      entity: 'harness',
+      action,
+      entityId: harness._id.toString(),
+      summary,
+    });
+  }
+
+  /**
+   * Räumt die Harness-Ebene eines gelöschten Projekts ab (T-463).
+   *
+   * Nur Projekte: Kunden werden über die API **nicht gelöscht, sondern
+   * archiviert** (`DELETE /api/customers/:id` → `action: 'updated'`) — es gibt
+   * also gar kein Ereignis, an dem ein Kunden-Cleanup hängen könnte, und die
+   * Ebene eines archivierten Kunden soll erhalten bleiben: wird er reaktiviert,
+   * gelten seine Konventionen wieder.
+   *
+   * Die Id kommt aus dem Ereignis, nicht aus einer Nachfrage — das Projekt ist
+   * zu diesem Zeitpunkt bereits weg.
+   */
+  @OnEvent(PROJECT_CHANGED)
+  async handleCascade(event: ProjectChangeEvent): Promise<void> {
+    if (event.action !== 'deleted' || event.entity !== 'project' || !event.entityId) return;
+    await this.harnessModel
+      .deleteOne({ scope: 'project', projectId: projectIdFilter(event.entityId) })
+      .exec();
+  }
 
   /**
    * Resolved harness for a project: `global → customer(s) → project` (T-438).
@@ -169,7 +222,10 @@ export class HarnessService {
         { new: true, runValidators: true },
       )
       .exec();
-    if (updated) return updated;
+    if (updated) {
+      this.emitChange(updated, 'updated', `Harness-Abschnitt '${section.key}' geändert`);
+      return updated;
+    }
 
     // Not present yet. `$ne` guards the race against a parallel insert of the
     // same key: the second writer matches nothing and retries through the
@@ -181,7 +237,10 @@ export class HarnessService {
         { new: true, runValidators: true },
       )
       .exec();
-    if (inserted) return inserted;
+    if (inserted) {
+      this.emitChange(inserted, 'updated', `Harness-Abschnitt '${section.key}' angelegt`);
+      return inserted;
+    }
 
     const retried = await this.harnessModel
       .findOneAndUpdate(
@@ -193,6 +252,7 @@ export class HarnessService {
     if (!retried) {
       throw new NotFoundException(`Harness ${harness._id.toString()} not found`);
     }
+    this.emitChange(retried, 'updated', `Harness-Abschnitt '${section.key}' geändert`);
     return retried;
   }
 
@@ -212,6 +272,7 @@ export class HarnessService {
     if (!updated) {
       throw new NotFoundException(`Section '${key}' not found in harness ${harness._id.toString()}`);
     }
+    this.emitChange(updated, 'updated', `Harness-Abschnitt '${key}' entfernt`);
     return updated;
   }
 
@@ -245,7 +306,9 @@ export class HarnessService {
   }
 
   async create(dto: CreateHarnessDto): Promise<HarnessDocument> {
-    return this.harnessModel.create(dto);
+    const harness = await this.harnessModel.create(dto);
+    this.emitChange(harness, 'created', `Harness-Ebene '${harness.scope}' angelegt`);
+    return harness;
   }
 
   async findById(id: string): Promise<HarnessDocument | null> {
@@ -263,6 +326,7 @@ export class HarnessService {
     if (!harness) {
       throw new NotFoundException(`Harness ${id} not found`);
     }
+    this.emitChange(harness, 'updated', `Harness-Ebene '${harness.scope}' geändert`);
     return harness;
   }
 
@@ -271,6 +335,7 @@ export class HarnessService {
     if (!result) {
       throw new NotFoundException(`Harness ${id} not found`);
     }
+    this.emitChange(result, 'deleted', `Harness-Ebene '${result.scope}' gelöscht`);
   }
 
   /** Metadata only — the resolved content is served by `resolve()` (T-438). */

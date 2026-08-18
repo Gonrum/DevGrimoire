@@ -133,6 +133,12 @@ function projectModel(exists = true) {
   return { findOne: () => query(exists ? { _id: oid('p1') } : null) };
 }
 
+/** Attrappe des EventEmitter2 — sammelt, was der Service meldet. */
+function emitter() {
+  const events = [];
+  return { events, emit: (name, payload) => events.push({ name, payload }) };
+}
+
 const PROJECT = '69c12580c01a0739c142f1c0';
 
 function section(key, body, extra = {}) {
@@ -173,6 +179,7 @@ async function main() {
       harnesses,
       linkModel([{ projectId: oid(PROJECT), customerId: oid('cust1'), createdAt: 1, status: 'active' }]),
       projectModel(),
+      emitter(),
     );
 
     const res = await svc.resolve(PROJECT);
@@ -210,6 +217,7 @@ async function main() {
         { projectId: oid(PROJECT), customerId: oid('custB'), createdAt: 10, status: 'active' },
       ]),
       projectModel(),
+      emitter(),
     );
 
     const res = await svc.resolve(PROJECT);
@@ -233,13 +241,14 @@ async function main() {
       ]),
       linkModel([{ projectId: oid(PROJECT), customerId: oid('cust9'), createdAt: 1, status: 'active' }]),
       projectModel(),
+      emitter(),
     );
     const res = await svc.resolve(PROJECT);
     assert.deepStrictEqual(res.resolvedFrom, [{ scope: 'customer', projectId: undefined, customerId: 'cust9' }]);
   });
 
   await check('fehlende Ebenen ergeben ein gültiges Ergebnis, keinen Fehler', async () => {
-    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel());
+    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel(), emitter());
     const res = await svc.resolve(PROJECT);
     assert.deepStrictEqual(res.sections, []);
     assert.deepStrictEqual(res.resolvedFrom, []);
@@ -253,6 +262,7 @@ async function main() {
       ]),
       linkModel([{ projectId: oid(PROJECT), customerId: oid('ohne'), createdAt: 1, status: 'active' }]),
       projectModel(),
+      emitter(),
     );
     const res = await svc.resolve(PROJECT);
     assert.deepStrictEqual(
@@ -274,6 +284,7 @@ async function main() {
       ]),
       linkModel([{ projectId: oid(PROJECT), customerId: oid('alt'), createdAt: 1, status: 'archived' }]),
       projectModel(),
+      emitter(),
     );
     const res = await svc.resolve(PROJECT);
     assert.deepStrictEqual(res.resolvedFrom, []);
@@ -292,6 +303,7 @@ async function main() {
       ]),
       linkModel([{ projectId: oid(PROJECT), customerId: oid('pause'), createdAt: 1, status: 'paused' }]),
       projectModel(),
+      emitter(),
     );
     const res = await svc.resolve(PROJECT);
     assert.deepStrictEqual(
@@ -314,6 +326,7 @@ async function main() {
       ]),
       linkModel([{ projectId: oid(PROJECT), customerId: oid('aus'), createdAt: 1, status: 'active' }]),
       projectModel(),
+      emitter(),
     );
     const res = await svc.resolve(PROJECT);
     assert.deepStrictEqual(
@@ -324,12 +337,12 @@ async function main() {
   });
 
   await check('resolve() auf unbekannte projectId wirft NotFound statt leerem Ergebnis', async () => {
-    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel(false));
+    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel(false), emitter());
     await assert.rejects(() => svc.resolve(PROJECT), /not found/i);
   });
 
   await check('resolve() mit ungültiger projectId wirft BadRequest statt eines Cast-Fehlers', async () => {
-    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel());
+    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel(), emitter());
     await assert.rejects(() => svc.resolve('nicht-hex'), /not a valid project id/);
   });
 
@@ -351,6 +364,7 @@ async function main() {
         { projectId: oid(PROJECT), customerId: oid('c2'), createdAt: 2, status: 'active' },
       ]),
       projectModel(),
+      emitter(),
     );
     const res = await svc.resolve(PROJECT);
     assert.strictEqual(res.resolvedFrom.length, 2);
@@ -364,7 +378,7 @@ async function main() {
     // normalisiert beide Formen), deshalb wird hier die FORM des Filters
     // geprueft — das ist die Eigenschaft, an der es haengt.
     const harnesses = harnessModel([]);
-    const svc = new HarnessService(harnesses, linkModel([]), projectModel());
+    const svc = new HarnessService(harnesses, linkModel([]), projectModel(), emitter());
 
     await svc.findByOwner({ scope: 'project', projectId: PROJECT });
     const projectFilter = harnesses.calls.at(-1);
@@ -387,7 +401,7 @@ async function main() {
 
   await check('sectionSet ist idempotent — zweimal gleicher Input, gleicher Zustand', async () => {
     const harnesses = harnessModel([]);
-    const svc = new HarnessService(harnesses, linkModel([]), projectModel());
+    const svc = new HarnessService(harnesses, linkModel([]), projectModel(), emitter());
     const dto = { key: 'stil', kind: 'prose', title: 'Stil', body: 'kurz', mergeStrategy: 'replace' };
 
     const first = await svc.sectionSet({ scope: 'global' }, dto);
@@ -400,7 +414,7 @@ async function main() {
   });
 
   await check('sectionSet setzt die Defaults explizit — kein Feld fällt beim Ersetzen weg', async () => {
-    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel());
+    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel(), emitter());
     const doc = await svc.sectionSet({ scope: 'global' }, { key: 'nur-key', kind: 'prose' });
     const s = doc.sections[0];
     assert.deepStrictEqual(
@@ -410,7 +424,7 @@ async function main() {
   });
 
   await check('sectionSet aktualisiert eine vorhandene Section, statt sie zu duplizieren', async () => {
-    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel());
+    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel(), emitter());
     await svc.sectionSet({ scope: 'global' }, { key: 'stil', kind: 'prose', body: 'alt' });
     const doc = await svc.sectionSet({ scope: 'global' }, { key: 'stil', kind: 'prose', body: 'neu' });
     assert.strictEqual(doc.sections.length, 1);
@@ -418,7 +432,7 @@ async function main() {
   });
 
   await check('sectionDelete entfernt gezielt; unbekannter Key wirft NotFound', async () => {
-    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel());
+    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel(), emitter());
     await svc.sectionSet({ scope: 'global' }, { key: 'a', kind: 'prose', body: '1' });
     await svc.sectionSet({ scope: 'global' }, { key: 'b', kind: 'prose', body: '2' });
 
@@ -428,14 +442,74 @@ async function main() {
   });
 
   await check('sectionSet ohne projectId bei scope project wird abgelehnt', async () => {
-    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel());
+    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel(), emitter());
     await assert.rejects(
       () => svc.sectionSet({ scope: 'project' }, { key: 'a', kind: 'prose' }),
       /projectId is required/,
     );
   });
 
-  console.log(`\n${passed} Prüfungen bestanden.`);
+    await check('sectionSet meldet genau ein Ereignis mit entity harness', async () => {
+    const ev = emitter();
+    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel(), ev);
+    await svc.sectionSet({ scope: 'project', projectId: PROJECT }, { key: 'stil', kind: 'prose' });
+    assert.strictEqual(ev.events.length, 1, `erwartet 1 Ereignis, bekam ${ev.events.length}`);
+    const p = ev.events[0].payload;
+    assert.strictEqual(p.entity, 'harness');
+    assert.strictEqual(p.action, 'updated');
+    assert.strictEqual(p.projectId, PROJECT, 'projectId muss am Ereignis haengen, sonst laedt keine Ansicht nach');
+    assert.ok(String(p.summary).includes('stil'), 'summary soll den Section-Key nennen');
+  });
+
+  await check('globale Ebene meldet ohne Owner statt gar nicht', async () => {
+    const ev = emitter();
+    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel(), ev);
+    await svc.sectionSet({ scope: 'global' }, { key: 'a', kind: 'prose' });
+    assert.strictEqual(ev.events.length, 1);
+    assert.strictEqual(ev.events[0].payload.projectId, null);
+    assert.strictEqual(ev.events[0].payload.customerId, null);
+  });
+
+  await check('sectionDelete meldet ebenfalls', async () => {
+    const ev = emitter();
+    const svc = new HarnessService(harnessModel([]), linkModel([]), projectModel(), ev);
+    await svc.sectionSet({ scope: 'global' }, { key: 'a', kind: 'prose' });
+    ev.events.length = 0;
+    await svc.sectionDelete({ scope: 'global' }, 'a');
+    assert.strictEqual(ev.events.length, 1);
+    assert.ok(String(ev.events[0].payload.summary).includes('entfernt'));
+  });
+
+  await check('Projekt-Loeschung raeumt die Projektebene ab', async () => {
+    const harnesses = harnessModel([
+      { _id: oid('p'), scope: 'project', projectId: oid(PROJECT), enabled: true, sections: [] },
+      { _id: oid('g'), scope: 'global', enabled: true, sections: [] },
+    ]);
+    let deleted = null;
+    harnesses.deleteOne = (filter) => { deleted = filter; return query({ deletedCount: 1 }); };
+    const svc = new HarnessService(harnesses, linkModel([]), projectModel(), emitter());
+
+    await svc.handleCascade({ entity: 'project', action: 'deleted', entityId: PROJECT });
+    assert.ok(deleted, 'deleteOne wurde nicht aufgerufen');
+    assert.strictEqual(deleted.scope, 'project');
+    assert.ok(Array.isArray(deleted.projectId.$in), 'muss ueber $in beider Darstellungen loeschen');
+  });
+
+  await check('andere Ereignisse loesen kein Aufraeumen aus', async () => {
+    const harnesses = harnessModel([]);
+    let called = false;
+    harnesses.deleteOne = () => { called = true; return query({}); };
+    const svc = new HarnessService(harnesses, linkModel([]), projectModel(), emitter());
+
+    // Kunden werden archiviert, nicht geloescht — es darf kein Cleanup geben.
+    await svc.handleCascade({ entity: 'customer', action: 'updated', entityId: 'x' });
+    await svc.handleCascade({ entity: 'customer', action: 'deleted', entityId: 'x' });
+    await svc.handleCascade({ entity: 'project', action: 'updated', entityId: PROJECT });
+    await svc.handleCascade({ entity: 'project', action: 'deleted' });
+    assert.strictEqual(called, false, 'nur project+deleted+entityId darf aufraeumen');
+  });
+
+console.log(`\n${passed} Prüfungen bestanden.`);
 }
 
 main().catch((err) => {

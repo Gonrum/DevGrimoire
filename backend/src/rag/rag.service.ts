@@ -22,6 +22,25 @@ interface StoredEndpoint {
 }
 
 /** Entity types that contain indexable text content */
+/*
+ * Bewusst NICHT enthalten: `harness` (M-51) und `soul`.
+ *
+ * Entscheidung aus T-463, mit Begründung, damit sie nicht als Versehen gelesen
+ * wird:
+ *
+ *  1. `soul` war nie indiziert — Harness auszulassen ist kein Rückschritt.
+ *  2. Die globale Ebene trägt den `tool-usage`-Abschnitt: rund 45.000 Zeichen
+ *     Tool-Dokumentation. Indiziert würde er auf nahezu jede Anfrage passen und
+ *     die echten Treffer verdrängen.
+ *  3. Der Inhalt wird ohnehin vollständig ausgeliefert — beim Sessionstart über
+ *     `system_instructions_get`, sonst über `harness_get`. Semantische Suche
+ *     fügt dort wenig hinzu.
+ *
+ * Wo es sich lohnen KÖNNTE: der Projekt-Chat baut seinen Kontext serverseitig
+ * per RAG und sieht `system_instructions_get` nie. Falls das aufgenommen wird,
+ * dann nur `scope: project` und `customer` — die globale Ebene aus Grund 2
+ * niemals — und mit anschliessendem `rag_reindex`.
+ */
 const INDEXABLE_ENTITIES = [
   'knowledge',
   'research',
