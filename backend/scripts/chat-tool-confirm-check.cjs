@@ -27,7 +27,6 @@ function check(name, fn) {
 function controller(opts = {}) {
   const executed = [];
   const llm = {
-    // eslint-disable-next-line require-yield
     async *streamChatWithTools() {
       for (const ev of opts.events ?? []) yield ev;
     },
