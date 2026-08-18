@@ -3,20 +3,21 @@ import { Link, matchPath, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Sparkles } from 'lucide-react';
 import {
-  api,
   ChatAttachmentRef,
   ChatContextRef,
   ChatMessage,
   ChatResponseMetrics,
   ChatSession,
+  ChatStreamHandlers,
   ChatToolCallRecord,
   Project,
   UserLlmConfig,
   Workspace,
+  api,
 } from '../api/client';
 import { streamBrowserLlm, BrowserLlmMessage } from '../api/browserLlmClient';
 import ToolConfirmDialog from './ToolConfirmDialog';
-import { isRecord, optionOr } from '../lib/narrow';
+import { errorMessage, isRecord, optionOr } from '../lib/narrow';
 import Markdown from './Markdown';
 import Button from './ui/Button';
 
@@ -509,86 +510,6 @@ export default function ChatDock() {
     }
   }, [session, projectId, customerId, loadSessions, loadSession]);
 
-  const runServerStream = useCallback(
-    async (
-      sessionId: string,
-      content: string,
-      attachmentIds: string[] | undefined,
-      abort: AbortController,
-      activeBriefingMode?: boolean,
-    ) => {
-      await api.chat.streamMessage(
-        sessionId,
-        content,
-        attachmentIds,
-        {
-          onContext: (refs) => {
-            setStreaming((s) => s ? { ...s, contextRefs: refs, phase: 'context' } : s);
-          },
-          onStatus: (status) => {
-            const phase = optionOr(status.phase, STREAMING_PHASES, 'thinking');
-            setStreaming((s) => s ? { ...s, phase, activeToolName: status.name } : s);
-          },
-          onToken: (token) => {
-            setStreaming((s) => s ? { ...s, content: s.content + token, phase: 'responding', activeToolName: undefined } : s);
-          },
-          onToolCall: (call) => {
-            setStreaming((s) => s ? {
-              ...s,
-              phase: 'tool_call',
-              activeToolName: call.name,
-              toolCalls: [...s.toolCalls, { id: call.id, name: call.name, arguments: call.arguments }],
-            } : s);
-          },
-          onToolResult: (result) => {
-            setStreaming((s) => s ? {
-              ...s,
-              toolCalls: s.toolCalls.map((tc) =>
-                tc.id === result.id ? { ...tc, success: result.success, summary: result.summary } : tc,
-              ),
-            } : s);
-          },
-          onMetrics: (metrics) => {
-            setStreaming((s) => s ? { ...s, metrics } : s);
-          },
-          onDone: () => {
-            setStreaming((s) => {
-              if (!s) return null;
-              const toolCallRecords: ChatToolCallRecord[] | undefined = s.toolCalls.length > 0
-                ? s.toolCalls.map((tc) => ({
-                    id: tc.id,
-                    name: tc.name,
-                    arguments: tc.arguments,
-                    success: tc.success ?? false,
-                    error: tc.success === false ? tc.summary : undefined,
-                  }))
-                : undefined;
-              const assistantMsg: ChatMessage = {
-                role: 'assistant',
-                content: s.content,
-                timestamp: new Date().toISOString(),
-                contextUsed: s.contextRefs.length > 0 ? s.contextRefs : undefined,
-                toolCalls: toolCallRecords,
-                metrics: s.metrics,
-              };
-              setSession((prev) => prev ? { ...prev, messages: [...prev.messages, assistantMsg] } : prev);
-              return null;
-            });
-          },
-          onError: (message) => {
-            setError(message);
-            setRetryDraft(content);
-            setStreaming(null);
-          },
-        },
-        abort.signal,
-        activeWorkspaceId,
-        activeBriefingMode,
-      );
-    },
-    [activeWorkspaceId],
-  );
-
   /**
    * Fragt vor einem schreibenden Tool nach (T-415).
    *
@@ -609,6 +530,153 @@ export default function ChatDock() {
     },
     [writeTools],
   );
+
+  /*
+   * Der Resume nach einer Bestätigung benutzt dieselben Handler wie der
+   * ursprüngliche Stream — und die Handler brauchen den Resume. Eine direkte
+   * Referenz wäre zirkulär, deshalb ein Ref (dasselbe Muster wie beim
+   * bestehenden `handleSaveRef` in dieser Datei).
+   */
+  const resumeRef = useRef<
+    (sessionId: string, callId: string, approved: boolean, abort: AbortController) => void
+  >(() => {});
+
+  /**
+   * Die Ereignis-Handler des Server-Streams.
+   *
+   * Als Fabrik herausgezogen, weil der Resume nach einer Bestätigung denselben
+   * Ereignisstrom liefert (T-415) — zwei Kopien liefen garantiert auseinander.
+   */
+  const serverStreamHandlers = useCallback(
+    (sessionId: string, content: string, abort: AbortController): ChatStreamHandlers => ({
+        onContext: (refs) => {
+          setStreaming((s) => s ? { ...s, contextRefs: refs, phase: 'context' } : s);
+        },
+        onStatus: (status) => {
+          const phase = optionOr(status.phase, STREAMING_PHASES, 'thinking');
+          setStreaming((s) => s ? { ...s, phase, activeToolName: status.name } : s);
+        },
+        onToken: (token) => {
+          setStreaming((s) => s ? { ...s, content: s.content + token, phase: 'responding', activeToolName: undefined } : s);
+        },
+        onToolCall: (call) => {
+          setStreaming((s) => s ? {
+            ...s,
+            phase: 'tool_call',
+            activeToolName: call.name,
+            toolCalls: [...s.toolCalls, { id: call.id, name: call.name, arguments: call.arguments }],
+          } : s);
+        },
+        onToolResult: (result) => {
+          setStreaming((s) => s ? {
+            ...s,
+            toolCalls: s.toolCalls.map((tc) =>
+              tc.id === result.id ? { ...tc, success: result.success, summary: result.summary } : tc,
+            ),
+          } : s);
+        },
+        /*
+         * Der Server hat vor einem schreibenden Tool angehalten (T-415).
+         * Dieser Stream endet gleich; die Entscheidung des Nutzers geht über
+         * `resumeTool` an einen neuen Stream, der den Turn zu Ende führt.
+         *
+         * `void`, weil der Handler synchron ist: der Fortsetzungs-Stream darf
+         * den aktuellen nicht blockieren, dessen Leseschleife gerade läuft.
+         */
+        onToolConfirm: (call) => {
+          let parsed: Record<string, unknown>;
+          try {
+            const raw: unknown = call.arguments ? JSON.parse(call.arguments) : {};
+            parsed = isRecord(raw) ? raw : {};
+          } catch {
+            parsed = {};
+          }
+          setStreaming((s) => s ? { ...s, phase: 'tool_call', activeToolName: call.name } : s);
+          void confirmToolCall(call.name, parsed).then((approved) => {
+            resumeRef.current(sessionId, call.id, approved, abort);
+          });
+        },
+        onMetrics: (metrics) => {
+          setStreaming((s) => s ? { ...s, metrics } : s);
+        },
+        onDone: () => {
+          setStreaming((s) => {
+            if (!s) return null;
+            const toolCallRecords: ChatToolCallRecord[] | undefined = s.toolCalls.length > 0
+              ? s.toolCalls.map((tc) => ({
+                  id: tc.id,
+                  name: tc.name,
+                  arguments: tc.arguments,
+                  success: tc.success ?? false,
+                  error: tc.success === false ? tc.summary : undefined,
+                }))
+              : undefined;
+            const assistantMsg: ChatMessage = {
+              role: 'assistant',
+              content: s.content,
+              timestamp: new Date().toISOString(),
+              contextUsed: s.contextRefs.length > 0 ? s.contextRefs : undefined,
+              toolCalls: toolCallRecords,
+              metrics: s.metrics,
+            };
+            setSession((prev) => prev ? { ...prev, messages: [...prev.messages, assistantMsg] } : prev);
+            return null;
+          });
+        },
+        onError: (message) => {
+          setError(message);
+          setRetryDraft(content);
+          setStreaming(null);
+        },
+    }),
+    [confirmToolCall],
+  );
+
+  const runServerStream = useCallback(
+    async (
+      sessionId: string,
+      content: string,
+      attachmentIds: string[] | undefined,
+      abort: AbortController,
+      activeBriefingMode?: boolean,
+    ) => {
+      await api.chat.streamMessage(
+        sessionId,
+        content,
+        attachmentIds,
+        serverStreamHandlers(sessionId, content, abort),
+        abort.signal,
+        activeWorkspaceId,
+        activeBriefingMode,
+      );
+    },
+    [activeWorkspaceId, serverStreamHandlers],
+  );
+
+  /**
+   * Setzt einen im Server-Modus angehaltenen Turn fort (T-415).
+   *
+   * Derselbe Ereignisstrom wie beim ursprünglichen Aufruf — deshalb dieselben
+   * Handler. Hält der fortgesetzte Turn erneut an (zweites schreibendes Tool im
+   * selben Durchlauf), greift `onToolConfirm` wieder und die Kette setzt sich
+   * fort, bis nichts mehr zu bestätigen ist.
+   */
+  const resumeServerStream = useCallback(
+    (sessionId: string, callId: string, approved: boolean, abort: AbortController) => {
+      void api.chat
+        .resumeTool(sessionId, { callId, approved }, serverStreamHandlers(sessionId, '', abort), abort.signal)
+        .catch((err: unknown) => {
+          if (isAbortError(err) || abort.signal.aborted) return;
+          setError(errorMessage(err, t('common.error')));
+          setStreaming(null);
+        });
+    },
+    [serverStreamHandlers, t],
+  );
+
+  useEffect(() => {
+    resumeRef.current = resumeServerStream;
+  }, [resumeServerStream]);
 
   const runBrowserStream = useCallback(
     async (

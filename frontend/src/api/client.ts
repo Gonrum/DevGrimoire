@@ -1863,6 +1863,110 @@ export interface SetWebSearchConfig {
   providers: SetWebSearchProvider[];
 }
 
+/**
+ * Ereignis-Handler eines Chat-Streams (SSE).
+ *
+ * Von `streamMessage` und `resumeTool` geteilt: ein fortgesetzter Turn sendet
+ * dieselben Ereignisse wie ein begonnener (T-415).
+ */
+export interface ChatStreamHandlers {
+  onContext?: (refs: ChatContextRef[]) => void;
+  onToken?: (token: string) => void;
+  onToolCall?: (call: { id: string; name: string; arguments: string }) => void;
+  onToolResult?: (result: { id: string; success: boolean; summary: string }) => void;
+  /**
+   * Der Server hat vor einem schreibenden Tool angehalten. Der Stream endet
+   * danach; Fortsetzung über `api.chat.resumeTool`.
+   */
+  onToolConfirm?: (call: { id: string; name: string; arguments: string }) => void;
+  onStatus?: (status: { phase: string; name?: string; state?: string }) => void;
+  onMetrics?: (metrics: ChatResponseMetrics) => void;
+  onDone?: (reason?: string) => void;
+  onError?: (message: string) => void;
+}
+
+/** POST mit Auth-Header, dessen Antwort ein SSE-Stream ist. */
+async function postChatStream(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = getAccessToken?.();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
+/**
+ * Liest einen Chat-SSE-Stream und verteilt die Ereignisse.
+ *
+ * Eine Schleife für beide Aufrufer: zwei Kopien liefen garantiert auseinander,
+ * sobald ein Ereignistyp dazukommt — genau das ist mit `tool_confirm` gerade
+ * passiert.
+ */
+async function consumeChatStream(res: Response, handlers: ChatStreamHandlers): Promise<void> {
+  if (!res.ok || !res.body) {
+    throw new Error(await readErrorMessage(res));
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split('\n\n');
+      buffer = chunks.pop() ?? '';
+      for (const chunk of chunks) {
+        const line = chunk.split('\n').find((l) => l.startsWith('data:'));
+        if (!line) continue;
+        const data = line.slice(5).trim();
+        if (!data) continue;
+        try {
+          // Ein defektes Frame darf verworfen werden — der `catch` unten fängt
+          // den Parse-Fehler, der Stream läuft weiter.
+          const event = parseJsonText<ChatStreamEvent>(data);
+          if (event.type === 'context') handlers.onContext?.(event.refs);
+          else if (event.type === 'token') handlers.onToken?.(event.content);
+          else if (event.type === 'tool_call') handlers.onToolCall?.({ id: event.id, name: event.name, arguments: event.arguments });
+          else if (event.type === 'tool_result') handlers.onToolResult?.({ id: event.id, success: event.success, summary: event.summary });
+          else if (event.type === 'tool_confirm') handlers.onToolConfirm?.({ id: event.id, name: event.name, arguments: event.arguments });
+          else if (event.type === 'status') handlers.onStatus?.({ phase: event.phase, name: event.name, state: event.state });
+          else if (event.type === 'tool_status') handlers.onStatus?.({ phase: event.phase ?? 'tool_call', name: event.name, state: event.state });
+          else if (event.type === 'metrics') {
+            // Felder explizit übernehmen statt `type` per Rest-Destructuring
+            // wegzuwerfen — dann bleibt keine ungenutzte Variable übrig.
+            handlers.onMetrics?.({
+              outputTokens: event.outputTokens,
+              durationMs: event.durationMs,
+              firstTokenMs: event.firstTokenMs,
+              tokensPerSecond: event.tokensPerSecond,
+              totalDurationMs: event.totalDurationMs,
+              estimated: event.estimated,
+            });
+          }
+          else if (event.type === 'done') handlers.onDone?.(event.reason);
+          else if (event.type === 'error') handlers.onError?.(event.message);
+        } catch {
+          /* ignore malformed event */
+        }
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      /* noop */
+    }
+  }
+}
+
 export const api = {
   projects: {
     list: (filters?: { active?: boolean; favorite?: boolean; customerId?: string }) => {
@@ -3213,83 +3317,40 @@ export const api = {
       sessionId: string,
       content: string,
       attachmentIds: string[] | undefined,
-      handlers: {
-        onContext?: (refs: ChatContextRef[]) => void;
-        onToken?: (token: string) => void;
-        onToolCall?: (call: { id: string; name: string; arguments: string }) => void;
-        onToolResult?: (result: { id: string; success: boolean; summary: string }) => void;
-        onStatus?: (status: { phase: string; name?: string; state?: string }) => void;
-        onMetrics?: (metrics: ChatResponseMetrics) => void;
-        onDone?: (reason?: string) => void;
-        onError?: (message: string) => void;
-      },
+      handlers: ChatStreamHandlers,
       signal?: AbortSignal,
       workspaceId?: string | null,
       briefingMode?: boolean,
     ): Promise<void> => {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const token = getAccessToken?.();
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`${BASE_URL}/chat/sessions/${sessionId}/message`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ content, attachmentIds, workspaceId: workspaceId ?? undefined, briefingMode: briefingMode ?? undefined }),
+      const res = await postChatStream(
+        `/chat/sessions/${sessionId}/message`,
+        {
+          content,
+          attachmentIds,
+          workspaceId: workspaceId ?? undefined,
+          briefingMode: briefingMode ?? undefined,
+        },
         signal,
-      });
-      if (!res.ok || !res.body) {
-        throw new Error(await readErrorMessage(res));
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const chunks = buffer.split('\n\n');
-          buffer = chunks.pop() ?? '';
-          for (const chunk of chunks) {
-            const line = chunk.split('\n').find((l) => l.startsWith('data:'));
-            if (!line) continue;
-            const data = line.slice(5).trim();
-            if (!data) continue;
-            try {
-              // Ein defektes Frame darf verworfen werden — der `catch` unten
-              // fängt den Parse-Fehler, der Stream läuft weiter.
-              const event = parseJsonText<ChatStreamEvent>(data);
-              if (event.type === 'context') handlers.onContext?.(event.refs);
-              else if (event.type === 'token') handlers.onToken?.(event.content);
-              else if (event.type === 'tool_call') handlers.onToolCall?.({ id: event.id, name: event.name, arguments: event.arguments });
-              else if (event.type === 'tool_result') handlers.onToolResult?.({ id: event.id, success: event.success, summary: event.summary });
-              else if (event.type === 'status') handlers.onStatus?.({ phase: event.phase, name: event.name, state: event.state });
-              else if (event.type === 'tool_status') handlers.onStatus?.({ phase: event.phase ?? 'tool_call', name: event.name, state: event.state });
-              else if (event.type === 'metrics') {
-                // Felder explizit übernehmen statt `type` per Rest-Destructuring
-                // wegzuwerfen — dann bleibt keine ungenutzte Variable übrig.
-                handlers.onMetrics?.({
-                  outputTokens: event.outputTokens,
-                  durationMs: event.durationMs,
-                  firstTokenMs: event.firstTokenMs,
-                  tokensPerSecond: event.tokensPerSecond,
-                  totalDurationMs: event.totalDurationMs,
-                  estimated: event.estimated,
-                });
-              }
-              else if (event.type === 'done') handlers.onDone?.(event.reason);
-              else if (event.type === 'error') handlers.onError?.(event.message);
-            } catch {
-              /* ignore malformed event */
-            }
-          }
-        }
-      } finally {
-        try {
-          reader.releaseLock();
-        } catch {
-          /* noop */
-        }
-      }
+      );
+      await consumeChatStream(res, handlers);
+    },
+
+    /**
+     * Setzt einen Turn fort, der vor einem schreibenden Tool angehalten hat
+     * (T-415).
+     *
+     * Antwort ist derselbe Ereignisstrom wie bei `streamMessage` — deshalb
+     * teilen sich beide Handler und Leseschleife. `approved: false` führt das
+     * Tool nicht aus, meldet es dem Modell aber als abgelehnt zurück.
+     */
+    resumeTool: async (
+      sessionId: string,
+      body: { callId: string; approved: boolean },
+      handlers: ChatStreamHandlers,
+      signal?: AbortSignal,
+    ): Promise<void> => {
+      const res = await postChatStream(`/chat/sessions/${sessionId}/tools/resume`, body, signal);
+      await consumeChatStream(res, handlers);
     },
   },
   chatActivity: {
@@ -3728,6 +3789,8 @@ export type ChatStreamEvent =
   | { type: 'token'; content: string }
   | { type: 'tool_call'; id: string; name: string; arguments: string }
   | { type: 'tool_result'; id: string; success: boolean; summary: string }
+  /** Server hält vor einem schreibenden Tool an und beendet den Stream (T-415). */
+  | { type: 'tool_confirm'; id: string; name: string; arguments: string }
   | { type: 'status'; phase: string; name?: string; state?: string }
   | { type: 'tool_status'; phase?: string; name?: string; state?: string }
   | ({ type: 'metrics' } & ChatResponseMetrics)

@@ -6,6 +6,7 @@ import {
   Get,
   HttpCode,
   Logger,
+  NotFoundException,
   Param,
   Post,
   Put,
@@ -25,6 +26,8 @@ import { ChatService } from './chat.service';
 import { ChatLlmService, LlmMessageWithTools, LlmImageInput } from './chat-llm.service';
 import { ChatContextService, AttachmentForContext } from './chat-context.service';
 import { ChatToolsService, ALL_TOOL_NAMES, TOOL_GROUPS, WRITE_TOOL_NAMES } from './chat-tools';
+import { ChatContextRef } from './schemas/chat-session.schema';
+import { ResumeChatToolDto } from './dto/resume-chat-tool.dto';
 import { ChatActivityService } from './chat-activity.service';
 import { AgentRolesService } from '../agent-roles/agent-roles.service';
 import { ChatAttachmentRef, ChatResponseMetrics, ChatToolCallRecord } from './schemas/chat-session.schema';
@@ -130,9 +133,79 @@ function canonicalizeJsonArgs(raw: string | undefined | null): string {
   }
 }
 
+/** Ein vom Modell angeforderter Tool-Aufruf, wie er über SSE hereinkommt. */
+interface PendingToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+/**
+ * Ein Turn, der auf eine Bestätigung wartet (T-415).
+ *
+ * Bewusst im Speicher und nicht in der Session: der Zustand lebt Sekunden bis
+ * Minuten, und ein halb ausgeführter Turn hat in der persistierten Historie
+ * nichts verloren. Ein Neustart des Backends verwirft ihn — der Client bekommt
+ * dann 404 auf `resume` und der Nutzer fragt neu. Das ist der ehrlichere
+ * Ausgang als ein Turn, der Tage später weiterläuft.
+ */
+interface PendingConfirmation {
+  userId?: string;
+  projectId: string | null;
+  customerId?: string;
+  effectiveAllowlist: string[];
+  conversation: LlmMessageWithTools[];
+  persisted: ChatToolCallRecord[];
+  contextRefs: ChatContextRef[];
+  call: PendingToolCall;
+  queue: PendingToolCall[];
+  iter: number;
+  maxIter: number;
+  fullResponse: string;
+  firstTokenMs: number | null;
+  userMessageLength: number;
+  createdAtMs: number;
+}
+
+interface ToolLoopResult {
+  fullResponse: string;
+  firstTokenMs: number | null;
+  pendingDone: boolean;
+  pendingDoneReason?: string;
+  /** Gesetzt, wenn vor einem schreibenden Tool angehalten wurde. */
+  paused?: { call: PendingToolCall; queue: PendingToolCall[]; iter: number };
+}
+
 @Controller('chat')
 export class ChatController {
   private readonly logger = new Logger(ChatController.name);
+
+  /**
+   * Turns, die auf eine Bestätigung warten, je Session (T-415).
+   *
+   * Eine Session kann höchstens einen offenen Turn haben — ein zweiter
+   * `sendMessage` verwirft den alten, weil der Nutzer dann offensichtlich
+   * weitergezogen ist. Ohne diese Verdrängung sammelten sich Einträge, die
+   * niemand mehr bestätigt.
+   */
+  private readonly pendingConfirmations = new Map<string, PendingConfirmation>();
+
+  /** Nach dieser Zeit gilt eine unbeantwortete Bestätigung als verfallen. */
+  private static readonly CONFIRM_TTL_MS = 30 * 60 * 1000;
+
+  /**
+   * Räumt verfallene Bestätigungen ab.
+   *
+   * Läuft bei jedem Zugriff statt per Timer: der Speicher ist klein, und ein
+   * Intervall in einem Controller wäre eine Hintergrundaufgabe, die niemand
+   * beendet.
+   */
+  private sweepPendingConfirmations(): void {
+    const cutoff = Date.now() - ChatController.CONFIRM_TTL_MS;
+    for (const [key, pending] of this.pendingConfirmations) {
+      if (pending.createdAtMs < cutoff) this.pendingConfirmations.delete(key);
+    }
+  }
 
   constructor(
     private readonly chatService: ChatService,
@@ -802,131 +875,62 @@ export class ChatController {
         }
         if (!abort.signal.aborted) pendingDone = true;
       } else {
-        const tools = this.tools.getToolsForLlm(effectiveAllowlist);
+        /*
+         * Die Tool-Schleife steckt in `runToolLoop`, damit sie ein zweites Mal
+         * betreten werden kann: nach einer Bestätigung setzt `resumeTool` genau
+         * dort wieder auf (T-415). Der Rumpf ist unverändert übernommen.
+         */
         const conversation: LlmMessageWithTools[] = built.messages.map((m) => ({
           role: m.role,
           content: m.content,
         }));
-        const maxIter = opts.toolsMaxIterations;
-        // Only attach images to the first iteration — once the model has seen them
-        // and replied / issued a tool-call, follow-up turns don't need them re-sent.
-        let imagesForIteration: LlmImageInput[] | undefined = built.images;
+        const loop = await this.runToolLoop({
+          send,
+          abort,
+          projectId: projectId ?? null,
+          effectiveAllowlist,
+          conversation,
+          persisted: persistedToolCalls,
+          images: built.images,
+          startIter: 0,
+          maxIter: opts.toolsMaxIterations,
+          onEndpointSelected,
+          confirmWrites: true,
+        });
+        fullResponse += loop.fullResponse;
+        if (loop.firstTokenMs !== null && firstTokenMs === null) firstTokenMs = loop.firstTokenMs;
+        pendingDone = loop.pendingDone;
+        pendingDoneReason = loop.pendingDoneReason;
 
-        for (let iter = 0; iter < maxIter; iter++) {
-          if (abort.signal.aborted) break;
-          const pendingToolCalls: Array<{ id: string; name: string; arguments: string }> = [];
-          let iterFinishReason: 'stop' | 'tool_calls' | 'length' | 'other' = 'other';
-          let iterContent = '';
-
-          send({ type: 'status', phase: iter === 0 ? 'thinking' : 'responding' });
-          for await (const event of this.llm.streamChatWithTools(conversation, tools, {
-            signal: abort.signal,
-            images: imagesForIteration,
-            onEndpointSelected,
-          })) {
-            if (abort.signal.aborted) break;
-            if (event.type === 'content') {
-              if (firstTokenMs === null) firstTokenMs = Date.now();
-              iterContent += event.delta;
-              fullResponse += event.delta;
-              send({ type: 'token', content: event.delta });
-            } else if (event.type === 'tool_call') {
-              pendingToolCalls.push(event);
-            } else if (event.type === 'finish') {
-              iterFinishReason = event.reason;
-            }
-          }
-
-          if (abort.signal.aborted) break;
-
-          if (iterFinishReason !== 'tool_calls' || pendingToolCalls.length === 0) {
-            pendingDone = true;
-            break;
-          }
-
-          // Assistant turn with tool_calls (content may be empty, that's fine).
-          // Canonicalize arguments so strict providers (Ollama Cloud) don't 400
-          // on the next iteration due to streaming-accumulator artefacts.
-          conversation.push({
-            role: 'assistant',
-            content: iterContent,
-            tool_calls: pendingToolCalls.map((tc) => {
-              const canonical = canonicalizeJsonArgs(tc.arguments);
-              if (canonical === '{}' && tc.arguments && tc.arguments.trim() !== '{}') {
-                this.logger.debug(
-                  `tool_call ${tc.name} raw arguments unparseable, falling back to "{}": ${tc.arguments.slice(0, 200)}`,
-                );
-              }
-              return {
-                id: tc.id,
-                type: 'function' as const,
-                function: { name: tc.name, arguments: canonical },
-              };
-            }),
+        if (loop.paused) {
+          /*
+           * Angehalten vor einem schreibenden Tool. Der Turn ist NICHT fertig:
+           * weder wird die Assistenten-Nachricht persistiert (sie wäre halb)
+           * noch ein `done` gesendet. Beides holt der Resume nach, sobald der
+           * Nutzer entschieden hat.
+           */
+          this.sweepPendingConfirmations();
+          this.pendingConfirmations.set(id, {
+            userId,
+            projectId: projectId ?? null,
+            customerId,
+            effectiveAllowlist,
+            conversation,
+            persisted: persistedToolCalls,
+            contextRefs: built.contextRefs,
+            call: loop.paused.call,
+            queue: loop.paused.queue,
+            iter: loop.paused.iter,
+            maxIter: opts.toolsMaxIterations,
+            fullResponse,
+            firstTokenMs,
+            userMessageLength: dto.content.length,
+            createdAtMs: Date.now(),
           });
-
-          for (const tc of pendingToolCalls) {
-            if (abort.signal.aborted) break;
-            send({ type: 'tool_status', phase: 'tool_call', name: tc.name, state: 'running' });
-            send({ type: 'tool_call', id: tc.id, name: tc.name, arguments: tc.arguments });
-
-            let parsedArgs: Record<string, unknown>;
-            try {
-              // Ein geparster Nicht-Objekt-Wert (Array, Skalar) lief vorher als
-              // `Record<string, unknown>` in den Dispatcher; jetzt gilt er als
-              // ungültige Argumentliste — dieselbe Antwort wie kaputtes JSON.
-              const parsed: unknown = tc.arguments ? JSON.parse(tc.arguments) : {};
-              if (!isRecord(parsed)) throw new Error('arguments must be a JSON object');
-              parsedArgs = parsed;
-            } catch (err: unknown) {
-              const error = `Invalid JSON arguments: ${errorMessage(err)}`;
-              send({ type: 'tool_result', id: tc.id, success: false, summary: error });
-              conversation.push({
-                role: 'tool',
-                tool_call_id: tc.id,
-                name: tc.name,
-                content: JSON.stringify({ error }),
-              });
-              persistedToolCalls.push({ id: tc.id, name: tc.name, arguments: tc.arguments, success: false, error });
-              continue;
-            }
-
-            const result = await this.tools.execute(tc.name, parsedArgs, { projectId: projectId || null }, effectiveAllowlist);
-            const resultJson = JSON.stringify(result.success ? result.result : { error: result.error });
-            const truncated = resultJson.length > MAX_TOOL_RESULT_CHARS
-              ? resultJson.slice(0, MAX_TOOL_RESULT_CHARS) + '…[truncated]'
-              : resultJson;
-
-            const summary = result.success
-              ? this.summarizeResult(tc.name, result.result)
-              : `error: ${result.error}`;
-            send({ type: 'tool_result', id: tc.id, success: result.success, summary });
-            send({ type: 'status', phase: 'responding' });
-
-            conversation.push({
-              role: 'tool',
-              tool_call_id: tc.id,
-              name: tc.name,
-              content: truncated,
-            });
-
-            persistedToolCalls.push({
-              id: tc.id,
-              name: tc.name,
-              arguments: tc.arguments,
-              result: truncated,
-              success: result.success,
-              error: result.error,
-            });
-          }
-
-          if (iter === maxIter - 1) {
-            pendingDone = true;
-            pendingDoneReason = 'max_iterations_reached';
-          }
-          // After the first iteration the model has seen the images — further
-          // tool-call rounds don't need to resend them.
-          imagesForIteration = undefined;
+          clearInterval(heartbeat);
+          req.off('close', onClose);
+          if (!res.writableEnded) res.end();
+          return;
         }
       }
     } catch (err: unknown) {
@@ -1003,6 +1007,415 @@ export class ChatController {
     });
 
     if (!res.writableEnded) res.end();
+  }
+
+
+
+  /**
+   * Setzt einen Turn fort, der vor einem schreibenden Tool angehalten hat
+   * (T-415).
+   *
+   * Der Client zeigt die Vorschau und ruft diesen Endpunkt mit `approved`.
+   * Antwort ist wieder ein SSE-Stream — die Schleife läuft weiter, als hätte
+   * sie nie gehalten.
+   *
+   * Bei `approved: false` wird der Aufruf **nicht** ausgeführt, aber als
+   * `tool`-Ergebnis in die Konversation geschrieben. Das ist keine Kosmetik:
+   * zu jedem `tool_call` gehört genau ein Ergebnis, sonst quittiert der
+   * Provider den nächsten Durchlauf mit einem Fehler.
+   */
+  @Post('sessions/:id/tools/resume')
+  async resumeTool(
+    @Param('id') id: string,
+    @Body() dto: ResumeChatToolDto,
+    @Req() req: ChatRequest,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.assertEnabled();
+    this.sweepPendingConfirmations();
+
+    const pending = this.pendingConfirmations.get(id);
+    if (!pending) {
+      // Kein offener Turn: Backend neu gestartet, TTL abgelaufen oder der
+      // Client ist zweimal losgelaufen.
+      throw new NotFoundException('No tool call is awaiting confirmation for this session');
+    }
+    const userId = req.user?.userId;
+    if (pending.userId !== userId) {
+      // Die Session gehört jemand anderem — nicht bestätigbar.
+      throw new NotFoundException('No tool call is awaiting confirmation for this session');
+    }
+    if (dto.callId !== pending.call.id) {
+      throw new BadRequestException(
+        `Stale confirmation: expected call ${pending.call.id}, got ${dto.callId}`,
+      );
+    }
+    this.pendingConfirmations.delete(id);
+
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+    const send = (event: Record<string, unknown>) => {
+      if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded) res.write(': ping\n\n');
+    }, 15000);
+    const abort = new AbortController();
+    const onClose = () => abort.abort();
+    req.on('close', onClose);
+
+    // Kein erneutes `getOptions()`: `maxIter` und die Allowlist kommen aus dem
+    // gemerkten Zustand. Ändert ein Admin die Einstellungen zwischen Anhalten
+    // und Bestätigen, läuft der Turn trotzdem unter den Regeln, unter denen er
+    // begonnen hat — sonst könnte sich die Tool-Freigabe mitten im Turn ändern.
+    let fullResponse = pending.fullResponse;
+    let firstTokenMs = pending.firstTokenMs;
+    let errored = false;
+    let streamError: string | undefined;
+    let pendingDone = false;
+    let pendingDoneReason: string | undefined;
+    let selectedEndpoint: { provider: string; url: string; model: string } | undefined;
+    const onEndpointSelected = (e: { provider: string; url: string; model: string }) => {
+      selectedEndpoint = e;
+    };
+    const requestStartMs = Date.now();
+
+    try {
+      if (dto.approved) {
+        await this.executeToolCall(pending.call, {
+          send,
+          projectId: pending.projectId,
+          effectiveAllowlist: pending.effectiveAllowlist,
+          conversation: pending.conversation,
+          persisted: pending.persisted,
+        });
+      } else {
+        const rejection = 'Rejected by the user — not executed.';
+        send({ type: 'tool_result', id: pending.call.id, success: false, summary: rejection });
+        pending.conversation.push({
+          role: 'tool',
+          tool_call_id: pending.call.id,
+          name: pending.call.name,
+          content: JSON.stringify({ error: rejection }),
+        });
+        pending.persisted.push({
+          id: pending.call.id,
+          name: pending.call.name,
+          arguments: pending.call.arguments,
+          success: false,
+          error: rejection,
+        });
+      }
+
+      const loop = await this.runToolLoop({
+        send,
+        abort,
+        projectId: pending.projectId,
+        effectiveAllowlist: pending.effectiveAllowlist,
+        conversation: pending.conversation,
+        persisted: pending.persisted,
+        // Bilder sind in der ersten Runde bereits gesehen worden.
+        startIter: pending.iter,
+        maxIter: pending.maxIter,
+        onEndpointSelected,
+        confirmWrites: true,
+        initialQueue: pending.queue,
+      });
+      fullResponse += loop.fullResponse;
+      if (loop.firstTokenMs !== null && firstTokenMs === null) firstTokenMs = loop.firstTokenMs;
+      pendingDone = loop.pendingDone;
+      pendingDoneReason = loop.pendingDoneReason;
+
+      if (loop.paused) {
+        // Noch ein schreibendes Tool im selben Turn — erneut anhalten.
+        this.pendingConfirmations.set(id, {
+          ...pending,
+          call: loop.paused.call,
+          queue: loop.paused.queue,
+          iter: loop.paused.iter,
+          fullResponse,
+          firstTokenMs,
+          createdAtMs: Date.now(),
+        });
+        clearInterval(heartbeat);
+        req.off('close', onClose);
+        if (!res.writableEnded) res.end();
+        return;
+      }
+    } catch (err: unknown) {
+      errored = true;
+      streamError = errorMessage(err) || 'LLM error';
+      this.logger.warn(`Chat resume failed for session ${id}: ${streamError}`);
+      send({ type: 'error', message: streamError });
+    } finally {
+      clearInterval(heartbeat);
+      req.off('close', onClose);
+    }
+
+    const endMs = Date.now();
+    const metrics = this.buildMetrics({
+      fullResponse,
+      startMs: requestStartMs,
+      firstTokenMs,
+      endMs,
+      totalDurationMs: endMs - requestStartMs,
+    });
+    if (metrics && !abort.signal.aborted) send({ type: 'metrics', ...metrics });
+    if (pendingDone && !abort.signal.aborted && !errored) {
+      send({ type: 'done', ...(pendingDoneReason ? { reason: pendingDoneReason } : {}) });
+    }
+
+    if (!errored && fullResponse.trim()) {
+      try {
+        await this.chatService.appendMessage(id, {
+          role: 'assistant',
+          content: fullResponse,
+          contextUsed: pending.contextRefs,
+          toolCalls: pending.persisted.length > 0 ? pending.persisted : undefined,
+          metrics,
+        }, userId);
+      } catch (err: unknown) {
+        this.logger.warn(
+          `Failed to persist assistant message for session ${id}: ${errorMessage(err)}`,
+        );
+      }
+    }
+
+    /*
+     * Der Chat-Log-Eintrag entsteht erst hier, nicht schon beim Anhalten: erst
+     * jetzt steht fest, was der Turn insgesamt getan hat. Wird nie bestätigt,
+     * gibt es keinen Eintrag — der Turn hat dann auch nichts bewirkt.
+     */
+    await this.activity.record({
+      sessionId: id,
+      userId,
+      projectId: pending.projectId ?? undefined,
+      customerId: pending.customerId,
+      mode: 'server',
+      provider: selectedEndpoint?.provider,
+      endpointUrl: selectedEndpoint?.url,
+      model: selectedEndpoint?.model,
+      toolsEnabled: true,
+      toolsUsed: pending.persisted.length > 0 ? this.aggregateTools(pending.persisted) : undefined,
+      outcome: errored ? (selectedEndpoint ? 'failed' : 'no_endpoint') : abort.signal.aborted ? 'aborted' : 'completed',
+      errorMessage: streamError,
+      outputTokens: metrics?.outputTokens,
+      durationMs: metrics?.durationMs,
+      firstTokenMs: metrics?.firstTokenMs,
+      tokensPerSecond: metrics?.tokensPerSecond,
+      estimated: metrics?.estimated,
+      hadImages: false,
+      userMessageLength: pending.userMessageLength,
+    });
+
+    if (!res.writableEnded) res.end();
+  }
+
+  /**
+   * Die Tool-Schleife des Server-Modus (T-415).
+   *
+   * Als eigene Methode, damit sie **zweimal** betreten werden kann: einmal aus
+   * `sendMessage`, und nach einer Bestätigung erneut aus `resumeTool`. Der
+   * Rumpf ist der frühere Inline-Block, unverändert bis auf die Pause.
+   *
+   * `conversation` und `persisted` werden **in place** fortgeschrieben — der
+   * Aufrufer hält dieselben Arrays und kann sie bei einer Pause wegspeichern,
+   * ohne dass hier etwas kopiert werden müsste.
+   */
+  private async runToolLoop(p: {
+    send: (event: Record<string, unknown>) => void;
+    abort: AbortController;
+    projectId: string | null;
+    effectiveAllowlist: string[];
+    conversation: LlmMessageWithTools[];
+    persisted: ChatToolCallRecord[];
+    images?: LlmImageInput[];
+    startIter: number;
+    maxIter: number;
+    onEndpointSelected: (e: { provider: string; url: string; model: string }) => void;
+    /** Vor der Bestätigung anhalten, statt schreibende Tools auszuführen. */
+    confirmWrites: boolean;
+    /**
+     * Aufgeschobene Aufrufe desselben Durchlaufs (Resume). Sie werden
+     * abgearbeitet, bevor das Modell erneut befragt wird — sonst ginge die
+     * Reihenfolge der Tool-Calls verloren.
+     */
+    initialQueue?: PendingToolCall[];
+  }): Promise<ToolLoopResult> {
+    const tools = this.tools.getToolsForLlm(p.effectiveAllowlist);
+    const conversation = p.conversation;
+    let fullResponse = '';
+    let firstTokenMs: number | null = null;
+    let pendingDone = false;
+    let pendingDoneReason: string | undefined;
+    // Only attach images to the first iteration — once the model has seen them
+    // and replied / issued a tool-call, follow-up turns don't need them re-sent.
+    let imagesForIteration: LlmImageInput[] | undefined = p.images;
+    let queue: PendingToolCall[] = p.initialQueue ?? [];
+
+    for (let iter = p.startIter; iter < p.maxIter; iter++) {
+      if (p.abort.signal.aborted) break;
+
+      if (queue.length === 0) {
+        const pendingToolCalls: PendingToolCall[] = [];
+        let iterFinishReason: 'stop' | 'tool_calls' | 'length' | 'other' = 'other';
+        let iterContent = '';
+
+        p.send({ type: 'status', phase: iter === 0 ? 'thinking' : 'responding' });
+        for await (const event of this.llm.streamChatWithTools(conversation, tools, {
+          signal: p.abort.signal,
+          images: imagesForIteration,
+          onEndpointSelected: p.onEndpointSelected,
+        })) {
+          if (p.abort.signal.aborted) break;
+          if (event.type === 'content') {
+            if (firstTokenMs === null) firstTokenMs = Date.now();
+            iterContent += event.delta;
+            fullResponse += event.delta;
+            p.send({ type: 'token', content: event.delta });
+          } else if (event.type === 'tool_call') {
+            pendingToolCalls.push(event);
+          } else if (event.type === 'finish') {
+            iterFinishReason = event.reason;
+          }
+        }
+
+        if (p.abort.signal.aborted) break;
+
+        if (iterFinishReason !== 'tool_calls' || pendingToolCalls.length === 0) {
+          pendingDone = true;
+          break;
+        }
+
+        // Assistant turn with tool_calls (content may be empty, that's fine).
+        // Canonicalize arguments so strict providers (Ollama Cloud) don't 400
+        // on the next iteration due to streaming-accumulator artefacts.
+        conversation.push({
+          role: 'assistant',
+          content: iterContent,
+          tool_calls: pendingToolCalls.map((tc) => {
+            const canonical = canonicalizeJsonArgs(tc.arguments);
+            if (canonical === '{}' && tc.arguments && tc.arguments.trim() !== '{}') {
+              this.logger.debug(
+                `tool_call ${tc.name} raw arguments unparseable, falling back to "{}": ${tc.arguments.slice(0, 200)}`,
+              );
+            }
+            return {
+              id: tc.id,
+              type: 'function' as const,
+              function: { name: tc.name, arguments: canonical },
+            };
+          }),
+        });
+        queue = pendingToolCalls;
+      }
+
+      while (queue.length > 0) {
+        if (p.abort.signal.aborted) break;
+        const tc = queue[0];
+
+        /*
+         * Vor einem schreibenden Tool anhalten. Der Stream endet hier; der
+         * Client zeigt die Vorschau und ruft `tools/resume`. Die noch nicht
+         * abgearbeiteten Aufrufe dieses Durchlaufs wandern mit in den
+         * gemerkten Zustand — sonst ginge ihre Reihenfolge verloren.
+         */
+        if (p.confirmWrites && WRITE_TOOL_NAMES.has(tc.name)) {
+          p.send({ type: 'tool_confirm', id: tc.id, name: tc.name, arguments: tc.arguments });
+          return {
+            fullResponse,
+            firstTokenMs,
+            pendingDone: false,
+            paused: { call: tc, queue: queue.slice(1), iter },
+          };
+        }
+
+        queue = queue.slice(1);
+        await this.executeToolCall(tc, p);
+      }
+
+      if (iter === p.maxIter - 1) {
+        pendingDone = true;
+        pendingDoneReason = 'max_iterations_reached';
+      }
+      // After the first iteration the model has seen the images — further
+      // tool-call rounds don't need to resend them.
+      imagesForIteration = undefined;
+    }
+
+    return { fullResponse, firstTokenMs, pendingDone, pendingDoneReason };
+  }
+
+  /**
+   * Führt einen einzelnen Tool-Aufruf aus und schreibt Ergebnis, Konversation
+   * und Persistenz fort. Herausgezogen, weil der Resume denselben Schritt für
+   * den bestätigten Aufruf braucht.
+   */
+  private async executeToolCall(
+    tc: PendingToolCall,
+    p: {
+      send: (event: Record<string, unknown>) => void;
+      projectId: string | null;
+      effectiveAllowlist: string[];
+      conversation: LlmMessageWithTools[];
+      persisted: ChatToolCallRecord[];
+    },
+  ): Promise<void> {
+    p.send({ type: 'tool_status', phase: 'tool_call', name: tc.name, state: 'running' });
+    p.send({ type: 'tool_call', id: tc.id, name: tc.name, arguments: tc.arguments });
+
+    let parsedArgs: Record<string, unknown>;
+    try {
+      // Ein geparster Nicht-Objekt-Wert (Array, Skalar) lief vorher als
+      // `Record<string, unknown>` in den Dispatcher; jetzt gilt er als
+      // ungültige Argumentliste — dieselbe Antwort wie kaputtes JSON.
+      const parsed: unknown = tc.arguments ? JSON.parse(tc.arguments) : {};
+      if (!isRecord(parsed)) throw new Error('arguments must be a JSON object');
+      parsedArgs = parsed;
+    } catch (err: unknown) {
+      const error = `Invalid JSON arguments: ${errorMessage(err)}`;
+      p.send({ type: 'tool_result', id: tc.id, success: false, summary: error });
+      p.conversation.push({
+        role: 'tool',
+        tool_call_id: tc.id,
+        name: tc.name,
+        content: JSON.stringify({ error }),
+      });
+      p.persisted.push({ id: tc.id, name: tc.name, arguments: tc.arguments, success: false, error });
+      return;
+    }
+
+    const result = await this.tools.execute(tc.name, parsedArgs, { projectId: p.projectId }, p.effectiveAllowlist);
+    const resultJson = JSON.stringify(result.success ? result.result : { error: result.error });
+    const truncated = resultJson.length > MAX_TOOL_RESULT_CHARS
+      ? resultJson.slice(0, MAX_TOOL_RESULT_CHARS) + '…[truncated]'
+      : resultJson;
+
+    const summary = result.success
+      ? this.summarizeResult(tc.name, result.result)
+      : `error: ${result.error}`;
+    p.send({ type: 'tool_result', id: tc.id, success: result.success, summary });
+    p.send({ type: 'status', phase: 'responding' });
+
+    p.conversation.push({
+      role: 'tool',
+      tool_call_id: tc.id,
+      name: tc.name,
+      content: truncated,
+    });
+
+    p.persisted.push({
+      id: tc.id,
+      name: tc.name,
+      arguments: tc.arguments,
+      result: truncated,
+      success: result.success,
+      error: result.error,
+    });
   }
 
   /** Short human-readable summary of a tool result for SSE/UI display */
