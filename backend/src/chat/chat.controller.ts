@@ -133,6 +133,32 @@ function canonicalizeJsonArgs(raw: string | undefined | null): string {
   }
 }
 
+/**
+ * Die drei Tools, die der Briefing-Mode zusätzlich freischaltet (T-424).
+ * Als Konstante, damit der Test sie nicht abschreiben muss.
+ */
+export const BRIEFING_EXTRA_TOOLS = [
+  'milestone_create_with_todos',
+  'milestone_import_apply',
+  'milestone_import_preview',
+] as const;
+
+/**
+ * Erweitert die Allowlist um die Briefing-Tools — per **Union**, nie als
+ * Ersatz (T-424).
+ *
+ * Das ist die sicherheitsrelevante Eigenschaft: der Schalter darf zusätzliche
+ * Tools freigeben, aber keine bestehende Grenze aufweichen. Wäre es eine
+ * Zuweisung statt einer Vereinigung, würde ein eingeschalteter Briefing-Mode
+ * jede Rollen- oder Admin-Beschränkung überschreiben — aus einem
+ * Komfort-Schalter würde ein Generalschlüssel.
+ *
+ * Als eigene Funktion herausgezogen (T-416), damit genau das prüfbar ist.
+ */
+export function extendAllowlistForBriefing(allowlist: string[]): string[] {
+  return [...allowlist, ...BRIEFING_EXTRA_TOOLS.filter((t) => !allowlist.includes(t))];
+}
+
 /** Ein vom Modell angeforderter Tool-Aufruf, wie er über SSE hereinkommt. */
 interface PendingToolCall {
   id: string;
@@ -803,20 +829,8 @@ export class ChatController {
       ? this.agentRoles.intersectAllowedTools(dto.agentRoleId, opts.toolsAllowlist)
       : opts.toolsAllowlist;
 
-    // Briefing-Mode erweitert die Allowlist per Union um milestone-write-Tools
-    // (T-424). Dies ist sicher, weil der User den Briefing-Mode explizit
-    // eingeschaltet hat und die drei Tools gezielt für das Agent-Workflow
-    // verwendet werden. Es ist kein Override — alle anderen Caps bleiben.
     if (dto.briefingMode) {
-      const briefingExtras = [
-        'milestone_create_with_todos',
-        'milestone_import_apply',
-        'milestone_import_preview',
-      ];
-      effectiveAllowlist = [
-        ...effectiveAllowlist,
-        ...briefingExtras.filter((t) => !effectiveAllowlist.includes(t)),
-      ];
+      effectiveAllowlist = extendAllowlistForBriefing(effectiveAllowlist);
     }
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');

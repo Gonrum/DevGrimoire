@@ -67,7 +67,8 @@
     "check:harness-service": "node scripts/harness-service-units-check.cjs",
     "check:harness-migrate": "node scripts/harness-migrate-units-check.cjs",
     "harness:migrate": "node scripts/harness-migrate.cjs",
-    "check:chat-tool-confirm": "node scripts/chat-tool-confirm-check.cjs"
+    "check:chat-tool-confirm": "node scripts/chat-tool-confirm-check.cjs",
+    "check:briefing-allowlist": "node scripts/briefing-allowlist-check.cjs"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.0",
