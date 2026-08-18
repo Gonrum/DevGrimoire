@@ -15,6 +15,7 @@ import {
   Workspace,
 } from '../api/client';
 import { streamBrowserLlm, BrowserLlmMessage } from '../api/browserLlmClient';
+import ToolConfirmDialog from './ToolConfirmDialog';
 import { isRecord, optionOr } from '../lib/narrow';
 import Markdown from './Markdown';
 import Button from './ui/Button';
@@ -162,6 +163,24 @@ export default function ChatDock() {
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
   const [retryDraft, setRetryDraft] = useState<string | null>(null);
   const [briefingMode, setBriefingMode] = useState(false);
+  /*
+   * Namen der schreibenden Tools, vom Backend geliefert (T-415). Kommt die
+   * Liste nicht an, bleibt sie leer — dann wird NICHT nachgefragt. Das ist die
+   * bewusste Richtung: eine kaputte Konfiguration darf den Chat nicht mit
+   * Dialogen fluten, die niemand beantworten kann. Der Schutz greift, sobald
+   * die Konfiguration da ist, und die ist Teil desselben Aufrufs, der ohnehin
+   * für jeden Chat nötig ist.
+   */
+  const [writeTools, setWriteTools] = useState<Set<string>>(new Set());
+  /**
+   * Offene Bestätigung. `resolve` gibt die wartende Tool-Schleife frei —
+   * `true` = ausführen, `false` = ablehnen.
+   */
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    name: string;
+    args: Record<string, unknown>;
+    resolve: (ok: boolean) => void;
+  } | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -328,6 +347,7 @@ export default function ChatDock() {
       .then((cfg) => {
         setFeatureEnabled(cfg.enabled !== false);
         setConfigured((cfg.endpoints?.length ?? 0) > 0);
+        setWriteTools(new Set(cfg.writeTools ?? []));
       })
       .catch(() => setFeatureEnabled(false));
   }, []);
@@ -569,6 +589,27 @@ export default function ChatDock() {
     [activeWorkspaceId],
   );
 
+  /**
+   * Fragt vor einem schreibenden Tool nach (T-415).
+   *
+   * Gibt `true` zurück, wenn ausgeführt werden darf. Lesende Tools passieren
+   * ohne Dialog — sonst wäre jede Recherche ein Klickmarathon.
+   *
+   * Die Schleife wartet hier bewusst: der Dialog ist kein Nebenläufer, sondern
+   * ein Halt. Der Aufrufer MUSS auch im Ablehnungsfall ein `tool`-Ergebnis in
+   * die Konversation schreiben — das Modell erwartet zu jedem `tool_call` eine
+   * Antwort, sonst läuft der nächste Durchlauf in einen Provider-Fehler.
+   */
+  const confirmToolCall = useCallback(
+    (name: string, args: Record<string, unknown>): Promise<boolean> => {
+      if (!writeTools.has(name)) return Promise.resolve(true);
+      return new Promise<boolean>((resolve) => {
+        setPendingConfirm({ name, args, resolve });
+      });
+    },
+    [writeTools],
+  );
+
   const runBrowserStream = useCallback(
     async (
       sessionId: string,
@@ -668,6 +709,35 @@ export default function ChatDock() {
           } catch {
             parsedArgs = {};
           }
+          const approved = await confirmToolCall(tc.name, parsedArgs);
+          if (!approved) {
+            // Abgelehnt: dem Modell als Ergebnis zurückmelden, nicht
+            // verschweigen. Ohne `tool`-Antwort auf einen `tool_call` bricht
+            // der nächste Durchlauf beim Provider ab.
+            const rejection = t('chat.toolConfirm.rejectedResult');
+            setStreaming((s) => s ? {
+              ...s,
+              toolCalls: s.toolCalls.map((tcUi) =>
+                tcUi.id === tc.id ? { ...tcUi, success: false, summary: rejection } : tcUi,
+              ),
+            } : s);
+            conversation.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              name: tc.name,
+              content: rejection,
+            });
+            persistedToolCalls.push({
+              id: tc.id,
+              name: tc.name,
+              arguments: tc.arguments,
+              result: rejection,
+              success: false,
+              error: rejection,
+            });
+            continue;
+          }
+
           const result = await api.chat.executeTool(sessionId, {
             name: tc.name,
             projectId: prep.projectId,
@@ -753,7 +823,10 @@ export default function ChatDock() {
         setStreaming(null);
       }
     },
-    [t, activeWorkspaceId],
+    // `confirmToolCall` ist `useCallback`-stabil (haengt nur an `writeTools`,
+    // das sich einmal beim Laden der Konfiguration aendert) — als Dependency
+    // also unbedenklich, keine Neuerzeugung pro Render.
+    [t, activeWorkspaceId, confirmToolCall],
   );
 
   const sendMessage = useCallback(async () => {
@@ -1263,6 +1336,25 @@ export default function ChatDock() {
           </>
         )}
       </div>
+
+      {/*
+        Bestätigung vor schreibenden Tools (T-415). Ausserhalb des Dock-Divs,
+        damit der Dialog nicht von dessen Overflow beschnitten wird.
+      */}
+      {pendingConfirm && (
+        <ToolConfirmDialog
+          toolName={pendingConfirm.name}
+          args={pendingConfirm.args}
+          onConfirm={() => {
+            pendingConfirm.resolve(true);
+            setPendingConfirm(null);
+          }}
+          onCancel={() => {
+            pendingConfirm.resolve(false);
+            setPendingConfirm(null);
+          }}
+        />
+      )}
     </>
   );
 }

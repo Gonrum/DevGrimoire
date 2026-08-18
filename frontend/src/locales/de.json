@@ -1873,6 +1873,24 @@
       "tooltipOff": "Briefing-Modus starten — Agent fragt nach Anforderungen",
       "tooltipOn": "Briefing-Modus aktiv (klicken zum Beenden)",
       "banner": "Briefing-Modus aktiv — beschreibe deine Feature-Idee, der Agent stellt Klärungsfragen und kann am Ende einen Milestone anlegen."
+    },
+    "toolConfirm": {
+      "title": "Aktion bestätigen",
+      "subtitle": "Der Agent möchte {{tool}} ausführen. Prüfe die Vorschau, bevor du zustimmst.",
+      "milestone": "Milestone",
+      "noName": "(ohne Namen)",
+      "noTitle": "(ohne Titel)",
+      "todoCount": "{{count}} Todo wird angelegt",
+      "todoCount_other": "{{count}} Todos werden angelegt",
+      "description": "Beschreibung",
+      "userStories": "User Stories",
+      "acceptance": "Akzeptanzkriterien",
+      "outOfScope": "Nicht im Umfang",
+      "edgeCases": "Edge Cases",
+      "noDetail": "Keine weiteren Angaben — der Vorschlag ist nur ein Titel.",
+      "confirm": "Bestätigen & ausführen",
+      "cancel": "Abbrechen",
+      "rejectedResult": "Vom Nutzer abgelehnt — nicht ausgeführt."
     }
   },
   "chatLog": {

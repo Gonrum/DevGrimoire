@@ -1873,6 +1873,24 @@
       "tooltipOff": "Start briefing mode — agent will ask for requirements",
       "tooltipOn": "Briefing mode active (click to exit)",
       "banner": "Briefing mode active — describe your feature idea; the agent will ask clarifying questions and can create a milestone."
+    },
+    "toolConfirm": {
+      "title": "Confirm action",
+      "subtitle": "The agent wants to run {{tool}}. Check the preview before you approve.",
+      "milestone": "Milestone",
+      "noName": "(no name)",
+      "noTitle": "(no title)",
+      "todoCount": "{{count}} todo will be created",
+      "todoCount_other": "{{count}} todos will be created",
+      "description": "Description",
+      "userStories": "User stories",
+      "acceptance": "Acceptance criteria",
+      "outOfScope": "Out of scope",
+      "edgeCases": "Edge cases",
+      "noDetail": "No further detail — the proposal is a title only.",
+      "confirm": "Confirm & run",
+      "cancel": "Cancel",
+      "rejectedResult": "Rejected by the user — not executed."
     }
   },
   "chatLog": {

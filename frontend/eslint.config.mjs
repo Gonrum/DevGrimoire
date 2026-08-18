@@ -25,9 +25,9 @@ export default tseslint.config(
   reactRefresh.configs.vite,
   {
     /*
-     * Build- und Laufzeit-Dateien ausserhalb der tsconfig: `vite.config.ts`,
-     * `postcss.config.js`, `tailwind.config.js` und der Service Worker
-     * `public/sw.js`.
+     * Dateien ausserhalb der tsconfig: `vite.config.ts`, `postcss.config.js`,
+     * `tailwind.config.js`, der Service Worker `public/sw.js` und die
+     * `.cjs`-Checks unter `scripts/` (T-415).
      *
      * Ohne eigenen Block scheitert das typed linting an ihnen mit
      * "was not found by the project service" — ein *fataler* Parse-Fehler, also
@@ -38,7 +38,7 @@ export default tseslint.config(
      * ist `js.configs.recommended` — für einen Service Worker durchaus
      * relevant (unerreichbarer Code, ungenutzte Variablen, doppelte Keys).
      */
-    files: ['*.config.js', '*.config.ts', 'public/**/*.js'],
+    files: ['*.config.js', '*.config.ts', 'public/**/*.js', 'scripts/**/*.cjs'],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: {
       globals: {
@@ -46,6 +46,8 @@ export default tseslint.config(
         self: 'readonly',
         caches: 'readonly',
         clients: 'readonly',
+        // Node-Globals für die `.cjs`-Checks unter `scripts/`.
+        exports: 'writable',
         fetch: 'readonly',
         console: 'readonly',
         process: 'readonly',

@@ -9,7 +9,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "NODE_OPTIONS=--max-old-space-size=8192 eslint .",
-    "lint:fix": "NODE_OPTIONS=--max-old-space-size=8192 eslint . --fix"
+    "lint:fix": "NODE_OPTIONS=--max-old-space-size=8192 eslint . --fix",
+    "check:tool-preview": "node scripts/tool-preview-check.cjs"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",
