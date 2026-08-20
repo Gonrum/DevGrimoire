@@ -2589,6 +2589,7 @@
       "empty": "Noch kein Cluster hinterlegt.",
       "test": "Testen",
       "delete": "Löschen",
+      "confirmDelete": "Cluster \"{{label}}\" wirklich löschen? Die hinterlegte Kubeconfig kann danach nicht wiederhergestellt werden.",
       "deleted": "Cluster gelöscht.",
       "deleteFailed": "Löschen fehlgeschlagen",
       "testFailed": "Test fehlgeschlagen",

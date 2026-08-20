@@ -4,6 +4,7 @@ import { api, KubeCluster, KubeConnectionTestResult } from '../../api/client';
 import { errorMessage } from '../../lib/narrow';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
+import ConfirmButton from '../ui/ConfirmButton';
 import EmptyState from '../ui/EmptyState';
 import { LoadingText } from '../ui/LoadingSpinner';
 import { useToast } from '../Toast';
@@ -132,14 +133,15 @@ export function KubeClustersTab({ scope }: KubeClustersTabProps) {
                   >
                     {busyId === cluster._id ? '…' : t('kube.tab.test')}
                   </Button>
-                  <Button
+                  <ConfirmButton
                     size="xs"
                     variant="danger"
+                    confirmVariant="danger-solid"
+                    label={t('kube.tab.delete')}
+                    confirmLabel={t('kube.tab.confirmDelete', { label: cluster.label })}
                     disabled={busyId === cluster._id}
-                    onClick={() => void remove(cluster)}
-                  >
-                    {t('kube.tab.delete')}
-                  </Button>
+                    onConfirm={() => remove(cluster)}
+                  />
                 </div>
               </li>
             );

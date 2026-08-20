@@ -2590,6 +2590,7 @@
       "empty": "No cluster stored yet.",
       "test": "Test",
       "delete": "Delete",
+      "confirmDelete": "Really delete cluster \"{{label}}\"? The stored kubeconfig cannot be recovered afterwards.",
       "deleted": "Cluster deleted.",
       "deleteFailed": "Delete failed",
       "testFailed": "Test failed",
