@@ -7,6 +7,7 @@
  */
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const { Readable } = require('node:stream');
 
 function loadCompiled(rel) {
   const abs = path.resolve(__dirname, '..', 'dist', rel);
@@ -19,12 +20,36 @@ function loadCompiled(rel) {
 
 const { KubeLogsService } = loadCompiled('kube/kube-logs.service.js');
 
+// Erwartete Fallzahl (Review-Fund, Important 3): ohne diese Zusicherung
+// meldet ein Lauf, der vorzeitig endet — z.B. weil ein Fall für immer
+// hängt und der Event-Loop danach einfach leerläuft — Exit 0 und druckt
+// die Zusammenfassung nie. Ein Timeout pro Fall (unten in `check()`) ist
+// die primäre Abwehr; diese Zählung ist das zweite Netz.
+const EXPECTED_CHECKS = 15;
+const CHECK_TIMEOUT_MS = 3000;
+
 let failures = 0, total = 0;
 function check(label, fn) {
   total += 1;
-  return Promise.resolve().then(fn).then(
-    () => console.log(`✓ ${label}`),
-    (err) => { failures += 1; console.error(`✗ ${label}\n    ${err && err.stack ? err.stack : err}`); },
+  let timer;
+  // Review-Fund (Important 3): ohne dieses Rennen lässt ein hängender Fall
+  // den Prozess mit leerem Event-Loop und Exit 0 enden — die eine
+  // Fehlerklasse, für die diese Suite existiert, würde als Erfolg gemeldet.
+  const settleGuard = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(
+        `Zeitlimit (${CHECK_TIMEOUT_MS}ms) überschritten — der Fall hängt vermutlich (kein settle).`,
+      )),
+      CHECK_TIMEOUT_MS,
+    );
+  });
+  return Promise.race([Promise.resolve().then(fn), settleGuard]).then(
+    () => { clearTimeout(timer); console.log(`✓ ${label}`); },
+    (err) => {
+      clearTimeout(timer);
+      failures += 1;
+      console.error(`✗ ${label}\n    ${err && err.stack ? err.stack : err}`);
+    },
   );
 }
 
@@ -68,6 +93,40 @@ function makeEnv(chunks, opts = {}) {
         abort: () => {
           state.aborted += 1;
           if (opts.abortThrows) throw new Error('abort kaputt');
+        },
+      };
+    },
+  });
+  return { state, client, logFactory };
+}
+
+/**
+ * Bildet nach, wie `Log.log()` (log.js aus @kubernetes/client-node) die
+ * HTTP-Antwort tatsächlich anschließt: `nodeStream.pipe(stream)`, OHNE
+ * einen 'error'-Listener auf der Quelle. Genau dieses Muster führt ohne den
+ * 'pipe'-Hook in KubeLogsService zu einer uncaught exception, sobald die
+ * Quelle asynchron (wie bei einem echten AbortSignal über undici) mit
+ * einem Fehler endet — der reale Auslöser von Critical 1 im Review.
+ */
+function makePipedEnv() {
+  const state = { released: 0, aborted: 0 };
+  const client = {
+    async buildConfig() {
+      return { kc: {}, release: () => { state.released += 1; } };
+    },
+  };
+  const logFactory = () => ({
+    async log(ns, pod, container, stream) {
+      const src = new Readable({ read() {} });
+      src.pipe(stream); // wie log.js — bewusst KEIN error-Listener auf src
+      return {
+        abort: () => {
+          state.aborted += 1;
+          // Wie ein echter Abbruch über undici/AbortSignal: die Quelle
+          // endet ASYNCHRON mit einem Fehler, nicht innerhalb des
+          // synchronen abort()-Aufrufs selbst — sonst würde das bereits
+          // bestehende try/catch um abort() ihn zufällig abfangen.
+          setImmediate(() => src.emit('error', new Error('This operation was aborted')));
         },
       };
     },
@@ -157,8 +216,8 @@ async function collect(iterable, max = 10) {
     assert.equal(seen.options.previous, true);
   });
 
-  // Über die sieben Basisfälle hinaus: zwei Lebenszyklus-Pfade, die die
-  // Basisfälle nicht ausdrücken (siehe JSDoc an makeEnv).
+  // Über die sieben Basisfälle hinaus: Lebenszyklus-Pfade, die die
+  // Basisfälle nicht ausdrücken (siehe JSDoc an makeEnv/makePipedEnv).
 
   await check('ein werfender abort() verhindert die Freigabe nicht', async () => {
     const env = makeEnv(['a\n'], { keepOpen: true, abortThrows: true });
@@ -210,7 +269,137 @@ async function collect(iterable, max = 10) {
     );
   });
 
+  // Fix round 1 (Reviewer-Fund): fünf weitere Fälle — zwei kritische
+  // Lebenszyklus-Lücken (Prozess-Crash, hängender Iterator) und drei
+  // Dekodier-/Kappungs-Pfade, die keiner der obigen Fälle erreicht.
+
+  await check('close() auf einem laufenden follow-Stream crasht den Prozess nicht', async () => {
+    // Kritisch 1: `Log.log()` verbindet per `nodeStream.pipe(stream)` ohne
+    // 'error'-Listener auf der Quelle. Unser abort() lässt die Quelle
+    // asynchron mit einem AbortError enden — ohne einen eigenen Listener
+    // auf dieser Quelle ist das eine uncaught exception (kein
+    // process.on('uncaughtException') im Backend). Ein Zähler-Stub sieht
+    // das nicht — deshalb hier ein echter process.on('uncaughtException')
+    // als Sensor, scharf geschaltet nur für die Dauer dieses Falls.
+    const env = makePipedEnv();
+    const svc = new KubeLogsService(clustersStub, env.client, env.logFactory);
+    const session = await svc.open('c1', 'prod', 'api', { follow: true });
+
+    let crashed = null;
+    const onUncaught = (err) => { crashed = err; };
+    process.on('uncaughtException', onUncaught);
+    try {
+      session.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      process.removeListener('uncaughtException', onUncaught);
+    }
+    assert.equal(crashed, null, `Prozess wäre gecrasht: ${crashed && crashed.message}`);
+    assert.equal(env.state.aborted, 1);
+    assert.equal(env.state.released, 1);
+  });
+
+  await check('close() auf einem laufenden Stream beendet lines() statt zu hängen', async () => {
+    // Kritisch 2: finish() gab den Transport frei, ließ `stream` aber offen
+    // — der `for await` in toLines() parkte für immer auf einem Read, der
+    // nie ankam. Der Timeout in check() oben ist das Sicherheitsnetz, falls
+    // das hier regressiert; die eigentliche Zusicherung ist `await
+    // consumerDone` unten, das sich ohne die Freigabe nie lösen würde.
+    const env = makeEnv(['eins\n'], { keepOpen: true });
+    const svc = new KubeLogsService(clustersStub, env.client, env.logFactory);
+    const session = await svc.open('c1', 'prod', 'api', { follow: true });
+    const seen = [];
+    const consumerDone = (async () => {
+      for await (const line of session.lines) seen.push(line);
+    })();
+    await new Promise((r) => setImmediate(r));
+    session.close();
+    await consumerDone;
+    assert.deepEqual(seen, ['eins']);
+    assert.equal(env.state.released, 1);
+  });
+
+  await check('mehrbytiges UTF-8-Zeichen an einer Chunk-Grenze wird nicht korrumpiert', async () => {
+    // Important 4: naive Chunk-für-Chunk-Dekodierung (String(chunk)) zerlegt
+    // ein mehrbytiges Zeichen, das genau an einer Chunk-Grenze auseinander-
+    // reißt, in zwei U+FFFD. Beide Writes MÜSSEN in getrennten Ticks
+    // passieren — im selben Tick fasst Readable.read() sie zu einem Chunk
+    // zusammen und der Fehler bleibt unsichtbar (wie in den Basisfällen).
+    const full = Buffer.from('Größe: 20µm läuft\n', 'utf8');
+    const splitAt = full.indexOf(Buffer.from('ö', 'utf8')) + 1; // mitten im 2-Byte-Zeichen trennen
+    const part1 = full.subarray(0, splitAt);
+    const part2 = full.subarray(splitAt);
+    const client = { async buildConfig() { return { kc: {}, release: () => {} }; } };
+    const logFactory = () => ({
+      async log(ns, pod, container, stream) {
+        setImmediate(() => {
+          stream.write(part1);
+          setImmediate(() => {
+            stream.write(part2);
+            stream.end();
+          });
+        });
+        return { abort: () => {} };
+      },
+    });
+    const svc = new KubeLogsService(clustersStub, client, logFactory);
+    const session = await svc.open('c1', 'prod', 'api', {});
+    const lines = await collect(session.lines);
+    assert.deepEqual(lines, ['Größe: 20µm läuft']);
+  });
+
+  await check('Zeilen ohne Zeilenumbruch werden trotzdem bei LINE_MAX gekappt', async () => {
+    // Important 5a: der Zwischenspeicher-Kappungspfad (buffer.length >
+    // LINE_MAX ohne gefundenes '\n') wurde von keinem Fall erreicht — jeder
+    // vorhandene Fall fand sein '\n', bevor der Puffer 8192 überschritt.
+    // 3 × 5000 zeilenumbruchfreie Zeichen erzwingen genau diesen Pfad.
+    const client = { async buildConfig() { return { kc: {}, release: () => {} }; } };
+    const logFactory = () => ({
+      async log(ns, pod, container, stream) {
+        setImmediate(() => {
+          stream.write('x'.repeat(5000));
+          stream.write('x'.repeat(5000));
+          stream.write('x'.repeat(5000));
+          // bewusst offen: kein '\n', kein end() — die Zeile ist noch "im Gange"
+        });
+        return { abort: () => {} };
+      },
+    });
+    const svc = new KubeLogsService(clustersStub, client, logFactory);
+    const session = await svc.open('c1', 'prod', 'api', { follow: true });
+    const lines = await collect(session.lines, 1);
+    session.close();
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0].length, 8192, `Zeile war ${lines[0].length} Zeichen lang, erwartet genau 8192`);
+  });
+
+  await check('eine letzte Zeile ohne abschließendes Zeilenumbruch wird trotzdem ausgeliefert', async () => {
+    // Important 5b: der Pfad nach der Schleife (`if (buffer.length > 0)
+    // yield …`) wurde von keinem Fall erreicht — jeder vorhandene Fall
+    // endete mit '\n' im letzten Chunk.
+    const client = { async buildConfig() { return { kc: {}, release: () => {} }; } };
+    const logFactory = () => ({
+      async log(ns, pod, container, stream) {
+        setImmediate(() => {
+          stream.write('erste\nkeinzeilenumbruchamende');
+          stream.end();
+        });
+        return { abort: () => {} };
+      },
+    });
+    const svc = new KubeLogsService(clustersStub, client, logFactory);
+    const session = await svc.open('c1', 'prod', 'api', {});
+    const lines = await collect(session.lines);
+    assert.deepEqual(lines, ['erste', 'keinzeilenumbruchamende']);
+  });
+
   console.log('');
   console.log(`Kube logs checks: ${total - failures}/${total} passed`);
-  if (failures > 0) process.exit(1);
+  if (total !== EXPECTED_CHECKS) {
+    console.error(
+      `FEHLER: erwartet ${EXPECTED_CHECKS} Fälle, tatsächlich ${total} gelaufen — der Lauf wurde offenbar vorzeitig abgebrochen.`,
+    );
+    process.exit(1);
+  }
+  process.exit(failures > 0 ? 1 : 0);
 })();
