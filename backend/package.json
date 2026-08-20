@@ -69,9 +69,11 @@
     "harness:migrate": "node scripts/harness-migrate.cjs",
     "check:chat-tool-confirm": "node scripts/chat-tool-confirm-check.cjs",
     "check:briefing-allowlist": "node scripts/briefing-allowlist-check.cjs",
-    "check:replication-entity-maps": "node scripts/replication-entity-maps-check.cjs"
+    "check:replication-entity-maps": "node scripts/replication-entity-maps-check.cjs",
+    "check:kubeconfig-parser": "node scripts/kubeconfig-parser-check.cjs"
   },
   "dependencies": {
+    "@kubernetes/client-node": "^2.0.0",
     "@lancedb/lancedb": "^0.27.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@mozilla/readability": "^0.6.0",
