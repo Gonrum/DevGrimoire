@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { api, KubeCluster, KubeListRow } from '../../api/client';
 import Button from '../ui/Button';
 import EmptyState from '../ui/EmptyState';
+import { KubeResourceDrawer } from './KubeResourceDrawer';
 import { columnsFor, KUBE_KIND_GROUPS, statusClasses } from './kubeKinds';
 import { useKubeResources } from './hooks/useKubeResources';
 
@@ -172,6 +173,15 @@ export function KubeClusterView({ cluster, onBack }: Props) {
               </tbody>
             </table>
           </div>
+        )}
+
+        {selected !== null && (
+          <KubeResourceDrawer
+            cluster={cluster}
+            kind={kind}
+            row={selected}
+            onClose={() => setSelected(null)}
+          />
         )}
       </section>
     </div>

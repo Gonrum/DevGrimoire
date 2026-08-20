@@ -2661,6 +2661,24 @@
       "submit": "Create",
       "cancel": "Cancel",
       "submitFailed": "Create failed"
+    },
+    "drawer": {
+      "close": "Close",
+      "tab": {
+        "overview": "Overview",
+        "yaml": "YAML",
+        "events": "Events",
+        "logs": "Logs"
+      },
+      "loadFailed": "Failed to load",
+      "noConditions": "No conditions reported.",
+      "noEvents": "No events for this resource.",
+      "follow": "Follow",
+      "clear": "Clear",
+      "streaming": "Live",
+      "streamLost": "Lost connection to the log stream.",
+      "streamError": "Stream interrupted: {{message}}",
+      "streamEnded": "Stream ended."
     }
   },
   "harness": {

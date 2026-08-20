@@ -2660,6 +2660,24 @@
       "submit": "Anlegen",
       "cancel": "Abbrechen",
       "submitFailed": "Anlegen fehlgeschlagen"
+    },
+    "drawer": {
+      "close": "Schließen",
+      "tab": {
+        "overview": "Übersicht",
+        "yaml": "YAML",
+        "events": "Events",
+        "logs": "Logs"
+      },
+      "loadFailed": "Laden fehlgeschlagen",
+      "noConditions": "Keine Conditions gemeldet.",
+      "noEvents": "Keine Events zu dieser Ressource.",
+      "follow": "Live verfolgen",
+      "clear": "Leeren",
+      "streaming": "Live",
+      "streamLost": "Verbindung zum Log-Stream verloren.",
+      "streamError": "Stream unterbrochen: {{message}}",
+      "streamEnded": "Stream beendet."
     }
   },
   "harness": {
