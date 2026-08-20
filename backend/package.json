@@ -70,7 +70,8 @@
     "check:chat-tool-confirm": "node scripts/chat-tool-confirm-check.cjs",
     "check:briefing-allowlist": "node scripts/briefing-allowlist-check.cjs",
     "check:replication-entity-maps": "node scripts/replication-entity-maps-check.cjs",
-    "check:kubeconfig-parser": "node scripts/kubeconfig-parser-check.cjs"
+    "check:kubeconfig-parser": "node scripts/kubeconfig-parser-check.cjs",
+    "check:kube-schema": "node scripts/kube-schema-check.cjs"
   },
   "dependencies": {
     "@kubernetes/client-node": "^2.0.0",

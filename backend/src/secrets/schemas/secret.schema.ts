@@ -32,6 +32,12 @@ export class Secret {
   @Prop({ type: Types.ObjectId, ref: 'SshConnection' })
   ownedBySshConnectionId?: Types.ObjectId;
 
+  // Marker for cascade-delete from KubeCluster. Analog zu
+  // ownedBySshConnectionId: beim Löschen des Clusters fliegt die
+  // verschlüsselte Kubeconfig mit.
+  @Prop({ type: Types.ObjectId, ref: 'KubeCluster' })
+  ownedByKubeClusterId?: Types.ObjectId;
+
   // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
   // nicht am Typ — ohne Deklaration brauchten Leser dafür ein `as any`.
   createdAt?: Date;
@@ -50,3 +56,4 @@ SecretSchema.index(
 // Cascade-delete pivot: SshService deletes secrets by ownedBySshConnectionId.
 // Sparse so only owned (i.e. SSH-rotated) secrets are indexed.
 SecretSchema.index({ ownedBySshConnectionId: 1 }, { sparse: true });
+SecretSchema.index({ ownedByKubeClusterId: 1 }, { sparse: true });
