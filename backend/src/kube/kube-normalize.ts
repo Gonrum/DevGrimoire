@@ -166,22 +166,61 @@ export function redactSecret(obj: unknown): Record<string, unknown> & { keys: st
   return { ...base, keys: [...keySet] };
 }
 
+const REDACTED_KEYS_ANNOTATION = 'devgrimoire.io/redacted-keys';
+
+/**
+ * `dumpYaml` serialisiert ein erkanntes Kind (hier `V1Secret`) strikt gegen
+ * dessen deklarierte Feldliste (`apiVersion, data, immutable, kind,
+ * metadata, stringData, type`) — ein zusätzliches Top-Level-Feld wie `keys`
+ * aus `redactSecret` gehört nicht dazu und wird beim Dump kommentarlos
+ * verworfen. Ohne Gegenmaßnahme sieht das YAML eines redigierten Secrets
+ * dann genauso aus wie das eines Secrets ganz ohne Daten — genau die
+ * Transparenz, für die `redactSecret` existiert, geht auf diesem Weg
+ * verloren.
+ *
+ * Die Schlüsselnamen wandern deshalb in eine Annotation:
+ * `metadata.annotations` ist bei `V1ObjectMeta` selbst ein deklariertes,
+ * freies String-Feld (`{ [key: string]: string }`) und übersteht die
+ * Serialisierung unverändert. Das ist kein erfundenes API-Feld, sondern der
+ * von Kubernetes vorgesehene Mechanismus für genau diesen Zweck — derselbe,
+ * über den z.B. `kubectl.kubernetes.io/last-applied-configuration`
+ * funktioniert (nur mit unserem Namespace statt kubectls).
+ */
+function withRedactedKeysAnnotation(
+  redacted: Record<string, unknown> & { keys: string[] },
+): Record<string, unknown> {
+  if (redacted.keys.length === 0) return redacted;
+  const meta = isRecord(redacted.metadata) ? redacted.metadata : {};
+  const annotations = isRecord(meta.annotations) ? meta.annotations : {};
+  return {
+    ...redacted,
+    metadata: {
+      ...meta,
+      annotations: {
+        ...annotations,
+        [REDACTED_KEYS_ANNOTATION]: [...redacted.keys].sort().join(','),
+      },
+    },
+  };
+}
+
 /**
  * YAML-Ausgabe fürs Detail — immer über die Strip-Schicht.
  *
  * Zusätzliches Sicherheitsnetz: trägt das Objekt `kind: 'Secret'`, läuft es
- * vor `dumpYaml` zusätzlich durch `redactSecret`. Das ist Best-Effort, kein
- * Ersatz für kind-bewusste Aufrufer-Logik: `dumpYaml` bestimmt seinen
- * Serialisierungspfad selbst über `apiVersion`/`kind` des übergebenen
- * Objekts (`ObjectSerializer` in `@kubernetes/client-node`) — fehlen beide
- * (z.B. bei `items[]` aus einer List-Antwort, die typischerweise kein
- * eigenes `kind` tragen, oder bei einem unvollständigen/kaputten Objekt),
- * greift dort ein generischer Pfad, der *alle* Felder unverändert
- * durchreicht, inklusive `data`/`stringData`. Aufrufer, die den Kind schon
- * kennen (z.B. aus der Listen-Anfrage), müssen ein Secret deshalb weiterhin
- * *selbst* vor dem Aufruf durch `redactSecret` schicken — dieser Fall fängt
- * nur nach, was sonst durchrutschen würde, wenn `kind` zufällig vorhanden
- * ist.
+ * vor `dumpYaml` zusätzlich durch `redactSecret` (und danach durch
+ * `withRedactedKeysAnnotation`, damit die Schlüsselnamen im YAML sichtbar
+ * bleiben — siehe dort). Das ist Best-Effort, kein Ersatz für kind-bewusste
+ * Aufrufer-Logik: `dumpYaml` bestimmt seinen Serialisierungspfad selbst über
+ * `apiVersion`/`kind` des übergebenen Objekts (`ObjectSerializer` in
+ * `@kubernetes/client-node`) — fehlen beide (z.B. bei `items[]` aus einer
+ * List-Antwort, die typischerweise kein eigenes `kind` tragen, oder bei
+ * einem unvollständigen/kaputten Objekt), greift dort ein generischer Pfad,
+ * der *alle* Felder unverändert durchreicht, inklusive `data`/`stringData`.
+ * Aufrufer, die den Kind schon kennen (z.B. aus der Listen-Anfrage), müssen
+ * ein Secret deshalb weiterhin *selbst* vor dem Aufruf durch `redactSecret`
+ * schicken — dieser Fall fängt nur nach, was sonst durchrutschen würde, wenn
+ * `kind` zufällig vorhanden ist.
  *
  * `dumpYaml` selbst wirft bei `null`/`undefined` (liest `.apiVersion` davon),
  * degradiert bei jedem anderen Wert. Das wird hier abgefangen, damit die
@@ -190,6 +229,9 @@ export function redactSecret(obj: unknown): Record<string, unknown> & { keys: st
  */
 export function toYamlSafe(obj: unknown): string {
   const stripped = stripHeavyMetadata(obj);
-  const safe = isRecord(stripped) && stripped.kind === 'Secret' ? redactSecret(stripped) : stripped;
+  const safe =
+    isRecord(stripped) && stripped.kind === 'Secret'
+      ? withRedactedKeysAnnotation(redactSecret(stripped))
+      : stripped;
   return dumpYaml(safe ?? {});
 }

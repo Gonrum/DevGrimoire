@@ -139,6 +139,36 @@ check('toYamlSafe strippt vorher und liefert lesbares YAML', () => {
   assert.ok(!yaml.includes('last-applied-configuration'), 'last-applied ist im YAML gelandet');
 });
 
+const SECRET = {
+  kind: 'Secret', apiVersion: 'v1',
+  metadata: { name: 'db', namespace: 'prod', creationTimestamp: '2026-08-01T10:00:00Z' },
+  type: 'Opaque',
+  data: { password: 'c3VwZXJnZWhlaW0=', username: 'YWRtaW4=' },
+  stringData: { extra: 'plaintext' },
+};
+
+check('toYamlSafe: wohlgeformtes Secret enthält keine Werte', () => {
+  const yaml = toYamlSafe(SECRET);
+  assert.ok(!yaml.includes('c3VwZXJnZWhlaW0='), 'Secret-Wert (data) ist im YAML gelandet');
+  assert.ok(!yaml.includes('YWRtaW4='), 'Secret-Wert (data) ist im YAML gelandet');
+  assert.ok(!yaml.includes('plaintext'), 'Secret-Wert (stringData) ist im YAML gelandet');
+});
+
+check('toYamlSafe: wohlgeformtes Secret zeigt trotzdem die Key-Namen', () => {
+  const yaml = toYamlSafe(SECRET);
+  assert.ok(yaml.includes('password'), 'Key-Name "password" ist aus dem YAML verschwunden (dumpYaml filtert unbekannte Felder wie `keys` gegen V1Secret weg)');
+  assert.ok(yaml.includes('username'), 'Key-Name "username" ist aus dem YAML verschwunden');
+  assert.ok(yaml.includes('extra'), 'Key-Name "extra" ist aus dem YAML verschwunden');
+});
+
+check('toYamlSafe(null) wirft nicht', () => {
+  assert.doesNotThrow(() => toYamlSafe(null));
+});
+
+check('toYamlSafe(undefined) wirft nicht', () => {
+  assert.doesNotThrow(() => toYamlSafe(undefined));
+});
+
 console.log('');
 console.log(`Kube normalize checks: ${total - failures}/${total} passed`);
 if (failures > 0) process.exit(1);
