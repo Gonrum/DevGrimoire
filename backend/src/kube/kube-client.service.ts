@@ -4,7 +4,7 @@ import { KubeClustersService } from './kube-clusters.service';
 import { KubeTransportService } from './kube-transport.service';
 import { KubeAuditService } from './kube-audit.service';
 import { KubeClusterDocument } from './schemas/kube-cluster.schema';
-import { errorMessage } from '../common/narrow';
+import { errorMessageWithCause } from '../common/narrow';
 
 export interface KubeConnectionTestResult {
   ok: boolean;
@@ -67,7 +67,20 @@ export class KubeClientService {
     const endpoint = await this.transport.resolve(cluster);
     try {
       const kc = new KubeConfig();
-      kc.loadFromString(raw);
+      try {
+        kc.loadFromString(raw);
+      } catch {
+        // js-yaml zitiert bei einem Parse-Fehler typischerweise einen
+        // Ausschnitt des rohen Inputs in seiner Meldung — und der Input ist
+        // hier die Kubeconfig, also Credential-Material. Ohne dieses eigene
+        // catch würde das über logger.warn, recordConnectError (persistiert,
+        // im UI sichtbar) und die Response bis zum Aufrufer durchsickern.
+        // Erreichbar, weil die Kubeconfig ein gewöhnliches Secret ist und
+        // PUT /api/secrets/:id ihren Inhalt beliebig ersetzen kann.
+        // Gleiche Disziplin wie die parse-kubeconfig-Route (kube.controller.ts):
+        // fixe Literal-Meldung, keine Referenz auf den gefangenen Fehler.
+        throw new Error('Kubeconfig konnte nicht geparst werden');
+      }
       kc.setCurrentContext(cluster.contextName);
 
       const current = kc.getCurrentCluster();
@@ -121,7 +134,15 @@ export class KubeClientService {
       });
       return { ok: true, serverVersion, canWrite, verbs };
     } catch (err) {
-      const message = errorMessage(err);
+      // errorMessageWithCause() folgt `.cause` (undici packt ECONNREFUSED,
+      // ENOTFOUND, "unable to verify the first certificate" etc. dort hinein,
+      // nicht in `.message`) — sonst sieht der Aufrufer nur "fetch failed".
+      // Weil buildConfig() einen Parse-Fehler oben bereits auf eine fixe
+      // Literal-Meldung ohne `.cause` reduziert (I6), trägt die Ursachenkette
+      // hier nie Kubeconfig-Rohtext. Cap auf 500 Zeichen wie recordConnectError
+      // ihn beim Persistieren ohnehin anwendet — hier einmal für Response,
+      // Log und Persistenz gemeinsam.
+      const message = errorMessageWithCause(err).slice(0, 500);
       this.logger.warn(`Kube-Verbindungstest fehlgeschlagen (${clusterId}): ${message}`);
       await this.clusters.recordConnectError(clusterId, message);
       await this.audit.record({
