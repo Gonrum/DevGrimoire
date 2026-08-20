@@ -103,6 +103,48 @@ check('lehnt Exec-Credential-Plugins ab', () => {
   assert.ok(eks.rejections.includes('exec_plugin'), 'exec_plugin fehlt');
 });
 
+// A1: auth_provider ist das Gegenstück zu exec_plugin — der Gate für
+// OIDC/GKE-Kubeconfigs — und war bislang ohne jede Abdeckung. Der
+// `config`-Block eines echten `auth-provider` trägt Secret-Material
+// (`access-token` bei GCP, analog `id-token`/`refresh-token`/`client-secret`
+// bei generischem OIDC) — der Canary-String hier steht stellvertretend dafür
+// und darf im Parse-Ergebnis so wenig auftauchen wie das Token oben.
+const AUTH_PROVIDER = `
+apiVersion: v1
+kind: Config
+current-context: gke
+contexts:
+  - name: gke
+    context: { cluster: gke-cluster, user: gke-user }
+clusters:
+  - name: gke-cluster
+    cluster:
+      server: https://gke.example.com
+      certificate-authority-data: Zm9v
+users:
+  - name: gke-user
+    user:
+      auth-provider:
+        name: gcp
+        config:
+          access-token: MARKER_AUTH_PROVIDER_SECRET
+          expiry: 2024-01-01T00:00:00Z
+          cmd-path: /usr/lib/google-cloud-sdk/bin/gcloud
+`;
+
+check('lehnt auth_provider (OIDC/GKE) ab', () => {
+  const gke = parseKubeconfig(AUTH_PROVIDER).contexts[0];
+  assert.ok(gke.rejections.includes('auth_provider'), 'auth_provider fehlt');
+});
+
+check('auth_provider-Credential-Material landet nie im Parse-Ergebnis', () => {
+  const json = JSON.stringify(parseKubeconfig(AUTH_PROVIDER));
+  assert.ok(
+    !json.includes('MARKER_AUTH_PROVIDER_SECRET'),
+    'access-token aus auth-provider.config ist in der Ausgabe gelandet',
+  );
+});
+
 check('gibt NIEMALS Credentials zurück', () => {
   const json = JSON.stringify(parseKubeconfig(GOOD));
   assert.ok(!json.includes('sekret'), 'Token ist in der Ausgabe gelandet');
