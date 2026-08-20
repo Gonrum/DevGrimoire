@@ -87,12 +87,32 @@ export class KubeClustersService {
     if (dto.transport === 'ssh-tunnel' && !dto.sshConnectionId) {
       throw new BadRequestException('sshConnectionId ist bei transport="ssh-tunnel" erforderlich');
     }
+    // Gleiche Klasse wie die Checks oben (Correction 3: keine Aufzählung,
+    // sondern jede Caller-Input-Invariante). Ohne diesen Check würde
+    // prometheus.enabled=true mit fehlendem namespace/service/port erst im
+    // Pre-Validate-Hook auffallen und als 500 statt 400 beim Aufrufer landen.
+    if (dto.prometheus?.enabled && (!dto.prometheus.namespace || !dto.prometheus.service || !dto.prometheus.port)) {
+      throw new BadRequestException(
+        'prometheus: namespace, service und port sind bei enabled=true erforderlich',
+      );
+    }
 
     const _id = new Types.ObjectId();
+    // Der Secret-Key MUSS vom frischen Cluster-_id abhängen, nicht (nur) vom
+    // Slug: SecretsService.create() ist kein Insert, sondern ein Upsert über
+    // (Scope, environmentId, Key) — siehe secrets.service.ts. Zwei create()-
+    // Aufrufe mit demselben Slug im selben Scope hätten mit einem rein
+    // slug-basierten Key denselben Key getroffen: der zweite (zum Scheitern
+    // verurteilte) Aufruf hätte dann das Secret des ERSTEN, erfolgreichen
+    // Clusters überschrieben — und der Rollback hätte es anschließend
+    // gelöscht. Der _id-Anteil macht den Key pro Aufruf einzigartig, der
+    // Upsert kann also nur je einmal treffen: entweder als echter Insert
+    // (Normalfall) oder — praktisch unerreichbar, da _id frisch generiert
+    // ist — als Kollision mit sich selbst.
     const secret = await this.secretsService.create({
       projectId: dto.projectId,
       customerId: dto.customerId,
-      key: `kubeconfig-${dto.slug}`,
+      key: `kubeconfig-${dto.slug}-${_id.toString()}`,
       value: dto.kubeconfig,
       type: 'file',
       description: `Kubeconfig für Cluster "${dto.label}"`,
@@ -202,6 +222,16 @@ export class KubeClustersService {
     }
     if (doc.transport === 'ssh-tunnel' && !doc.sshConnectionId) {
       throw new BadRequestException('sshConnectionId ist bei transport="ssh-tunnel" erforderlich');
+    }
+    // Anders als die Scope-Invariante IST diese hier über update() erreichbar:
+    // UpdateKubeClusterDto lässt prometheus zu, und die Zuweisung oben
+    // schreibt sie auf doc.prometheus. Ohne diesen Check würde ein Patch auf
+    // enabled=true ohne namespace/service/port erst am Pre-Validate-Hook von
+    // doc.save() scheitern — 500 statt 400.
+    if (doc.prometheus?.enabled && (!doc.prometheus.namespace || !doc.prometheus.service || !doc.prometheus.port)) {
+      throw new BadRequestException(
+        'prometheus: namespace, service und port sind bei enabled=true erforderlich',
+      );
     }
 
     await doc.save();

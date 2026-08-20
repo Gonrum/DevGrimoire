@@ -34,6 +34,27 @@ function makeModel() {
   const model = {
     _store: store,
     async create(doc) {
+      // Emuliert die echten Unique-Indizes aus dem KubeCluster-Schema
+      // (customerId+slug / projectId+slug, siehe kube-cluster.schema.ts) —
+      // sonst kann kein Check eine ECHTE Duplicate-Slug-Sequenz auslösen,
+      // und genau die braucht der Regressionstest für den kritischen
+      // Upsert-Kollisions-Bug unten.
+      if (typeof doc.slug === 'string') {
+        for (const existing of store.values()) {
+          if (existing.slug !== doc.slug) continue;
+          const sameProject = doc.projectId && existing.projectId
+            && String(existing.projectId) === String(doc.projectId);
+          const sameCustomer = doc.customerId && existing.customerId
+            && String(existing.customerId) === String(doc.customerId);
+          if (sameProject || sameCustomer) {
+            const dupErr = new Error(
+              `E11000 duplicate key error collection: kubeclusters dup key: { slug: "${doc.slug}" }`,
+            );
+            dupErr.code = 11000;
+            throw dupErr;
+          }
+        }
+      }
       const _id = doc._id || new Types.ObjectId();
       const saved = Object.assign({ _id }, doc);
       store.set(String(_id), saved);
@@ -67,10 +88,38 @@ function makeModel() {
 }
 
 function makeSecretsService() {
+  // Modelliert das ECHTE Verhalten von SecretsService.create(): kein Insert,
+  // sondern findOneAndUpdate({owner, environmentId, key}, ..., {upsert:true})
+  // (backend/src/secrets/secrets.service.ts:66-76). Ein zweiter create()-
+  // Aufruf mit demselben (Scope, environmentId, Key)-Tripel trifft denselben
+  // Datensatz und überschreibt ihn — statt ein neues Secret anzulegen. Das
+  // alte Surrogat mintete bei jedem Aufruf eine frische Id und konnte diesen
+  // Bug (Task 3, Fix-Runde 1) deshalb nicht abbilden: 13/13 checks passed,
+  // obwohl der Pfad kaputt war.
   const created = [];
+  const byUpsertKey = new Map();
+  function upsertKeyOf(dto) {
+    const owner = dto.projectId ? `p:${dto.projectId}` : `c:${dto.customerId}`;
+    const env = dto.environmentId ?? 'null';
+    return `${owner}|${env}|${dto.key}`;
+  }
   return {
     _created: created,
-    async create(dto) { const _id = new Types.ObjectId(); created.push({ _id, dto }); return { _id: String(_id) }; },
+    async create(dto) {
+      const k = upsertKeyOf(dto);
+      const existing = byUpsertKey.get(k);
+      if (existing) {
+        // Upsert-Treffer: derselbe Datensatz wird überschrieben, NICHT neu
+        // angelegt — `created` wächst hier bewusst nicht.
+        existing.dto = dto;
+        return { _id: String(existing._id) };
+      }
+      const _id = new Types.ObjectId();
+      const entry = { _id, dto };
+      byUpsertKey.set(k, entry);
+      created.push(entry);
+      return { _id: String(_id) };
+    },
     async findById(id) {
       const hit = created.find((c) => String(c._id) === String(id));
       if (!hit) throw new Error('not found');
@@ -236,6 +285,69 @@ function makeSecretsService() {
     assert.ok(err, 'hätte fehlschlagen müssen');
     assert.equal(err.status, 400, 'muss BadRequest sein, nicht ValidationError/500');
     assert.equal(secrets._created.length, 0, 'darf kein Secret anlegen, bevor der Scope geprüft ist');
+  });
+
+  await check('prometheus.enabled ohne namespace/service/port wird als BadRequest abgelehnt', async () => {
+    const secrets = makeSecretsService();
+    const svc = new KubeClustersService(makeModel(), makeModel(), secrets);
+    const err = await svc.create({
+      label: 'X', slug: 'x', projectId: String(PROJECT), kubeconfig: GOOD_KUBECONFIG,
+      contextName: 'prod', transport: 'direct',
+      prometheus: { enabled: true },
+    }).then(() => null, (e) => e);
+    assert.ok(err, 'hätte fehlschlagen müssen');
+    assert.equal(err.status, 400, 'muss BadRequest sein, nicht ValidationError/500');
+    assert.equal(secrets._created.length, 0, 'darf kein Secret anlegen, bevor die Invariante geprüft ist');
+  });
+
+  await check('create überschreibt nicht das Secret des ersten Clusters, wenn ein zweiter mit demselben Slug im selben Scope fehlschlägt', async () => {
+    // Regression für den kritischen Bug aus Fix-Runde 1: SecretsService.create()
+    // ist kein Insert, sondern ein Upsert über (Scope, environmentId, Key)
+    // (backend/src/secrets/secrets.service.ts:66-76). Ein slug-basierter Key
+    // hätte beim zweiten, zum Scheitern verurteilten create()-Aufruf denselben
+    // Key wie der erste getroffen — der Upsert hätte das Secret des ERSTEN,
+    // erfolgreichen Clusters mit dem Inhalt des zweiten überschrieben, und der
+    // anschließende Rollback hätte es dann gelöscht. Zwei ECHTE create()-Aufrufe
+    // hier, kein gemockter clusterModel.create — nur so kann die reale
+    // Slug-Kollision (siehe makeModel()) überhaupt auftreten.
+    const clusterModel = makeModel();
+    const secretModel = makeModel();
+    const secrets = makeSecretsService();
+    const svc = new KubeClustersService(clusterModel, secretModel, secrets);
+
+    const SECOND_KUBECONFIG = GOOD_KUBECONFIG.replace('token: t', 'token: t-second');
+
+    const first = await svc.create({
+      label: 'Erster', slug: 'prod', projectId: String(PROJECT),
+      kubeconfig: GOOD_KUBECONFIG, contextName: 'prod', transport: 'direct',
+    });
+
+    const err = await svc.create({
+      label: 'Zweiter', slug: 'prod', projectId: String(PROJECT),
+      kubeconfig: SECOND_KUBECONFIG, contextName: 'prod', transport: 'direct',
+    }).then(() => null, (e) => e);
+
+    assert.ok(err, 'zweiter create() mit demselben Slug im selben Scope hätte scheitern müssen');
+    assert.equal(err.status, 409, 'Duplicate-Slug muss 409 sein');
+
+    const firstSecretAfterwards = await secrets.findById(String(first.kubeconfigSecretId));
+    assert.equal(
+      firstSecretAfterwards.value,
+      GOOD_KUBECONFIG,
+      'das Secret des ERSTEN, erfolgreichen Clusters wurde vom fehlgeschlagenen zweiten Aufruf überschrieben',
+    );
+    assert.equal(
+      secrets._created.length,
+      2,
+      'zwei create()-Aufrufe müssen zwei eigenständige Secrets anlegen (verschiedene Keys), nicht per Upsert denselben Datensatz treffen',
+    );
+
+    const stillThere = await svc.findById(String(first._id));
+    assert.equal(
+      String(stillThere.kubeconfigSecretId),
+      String(first.kubeconfigSecretId),
+      'der erste Cluster muss weiterhin auf sein eigenes, unverändertes Secret zeigen',
+    );
   });
 
   await check('findById wirft NotFound bei unbekannter Id', async () => {
