@@ -66,6 +66,7 @@ import { OracleModule } from './oracle/oracle.module';
 import { CustomerTemplatesModule } from './customer-templates/customer-templates.module';
 import { NotesModule } from './notes/notes.module';
 import { SshModule } from './ssh/ssh.module';
+import { KubeModule } from './kube/kube.module';
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
@@ -140,6 +141,7 @@ if (!MONGODB_URI) {
     AgentRolesModule,
     NotesModule,
     SshModule,
+    KubeModule,
     BalancerModule,
   ],
   providers: [
