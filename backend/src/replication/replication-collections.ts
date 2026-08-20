@@ -95,6 +95,8 @@ export const EXCLUDED_COLLECTIONS: { className: string; reason: string }[] = [
   { className: 'RequestCollection', reason: 'API-Werkbank: nur sinnvoll zusammen mit SavedRequest (exkludiert) — Feature bleibt vorerst instanzlokal' },
   { className: 'RequestHistoryEntry', reason: 'API-Werkbank: hochvolumige, TTL-ephemere Request/Response-Snapshots (Diagnose) — nicht projekt-inhaltlich, analog LogEntry' },
   { className: 'SshConnection', reason: 'Infra-Zugangsdaten, instanz-/umgebungsspezifisch (Home vs Firma erreichen andere Hosts)' },
+  { className: 'KubeCluster', reason: 'Infra-Zugangsdaten, instanz-/umgebungsspezifisch (Home vs Firma erreichen andere Cluster)' },
+  { className: 'KubeAudit', reason: 'Audit-Spur ist instanzlokal, wie SshAudit' },
   { className: 'WorkflowDefinition', reason: 'Referenziert instanzgebundene Secrets/Endpoints' },
   { className: 'WorkflowRun', reason: 'Workflow-Run-State, instanzgebunden' },
   { className: 'Workspace', reason: 'Lokaler Sidecar-Container-State (Clones, Scratch) — instanzgebunden' },
