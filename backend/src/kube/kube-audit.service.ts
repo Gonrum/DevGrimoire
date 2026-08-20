@@ -61,8 +61,16 @@ export class KubeAuditService {
       return { items: [], total: 0 };
     }
     const filter = { clusterId: new Types.ObjectId(clusterId) };
-    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
-    const offset = Math.max(opts.offset ?? 0, 0);
+    // Nie einen ungeprüften Wert in .limit()/.skip() geben: der REST-Layer
+    // validiert limit/offset bereits per DTO, aber dieser Service wird ab K2
+    // auch direkt von MCP-Tools aufgerufen — die Guards hier sind die
+    // eigentliche Grenze, nicht nur eine Verdopplung der Controller-Prüfung.
+    // `opts.limit ?? 50` würde NaN unverändert durchlassen (NaN ?? 50 ist
+    // NaN, kein Fallback), Math.max/min mit NaN bleiben NaN.
+    const rawLimit = typeof opts.limit === 'number' && Number.isFinite(opts.limit) ? opts.limit : 50;
+    const rawOffset = typeof opts.offset === 'number' && Number.isFinite(opts.offset) ? opts.offset : 0;
+    const limit = Math.min(Math.max(rawLimit, 1), 200);
+    const offset = Math.max(rawOffset, 0);
     const [items, total] = await Promise.all([
       this.auditModel.find(filter).sort({ at: -1 }).skip(offset).limit(limit).exec(),
       this.auditModel.countDocuments(filter).exec(),

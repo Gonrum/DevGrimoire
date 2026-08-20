@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Req, UseGuards,
 } from '@nestjs/common';
 import { KubeClustersService } from './kube-clusters.service';
@@ -8,6 +9,7 @@ import { CreateKubeClusterDto } from './dto/create-kube-cluster.dto';
 import { UpdateKubeClusterDto } from './dto/update-kube-cluster.dto';
 import { ListKubeClustersDto } from './dto/list-kube-clusters.dto';
 import { ParseKubeconfigDto } from './dto/parse-kubeconfig.dto';
+import { KubeAuditQueryDto } from './dto/audit-query.dto';
 import { KubeClusterDocument } from './schemas/kube-cluster.schema';
 import { KubeAuditService } from './kube-audit.service';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -62,7 +64,17 @@ export class KubeController {
   @Post('parse-kubeconfig')
   @HttpCode(200)
   parse(@Body() dto: ParseKubeconfigDto) {
-    return parseKubeconfig(dto.kubeconfig);
+    try {
+      return parseKubeconfig(dto.kubeconfig);
+    } catch {
+      // Ein kaputtes Kubeconfig ist ein Caller-Fehler (400), kein Server-
+      // Fehler (500) — dieselbe Regel wie bei den Invarianten in
+      // KubeClustersService.create(). `parseKubeconfig()` schluckt den
+      // rohen YAML-Parser-Fehler absichtlich (der könnte einen Ausschnitt
+      // des credential-tragenden Inputs enthalten) — die Meldung hier
+      // bleibt deshalb generisch, nicht der Original-Fehlertext.
+      throw new BadRequestException('Kubeconfig konnte nicht geparst werden');
+    }
   }
 
   @Get()
@@ -110,12 +122,11 @@ export class KubeController {
   @Get(':id/audit')
   async auditLog(
     @Param('id') id: string,
-    @Query('limit') limit?: string,
-    @Query('offset') offset?: string,
+    @Query() q: KubeAuditQueryDto,
   ) {
     const { items, total } = await this.audit.list(id, {
-      limit: limit ? Number(limit) : undefined,
-      offset: offset ? Number(offset) : undefined,
+      limit: q.limit,
+      offset: q.offset,
     });
     return {
       total,

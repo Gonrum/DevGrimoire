@@ -42,6 +42,12 @@ users:
 EOF
 )
 
+# Absichtlich unparsbares YAML (unterminierte Flow-Sequenz). Der eingebettete
+# Marker steht dafür, dass js-yaml-Fehlermeldungen typischerweise einen
+# Ausschnitt des rohen Inputs zitieren — genau das, was NICHT in der
+# 400-Response landen darf.
+MALFORMED_KUBECONFIG_TEXT='not: [valid, yaml MARKER_SHOULD_NOT_LEAK'
+
 # --- 1. Parse liefert Contexts, aber keine Credentials -------------------
 PARSED=$(jq -n --arg kc "$KUBECONFIG_TEXT" '{kubeconfig: $kc}' \
   | curl -sS "${AUTH[@]}" -X POST "${API_URL}/api/kube-clusters/parse-kubeconfig" -d @-)
@@ -51,7 +57,18 @@ echo "$PARSED" | jq -e '.contexts[0].contextName == "e2e"' >/dev/null \
 echo "$PARSED" | grep -q 'e2e-token' && fail "Token ist in der Parse-Response gelandet"
 pass "parse-kubeconfig liefert Contexts ohne Credentials"
 
-# --- 2. Cluster anlegen ---------------------------------------------------
+# --- 2. Kaputtes Kubeconfig ergibt 400, nicht 500, ohne Input-Echo --------
+CODE=$(jq -n --arg kc "$MALFORMED_KUBECONFIG_TEXT" '{kubeconfig: $kc}' \
+  | curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST "${API_URL}/api/kube-clusters/parse-kubeconfig" -d @-)
+[ "$CODE" = "400" ] || fail "Kaputtes Kubeconfig ergab HTTP $CODE statt 400"
+
+BODY=$(jq -n --arg kc "$MALFORMED_KUBECONFIG_TEXT" '{kubeconfig: $kc}' \
+  | curl -sS "${AUTH[@]}" -X POST "${API_URL}/api/kube-clusters/parse-kubeconfig" -d @-)
+echo "$BODY" | grep -q 'MARKER_SHOULD_NOT_LEAK' \
+  && fail "Kubeconfig-Rohtext ist in der 400-Response gelandet"
+pass "Kaputtes Kubeconfig ergibt 400 ohne Input-Echo"
+
+# --- 3. Cluster anlegen ---------------------------------------------------
 CREATED=$(jq -n --arg kc "$KUBECONFIG_TEXT" --arg pid "$PROJECT_ID" \
   '{label:"E2E", slug:"e2e-cluster", projectId:$pid, kubeconfig:$kc, contextName:"e2e", transport:"direct"}' \
   | curl -sS "${AUTH[@]}" -X POST "${API_URL}/api/kube-clusters" -d @-)
@@ -60,39 +77,45 @@ CLUSTER_ID=$(echo "$CREATED" | jq -r '._id')
 [ "$CLUSTER_ID" != "null" ] || fail "Cluster wurde nicht angelegt: $CREATED"
 pass "Cluster angelegt ($CLUSTER_ID)"
 
-# --- 3. GET gibt niemals die Kubeconfig zurück ----------------------------
+# --- 4. GET gibt niemals die Kubeconfig zurück ----------------------------
 DETAIL=$(curl -sS "${AUTH[@]}" "${API_URL}/api/kube-clusters/${CLUSTER_ID}")
 echo "$DETAIL" | grep -q 'e2e-token' && fail "Kubeconfig in der GET-Response"
 echo "$DETAIL" | jq -e '.kubeconfigSecretId == null' >/dev/null \
   || fail "kubeconfigSecretId wird nach aussen gegeben"
 pass "GET gibt keine Credentials preis"
 
-# --- 4. readOnly ist Default ----------------------------------------------
+# --- 5. readOnly ist Default ----------------------------------------------
 echo "$DETAIL" | jq -e '.readOnly == true' >/dev/null || fail "readOnly ist nicht Default"
 echo "$DETAIL" | jq -e '.allowMcpWrites == false' >/dev/null || fail "allowMcpWrites ist nicht false"
 pass "readOnly=true und allowMcpWrites=false sind Default"
 
-# --- 5. allowMcpWrites bei readOnly wird abgelehnt ------------------------
+# --- 6. allowMcpWrites bei readOnly wird abgelehnt ------------------------
 CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X PATCH \
   "${API_URL}/api/kube-clusters/${CLUSTER_ID}" -d '{"allowMcpWrites": true}')
 [ "$CODE" != "403" ] || fail "API_KEY hat keine Admin-Rolle — PATCH ist Admin-only"
 [ "$CODE" = "400" ] || fail "allowMcpWrites bei readOnly ergab HTTP $CODE statt 400"
 pass "allowMcpWrites setzt readOnly=false voraus"
 
-# --- 6. Verbindungstest scheitert sauber ----------------------------------
+# --- 7. Verbindungstest scheitert sauber ----------------------------------
 TEST=$(curl -sS "${AUTH[@]}" -X POST "${API_URL}/api/kube-clusters/${CLUSTER_ID}/test")
 echo "$TEST" | jq -e '.ok == false' >/dev/null || fail "Test gegen cluster.invalid meldete Erfolg"
 echo "$TEST" | jq -e '.error | length > 0' >/dev/null || fail "Fehlermeldung fehlt"
 pass "Verbindungstest meldet Fehler statt zu werfen"
 
-# --- 7. Audit-Zeile ist entstanden ----------------------------------------
+# --- 8. Audit-Zeile ist entstanden ----------------------------------------
 AUDIT=$(curl -sS "${AUTH[@]}" "${API_URL}/api/kube-clusters/${CLUSTER_ID}/audit")
 echo "$AUDIT" | jq -e '.total >= 1' >/dev/null || fail "keine Audit-Zeile nach dem Test"
 echo "$AUDIT" | jq -e '.items[0].action == "connect"' >/dev/null || fail "Audit-Action ist nicht connect"
 echo "$AUDIT" | jq -e '.items[0].sourceContext == "rest"' >/dev/null || fail "sourceContext ist nicht rest"
 pass "Verbindungstest hinterlässt eine Audit-Zeile"
 
-# --- 8. Löschen räumt auf --------------------------------------------------
+# --- 9. Nicht-numerisches limit auf /audit wird abgelehnt -----------------
+CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" \
+  "${API_URL}/api/kube-clusters/${CLUSTER_ID}/audit?limit=abc")
+[ "$CODE" = "400" ] || fail "?limit=abc auf /audit ergab HTTP $CODE statt 400"
+pass "audit lehnt nicht-numerisches limit mit 400 ab (statt NaN durchzureichen)"
+
+# --- 10. Löschen räumt auf -------------------------------------------------
 curl -sS "${AUTH[@]}" -X DELETE "${API_URL}/api/kube-clusters/${CLUSTER_ID}" >/dev/null
 CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" "${API_URL}/api/kube-clusters/${CLUSTER_ID}")
 [ "$CODE" = "404" ] || fail "Cluster nach DELETE noch da (HTTP $CODE)"
