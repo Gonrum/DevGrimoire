@@ -1886,51 +1886,131 @@ export class SshSessionService {
    * Prüfung, dasselbe `clientFactory`-Seam und dieselbe Connect-Status-
    * Aufzeichnung wie jeder andere SSH-Pfad in dieser Klasse. Der Tunnel ist
    * reiner Transport; er lockert an keiner Stelle eine Vertrauensprüfung.
+   *
+   * `onBroken` meldet dem Eigentümer den **ungeplanten** Abbau (SSH-Client
+   * tot, Listener-Fehler, synchron werfendes `forwardOut`). Wer den Tunnel
+   * cacht, muss daraufhin seinen Eintrag wegwerfen — sonst zeigt der Cache
+   * weiter auf einen Listener vor einem toten Client. Der geplante Abbau
+   * über das zurückgegebene `close()` meldet bewusst NICHT zurück.
    */
   async openTunnel(
     connectionId: string,
     dstHost: string,
     dstPort: number,
+    onBroken?: () => void,
   ): Promise<{ localPort: number; close: () => void }> {
     const connection = await this.sshService.findById(connectionId);
     const creds = await this.resolveCredentialsOrFail(connection);
     const client = await this.openClient(connection, creds);
+    const label = `${dstHost}:${dstPort}`;
 
     const server = net.createServer((socket) => {
-      client.forwardOut('127.0.0.1', 0, dstHost, dstPort, (err, stream) => {
-        if (err) {
-          socket.destroy();
-          return;
-        }
-        socket.pipe(stream).pipe(socket);
-        stream.on('error', () => socket.destroy());
-        socket.on('error', () => stream.destroy());
-      });
+      // `forwardOut` wirft SYNCHRON, sobald der Client nicht mehr verbunden
+      // ist — ssh2/lib/client.js:1399:
+      //   if (!this._sock || !isWritable(this._sock)) throw new Error('Not connected');
+      // Dieser Aufruf steht in einem net-'connection'-Handler. Ein
+      // entkommener Throw geht über `Server.emit` als uncaughtException
+      // hoch, und weil dieses Backend weder `process.on('uncaughtException')`
+      // noch einen globalen Exception-Filter hat, beendet er den GANZEN
+      // Prozess. Erreichbar durch jeden gewöhnlichen Verbindungsabbruch
+      // (Bastion-Reboot, sshd-Restart, Netz-Flap): der Listener wird pro
+      // Cluster gecacht und überlebt den toten SSH-Client, der nächste
+      // UI-Klick öffnet einen Socket und nimmt den Prozess mit.
+      try {
+        client.forwardOut('127.0.0.1', 0, dstHost, dstPort, (err, stream) => {
+          if (err) {
+            socket.destroy();
+            return;
+          }
+          socket.pipe(stream).pipe(socket);
+          stream.on('error', () => socket.destroy());
+          socket.on('error', () => stream.destroy());
+        });
+      } catch (err: unknown) {
+        socket.destroy();
+        // Ein synchroner Wurf heisst: der SSH-Client ist tot. Der Listener
+        // davor ist damit wertlos — Spec: "Bricht der Tunnel, wird der
+        // Listener verworfen; der nächste Request baut neu auf."
+        this.logger.warn(`Tunnel ${label} ist gebrochen: ${errorMessage(err)}`);
+        teardown(true);
+      }
+    });
+
+    let torndown = false;
+    /**
+     * Der einzige Abbauweg, idempotent. `notify` trennt den geplanten Abbau
+     * durch den Eigentümer (`close()`) vom ungeplanten (SSH-Client tot,
+     * Listener-Fehler): nur der ungeplante meldet zurück — sonst liefe der
+     * Eigentümer beim eigenen Schliessen in seine eigene Invalidierung.
+     */
+    const teardown = (notify: boolean): void => {
+      if (torndown) return;
+      torndown = true;
+      try { server.close(); } catch { /* noop */ }
+      try { client.end(); } catch { /* noop */ }
+      if (!notify || !onBroken) return;
+      try {
+        onBroken();
+      } catch (err: unknown) {
+        this.logger.warn(`Tunnel-Abbruchmeldung für ${label} fehlgeschlagen: ${errorMessage(err)}`);
+      }
+    };
+
+    // Der Listener überlebt den SSH-Client sonst um bis zu eine Idle-TTL
+    // (und mit Polling potenziell unbegrenzt). Beide Ereignisse verwerfen
+    // ihn deshalb und melden es dem Eigentümer, damit dessen Cache-Eintrag
+    // verschwindet und der nächste Request neu aufbaut.
+    client.on('error', (err: Error) => {
+      this.logger.warn(`SSH-Client des Tunnels ${label} meldete: ${err.message}`);
+      teardown(true);
+    });
+    client.on('close', () => { teardown(true); });
+
+    // `server.once('error', reject)` blieb nach erfolgreichem `listen()`
+    // unverbraucht liegen: der ERSTE Fehler danach hätte ihn konsumiert
+    // (wirkungslos, der Promise war längst aufgelöst), der ZWEITE träfe
+    // einen net.Server ganz ohne 'error'-Listener — Node wirft ihn dann als
+    // uncaughtException und der Prozess stirbt. Deshalb ein dauerhafter
+    // Handler über die gesamte Lebenszeit des Listeners, aus dem der
+    // Listen-Fehler nur abgezweigt wird, solange `listen()` noch aussteht.
+    let rejectListen: ((err: Error) => void) | null = null;
+    server.on('error', (err: Error) => {
+      const pendingListen = rejectListen;
+      rejectListen = null;
+      if (pendingListen) {
+        pendingListen(err);
+        return;
+      }
+      this.logger.warn(`Tunnel-Listener ${label} meldete einen Fehler: ${err.message}`);
+      teardown(true);
     });
 
     try {
       await new Promise<void>((resolve, reject) => {
-        server.once('error', reject);
-        server.listen(0, '0.0.0.0', resolve);
+        rejectListen = reject;
+        server.listen(0, '0.0.0.0', () => {
+          rejectListen = null;
+          resolve();
+        });
       });
     } catch (err: unknown) {
+      // Kein Listener aktiv: nur den Client abbauen, und den Abbauweg
+      // stilllegen, damit ein nachlaufendes client-'close' nicht noch eine
+      // Abbruchmeldung an einen Eigentümer schickt, den es nie gab.
+      torndown = true;
       client.end();
       throw asError(err);
     }
 
     const address = server.address();
     if (address === null || typeof address === 'string') {
-      server.close();
-      client.end();
+      teardown(false);
       throw new Error('Tunnel-Listener lieferte keine Portnummer');
     }
 
     return {
       localPort: address.port,
-      close: () => {
-        server.close();
-        client.end();
-      },
+      close: () => { teardown(false); },
     };
   }
 }

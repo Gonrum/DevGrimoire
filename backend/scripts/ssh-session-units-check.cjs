@@ -18,7 +18,9 @@
  */
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const net = require('node:net');
 const { EventEmitter } = require('node:events');
+const { PassThrough } = require('node:stream');
 
 function loadCompiled(rel) {
   const abs = path.resolve(__dirname, '..', 'dist', rel);
@@ -166,7 +168,13 @@ function makeSettingsStub({ maxUploadBytes = null } = {}) {
 // its stream. We always drive hostVerifier first (mirrors real ssh2).
 // ---------------------------------------------------------------------------
 function makeFakeClient(behaviour = {}) {
+  // `handlers` bleibt die alte Last-Wins-Ansicht (die älteren Tests lesen
+  // sie), `listeners` bildet zusätzlich ab, was ein echter EventEmitter tut:
+  // MEHRERE Handler pro Event. Das ist für den Tunnel wesentlich —
+  // openClient() registriert bereits 'error', openTunnel() hängt einen
+  // zweiten daran, und beide müssen feuern.
   const handlers = {};
+  const listeners = {};
 
   function makeChannel(_opts = {}) {
     const stream = new EventEmitter();
@@ -185,14 +193,42 @@ function makeFakeClient(behaviour = {}) {
 
   const client = {
     handlers,
+    listeners,
     on(event, cb) {
+      (listeners[event] || (listeners[event] = [])).push(cb);
       handlers[event] = cb;
+      return client;
+    },
+    emit(event, ...args) {
+      for (const cb of [...(listeners[event] || [])]) cb(...args);
       return client;
     },
     endCalls: 0,
     destroyCalls: 0,
-    end() { this.endCalls += 1; },
+    end() {
+      this.endCalls += 1;
+      // Ein echter ssh2.Client meldet den Abbau als 'close' — der Tunnel
+      // hängt daran, also muss die Attrappe es auch tun.
+      if (!this._closeEmitted) {
+        this._closeEmitted = true;
+        process.nextTick(() => client.emit('close'));
+      }
+    },
     destroy() { this.destroyCalls += 1; },
+    /**
+     * `forwardOut` ist der Punkt, an dem ssh2 SYNCHRON wirft, sobald der
+     * Client nicht mehr verbunden ist:
+     *   node_modules/ssh2/lib/client.js:1399
+     *   if (!this._sock || !isWritable(this._sock)) throw new Error('Not connected');
+     */
+    forwardOut(_srcIp, _srcPort, _dstHost, _dstPort, cb) {
+      if (behaviour.forwardOutThrows) throw new Error('Not connected');
+      // Ein echter forwardOut-Kanal ist ein Duplex-Stream; der Service
+      // verrohrt ihn beidseitig mit dem Socket (socket.pipe(stream).pipe(socket)).
+      const stream = new PassThrough();
+      process.nextTick(() => cb(undefined, stream));
+      return client;
+    },
     connect(opts) {
       // Drive hostVerifier first.
       const hash = Buffer.from(
@@ -209,18 +245,16 @@ function makeFakeClient(behaviour = {}) {
       if (!accept) {
         // ssh2 fires 'error' when the verifier rejected.
         process.nextTick(() => {
-          if (handlers.error) {
-            const e = new Error('Host key verification failed');
-            e.level = 'protocol';
-            handlers.error(e);
-          }
+          const e = new Error('Host key verification failed');
+          e.level = 'protocol';
+          client.emit('error', e);
         });
         return;
       }
 
       // Fingerprint accepted → fire ready.
       process.nextTick(() => {
-        if (handlers.ready) handlers.ready();
+        client.emit('ready');
       });
     },
     // exec() spawns a channel and exposes its events via the callback.
@@ -1051,6 +1085,142 @@ function makeFakeSftp({
     assert.equal(out.bytesWritten, 10 * 1024 * 1024);
     assert.equal(audit._writes.length, 1);
     assert.equal(audit._writes[0].action, 'upload');
+  });
+
+  // ------------------------------------------------------------------
+  // openTunnel (K1) — Lebenszyklus des Listeners
+  //
+  // Diese vier Prüfungen fehlten, und genau deshalb ist der kritischste
+  // Fehler dieser Phase durch eine grüne Testsuite gekommen: openTunnel()
+  // hatte überhaupt keine automatisierte Abdeckung. Der Listener wird pro
+  // Cluster gecacht und überlebt den SSH-Client — jeder gewöhnliche
+  // Verbindungsabbruch (Bastion-Reboot, sshd-Restart, Netz-Flap) macht die
+  // nächste eingehende Verbindung zum Prozess-Ende.
+  // ------------------------------------------------------------------
+
+  /** Sammelt uncaughtException-Ereignisse, statt den Prozess sterben zu lassen. */
+  async function withUncaughtCapture(fn) {
+    const caught = [];
+    const onUncaught = (err) => caught.push(err);
+    process.on('uncaughtException', onUncaught);
+    try {
+      await fn(caught);
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
+    return caught;
+  }
+
+  function makeTunnelService(behaviour = {}) {
+    const conn = makeKeyConnection({ knownHostFingerprint: FAKE_FINGERPRINT });
+    const sshService = makeSshServiceStub({ connection: conn });
+    const factory = makeClientFactory(behaviour);
+    const svc = new SshSessionService(
+      sshService, makeSecretsServiceStub(), makeAuditModelStub(),
+      makeNotificationsStub(), makeSettingsStub(), factory,
+    );
+    return { svc, conn, factory };
+  }
+
+  /** true, wenn auf dem Port noch ein Listener Verbindungen annimmt. */
+  function isListening(port) {
+    return new Promise((resolve) => {
+      const s = net.connect(port, '127.0.0.1');
+      s.on('connect', () => { s.destroy(); resolve(true); });
+      s.on('error', () => { s.destroy(); resolve(false); });
+    });
+  }
+
+  // 16) forwardOut wirft synchron → darf nicht aus dem 'connection'-Handler
+  //     entkommen (sonst uncaughtException → Prozessende).
+  await check('openTunnel(): synchron werfendes forwardOut zerstört den Socket, statt den Prozess zu beenden', async () => {
+    const { svc, conn } = makeTunnelService({ forwardOutThrows: true });
+    let socketClosed = false;
+    const caught = await withUncaughtCapture(async () => {
+      const tunnel = await svc.openTunnel(String(conn._id), 'api.internal', 6443);
+      const socket = net.connect(tunnel.localPort, '127.0.0.1');
+      socket.on('close', () => { socketClosed = true; });
+      socket.on('error', () => { /* ECONNRESET ist der erwartete Abbruch */ });
+      await new Promise((r) => setTimeout(r, 120));
+      socket.destroy();
+      tunnel.close();
+    });
+    assert.deepEqual(
+      caught.map((e) => e.message),
+      [],
+      'der forwardOut-Throw ist aus dem net-connection-Handler entkommen — in Produktion beendet das (kein uncaughtException-Handler, kein globaler Exception-Filter) den gesamten Prozess',
+    );
+    assert.equal(socketClosed, true, 'der Socket wurde nicht zerstört, der Aufrufer hängt');
+  });
+
+  // 17) Client-'error' verwirft den Listener und meldet es dem Eigentümer.
+  await check("openTunnel(): ein Client-'error' verwirft den Listener und meldet es dem Eigentümer", async () => {
+    const { svc, conn, factory } = makeTunnelService();
+    const broken = [];
+    const tunnel = await svc.openTunnel(
+      String(conn._id), 'api.internal', 6443, () => broken.push('broken'),
+    );
+    assert.equal(await isListening(tunnel.localPort), true, 'Listener kam gar nicht erst hoch');
+
+    factory._inst._last.emit('error', new Error('Connection reset by peer'));
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.deepEqual(broken, ['broken'], 'der Eigentümer wurde nicht benachrichtigt — sein Cache-Eintrag zeigt weiter auf einen toten Tunnel');
+    assert.equal(
+      await isListening(tunnel.localPort), false,
+      'der Listener nimmt nach dem Tod des SSH-Clients weiter Verbindungen an (Spec: "Bricht der Tunnel, wird der Listener verworfen")',
+    );
+    tunnel.close();
+  });
+
+  // 18) Client-'close' verwirft den Listener ebenso.
+  await check("openTunnel(): ein Client-'close' verwirft den Listener ebenso", async () => {
+    const { svc, conn, factory } = makeTunnelService();
+    const broken = [];
+    const tunnel = await svc.openTunnel(
+      String(conn._id), 'api.internal', 6443, () => broken.push('broken'),
+    );
+    factory._inst._last.emit('close');
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.deepEqual(broken, ['broken'], 'der Eigentümer wurde nicht benachrichtigt');
+    assert.equal(await isListening(tunnel.localPort), false, 'Listener überlebt die geschlossene SSH-Verbindung');
+    tunnel.close();
+  });
+
+  // 19) C1b: der ZWEITE Listener-Fehler nach erfolgreichem listen() darf
+  //     keinen net.Server ohne 'error'-Listener treffen.
+  await check("openTunnel(): ein zweiter Listener-Fehler nach listen() trifft nicht auf einen Server ohne 'error'-Handler", async () => {
+    const { svc, conn } = makeTunnelService();
+    // net.createServer abgreifen: openTunnel gibt den Server nicht heraus.
+    // Der kompilierte Code liest `net.createServer` über einen Live-Getter
+    // (tsc __createBinding), das Patchen ist also sichtbar.
+    const origCreateServer = net.createServer;
+    let captured = null;
+    net.createServer = (...args) => {
+      const s = origCreateServer.apply(net, args);
+      captured = s;
+      return s;
+    };
+    let tunnel = null;
+    let secondEmitThrew = null;
+    try {
+      tunnel = await svc.openTunnel(String(conn._id), 'api.internal', 6443);
+      assert.ok(captured, 'net.createServer wurde nicht abgegriffen');
+      captured.emit('error', new Error('accept EMFILE'));
+      try {
+        captured.emit('error', new Error('accept EMFILE (zweiter)'));
+      } catch (err) {
+        secondEmitThrew = err;
+      }
+    } finally {
+      net.createServer = origCreateServer;
+      if (tunnel) tunnel.close();
+    }
+    assert.equal(
+      secondEmitThrew, null,
+      "der zweite Listener-Fehler traf einen net.Server ohne 'error'-Listener (server.once('error', reject) war schon verbraucht) — aus Node-Internals kommt das als uncaughtException und beendet den Prozess",
+    );
   });
 
   // ------------------------------------------------------------------
