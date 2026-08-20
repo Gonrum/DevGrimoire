@@ -26,4 +26,19 @@ export class LogsQueryDto {
 
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(86400)
   sinceSeconds?: number;
+
+  /**
+   * Review-Fund (Critical 1, Task 5 Fix Round 1): `JwtAuthGuard` liest ein
+   * JWT aus `?token=` und kopiert es in den Authorization-Header
+   * (jwt-auth.guard.ts:144-154) — der Query-Parameter selbst bleibt aber im
+   * Request stehen. Die globale `ValidationPipe` steht auf
+   * `forbidNonWhitelisted: true`; ohne dieses Feld lehnt sie `?token=` als
+   * unbekannt ab, BEVOR der Guard es je sieht — und `EventSource` (der
+   * einzige Weg, wie ein Browser SSE konsumiert) kann keine Header setzen,
+   * `?token=` ist also der einzige Weg, wie ein Browser diese Route
+   * überhaupt authentifiziert aufruft. Vom Handler selbst ungenutzt: die
+   * Auth ist zu dem Zeitpunkt schon gelaufen.
+   */
+  @IsOptional() @IsString()
+  token?: string;
 }
