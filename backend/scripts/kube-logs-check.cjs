@@ -188,6 +188,28 @@ async function collect(iterable, max = 10) {
     );
   });
 
+  await check('ein früher Ausstieg aus der Iteration (break) gibt trotzdem frei', async () => {
+    // Ein Aufrufer, der `session.lines` per `for await` konsumiert und die
+    // Schleife vorzeitig mit `break` verlässt, ruft nie `close()` auf. Die
+    // for-await-of-Semantik schließt den zugrundeliegenden Async-Iterator
+    // trotzdem (IteratorClose) — das muss bis zum `finally` in toLines()
+    // durchreichen, sonst bleibt der Transport offen, bis der Prozess endet.
+    const env = makeEnv(['eins\n', 'zwei\n', 'drei\n'], { keepOpen: true });
+    const svc = new KubeLogsService(clustersStub, env.client, env.logFactory);
+    const session = await svc.open('c1', 'prod', 'api', { follow: true });
+    const out = [];
+    for await (const line of session.lines) {
+      out.push(line);
+      if (out.length >= 1) break;
+    }
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(out, ['eins']);
+    assert.equal(
+      env.state.released, 1,
+      `released=${env.state.released} — ein früher break() aus der Iteration gab den Transport nicht frei`,
+    );
+  });
+
   console.log('');
   console.log(`Kube logs checks: ${total - failures}/${total} passed`);
   if (failures > 0) process.exit(1);
