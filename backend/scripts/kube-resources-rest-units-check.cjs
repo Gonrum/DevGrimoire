@@ -82,11 +82,16 @@ function makeFakeRes() {
   return res;
 }
 
-/** Express-artiges Request-Double mit steuerbarem 'close'-Event. */
+/**
+ * Express-artiges Request-Double mit steuerbarem 'close'-Event UND einem
+ * schreibbaren `destroyed`-Flag (Runde 2: die Absicherung direkt nach
+ * `findById`, unabhängig vom 'close'-Event).
+ */
 function makeFakeReq(userId = 'u1') {
   const listeners = [];
   return {
     user: { userId },
+    destroyed: false,
     on(event, cb) { if (event === 'close') listeners.push(cb); },
     __fireClose() { for (const cb of listeners.slice()) cb(); },
   };
@@ -132,6 +137,76 @@ const clustersOk = { async findById(id) { return { _id: id }; } };
       assert.equal(state.closeCalls, 1, `close() wurde ${state.closeCalls}x aufgerufen, erwartet genau 1`);
       assert.equal(res.writableEnded, true, 'die Antwort wurde nie beendet — der Handler hing');
       assert.equal(res.writes.length, 0, 'es wurde eine Zeile gesendet, obwohl der Client schon weg war');
+    },
+  );
+
+  await check(
+    'logStream: ein Client, der geht WÄHREND clusters.findById() noch läuft, öffnet den Log-Stream gar nicht erst (Runde 2)',
+    async () => {
+      // Runde 2 (Review-Fund): Rundes-1-Fix registrierte den close-Listener
+      // VOR open(), aber NACH clusters.findById() — ein schmaleres, aber
+      // strukturell identisches Fenster wie das ursprüngliche Critical 2.
+      // Ein Client, der genau während dieses einen Lookups geht, hätte
+      // clientGone nie gesetzt gesehen, open() trotzdem aufgerufen und bei
+      // follow=true für die Lebensdauer des Pods weitergelaufen.
+      let resolveFindById;
+      const findByIdPromise = new Promise((resolve) => { resolveFindById = resolve; });
+      const clustersSlow = { async findById() { return findByIdPromise; } };
+      let openCalls = 0;
+      const logs = {
+        async open() {
+          openCalls += 1;
+          return { lines: (async function* () { })(), close() {}, error() { return undefined; } };
+        },
+      };
+      const ctrl = new KubeResourcesController({}, logs, auditStub, clustersSlow);
+      const req = makeFakeReq();
+      const res = makeFakeRes();
+
+      const handlerDone = ctrl.logStream('c1', { namespace: 'prod', pod: 'api' }, req, res);
+      // Lässt den synchronen Teil bis zum await auf findById() durchlaufen —
+      // der close-Listener ist zu diesem Zeitpunkt bereits registriert
+      // (Fix: VOR jedem await, nicht nur vor open()).
+      await new Promise((r) => setImmediate(r));
+      req.__fireClose(); // Client geht, WÄHREND findById() noch aussteht.
+      resolveFindById({ _id: 'c1' });
+      await handlerDone;
+
+      assert.equal(openCalls, 0, `logs.open() wurde ${openCalls}x aufgerufen — ein bereits gegangener Client hätte den Stream nie öffnen dürfen`);
+      assert.deepEqual(res.headers, {}, 'Header wurden gesetzt, obwohl der Client schon vor dem ersten setHeader weg war');
+      assert.equal(res.writes.length, 0, 'es wurde in die Antwort geschrieben, obwohl der Client schon weg war');
+    },
+  );
+
+  await check(
+    'logStream: req.destroyed (ohne dass close schon gefeuert hat) verhindert das Öffnen ebenfalls (Runde 2)',
+    async () => {
+      // Die zweite, synchrone Absicherung direkt nach findById: Node setzt
+      // `destroyed` beim Zerstören eines Streams sofort, das 'close'-Event
+      // selbst kann noch einen Tick brauchen. Dieser Fall testet GENAU
+      // diesen Pfad, indem er __fireClose() bewusst NICHT aufruft.
+      let resolveFindById;
+      const findByIdPromise = new Promise((resolve) => { resolveFindById = resolve; });
+      const clustersSlow = { async findById() { return findByIdPromise; } };
+      let openCalls = 0;
+      const logs = {
+        async open() {
+          openCalls += 1;
+          return { lines: (async function* () { })(), close() {}, error() { return undefined; } };
+        },
+      };
+      const ctrl = new KubeResourcesController({}, logs, auditStub, clustersSlow);
+      const req = makeFakeReq();
+      const res = makeFakeRes();
+
+      const handlerDone = ctrl.logStream('c1', { namespace: 'prod', pod: 'api' }, req, res);
+      await new Promise((r) => setImmediate(r));
+      req.destroyed = true; // Verbindung schon weg, 'close' aber (noch) nicht gefeuert.
+      resolveFindById({ _id: 'c1' });
+      await handlerDone;
+
+      assert.equal(openCalls, 0, `logs.open() wurde ${openCalls}x aufgerufen trotz req.destroyed`);
+      assert.deepEqual(res.headers, {}, 'Header wurden trotz req.destroyed gesetzt');
     },
   );
 
@@ -229,6 +304,44 @@ const clustersOk = { async findById(id) { return { _id: id }; } };
       try { await ctrl.list('c1', { kind: 'Pod' }, authReq); } catch (e) { caught = e; }
       assert.equal(caught, bug, 'der Fehler wurde ersetzt statt unverändert durchgereicht');
       assert.ok(!(caught instanceof HttpException), 'ein echter Bug wurde fälschlich in eine HttpException verpackt');
+    },
+  );
+
+  await check(
+    'guarded(): ein Bug an einem TLS-klingenden Bezeichner (skipTLSVerify) läuft UNVERÄNDERT durch, kein 503 (Runde 2)',
+    async () => {
+      // Runde 2 (Review-Fund): vorher stand hier ein /certificate|TLS|SSL/i-
+      // Textmuster auf der zusammengesetzten Meldung — dieses Modul hat
+      // lebende Bezeichner wie skipTLSVerify/tlsServerName/allowInsecureTls,
+      // ein TypeError genau an so einer Stelle hätte gematcht und wäre als
+      // warn-geloggtes 503 OHNE Stacktrace verschwunden. Der Regex ist weg;
+      // dieser Fall pinnt, dass ein solcher Bug jetzt wieder roh durchläuft.
+      const bug = new TypeError("Cannot read properties of undefined (reading 'skipTLSVerify')");
+      const resources = { async list() { throw bug; } };
+      const ctrl = new KubeResourcesController(resources, {}, auditStub, clustersOk);
+      let caught = null;
+      try { await ctrl.list('c1', { kind: 'Pod' }, authReq); } catch (e) { caught = e; }
+      assert.equal(caught, bug, 'der Fehler wurde ersetzt statt unverändert durchgereicht');
+      assert.ok(!(caught instanceof HttpException), 'ein Bug an einem TLS-klingenden Bezeichner wurde fälschlich zu 503');
+    },
+  );
+
+  await check(
+    'guarded(): eine echte OpenSSL-Verifikationsfehler-Ursache (UNABLE_TO_VERIFY_LEAF_SIGNATURE) wird zu 503 (Runde 2)',
+    async () => {
+      // Strukturelles Gegenstück zum vorigen Fall: ein ECHTER TLS-Fehler
+      // (hier direkt über .cause.code modelliert, nicht über den
+      // fetch-failed-Zweig) muss weiterhin als Transport-Störung erkannt
+      // werden — nur eben über den stabilen Code, nicht über einen Text-
+      // Treffer.
+      const err = new Error('unable to verify the first certificate');
+      err.cause = Object.assign(new Error('self-signed certificate'), { code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' });
+      const resources = { async list() { throw err; } };
+      const ctrl = new KubeResourcesController(resources, {}, auditStub, clustersOk);
+      let caught = null;
+      try { await ctrl.list('c1', { kind: 'Pod' }, authReq); } catch (e) { caught = e; }
+      assert.ok(caught instanceof HttpException, 'kein HttpException geworfen');
+      assert.equal(caught.getStatus(), 503, `Status war ${caught.getStatus && caught.getStatus()}`);
     },
   );
 

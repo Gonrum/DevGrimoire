@@ -48,6 +48,10 @@ function kubeApiExceptionMessage(err: unknown): string {
 
 const TRANSPORT_CAUSE_CODES = new Set([
   'ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'EHOSTUNREACH',
+  // TLS/Zertifikatsfehler: OpenSSL-Verifikationsfehler tragen einen dieser
+  // stabilen Codes in `.cause.code` (Review-Fund, Runde 2) — kein Textmuster
+  // nötig, und keins mehr erwünscht (siehe JSDoc unten).
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'CERT_HAS_EXPIRED',
 ]);
 
 /** Node-Fehlercode einer `.cause`-Kette, sofern vorhanden — wie `mongoErrorCode` in narrow.ts. */
@@ -59,17 +63,27 @@ function causeErrorCode(err: unknown): string | undefined {
 /**
  * Erkennt eine Downstream-/Transport-Störung (Cluster nicht erreichbar,
  * DNS/TLS-Fehler) statt eines echten Bugs im eigenen Code. undici wirft für
- * einen fehlgeschlagenen `fetch()` immer denselben äusseren
- * `TypeError: fetch failed` und packt das eigentlich Brauchbare in `.cause`
- * (ENOTFOUND, ECONNREFUSED, TLS-Meldungen) — dasselbe Muster, das
- * `errorMessageWithCause` an anderer Stelle (`KubeClientService.test()`)
- * schon auswertet.
+ * einen fehlgeschlagenen `fetch()` — `@kubernetes/client-node` v2 geht immer
+ * darüber, auch für TLS-Fehler — denselben äusseren `TypeError: fetch
+ * failed` und packt das eigentlich Brauchbare in `.cause` (ENOTFOUND,
+ * ECONNREFUSED, TLS-Codes) — dasselbe Muster, das `errorMessageWithCause`
+ * an anderer Stelle (`KubeClientService.test()`) schon auswertet.
+ *
+ * KEIN Textmuster-Fallback (Review-Fund, Runde 2 — vorher stand hier ein
+ * `/certificate|TLS|SSL/i`-Test auf der zusammengesetzten Meldung): dieses
+ * Modul hat lebende Bezeichner wie `skipTLSVerify`, `tlsServerName`,
+ * `allowInsecureTls` — ein `TypeError: Cannot read properties of undefined
+ * (reading 'skipTLSVerify')`, ein echter Bug im eigenen Code, hätte
+ * gematcht und wäre als `warn`-geloggtes 503 OHNE Stacktrace verschwunden —
+ * exakt die Fehlerklasse, die Stufe 3 (raw rethrow) erhalten soll. Der
+ * Regex kaufte dafür nichts ein: TLS-Fehler kommen ohnehin schon über den
+ * `fetch failed`-Zweig oben an, und die stabilen `.cause.code`-Werte oben
+ * decken den Rest strukturell ab.
  */
 function isTransportFailure(err: unknown): boolean {
   if (err instanceof TypeError && err.message === 'fetch failed') return true;
   const causeCode = causeErrorCode(err);
-  if (causeCode && TRANSPORT_CAUSE_CODES.has(causeCode)) return true;
-  return /certificate|TLS|SSL/i.test(errorMessageWithCause(err));
+  return causeCode !== undefined && TRANSPORT_CAUSE_CODES.has(causeCode);
 }
 
 /**
@@ -235,21 +249,30 @@ export class KubeResourcesController {
    *    Query-Parameter aber stehen, und die globale `ValidationPipe`
    *    (`forbidNonWhitelisted: true`) hätte ihn sonst als unbekanntes Feld
    *    abgelehnt, bevor der Guard ihn je sieht.
-   * 4. (Review-Fund, Critical 2) `req.on('close', …)` MUSS registriert sein,
-   *    BEVOR `open()` awaited wird. `'close'` feuert genau einmal;
-   *    passierte das während `open()` noch am Tunnel/API-Server hängt, hätte
-   *    ein erst danach registrierter Listener dieses Ereignis nie gesehen —
-   *    `res.writableEnded` wird ausschliesslich durch unser EIGENES
-   *    `res.end()` wahr, ein verschwundener Client setzt es nicht. Ein
-   *    `follow`-Stream liefe dann bis zum Ende der Pod-Ausgabe weiter, ohne
-   *    dass ihn noch jemand liest, und hielte Cluster-Verbindung und
-   *    Transport-Lease für immer. `clientGone` ist deshalb der zusätzliche
-   *    Flag, den `writableEnded` allein nicht liefert.
+   * 4. (Review-Fund, Critical 2 + Runde 2) `req.on('close', …)` MUSS
+   *    registriert sein, BEVOR IRGENDEIN `await` in diesem Handler läuft —
+   *    nicht nur vor `open()`. `'close'` feuert genau einmal auf
+   *    `IncomingMessage`; passierte das während irgendeinem `await` hier
+   *    (`clusters.findById` eingeschlossen — Runde 1 hatte den Listener
+   *    versehentlich DAHINTER registriert, ein schmaleres, aber
+   *    strukturell identisches Fenster) hätte ein erst danach registrierter
+   *    Listener dieses Ereignis nie gesehen. `res.writableEnded` wird
+   *    ausschliesslich durch unser EIGENES `res.end()` wahr, ein
+   *    verschwundener Client setzt es nicht. Ein `follow`-Stream liefe dann
+   *    bis zum Ende der Pod-Ausgabe weiter, ohne dass ihn noch jemand liest,
+   *    und hielte Cluster-Verbindung, Transport-Lease und den 15s-Heartbeat
+   *    für immer. `clientGone` ist deshalb der zusätzliche Flag, den
+   *    `writableEnded` allein nicht liefert; `req.destroyed` ist die
+   *    zusätzliche SYNCHRONE Absicherung direkt nach `findById` — Node
+   *    setzt `destroyed` beim Zerstören des Streams sofort, das `'close'`-
+   *    Event selbst kann noch einen Tick brauchen.
    * 5. (Review-Fund, Important 4) Der Cluster wird VOR dem ersten
    *    `setHeader` aufgelöst (`clusters.findById`) — ein unbekannter/
    *    ungültiger Cluster bekommt eine saubere JSON-Antwort (400/404) statt
    *    eines halb geöffneten SSE-Streams. Gleiches Muster wie
-   *    `workspaces.controller.ts` (`execStream`).
+   *    `workspaces.controller.ts` (`execStream`) — bewusst NICHT geändert
+   *    dort, siehe Runde-2-Notiz im Report: derselbe Listener-nach-await-
+   *    Fehler steckt dort ausserhalb dieses Tasks.
    * 6. (Review-Fund, Minor) Heartbeat alle 15s wie `chat.controller.ts` —
    *    ein ruhiger `follow`-Stream produziert sonst minutenlang nichts und
    *    nginx' `proxy_read_timeout` (Default 60s) kappt die Verbindung, ohne
@@ -263,11 +286,35 @@ export class KubeResourcesController {
   ): Promise<void> {
     const started = Date.now();
 
+    // Fix 4 (s.o.): registriert VOR JEDEM `await` in diesem Handler,
+    // eingeschlossen dem `clusters.findById` gleich unten — nicht nur vor
+    // `open()` (das war die Runde-1-Version dieses Fixes, die dieselbe
+    // Lücke nur enger gemacht, nicht geschlossen hat). `session` ist zu
+    // diesem Zeitpunkt noch undefined, falls der Client geht, während
+    // `findById`/`open()` noch laufen — `session?.close()` ist dann ein
+    // No-Op, deshalb die `clientGone`-Nachträge weiter unten.
+    let session: Awaited<ReturnType<KubeLogsService['open']>> | undefined;
+    let clientGone = false;
+    req.on('close', () => {
+      clientGone = true;
+      session?.close();
+    });
+
     // Fix 5 (s.o.): VOR dem ersten setHeader. Wirft `clusters.findById` (400
     // ungültige Id, 404 unbekannter Cluster), ist noch keine Response-Zeile
     // geschrieben — Nests Filter liefert ein sauberes JSON, kein halb
     // geöffneter SSE-Stream.
     await this.clusters.findById(id);
+
+    // Runde 2 (Review-Fund): der Client kann WÄHREND `findById` gegangen
+    // sein. `clientGone` deckt den Fall ab, in dem `'close'` bereits
+    // gefeuert hat; `req.destroyed` zusätzlich den Fall, in dem der Stream
+    // schon zerstört ist, das `'close'`-Event selbst aber erst einen Tick
+    // später kommt. Beides führt hierher, BEVOR auch nur ein Header steht
+    // oder `open()` je aufgerufen wird — kein Transport wird erst gar nicht
+    // erworben, es gibt also nichts freizugeben ausser dem, was `close()`
+    // im Listener oben schon (als No-Op) versucht hat.
+    if (clientGone || req.destroyed) return;
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -284,18 +331,6 @@ export class KubeResourcesController {
     const heartbeat = setInterval(() => {
       if (!res.writableEnded) res.write(': ping\n\n');
     }, 15000);
-
-    let session: Awaited<ReturnType<KubeLogsService['open']>> | undefined;
-    // Fix 4 (s.o.): registriert VOR dem `await this.logs.open(...)` unten,
-    // nicht danach. `session` ist zu diesem Zeitpunkt noch undefined, falls
-    // der Client geht, während `open()` selbst noch läuft — `session?.close()`
-    // ist dann ein No-Op, deshalb der `clientGone`-Nachtrag direkt nach dem
-    // `await`.
-    let clientGone = false;
-    req.on('close', () => {
-      clientGone = true;
-      session?.close();
-    });
 
     try {
       try {
