@@ -196,6 +196,67 @@ const clustersStub = { async findById(id) { return { _id: id, defaultNamespace: 
     assert.ok(seen.limit <= 500, `limit war ${seen.limit}, erwartet <= 500`);
   });
 
+  await check('events() projiziert auf schmale Zeilen und sortiert neueste zuerst', async () => {
+    const client = makeClientStub({ listNamespacedEvent: { items: [
+      { type: 'Normal', reason: 'Pulled', message: 'alt', count: 1,
+        lastTimestamp: '2026-08-01T10:00:00Z',
+        involvedObject: { kind: 'Pod', name: 'api' }, metadata: { namespace: 'prod' } },
+      { type: 'Warning', reason: 'BackOff', message: 'neu', count: 7,
+        lastTimestamp: '2026-08-01T12:00:00Z',
+        involvedObject: { kind: 'Pod', name: 'api' }, metadata: { namespace: 'prod' } },
+    ] } });
+    const svc = new KubeResourcesService(clustersStub, client);
+    const rows = await svc.events('c1', { namespace: 'prod' });
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].reason, 'BackOff', 'nicht nach Zeit sortiert');
+    assert.equal(rows[0].count, 7);
+    assert.equal(rows[0].involvedKind, 'Pod');
+    assert.equal(client._state.released, 1);
+  });
+
+  await check('events() ohne lastTimestamp wirft nicht', async () => {
+    const client = makeClientStub({ listNamespacedEvent: { items: [
+      { type: 'Normal', reason: 'X', involvedObject: { kind: 'Pod', name: 'a' } },
+    ] } });
+    const svc = new KubeResourcesService(clustersStub, client);
+    const rows = await svc.events('c1', { namespace: 'prod' });
+    assert.equal(rows.length, 1);
+  });
+
+  await check('describe() liefert Objekt, Events und Conditions', async () => {
+    const client = makeClientStub({
+      readNamespacedPod: {
+        kind: 'Pod', metadata: { name: 'api', namespace: 'prod' },
+        status: { phase: 'Running', conditions: [
+          { type: 'Ready', status: 'False', reason: 'ContainersNotReady', message: 'warte' },
+        ] },
+      },
+      listNamespacedEvent: { items: [
+        { type: 'Warning', reason: 'BackOff', lastTimestamp: '2026-08-01T12:00:00Z',
+          involvedObject: { kind: 'Pod', name: 'api' }, metadata: { namespace: 'prod' } },
+        { type: 'Normal', reason: 'Andere', lastTimestamp: '2026-08-01T12:00:00Z',
+          involvedObject: { kind: 'Pod', name: 'nicht-api' }, metadata: { namespace: 'prod' } },
+      ] },
+    });
+    const svc = new KubeResourcesService(clustersStub, client);
+    const out = await svc.describe('c1', 'Pod', 'api', 'prod');
+    assert.equal(out.conditions.length, 1);
+    assert.equal(out.conditions[0].reason, 'ContainersNotReady');
+    assert.equal(out.events.length, 1, 'Events fremder Objekte wurden nicht ausgefiltert');
+    assert.equal(out.events[0].reason, 'BackOff');
+  });
+
+  await check('describe() gibt den Transport genau einmal frei', async () => {
+    const client = makeClientStub({
+      readNamespacedPod: { kind: 'Pod', metadata: { name: 'api', namespace: 'prod' } },
+      listNamespacedEvent: { items: [] },
+    });
+    const svc = new KubeResourcesService(clustersStub, client);
+    await svc.describe('c1', 'Pod', 'api', 'prod');
+    assert.equal(client._state.released, 1,
+      `released=${client._state.released} — describe() macht zwei Abfragen, darf aber nur einmal freigeben`);
+  });
+
   console.log('');
   console.log(`Kube resources checks: ${total - failures}/${total} passed`);
   if (failures > 0) process.exit(1);

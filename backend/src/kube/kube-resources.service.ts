@@ -21,6 +21,31 @@ export interface KubeListOptions {
   limit?: number;
 }
 
+export interface KubeEventRow {
+  type?: string;
+  reason?: string;
+  message?: string;
+  count?: number;
+  lastTimestamp?: string;
+  involvedKind?: string;
+  involvedName?: string;
+  namespace?: string;
+}
+
+export interface KubeCondition {
+  type?: string;
+  status?: string;
+  reason?: string;
+  message?: string;
+  lastTransitionTime?: string;
+}
+
+export interface KubeDescribeResult {
+  object: unknown;
+  events: KubeEventRow[];
+  conditions: KubeCondition[];
+}
+
 /**
  * Wie `isNullaryMethod` in `common/narrow.ts`, nur mit einem Parameter: jede
  * Ressourcen-Methode des generierten Clients (`listNamespacedPod`,
@@ -171,5 +196,99 @@ export class KubeResourcesService {
   async getYaml(clusterId: string, kindInput: string, name: string, namespace?: string): Promise<string> {
     const obj = await this.get(clusterId, kindInput, name, namespace);
     return toYamlSafe(obj);
+  }
+
+  private projectEvent(raw: unknown): KubeEventRow {
+    const involved = isRecord(raw) && isRecord(raw.involvedObject) ? raw.involvedObject : undefined;
+    const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+    const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
+    return {
+      type: isRecord(raw) ? str(raw.type) : undefined,
+      reason: isRecord(raw) ? str(raw.reason) : undefined,
+      message: isRecord(raw) ? str(raw.message)?.slice(0, 1000) : undefined,
+      count: isRecord(raw) ? num(raw.count) : undefined,
+      lastTimestamp: isRecord(raw) ? str(raw.lastTimestamp) ?? str(raw.eventTime) : undefined,
+      involvedKind: involved ? str(involved.kind) : undefined,
+      involvedName: involved ? str(involved.name) : undefined,
+      namespace: isRecord(raw) && isRecord(raw.metadata) ? str(raw.metadata.namespace) : undefined,
+    };
+  }
+
+  /** Neueste zuerst. Ereignisse ohne Zeitstempel sinken ans Ende. */
+  private sortEvents(rows: KubeEventRow[]): KubeEventRow[] {
+    return [...rows].sort((a, b) => {
+      const at = a.lastTimestamp ? Date.parse(a.lastTimestamp) : 0;
+      const bt = b.lastTimestamp ? Date.parse(b.lastTimestamp) : 0;
+      return bt - at;
+    });
+  }
+
+  async events(
+    clusterId: string,
+    opts: { namespace?: string; involvedName?: string; limit?: number },
+  ): Promise<KubeEventRow[]> {
+    const rows = await this.withConfig(clusterId, async (api) =>
+      this.fetchEvents(api('core'), opts));
+    return rows;
+  }
+
+  /** Gemeinsamer Kern für `events()` und `describe()` — eine Verbindung, zwei Nutzer. */
+  private async fetchEvents(
+    coreClient: unknown,
+    opts: { namespace?: string; involvedName?: string; limit?: number },
+  ): Promise<KubeEventRow[]> {
+    const spec = KUBE_KIND_SPECS.Event;
+    const useNamespaced = Boolean(opts.namespace);
+    const method = useNamespaced && spec.listNamespaced ? spec.listNamespaced : spec.listAll;
+    const param: Record<string, unknown> = { limit: this.clampLimit(opts.limit) };
+    if (useNamespaced) param.namespace = opts.namespace;
+
+    const result = await this.callApi(coreClient, method, param);
+    const items = isRecord(result) && Array.isArray(result.items) ? result.items : [];
+    let rows = items.map((item) => this.projectEvent(item));
+    if (opts.involvedName) {
+      rows = rows.filter((r) => r.involvedName === opts.involvedName);
+    }
+    return this.sortEvents(rows);
+  }
+
+  async describe(
+    clusterId: string,
+    kindInput: string,
+    name: string,
+    namespace?: string,
+  ): Promise<KubeDescribeResult> {
+    const kind = this.assertKind(kindInput);
+    const spec = KUBE_KIND_SPECS[kind];
+    if (spec.namespaced && !namespace) {
+      throw new BadRequestException(`${kind} braucht einen Namespace`);
+    }
+
+    // Beide Abfragen teilen sich EINE aufgelöste Config. Zwei getrennte
+    // withConfig-Aufrufe würden bei Tunnel-Clustern zweimal acquiren und
+    // freigeben — korrekt, aber unnötig teuer.
+    return this.withConfig(clusterId, async (api) => {
+      const client = api(spec.group);
+      const param: Record<string, unknown> = { name };
+      if (spec.namespaced) param.namespace = namespace;
+      const raw = await this.callApi(client, spec.read, param);
+      const stripped = stripHeavyMetadata(raw);
+      const object = kind === 'Secret' ? redactSecret(stripped) : stripped;
+
+      const conditions: KubeCondition[] = [];
+      if (isRecord(stripped) && isRecord(stripped.status) && Array.isArray(stripped.status.conditions)) {
+        for (const c of stripped.status.conditions) {
+          if (!isRecord(c)) continue;
+          const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+          conditions.push({
+            type: str(c.type), status: str(c.status), reason: str(c.reason),
+            message: str(c.message), lastTransitionTime: str(c.lastTransitionTime),
+          });
+        }
+      }
+
+      const events = await this.fetchEvents(api('core'), { namespace, involvedName: name });
+      return { object, events, conditions };
+    });
   }
 }
