@@ -43,10 +43,20 @@ export function rewriteServerUrl(
  * gleichzeitige `resolve()`-Aufrufe für denselben Cluster teilen sich einen
  * Tunnel per Refcount; der Tunnel wird erst geschlossen, wenn der letzte
  * Halter freigegeben hat und die Idle-TTL abgelaufen ist.
+ *
+ * Gecacht wird der **Promise**, nicht erst das aufgelöste Ergebnis (Fix
+ * Review-Runde 1): `this.tunnels.get(key)` und `this.tunnels.set(key, …)`
+ * lägen sonst auf verschiedenen Seiten eines `await` — zwei gleichzeitige
+ * `resolve()`-Aufrufe für denselben, noch ungecachten Cluster sähen beide
+ * "nichts gecacht" und öffneten beide einen echten SSH-Tunnel; der zuletzt
+ * schreibende gewinnt den Map-Slot, der andere Tunnel bliebe für immer
+ * offen und unerreichbar. Weil der Promise synchron gecacht wird, bevor
+ * überhaupt ein `await` läuft, sieht ein zweiter, im selben Tick gestarteter
+ * Aufruf garantiert den bereits gecachten Promise.
  */
 @Injectable()
 export class KubeTransportService {
-  private readonly tunnels = new Map<string, TunnelEntry>();
+  private readonly tunnels = new Map<string, Promise<TunnelEntry>>();
   private readonly idleTtlMs: number;
 
   constructor(
@@ -67,48 +77,82 @@ export class KubeTransportService {
     }
 
     const key = String(cluster._id);
+    const sshConnectionId = cluster.sshConnectionId.toString();
     const target = new URL(cluster.clusterServer);
     const dstPort = target.port ? Number(target.port) : 443;
 
-    let entry = this.tunnels.get(key);
-    if (!entry) {
-      const opened = await this.sshSessionService.openTunnel(
-        cluster.sshConnectionId.toString(),
-        target.hostname,
-        dstPort,
-      );
-      entry = { localPort: opened.localPort, refs: 0, close: opened.close };
-      this.tunnels.set(key, entry);
+    let entryPromise = this.tunnels.get(key);
+    if (!entryPromise) {
+      entryPromise = this.sshSessionService
+        .openTunnel(sshConnectionId, target.hostname, dstPort)
+        .then((opened): TunnelEntry => ({ localPort: opened.localPort, refs: 0, close: opened.close }));
+      this.tunnels.set(key, entryPromise);
+      // Schlägt das Öffnen fehl, darf der Key nicht dauerhaft mit einem
+      // abgelehnten Promise belegt bleiben — sonst könnte kein späterer
+      // Aufruf je wieder einen Tunnel für diesen Cluster aufbauen. Nur
+      // löschen, wenn zwischenzeitlich kein neuerer Versuch den Slot bereits
+      // übernommen hat.
+      const pending = entryPromise;
+      pending.catch(() => {
+        if (this.tunnels.get(key) === pending) this.tunnels.delete(key);
+      });
     }
+
+    const entry = await entryPromise;
+
     if (entry.idleTimer) {
       clearTimeout(entry.idleTimer);
       entry.idleTimer = undefined;
     }
     entry.refs += 1;
 
-    const { url, servername } = rewriteServerUrl(cluster.clusterServer, entry.localPort);
+    // rewriteServerUrl() kann werfen (z.B. clusterServer ist kein https).
+    // Schlägt sie fehl, bekommt dieser Aufrufer nie eine release()-Closure
+    // zurück — der eben gesetzte Ref muss deshalb über denselben Pfad wie
+    // ein normales release() zurückgenommen werden (Fix Review-Runde 1).
+    // Ein bloßes "vor dem Increment validieren" reicht NICHT: bei einem
+    // frisch geöffneten Tunnel (refs war 0) bliebe der Eintrag sonst für
+    // immer mit refs=0 in der Map, ohne dass je ein closeNow eingeplant
+    // wird — der Tunnel bliebe trotzdem offen, nur eben ohne
+    // Refcount-Korruption. releaseEntry() enthält die einzige Stelle, die
+    // "auf 0 gefallen → schließen" auslöst, daher muss auch dieser
+    // Fehlerpfad dort durch.
+    let endpoint: { url: string; servername: string };
+    try {
+      endpoint = rewriteServerUrl(cluster.clusterServer, entry.localPort);
+    } catch (err) {
+      this.releaseEntry(key, entryPromise, entry);
+      throw err;
+    }
+
     let released = false;
     return {
-      url,
-      servername,
+      url: endpoint.url,
+      servername: endpoint.servername,
       release: () => {
         if (released) return; // doppeltes release darf fremde Refs nicht fressen
         released = true;
-        this.releaseTunnel(key);
+        // Schließt über den konkreten Promise/Entry, den dieser Aufruf
+        // tatsächlich erhöht hat — nicht über einen erneuten Lookup per
+        // Key. Ein erneuter Lookup würde bei gleichzeitigen Aufrufen den
+        // jeweils aktuellen (u.U. fremden) Map-Eintrag treffen und dessen
+        // Refcount statt des eigenen verändern.
+        this.releaseEntry(key, entryPromise, entry);
       },
     };
   }
 
-  private releaseTunnel(key: string): void {
-    const entry = this.tunnels.get(key);
-    if (!entry) return;
+  private releaseEntry(key: string, entryPromise: Promise<TunnelEntry>, entry: TunnelEntry): void {
     entry.refs -= 1;
     if (entry.refs > 0) return;
     const closeNow = () => {
-      const current = this.tunnels.get(key);
-      if (!current || current.refs > 0) return;
-      current.close();
-      this.tunnels.delete(key);
+      if (entry.refs > 0) return;
+      entry.close();
+      // Nur aus der Map nehmen, wenn dort noch genau dieser Tunnel hängt —
+      // ein zwischenzeitlich neu geöffneter Tunnel für denselben Cluster
+      // darf nicht durch das verspätete Aufräumen eines alten entfernt
+      // werden.
+      if (this.tunnels.get(key) === entryPromise) this.tunnels.delete(key);
     };
     if (this.idleTtlMs <= 0) {
       setImmediate(closeNow);
