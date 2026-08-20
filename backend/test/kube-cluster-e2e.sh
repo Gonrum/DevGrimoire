@@ -139,6 +139,35 @@ CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" \
 [ "$CODE" = "400" ] || fail "?limit=abc auf /audit ergab HTTP $CODE statt 400"
 pass "audit lehnt nicht-numerisches limit mit 400 ab (statt NaN durchzureichen)"
 
+# --- Ressourcen-Routen: existieren und scheitern sauber ------------------
+CODE=$(curl -sS -o /tmp/kube-res.json -w '%{http_code}' "${AUTH[@]}" \
+  "${API_URL}/api/kube-clusters/${CLUSTER_ID}/resources?kind=Pod&namespace=default")
+[ "$CODE" != "404" ] || fail "Route /resources existiert nicht"
+[ "$CODE" != "500" ] || fail "Ressourcen-Route ergab 500 statt eines sauberen Fehlers: $(cat /tmp/kube-res.json)"
+pass "Ressourcen-Route antwortet ohne Serverfehler (HTTP $CODE)"
+
+CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" \
+  "${API_URL}/api/kube-clusters/${CLUSTER_ID}/resources?kind=Widget")
+[ "$CODE" = "400" ] || fail "unbekanntes Kind ergab HTTP $CODE statt 400"
+pass "unbekanntes Kind wird mit 400 abgelehnt"
+
+CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" \
+  "${API_URL}/api/kube-clusters/${CLUSTER_ID}/resources?kind=Pod&limit=abc")
+[ "$CODE" = "400" ] || fail "nicht-numerisches limit ergab HTTP $CODE statt 400"
+pass "nicht-numerisches limit wird mit 400 abgelehnt"
+
+CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" \
+  "${API_URL}/api/kube-clusters/${CLUSTER_ID}/logs/stream?namespace=default&pod=api")
+[ "$CODE" != "404" ] || fail "Log-Stream-Route existiert nicht"
+[ "$CODE" != "500" ] || fail "Log-Stream-Route ergab 500"
+pass "Log-Stream-Route antwortet ohne Serverfehler (HTTP $CODE)"
+
+# --- Ein Zugriff auf einen unbekannten Cluster ist 404, nicht 500 --------
+CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" \
+  "${API_URL}/api/kube-clusters/000000000000000000000000/resources?kind=Pod")
+[ "$CODE" = "404" ] || fail "unbekannte Cluster-Id ergab HTTP $CODE statt 404"
+pass "unbekannte Cluster-Id ergibt 404"
+
 # --- 10. Löschen räumt auf -------------------------------------------------
 curl -sS "${AUTH[@]}" -X DELETE "${API_URL}/api/kube-clusters/${CLUSTER_ID}" >/dev/null
 CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" "${API_URL}/api/kube-clusters/${CLUSTER_ID}")

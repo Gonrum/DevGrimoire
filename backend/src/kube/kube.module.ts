@@ -10,6 +10,7 @@ import { KubeAuditService } from './kube-audit.service';
 import { KubeResourcesService } from './kube-resources.service';
 import { KubeLogsService } from './kube-logs.service';
 import { KubeController } from './kube.controller';
+import { KubeResourcesController } from './kube-resources.controller';
 import { SecretsModule } from '../secrets/secrets.module';
 import { SshModule } from '../ssh/ssh.module';
 
@@ -27,7 +28,7 @@ import { SshModule } from '../ssh/ssh.module';
     // SshSessionService liefert openTunnel für transport="ssh-tunnel".
     SshModule,
   ],
-  controllers: [KubeController],
+  controllers: [KubeController, KubeResourcesController],
   providers: [
     KubeClustersService, KubeTransportService, KubeClientService, KubeAuditService,
     KubeResourcesService, KubeLogsService,

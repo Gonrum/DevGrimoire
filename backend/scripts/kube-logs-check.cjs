@@ -25,7 +25,7 @@ const { KubeLogsService } = loadCompiled('kube/kube-logs.service.js');
 // hängt und der Event-Loop danach einfach leerläuft — Exit 0 und druckt
 // die Zusammenfassung nie. Ein Timeout pro Fall (unten in `check()`) ist
 // die primäre Abwehr; diese Zählung ist das zweite Netz.
-const EXPECTED_CHECKS = 15;
+const EXPECTED_CHECKS = 16;
 const CHECK_TIMEOUT_MS = 3000;
 
 let failures = 0, total = 0;
@@ -129,6 +129,34 @@ function makePipedEnv() {
           setImmediate(() => src.emit('error', new Error('This operation was aborted')));
         },
       };
+    },
+  });
+  return { state, client, logFactory };
+}
+
+/**
+ * Wie `makePipedEnv`, aber die Quelle bricht SPONTAN mit einem Fehler ab —
+ * nicht als Folge unseres eigenen `close()`/`abort()`. Bildet einen echten
+ * Verbindungsabbruch mitten in einem `follow`-Stream nach (Task 5, K2,
+ * carried requirement 1 aus dem Review von Task 4): `Log.log()` pipet die
+ * Quelle ohne eigenen 'error'-Listener, und `finish()` beendet `stream`
+ * bewusst über `end()`, nicht `destroy()` — der Fehler selbst erreicht
+ * `lines` also NIE als Reject, nur als reguläres Ende.
+ */
+function makePipedErrorEnv(chunks) {
+  const state = { released: 0 };
+  const client = {
+    async buildConfig() { return { kc: {}, release: () => { state.released += 1; } }; },
+  };
+  const logFactory = () => ({
+    async log(ns, pod, container, stream) {
+      const src = new Readable({ read() {} });
+      src.pipe(stream); // wie log.js — bewusst KEIN error-Listener auf src
+      setImmediate(() => {
+        for (const c of chunks) src.push(c);
+        setImmediate(() => src.emit('error', new Error('Verbindung verloren')));
+      });
+      return { abort: () => {} };
     },
   });
   return { state, client, logFactory };
@@ -391,6 +419,24 @@ async function collect(iterable, max = 10) {
     const session = await svc.open('c1', 'prod', 'api', {});
     const lines = await collect(session.lines);
     assert.deepEqual(lines, ['erste', 'keinzeilenumbruchamende']);
+  });
+
+  // Task 5 (K2): carried requirement 1 aus dem Review von Task 4 — ein
+  // Verbindungsabbruch während `follow` darf bei der SSE-Schicht (Task 5)
+  // nicht als sauberes Ende ankommen. `KubeLogSession` bekam dafür
+  // `error()`; dieser Fall pinnt, dass er nach einem spontanen Quell-Fehler
+  // tatsächlich gesetzt ist — und nicht nur bei explizitem close()/abort().
+
+  await check('ein spontaner Quell-Fehler beendet lines() sauber, aber session.error() meldet ihn', async () => {
+    const env = makePipedErrorEnv(['erste\n']);
+    const svc = new KubeLogsService(clustersStub, env.client, env.logFactory);
+    const session = await svc.open('c1', 'prod', 'api', { follow: true });
+    const lines = await collect(session.lines);
+    assert.deepEqual(lines, ['erste']);
+    assert.equal(env.state.released, 1);
+    const err = session.error();
+    assert.ok(err, 'session.error() hätte den Verbindungsabbruch melden müssen, meldete aber nichts');
+    assert.match(err, /Verbindung verloren/);
   });
 
   console.log('');

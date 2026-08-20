@@ -19,6 +19,20 @@ export interface KubeLogSession {
   lines: AsyncIterable<string>;
   /** Bricht ab und gibt den Transport frei. Mehrfach aufrufbar. */
   close: () => void;
+  /**
+   * Meldungstext, falls der Stream durch einen Verbindungsfehler beendet
+   * wurde, statt regulär oder durch einen expliziten `close()`.
+   *
+   * Grund für dieses Feld statt eines geworfenen Fehlers: ein Quell-Fehler,
+   * der über den `'pipe'`-Listener (siehe unten) abgefangen wird, endet
+   * `stream` bewusst über `stream.end()`, nicht `.destroy()` — `lines`
+   * bekommt also ein reguläres `'end'`, keinen Reject. Ohne dieses Feld ist
+   * ein abgebrochener Follow-Stream vom Konsumenten aus nicht von einem
+   * Stream zu unterscheiden, der einfach zu Ende ist. Erst NACH dem
+   * vollständigen Durchlauf von `lines` aussagekräftig — undefined vorher
+   * heisst nur "noch kein Fehler gesehen", nicht "wird keinen geben".
+   */
+  error: () => string | undefined;
 }
 
 /** Injizierbar, damit der Check ohne Cluster auskommt (Muster: SshClientFactory). */
@@ -99,6 +113,13 @@ export class KubeLogsService {
     // bringt hier keinen zusätzlichen Nutzen — nur das Risiko oben.
     let closed = false;
     let abort: (() => void) | undefined;
+    // Task 5 (K2): einzige Stelle, an der ein Verbindungsfehler festgehalten
+    // wird, bevor `finish()` den Stream sauber über `end()` schliesst — ohne
+    // das liest die SSE-Schicht einen abgebrochenen Follow-Stream als
+    // vollständiges Ende ("done") statt als Fehler. Wird NUR von den beiden
+    // 'error'-Listenern unten gesetzt (ein selbst ausgelöstes close()/abort()
+    // setzt es nicht), s. `KubeLogSession.error` oben.
+    let lastError: string | undefined;
     const finish = () => {
       if (closed) return;
       closed = true;
@@ -126,7 +147,8 @@ export class KubeLogsService {
         // kein neuer Befund. Der Listener bleibt trotzdem bestehen, weil
         // allein seine Anwesenheit die uncaught exception verhindert.
         if (closed) return;
-        this.logger.warn(`Log-Quelle ${namespace}/${pod}: ${errorMessage(err)}`);
+        lastError = errorMessage(err);
+        this.logger.warn(`Log-Quelle ${namespace}/${pod}: ${lastError}`);
         finish();
       });
     });
@@ -155,14 +177,15 @@ export class KubeLogsService {
       // `stream` schreiben wollen ("write after end") — erwartet, kein
       // eigenständiger Fehler.
       if (closed) return;
-      this.logger.warn(`Log-Stream ${namespace}/${pod}: ${errorMessage(err)}`);
+      lastError = errorMessage(err);
+      this.logger.warn(`Log-Stream ${namespace}/${pod}: ${lastError}`);
       finish();
     });
     stream.on('end', finish);
     stream.on('close', finish);
 
     const lines = this.toLines(stream, finish);
-    return { lines, close: finish };
+    return { lines, close: finish, error: () => lastError };
   }
 
   /**
