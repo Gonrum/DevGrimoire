@@ -71,7 +71,8 @@
     "check:briefing-allowlist": "node scripts/briefing-allowlist-check.cjs",
     "check:replication-entity-maps": "node scripts/replication-entity-maps-check.cjs",
     "check:kubeconfig-parser": "node scripts/kubeconfig-parser-check.cjs",
-    "check:kube-schema": "node scripts/kube-schema-check.cjs"
+    "check:kube-schema": "node scripts/kube-schema-check.cjs",
+    "check:kube-service": "node scripts/kube-service-units-check.cjs"
   },
   "dependencies": {
     "@kubernetes/client-node": "^2.0.0",
