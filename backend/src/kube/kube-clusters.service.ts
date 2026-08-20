@@ -1,4 +1,6 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { KubeCluster, KubeClusterDocument, KubePrometheusConfig } from './schemas/kube-cluster.schema';
@@ -7,6 +9,8 @@ import { SecretsService } from '../secrets/secrets.service';
 import { parseKubeconfig } from './kubeconfig-parser';
 import { KubeTransportService, requireHttpsUrl } from './kube-transport.service';
 import { isDuplicateKeyError } from '../common/narrow';
+import { RequestContext } from '../common/request-context';
+import { UserRole } from '../auth/schemas/user.schema';
 import { CreateKubeClusterDto, KubePrometheusDto } from './dto/create-kube-cluster.dto';
 import { UpdateKubeClusterDto } from './dto/update-kube-cluster.dto';
 
@@ -49,7 +53,37 @@ export class KubeClustersService {
     return { ...dto, path: dto.path ?? '/' };
   }
 
+  /**
+   * readOnly=false und allowMcpWrites=true sind der eigentliche Hebel — ein
+   * Kube-Cluster mit Schreibrechten, dazu für MCP-Tools freigegeben — und
+   * laut Spec admin-only. Alles andere an Cluster-CRUD ist unreguliert, wie
+   * bei SSH-Connections. Gilt für create() UND update(), nicht nur die Route:
+   * beide sind die einzigen Schreibpfade auf diese Felder.
+   *
+   * Kein Actor (interner Aufrufer, z.B. Migration, MCP-Tool ohne HTTP-Kontext)
+   * bleibt ungegated — dieselbe Konvention wie in SecretsService
+   * (`if (actor && …)`): JwtAuthGuard hängt global, jeder echte HTTP-Aufruf
+   * hat also einen Actor; ein fehlender Actor bedeutet einen vertrauenswürdigen
+   * internen Aufrufer, keine Lücke.
+   */
+  private assertFlagPermission(dto: { readOnly?: boolean; allowMcpWrites?: boolean }): void {
+    const actor = RequestContext.getUser();
+    if (!actor) return;
+    // `RequestUser.role` ist `string` (kommt aus JWT/DB, nicht aus dem
+    // TS-Enum) — dieselbe Verbreiterung wie in RolesGuard.canActivate(),
+    // damit der Vergleich keine Behauptung über den Enum-Ursprung macht.
+    const adminRole: string = UserRole.ADMIN;
+    if (actor.role === adminRole) return;
+    if (dto.readOnly === false) {
+      throw new ForbiddenException('readOnly=false erfordert Admin-Rechte');
+    }
+    if (dto.allowMcpWrites === true) {
+      throw new ForbiddenException('allowMcpWrites=true erfordert Admin-Rechte');
+    }
+  }
+
   async create(dto: CreateKubeClusterDto): Promise<KubeClusterDocument> {
+    this.assertFlagPermission(dto);
     // Scope-Invariante vorab prüfen, nicht dem Pre-Validate-Hook überlassen —
     // gleiche Begründung wie bei den Invarianten weiter unten: der Hook wirft
     // einen nackten Error, den Mongoose als ValidationError verpackt und Nest
@@ -211,6 +245,7 @@ export class KubeClustersService {
   }
 
   async update(id: string, dto: UpdateKubeClusterDto): Promise<KubeClusterDocument> {
+    this.assertFlagPermission(dto);
     // Keine Scope-Invariante hier zu prüfen: UpdateKubeClusterDto lässt
     // projectId/customerId absichtlich aus (Scope ist unveränderlich), also
     // rührt update() doc.projectId/doc.customerId nie an. Der Zustand, den

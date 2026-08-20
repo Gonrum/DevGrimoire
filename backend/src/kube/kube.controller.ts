@@ -1,6 +1,6 @@
 import {
   BadRequestException,
-  Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Req, UseGuards,
+  Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Req,
 } from '@nestjs/common';
 import { KubeClustersService } from './kube-clusters.service';
 import { KubeClientService, KubeConnectionTestResult } from './kube-client.service';
@@ -12,9 +12,6 @@ import { ParseKubeconfigDto } from './dto/parse-kubeconfig.dto';
 import { KubeAuditQueryDto } from './dto/audit-query.dto';
 import { KubeClusterDocument } from './schemas/kube-cluster.schema';
 import { KubeAuditService } from './kube-audit.service';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { UserRole } from '../auth/schemas/user.schema';
 
 /** `req.user.userId` wird vom global registrierten JwtAuthGuard gesetzt. */
 interface AuthRequest {
@@ -23,8 +20,16 @@ interface AuthRequest {
 
 /**
  * Auth: `JwtAuthGuard` hängt global in app.module.ts, deshalb kein
- * `@UseGuards` für die Lese- und CRUD-Routen. Das Umschalten der
- * Rechte-Flags ist Admin-only — das ist der eigentliche Hebel.
+ * `@UseGuards` für die Lese- und CRUD-Routen. Cluster-CRUD ist wie bei
+ * SSH-Connections unreguliert — auch `create`/`update` selbst sind es.
+ *
+ * Der eigentliche Hebel sind die beiden Rechte-Flags `readOnly`/
+ * `allowMcpWrites`: die sind admin-only, aber pro Feld, nicht pro Route
+ * gegated — `KubeClustersService.assertFlagPermission()` prüft das in
+ * `create()` UND `update()`. Eine Route-Guard hätte entweder `POST`
+ * offen gelassen (die DTO nimmt beide Flags an) oder — auf `PATCH`
+ * gesetzt — jedem Nicht-Admin auch das blosse Umbenennen verboten, was
+ * die Spec nie verlangt hat.
  */
 @Controller('kube-clusters')
 export class KubeController {
@@ -98,8 +103,6 @@ export class KubeController {
   }
 
   @Patch(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN)
   async update(@Param('id') id: string, @Body() dto: UpdateKubeClusterDto) {
     return this.toResponse(await this.clusters.update(id, dto));
   }

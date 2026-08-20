@@ -17,8 +17,15 @@ function loadCompiled(rel) {
 }
 
 const { KubeClustersService } = loadCompiled('kube/kube-clusters.service.js');
+const { RequestContext } = loadCompiled('common/request-context.js');
+const { UserRole } = loadCompiled('auth/schemas/user.schema.js');
 const mongoose = loadCompiled('../node_modules/mongoose/index.js');
 const { Types } = mongoose;
+
+/** I3: läuft `fn` mit einem HTTP-artigen Actor im RequestContext. */
+function asActor(role, fn) {
+  return RequestContext.run({ userId: 'u-' + role, username: role, role }, undefined, fn);
+}
 
 let failures = 0, total = 0;
 function check(label, fn) {
@@ -304,6 +311,60 @@ function makeSecretsService() {
     assert.equal(secrets._created.length, 0, 'darf kein Secret anlegen, bevor der Scope geprüft ist');
   });
 
+  // ------------------------------------------------------------------
+  // create(): Admin-Gate für readOnly/allowMcpWrites (I3)
+  // ------------------------------------------------------------------
+  // Der eigentliche Hebel ist nicht die Route (POST war komplett offen,
+  // CreateKubeClusterDto nimmt readOnly/allowMcpWrites klaglos an), sondern
+  // die beiden Flags selbst — für JEDEN Aufrufer, admin oder nicht.
+
+  await check('create lehnt readOnly=false von einem Nicht-Admin als 403 ab und nennt das Feld (I3)', async () => {
+    const svc = new KubeClustersService(makeModel(), makeModel(), makeSecretsService(), makeTransportStub());
+    const err = await asActor(UserRole.USER, () => svc.create({
+      label: 'X', slug: 'x', projectId: String(PROJECT), kubeconfig: GOOD_KUBECONFIG,
+      contextName: 'prod', transport: 'direct', readOnly: false,
+    })).then(() => null, (e) => e);
+    assert.ok(err, 'hätte fehlschlagen müssen');
+    assert.equal(err.status, 403, 'muss Forbidden sein, nicht BadRequest');
+    assert.match(String(err.message), /readOnly/, 'Meldung muss das Feld benennen');
+  });
+
+  await check('create lehnt allowMcpWrites=true von einem Nicht-Admin als 403 ab und nennt das Feld (I3)', async () => {
+    // readOnly bewusst NICHT mitgesetzt: sonst würde assertFlagPermission
+    // schon am ersten (readOnly-)Zweig scheitern und der Test könnte den
+    // allowMcpWrites-Zweig gar nicht erreichen.
+    const svc = new KubeClustersService(makeModel(), makeModel(), makeSecretsService(), makeTransportStub());
+    const err = await asActor(UserRole.USER, () => svc.create({
+      label: 'X', slug: 'x', projectId: String(PROJECT), kubeconfig: GOOD_KUBECONFIG,
+      contextName: 'prod', transport: 'direct', allowMcpWrites: true,
+    })).then(() => null, (e) => e);
+    assert.ok(err, 'hätte fehlschlagen müssen');
+    assert.equal(err.status, 403, 'muss Forbidden sein');
+    assert.match(String(err.message), /allowMcpWrites/, 'Meldung muss das Feld benennen');
+  });
+
+  await check('create erlaubt einem Admin readOnly=false und allowMcpWrites=true (I3)', async () => {
+    const svc = new KubeClustersService(makeModel(), makeModel(), makeSecretsService(), makeTransportStub());
+    const doc = await asActor(UserRole.ADMIN, () => svc.create({
+      label: 'X', slug: 'x', projectId: String(PROJECT), kubeconfig: GOOD_KUBECONFIG,
+      contextName: 'prod', transport: 'direct', readOnly: false, allowMcpWrites: true,
+    }));
+    assert.equal(doc.readOnly, false);
+    assert.equal(doc.allowMcpWrites, true);
+  });
+
+  await check('create erlaubt einem Nicht-Admin einen Cluster OHNE Rechte-Flags anzulegen (I3)', async () => {
+    // Die Spec verlangt Admin-only für die Flags, nicht für Cluster-CRUD an
+    // sich — SSH-Connections gaten ihr CRUD schliesslich auch nicht.
+    const svc = new KubeClustersService(makeModel(), makeModel(), makeSecretsService(), makeTransportStub());
+    const doc = await asActor(UserRole.USER, () => svc.create({
+      label: 'X', slug: 'x', projectId: String(PROJECT), kubeconfig: GOOD_KUBECONFIG,
+      contextName: 'prod', transport: 'direct',
+    }));
+    assert.equal(doc.readOnly, true, 'Default bleibt readOnly=true');
+    assert.equal(doc.allowMcpWrites, false);
+  });
+
   await check('prometheus.enabled ohne namespace/service/port wird als BadRequest abgelehnt', async () => {
     const secrets = makeSecretsService();
     const svc = new KubeClustersService(makeModel(), makeModel(), secrets, makeTransportStub());
@@ -441,6 +502,50 @@ function makeSecretsService() {
     assert.equal(out.description, 'neu');
     assert.deepEqual(out.tags, ['a', 'b']);
     assert.equal(clusterModel._store.get(String(doc._id)).label, 'Produktion', 'doc.save() wurde nicht gerufen');
+  });
+
+  // ------------------------------------------------------------------
+  // update(): Admin-Gate für readOnly/allowMcpWrites (I3)
+  // ------------------------------------------------------------------
+
+  await check('update lehnt readOnly=false von einem Nicht-Admin als 403 ab und nennt das Feld (I3)', async () => {
+    const { svc, doc } = await makeTunnelCluster();
+    const err = await asActor(UserRole.USER, () => svc.update(String(doc._id), { readOnly: false }))
+      .then(() => null, (e) => e);
+    assert.ok(err, 'hätte fehlschlagen müssen');
+    assert.equal(err.status, 403, 'muss Forbidden sein');
+    assert.match(String(err.message), /readOnly/, 'Meldung muss das Feld benennen');
+  });
+
+  await check('update lehnt allowMcpWrites=true von einem Nicht-Admin als 403 ab und nennt das Feld (I3)', async () => {
+    const { svc, doc } = await makeTunnelCluster();
+    const err = await asActor(UserRole.USER, () => svc.update(String(doc._id), { allowMcpWrites: true }))
+      .then(() => null, (e) => e);
+    assert.ok(err, 'hätte fehlschlagen müssen');
+    assert.equal(err.status, 403, 'muss Forbidden sein');
+    assert.match(String(err.message), /allowMcpWrites/, 'Meldung muss das Feld benennen');
+  });
+
+  await check('update erlaubt einem Admin readOnly=false zu setzen (I3)', async () => {
+    const { svc, doc } = await makeTunnelCluster();
+    const out = await asActor(UserRole.ADMIN, () => svc.update(String(doc._id), { readOnly: false }));
+    assert.equal(out.readOnly, false);
+  });
+
+  await check('update erlaubt einem Nicht-Admin harmlose Felder wie label zu ändern (I3)', async () => {
+    // Vorher: @Roles(ADMIN) auf der ganzen PATCH-Route verbot einem
+    // Nicht-Admin sogar das blosse Umbenennen — das hat die Spec nie
+    // verlangt ("Cluster-CRUD wie SSH-Connections", und SSH gated sein
+    // CRUD gar nicht).
+    const { svc, doc } = await makeTunnelCluster();
+    const out = await asActor(UserRole.USER, () => svc.update(String(doc._id), { label: 'Umbenannt' }));
+    assert.equal(out.label, 'Umbenannt');
+  });
+
+  await check('update ohne RequestContext-Actor (interner Aufrufer) bleibt ungegated (I3)', async () => {
+    const { svc, doc } = await makeTunnelCluster();
+    const out = await svc.update(String(doc._id), { readOnly: false });
+    assert.equal(out.readOnly, false);
   });
 
   await check('update lehnt allowMcpWrites bei readOnly als 400 ab', async () => {

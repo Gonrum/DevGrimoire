@@ -4,8 +4,17 @@
 set -euo pipefail
 
 API_URL="${API_URL:-http://localhost:3200}"
-# Der Key muss zu einem Admin gehören: PATCH ist Admin-only (RolesGuard),
-# ein Nicht-Admin bekäme 403 statt der geprüften 400.
+# Der Key muss zu einem Admin gehören: Cluster-CRUD selbst ist NICHT
+# admin-only (wie SSH-Connections), aber die beiden Rechte-Flags
+# (readOnly=false, allowMcpWrites=true) sind es — pro Feld gegated in
+# KubeClustersService.assertFlagPermission(), nicht per Route-Guard. Mit
+# einem Nicht-Admin-Key würden Schritt 6b (Admin darf) und mittelbar auch
+# Schritt 6 (die 400-Prüfung würde nie erreicht, weil schon der Admin-Gate
+# vorher mit 403 abbräche) danebengehen. Der Negativfall — ein Nicht-Admin
+# bekommt 403 — lässt sich hier mangels eines Nicht-Admin-Tokens nicht
+# exercisen; er ist stattdessen in kube-service-units-check.cjs gepinnt
+# (simulierter Actor über RequestContext.run(), beide Richtungen: 403 für
+# USER, Erfolg für ADMIN, sowie "kein Actor bleibt ungegated").
 API_KEY="${API_KEY:?API_KEY muss gesetzt sein (DEVGRIMOIRE_API_KEY aus .env, Admin-Rolle)}"
 PROJECT_ID="${PROJECT_ID:?PROJECT_ID muss gesetzt sein}"
 AUTH=(-H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json")
@@ -92,9 +101,24 @@ pass "readOnly=true und allowMcpWrites=false sind Default"
 # --- 6. allowMcpWrites bei readOnly wird abgelehnt ------------------------
 CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X PATCH \
   "${API_URL}/api/kube-clusters/${CLUSTER_ID}" -d '{"allowMcpWrites": true}')
-[ "$CODE" != "403" ] || fail "API_KEY hat keine Admin-Rolle — PATCH ist Admin-only"
+[ "$CODE" != "403" ] || fail "Admin-Key wurde vom Flag-Gate abgelehnt — sollte nur Nicht-Admins treffen (I3)"
 [ "$CODE" = "400" ] || fail "allowMcpWrites bei readOnly ergab HTTP $CODE statt 400"
 pass "allowMcpWrites setzt readOnly=false voraus"
+
+# --- 6b. Admin-Pfad: readOnly=false/allowMcpWrites=true sind für den
+#         Admin-Key erlaubt (I3, positiver Pfad — der eigentliche Hebel aus
+#         der Spec ist erreichbar, nur eben nicht für Nicht-Admins) --------
+PATCHED=$(curl -sS "${AUTH[@]}" -X PATCH "${API_URL}/api/kube-clusters/${CLUSTER_ID}" \
+  -d '{"readOnly": false, "allowMcpWrites": true}')
+echo "$PATCHED" | jq -e '.readOnly == false and .allowMcpWrites == true' >/dev/null \
+  || fail "Admin-Key konnte readOnly=false/allowMcpWrites=true nicht setzen: $PATCHED"
+pass "Admin-Key darf readOnly=false und allowMcpWrites=true setzen"
+
+# Zustand für die folgenden Schritte zurücksetzen, sonst würde der spätere
+# Verbindungstest (Schritt 7) canWrite basierend auf einem inkonsistenten
+# gespeicherten Zustand auswerten.
+curl -sS -o /dev/null "${AUTH[@]}" -X PATCH "${API_URL}/api/kube-clusters/${CLUSTER_ID}" \
+  -d '{"allowMcpWrites": false, "readOnly": true}'
 
 # --- 7. Verbindungstest scheitert sauber ----------------------------------
 TEST=$(curl -sS "${AUTH[@]}" -X POST "${API_URL}/api/kube-clusters/${CLUSTER_ID}/test")
