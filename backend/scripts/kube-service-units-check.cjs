@@ -214,6 +214,30 @@ function makeSecretsService() {
     assert.equal(err.status, 400);
   });
 
+  await check('create ohne projectId und customerId wird als BadRequest abgelehnt', async () => {
+    const secrets = makeSecretsService();
+    const svc = new KubeClustersService(makeModel(), makeModel(), secrets);
+    const err = await svc.create({
+      label: 'X', slug: 'x', kubeconfig: GOOD_KUBECONFIG,
+      contextName: 'prod', transport: 'direct',
+    }).then(() => null, (e) => e);
+    assert.ok(err, 'hätte fehlschlagen müssen');
+    assert.equal(err.status, 400, 'muss BadRequest sein, nicht ValidationError/500');
+    assert.equal(secrets._created.length, 0, 'darf kein Secret anlegen, bevor der Scope geprüft ist');
+  });
+
+  await check('create mit projectId UND customerId wird als BadRequest abgelehnt', async () => {
+    const secrets = makeSecretsService();
+    const svc = new KubeClustersService(makeModel(), makeModel(), secrets);
+    const err = await svc.create({
+      label: 'X', slug: 'x', projectId: String(PROJECT), customerId: String(new Types.ObjectId()),
+      kubeconfig: GOOD_KUBECONFIG, contextName: 'prod', transport: 'direct',
+    }).then(() => null, (e) => e);
+    assert.ok(err, 'hätte fehlschlagen müssen');
+    assert.equal(err.status, 400, 'muss BadRequest sein, nicht ValidationError/500');
+    assert.equal(secrets._created.length, 0, 'darf kein Secret anlegen, bevor der Scope geprüft ist');
+  });
+
   await check('findById wirft NotFound bei unbekannter Id', async () => {
     const svc = new KubeClustersService(makeModel(), makeModel(), makeSecretsService());
     const err = await svc.findById(String(new Types.ObjectId())).then(() => null, (e) => e);

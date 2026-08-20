@@ -48,6 +48,17 @@ export class KubeClustersService {
   }
 
   async create(dto: CreateKubeClusterDto): Promise<KubeClusterDocument> {
+    // Scope-Invariante vorab prüfen, nicht dem Pre-Validate-Hook überlassen —
+    // gleiche Begründung wie bei den Invarianten weiter unten: der Hook wirft
+    // einen nackten Error, den Mongoose als ValidationError verpackt und Nest
+    // als HTTP 500 mappt statt 400. Der Hook bleibt als letzte Verteidigung.
+    if (!dto.projectId && !dto.customerId) {
+      throw new BadRequestException('Genau eines von projectId / customerId ist erforderlich');
+    }
+    if (dto.projectId && dto.customerId) {
+      throw new BadRequestException('projectId und customerId schließen sich gegenseitig aus');
+    }
+
     const parsed = parseKubeconfig(dto.kubeconfig);
     const ctx = parsed.contexts.find((c) => c.contextName === dto.contextName);
     if (!ctx) {
@@ -163,6 +174,11 @@ export class KubeClustersService {
   }
 
   async update(id: string, dto: UpdateKubeClusterDto): Promise<KubeClusterDocument> {
+    // Keine Scope-Invariante hier zu prüfen: UpdateKubeClusterDto lässt
+    // projectId/customerId absichtlich aus (Scope ist unveränderlich), also
+    // rührt update() doc.projectId/doc.customerId nie an. Der Zustand, den
+    // create() geprüft hat, bleibt über die gesamte Lebensdauer des
+    // Dokuments erhalten — ein Check hier könnte nie auslösen.
     const doc = await this.findById(id);
     if (dto.label !== undefined) doc.label = dto.label;
     if (dto.defaultNamespace !== undefined) doc.defaultNamespace = dto.defaultNamespace;
