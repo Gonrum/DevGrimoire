@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import * as net from 'node:net';
 import { Readable } from 'node:stream';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -1867,5 +1868,69 @@ export class SshSessionService {
       this.concurrency.set(connId, s);
     }
     return s;
+  }
+
+  // -------------------- Kube tunnel (K1, Task 4) --------------------
+
+  /**
+   * Öffnet einen lokalen TCP-Listener, der jede eingehende Verbindung über
+   * die bestehende SSH-Verbindung `connectionId` per `forwardOut` an
+   * `dstHost:dstPort` weiterreicht. Gebunden wird auf `0.0.0.0`
+   * *innerhalb des Containers* — das Backend selbst erreicht den Listener
+   * über `127.0.0.1`, das Workspace-Sidecar (K3, später) über
+   * `backend:<port>` im gemeinsamen Docker-Netz. Der Port wird in
+   * docker-compose.yml nicht via `ports:` veröffentlicht und ist damit vom
+   * Host aus nicht erreichbar.
+   *
+   * Verbindungsaufbau läuft über `openClient` — dieselbe TOFU-Host-Key-
+   * Prüfung, dasselbe `clientFactory`-Seam und dieselbe Connect-Status-
+   * Aufzeichnung wie jeder andere SSH-Pfad in dieser Klasse. Der Tunnel ist
+   * reiner Transport; er lockert an keiner Stelle eine Vertrauensprüfung.
+   */
+  async openTunnel(
+    connectionId: string,
+    dstHost: string,
+    dstPort: number,
+  ): Promise<{ localPort: number; close: () => void }> {
+    const connection = await this.sshService.findById(connectionId);
+    const creds = await this.resolveCredentialsOrFail(connection);
+    const client = await this.openClient(connection, creds);
+
+    const server = net.createServer((socket) => {
+      client.forwardOut('127.0.0.1', 0, dstHost, dstPort, (err, stream) => {
+        if (err) {
+          socket.destroy();
+          return;
+        }
+        socket.pipe(stream).pipe(socket);
+        stream.on('error', () => socket.destroy());
+        socket.on('error', () => stream.destroy());
+      });
+    });
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '0.0.0.0', resolve);
+      });
+    } catch (err: unknown) {
+      client.end();
+      throw asError(err);
+    }
+
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+      server.close();
+      client.end();
+      throw new Error('Tunnel-Listener lieferte keine Portnummer');
+    }
+
+    return {
+      localPort: address.port,
+      close: () => {
+        server.close();
+        client.end();
+      },
+    };
   }
 }
