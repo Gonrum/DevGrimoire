@@ -61,6 +61,10 @@ import { HttpRequestsService } from './http-requests/http-requests.service';
 import { SshService } from './ssh/ssh.service';
 import { SshSessionService } from './ssh/ssh-session.service';
 import { StacksService } from './stacks/stacks.service';
+import { KubeClustersService } from './kube/kube-clusters.service';
+import { KubeResourcesService } from './kube/kube-resources.service';
+import { KubeLogsService } from './kube/kube-logs.service';
+import { KubeClientService } from './kube/kube-client.service';
 import { UserRole } from './auth/schemas/user.schema';
 import { registerMcpTools } from './mcp-tools';
 
@@ -173,6 +177,10 @@ async function bootstrap() {
     sshService: app.get(SshService),
     sshSessionService: app.get(SshSessionService),
     stackService: app.get(StacksService),
+    kubeClustersService: app.get(KubeClustersService),
+    kubeResourcesService: app.get(KubeResourcesService),
+    kubeLogsService: app.get(KubeLogsService),
+    kubeClientService: app.get(KubeClientService),
   });
 
   const transport = new StdioServerTransport();

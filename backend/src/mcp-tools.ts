@@ -83,6 +83,15 @@ import { SshConnectionDocument } from './ssh/schemas/ssh-connection.schema';
 import type { SshConnectionWithInheritance } from './ssh/ssh.service';
 import { SshAuditDocument } from './ssh/schemas/ssh-audit.schema';
 import { computeEffectiveUploadLimit } from './ssh/upload-limit.util';
+import { KubeClustersService } from './kube/kube-clusters.service';
+import { KubeResourcesService } from './kube/kube-resources.service';
+import { KubeLogsService } from './kube/kube-logs.service';
+import { KubeClientService } from './kube/kube-client.service';
+import { KubeClusterDocument } from './kube/schemas/kube-cluster.schema';
+import { isKubeKind, KUBE_KIND_SPECS, KubeKind } from './kube/kube-kinds';
+import {
+  CoreV1Api, Metrics, NodeStatus, PodStatus, topNodes, topPods,
+} from '@kubernetes/client-node';
 import {
   assertSha256Matches,
   decodeBase64Strict,
@@ -129,10 +138,13 @@ import type { WorkspaceStatus } from './workspaces/schemas/workspace.schema';
  */
 import {
   type PlainDoc,
+  type ToolArgs,
   asObjectArray,
   asString,
   countArray,
+  errorMessage,
   idToString,
+  isRecord,
   isUnknownArray,
   optionalBoolean,
   optionalEnum,
@@ -461,6 +473,140 @@ async function getClientRoots(server: Server): Promise<McpRootLike[] | undefined
   }
 }
 
+/*
+ * Kube MCP helpers (K2, Task 6).
+ *
+ * `KUBE_KINDS` in kube-kinds.ts is a hand-maintained literal, kept separate
+ * from `KUBE_KIND_SPECS` on purpose (see the comment there): a cast from
+ * `Object.keys()` would be an unproven assertion. But `Array.prototype.filter`
+ * with a type-predicate argument narrows the result type WITHOUT a cast —
+ * `isKubeKind` already is `(value: unknown) => value is KubeKind`. Deriving
+ * the tool schema's enum this way means a kind added to the registry can never
+ * silently miss the MCP surface, which a second hand-maintained list could.
+ */
+const KUBE_KIND_ENUM: readonly KubeKind[] = Object.keys(KUBE_KIND_SPECS).filter(isKubeKind);
+
+const KUBE_TOP_SCOPES = ['pods', 'nodes'] as const;
+
+/** Hard safety cap independent of the (already-capped) `tailLines` schema max — matters for `sinceSeconds`, which has no upper bound of its own. */
+const KUBE_LOG_LINES_HARD_CAP = 5000;
+
+type KubeScope = { kind: 'project'; id: string } | { kind: 'customer'; id: string };
+
+/**
+ * Reads "projectId XOR customerId" from tool args and throws a short,
+ * greppable sentinel (same idiom as `resolveSshConnection`'s
+ * `scope_required`) on either both-missing or both-present — T-477 forbids
+ * global cluster discovery, so "neither" can't silently mean "everything".
+ */
+function readKubeScope(a: ToolArgs): KubeScope {
+  const projectId = optionalString(a, 'projectId');
+  const customerId = optionalString(a, 'customerId');
+  if (projectId && customerId) throw new Error('scope_exclusive');
+  if (projectId) return { kind: 'project', id: projectId };
+  if (customerId) return { kind: 'customer', id: customerId };
+  throw new Error('scope_required');
+}
+
+/**
+ * Safe projection of a KubeCluster document for MCP — mirrors
+ * `KubeController.toResponse()`. Never includes `kubeconfigSecretId` or any
+ * other credential reference.
+ */
+function serializeKubeClusterForMcp(doc: KubeClusterDocument): Record<string, unknown> {
+  return {
+    clusterId: idToString(doc._id),
+    label: doc.label,
+    slug: doc.slug,
+    projectId: idToString(doc.projectId),
+    customerId: idToString(doc.customerId),
+    contextName: doc.contextName,
+    clusterServer: doc.clusterServer,
+    defaultNamespace: doc.defaultNamespace,
+    transport: doc.transport,
+    readOnly: doc.readOnly,
+    lastConnectedAt: doc.lastConnectedAt,
+    lastConnectError: doc.lastConnectError?.message,
+  };
+}
+
+/**
+ * `ResourceUsage`/`CurrentResourceUsage` fields from `@kubernetes/client-node`
+ * are `number | bigint` (large memory quantities like "128974848Ki" overflow
+ * a safe integer and come back as `bigint`) — `JSON.stringify` throws on a
+ * raw `bigint`, so every value crosses to `string` before it can reach
+ * `textResult`.
+ */
+function kubeUsageValue(value: number | bigint): string {
+  return typeof value === 'bigint' ? value.toString() : String(value);
+}
+
+/**
+ * Narrow projection of `topPods()`'s `PodStatus` — NOT a pass-through.
+ * `PodStatus.Pod` is the full raw `V1Pod` (managedFields, full annotations,
+ * the works); returning it verbatim would be exactly the un-normalized
+ * cluster JSON the output-normalization constraint exists to prevent.
+ */
+function projectPodTop(row: PodStatus): Record<string, unknown> {
+  return {
+    name: row.Pod.metadata?.name,
+    namespace: row.Pod.metadata?.namespace,
+    cpu: {
+      usage: kubeUsageValue(row.CPU.CurrentUsage),
+      requests: kubeUsageValue(row.CPU.RequestTotal),
+      limits: kubeUsageValue(row.CPU.LimitTotal),
+    },
+    memory: {
+      usage: kubeUsageValue(row.Memory.CurrentUsage),
+      requests: kubeUsageValue(row.Memory.RequestTotal),
+      limits: kubeUsageValue(row.Memory.LimitTotal),
+    },
+    containers: row.Containers.map((c) => ({
+      name: c.Container,
+      cpuUsage: kubeUsageValue(c.CPUUsage.CurrentUsage),
+      memoryUsage: kubeUsageValue(c.MemoryUsage.CurrentUsage),
+    })),
+  };
+}
+
+/** Same reasoning as `projectPodTop` — `NodeStatus.Node` is a full raw `V1Node`. */
+function projectNodeTop(row: NodeStatus): Record<string, unknown> {
+  return {
+    name: row.Node.metadata?.name,
+    cpu: {
+      capacity: kubeUsageValue(row.CPU.Capacity),
+      requests: kubeUsageValue(row.CPU.RequestTotal),
+      limits: kubeUsageValue(row.CPU.LimitTotal),
+    },
+    memory: {
+      capacity: kubeUsageValue(row.Memory.Capacity),
+      requests: kubeUsageValue(row.Memory.RequestTotal),
+      limits: kubeUsageValue(row.Memory.LimitTotal),
+    },
+  };
+}
+
+function kubeMetricsErrorCode(err: unknown): number | undefined {
+  return isRecord(err) && typeof err.code === 'number' ? err.code : undefined;
+}
+
+/**
+ * `Metrics`/`topPods`/`topNodes` hit `metrics.k8s.io`, a separate optional API
+ * that only exists if a metrics-server is deployed — its absence surfaces as
+ * an `ApiException` with `.code` 404, same shape kube-resources.controller.ts
+ * already decodes for the REST path. Rewritten into a message that says what
+ * is actually missing instead of leaking the library's generic "Error
+ * occurred in metrics request".
+ */
+function kubeTopError(err: unknown): Error {
+  if (kubeMetricsErrorCode(err) === 404) {
+    return new Error(
+      'metrics-server ist im Cluster nicht installiert oder metrics.k8s.io nicht erreichbar (404 von der Metrics-API)',
+    );
+  }
+  return err instanceof Error ? err : new Error(errorMessage(err));
+}
+
 export interface McpServices {
   projectsService: ProjectsService;
   todosService: TodosService;
@@ -518,6 +664,10 @@ export interface McpServices {
   sshService: SshService;
   sshSessionService: SshSessionService;
   stackService: StacksService;
+  kubeClustersService: KubeClustersService;
+  kubeResourcesService: KubeResourcesService;
+  kubeLogsService: KubeLogsService;
+  kubeClientService: KubeClientService;
 }
 
 const tools = [
@@ -3134,6 +3284,104 @@ const tools = [
     },
   },
   {
+    name: 'kube_cluster_list',
+    description: 'Liste der in DevGrimoire konfigurierten Kubernetes-Cluster für ein Projekt oder einen Kunden. Scope ist Pflicht (projectId ODER customerId) — es gibt keine globale Cluster-Entdeckung. Die Antwort enthält Label, Slug, Context, Server-URL, Transport, readOnly-Flag und den letzten Verbindungsstatus, aber niemals Credentials. Rufe das zuerst auf, um an eine clusterId für kube_get / kube_logs / kube_events zu kommen.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Projekt-ID (entweder diese oder customerId)' },
+        customerId: { type: 'string', description: 'Kunden-ID (entweder diese oder projectId)' },
+      },
+    },
+  },
+  {
+    name: 'kube_cluster_get',
+    description: 'Einen Cluster über seine ID oder über slug + Scope holen, inklusive letztem Verbindungsergebnis. Nie Credentials. Nutze das, um vor einer Abfrage zu prüfen, ob der Zugang gesund ist.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        clusterId: { type: 'string', description: 'Cluster-ID; schlägt slug + Scope' },
+        slug: { type: 'string', description: 'Cluster-Slug, zusammen mit projectId oder customerId' },
+        projectId: { type: 'string' },
+        customerId: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'kube_get',
+    description: 'Ressourcen eines Clusters lesen. Ohne "name" wird gelistet (schmale Zeilen: Name, Namespace, Status, Ready, Restarts, Alter), mit "name" kommt das vollständige Objekt. Ohne "namespace" wird über alle Namespaces gelistet. Die Ausgabe ist normalisiert: managedFields sind entfernt und Annotations gekürzt, weil rohes Cluster-JSON mehr Kontext frisst als es wert ist. Secrets liefern grundsätzlich nur Metadaten und Key-Namen, niemals Werte.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        clusterId: { type: 'string', description: 'Cluster-ID aus kube_cluster_list' },
+        kind: { type: 'string', enum: [...KUBE_KIND_ENUM], description: 'Ressourcentyp' },
+        namespace: { type: 'string', description: 'Namespace; weglassen für alle' },
+        name: { type: 'string', description: 'Objektname; weglassen zum Listen' },
+        labelSelector: { type: 'string', description: 'Label-Selektor, z.B. "app=api"' },
+        limit: { type: 'number', description: 'Höchstzahl Zeilen (max. 500, Default 200)' },
+      },
+      required: ['clusterId', 'kind'],
+    },
+  },
+  {
+    name: 'kube_describe',
+    description: 'Ein Objekt zusammen mit seinen Events und Conditions — das Werkzeug für "warum läuft das nicht". Entspricht kubectl describe, liefert aber strukturiertes JSON statt Text.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        clusterId: { type: 'string' },
+        kind: { type: 'string', enum: [...KUBE_KIND_ENUM] },
+        name: { type: 'string' },
+        namespace: { type: 'string', description: 'Pflicht für namespaced Ressourcen' },
+      },
+      required: ['clusterId', 'kind', 'name'],
+    },
+  },
+  {
+    name: 'kube_logs',
+    description: 'Pod-Logs lesen. Endlich, nicht folgend: gib tailLines oder sinceSeconds an. Ein folgender Stream würde über MCP nie enden — dafür ist die UI da. Bei mehreren Containern im Pod ist "container" anzugeben. Die Antwort trägt ein `status`-Feld ("complete", "dropped" oder "truncated") — ein Verbindungsabbruch mitten im Log sieht sonst wie ein sauberes Ende aus.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        clusterId: { type: 'string' },
+        namespace: { type: 'string' },
+        pod: { type: 'string' },
+        container: { type: 'string', description: 'Nötig bei mehreren Containern' },
+        tailLines: { type: 'number', description: 'Letzte N Zeilen (max. 5000, Default 200)', maximum: 5000 },
+        sinceSeconds: { type: 'number', description: 'Nur Logs der letzten N Sekunden' },
+        previous: { type: 'boolean', description: 'Logs des vorherigen, abgestürzten Containers' },
+      },
+      required: ['clusterId', 'namespace', 'pod'],
+    },
+  },
+  {
+    name: 'kube_events',
+    description: 'Cluster-Events, neueste zuerst. Ohne namespace über alle. Mit involvedName auf ein Objekt eingeschränkt. Events sind der schnellste Weg zu "was ist gerade schiefgegangen".',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        clusterId: { type: 'string' },
+        namespace: { type: 'string' },
+        involvedName: { type: 'string', description: 'Nur Events zu diesem Objekt' },
+        limit: { type: 'number', description: 'Höchstzahl (max. 500)' },
+      },
+      required: ['clusterId'],
+    },
+  },
+  {
+    name: 'kube_top',
+    description: 'CPU- und Speicherverbrauch als Momentaufnahme über metrics.k8s.io. Keine Historie — dafür kommt in K4 die Prometheus-Anbindung. Braucht einen metrics-server im Cluster; fehlt der, kommt eine klare Fehlermeldung statt leerer Daten.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        clusterId: { type: 'string' },
+        scope: { type: 'string', enum: ['pods', 'nodes'], description: 'Default: pods' },
+        namespace: { type: 'string', description: 'Nur bei scope=pods' },
+      },
+      required: ['clusterId'],
+    },
+  },
+  {
     name: 'recurring_task_create',
     description: 'Create a recurring task. With projectId: creates project todos. With customerId: creates customer-scoped quests. With neither: system-wide task that creates notifications.',
     inputSchema: {
@@ -4467,7 +4715,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, environmentsService, secretsService, manualsService, researchService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, harnessService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService, stackService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, environmentsService, secretsService, manualsService, researchService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, harnessService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService, stackService, kubeClustersService, kubeResourcesService, kubeLogsService, kubeClientService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -6823,6 +7071,129 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             sourceContext: 'mcp',
             userId,
           });
+          break;
+        }
+        case 'kube_cluster_list': {
+          const scope = readKubeScope(a);
+          const docs = scope.kind === 'project'
+            ? await kubeClustersService.findByProjectId(scope.id)
+            : await kubeClustersService.findByCustomerId(scope.id);
+          result = docs.map((d) => serializeKubeClusterForMcp(d));
+          break;
+        }
+        case 'kube_cluster_get': {
+          const clusterId = optionalString(a, 'clusterId');
+          const slug = optionalString(a, 'slug');
+          let cluster: KubeClusterDocument;
+          if (clusterId) {
+            cluster = await kubeClustersService.findById(clusterId);
+          } else if (slug) {
+            const scope = readKubeScope(a);
+            cluster = await kubeClustersService.findBySlug(
+              slug,
+              scope.kind === 'project' ? { projectId: scope.id } : { customerId: scope.id },
+            );
+          } else {
+            throw new Error('cluster_identifier_required');
+          }
+          result = serializeKubeClusterForMcp(cluster);
+          break;
+        }
+        case 'kube_get': {
+          const clusterId = requireString(a, 'clusterId');
+          const kind = requireEnum(a, 'kind', KUBE_KIND_ENUM);
+          const name = optionalString(a, 'name');
+          const namespace = optionalString(a, 'namespace');
+          result = name
+            ? await kubeResourcesService.get(clusterId, kind, name, namespace)
+            : await kubeResourcesService.list(clusterId, kind, {
+              namespace,
+              labelSelector: optionalString(a, 'labelSelector'),
+              limit: optionalNumber(a, 'limit'),
+            });
+          break;
+        }
+        case 'kube_describe': {
+          result = await kubeResourcesService.describe(
+            requireString(a, 'clusterId'),
+            requireEnum(a, 'kind', KUBE_KIND_ENUM),
+            requireString(a, 'name'),
+            optionalString(a, 'namespace'),
+          );
+          break;
+        }
+        case 'kube_events': {
+          result = await kubeResourcesService.events(requireString(a, 'clusterId'), {
+            namespace: optionalString(a, 'namespace'),
+            involvedName: optionalString(a, 'involvedName'),
+            limit: optionalNumber(a, 'limit'),
+          });
+          break;
+        }
+        case 'kube_logs': {
+          // follow ist bewusst NICHT aus `a` gelesen — über MCP niemals folgen,
+          // der Aufruf käme sonst nie zurück. Selbst ein Client, der `follow`
+          // trotz fehlendem Schema-Feld mitschickt, hat hier keinen Hebel.
+          const session = await kubeLogsService.open(
+            requireString(a, 'clusterId'),
+            requireString(a, 'namespace'),
+            requireString(a, 'pod'),
+            {
+              container: optionalString(a, 'container'),
+              tailLines: optionalNumber(a, 'tailLines') ?? 200,
+              previous: optionalBoolean(a, 'previous'),
+              sinceSeconds: optionalNumber(a, 'sinceSeconds'),
+              follow: false,
+            },
+          );
+          try {
+            const lines: string[] = [];
+            let truncated = false;
+            for await (const line of session.lines) {
+              lines.push(line);
+              if (lines.length >= KUBE_LOG_LINES_HARD_CAP) {
+                truncated = true;
+                break;
+              }
+            }
+            if (truncated) {
+              // `session.error()` ist erst nach vollständigem Durchlauf von
+              // `lines` aussagekräftig (siehe KubeLogSession-JSDoc) — hier
+              // wurde die Iteration selbst abgebrochen, also weder "complete"
+              // noch "dropped" behaupten.
+              result = { lines, lineCount: lines.length, status: 'truncated' };
+            } else {
+              const streamError = session.error();
+              result = streamError
+                ? { lines, lineCount: lines.length, status: 'dropped', error: streamError }
+                : { lines, lineCount: lines.length, status: 'complete' };
+            }
+          } finally {
+            session.close();
+          }
+          break;
+        }
+        case 'kube_top': {
+          const clusterId = requireString(a, 'clusterId');
+          const scope = optionalEnum(a, 'scope', KUBE_TOP_SCOPES) ?? 'pods';
+          const namespace = optionalString(a, 'namespace');
+          const cluster = await kubeClustersService.findById(clusterId);
+          const { kc, release } = await kubeClientService.buildConfig(cluster);
+          try {
+            const coreApi = kc.makeApiClient(CoreV1Api);
+            if (scope === 'nodes') {
+              const rows = await topNodes(coreApi);
+              result = rows.map((r) => projectNodeTop(r));
+            } else {
+              const metrics = new Metrics(kc);
+              const rows = await topPods(coreApi, metrics, namespace);
+              result = rows.map((r) => projectPodTop(r));
+            }
+          } catch (err) {
+            throw kubeTopError(err);
+          } finally {
+            release();
+          }
           break;
         }
         case 'recurring_task_create': {
