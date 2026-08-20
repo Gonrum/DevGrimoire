@@ -2599,12 +2599,39 @@
       "insecureTls": "TLS unverified",
       "testSuccess": "Server {{version}}",
       "canWrite": "This access may write",
-      "readOnlyAccess": "Read-only access"
+      "readOnlyAccess": "Read-only access",
+      "open": "Open"
     },
     "status": {
       "ok": "Connected",
       "error": "Error",
       "never_tested": "Never tested"
+    },
+    "group": {
+      "workloads": "Workloads",
+      "network": "Network",
+      "config": "Configuration",
+      "storage": "Storage",
+      "cluster": "Cluster"
+    },
+    "view": {
+      "back": "Back",
+      "namespace": "Namespace",
+      "allNamespaces": "All namespaces",
+      "loading": "Loading…",
+      "refresh": "Refresh",
+      "empty": "No resources of type {{kind}} found.",
+      "selected": "Selected: {{name}}"
+    },
+    "col": {
+      "name": "Name",
+      "namespace": "Namespace",
+      "status": "Status",
+      "ready": "Ready",
+      "restarts": "Restarts",
+      "node": "Node",
+      "detail": "Detail",
+      "age": "Age"
     },
     "form": {
       "kubeconfigLabel": "Kubeconfig",

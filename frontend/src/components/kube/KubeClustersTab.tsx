@@ -11,6 +11,7 @@ import { useToast } from '../Toast';
 import { useKubeClusters } from './hooks/useKubeClusters';
 import { kubeStatusClasses, kubeStatusOf, KubeClusterStatus } from './kubeStatus';
 import { KubeClusterForm } from './KubeClusterForm';
+import { KubeClusterView } from './KubeClusterView';
 
 const STATUS_KEY: Record<KubeClusterStatus, string> = {
   ok: 'kube.status.ok',
@@ -31,6 +32,7 @@ export function KubeClustersTab({ scope }: KubeClustersTabProps) {
   const [creating, setCreating] = useState(false);
   const [results, setResults] = useState<Record<string, KubeConnectionTestResult>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [viewingCluster, setViewingCluster] = useState<KubeCluster | null>(null);
 
   async function runTest(cluster: KubeCluster) {
     setBusyId(cluster._id);
@@ -57,6 +59,10 @@ export function KubeClustersTab({ scope }: KubeClustersTabProps) {
     } finally {
       setBusyId(null);
     }
+  }
+
+  if (viewingCluster !== null) {
+    return <KubeClusterView cluster={viewingCluster} onBack={() => setViewingCluster(null)} />;
   }
 
   return (
@@ -125,6 +131,13 @@ export function KubeClustersTab({ scope }: KubeClustersTabProps) {
                   </p>
                 )}
                 <div className="mt-2 flex gap-2">
+                  <Button
+                    size="xs"
+                    variant="primary"
+                    onClick={() => setViewingCluster(cluster)}
+                  >
+                    {t('kube.tab.open')}
+                  </Button>
                   <Button
                     size="xs"
                     variant="secondary"

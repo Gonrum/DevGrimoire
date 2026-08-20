@@ -2598,12 +2598,39 @@
       "insecureTls": "TLS ungeprüft",
       "testSuccess": "Server {{version}}",
       "canWrite": "Dieser Zugang darf schreiben",
-      "readOnlyAccess": "Nur lesender Zugang"
+      "readOnlyAccess": "Nur lesender Zugang",
+      "open": "Öffnen"
     },
     "status": {
       "ok": "Verbunden",
       "error": "Fehler",
       "never_tested": "Nie getestet"
+    },
+    "group": {
+      "workloads": "Workloads",
+      "network": "Netzwerk",
+      "config": "Konfiguration",
+      "storage": "Speicher",
+      "cluster": "Cluster"
+    },
+    "view": {
+      "back": "Zurück",
+      "namespace": "Namespace",
+      "allNamespaces": "Alle Namespaces",
+      "loading": "Lädt…",
+      "refresh": "Aktualisieren",
+      "empty": "Keine Ressourcen vom Typ {{kind}} gefunden.",
+      "selected": "Ausgewählt: {{name}}"
+    },
+    "col": {
+      "name": "Name",
+      "namespace": "Namespace",
+      "status": "Status",
+      "ready": "Bereit",
+      "restarts": "Neustarts",
+      "node": "Node",
+      "detail": "Detail",
+      "age": "Alter"
     },
     "form": {
       "kubeconfigLabel": "Kubeconfig",

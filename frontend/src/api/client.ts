@@ -1231,6 +1231,36 @@ export interface KubeConnectionTestResult {
   error?: string;
 }
 
+// ---- Kube resources (K2) ---------------------------------------------------
+
+export interface KubeListRow {
+  name: string;
+  namespace?: string;
+  createdAt?: string;
+  status?: string;
+  ready?: string;
+  restarts?: number;
+  node?: string;
+  detail?: string;
+}
+
+export interface KubeEventRow {
+  type?: string;
+  reason?: string;
+  message?: string;
+  count?: number;
+  lastTimestamp?: string;
+  involvedKind?: string;
+  involvedName?: string;
+  namespace?: string;
+}
+
+export interface KubeDescribeResult {
+  object: unknown;
+  events: KubeEventRow[];
+  conditions: Array<{ type?: string; status?: string; reason?: string; message?: string; lastTransitionTime?: string }>;
+}
+
 export interface Notification {
   _id: string;
   title: string;
@@ -2406,6 +2436,37 @@ export const api = {
     request<void>(`/kube-clusters/${id}`, { method: 'DELETE' }),
   testKubeCluster: (id: string) =>
     request<KubeConnectionTestResult>(`/kube-clusters/${id}/test`, { method: 'POST' }),
+  listKubeNamespaces: (clusterId: string) =>
+    request<KubeListRow[]>(`/kube-clusters/${clusterId}/namespaces`),
+  listKubeResources: (
+    clusterId: string,
+    params: { kind: string; namespace?: string; labelSelector?: string; limit?: number },
+  ) => {
+    const q = new URLSearchParams({ kind: params.kind });
+    if (params.namespace) q.set('namespace', params.namespace);
+    if (params.labelSelector) q.set('labelSelector', params.labelSelector);
+    if (params.limit) q.set('limit', String(params.limit));
+    return request<KubeListRow[]>(`/kube-clusters/${clusterId}/resources?${q.toString()}`);
+  },
+  getKubeResourceYaml: (clusterId: string, kind: string, name: string, namespace?: string) => {
+    const q = namespace ? `?namespace=${encodeURIComponent(namespace)}` : '';
+    return request<{ yaml: string }>(
+      `/kube-clusters/${clusterId}/resources/${encodeURIComponent(kind)}/${encodeURIComponent(name)}/yaml${q}`,
+    );
+  },
+  describeKubeResource: (clusterId: string, kind: string, name: string, namespace?: string) => {
+    const q = namespace ? `?namespace=${encodeURIComponent(namespace)}` : '';
+    return request<KubeDescribeResult>(
+      `/kube-clusters/${clusterId}/describe/${encodeURIComponent(kind)}/${encodeURIComponent(name)}${q}`,
+    );
+  },
+  listKubeEvents: (clusterId: string, params: { namespace?: string; involvedName?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params.namespace) q.set('namespace', params.namespace);
+    if (params.involvedName) q.set('involvedName', params.involvedName);
+    if (params.limit) q.set('limit', String(params.limit));
+    return request<KubeEventRow[]>(`/kube-clusters/${clusterId}/events?${q.toString()}`);
+  },
   ssh: {
     listForCustomer: (customerId: string) =>
       request<SshConnectionListItem[]>(`/customers/${customerId}/ssh-connections`),
