@@ -169,6 +169,116 @@ function check(label, fn) {
     assert.equal(closed, 1);
   });
 
+  await check('invalidate() wirft den gecachten Tunnel weg — der nächste resolve() baut neu auf', async () => {
+    // Ohne diesen Weg leert sich der Cache ausschliesslich über refs=0 plus
+    // Idle-TTL. Mit K2s 2–5-s-Polling setzt aber JEDES acquire den
+    // Idle-Timer zurück — ein veralteter Eintrag (andere Bastion, gelöschter
+    // Cluster, toter SSH-Client) könnte beliebig lange überleben.
+    let opened = 0;
+    let closed = 0;
+    const svc = new KubeTransportService({
+      openTunnel: async () => { opened += 1; return { localPort: 41234 + opened, close: () => { closed += 1; } }; },
+    }, { idleTtlMs: 60_000 });
+    const cluster = { transport: 'ssh-tunnel', clusterServer: 'https://prod:6443', _id: 'inv-1', sshConnectionId: 's1' };
+
+    const a = await svc.resolve(cluster);
+    assert.equal(opened, 1);
+    a.release(); // refs=0, aber Idle-TTL läuft noch: Eintrag bleibt gecacht
+
+    svc.invalidate('inv-1');
+    // Der Map-Eintrag verschwindet SYNCHRON (der nächste resolve() baut
+    // sofort neu auf); das Schliessen hängt am gecachten Promise und läuft
+    // deshalb einen Microtask später.
+    await new Promise((r) => setImmediate(r));
+    assert.equal(closed, 1, 'invalidate() hat den Tunnel nicht geschlossen');
+
+    const b = await svc.resolve(cluster);
+    assert.equal(opened, 2, 'nach invalidate() wurde der alte, tote Eintrag wiederverwendet');
+    assert.equal(b.url, 'https://127.0.0.1:41236', 'der neue Tunnel wurde nicht benutzt');
+    b.release();
+  });
+
+  await check('invalidate() schliesst auch einen Tunnel, den noch jemand hält (Bastion gewechselt)', async () => {
+    let closed = 0;
+    const svc = new KubeTransportService({
+      openTunnel: async () => ({ localPort: 41234, close: () => { closed += 1; } }),
+    }, { idleTtlMs: 60_000 });
+    const cluster = { transport: 'ssh-tunnel', clusterServer: 'https://prod:6443', _id: 'inv-2', sshConnectionId: 's1' };
+    const a = await svc.resolve(cluster);
+    svc.invalidate('inv-2');
+    await new Promise((r) => setImmediate(r));
+    assert.equal(closed, 1, 'ein noch gehaltener Eintrag blieb trotz invalidate() stehen');
+    // Das nachlaufende release() des Halters darf nichts kaputt machen.
+    a.release();
+    await new Promise((r) => setImmediate(r));
+    assert.equal(closed, 1, 'release() nach invalidate() hat ein zweites Mal geschlossen');
+  });
+
+  await check('invalidate() auf unbekanntem Cluster ist ein No-Op', () => {
+    const svc = new KubeTransportService({ openTunnel: async () => { throw new Error('nicht rufen'); } });
+    svc.invalidate('gibtsnicht');
+  });
+
+  await check('ein gebrochener Tunnel (onBroken) räumt seinen eigenen Cache-Eintrag ab', async () => {
+    // C1: SshSessionService meldet den ungeplanten Abbau über onBroken.
+    // Der Transport MUSS daraufhin seinen Eintrag wegwerfen, sonst zeigt
+    // der Cache weiter auf einen Listener vor einem toten SSH-Client.
+    let opened = 0;
+    let closed = 0;
+    let broken = null;
+    const svc = new KubeTransportService({
+      openTunnel: async (_connId, _host, _port, onBroken) => {
+        opened += 1;
+        broken = onBroken;
+        return { localPort: 41234 + opened, close: () => { closed += 1; } };
+      },
+    }, { idleTtlMs: 60_000 });
+    const cluster = { transport: 'ssh-tunnel', clusterServer: 'https://prod:6443', _id: 'broken-1', sshConnectionId: 's1' };
+
+    const a = await svc.resolve(cluster);
+    assert.equal(typeof broken, 'function', 'openTunnel bekam keinen onBroken-Callback');
+    a.release();
+
+    broken();
+    await new Promise((r) => setImmediate(r));
+
+    const b = await svc.resolve(cluster);
+    assert.equal(opened, 2, 'nach dem Bruch wurde der tote Cache-Eintrag wiederverwendet');
+    b.release();
+    assert.ok(closed >= 1, 'der gebrochene Tunnel wurde nicht geschlossen');
+  });
+
+  await check('direct lehnt nicht-https ab (kein Bearer-Token im Klartext)', async () => {
+    // rewriteServerUrl prüfte https nur auf dem TUNNEL-Pfad; `direct` gab
+    // cluster.clusterServer unverändert zurück. Ein `http://prod:8080`
+    // hätte `Authorization: Bearer <token>` im Klartext auf die Leitung
+    // gelegt.
+    const svc = new KubeTransportService({ openTunnel: async () => { throw new Error('nicht rufen'); } });
+    const err = await svc.resolve({ transport: 'direct', clusterServer: 'http://prod:8080', _id: 'plain-1' })
+      .then(() => null, (e) => e);
+    assert.ok(err, 'http auf dem direct-Pfad wurde akzeptiert');
+    assert.equal(err.status, 400, 'muss BadRequest sein');
+    assert.match(String(err.message), /https/i);
+  });
+
+  await check('direct lehnt eine leere/kaputte Server-URL als 400 ab (nicht 500)', async () => {
+    const svc = new KubeTransportService({ openTunnel: async () => { throw new Error('nicht rufen'); } });
+    for (const bad of ['', 'prod:6443', 'nicht mal eine url']) {
+      const err = await svc.resolve({ transport: 'direct', clusterServer: bad, _id: 'bad-url' })
+        .then(() => null, (e) => e);
+      assert.ok(err, `"${bad}" wurde akzeptiert`);
+      assert.equal(err.status, 400, `"${bad}" ergab keinen 400 (TypeError aus new URL() wird sonst zu 500)`);
+    }
+  });
+
+  await check('ssh-tunnel lehnt eine kaputte Server-URL als 400 ab (nicht 500)', async () => {
+    const svc = new KubeTransportService({ openTunnel: async () => { throw new Error('nicht rufen'); } });
+    const err = await svc.resolve({ transport: 'ssh-tunnel', clusterServer: '', _id: 'bad-url-2', sshConnectionId: 's1' })
+      .then(() => null, (e) => e);
+    assert.ok(err, 'leere URL wurde akzeptiert');
+    assert.equal(err.status, 400);
+  });
+
   await check('ssh-tunnel ohne sshConnectionId wird abgelehnt', async () => {
     const svc = new KubeTransportService({ openTunnel: async () => ({ localPort: 1, close: () => {} }) });
     const err = await svc.resolve({ transport: 'ssh-tunnel', clusterServer: 'https://p:6443', _id: 'c5' })

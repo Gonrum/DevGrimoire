@@ -30,11 +30,33 @@ export function rewriteServerUrl(
   server: string,
   localPort: number,
 ): { url: string; servername: string } {
-  const parsed = new URL(server);
+  const parsed = requireHttpsUrl(server);
+  return { url: `https://127.0.0.1:${localPort}`, servername: parsed.hostname };
+}
+
+/**
+ * Parst eine Cluster-Server-URL und besteht auf `https`.
+ *
+ * Beides ist nötig, und beides war es nicht: `new URL('')` wirft einen
+ * TypeError, der als HTTP 500 beim Aufrufer landet statt als 400 — und ein
+ * `http://…`-Server legt `Authorization: Bearer <token>` im Klartext auf die
+ * Leitung. Die https-Prüfung stand bisher nur in `rewriteServerUrl()`, also
+ * ausschliesslich auf dem Tunnel-Pfad; `direct` reichte durch, was in der
+ * Kubeconfig stand.
+ */
+export function requireHttpsUrl(server: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(server);
+  } catch {
+    throw new BadRequestException(
+      `Cluster-Server ist keine gültige URL: ${server || '(leer)'}`,
+    );
+  }
   if (parsed.protocol !== 'https:') {
     throw new BadRequestException('Cluster-Server muss https verwenden');
   }
-  return { url: `https://127.0.0.1:${localPort}`, servername: parsed.hostname };
+  return parsed;
 }
 
 /**
@@ -68,7 +90,11 @@ export class KubeTransportService {
 
   async resolve(cluster: KubeClusterDocument): Promise<ResolvedEndpoint> {
     if (cluster.transport === 'direct') {
-      const parsed = new URL(cluster.clusterServer);
+      // Auch der direkte Pfad muss https erzwingen — sonst geht der
+      // Bearer-Token im Klartext raus. `create()` lehnt das bereits beim
+      // Anlegen ab; das hier ist die zweite Verteidigungslinie für
+      // Bestandsdaten, die vor dieser Prüfung angelegt wurden.
+      const parsed = requireHttpsUrl(cluster.clusterServer);
       return { url: cluster.clusterServer, servername: parsed.hostname, release: () => {} };
     }
 
@@ -78,13 +104,28 @@ export class KubeTransportService {
 
     const key = String(cluster._id);
     const sshConnectionId = cluster.sshConnectionId.toString();
-    const target = new URL(cluster.clusterServer);
+    // Bewusst nur die URL-Form prüfen, nicht das Protokoll: die
+    // https-Prüfung bleibt auf diesem Pfad in `rewriteServerUrl()`, NACH dem
+    // Öffnen des Tunnels — genau dort sitzt die Regression aus Review-Runde 1
+    // (Refcount-Leak beim späten Wurf), und die soll erreichbar bleiben.
+    let target: URL;
+    try {
+      target = new URL(cluster.clusterServer);
+    } catch {
+      throw new BadRequestException(
+        `Cluster-Server ist keine gültige URL: ${cluster.clusterServer || '(leer)'}`,
+      );
+    }
     const dstPort = target.port ? Number(target.port) : 443;
 
     let entryPromise = this.tunnels.get(key);
     if (!entryPromise) {
       entryPromise = this.sshSessionService
-        .openTunnel(sshConnectionId, target.hostname, dstPort)
+        // Der vierte Parameter ist die Bruchmeldung: stirbt der SSH-Client
+        // (Bastion-Reboot, sshd-Restart, Netz-Flap), verwirft der Listener
+        // sich selbst und sagt hier Bescheid, damit der Cache-Eintrag
+        // verschwindet statt auf einen toten Tunnel zu zeigen.
+        .openTunnel(sshConnectionId, target.hostname, dstPort, () => { this.invalidate(key); })
         .then((opened): TunnelEntry => ({ localPort: opened.localPort, refs: 0, close: opened.close }));
       this.tunnels.set(key, entryPromise);
       // Schlägt das Öffnen fehl, darf der Key nicht dauerhaft mit einem
@@ -140,6 +181,48 @@ export class KubeTransportService {
         this.releaseEntry(key, entryPromise, entry);
       },
     };
+  }
+
+  /**
+   * Wirft den gecachten Tunnel eines Clusters sofort weg — unabhängig vom
+   * Refcount.
+   *
+   * Ohne diesen Weg leert sich der Cache ausschliesslich über „refs auf 0"
+   * plus Idle-TTL. Das reicht nicht: mit K2s 2–5-Sekunden-Polling setzt jedes
+   * `resolve()` den Idle-Timer zurück, ein veralteter Eintrag könnte also
+   * unbegrenzt lange überleben. Drei Ereignisse machen einen Eintrag
+   * veraltet, und alle drei rufen hier herein:
+   *
+   * - der SSH-Client stirbt (`onBroken` aus `openTunnel`) — der Listener
+   *   davor ist wertlos;
+   * - `update()` ändert `transport`/`sshConnectionId` — der Cluster tunnelte
+   *   sonst bis zu eine Idle-TTL lang weiter über die ALTE Bastion;
+   * - `delete()` entfernt den Cluster — Listener und ssh2-Client überlebten
+   *   sonst die Entität.
+   *
+   * Bewusst hart: ein noch gehaltener Eintrag wird ebenfalls geschlossen. Bei
+   * allen drei Anlässen ist er entweder schon tot oder zeigt aufs falsche
+   * Ziel; ein laufender Request soll daran scheitern statt still das Falsche
+   * zu tun.
+   */
+  invalidate(clusterId: string): void {
+    const key = String(clusterId);
+    const pending = this.tunnels.get(key);
+    if (!pending) return;
+    this.tunnels.delete(key);
+    pending.then(
+      (entry) => {
+        if (entry.idleTimer) {
+          clearTimeout(entry.idleTimer);
+          entry.idleTimer = undefined;
+        }
+        entry.close();
+      },
+      () => {
+        // Das Öffnen war ohnehin fehlgeschlagen — es gibt nichts zu
+        // schliessen, und die Ablehnung ist hier bereits behandelt.
+      },
+    );
   }
 
   private releaseEntry(key: string, entryPromise: Promise<TunnelEntry>, entry: TunnelEntry): void {

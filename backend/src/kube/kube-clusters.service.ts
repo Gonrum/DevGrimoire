@@ -5,6 +5,7 @@ import { KubeCluster, KubeClusterDocument, KubePrometheusConfig } from './schema
 import { Secret, SecretDocument } from '../secrets/schemas/secret.schema';
 import { SecretsService } from '../secrets/secrets.service';
 import { parseKubeconfig } from './kubeconfig-parser';
+import { KubeTransportService, requireHttpsUrl } from './kube-transport.service';
 import { isDuplicateKeyError } from '../common/narrow';
 import { CreateKubeClusterDto, KubePrometheusDto } from './dto/create-kube-cluster.dto';
 import { UpdateKubeClusterDto } from './dto/update-kube-cluster.dto';
@@ -15,6 +16,7 @@ export class KubeClustersService {
     @InjectModel(KubeCluster.name) private readonly clusterModel: Model<KubeClusterDocument>,
     @InjectModel(Secret.name) private readonly secretModel: Model<SecretDocument>,
     private readonly secretsService: SecretsService,
+    private readonly transport: KubeTransportService,
   ) {}
 
   /**
@@ -72,6 +74,21 @@ export class KubeClustersService {
         'Exec-Credential-Plugins (aws/gcloud) laufen serverseitig nicht.',
       );
     }
+    // Die Server-URL aus der Kubeconfig ist Caller-Input und landet
+    // unverändert im `required: true`-Feld `clusterServer`. Zwei Dinge
+    // müssen hier stimmen, und beide taten es nicht:
+    //
+    //  - **Form**: ein Context, der auf einen in der Datei fehlenden Cluster
+    //    zeigt, parst anstandslos und liefert `server: ''`. Das lief in den
+    //    Pre-Validate-Hook und kam als HTTP 500 beim Aufrufer an.
+    //  - **Protokoll**: der Parser winkt `http://prod:8080` mit einer blossen
+    //    `no_ca`-Warnung durch. So ein Cluster war anlegbar — und
+    //    funktionierte dann auch, mit `Authorization: Bearer <token>` im
+    //    Klartext auf der Leitung.
+    //
+    // Vor dem Anlegen des Secrets prüfen, sonst bliebe bei Ablehnung ein
+    // verwaistes Secret zurück.
+    requireHttpsUrl(ctx.server);
     const insecure = ctx.warnings.includes('insecure_tls') || ctx.warnings.includes('no_ca');
     if (insecure && dto.allowInsecureTls !== true) {
       throw new BadRequestException(
@@ -200,6 +217,10 @@ export class KubeClustersService {
     // create() geprüft hat, bleibt über die gesamte Lebensdauer des
     // Dokuments erhalten — ein Check hier könnte nie auslösen.
     const doc = await this.findById(id);
+    // Vorzustand des Transports festhalten: ein gecachter Tunnel gehört zur
+    // ALTEN Bastion und muss weg, sobald sich hier etwas ändert (I2).
+    const previousTransport = doc.transport;
+    const previousSshConnectionId = doc.sshConnectionId?.toString();
     if (dto.label !== undefined) doc.label = dto.label;
     if (dto.defaultNamespace !== undefined) doc.defaultNamespace = dto.defaultNamespace;
     if (dto.transport !== undefined) doc.transport = dto.transport;
@@ -235,6 +256,21 @@ export class KubeClustersService {
     }
 
     await doc.save();
+
+    // Ohne diesen Wurf tunnelte der Cluster bis zum Ablauf der Idle-TTL
+    // (5 Minuten) weiter über den alten Bastion-Host — und weil K2s Polling
+    // den Idle-Timer bei jedem Zugriff zurücksetzt, potenziell unbegrenzt
+    // lange. Nur bei echter Änderung: Invalidieren schliesst den Tunnel
+    // sofort, auch unter laufenden Requests, und für eine Umbenennung wäre
+    // das grundlose Störung. Als Schlüssel die kanonische Id des Dokuments,
+    // nicht den Roh-String aus der Route — der Cache ist über
+    // `String(cluster._id)` verschlüsselt.
+    if (
+      doc.transport !== previousTransport ||
+      doc.sshConnectionId?.toString() !== previousSshConnectionId
+    ) {
+      this.transport.invalidate(doc._id.toString());
+    }
     return doc;
   }
 
@@ -242,6 +278,9 @@ export class KubeClustersService {
     const _id = this.toObjectId(id, 'id');
     await this.secretModel.deleteMany({ ownedByKubeClusterId: _id }).exec();
     await this.clusterModel.deleteOne({ _id }).exec();
+    // Sonst überleben der Listener und der ssh2-Client die gelöschte
+    // Entität — bis zum nächsten Backend-Neustart.
+    this.transport.invalidate(_id.toString());
   }
 
   async recordConnectSuccess(id: string): Promise<KubeClusterDocument> {
