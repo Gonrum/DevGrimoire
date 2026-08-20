@@ -33,6 +33,7 @@ import FileUploadZone from '../components/FileUploadZone';
 import EnvironmentList, { SecretsList } from '../components/EnvironmentList';
 import MonitoringTab from '../components/MonitoringTab';
 import SshConnectionsTab from '../components/ssh/SshConnectionsTab';
+import { KubeClustersTab } from '../components/kube/KubeClustersTab';
 import HarnessView from '../components/HarnessView';
 import { harnessSectionCount } from '../lib/harness';
 import SnippetList from '../components/SnippetList';
@@ -54,6 +55,7 @@ type Tab =
   | 'files'
   | 'monitoring'
   | 'ssh'
+  | 'kube'
   | 'contacts'
   | 'activity'
   | 'soul'
@@ -355,6 +357,7 @@ export default function CustomerDetail() {
         { key: 'secrets', label: t('customers.tab.secrets'), count: customerSecrets.length + linkedSecrets.length },
         { key: 'monitoring', label: t('customers.tab.monitoring') },
         { key: 'ssh', label: t('customers.tab.ssh') },
+        { key: 'kube', label: t('customers.tab.kube') },
         { key: 'automation', label: t('nav.workflows') },
         { key: 'contacts', label: t('customers.tab.contacts'), count: contacts.length },
       ],
@@ -714,6 +717,10 @@ export default function CustomerDetail() {
 
             {tab === 'ssh' && (
               <SshConnectionsTab scope={{ customerId: id }} />
+            )}
+
+            {tab === 'kube' && (
+              <KubeClustersTab scope={{ customerId: id }} />
             )}
 
             {tab === 'automation' && (

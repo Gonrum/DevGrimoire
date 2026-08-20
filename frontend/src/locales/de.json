@@ -446,6 +446,7 @@
       "files": "Pergamente",
       "monitoring": "Observatorium",
       "ssh": "Server",
+      "kube": "Cluster",
       "contacts": "Kontakte",
       "activity": "Chronik",
       "soul": "Mandantenseele",
@@ -1021,6 +1022,7 @@
       "secrets": "Siegel",
       "httpRequests": "API-Werkbank",
       "ssh": "Server",
+      "kube": "Cluster",
       "recurringTasks": "Riten",
       "commits": "Vermerke",
       "logs": "Orakel",
@@ -1044,6 +1046,7 @@
       "secrets": "Verschlüsselte Secrets pro Projekt oder Umgebung.",
       "httpRequests": "HTTP-Requests bauen, speichern und senden — mit Projekt-Secrets und curl-Import.",
       "ssh": "SSH-Zugänge zu Servern dieses Projekts — Terminal, Test, Audit.",
+      "kube": "Kubernetes-Cluster dieses Projekts — Kubeconfig hinterlegen, Context wählen, Verbindung testen.",
       "recurringTasks": "Wiederkehrende Aufgaben — Riten und Routinen.",
       "commits": "Commit-Historie aus verbundenen Git-Repositories.",
       "files": "Dateianhänge und Pergamente dieses Projekts.",
@@ -2577,6 +2580,58 @@
       "done": "Hochgeladen ({{bytes}} Bytes).",
       "noFile": "Bitte eine Datei auswählen.",
       "noPath": "Bitte einen Ziel-Pfad angeben."
+    }
+  },
+  "kube": {
+    "tab": {
+      "title": "Cluster",
+      "addCluster": "Cluster hinzufügen",
+      "empty": "Noch kein Cluster hinterlegt.",
+      "test": "Testen",
+      "delete": "Löschen",
+      "deleted": "Cluster gelöscht.",
+      "deleteFailed": "Löschen fehlgeschlagen",
+      "testFailed": "Test fehlgeschlagen",
+      "readOnly": "read-only",
+      "viaSsh": "über SSH",
+      "insecureTls": "TLS ungeprüft",
+      "testSuccess": "Server {{version}}",
+      "canWrite": "Dieser Zugang darf schreiben",
+      "readOnlyAccess": "Nur lesender Zugang"
+    },
+    "status": {
+      "ok": "Verbunden",
+      "error": "Fehler",
+      "never_tested": "Nie getestet"
+    },
+    "form": {
+      "kubeconfigLabel": "Kubeconfig",
+      "kubeconfigPlaceholder": "Inhalt von ~/.kube/config einfügen",
+      "loadContexts": "Contexts laden",
+      "loadContextsFailed": "Kubeconfig konnte nicht gelesen werden",
+      "chooseContext": "Context wählen",
+      "warning": {
+        "insecure_tls": "insecure-skip-tls-verify ist gesetzt",
+        "no_ca": "Keine CA hinterlegt"
+      },
+      "rejection": {
+        "exec_plugin": "Exec-Credential-Plugin wird serverseitig nicht unterstützt",
+        "auth_provider": "Auth-Provider wird serverseitig nicht unterstützt",
+        "no_contexts": "Kein Context in dieser Kubeconfig gefunden",
+        "unparsable": "Dieser Context konnte nicht gelesen werden"
+      },
+      "insecureAck": "TLS-Prüfung bewusst abschwächen — der Cluster trägt danach dauerhaft eine Warnung",
+      "label": "Label",
+      "slug": "Slug",
+      "slugPlaceholder": "prod-cluster",
+      "transport": "Transport",
+      "transportDirect": "Direkt erreichbar",
+      "transportTunnel": "Über SSH-Verbindung tunneln",
+      "sshConnectionId": "SSH-Verbindung",
+      "sshConnectionPlaceholder": "Id der SSH-Verbindung",
+      "submit": "Anlegen",
+      "cancel": "Abbrechen",
+      "submitFailed": "Anlegen fehlgeschlagen"
     }
   },
   "harness": {

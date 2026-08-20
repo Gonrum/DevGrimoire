@@ -33,6 +33,7 @@ import ProjectTabShell from '../components/ui/ProjectTabShell';
 import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
 import { workflowsApi } from '../api/workflows';
 import SshConnectionsTab from '../components/ssh/SshConnectionsTab';
+import { KubeClustersTab } from '../components/kube/KubeClustersTab';
 import ProjectAccessTab from '../components/projects/ProjectAccessTab';
 import ProjectHeader from '../components/projects/ProjectHeader';
 import HttpRequestsTab from '../components/HttpRequestsTab';
@@ -340,6 +341,7 @@ export default function ProjectDetail() {
         { key: 'secrets', label: t('projectDetail.tab.secrets'), count: secrets.length },
         { key: 'http-requests', label: t('projectDetail.tab.httpRequests'), count: httpRequestCount },
         { key: 'ssh', label: t('projectDetail.tab.ssh'), count: sshCount },
+        { key: 'kube', label: t('projectDetail.tab.kube') },
         { key: 'recurring-tasks', label: t('projectDetail.tab.recurringTasks'), count: recurringTasks.filter((rt) => rt.active).length },
         { key: 'workflows', label: t('nav.workflows'), count: workflowCount },
         { key: 'commits', label: t('projectDetail.tab.commits'), count: commitCount },
@@ -373,6 +375,7 @@ export default function ProjectDetail() {
     secrets: t('projectDetail.tabDesc.secrets'),
     'http-requests': t('projectDetail.tabDesc.httpRequests'),
     ssh: t('projectDetail.tabDesc.ssh'),
+    kube: t('projectDetail.tabDesc.kube'),
     'recurring-tasks': t('projectDetail.tabDesc.recurringTasks'),
     commits: t('projectDetail.tabDesc.commits'),
     files: t('projectDetail.tabDesc.files'),
@@ -497,6 +500,7 @@ export default function ProjectDetail() {
             {tab === 'secrets' && <SecretsList key={secretsKey} projectId={id} />}
             {tab === 'http-requests' && <HttpRequestsTab projectId={id!} />}
             {tab === 'ssh' && <SshConnectionsTab scope={{ projectId: id! }} />}
+            {tab === 'kube' && <KubeClustersTab scope={{ projectId: id! }} />}
             {tab === 'recurring-tasks' && <RecurringTaskList entries={recurringTasks} projectId={id} />}
             {tab === 'workflows' && (
               <WorkflowProjectTab scope="project" projectId={id} />

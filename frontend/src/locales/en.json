@@ -446,6 +446,7 @@
       "files": "Scrolls",
       "monitoring": "Observatory",
       "ssh": "Servers",
+      "kube": "Clusters",
       "contacts": "Contacts",
       "activity": "Chronicle",
       "soul": "Customer Soul",
@@ -1021,6 +1022,7 @@
       "secrets": "Seals",
       "httpRequests": "API Workbench",
       "ssh": "Servers",
+      "kube": "Clusters",
       "recurringTasks": "Rites",
       "commits": "Inscriptions",
       "logs": "Oracles",
@@ -1044,6 +1046,7 @@
       "secrets": "Encrypted secrets per project or environment.",
       "httpRequests": "Build, save and send HTTP requests — with project secrets and curl import.",
       "ssh": "SSH connections for this project — terminal, test, audit.",
+      "kube": "Kubernetes clusters for this project — store a kubeconfig, pick a context, test the connection.",
       "recurringTasks": "Recurring tasks — rites and routines.",
       "commits": "Commit history from connected git repositories.",
       "files": "File attachments and scrolls of this project.",
@@ -2578,6 +2581,58 @@
       "done": "Uploaded ({{bytes}} bytes).",
       "noFile": "Please choose a file.",
       "noPath": "Please enter a remote path."
+    }
+  },
+  "kube": {
+    "tab": {
+      "title": "Clusters",
+      "addCluster": "Add cluster",
+      "empty": "No cluster stored yet.",
+      "test": "Test",
+      "delete": "Delete",
+      "deleted": "Cluster deleted.",
+      "deleteFailed": "Delete failed",
+      "testFailed": "Test failed",
+      "readOnly": "read-only",
+      "viaSsh": "via SSH",
+      "insecureTls": "TLS unverified",
+      "testSuccess": "Server {{version}}",
+      "canWrite": "This access may write",
+      "readOnlyAccess": "Read-only access"
+    },
+    "status": {
+      "ok": "Connected",
+      "error": "Error",
+      "never_tested": "Never tested"
+    },
+    "form": {
+      "kubeconfigLabel": "Kubeconfig",
+      "kubeconfigPlaceholder": "Paste the contents of ~/.kube/config",
+      "loadContexts": "Load contexts",
+      "loadContextsFailed": "Could not read the kubeconfig",
+      "chooseContext": "Choose a context",
+      "warning": {
+        "insecure_tls": "insecure-skip-tls-verify is set",
+        "no_ca": "No CA on file"
+      },
+      "rejection": {
+        "exec_plugin": "Exec credential plugins aren't supported server-side",
+        "auth_provider": "This auth provider isn't supported server-side",
+        "no_contexts": "No context found in this kubeconfig",
+        "unparsable": "This context could not be read"
+      },
+      "insecureAck": "Deliberately weaken TLS verification — the cluster keeps a permanent warning afterwards",
+      "label": "Label",
+      "slug": "Slug",
+      "slugPlaceholder": "prod-cluster",
+      "transport": "Transport",
+      "transportDirect": "Directly reachable",
+      "transportTunnel": "Tunnel over an SSH connection",
+      "sshConnectionId": "SSH connection",
+      "sshConnectionPlaceholder": "Id of the SSH connection",
+      "submit": "Create",
+      "cancel": "Cancel",
+      "submitFailed": "Create failed"
     }
   },
   "harness": {

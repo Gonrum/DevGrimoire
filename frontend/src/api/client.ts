@@ -1187,6 +1187,50 @@ export interface SshAuditQueryParams {
   sourceContext?: SshAuditSourceContext;
 }
 
+// ---- Kube clusters (K1) ----------------------------------------------------
+
+/** Projected shape returned by the API — never carries the raw kubeconfig. */
+export interface KubeCluster {
+  _id: string;
+  label: string;
+  slug: string;
+  projectId?: string;
+  customerId?: string;
+  contextName: string;
+  clusterServer: string;
+  defaultNamespace?: string;
+  transport: 'direct' | 'ssh-tunnel';
+  sshConnectionId?: string;
+  readOnly: boolean;
+  allowMcpWrites: boolean;
+  allowInsecureTls: boolean;
+  prometheus: { enabled: boolean; namespace?: string; service?: string; port?: number; path: string };
+  description?: string;
+  tags: string[];
+  lastConnectedAt?: string;
+  lastConnectError?: { at: string; message: string };
+}
+
+/** One context out of `POST /kube-clusters/parse-kubeconfig`. */
+export interface ParsedKubeContext {
+  contextName: string;
+  clusterName: string;
+  server: string;
+  userName: string;
+  namespace?: string;
+  warnings: Array<'insecure_tls' | 'no_ca'>;
+  /** Non-empty means this context is unselectable — the backend can't act on it. */
+  rejections: Array<'exec_plugin' | 'auth_provider' | 'no_contexts' | 'unparsable'>;
+}
+
+export interface KubeConnectionTestResult {
+  ok: boolean;
+  serverVersion?: string;
+  canWrite: boolean;
+  verbs: string[];
+  error?: string;
+}
+
 export interface Notification {
   _id: string;
   title: string;
@@ -2343,6 +2387,25 @@ export const api = {
     delete: (id: string) =>
       request<void>(`/secrets/${id}`, { method: 'DELETE' }),
   },
+  // Flat, not namespaced under `kube:` — later K-phase tasks call these
+  // exact names (`api.parseKubeconfig`, `api.listKubeClusters`, …).
+  parseKubeconfig: (kubeconfig: string) =>
+    request<{ contexts: ParsedKubeContext[]; currentContext?: string }>(
+      '/kube-clusters/parse-kubeconfig',
+      { method: 'POST', body: JSON.stringify({ kubeconfig }) },
+    ),
+  listKubeClusters: (scope: { projectId?: string; customerId?: string }) =>
+    request<KubeCluster[]>(
+      `/kube-clusters?${new URLSearchParams(
+        scope.projectId ? { projectId: scope.projectId } : { customerId: scope.customerId ?? '' },
+      ).toString()}`,
+    ),
+  createKubeCluster: (body: Record<string, unknown>) =>
+    request<KubeCluster>('/kube-clusters', { method: 'POST', body: JSON.stringify(body) }),
+  deleteKubeCluster: (id: string) =>
+    request<void>(`/kube-clusters/${id}`, { method: 'DELETE' }),
+  testKubeCluster: (id: string) =>
+    request<KubeConnectionTestResult>(`/kube-clusters/${id}/test`, { method: 'POST' }),
   ssh: {
     listForCustomer: (customerId: string) =>
       request<SshConnectionListItem[]>(`/customers/${customerId}/ssh-connections`),

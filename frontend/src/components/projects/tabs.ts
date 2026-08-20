@@ -4,14 +4,14 @@ import {
   BookOpen, ScrollText, BookMarked, FileHeart, FlaskConical, Scissors, Paperclip,
   Zap, Share2, Sparkles, Database, Package, Tag,
   Ghost, FolderGit2, Settings2, KeyRound, Globe, TerminalSquare, Repeat, Workflow,
-  GitCommit, FileText, Users,
+  GitCommit, FileText, Users, Container,
 } from 'lucide-react';
 
 export type Tab =
   | 'overview' | 'todos' | 'soul' | 'milestones' | 'sessions' | 'knowledge' | 'changelog'
   | 'activity' | 'environments' | 'secrets' | 'manual' | 'research' | 'schemas' | 'dependencies'
   | 'features' | 'commits' | 'recurring-tasks' | 'snippets' | 'files' | 'logs' | 'releases'
-  | 'workspaces' | 'workflows' | 'ssh' | 'http-requests' | 'docs-health' | 'graph' | 'oracle' | 'access';
+  | 'workspaces' | 'workflows' | 'ssh' | 'kube' | 'http-requests' | 'docs-health' | 'graph' | 'oracle' | 'access';
 
 export interface NavItem {
   key: Tab;
@@ -49,6 +49,7 @@ export const TAB_ICON: Record<Tab, LucideIcon> = {
   secrets: KeyRound,
   'http-requests': Globe,
   ssh: TerminalSquare,
+  kube: Container,
   'recurring-tasks': Repeat,
   workflows: Workflow,
   commits: GitCommit,
