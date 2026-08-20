@@ -76,7 +76,8 @@
     "check:kube-transport": "node scripts/kube-transport-check.cjs",
     "check:kube-client": "node scripts/kube-client-check.cjs",
     "check:kube-normalize": "node scripts/kube-normalize-check.cjs",
-    "check:kube-resources": "node scripts/kube-resources-check.cjs"
+    "check:kube-resources": "node scripts/kube-resources-check.cjs",
+    "check:kube-logs": "node scripts/kube-logs-check.cjs"
   },
   "dependencies": {
     "@kubernetes/client-node": "^2.0.0",
