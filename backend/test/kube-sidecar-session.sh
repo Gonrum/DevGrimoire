@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # E2E für den Kube-Session-Endpunkt des Sidecars (K3, Task 2).
 # Läuft gegen den laufenden workspace-Container.
+#
+# SIDECAR_URL: der `workspace`-Service published in docker-compose.yml
+# KEINEN Host-Port (nur `workspace-net`/`workspace-api-net`, letzteres
+# `internal: true`). Der Default unten (http://localhost:9000) funktioniert
+# deshalb nicht unverändert von einer Host-Shell aus. Override mit der
+# Container-IP, z.B.:
+#   IP=$(docker inspect devgrimoire-workspace --format \
+#     '{{(index .NetworkSettings.Networks "devgrimoire_workspace-api-net").IPAddress}}')
+#   SIDECAR_URL="http://$IP:9000" ./backend/test/kube-sidecar-session.sh
+# Der Host erreicht diese IP trotz `internal: true`, weil die Bridge lokal
+# am Host hängt. Läuft dieses Skript dagegen aus einem Container heraus, der
+# selbst an workspace-api-net hängt (z.B. dem Backend), reicht der Default.
 set -euo pipefail
 
 TOKEN="${WORKSPACE_API_TOKEN:?WORKSPACE_API_TOKEN muss gesetzt sein (aus .env)}"
@@ -9,6 +21,26 @@ AUTH=(-H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json")
 
 fail() { echo "✗ $1" >&2; exit 1; }
 pass() { echo "✓ $1"; }
+
+# Läuft garantiert beim Skriptende, auch wenn ein früherer Check via fail()
+# (exit 1) das Skript vorzeitig beendet — ein Leak-Check, der nur bei einem
+# sauberen Gesamtdurchlauf feuert, ist kein Leak-Check. Muss darum per EXIT-
+# Trap früh registriert werden, nicht als letzte Zeile im Happy Path.
+canary_check_on_exit() {
+  local prior_rc=$?
+  trap - EXIT
+  if docker logs devgrimoire-workspace 2>&1 | grep -q "SIDECAR_CANARY_TOKEN"; then
+    echo "✗ der Kubeconfig-Token steht im Sidecar-Log" >&2
+    exit 1
+  fi
+  if [ "$prior_rc" = "0" ]; then
+    echo "✓ kein Credential im Sidecar-Log"
+    echo ""
+    echo "Kube sidecar session E2E: alle Prüfungen bestanden"
+  fi
+  exit "$prior_rc"
+}
+trap canary_check_on_exit EXIT
 
 KC='apiVersion: v1
 kind: Config
@@ -79,6 +111,21 @@ OUT=$(curl -sS -H "Authorization: Bearer $TOKEN" \
 echo "$OUT" | jq -e '.exitCode == 0' >/dev/null || fail "kubectl config current-context: $OUT"
 pass "kubectl läuft mit der Session-Kubeconfig"
 
+# --- 6d. /kube/exec: kein Shell-Escape über ein einzelnes Argument --------
+# 6a prüft nur `Array.isArray`, nicht die Abwesenheit einer Shell — vertauschte
+# man execFile gegen exec([...].join(' ')), bliebe 6a grün und
+# args: ["get","pods;id"] würde zur Injektion. Dieser Check fängt genau das:
+# ein Semikolon in EINEM Argument bleibt Text für kubectl, wird nie zur
+# Kommando-Trennung. Liefe stattdessen `id` als zweiter Befehl, stünde
+# "uid=" in der Ausgabe.
+OUT=$(curl -sS -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -X POST "${BASE}/kube/exec" \
+  -d "{\"kubeSessionId\":\"$SID\",\"args\":[\"get\",\"pods;id\"]}")
+if echo "$OUT" | grep -qE 'uid=[0-9]+\(' ; then
+  fail "Shell-Metazeichen im Argument wurden ausgeführt: $OUT"
+fi
+pass "Semikolon im Argument bleibt Text, keine Kommando-Injektion"
+
 # --- 7. Löschen ist idempotent -------------------------------------------
 curl -sS -o /dev/null "${AUTH[@]}" -X DELETE "${BASE}/kube/session/${SID}"
 CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X DELETE "${BASE}/kube/session/${SID}")
@@ -87,11 +134,6 @@ GONE=$(docker exec devgrimoire-workspace sh -c "test -f /run/kube-sessions/${SID
 [ "$GONE" = "weg" ] || fail "Kubeconfig-Datei überlebte das DELETE"
 pass "DELETE ist idempotent und entfernt die Datei"
 
-# --- 8. Der Canary darf nirgends im Container-Log auftauchen -------------
-if docker logs devgrimoire-workspace 2>&1 | grep -q "SIDECAR_CANARY_TOKEN"; then
-  fail "der Kubeconfig-Token steht im Sidecar-Log"
-fi
-pass "kein Credential im Sidecar-Log"
-
-echo ""
-echo "Kube sidecar session E2E: alle Prüfungen bestanden"
+# Restlicher Output (Canary-Check + Abschlussbanner) kommt aus dem EXIT-Trap
+# oben — der muss so oder so laufen, auch wenn ein früherer Check via fail()
+# das Skript vorzeitig beendet.

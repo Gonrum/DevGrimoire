@@ -797,17 +797,95 @@ app.post('/size', async (req, res) => {
 const KUBE_SESSION_DIR = '/run/kube-sessions';
 const KUBE_SESSION_TTL_DEFAULT_MS = 60 * 60 * 1000;   // 1 h
 const KUBE_SESSION_TTL_MAX_MS = 8 * 60 * 60 * 1000;   // 8 h
-const KUBE_CONFIG_MAX_BYTES = 512 * 1024;
+// 100 KB, deutlich unter dem globalen express.json-Limit von 256 KB
+// (Zeile ~240). Ein Kubeconfig, das als JSON-String-Wert kodiert wird, kann
+// im Worst Case (viele Escapes) auf etwa das Doppelte anschwellen — bei
+// 100 KB Rohinhalt bleibt selbst dann Luft unter den 256 KB, sodass diese
+// Prüfung tatsächlich feuert und nicht body-parser mit einem undifferenzierten
+// 500 zuvorkommt. 100 KB ist für reale Kubeconfigs immer noch grosszügig.
+const KUBE_CONFIG_MAX_BYTES = 100 * 1024;
+// 12 Sessions × 100 KB (KUBE_CONFIG_MAX_BYTES) = 1,2 MB — mit reichlich Luft
+// unter den 8 MB des tmpfs-Mounts (docker-compose.yml, size=8m). Der Cap
+// existiert nicht wegen der Bytes, sondern gegen unbegrenztes Anwachsen der
+// In-Memory-Session-Map bei vielen kleinen Sessions.
+const KUBE_SESSION_MAX_COUNT = 12;
 const KUBE_SESSION_ID_PATTERN = /^[a-f0-9]{32}$/;
 
-/** id -> { expiresAt } — die Datei ist die Wahrheit, das hier nur der Reaper-Index. */
+/** id -> { expiresAt } — der Reaper-Index; Ablauf wird bei jedem Zugriff live geprüft. */
 const kubeSessions = new Map();
 
 function kubeSessionPath(id) {
   return path.join(KUBE_SESSION_DIR, `${id}.yaml`);
 }
 
+/**
+ * `kubeSessions.has(id)` allein ist NICHT verlässlich: der periodische
+ * Reaper räumt abgelaufene Einträge erst bis zu 60s später weg, in der
+ * Zwischenzeit stünde eine bereits abgelaufene Session weiter zur
+ * Verfügung. Diese Funktion vergleicht `expiresAt` bei jedem Aufruf live
+ * und räumt einen gefundenen abgelaufenen Eintrag sofort weg, statt auf
+ * den nächsten Reaper-Lauf zu warten.
+ */
+function kubeSessionActive(id) {
+  const entry = kubeSessions.get(id);
+  if (!entry) return false;
+  if (entry.expiresAt > Date.now()) return true;
+  kubeSessions.delete(id);
+  fsp.rm(kubeSessionPath(id), { force: true }).catch(() => { /* best effort */ });
+  return false;
+}
+
+/** Räumt abgelaufene Sessions weg, auch wenn niemand darauf zugreift oder DELETE ruft. */
+function pruneExpiredKubeSessions() {
+  const now = Date.now();
+  for (const [id, entry] of kubeSessions) {
+    if (entry.expiresAt > now) continue;
+    kubeSessions.delete(id);
+    fsp.rm(kubeSessionPath(id), { force: true }).catch(() => { /* best effort */ });
+  }
+}
+setInterval(pruneExpiredKubeSessions, 60_000).unref();
+
+// Linux TMPFS_MAGIC (statfs(2), <linux/magic.h>). Verglichen mit dem `type`,
+// den fs.statfsSync liefert — kein Text-Parsing von /proc/mounts nötig.
+const TMPFS_MAGIC_LINUX = 0x01021994;
+
+/**
+ * Einmal beim Start geprüft, nicht pro Request — der Mount ändert sich zur
+ * Laufzeit nicht. Der Grund, das überhaupt zu prüfen: `fsp.mkdir(...,
+ * {recursive:true})` unten würde anstandslos ein Verzeichnis auf der
+ * beschreibbaren Container-Schicht anlegen, wenn `/run/kube-sessions` aus
+ * irgendeinem Grund kein tmpfs ist (z.B. weil eine andere docker-compose.yml
+ * — etwa auf der Firmen-Instanz, die dieses Repo nicht überschreibt — diesen
+ * Service ohne die tmpfs-Zeile startet). Dann läge jede Kubeconfig dauerhaft
+ * auf Platte statt im flüchtigen Speicher — exakt das, was der tmpfs-Mount
+ * ausschliessen soll. Lieber alle /kube/*-Routen mit 503 verweigern, als das
+ * Sicherheitsversprechen still zu brechen.
+ */
+function checkKubeSessionDirIsTmpfs() {
+  try {
+    return fs.statfsSync(KUBE_SESSION_DIR).type === TMPFS_MAGIC_LINUX;
+  } catch {
+    return false;
+  }
+}
+const KUBE_SESSION_DIR_IS_TMPFS = checkKubeSessionDirIsTmpfs();
+if (!KUBE_SESSION_DIR_IS_TMPFS) {
+  console.error(JSON.stringify({
+    type: 'kube-session-dir-not-tmpfs',
+    dir: KUBE_SESSION_DIR,
+    message: 'refusing all /kube/* routes and kube terminals until this is mounted as tmpfs',
+  }));
+}
+
+function requireKubeSessionTmpfs(res) {
+  if (KUBE_SESSION_DIR_IS_TMPFS) return true;
+  res.status(503).json({ error: 'kube sessions unavailable: session directory is not a tmpfs mount' });
+  return false;
+}
+
 app.post('/kube/session', async (req, res) => {
+  if (!requireKubeSessionTmpfs(res)) return;
   const kubeconfig = req.body?.kubeconfig;
   if (typeof kubeconfig !== 'string' || kubeconfig.trim().length === 0) {
     return res.status(400).json({ error: 'kubeconfig must be a non-empty string' });
@@ -815,15 +893,39 @@ app.post('/kube/session', async (req, res) => {
   if (Buffer.byteLength(kubeconfig, 'utf8') > KUBE_CONFIG_MAX_BYTES) {
     return res.status(400).json({ error: 'kubeconfig too large' });
   }
+  // TODO(K3, bekannte Lücke): eine Kubeconfig mit einem exec-Credential-Block
+  // (users[].user.exec.command) lässt kubectl bei jedem Request ein
+  // beliebiges Binary im Sidecar ausführen — das hebelt das execFile-ohne-
+  // Shell-Ruling von /kube/exec komplett aus, denn nicht die Argumente sind
+  // dann der Angriffsweg, sondern der Inhalt der Kubeconfig selbst. Eine
+  // korrekte Prüfung braucht einen echten YAML-Parser (ein String-Match auf
+  // "exec:" ist zu leicht zu umgehen und zu leicht falsch-positiv); der
+  // Sidecar hat aktuell kein YAML-Paket in package.json. Bewusst nicht
+  // improvisiert — Entscheidung (Paket aufnehmen vs. Prüfung ins Backend
+  // verlagern) steht noch aus, siehe Fix-Runde-1-Bericht zu Task 2.
+  pruneExpiredKubeSessions();
+  if (kubeSessions.size >= KUBE_SESSION_MAX_COUNT) {
+    return res.status(429).json({ error: 'too many active kube sessions' });
+  }
   let ttl = Number(req.body?.ttlSeconds) * 1000;
   if (!Number.isFinite(ttl) || ttl <= 0) ttl = KUBE_SESSION_TTL_DEFAULT_MS;
   if (ttl > KUBE_SESSION_TTL_MAX_MS) ttl = KUBE_SESSION_TTL_MAX_MS;
 
   const id = crypto.randomBytes(16).toString('hex');
-  await fsp.mkdir(KUBE_SESSION_DIR, { recursive: true, mode: 0o700 });
-  // mode im open(), nicht per chmod danach — sonst existiert die Datei
-  // kurzzeitig mit dem umask-Default.
-  await fsp.writeFile(kubeSessionPath(id), kubeconfig, { mode: 0o600, flag: 'wx' });
+  try {
+    await fsp.mkdir(KUBE_SESSION_DIR, { recursive: true, mode: 0o700 });
+    // mode im open(), nicht per chmod danach — sonst existiert die Datei
+    // kurzzeitig mit dem umask-Default.
+    await fsp.writeFile(kubeSessionPath(id), kubeconfig, { mode: 0o600, flag: 'wx' });
+  } catch (err) {
+    // Fehlertext bleibt im Server-Log — an den Client nur ein generischer
+    // Text, sonst könnten Pfade oder sogar Teile des Inhalts zurückgespiegelt
+    // werden.
+    console.error(JSON.stringify({
+      type: 'kube-session-create-failed', id, error: String(err && err.message ? err.message : err),
+    }));
+    return res.status(500).json({ error: 'failed to persist kube session' });
+  }
 
   const expiresAt = Date.now() + ttl;
   kubeSessions.set(id, { expiresAt });
@@ -833,23 +935,21 @@ app.post('/kube/session', async (req, res) => {
 });
 
 app.delete('/kube/session/:id', async (req, res) => {
+  if (!requireKubeSessionTmpfs(res)) return;
   const id = req.params.id;
   if (!KUBE_SESSION_ID_PATTERN.test(id)) return res.status(400).json({ error: 'bad session id' });
   kubeSessions.delete(id);
-  await fsp.rm(kubeSessionPath(id), { force: true });
+  try {
+    await fsp.rm(kubeSessionPath(id), { force: true });
+  } catch (err) {
+    console.error(JSON.stringify({
+      type: 'kube-session-delete-failed', id, error: String(err && err.message ? err.message : err),
+    }));
+    return res.status(500).json({ error: 'failed to delete kube session' });
+  }
   console.log(JSON.stringify({ type: 'kube-session-delete', id }));
   res.status(204).end();
 });
-
-/** Räumt abgelaufene Sessions weg, auch wenn niemand DELETE gerufen hat. */
-setInterval(() => {
-  const now = Date.now();
-  for (const [id, entry] of kubeSessions) {
-    if (entry.expiresAt > now) continue;
-    kubeSessions.delete(id);
-    fsp.rm(kubeSessionPath(id), { force: true }).catch(() => { /* best effort */ });
-  }
-}, 60_000).unref();
 
 const KUBE_EXEC_MAX_ARGS = 64;
 const KUBE_EXEC_MAX_OUTPUT = 200_000;
@@ -858,17 +958,22 @@ const KUBE_EXEC_MAX_OUTPUT = 200_000;
  * Freies kubectl gegen eine Kube-Session.
  *
  * `args` ist ein ARRAY, kein String, und wird ohne Shell an kubectl übergeben.
- * Das ist der ganze Unterschied zwischen "freies kubectl" (was die Spec will)
- * und "freie Shell im Sidecar" (was ein `sh -c` daraus machen würde). Ein
- * String mit `;` oder `$(...)` wäre bei einem Aufrufer, dem niemand zusieht,
- * beliebige Codeausführung — genau deshalb kein `exec`, sondern `execFile`.
+ * Das schützt gegen Shell-Metazeichen (`;`, `$(...)`, `|`, …) INNERHALB der
+ * Argumente — ein Aufrufer kann kubectl nicht durch geschicktes Quoting eine
+ * zweite Shell-Kommandozeile unterschieben. Es schützt NICHT gegen alles, was
+ * die Kubeconfig selbst hergibt: ein exec-Credential-Block darin (siehe TODO
+ * bei /kube/session) lässt kubectl unabhängig von den hier übergebenen args
+ * ein beliebiges Binary starten. Genau deshalb kein `exec`, sondern
+ * `execFile` — aber das ist eine von zwei Verteidigungslinien, nicht die
+ * einzige.
  */
 app.post('/kube/exec', async (req, res) => {
+  if (!requireKubeSessionTmpfs(res)) return;
   const id = req.body?.kubeSessionId;
   if (typeof id !== 'string' || !KUBE_SESSION_ID_PATTERN.test(id)) {
     return res.status(400).json({ error: 'invalid kubeSessionId' });
   }
-  if (!kubeSessions.has(id)) {
+  if (!kubeSessionActive(id)) {
     return res.status(404).json({ error: 'unknown or expired kube session' });
   }
   const args = req.body?.args;
@@ -878,38 +983,54 @@ app.post('/kube/exec', async (req, res) => {
   if (!args.every((a) => typeof a === 'string')) {
     return res.status(400).json({ error: 'args must contain only strings' });
   }
-  const timeout = Math.min(Number(req.body?.timeout) || 30_000, 120_000);
+  // Muss eine positive Ganzzahl sein, bevor sie an execFile geht: `Number(-1)`
+  // ist truthy, also überlebt ein negativer oder gebrochener Wert `Math.min`
+  // klaglos und execFile wirft dann SYNCHRON (ERR_OUT_OF_RANGE) — innerhalb
+  // eines async-Handlers wird daraus eine unhandled rejection, die den
+  // gesamten Prozess und damit jedes laufende Workspace-Terminal mitnimmt.
+  const rawTimeout = Number(req.body?.timeout);
+  const timeout = Number.isInteger(rawTimeout) && rawTimeout > 0
+    ? Math.min(rawTimeout, 120_000)
+    : 30_000;
 
   const started = Date.now();
-  const child = execFile(
-    'kubectl',
-    args,
-    {
-      cwd: '/tmp',
-      env: { ...buildExecEnv({}), KUBECONFIG: kubeSessionPath(id) },
-      timeout,
-      maxBuffer: KUBE_EXEC_MAX_OUTPUT,
-      killSignal: 'SIGKILL',
-    },
-    (err, stdout, stderr) => {
-      const timedOut = Boolean(err && err.killed && err.signal === 'SIGKILL');
-      // maxBuffer-Überlauf liefert ERR_CHILD_PROCESS_STDIO_MAXBUFFER und
-      // verwirft die Ausgabe — das als "truncated" zu melden ist ehrlicher,
-      // als einen leeren Erfolg zurückzugeben.
-      const overflow = Boolean(err && err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER');
-      res.json({
-        exitCode: err && typeof err.code === 'number' ? err.code : (err ? 1 : 0),
-        stdout: String(stdout || '').slice(0, KUBE_EXEC_MAX_OUTPUT),
-        stderr: String(stderr || '').slice(0, KUBE_EXEC_MAX_OUTPUT),
-        truncated: overflow,
-        timedOut,
-        durationMs: Date.now() - started,
-      });
-    },
-  );
-  child.on('error', (err) => {
-    if (!res.headersSent) res.status(500).json({ error: String(err.message || err) });
-  });
+  try {
+    execFile(
+      'kubectl',
+      args,
+      {
+        cwd: '/tmp',
+        env: { ...buildExecEnv({}), KUBECONFIG: kubeSessionPath(id) },
+        timeout,
+        maxBuffer: KUBE_EXEC_MAX_OUTPUT,
+        killSignal: 'SIGKILL',
+      },
+      (err, stdout, stderr) => {
+        // maxBuffer-Überlauf und ein echter Timeout sehen beide wie ein
+        // SIGKILL aus, wenn killSignal auf SIGKILL steht — deshalb zuerst
+        // den Overflow-Fall über seinen eigenen err.code identifizieren und
+        // ausdrücklich aus timedOut ausschliessen, sonst meldet ein
+        // abgeschnittenes Kommando fälschlich beides gleichzeitig.
+        const overflow = Boolean(err && err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER');
+        const timedOut = Boolean(err && err.killed && err.signal === 'SIGKILL' && !overflow);
+        res.json({
+          exitCode: err && typeof err.code === 'number' ? err.code : (err ? 1 : 0),
+          // Bei maxBuffer-Überlauf behält Node den bereits eingesammelten,
+          // abgeschnittenen Anfang in stdout/stderr — nichts wird verworfen.
+          stdout: String(stdout || '').slice(0, KUBE_EXEC_MAX_OUTPUT),
+          stderr: String(stderr || '').slice(0, KUBE_EXEC_MAX_OUTPUT),
+          truncated: overflow,
+          timedOut,
+          durationMs: Date.now() - started,
+        });
+      },
+    );
+  } catch (err) {
+    console.error(JSON.stringify({
+      type: 'kube-exec-failed', id, error: String(err && err.message ? err.message : err),
+    }));
+    if (!res.headersSent) res.status(500).json({ error: 'failed to run kubectl' });
+  }
 });
 
 app.use((err, _req, res, _next) => {
@@ -995,15 +1116,21 @@ server.on('upgrade', (req, socket, head) => {
   const sessionId = url.searchParams.get('sessionId') || crypto.randomUUID();
 
   if (kubeSessionId) {
+    if (!KUBE_SESSION_DIR_IS_TMPFS) {
+      socket.write('HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n');
+      socket.destroy();
+      return;
+    }
     if (!KUBE_SESSION_ID_PATTERN.test(kubeSessionId)) {
       socket.write('HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n');
       socket.destroy();
       return;
     }
-    // Die Session muss existieren UND im Speicher stehen: die Datei allein
-    // genügt nicht, denn der Reaper löscht sie asynchron — ein Terminal auf
-    // eine bereits abgelaufene Session wäre sonst für einen Moment möglich.
-    if (!kubeSessions.has(kubeSessionId)) {
+    // kubeSessionActive vergleicht expiresAt live statt sich auf den
+    // periodischen Reaper zu verlassen — der räumt erst bis zu 60s nach
+    // Ablauf auf, ein Terminal auf eine bereits abgelaufene Session wäre
+    // sonst für bis zu einer Minute möglich.
+    if (!kubeSessionActive(kubeSessionId)) {
       socket.write('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n');
       socket.destroy();
       return;
@@ -1096,7 +1223,9 @@ function wireTerminal(ws, term, state, key) {
     activeTerminals.delete(key);
     // Snapshot the last-known cwd so the per-command /exec path picks up
     // where the interactive session left off. node-pty doesn't expose a
-    // cwd field directly, but bash's PROMPT_COMMAND or just leave it stale.
+    // cwd field directly, but bash's PWD env via a final command would —
+    // for now we rely on the user's bash session having written its
+    // state via PROMPT_COMMAND or just leave it stale.
   });
 }
 
