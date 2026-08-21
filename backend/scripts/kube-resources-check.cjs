@@ -139,6 +139,22 @@ const clustersStub = { async findById(id) { return { _id: id, defaultNamespace: 
     assert.ok(!yaml.includes('Z2VoZWlt'), 'Secret-Wert ist im YAML gelandet');
   });
 
+  await check('getYaml() auf ein Secret zeigt die Key-Namen (Fund B: doppelte Redaktion)', async () => {
+    // getYaml() delegiert an get(), das bereits redigiert hat — toYamlSafe
+    // redigierte danach ein zweites Mal, fand nichts mehr und produzierte
+    // keys: []. Das YAML eines redigierten Secrets sah dann aus wie das eines
+    // Secrets ganz ohne Daten.
+    const client = makeClientStub({ readNamespacedSecret: {
+      kind: 'Secret', apiVersion: 'v1', metadata: { name: 'db', namespace: 'prod' },
+      type: 'Opaque', data: { password: 'Z2VoZWlt', username: 'YWRtaW4=' },
+    } });
+    const svc = new KubeResourcesService(clustersStub, client);
+    const yaml = await svc.getYaml('c1', 'Secret', 'db', 'prod');
+    assert.ok(!yaml.includes('Z2VoZWlt'), 'Secret-Wert ist im YAML gelandet');
+    assert.ok(yaml.includes('password'), `Key-Name "password" fehlt im YAML:\n${yaml}`);
+    assert.ok(yaml.includes('username'), `Key-Name "username" fehlt im YAML:\n${yaml}`);
+  });
+
   await check('get() auf ein Secret OHNE kind/apiVersion liefert trotzdem nie Werte', async () => {
     // Genau die Form, die aus einer Kubernetes-List-Antwort kommt: items[]
     // trägt typischerweise kein eigenes kind/apiVersion. Task 1s toYamlSafe

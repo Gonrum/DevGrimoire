@@ -178,6 +178,53 @@ check('redactSecret verkraftet ein Secret ganz ohne data', () => {
   assert.deepEqual(out.keys, []);
 });
 
+check('redactSecret ist idempotent — ein zweiter Lauf verliert die Key-Namen nicht', () => {
+  // Review-Fund B: `getYaml()` delegiert an `get()`, das für ein Secret schon
+  // `redactSecret` angewandt hat; `toYamlSafe` sieht `kind: 'Secret'` und
+  // redigiert ein ZWEITES Mal. Der zweite Lauf fand weder `data` noch
+  // `stringData` und produzierte `keys: []` — `withRedactedKeysAnnotation`
+  // steigt bei leerer Liste aus, und ein redigiertes Secret wurde im YAML
+  // ununterscheidbar von einem Secret ganz ohne Daten. Kein Leck, aber genau
+  // die Transparenz, für die redactSecret existiert.
+  const once = redactSecret({
+    kind: 'Secret', metadata: { name: 'db' }, type: 'Opaque',
+    data: { password: 'Z2VoZWlt', username: 'YWRtaW4=' },
+  });
+  const twice = redactSecret(once);
+  assert.deepEqual(twice.keys.sort(), ['password', 'username'],
+    'der zweite Lauf hat die Key-Namen verworfen');
+  assert.equal(twice.data, undefined);
+  assert.ok(!JSON.stringify(twice).includes('Z2VoZWlt'));
+});
+
+check('redactSecret übernimmt keys NICHT, wenn data vorhanden ist', () => {
+  // Die Übernahme darf nur greifen, wenn es nichts zu redigieren GIBT —
+  // sonst könnte ein vom Cluster mitgeliefertes `keys`-Feld die echten
+  // Key-Namen überstimmen.
+  const out = redactSecret({
+    kind: 'Secret', keys: ['erfunden'], data: { echt: 'Z2VoZWlt' },
+  });
+  assert.deepEqual(out.keys, ['echt']);
+});
+
+check('redactSecret ignoriert ein keys-Feld, das kein string[] ist', () => {
+  const out = redactSecret({ kind: 'Secret', keys: 'nicht-array' });
+  assert.deepEqual(out.keys, []);
+  const mixed = redactSecret({ kind: 'Secret', keys: ['ok', 42] });
+  assert.deepEqual(mixed.keys, []);
+});
+
+check('toYamlSafe eines BEREITS redigierten Secrets zeigt die Key-Namen (Fund B)', () => {
+  const redacted = redactSecret({
+    kind: 'Secret', apiVersion: 'v1', metadata: { name: 'db', namespace: 'prod' },
+    type: 'kubernetes.io/tls', data: { 'tls.crt': 'Y3J0', 'tls.key': 'a2V5' },
+  });
+  const yaml = toYamlSafe(redacted);
+  assert.ok(yaml.includes('tls.crt'), `Key-Name "tls.crt" fehlt im YAML:\n${yaml}`);
+  assert.ok(yaml.includes('tls.key'), `Key-Name "tls.key" fehlt im YAML:\n${yaml}`);
+  assert.ok(!yaml.includes('Y3J0'), 'Secret-Wert ist im YAML gelandet');
+});
+
 check('toYamlSafe strippt vorher und liefert lesbares YAML', () => {
   const yaml = toYamlSafe(POD);
   assert.ok(yaml.includes('name: api-7d9f'));

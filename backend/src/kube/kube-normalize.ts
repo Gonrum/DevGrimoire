@@ -100,6 +100,16 @@ function readNumber(source: unknown, ...pathSegments: string[]): number | undefi
   return typeof cursor === 'number' ? cursor : undefined;
 }
 
+/**
+ * `string[]` — Prädikat statt Assertion, damit `redactSecret` ein bereits
+ * redigiertes `keys` übernehmen darf, ohne es zu behaupten. Ein gemischtes
+ * Array (`['a', 42]`) ist kein `string[]` und wird verworfen, nicht gefiltert:
+ * halb übernommene Schlüsselnamen wären irreführender als gar keine.
+ */
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+}
+
 function podReadiness(obj: unknown): { ready: string; restarts: number } {
   const statuses = isRecord(obj) && isRecord(obj.status) ? obj.status.containerStatuses : undefined;
   if (!Array.isArray(statuses)) return { ready: '0/0', restarts: 0 };
@@ -185,12 +195,34 @@ export function projectRow(kind: string, obj: unknown): KubeListRow {
  * statt generisch `<T>(obj: T): T & { keys: string[] }`: das Ergebnis wird
  * als Objekt-Literal zusammengesetzt, dessen Form TypeScript strukturell
  * gegen den Rückgabetyp prüfen kann — ganz ohne Assertion.
+ *
+ * **Idempotent** (Review-Fund B): sind weder `data` noch `stringData` da,
+ * aber ein `keys: string[]` aus einem früheren Lauf, wird das übernommen
+ * statt durch `[]` ersetzt. Ohne das verlor die Komposition
+ * `getYaml -> get -> redactSecret` + `toYamlSafe -> redactSecret` die
+ * Schlüsselnamen: der zweite Lauf fand nichts mehr, `keys` wurde leer, und
+ * `withRedactedKeysAnnotation` stieg bei leerer Liste aus — das YAML eines
+ * redigierten Secrets sah aus wie das eines Secrets ganz OHNE Daten. Kein
+ * Leck (kein Wert entkommt auf beiden Wegen), aber genau die Transparenz,
+ * für die diese Funktion existiert.
+ *
+ * Die Übernahme greift bewusst NUR, wenn es nichts zu redigieren gibt: läge
+ * `data` vor, dürfte ein mitgeliefertes `keys`-Feld die echten Schlüsselnamen
+ * nicht überstimmen.
  */
 export function redactSecret(obj: unknown): Record<string, unknown> & { keys: string[] } {
   const keySet = new Set<string>();
+  let hadSource = false;
   if (isRecord(obj)) {
-    if (isRecord(obj.data)) for (const k of Object.keys(obj.data)) keySet.add(k);
-    if (isRecord(obj.stringData)) for (const k of Object.keys(obj.stringData)) keySet.add(k);
+    if (isRecord(obj.data)) {
+      hadSource = true;
+      for (const k of Object.keys(obj.data)) keySet.add(k);
+    }
+    if (isRecord(obj.stringData)) {
+      hadSource = true;
+      for (const k of Object.keys(obj.stringData)) keySet.add(k);
+    }
+    if (!hadSource && isStringArray(obj.keys)) for (const k of obj.keys) keySet.add(k);
   }
   const base: Record<string, unknown> = isRecord(obj) ? { ...obj } : {};
   delete base.data;
