@@ -2,17 +2,7 @@ import { ForbiddenException } from '@nestjs/common';
 import {
   ActorScope, actorCanAccessCustomer, actorCanAccessProject,
 } from '../common/permissions';
-
-interface ClusterScope {
-  projectId?: unknown;
-  customerId?: unknown;
-  label?: string;
-}
-
-/** Ein Wert, der als ID verwendbar ist (string mit mindestens 1 Zeichen). */
-function isValidId(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
-}
+import { KubeClusterDocument } from './schemas/kube-cluster.schema';
 
 /**
  * Darf dieser Actor diesen Cluster sehen?
@@ -28,13 +18,16 @@ function isValidId(value: unknown): value is string {
  * ignoriert (T-477). Die lesenden Routen aus K2 nutzen sie noch nicht; die
  * globale Regel gehört gemeinsam mit den SSH-Routen entworfen.
  */
-export function canAccessCluster(cluster: ClusterScope, actor: ActorScope | undefined): boolean {
+export function canAccessCluster(
+  cluster: Pick<KubeClusterDocument, 'projectId' | 'customerId' | 'label'>,
+  actor: ActorScope | undefined,
+): boolean {
   if (!actor) return false;
-  if (isValidId(cluster.projectId)) {
-    return actorCanAccessProject(actor, cluster.projectId);
+  if (cluster.projectId) {
+    return actorCanAccessProject(actor, String(cluster.projectId));
   }
-  if (isValidId(cluster.customerId)) {
-    return actorCanAccessCustomer(actor, cluster.customerId);
+  if (cluster.customerId) {
+    return actorCanAccessCustomer(actor, String(cluster.customerId));
   }
   // Ein Cluster ohne Scope verletzt die Schema-Invariante; im Zweifel sperren.
   return false;
@@ -45,7 +38,10 @@ export function canAccessCluster(cluster: ClusterScope, actor: ActorScope | unde
  * Label, nie die Projekt- oder Kunden-Id: wer den Cluster nicht sehen darf,
  * soll aus der Absage nicht erfahren, wem er gehört.
  */
-export function assertClusterAccess(cluster: ClusterScope, actor: ActorScope | undefined): void {
+export function assertClusterAccess(
+  cluster: Pick<KubeClusterDocument, 'projectId' | 'customerId' | 'label'>,
+  actor: ActorScope | undefined,
+): void {
   if (!canAccessCluster(cluster, actor)) {
     throw new ForbiddenException(
       `Kein Zugriff auf den Cluster${cluster.label ? ` "${cluster.label}"` : ''}`,

@@ -21,7 +21,9 @@ function loadCompiled(rel) {
 }
 
 const { assertClusterAccess, canAccessCluster } = loadCompiled('kube/kube-access.guard.js');
+const { Types } = require('mongoose');
 
+const EXPECTED_CHECKS = 11;
 let failures = 0, total = 0;
 function check(label, fn) {
   total += 1;
@@ -86,6 +88,35 @@ check('assertClusterAccess wirft ForbiddenException (403) statt zu booleanen', (
 check('assertClusterAccess lässt einen berechtigten Actor durch', () => {
   assertClusterAccess(projectCluster, { projectScopeMode: 'all' });
 });
+
+check('ein ObjektId-förmiger Scope wird wie eine Id behandelt', () => {
+  const oid = new Types.ObjectId('69c12580c01a0739c142f1c0');
+  assert.equal(
+    canAccessCluster({ projectId: oid, label: 'Prod' }, { projectScopeMode: 'all' }),
+    true,
+    'ein echtes Cluster-Dokument trägt eine ObjectId, keinen String',
+  );
+  assert.equal(
+    canAccessCluster({ projectId: oid, label: 'Prod' },
+      { projectScopeMode: 'restricted', allowedProjectIds: ['69c12580c01a0739c142f1c0'] }),
+    true,
+    'der Vergleich muss auf der Hex-Darstellung stattfinden',
+  );
+});
+
+check('ein Cluster ohne jeden Scope wird gesperrt', () => {
+  assert.equal(
+    canAccessCluster({ label: 'Verwaist' }, { projectScopeMode: 'all', customerScopeMode: 'all' }),
+    false,
+  );
+  assert.throws(() => assertClusterAccess({ label: 'Verwaist' }, { projectScopeMode: 'all' }),
+    (err) => err.status === 403);
+});
+
+if (total !== EXPECTED_CHECKS) {
+  console.error(`\n✗ Check count mismatch: expected ${EXPECTED_CHECKS}, got ${total}`);
+  process.exit(1);
+}
 
 console.log('');
 console.log(`Kube access checks: ${total - failures}/${total} passed`);
