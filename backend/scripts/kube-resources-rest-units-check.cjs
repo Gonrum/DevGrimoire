@@ -98,8 +98,16 @@ function makeFakeReq(userId = 'u1') {
 }
 
 const authReq = { user: { userId: 'u1' } };
+/** Derselbe Actor, aber über einen API-Key statt über ein Browser-JWT. */
+const apiKeyReq = { user: { userId: 'u1', apiKeyId: 'k1' } };
 const auditStub = { async record() {} };
 const clustersOk = { async findById(id) { return { _id: id }; } };
+
+/** Audit-Attrappe, die die geschriebenen Zeilen festhält. */
+function makeAuditRecorder() {
+  const rows = [];
+  return { rows, async record(entry) { rows.push(entry); } };
+}
 
 (async () => {
   await check(
@@ -344,6 +352,127 @@ const clustersOk = { async findById(id) { return { _id: id }; } };
       assert.equal(caught.getStatus(), 503, `Status war ${caught.getStatus && caught.getStatus()}`);
     },
   );
+
+  // ---------------------------------------------------------------------------
+  // Audit-Vollständigkeit und Herkunft (Review-Fund I2)
+  //
+  // Spec: „Reads werden auditiert, aber ohne Payload." Gemessen schrieben
+  // namespaces/resources/resources/:kind/:name eine Zeile, …/yaml,
+  // describe/… und events KEINE. `sourceContext` stand auf allen sechs
+  // Routen fest auf 'ui' — ein API-Key-Aufruf wurde als Browser-Verkehr
+  // protokolliert, obwohl K1s `KubeClientService.test()` für dieselbe
+  // Controller-Familie 'rest' schreibt.
+  // ---------------------------------------------------------------------------
+  const AUDITED_READS = [
+    {
+      label: 'namespaces',
+      call: (ctrl, req) => ctrl.namespaces('c1', req),
+      resources: { async listNamespaces() { return []; } },
+      expect: { action: 'list', resource: 'Namespace' },
+    },
+    {
+      label: 'resources (list)',
+      call: (ctrl, req) => ctrl.list('c1', { kind: 'Pod', namespace: 'prod' }, req),
+      resources: { async list() { return []; } },
+      expect: { action: 'list', resource: 'Pod', namespace: 'prod' },
+    },
+    {
+      label: 'resources/:kind/:name',
+      call: (ctrl, req) => ctrl.get('c1', 'Pod', 'api', { namespace: 'prod' }, req),
+      resources: { async get() { return {}; } },
+      expect: { action: 'get', resource: 'Pod', namespace: 'prod', name: 'api' },
+    },
+    {
+      label: 'resources/:kind/:name/yaml',
+      call: (ctrl, req) => ctrl.yaml('c1', 'Secret', 'db', { namespace: 'prod' }, req),
+      resources: { async getYaml() { return 'kind: Secret\n'; } },
+      expect: { action: 'get', resource: 'Secret', namespace: 'prod', name: 'db' },
+    },
+    {
+      label: 'describe/:kind/:name',
+      call: (ctrl, req) => ctrl.describe('c1', 'Pod', 'api', { namespace: 'prod' }, req),
+      resources: { async describe() { return { object: {}, events: [], conditions: [] }; } },
+      expect: { action: 'get', resource: 'Pod', namespace: 'prod', name: 'api' },
+    },
+    {
+      label: 'events',
+      call: (ctrl, req) => ctrl.events('c1', { namespace: 'prod' }, req),
+      resources: { async events() { return []; } },
+      expect: { action: 'list', resource: 'Event', namespace: 'prod' },
+    },
+  ];
+
+  for (const route of AUDITED_READS) {
+    await check(`Audit: ${route.label} schreibt genau eine Zeile`, async () => {
+      const audit = makeAuditRecorder();
+      const ctrl = new KubeResourcesController(route.resources, {}, audit, clustersOk);
+      await route.call(ctrl, authReq);
+      assert.equal(audit.rows.length, 1, `${audit.rows.length} Audit-Zeilen statt 1`);
+      const row = audit.rows[0];
+      for (const [key, value] of Object.entries(route.expect)) {
+        assert.equal(row[key], value, `${key} war ${JSON.stringify(row[key])}, erwartet ${JSON.stringify(value)}`);
+      }
+      assert.equal(row.clusterId, 'c1');
+      assert.equal(row.userId, 'u1');
+    });
+
+    await check(`Audit: ${route.label} unterscheidet API-Key ('rest') von Browser ('ui')`, async () => {
+      const uiAudit = makeAuditRecorder();
+      await route.call(new KubeResourcesController(route.resources, {}, uiAudit, clustersOk), authReq);
+      assert.equal(uiAudit.rows[0].sourceContext, 'ui');
+
+      const restAudit = makeAuditRecorder();
+      await route.call(new KubeResourcesController(route.resources, {}, restAudit, clustersOk), apiKeyReq);
+      assert.equal(restAudit.rows[0].sourceContext, 'rest',
+        'ein API-Key-Aufruf wurde als Browser-Verkehr protokolliert');
+    });
+  }
+
+  await check('Audit: logStream schreibt auch dann eine Zeile, wenn open() scheitert', async () => {
+    const audit = makeAuditRecorder();
+    const logs = { async open() { const e = new Error('boom'); e.code = 404; e.body = { message: 'pods "api" not found' }; throw e; } };
+    const ctrl = new KubeResourcesController({}, logs, audit, clustersOk);
+    await ctrl.logStream('c1', { namespace: 'prod', pod: 'api' }, makeFakeReq(), makeFakeRes());
+    assert.equal(audit.rows.length, 1, `${audit.rows.length} Audit-Zeilen statt 1`);
+    assert.equal(audit.rows[0].action, 'logs');
+    assert.equal(audit.rows[0].sourceContext, 'ui');
+    assert.match(audit.rows[0].errorMsg ?? '', /not found/,
+      'der Grund des Fehlschlags steht nicht in der Audit-Zeile');
+  });
+
+  await check('Audit: logStream schreibt eine Zeile, wenn der Client vor dem Öffnen geht', async () => {
+    const audit = makeAuditRecorder();
+    let resolveFindById;
+    const findByIdPromise = new Promise((resolve) => { resolveFindById = resolve; });
+    const clustersSlow = { async findById() { return findByIdPromise; } };
+    const ctrl = new KubeResourcesController({}, { async open() { throw new Error('darf nie laufen'); } }, audit, clustersSlow);
+    const req = makeFakeReq();
+    const done = ctrl.logStream('c1', { namespace: 'prod', pod: 'api' }, req, makeFakeRes());
+    await new Promise((r) => setImmediate(r));
+    req.__fireClose();
+    resolveFindById({ _id: 'c1' });
+    await done;
+    assert.equal(audit.rows.length, 1, `${audit.rows.length} Audit-Zeilen statt 1 — der Abbruch vor open() blieb unprotokolliert`);
+    assert.equal(audit.rows[0].action, 'logs');
+  });
+
+  await check('Audit: logStream schreibt genau eine Zeile auf dem Erfolgspfad', async () => {
+    const audit = makeAuditRecorder();
+    const logs = {
+      async open() {
+        return {
+          lines: (async function* () { yield 'a'; yield 'b'; })(),
+          close() {}, error() { return undefined; },
+        };
+      },
+    };
+    const ctrl = new KubeResourcesController({}, logs, audit, clustersOk);
+    await ctrl.logStream('c1', { namespace: 'prod', pod: 'api' }, makeFakeReq(), makeFakeRes());
+    assert.equal(audit.rows.length, 1, `${audit.rows.length} Audit-Zeilen statt 1`);
+    assert.equal(audit.rows[0].errorMsg, undefined);
+    assert.equal(audit.rows[0].name, 'api');
+    assert.ok(typeof audit.rows[0].durationMs === 'number');
+  });
 
   await check(
     'LogsQueryDto: ?token= wird von der globalen ValidationPipe akzeptiert (kein forbidNonWhitelisted-400)',

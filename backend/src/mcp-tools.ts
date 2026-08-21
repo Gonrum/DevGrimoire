@@ -88,6 +88,8 @@ import { KubeClustersService } from './kube/kube-clusters.service';
 import { KubeResourcesService } from './kube/kube-resources.service';
 import { KubeLogsService } from './kube/kube-logs.service';
 import { KubeClientService } from './kube/kube-client.service';
+import { KubeAuditService } from './kube/kube-audit.service';
+import { KubeAuditAction } from './kube/schemas/kube-audit.schema';
 import { KubeClusterDocument } from './kube/schemas/kube-cluster.schema';
 import { isKubeKind, KUBE_KIND_SPECS, KubeKind } from './kube/kube-kinds';
 import {
@@ -528,6 +530,47 @@ const KUBE_KIND_ENUM: readonly KubeKind[] = Object.keys(KUBE_KIND_SPECS).filter(
 
 const KUBE_TOP_SCOPES = ['pods', 'nodes'] as const;
 
+/**
+ * Audit-Zeile für einen lesenden Kube-Zugriff über MCP.
+ *
+ * Spec (K2): „Reads werden auditiert, aber ohne Payload." Das Schema führt
+ * `sourceContext: 'mcp'` genau dafür — gemessen schrieb ihn im ganzen Repo
+ * nichts, und keines der sieben Tools protokollierte je irgendetwas. K3
+ * hängt das Write-Auditing an denselben Service; die Lücke hätte sich also
+ * fortgesetzt.
+ *
+ * Bewusst NACH dem erfolgreichen Zugriff aufgerufen und ohne Payload: die
+ * Zeile hält fest, WER WAS WANN gelesen hat, nicht das Gelesene. Ein
+ * fehlgeschlagener Aufruf bricht vorher ab und schreibt keine Zeile — genau
+ * wie am REST-Layer.
+ *
+ * `KubeAuditService.record()` schluckt seine eigenen Fehler (loggt sie
+ * stattdessen), ein kaputtes Audit lässt den Read also nicht scheitern.
+ */
+async function auditKubeRead(
+  audit: KubeAuditService,
+  entry: {
+    clusterId: string;
+    action: KubeAuditAction;
+    userId: string;
+    startedAt: number;
+    resource?: string;
+    namespace?: string;
+    name?: string;
+  },
+): Promise<void> {
+  await audit.record({
+    clusterId: entry.clusterId,
+    action: entry.action,
+    sourceContext: 'mcp',
+    userId: entry.userId,
+    resource: entry.resource,
+    namespace: entry.namespace,
+    name: entry.name,
+    durationMs: Date.now() - entry.startedAt,
+  });
+}
+
 /** Hard safety cap independent of the (already-capped) `tailLines` schema max — matters for `sinceSeconds`, which has no upper bound of its own. */
 const KUBE_LOG_LINES_HARD_CAP = 5000;
 
@@ -708,6 +751,7 @@ export interface McpServices {
   kubeResourcesService: KubeResourcesService;
   kubeLogsService: KubeLogsService;
   kubeClientService: KubeClientService;
+  kubeAuditService: KubeAuditService;
 }
 
 const tools = [
@@ -4756,7 +4800,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, environmentsService, secretsService, manualsService, researchService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, harnessService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService, stackService, kubeClustersService, kubeResourcesService, kubeLogsService, kubeClientService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, environmentsService, secretsService, manualsService, researchService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, harnessService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService, stackService, kubeClustersService, kubeResourcesService, kubeLogsService, kubeClientService, kubeAuditService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -7115,14 +7159,27 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'kube_cluster_list': {
+          const userId = requireUserId();
+          const startedAt = Date.now();
           const scope = readKubeScope(a);
           const docs = scope.kind === 'project'
             ? await kubeClustersService.findByProjectId(scope.id)
             : await kubeClustersService.findByCustomerId(scope.id);
           result = docs.map((d) => serializeKubeClusterForMcp(d));
+          // Eine Zeile je offengelegtem Cluster: `KubeAudit.clusterId` ist
+          // pflichtig und die Sicht des Audits ist die des einzelnen
+          // Clusters — „wer hat gesehen, dass es mich gibt" gehört in seine
+          // eigene Historie, nicht in eine sammelnde Zeile ohne Bezug. Die
+          // Zahl ist durch die konfigurierten Cluster im Scope begrenzt.
+          await Promise.all(docs.map((d) => auditKubeRead(kubeAuditService, {
+            clusterId: d._id.toString(), action: 'list', userId, startedAt,
+            resource: 'KubeCluster',
+          })));
           break;
         }
         case 'kube_cluster_get': {
+          const userId = requireUserId();
+          const startedAt = Date.now();
           const clusterId = optionalString(a, 'clusterId');
           const slug = optionalString(a, 'slug');
           let cluster: KubeClusterDocument;
@@ -7138,9 +7195,15 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             throw new Error('cluster_identifier_required');
           }
           result = serializeKubeClusterForMcp(cluster);
+          await auditKubeRead(kubeAuditService, {
+            clusterId: cluster._id.toString(), action: 'get', userId, startedAt,
+            resource: 'KubeCluster',
+          });
           break;
         }
         case 'kube_get': {
+          const userId = requireUserId();
+          const startedAt = Date.now();
           const clusterId = requireString(a, 'clusterId');
           const kind = requireEnum(a, 'kind', KUBE_KIND_ENUM);
           const name = optionalString(a, 'name');
@@ -7152,34 +7215,56 @@ export function registerMcpTools(server: Server, services: McpServices): void {
               labelSelector: optionalString(a, 'labelSelector'),
               limit: optionalNumber(a, 'limit'),
             });
+          await auditKubeRead(kubeAuditService, {
+            clusterId, action: name ? 'get' : 'list', userId, startedAt,
+            resource: kind, namespace, name,
+          });
           break;
         }
         case 'kube_describe': {
-          result = await kubeResourcesService.describe(
-            requireString(a, 'clusterId'),
-            requireEnum(a, 'kind', KUBE_KIND_ENUM),
-            requireString(a, 'name'),
-            optionalString(a, 'namespace'),
-          );
+          const userId = requireUserId();
+          const startedAt = Date.now();
+          const clusterId = requireString(a, 'clusterId');
+          const kind = requireEnum(a, 'kind', KUBE_KIND_ENUM);
+          const name = requireString(a, 'name');
+          const namespace = optionalString(a, 'namespace');
+          result = await kubeResourcesService.describe(clusterId, kind, name, namespace);
+          await auditKubeRead(kubeAuditService, {
+            clusterId, action: 'get', userId, startedAt, resource: kind, namespace, name,
+          });
           break;
         }
         case 'kube_events': {
-          result = await kubeResourcesService.events(requireString(a, 'clusterId'), {
-            namespace: optionalString(a, 'namespace'),
-            involvedName: optionalString(a, 'involvedName'),
+          const userId = requireUserId();
+          const startedAt = Date.now();
+          const clusterId = requireString(a, 'clusterId');
+          const namespace = optionalString(a, 'namespace');
+          const involvedName = optionalString(a, 'involvedName');
+          result = await kubeResourcesService.events(clusterId, {
+            namespace,
+            involvedName,
             involvedKind: optionalEnum(a, 'involvedKind', KUBE_KIND_ENUM),
             limit: optionalNumber(a, 'limit'),
+          });
+          await auditKubeRead(kubeAuditService, {
+            clusterId, action: 'list', userId, startedAt,
+            resource: 'Event', namespace, name: involvedName,
           });
           break;
         }
         case 'kube_logs': {
+          const userId = requireUserId();
+          const startedAt = Date.now();
+          const clusterId = requireString(a, 'clusterId');
+          const namespace = requireString(a, 'namespace');
+          const pod = requireString(a, 'pod');
           // follow ist bewusst NICHT aus `a` gelesen — über MCP niemals folgen,
           // der Aufruf käme sonst nie zurück. Selbst ein Client, der `follow`
           // trotz fehlendem Schema-Feld mitschickt, hat hier keinen Hebel.
           const session = await kubeLogsService.open(
-            requireString(a, 'clusterId'),
-            requireString(a, 'namespace'),
-            requireString(a, 'pod'),
+            clusterId,
+            namespace,
+            pod,
             {
               container: optionalString(a, 'container'),
               tailLines: optionalNumber(a, 'tailLines') ?? 200,
@@ -7213,9 +7298,15 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           } finally {
             session.close();
           }
+          await auditKubeRead(kubeAuditService, {
+            clusterId, action: 'logs', userId, startedAt,
+            resource: 'Pod', namespace, name: pod,
+          });
           break;
         }
         case 'kube_top': {
+          const userId = requireUserId();
+          const startedAt = Date.now();
           const clusterId = requireString(a, 'clusterId');
           const scope = optionalEnum(a, 'scope', KUBE_TOP_SCOPES) ?? 'pods';
           const namespace = optionalString(a, 'namespace');
@@ -7236,6 +7327,10 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           } finally {
             release();
           }
+          await auditKubeRead(kubeAuditService, {
+            clusterId, action: 'metrics_query', userId, startedAt,
+            resource: scope === 'nodes' ? 'Node' : 'Pod', namespace,
+          });
           break;
         }
         case 'recurring_task_create': {

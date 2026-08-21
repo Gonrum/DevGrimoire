@@ -68,7 +68,9 @@ function makeFakeServer() {
 // Minimal McpServices skeleton — everything but the four Kube services (and
 // notificationsService, which the handler fires-and-forgets into) is a
 // no-op proxy so registerMcpTools() doesn't blow up on destructure.
-function buildServices({ kubeClustersService, kubeResourcesService, kubeLogsService, kubeClientService }) {
+function buildServices({
+  kubeClustersService, kubeResourcesService, kubeLogsService, kubeClientService, kubeAuditService,
+}) {
   const noop = new Proxy(
     {},
     {
@@ -97,7 +99,17 @@ function buildServices({ kubeClustersService, kubeResourcesService, kubeLogsServ
     workspaceCliToken: noop, sshService: noop, sshSessionService: noop, httpRequestsService: noop,
     stackService: noop,
     kubeClustersService, kubeResourcesService, kubeLogsService, kubeClientService,
+    // Ohne echte Attrappe schlüge jeder Tool-Aufruf an der Audit-Zeile fehl —
+    // die noop-Proxy oben liefert zwar eine Funktion, aber `buildServices`
+    // destrukturiert `kubeAuditService` namentlich.
+    kubeAuditService: kubeAuditService || { record: async () => {} },
   };
+}
+
+/** Audit-Attrappe, die die geschriebenen Zeilen festhält. */
+function makeAuditRecorder() {
+  const rows = [];
+  return { rows, record: async (entry) => { rows.push(entry); } };
 }
 
 // MCP responses are wrapped as { content: [{type:'text', text:'<json>'}], isError? }.
@@ -138,6 +150,11 @@ function makeServer(kubeStubs) {
 async function* linesFrom(arr) {
   for (const l of arr) yield l;
 }
+
+// requireUserId(): die Kube-Tools schreiben seit Fund I2 eine Audit-Zeile und
+// brauchen dafür — wie die SSH-Tools — einen Actor.
+const TEST_USER_ID = new Types.ObjectId().toString();
+process.env.MCP_STDIO_USER_ID = TEST_USER_ID;
 
 // ===========================================================================
 // Static schema checks (adapted from the task brief)
@@ -545,6 +562,129 @@ async function* linesFrom(arr) {
     assert.ok(res.error, 'expected error');
     assert.match(res.error, /metrics-server/);
     assert.equal(released, 1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Audit (Review-Fund I2)
+  //
+  // Gemessen: KEINES der sieben Tools schrieb je eine Audit-Zeile, und der
+  // Wert `sourceContext: 'mcp'` — für den das Schema den Zweig ausdrücklich
+  // führt — wurde nirgends im Repo geschrieben. Spec: „Reads werden
+  // auditiert, aber ohne Payload."
+  // -------------------------------------------------------------------------
+  const clusterId = new Types.ObjectId().toString();
+  const clusterDoc = makeClusterDoc({ _id: new Types.ObjectId(clusterId) });
+
+  const AUDITED_TOOLS = [
+    {
+      tool: 'kube_get (Liste)',
+      invoke: (s) => s.invoke('kube_get', { clusterId, kind: 'Pod', namespace: 'prod' }),
+      stubs: { kubeResourcesService: { list: async () => [] } },
+      expect: { action: 'list', resource: 'Pod', namespace: 'prod' },
+    },
+    {
+      tool: 'kube_get (Einzelobjekt)',
+      invoke: (s) => s.invoke('kube_get', { clusterId, kind: 'Pod', name: 'api', namespace: 'prod' }),
+      stubs: { kubeResourcesService: { get: async () => ({}) } },
+      expect: { action: 'get', resource: 'Pod', namespace: 'prod', name: 'api' },
+    },
+    {
+      tool: 'kube_describe',
+      invoke: (s) => s.invoke('kube_describe', { clusterId, kind: 'Pod', name: 'api', namespace: 'prod' }),
+      stubs: { kubeResourcesService: { describe: async () => ({ object: {}, events: [], conditions: [] }) } },
+      expect: { action: 'get', resource: 'Pod', namespace: 'prod', name: 'api' },
+    },
+    {
+      tool: 'kube_events',
+      invoke: (s) => s.invoke('kube_events', { clusterId, namespace: 'prod' }),
+      stubs: { kubeResourcesService: { events: async () => [] } },
+      expect: { action: 'list', resource: 'Event', namespace: 'prod' },
+    },
+    {
+      tool: 'kube_logs',
+      invoke: (s) => s.invoke('kube_logs', { clusterId, namespace: 'prod', pod: 'api' }),
+      stubs: {
+        kubeLogsService: {
+          open: async () => ({ lines: linesFrom(['a']), close: () => {}, error: () => undefined }),
+        },
+      },
+      expect: { action: 'logs', resource: 'Pod', namespace: 'prod', name: 'api' },
+    },
+    {
+      tool: 'kube_cluster_get',
+      invoke: (s) => s.invoke('kube_cluster_get', { clusterId }),
+      stubs: { kubeClustersService: { findById: async () => clusterDoc } },
+      expect: { action: 'get', resource: 'KubeCluster' },
+    },
+  ];
+
+  for (const entry of AUDITED_TOOLS) {
+    await check(`Audit: ${entry.tool} schreibt genau eine Zeile mit sourceContext "mcp"`, async () => {
+      const audit = makeAuditRecorder();
+      const s = makeServer({
+        kubeClustersService: {}, kubeResourcesService: {}, kubeLogsService: {},
+        kubeClientService: {}, kubeAuditService: audit, ...entry.stubs,
+      });
+      const res = await entry.invoke(s);
+      assert.ok(!res.isError, `unerwarteter Fehler: ${res.content[0].text}`);
+      assert.equal(audit.rows.length, 1, `${audit.rows.length} Audit-Zeilen statt 1`);
+      const row = audit.rows[0];
+      assert.equal(row.sourceContext, 'mcp',
+        'kein Aufruf im Repo schrieb je den mcp-Zweig, für den das Schema existiert');
+      assert.equal(row.userId, TEST_USER_ID);
+      assert.equal(row.clusterId, clusterId);
+      for (const [key, value] of Object.entries(entry.expect)) {
+        assert.equal(row[key], value, `${key} war ${JSON.stringify(row[key])}, erwartet ${JSON.stringify(value)}`);
+      }
+    });
+  }
+
+  await check('Audit: kube_cluster_list protokolliert jeden offengelegten Cluster', async () => {
+    const audit = makeAuditRecorder();
+    const projectId = new Types.ObjectId();
+    const a = makeClusterDoc({ projectId });
+    const b = makeClusterDoc({ projectId });
+    const s = makeServer({
+      kubeClustersService: { findByProjectId: async () => [a, b] },
+      kubeResourcesService: {}, kubeLogsService: {}, kubeClientService: {}, kubeAuditService: audit,
+    });
+    await s.invoke('kube_cluster_list', { projectId: projectId.toString() });
+    assert.equal(audit.rows.length, 2, `${audit.rows.length} Audit-Zeilen statt 2`);
+    assert.deepEqual(audit.rows.map((r) => r.clusterId).sort(),
+      [a._id.toString(), b._id.toString()].sort());
+    assert.ok(audit.rows.every((r) => r.sourceContext === 'mcp' && r.action === 'list'));
+  });
+
+  await check('Audit: kube_top schreibt eine metrics_query-Zeile', async () => {
+    const audit = makeAuditRecorder();
+    let released = 0;
+    const s = makeServer({
+      kubeClustersService: { findById: async () => clusterDoc },
+      kubeResourcesService: {}, kubeLogsService: {}, kubeAuditService: audit,
+      kubeClientService: {
+        buildConfig: async () => ({
+          kc: { makeApiClient: () => ({ listNode: async () => ({ items: [] }) }) },
+          release: () => { released += 1; },
+        }),
+      },
+    });
+    await s.invoke('kube_top', { clusterId, scope: 'nodes' });
+    assert.equal(released, 1);
+    assert.equal(audit.rows.length, 1, `${audit.rows.length} Audit-Zeilen statt 1`);
+    assert.equal(audit.rows[0].action, 'metrics_query');
+    assert.equal(audit.rows[0].sourceContext, 'mcp');
+    assert.equal(audit.rows[0].resource, 'Node');
+  });
+
+  await check('Audit: ein gescheiterter Cluster-Zugriff schreibt KEINE Erfolgs-Zeile', async () => {
+    const audit = makeAuditRecorder();
+    const s = makeServer({
+      kubeClustersService: {}, kubeLogsService: {}, kubeClientService: {}, kubeAuditService: audit,
+      kubeResourcesService: { list: async () => { throw new Error('cluster weg'); } },
+    });
+    const res = await s.invoke('kube_get', { clusterId, kind: 'Pod' });
+    assert.ok(res.isError, 'der Fehler hätte durchschlagen müssen');
+    assert.equal(audit.rows.length, 0, 'ein fehlgeschlagener Read wurde als erfolgreich protokolliert');
   });
 
   console.log('');

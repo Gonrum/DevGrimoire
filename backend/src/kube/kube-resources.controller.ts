@@ -8,11 +8,19 @@ import { KubeAuditService } from './kube-audit.service';
 import { KubeClustersService } from './kube-clusters.service';
 import { EventsQueryDto, ListResourcesDto, ResourceParamsDto } from './dto/list-resources.dto';
 import { LogsQueryDto } from './dto/logs-query.dto';
+import { KubeAuditSourceContext } from './schemas/kube-audit.schema';
 import { errorMessageWithCause, isRecord } from '../common/narrow';
 
-/** `req.user.userId` setzt der global registrierte JwtAuthGuard. */
+/**
+ * `req.user` setzt der global registrierte JwtAuthGuard.
+ *
+ * `apiKeyId` ist dabei die Unterscheidung, die dieses Modul für den Audit
+ * braucht: der Guard setzt es AUSSCHLIESSLICH auf dem API-Key-Zweig
+ * (`request.user = { …, apiKeyId: validated._id.toString() }`), der
+ * JWT-Zweig lässt es leer. Kein neuer Mechanismus, kein Header-Raten.
+ */
 interface AuthRequest {
-  user?: { userId?: string };
+  user?: { userId?: string; apiKeyId?: string };
 }
 
 /** Nur für die SSE-Route: Request-Close-Erkennung braucht die Express-Form. */
@@ -110,6 +118,18 @@ export class KubeResourcesController {
   }
 
   /**
+   * Woher der Aufruf kam. `'ui'` hiess vorher fest „REST-Controller", was den
+   * Wert wertlos machte: ein Aufruf mit API-Key (Skript, CI, fremdes Tool)
+   * wurde als Browser-Verkehr protokolliert, und die `'rest'`-Zeilen von K1s
+   * `KubeClientService.test()` standen daneben wie eine andere Quelle. Die
+   * Unterscheidung ist die, die der `JwtAuthGuard` ohnehin schon trifft —
+   * `apiKeyId` gibt es nur auf dem API-Key-Zweig.
+   */
+  private sourceOf(req: AuthRequest): KubeAuditSourceContext {
+    return req.user?.apiKeyId ? 'rest' : 'ui';
+  }
+
+  /**
    * `KubeResourcesService` lässt jeden Fehler unverändert durch — sie soll
    * echte Cluster-Antworten durchreichen, nicht raten, was ein Fehler
    * bedeutet. Diese REST-Schicht entscheidet, was ein Caller sieht, in drei
@@ -162,7 +182,7 @@ export class KubeResourcesController {
     const started = Date.now();
     const rows = await this.guarded(() => this.resources.listNamespaces(id));
     await this.audit.record({
-      clusterId: id, action: 'list', sourceContext: 'ui',
+      clusterId: id, action: 'list', sourceContext: this.sourceOf(req),
       userId: this.userIdOf(req), resource: 'Namespace',
       durationMs: Date.now() - started,
     });
@@ -177,7 +197,7 @@ export class KubeResourcesController {
       namespace: q.namespace, labelSelector: q.labelSelector, limit: q.limit,
     }));
     await this.audit.record({
-      clusterId: id, action: 'list', sourceContext: 'ui', userId: this.userIdOf(req),
+      clusterId: id, action: 'list', sourceContext: this.sourceOf(req), userId: this.userIdOf(req),
       resource: q.kind, namespace: q.namespace, durationMs: Date.now() - started,
     });
     return rows;
@@ -189,10 +209,11 @@ export class KubeResourcesController {
     @Query() q: ResourceParamsDto, @Req() req: AuthRequest,
   ) {
     // T-477: hier hakt die Projekt-Scope-Prüfung ein, sobald sie existiert.
+    const started = Date.now();
     const obj = await this.guarded(() => this.resources.get(id, kind, name, q.namespace));
     await this.audit.record({
-      clusterId: id, action: 'get', sourceContext: 'ui', userId: this.userIdOf(req),
-      resource: kind, namespace: q.namespace, name,
+      clusterId: id, action: 'get', sourceContext: this.sourceOf(req), userId: this.userIdOf(req),
+      resource: kind, namespace: q.namespace, name, durationMs: Date.now() - started,
     });
     return obj;
   }
@@ -200,28 +221,52 @@ export class KubeResourcesController {
   @Get(':id/resources/:kind/:name/yaml')
   async yaml(
     @Param('id') id: string, @Param('kind') kind: string, @Param('name') name: string,
-    @Query() q: ResourceParamsDto,
+    @Query() q: ResourceParamsDto, @Req() req: AuthRequest,
   ) {
     // T-477: hier hakt die Projekt-Scope-Prüfung ein, sobald sie existiert.
-    return { yaml: await this.guarded(() => this.resources.getYaml(id, kind, name, q.namespace)) };
+    const started = Date.now();
+    const yaml = await this.guarded(() => this.resources.getYaml(id, kind, name, q.namespace));
+    // Auditiert wie jeder andere Read (Review-Fund I2): diese Route liest
+    // dasselbe Objekt wie `get` — dass sie es als YAML statt als JSON
+    // zurückgibt, macht sie nicht weniger protokollierenswert. Ausgerechnet
+    // hier fehlte die Zeile, obwohl der Weg der ist, über den man ein Secret
+    // ansieht.
+    await this.audit.record({
+      clusterId: id, action: 'get', sourceContext: this.sourceOf(req), userId: this.userIdOf(req),
+      resource: kind, namespace: q.namespace, name, durationMs: Date.now() - started,
+    });
+    return { yaml };
   }
 
   @Get(':id/describe/:kind/:name')
   async describe(
     @Param('id') id: string, @Param('kind') kind: string, @Param('name') name: string,
-    @Query() q: ResourceParamsDto,
+    @Query() q: ResourceParamsDto, @Req() req: AuthRequest,
   ) {
     // T-477: hier hakt die Projekt-Scope-Prüfung ein, sobald sie existiert.
-    return this.guarded(() => this.resources.describe(id, kind, name, q.namespace));
+    const started = Date.now();
+    const result = await this.guarded(() => this.resources.describe(id, kind, name, q.namespace));
+    await this.audit.record({
+      clusterId: id, action: 'get', sourceContext: this.sourceOf(req), userId: this.userIdOf(req),
+      resource: kind, namespace: q.namespace, name, durationMs: Date.now() - started,
+    });
+    return result;
   }
 
   @Get(':id/events')
-  async events(@Param('id') id: string, @Query() q: EventsQueryDto) {
+  async events(@Param('id') id: string, @Query() q: EventsQueryDto, @Req() req: AuthRequest) {
     // T-477: hier hakt die Projekt-Scope-Prüfung ein, sobald sie existiert.
-    return this.guarded(() => this.resources.events(id, {
+    const started = Date.now();
+    const rows = await this.guarded(() => this.resources.events(id, {
       namespace: q.namespace, involvedName: q.involvedName,
       involvedKind: q.involvedKind, limit: q.limit,
     }));
+    await this.audit.record({
+      clusterId: id, action: 'list', sourceContext: this.sourceOf(req), userId: this.userIdOf(req),
+      resource: 'Event', namespace: q.namespace, name: q.involvedName,
+      durationMs: Date.now() - started,
+    });
+    return rows;
   }
 
   /**
@@ -307,93 +352,112 @@ export class KubeResourcesController {
     // geöffneter SSE-Stream.
     await this.clusters.findById(id);
 
-    // Runde 2 (Review-Fund): der Client kann WÄHREND `findById` gegangen
-    // sein. `clientGone` deckt den Fall ab, in dem `'close'` bereits
-    // gefeuert hat; `req.destroyed` zusätzlich den Fall, in dem der Stream
-    // schon zerstört ist, das `'close'`-Event selbst aber erst einen Tick
-    // später kommt. Beides führt hierher, BEVOR auch nur ein Header steht
-    // oder `open()` je aufgerufen wird — kein Transport wird erst gar nicht
-    // erworben, es gibt also nichts freizugeben ausser dem, was `close()`
-    // im Listener oben schon (als No-Op) versucht hat.
-    if (clientGone || req.destroyed) return;
-
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    if (typeof res.flushHeaders === 'function') res.flushHeaders();
-
-    const send = (event: Record<string, unknown>) => {
-      if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
-    };
-
-    // Fix 6 (s.o.): dieselbe Stelle, an der der Handler die Session
-    // schliesst, räumt auch den Heartbeat ab — beides im äusseren `finally`.
-    const heartbeat = setInterval(() => {
-      if (!res.writableEnded) res.write(': ping\n\n');
-    }, 15000);
-
+    // Fix 7 (Review-Fund I2): die Audit-Zeile hängt im ÄUSSERSTEN `finally`
+    // ab hier, nicht mehr im `finally` um die Leseschleife. Vorher blieben
+    // zwei Pfade unprotokolliert — der Abbruch vor `open()` (gleich unten)
+    // und ein gescheitertes `open()` selbst, also ausgerechnet die beiden
+    // Fälle, in denen jemand später fragt, warum nichts kam. Jetzt schreibt
+    // JEDER Ausstieg nach dem aufgelösten Cluster genau eine Zeile;
+    // `auditError` trägt den Grund, falls es einen gab.
+    let auditError: string | undefined;
     try {
-      try {
-        session = await this.logs.open(id, q.namespace, q.pod, {
-          container: q.container, tailLines: q.tailLines,
-          previous: q.previous, follow: q.follow, sinceSeconds: q.sinceSeconds,
-        });
-      } catch (err) {
-        // kubeApiExceptionMessage statt eines rohen errorMessageWithCause:
-        // dieselbe Behandlung wie in guarded() oben — ein `ApiException`
-        // aus `Log.log()` (z.B. "HTTP-Code: 500\n…") wird sonst wörtlich an
-        // den Client gereicht. Anders als bei einem Stream-Fehler NACH dem
-        // Öffnen (den `KubeLogsService` selbst schon loggt) hat hier noch
-        // niemand geloggt.
-        const message = kubeApiExceptionMessage(err).slice(0, 500);
-        this.logger.warn(`Log-Stream konnte nicht geöffnet werden (${id}): ${message}`);
-        send({ type: 'error', message });
+      // Runde 2 (Review-Fund): der Client kann WÄHREND `findById` gegangen
+      // sein. `clientGone` deckt den Fall ab, in dem `'close'` bereits
+      // gefeuert hat; `req.destroyed` zusätzlich den Fall, in dem der Stream
+      // schon zerstört ist, das `'close'`-Event selbst aber erst einen Tick
+      // später kommt. Beides führt hierher, BEVOR auch nur ein Header steht
+      // oder `open()` je aufgerufen wird — kein Transport wird erst gar nicht
+      // erworben, es gibt also nichts freizugeben ausser dem, was `close()`
+      // im Listener oben schon (als No-Op) versucht hat.
+      if (clientGone || req.destroyed) {
+        auditError = 'Client ging vor dem Öffnen des Streams';
         return;
       }
 
-      // Der Client kann schon während open() gegangen sein (s.o., Fix 4) —
-      // `session` ist jetzt zwar offen, aber niemand liest mehr. Der
-      // Listener oben hat `close()` bereits versucht (war zu dem Zeitpunkt
-      // noch ein No-Op über `?.`); das wird hier nachgeholt.
-      if (clientGone) {
-        session.close();
-        return;
-      }
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+      const send = (event: Record<string, unknown>) => {
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
+
+      // Fix 6 (s.o.): dieselbe Stelle, an der der Handler die Session
+      // schliesst, räumt auch den Heartbeat ab — beides im inneren `finally`.
+      const heartbeat = setInterval(() => {
+        if (!res.writableEnded) res.write(': ping\n\n');
+      }, 15000);
 
       try {
-        for await (const line of session.lines) {
-          // `close()` beendet `lines` nicht sofort (bereits gepufferte
-          // Zeilen fliessen noch ab), und `res.writableEnded` wird nur durch
-          // unser EIGENES `res.end()` wahr — ein verschwundener Client
-          // setzt es nicht (Fix 4/Critical 2). `clientGone` ist deshalb Teil
-          // der Abbruchbedingung, nicht nur `writableEnded`.
-          if (clientGone || res.writableEnded) break;
-          send({ type: 'line', line });
+        try {
+          session = await this.logs.open(id, q.namespace, q.pod, {
+            container: q.container, tailLines: q.tailLines,
+            previous: q.previous, follow: q.follow, sinceSeconds: q.sinceSeconds,
+          });
+        } catch (err) {
+          // kubeApiExceptionMessage statt eines rohen errorMessageWithCause:
+          // dieselbe Behandlung wie in guarded() oben — ein `ApiException`
+          // aus `Log.log()` (z.B. "HTTP-Code: 500\n…") wird sonst wörtlich an
+          // den Client gereicht. Anders als bei einem Stream-Fehler NACH dem
+          // Öffnen (den `KubeLogsService` selbst schon loggt) hat hier noch
+          // niemand geloggt.
+          const message = kubeApiExceptionMessage(err).slice(0, 500);
+          this.logger.warn(`Log-Stream konnte nicht geöffnet werden (${id}): ${message}`);
+          auditError = message;
+          send({ type: 'error', message });
+          return;
         }
-        // `lines` endet nach einem Verbindungsabbruch genauso sauber wie
-        // nach einem regulären Ende (siehe JSDoc oben) — `session.error()`
-        // ist die einzige Stelle, an der sich das nachträglich
-        // unterscheiden lässt.
-        const streamError = session.error();
-        if (streamError) {
-          send({ type: 'error', message: streamError });
-        } else {
-          send({ type: 'done' });
+
+        // Der Client kann schon während open() gegangen sein (s.o., Fix 4) —
+        // `session` ist jetzt zwar offen, aber niemand liest mehr. Der
+        // Listener oben hat `close()` bereits versucht (war zu dem Zeitpunkt
+        // noch ein No-Op über `?.`); das wird hier nachgeholt.
+        if (clientGone) {
+          session.close();
+          auditError = 'Client ging während des Öffnens';
+          return;
         }
-      } catch (err) {
-        send({ type: 'error', message: kubeApiExceptionMessage(err).slice(0, 500) });
+
+        try {
+          for await (const line of session.lines) {
+            // `close()` beendet `lines` nicht sofort (bereits gepufferte
+            // Zeilen fliessen noch ab), und `res.writableEnded` wird nur durch
+            // unser EIGENES `res.end()` wahr — ein verschwundener Client
+            // setzt es nicht (Fix 4/Critical 2). `clientGone` ist deshalb Teil
+            // der Abbruchbedingung, nicht nur `writableEnded`.
+            if (clientGone || res.writableEnded) break;
+            send({ type: 'line', line });
+          }
+          // `lines` endet nach einem Verbindungsabbruch genauso sauber wie
+          // nach einem regulären Ende (siehe JSDoc oben) — `session.error()`
+          // ist die einzige Stelle, an der sich das nachträglich
+          // unterscheiden lässt.
+          const streamError = session.error();
+          if (streamError) {
+            auditError = streamError;
+            send({ type: 'error', message: streamError });
+          } else {
+            send({ type: 'done' });
+          }
+        } catch (err) {
+          const message = kubeApiExceptionMessage(err).slice(0, 500);
+          auditError = message;
+          send({ type: 'error', message });
+        } finally {
+          session.close();
+        }
       } finally {
-        session.close();
-        await this.audit.record({
-          clusterId: id, action: 'logs', sourceContext: 'ui', userId: this.userIdOf(req),
-          resource: 'Pod', namespace: q.namespace, name: q.pod,
-          durationMs: Date.now() - started,
-        });
+        clearInterval(heartbeat);
+        if (!res.writableEnded) res.end();
       }
     } finally {
-      clearInterval(heartbeat);
-      if (!res.writableEnded) res.end();
+      await this.audit.record({
+        clusterId: id, action: 'logs', sourceContext: this.sourceOf(req),
+        userId: this.userIdOf(req), resource: 'Pod', namespace: q.namespace, name: q.pod,
+        durationMs: Date.now() - started, errorMsg: auditError,
+      });
     }
   }
 }

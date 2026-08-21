@@ -65,6 +65,7 @@ import { KubeClustersService } from './kube/kube-clusters.service';
 import { KubeResourcesService } from './kube/kube-resources.service';
 import { KubeLogsService } from './kube/kube-logs.service';
 import { KubeClientService } from './kube/kube-client.service';
+import { KubeAuditService } from './kube/kube-audit.service';
 import { UserRole } from './auth/schemas/user.schema';
 import { registerMcpTools } from './mcp-tools';
 
@@ -181,6 +182,7 @@ async function bootstrap() {
     kubeResourcesService: app.get(KubeResourcesService),
     kubeLogsService: app.get(KubeLogsService),
     kubeClientService: app.get(KubeClientService),
+    kubeAuditService: app.get(KubeAuditService),
   });
 
   const transport = new StdioServerTransport();

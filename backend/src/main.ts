@@ -65,6 +65,7 @@ import { KubeClustersService } from './kube/kube-clusters.service';
 import { KubeResourcesService } from './kube/kube-resources.service';
 import { KubeLogsService } from './kube/kube-logs.service';
 import { KubeClientService } from './kube/kube-client.service';
+import { KubeAuditService } from './kube/kube-audit.service';
 import { Types as MongoTypes } from 'mongoose';
 import { CustomersService } from './customers/customers.service';
 import { ContactsService } from './contacts/contacts.service';
@@ -263,6 +264,7 @@ async function bootstrap() {
     kubeResourcesService: app.get(KubeResourcesService),
     kubeLogsService: app.get(KubeLogsService),
     kubeClientService: app.get(KubeClientService),
+    kubeAuditService: app.get(KubeAuditService),
   };
 
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};
