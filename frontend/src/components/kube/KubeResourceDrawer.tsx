@@ -60,6 +60,19 @@ export function KubeResourceDrawer({ cluster, kind, row, onClose }: Props) {
     setDescribed(null);
     setYaml(null);
     setError(null);
+    // Auch die drei Ansichtszustände (Review-Fund A2). React verwendet bei
+    // einem Wechsel auf eine ANDERE Zeile desselben Kinds dieselbe
+    // Komponenteninstanz weiter — `container` blieb dann auf dem Namen aus
+    // dem vorigen Pod stehen. Bei einem Pod mit mehreren Containern und
+    // aktivem Logs-Reiter öffnete der Klick auf einen anderen Pod damit
+    // einen Follow-Stream auf einen Container, den es dort nicht gibt: der
+    // Cluster antwortet 400, und nur das Schliessen des Drawers half.
+    // `tab` gehört dazu, weil der Logs-Reiter für ein Nicht-Pod-Kind gar
+    // nicht existiert (`tabs` unten) und der Inhalt dann leer bliebe;
+    // `follow` ebenso, damit eine neue Ressource nicht ungefragt streamt.
+    setTab('overview');
+    setContainer(undefined);
+    setFollow(false);
   }
 
   // Beim Öffnen genau EINE Abfrage. YAML kommt erst, wenn der Reiter
