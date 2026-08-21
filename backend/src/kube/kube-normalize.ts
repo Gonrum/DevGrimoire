@@ -11,7 +11,12 @@ export interface KubeListRow {
   restarts?: number;
   node?: string;
   detail?: string;
+  /** Nur für `Event`: die Meldung selbst, auf Zeilenlänge gekürzt. */
+  message?: string;
 }
+
+/** Kürzungsgrenze für `KubeListRow.message` — eine Tabellenzelle, kein Log. */
+const ROW_MESSAGE_MAX = 300;
 
 const LAST_APPLIED = 'kubectl.kubernetes.io/last-applied-configuration';
 const ANNOTATION_MAX = 256;
@@ -176,6 +181,22 @@ export function projectRow(kind: string, obj: unknown): KubeListRow {
         }
       }
       return { ...base, status: statusText };
+    }
+    case 'Event': {
+      // `Event` steht laut Spec in der Cluster-Gruppe des Baums, hatte hier
+      // aber kein `case` und fiel auf `default` — die Liste zeigte generierte
+      // Namen wie „api.18cdbed60501a8b3" und sonst nichts. `type` in `status`
+      // (damit `Warning` sich abhebt), `reason` als Detail, die Meldung
+      // gekürzt daneben.
+      const message = readString(obj, 'message');
+      return {
+        ...base,
+        status: readString(obj, 'type'),
+        detail: readString(obj, 'reason'),
+        message: message !== undefined && message.length > ROW_MESSAGE_MAX
+          ? `${message.slice(0, ROW_MESSAGE_MAX)}…`
+          : message,
+      };
     }
     case 'PersistentVolumeClaim':
       return { ...base, status: readString(obj, 'status', 'phase') };

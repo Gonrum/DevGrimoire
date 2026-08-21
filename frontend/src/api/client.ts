@@ -1242,6 +1242,8 @@ export interface KubeListRow {
   restarts?: number;
   node?: string;
   detail?: string;
+  /** Nur für `Event`: die Meldung selbst, backendseitig auf Zeilenlänge gekürzt. */
+  message?: string;
 }
 
 export interface KubeEventRow {

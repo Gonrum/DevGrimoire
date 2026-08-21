@@ -146,6 +146,33 @@ check('toYamlSafe überlebt ein Date im Objekt', () => {
   assert.ok(yaml.includes('2026-08-01T10:00:00'), `Zeitstempel fehlt im YAML:\n${yaml}`);
 });
 
+check('Event-Projektion liefert Typ, Reason und Message (Fund I5)', () => {
+  // `Event` steht seit Task 7 im Ressourcenbaum, hatte aber kein `case` in
+  // projectRow — die Liste zeigte generierte Namen und sonst nichts.
+  const row = projectRow('Event', {
+    metadata: { name: 'api.18cdbed6', namespace: 'prod', creationTimestamp: CREATED },
+    type: 'Warning',
+    reason: 'BackOff',
+    message: 'Back-off restarting failed container',
+    count: 7,
+    involvedObject: { kind: 'Pod', name: 'api-7d9f' },
+  });
+  assert.equal(row.status, 'Warning', 'ohne Typ ist ein Warning nicht von Normal zu unterscheiden');
+  assert.equal(row.detail, 'BackOff');
+  assert.equal(row.message, 'Back-off restarting failed container');
+  assert.equal(row.createdAt, '2026-08-01T10:00:00.000Z');
+});
+
+check('Event-Projektion kürzt eine überlange Message', () => {
+  const row = projectRow('Event', {
+    metadata: { name: 'e', namespace: 'prod' }, type: 'Normal',
+    reason: 'X', message: 'y'.repeat(5000),
+  });
+  // 300 Zeichen + das angehängte „…"
+  assert.ok(row.message.length <= 301, `Message war ${row.message.length} Zeichen lang`);
+  assert.ok(row.message.endsWith('…'), 'die Kürzung ist nicht erkennbar');
+});
+
 check('unbekanntes Kind ergibt trotzdem Name und Namespace', () => {
   const row = projectRow('Widget', { metadata: { name: 'w', namespace: 'ns' } });
   assert.equal(row.name, 'w');

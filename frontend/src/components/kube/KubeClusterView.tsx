@@ -25,6 +25,7 @@ function cellOf(row: KubeListRow, col: Exclude<ReturnType<typeof columnsFor>[num
     case 'restarts': return row.restarts === undefined ? '—' : String(row.restarts);
     case 'node': return row.node ?? '—';
     case 'detail': return row.detail ?? '—';
+    case 'message': return row.message ?? '—';
   }
 }
 

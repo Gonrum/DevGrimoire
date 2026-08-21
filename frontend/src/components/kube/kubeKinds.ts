@@ -23,8 +23,12 @@ export function pollIntervalFor(kind: string): number {
 }
 
 /** Welche Spalten eine Tabelle je Kind zeigt. Feste Liste, keine Ableitung. */
-export function columnsFor(kind: string): Array<'namespace' | 'status' | 'ready' | 'restarts' | 'node' | 'detail' | 'age'> {
+export function columnsFor(kind: string): Array<'namespace' | 'status' | 'ready' | 'restarts' | 'node' | 'detail' | 'message' | 'age'> {
   switch (kind) {
+    // Events tragen generierte Namen („api.18cdbed60501a8b3") — ohne Typ,
+    // Reason und Meldung ist die Zeile unlesbar. Der Zeitstempel steht in
+    // der ALTER-Spalte wie überall.
+    case 'Event': return ['namespace', 'status', 'detail', 'message', 'age'];
     case 'Pod': return ['namespace', 'status', 'ready', 'restarts', 'node', 'age'];
     case 'Deployment':
     case 'StatefulSet':
@@ -59,6 +63,9 @@ const STATUS_CLASSES: Record<string, string> = {
   Failed: 'text-red-300',
   NotReady: 'text-red-300',
   Lost: 'text-red-300',
+  // Event.type — dieselbe Einfärbung wie im Events-Reiter des Drawers.
+  // `Normal` bleibt bewusst unbelegt (neutral).
+  Warning: 'text-amber-300',
 };
 
 export function statusClasses(status?: string): string {

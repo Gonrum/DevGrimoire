@@ -2630,6 +2630,7 @@
       "restarts": "Neustarts",
       "node": "Node",
       "detail": "Detail",
+      "message": "Meldung",
       "age": "Alter"
     },
     "form": {
