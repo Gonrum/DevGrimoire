@@ -2,7 +2,7 @@
 
 const express = require('express');
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -787,6 +787,131 @@ app.post('/size', async (req, res) => {
   res.json({ sizeBytes: Number.isFinite(sizeBytes) ? sizeBytes : 0 });
 });
 
+// ---------------------------------------------------------------------------
+// Kube-Session (K3) — session-bound kubeconfig on tmpfs plus a free kubectl
+// exec endpoint. The sidecar has no notion of DevGrimoire actors; it only
+// authenticates with the shared bearer token, same as every other route
+// here. Access control lives in the backend (Task 3).
+// ---------------------------------------------------------------------------
+
+const KUBE_SESSION_DIR = '/run/kube-sessions';
+const KUBE_SESSION_TTL_DEFAULT_MS = 60 * 60 * 1000;   // 1 h
+const KUBE_SESSION_TTL_MAX_MS = 8 * 60 * 60 * 1000;   // 8 h
+const KUBE_CONFIG_MAX_BYTES = 512 * 1024;
+const KUBE_SESSION_ID_PATTERN = /^[a-f0-9]{32}$/;
+
+/** id -> { expiresAt } — die Datei ist die Wahrheit, das hier nur der Reaper-Index. */
+const kubeSessions = new Map();
+
+function kubeSessionPath(id) {
+  return path.join(KUBE_SESSION_DIR, `${id}.yaml`);
+}
+
+app.post('/kube/session', async (req, res) => {
+  const kubeconfig = req.body?.kubeconfig;
+  if (typeof kubeconfig !== 'string' || kubeconfig.trim().length === 0) {
+    return res.status(400).json({ error: 'kubeconfig must be a non-empty string' });
+  }
+  if (Buffer.byteLength(kubeconfig, 'utf8') > KUBE_CONFIG_MAX_BYTES) {
+    return res.status(400).json({ error: 'kubeconfig too large' });
+  }
+  let ttl = Number(req.body?.ttlSeconds) * 1000;
+  if (!Number.isFinite(ttl) || ttl <= 0) ttl = KUBE_SESSION_TTL_DEFAULT_MS;
+  if (ttl > KUBE_SESSION_TTL_MAX_MS) ttl = KUBE_SESSION_TTL_MAX_MS;
+
+  const id = crypto.randomBytes(16).toString('hex');
+  await fsp.mkdir(KUBE_SESSION_DIR, { recursive: true, mode: 0o700 });
+  // mode im open(), nicht per chmod danach — sonst existiert die Datei
+  // kurzzeitig mit dem umask-Default.
+  await fsp.writeFile(kubeSessionPath(id), kubeconfig, { mode: 0o600, flag: 'wx' });
+
+  const expiresAt = Date.now() + ttl;
+  kubeSessions.set(id, { expiresAt });
+  // Bewusst KEIN Logging des Inhalts, auch nicht gekürzt.
+  console.log(JSON.stringify({ type: 'kube-session-create', id, ttlMs: ttl }));
+  res.status(201).json({ kubeSessionId: id, expiresAt: new Date(expiresAt).toISOString() });
+});
+
+app.delete('/kube/session/:id', async (req, res) => {
+  const id = req.params.id;
+  if (!KUBE_SESSION_ID_PATTERN.test(id)) return res.status(400).json({ error: 'bad session id' });
+  kubeSessions.delete(id);
+  await fsp.rm(kubeSessionPath(id), { force: true });
+  console.log(JSON.stringify({ type: 'kube-session-delete', id }));
+  res.status(204).end();
+});
+
+/** Räumt abgelaufene Sessions weg, auch wenn niemand DELETE gerufen hat. */
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, entry] of kubeSessions) {
+    if (entry.expiresAt > now) continue;
+    kubeSessions.delete(id);
+    fsp.rm(kubeSessionPath(id), { force: true }).catch(() => { /* best effort */ });
+  }
+}, 60_000).unref();
+
+const KUBE_EXEC_MAX_ARGS = 64;
+const KUBE_EXEC_MAX_OUTPUT = 200_000;
+
+/**
+ * Freies kubectl gegen eine Kube-Session.
+ *
+ * `args` ist ein ARRAY, kein String, und wird ohne Shell an kubectl übergeben.
+ * Das ist der ganze Unterschied zwischen "freies kubectl" (was die Spec will)
+ * und "freie Shell im Sidecar" (was ein `sh -c` daraus machen würde). Ein
+ * String mit `;` oder `$(...)` wäre bei einem Aufrufer, dem niemand zusieht,
+ * beliebige Codeausführung — genau deshalb kein `exec`, sondern `execFile`.
+ */
+app.post('/kube/exec', async (req, res) => {
+  const id = req.body?.kubeSessionId;
+  if (typeof id !== 'string' || !KUBE_SESSION_ID_PATTERN.test(id)) {
+    return res.status(400).json({ error: 'invalid kubeSessionId' });
+  }
+  if (!kubeSessions.has(id)) {
+    return res.status(404).json({ error: 'unknown or expired kube session' });
+  }
+  const args = req.body?.args;
+  if (!Array.isArray(args) || args.length === 0 || args.length > KUBE_EXEC_MAX_ARGS) {
+    return res.status(400).json({ error: 'args must be a non-empty string array' });
+  }
+  if (!args.every((a) => typeof a === 'string')) {
+    return res.status(400).json({ error: 'args must contain only strings' });
+  }
+  const timeout = Math.min(Number(req.body?.timeout) || 30_000, 120_000);
+
+  const started = Date.now();
+  const child = execFile(
+    'kubectl',
+    args,
+    {
+      cwd: '/tmp',
+      env: { ...buildExecEnv({}), KUBECONFIG: kubeSessionPath(id) },
+      timeout,
+      maxBuffer: KUBE_EXEC_MAX_OUTPUT,
+      killSignal: 'SIGKILL',
+    },
+    (err, stdout, stderr) => {
+      const timedOut = Boolean(err && err.killed && err.signal === 'SIGKILL');
+      // maxBuffer-Überlauf liefert ERR_CHILD_PROCESS_STDIO_MAXBUFFER und
+      // verwirft die Ausgabe — das als "truncated" zu melden ist ehrlicher,
+      // als einen leeren Erfolg zurückzugeben.
+      const overflow = Boolean(err && err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER');
+      res.json({
+        exitCode: err && typeof err.code === 'number' ? err.code : (err ? 1 : 0),
+        stdout: String(stdout || '').slice(0, KUBE_EXEC_MAX_OUTPUT),
+        stderr: String(stderr || '').slice(0, KUBE_EXEC_MAX_OUTPUT),
+        truncated: overflow,
+        timedOut,
+        durationMs: Date.now() - started,
+      });
+    },
+  );
+  child.on('error', (err) => {
+    if (!res.headersSent) res.status(500).json({ error: String(err.message || err) });
+  });
+});
+
 app.use((err, _req, res, _next) => {
   console.error('unhandled error', err);
   res.status(500).json({ error: err.message || 'internal error' });
@@ -856,19 +981,57 @@ server.on('upgrade', (req, socket, head) => {
   }
 
   const workspaceId = url.searchParams.get('workspaceId');
-  if (!workspaceId || !WORKSPACE_ID_PATTERN.test(workspaceId)) {
+  const kubeSessionId = url.searchParams.get('kubeSessionId');
+
+  // Genau eines von beiden. Beide gesetzt hiesse: welcher Modus gilt? Diese
+  // Frage darf gar nicht erst entstehen — sonst entscheidet die Reihenfolge
+  // der if-Zweige darüber, in welchem Kontext eine Shell aufgeht.
+  if ((workspaceId && kubeSessionId) || (!workspaceId && !kubeSessionId)) {
     socket.write('HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n');
     socket.destroy();
     return;
   }
+
   const sessionId = url.searchParams.get('sessionId') || crypto.randomUUID();
 
+  if (kubeSessionId) {
+    if (!KUBE_SESSION_ID_PATTERN.test(kubeSessionId)) {
+      socket.write('HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    // Die Session muss existieren UND im Speicher stehen: die Datei allein
+    // genügt nicht, denn der Reaper löscht sie asynchron — ein Terminal auf
+    // eine bereits abgelaufene Session wäre sonst für einen Moment möglich.
+    if (!kubeSessions.has(kubeSessionId)) {
+      socket.write('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    if (countTerminalsFor(`kube:${kubeSessionId}`) >= TERMINAL_MAX_PER_KUBE_SESSION) {
+      socket.write('HTTP/1.1 429 Too Many Terminals\r\nContent-Length: 0\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      handleKubeTerminalConnection(ws, kubeSessionId, sessionId).catch((err) => {
+        console.error('kube terminal connection failed', err);
+        try { ws.close(1011, 'internal error'); } catch { /* noop */ }
+      });
+    });
+    return;
+  }
+
+  if (!WORKSPACE_ID_PATTERN.test(workspaceId)) {
+    socket.write('HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n');
+    socket.destroy();
+    return;
+  }
   if (countTerminalsFor(workspaceId) >= TERMINAL_MAX_PER_WORKSPACE) {
     socket.write('HTTP/1.1 429 Too Many Terminals\r\nContent-Length: 0\r\n\r\n');
     socket.destroy();
     return;
   }
-
   wss.handleUpgrade(req, socket, head, (ws) => {
     handleTerminalConnection(ws, workspaceId, sessionId).catch((err) => {
       console.error('terminal connection failed', err);
@@ -877,35 +1040,16 @@ server.on('upgrade', (req, socket, head) => {
   });
 });
 
-async function handleTerminalConnection(ws, workspaceId, sessionId) {
-  await ensureWorkspaceDir(workspaceId);
-  await ensureCwdStateDir();
-  const startCwd = (await readCwdState(workspaceId)) || workspaceRoot(workspaceId);
-
-  const term = pty.spawn('/bin/bash', ['-i'], {
-    name: 'xterm-256color',
-    cols: 80,
-    rows: 24,
-    cwd: startCwd,
-    env: {
-      ...buildExecEnv({}),
-      // PTY-only niceties — make the prompt obvious and history work.
-      TERM: 'xterm-256color',
-      PS1: '\\[\\033[36m\\]\\w\\[\\033[0m\\] $ ',
-      HISTFILE: `${ROOT}/${workspaceId}/.bash_history`,
-      HISTSIZE: '500',
-      HISTCONTROL: 'ignoredups:erasedups',
-    },
-  });
-
-  const key = `${workspaceId}:${sessionId}`;
-  const state = { pty: term, ws, lastActivity: Date.now() };
-  activeTerminals.set(key, state);
-
-  console.log(JSON.stringify({
-    type: 'pty-open', workspaceId, sessionId, pid: term.pid, cwd: startCwd,
-  }));
-
+/**
+ * Wires a spawned PTY to its WebSocket: forwards PTY output to the socket,
+ * routes socket input to keystrokes (or a resize control message), and
+ * tears both down together on exit/close. Shared verbatim by the workspace
+ * terminal and the kube-cluster terminal — `key` is whatever activeTerminals
+ * key the caller used (`<workspaceId>:<sessionId>` or
+ * `kube:<kubeSessionId>:<sessionId>`); this function treats it as an opaque
+ * bookkeeping/log id, never branches on its shape.
+ */
+function wireTerminal(ws, term, state, key) {
   term.onData((data) => {
     state.lastActivity = Date.now();
     if (ws.readyState === ws.OPEN) {
@@ -914,7 +1058,7 @@ async function handleTerminalConnection(ws, workspaceId, sessionId) {
   });
   term.onExit(({ exitCode, signal }) => {
     console.log(JSON.stringify({
-      type: 'pty-exit', workspaceId, sessionId, exitCode, signal,
+      type: 'pty-exit', key, exitCode, signal,
     }));
     if (ws.readyState === ws.OPEN) {
       try {
@@ -952,13 +1096,84 @@ async function handleTerminalConnection(ws, workspaceId, sessionId) {
     activeTerminals.delete(key);
     // Snapshot the last-known cwd so the per-command /exec path picks up
     // where the interactive session left off. node-pty doesn't expose a
-    // cwd field directly, but bash's PWD env via a final command would —
-    // for now we rely on the user's bash session having written its
-    // state via PROMPT_COMMAND or just leave it stale.
+    // cwd field directly, but bash's PROMPT_COMMAND or just leave it stale.
   });
+}
+
+async function handleTerminalConnection(ws, workspaceId, sessionId) {
+  await ensureWorkspaceDir(workspaceId);
+  await ensureCwdStateDir();
+  const startCwd = (await readCwdState(workspaceId)) || workspaceRoot(workspaceId);
+
+  const term = pty.spawn('/bin/bash', ['-i'], {
+    name: 'xterm-256color',
+    cols: 80,
+    rows: 24,
+    cwd: startCwd,
+    env: {
+      ...buildExecEnv({}),
+      // PTY-only niceties — make the prompt obvious and history work.
+      TERM: 'xterm-256color',
+      PS1: '\\[\\033[36m\\]\\w\\[\\033[0m\\] $ ',
+      HISTFILE: `${ROOT}/${workspaceId}/.bash_history`,
+      HISTSIZE: '500',
+      HISTCONTROL: 'ignoredups:erasedups',
+    },
+  });
+
+  const key = `${workspaceId}:${sessionId}`;
+  const state = { pty: term, ws, lastActivity: Date.now() };
+  activeTerminals.set(key, state);
+
+  console.log(JSON.stringify({
+    type: 'pty-open', workspaceId, sessionId, pid: term.pid, cwd: startCwd,
+  }));
+
+  wireTerminal(ws, term, state, key);
 
   // Greeting line so the browser sees something even if bash takes a beat.
   ws.send(`\x1b[2m# devgrimoire workspace ${workspaceId} — bash session\x1b[0m\r\n`);
+}
+
+const TERMINAL_MAX_PER_KUBE_SESSION = 4;
+
+/**
+ * PTY für ein Cluster-Terminal. Bewusst NICHT `handleTerminalConnection`
+ * wiederverwendet: die dortige Vorbereitung (`ensureWorkspaceDir`,
+ * `readCwdState`, `HISTFILE` unter `ROOT/<workspaceId>`) ist Workspace-Logik
+ * und würde hier auf ein Verzeichnis zeigen, das es nicht gibt. Der Rest —
+ * onData, onExit, resize, Idle-Reaper — teilt sich beides über `activeTerminals`.
+ */
+async function handleKubeTerminalConnection(ws, kubeSessionId, sessionId) {
+  const kubeconfigPath = kubeSessionPath(kubeSessionId);
+  const term = pty.spawn('/bin/bash', ['-i'], {
+    name: 'xterm-256color',
+    cols: 80,
+    rows: 24,
+    // Kein Workspace-Verzeichnis: /tmp ist der einzige Ort, den es hier
+    // garantiert gibt und an dem der Nutzer schreiben darf.
+    cwd: '/tmp',
+    env: {
+      ...buildExecEnv({}),
+      KUBECONFIG: kubeconfigPath,
+      TERM: 'xterm-256color',
+      PS1: '\\[\\033[35m\\]kube\\[\\033[0m\\]:\\w $ ',
+      // Kein HISTFILE: die History läge im tmpfs und stürbe mit der Session.
+      // Sie hier wegzulassen ist ehrlicher als ein Pfad, der ins Leere zeigt.
+      HISTSIZE: '500',
+      HISTCONTROL: 'ignoredups:erasedups',
+    },
+  });
+
+  const key = `kube:${kubeSessionId}:${sessionId}`;
+  const state = { pty: term, ws, lastActivity: Date.now() };
+  activeTerminals.set(key, state);
+
+  console.log(JSON.stringify({
+    type: 'pty-open', mode: 'kube', kubeSessionId, sessionId, pid: term.pid,
+  }));
+
+  wireTerminal(ws, term, state, key);
 }
 
 server.listen(PORT, () => {

@@ -58,6 +58,19 @@ COPY --chown=workspace:workspace server/ ./
 COPY dg-cli/dg /usr/local/bin/dg
 RUN chmod +x /usr/local/bin/dg && /usr/local/bin/dg --version
 
+# kubectl für das Cluster-Terminal (K3). Version gepinnt und gegen die
+# offizielle Prüfsumme verifiziert — ein Binary, das im Terminal jedes Verb
+# ausführen darf, wird nicht ungeprüft heruntergeladen.
+ARG KUBECTL_VERSION=v1.31.4
+RUN ARCH=$(dpkg --print-architecture) \
+    && case "$ARCH" in amd64|arm64) : ;; *) echo "unsupported arch: $ARCH" && exit 1 ;; esac \
+    && curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" \
+    && curl -fsSL -o /tmp/kubectl.sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl.sha256" \
+    && echo "$(cat /tmp/kubectl.sha256)  /tmp/kubectl" | sha256sum -c - \
+    && install -m 0755 /tmp/kubectl /usr/local/bin/kubectl \
+    && rm -f /tmp/kubectl /tmp/kubectl.sha256 \
+    && kubectl version --client
+
 USER workspace
 ENV NODE_ENV=production \
     PORT=9000 \
