@@ -79,7 +79,8 @@
     "check:kube-resources": "node scripts/kube-resources-check.cjs",
     "check:kube-logs": "node scripts/kube-logs-check.cjs",
     "check:kube-resources-rest": "node scripts/kube-resources-rest-units-check.cjs",
-    "check:kube-mcp": "node scripts/kube-mcp-check.cjs"
+    "check:kube-mcp": "node scripts/kube-mcp-check.cjs",
+    "check:kube-access": "node scripts/kube-access-check.cjs"
   },
   "dependencies": {
     "@kubernetes/client-node": "^2.0.0",
