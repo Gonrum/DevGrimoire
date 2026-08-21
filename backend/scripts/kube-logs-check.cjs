@@ -25,7 +25,7 @@ const { KubeLogsService } = loadCompiled('kube/kube-logs.service.js');
 // hängt und der Event-Loop danach einfach leerläuft — Exit 0 und druckt
 // die Zusammenfassung nie. Ein Timeout pro Fall (unten in `check()`) ist
 // die primäre Abwehr; diese Zählung ist das zweite Netz.
-const EXPECTED_CHECKS = 16;
+const EXPECTED_CHECKS = 18;
 const CHECK_TIMEOUT_MS = 3000;
 
 let failures = 0, total = 0;
@@ -65,6 +65,12 @@ const clustersStub = { async findById(id) { return { _id: id }; } };
  * legt es nicht fest, und ein werfender Abbruch darf die Freigabe des
  * Transports trotzdem nicht verhindern.
  *
+ * `opts.releaseThrows` lässt die Transport-Freigabe werfen. Der Refcount aus
+ * K1 kann das (er räumt SSH-Tunnel und Listener ab); `finish()` lief bis zum
+ * Review-Fund A1 ungewacht durch `release()` und danach erst durch
+ * `stream.end()` — ein Wurf dort liess `closed = true` zurück, ohne den
+ * Stream je zu beenden.
+ *
  * `opts.streamErrors` lässt den Stream nach den Chunks ein 'error'-Event
  * statt eines normalen `end()` feuern — das triggert sowohl den expliziten
  * 'error'-Listener als auch den `finally`-Block des Zeilen-Generators, beide
@@ -74,7 +80,13 @@ function makeEnv(chunks, opts = {}) {
   const state = { released: 0, aborted: 0, written: false };
   const client = {
     async buildConfig() {
-      return { kc: {}, release: () => { state.released += 1; } };
+      return {
+        kc: {},
+        release: () => {
+          state.released += 1;
+          if (opts.releaseThrows) throw new Error('release kaputt');
+        },
+      };
     },
   };
   const logFactory = () => ({
@@ -255,6 +267,45 @@ async function collect(iterable, max = 10) {
     await new Promise((r) => setImmediate(r));
     assert.equal(env.state.aborted, 1, 'AbortController wurde nicht ausgelöst');
     assert.equal(env.state.released, 1, `released=${env.state.released} — ein werfender abort() darf die Freigabe nicht verhindern`);
+  });
+
+  await check('ein werfendes release() wedgt die Session nicht (Fund A1)', async () => {
+    // `finish()` lief ungewacht durch `release()` und ERST danach durch
+    // `stream.end()` — während der `abort()`-Aufruf daneben ein try/catch
+    // hatte. Wirft die Freigabe, bleibt `closed = true` zurück, ohne dass
+    // der Stream je beendet wurde: `lines` endet nie, das `for await` der
+    // SSE-Schicht kehrt nie zurück, ihr äusseres `finally` läuft nie —
+    // Heartbeat für immer, Transport-Lease gehalten. Und weil `finish()`
+    // an 'end'/'close'/'error'-Listenern hängt, ist der Wurf dort eine
+    // uncaught exception: dieselbe Fehlerklasse, die in dieser Phase schon
+    // zwei Prozessabstürze verursacht hat.
+    const env = makeEnv(['a\n'], { keepOpen: true, releaseThrows: true });
+    const svc = new KubeLogsService(clustersStub, env.client, env.logFactory);
+    const session = await svc.open('c1', 'prod', 'api', { follow: true });
+    // Erst die Chunks abfliessen lassen (makeEnv schreibt sie in einem
+    // setImmediate) — sonst prüft der Fall nur das Ende, nicht dass bereits
+    // gepufferte Zeilen es noch herausschaffen.
+    await new Promise((r) => setImmediate(r));
+    assert.doesNotThrow(() => session.close(), 'close() hat den Fehler der Freigabe durchgereicht');
+    assert.equal(env.state.released, 1, 'release() wurde nie versucht');
+    // Der eigentliche Beweis: `lines` endet trotzdem. Ohne den Fix hängt
+    // dieses `for await` und der Fall läuft in den Zeitlimit-Guard.
+    const seen = [];
+    for await (const line of session.lines) seen.push(line);
+    assert.deepEqual(seen, ['a'], 'der Stream wurde nach dem Wurf nie beendet');
+  });
+
+  await check('ein werfendes release() lässt sich nicht in einen zweiten Versuch verwandeln', async () => {
+    // `closed` wird VOR den beiden Aufräumschritten gesetzt: ein zweiter
+    // finish()-Aufruf (die Listener feuern nach dem end() noch) darf
+    // release() nicht erneut aufrufen — der Refcount aus K1 zählt.
+    const env = makeEnv(['a\n'], { releaseThrows: true });
+    const svc = new KubeLogsService(clustersStub, env.client, env.logFactory);
+    const session = await svc.open('c1', 'prod', 'api', {});
+    for await (const _line of session.lines) { /* bis zum Ende konsumieren */ }
+    session.close();
+    await new Promise((r) => setImmediate(r));
+    assert.equal(env.state.released, 1, `released=${env.state.released}, erwartet genau 1`);
   });
 
   await check('ein Stream-Fehler nach etwas Ausgabe gibt trotzdem nur einmal frei', async () => {

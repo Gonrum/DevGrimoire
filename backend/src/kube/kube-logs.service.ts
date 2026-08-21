@@ -120,11 +120,30 @@ export class KubeLogsService {
     // 'error'-Listenern unten gesetzt (ein selbst ausgelöstes close()/abort()
     // setzt es nicht), s. `KubeLogSession.error` oben.
     let lastError: string | undefined;
+    // Jeder der drei Schritte ist gewacht, und zwar aus DEMSELBEN Grund:
+    // `finish` hängt an 'end'/'close'/'error'-Listenern, und ein Wurf in
+    // einem EventEmitter-Listener ist in diesem Backend eine uncaught
+    // exception (kein `process.on('uncaughtException')`) — die Fehlerklasse,
+    // die in dieser Phase schon zwei Prozessabstürze verursacht hat.
+    //
+    // `release()` war bis zum Review-Fund A1 als einziger Schritt ungewacht,
+    // obwohl der Refcount aus K1 dahinter SSH-Tunnel und TCP-Listener
+    // abräumt. Ein Wurf dort liess ausserdem `closed = true` zurück, OHNE
+    // den Stream je zu beenden: `lines` endet dann nie, das `for await` der
+    // SSE-Schicht kehrt nie zurück, ihr äusseres `finally` läuft nie —
+    // Heartbeat für immer, Transport-Lease gehalten. Genau der Zustand, den
+    // `finish()` verhindern soll.
     const finish = () => {
       if (closed) return;
       closed = true;
       try { abort?.(); } catch { /* der Abbruch darf die Freigabe nicht verhindern */ }
-      release();
+      try {
+        release();
+      } catch (err) {
+        this.logger.warn(`Transport-Freigabe ${namespace}/${pod}: ${errorMessage(err)}`);
+      }
+      // NACH der Freigabe und ausserhalb ihres Wurfs: ohne das beendete
+      // `lines` nie (siehe oben).
       stream.end();
     };
 
