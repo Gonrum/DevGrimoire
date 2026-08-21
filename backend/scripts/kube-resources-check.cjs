@@ -246,6 +246,67 @@ const clustersStub = { async findById(id) { return { _id: id, defaultNamespace: 
     assert.equal(out.events[0].reason, 'BackOff');
   });
 
+  // -------------------------------------------------------------------------
+  // Zeitfelder kommen als `Date` (Review-Fund, Critical 1)
+  //
+  // `@kubernetes/client-node` deserialisiert jedes als `Date` deklarierte Feld
+  // über `new Date(data)` (ObjectSerializer.js:2473). Alle Fixtures oben
+  // benutzen ISO-Strings und bewiesen deshalb nichts: live fielen
+  // `metadata.creationTimestamp`, `lastTimestamp` und `lastTransitionTime`
+  // restlos weg (gemessen: 97 von 105 Events ohne Zeitstempel).
+  // -------------------------------------------------------------------------
+  await check('list() übernimmt ein Date-creationTimestamp als ISO-String', async () => {
+    const client = makeClientStub({ listNamespacedPod: { items: [
+      { metadata: { name: 'api', namespace: 'prod', creationTimestamp: new Date('2026-08-01T10:00:00.000Z') } },
+    ] } });
+    const svc = new KubeResourcesService(clustersStub, client);
+    const rows = await svc.list('c1', 'Pod', { namespace: 'prod' });
+    assert.equal(rows[0].createdAt, '2026-08-01T10:00:00.000Z',
+      'createdAt fehlt — die ALTER-Spalte bleibt für jede Zeile leer');
+  });
+
+  await check('events() übernimmt ein Date-lastTimestamp und sortiert danach', async () => {
+    const client = makeClientStub({ listNamespacedEvent: { items: [
+      { type: 'Normal', reason: 'Pulled', lastTimestamp: new Date('2026-08-01T10:00:00.000Z'),
+        involvedObject: { kind: 'Pod', name: 'api' }, metadata: { namespace: 'prod' } },
+      { type: 'Warning', reason: 'BackOff', lastTimestamp: new Date('2026-08-01T12:00:00.000Z'),
+        involvedObject: { kind: 'Pod', name: 'api' }, metadata: { namespace: 'prod' } },
+    ] } });
+    const svc = new KubeResourcesService(clustersStub, client);
+    const rows = await svc.events('c1', { namespace: 'prod' });
+    assert.equal(rows[0].lastTimestamp, '2026-08-01T12:00:00.000Z',
+      'lastTimestamp fehlt — "neueste zuerst" ist dann eine leere Zusicherung');
+    assert.equal(rows[0].reason, 'BackOff', 'ohne Zeitstempel wird nicht sortiert');
+    assert.equal(rows[1].lastTimestamp, '2026-08-01T10:00:00.000Z');
+  });
+
+  await check('events() nimmt eventTime als Date, wenn lastTimestamp fehlt', async () => {
+    const client = makeClientStub({ listNamespacedEvent: { items: [
+      { type: 'Normal', reason: 'X', eventTime: new Date('2026-08-01T09:00:00.000Z'),
+        involvedObject: { kind: 'Pod', name: 'api' } },
+    ] } });
+    const svc = new KubeResourcesService(clustersStub, client);
+    const rows = await svc.events('c1', { namespace: 'prod' });
+    assert.equal(rows[0].lastTimestamp, '2026-08-01T09:00:00.000Z');
+  });
+
+  await check('describe(): lastTransitionTime als Date überlebt die Projektion', async () => {
+    const client = makeClientStub({
+      readNamespacedPod: {
+        kind: 'Pod', metadata: { name: 'api', namespace: 'prod' },
+        status: { phase: 'Pending', conditions: [
+          { type: 'Ready', status: 'False', reason: 'ContainersNotReady',
+            lastTransitionTime: new Date('2026-08-01T11:30:00.000Z') },
+        ] },
+      },
+      listNamespacedEvent: { items: [] },
+    });
+    const svc = new KubeResourcesService(clustersStub, client);
+    const out = await svc.describe('c1', 'Pod', 'api', 'prod');
+    assert.equal(out.conditions[0].lastTransitionTime, '2026-08-01T11:30:00.000Z',
+      'ohne lastTransitionTime kann ein Agent nicht sagen, ob "Ready: False" fünf Sekunden oder fünf Tage alt ist');
+  });
+
   await check('describe() gibt den Transport genau einmal frei', async () => {
     const client = makeClientStub({
       readNamespacedPod: { kind: 'Pod', metadata: { name: 'api', namespace: 'prod' } },

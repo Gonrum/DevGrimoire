@@ -100,6 +100,52 @@ check('Deployment ohne readyReplicas ergibt 0/N statt undefined', () => {
   assert.equal(row.ready, '0/3');
 });
 
+// ---------------------------------------------------------------------------
+// Zeitfelder kommen als `Date`, nicht als String (Review-Fund, Critical 1)
+//
+// `@kubernetes/client-node` deserialisiert JEDES Feld, das seine Modelle als
+// `Date` deklarieren, über `new Date(data)` (ObjectSerializer.js:2473) —
+// `metadata.creationTimestamp`, `lastTimestamp`, `lastTransitionTime`. Die
+// Fixtures dieses Checks benutzten bis hierher ausschliesslich ISO-Strings und
+// bewiesen damit nichts über den echten Datenfluss: `typeof aDate === 'object'`,
+// die Felder fielen live restlos weg. Jede Fixture unten konstruiert deshalb
+// ein ECHTES `Date`.
+// ---------------------------------------------------------------------------
+
+const CREATED = new Date('2026-08-01T10:00:00.000Z');
+
+check('projectRow liest creationTimestamp als Date (nicht nur als String)', () => {
+  const row = projectRow('Pod', {
+    metadata: { name: 'api', namespace: 'prod', creationTimestamp: CREATED },
+  });
+  assert.equal(row.createdAt, '2026-08-01T10:00:00.000Z',
+    'ein Date-Zeitstempel wurde verworfen — die ALTER-Spalte bleibt für JEDE Zeile leer');
+});
+
+check('projectRow liest creationTimestamp weiterhin als String', () => {
+  const row = projectRow('Pod', {
+    metadata: { name: 'api', namespace: 'prod', creationTimestamp: '2026-08-01T10:00:00Z' },
+  });
+  assert.equal(row.createdAt, '2026-08-01T10:00:00Z');
+});
+
+check('ein ungültiges Date ergibt undefined statt eines Wurfs', () => {
+  // `new Date('kaputt').toISOString()` wirft RangeError — ohne Guard nähme
+  // ein einziges kaputtes Objekt die ganze Liste mit.
+  const row = projectRow('Pod', {
+    metadata: { name: 'api', creationTimestamp: new Date('kaputt') },
+  });
+  assert.equal(row.createdAt, undefined);
+});
+
+check('toYamlSafe überlebt ein Date im Objekt', () => {
+  const yaml = toYamlSafe({
+    apiVersion: 'v1', kind: 'Pod',
+    metadata: { name: 'api', namespace: 'prod', creationTimestamp: CREATED },
+  });
+  assert.ok(yaml.includes('2026-08-01T10:00:00'), `Zeitstempel fehlt im YAML:\n${yaml}`);
+});
+
 check('unbekanntes Kind ergibt trotzdem Name und Namespace', () => {
   const row = projectRow('Widget', { metadata: { name: 'w', namespace: 'ns' } });
   assert.equal(row.name, 'w');

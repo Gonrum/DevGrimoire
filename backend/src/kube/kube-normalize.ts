@@ -50,13 +50,45 @@ export function stripHeavyMetadata(obj: unknown): unknown {
   return { ...obj, metadata: nextMeta };
 }
 
+/**
+ * Ein Textfeld aus einer Cluster-Antwort lesen — inklusive der Zeitfelder.
+ *
+ * `@kubernetes/client-node` liefert **keine** Strings für Zeitstempel: sein
+ * `ObjectSerializer` deserialisiert jedes Feld, das die generierten Modelle als
+ * `Date` deklarieren, über `new Date(data)` (`dist/gen/models/
+ * ObjectSerializer.js`, Zweig `type === "Date"`). Betroffen sind
+ * `metadata.creationTimestamp`, `Event.lastTimestamp`/`firstTimestamp` und
+ * jedes `condition.lastTransitionTime`.
+ *
+ * Ein blosses `typeof v === 'string'` verwirft die deshalb **alle** —
+ * lautlos, weil `undefined` in einem optionalen Feld wie ein Objekt aussieht,
+ * das das Feld eben nicht hat. Real gemessen: `createdAt` fehlte in JEDER
+ * Listenzeile, `lastTimestamp` in 97 von 105 Events (die 8 Überlebenden kamen
+ * über `eventTime`, weil `V1MicroTime` kein `Date` ist).
+ *
+ * Die Umwandlung sitzt bewusst hier unten an EINER Stelle statt an jeder
+ * Lesestelle: `readString` und der `str`-Helfer in `kube-resources.service.ts`
+ * teilen sie sich, sonst driftet die nächste Kopie wieder auseinander.
+ *
+ * `Number.isNaN(getTime())` ist kein Zierrat: `new Date('kaputt')` ist ein
+ * gültiges `Date`, dessen `toISOString()` mit `RangeError` wirft — ohne den
+ * Guard nähme ein einziges kaputtes Feld die ganze Liste mit.
+ */
+export function asString(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  }
+  return undefined;
+}
+
 function readString(source: unknown, ...pathSegments: string[]): string | undefined {
   let cursor: unknown = source;
   for (const segment of pathSegments) {
     if (!isRecord(cursor)) return undefined;
     cursor = cursor[segment];
   }
-  return typeof cursor === 'string' ? cursor : undefined;
+  return asString(cursor);
 }
 
 function readNumber(source: unknown, ...pathSegments: string[]): number | undefined {

@@ -8,7 +8,7 @@ import {
   isKubeKind, isNamespaced, KubeApiGroup, KUBE_KIND_SPECS, KubeKind,
 } from './kube-kinds';
 import {
-  KubeListRow, projectRow, redactSecret, stripHeavyMetadata, toYamlSafe,
+  asString, KubeListRow, projectRow, redactSecret, stripHeavyMetadata, toYamlSafe,
 } from './kube-normalize';
 import { isRecord } from '../common/narrow';
 
@@ -200,7 +200,9 @@ export class KubeResourcesService {
 
   private projectEvent(raw: unknown): KubeEventRow {
     const involved = isRecord(raw) && isRecord(raw.involvedObject) ? raw.involvedObject : undefined;
-    const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+    // `asString` statt eines lokalen `typeof v === 'string'`: der Cluster
+    // liefert `lastTimestamp` als `Date`, nicht als String (siehe JSDoc dort).
+    const str = asString;
     const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
     return {
       type: isRecord(raw) ? str(raw.type) : undefined,
@@ -279,10 +281,13 @@ export class KubeResourcesService {
       if (isRecord(stripped) && isRecord(stripped.status) && Array.isArray(stripped.status.conditions)) {
         for (const c of stripped.status.conditions) {
           if (!isRecord(c)) continue;
-          const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+          // `asString` statt eines lokalen `typeof`-Tests: `lastTransitionTime`
+          // kommt als `Date` an und ging vorher für JEDE Condition verloren —
+          // ausgerechnet an dem Werkzeug, das „warum läuft das nicht"
+          // beantworten soll (siehe JSDoc in kube-normalize.ts).
           conditions.push({
-            type: str(c.type), status: str(c.status), reason: str(c.reason),
-            message: str(c.message), lastTransitionTime: str(c.lastTransitionTime),
+            type: asString(c.type), status: asString(c.status), reason: asString(c.reason),
+            message: asString(c.message), lastTransitionTime: asString(c.lastTransitionTime),
           });
         }
       }
