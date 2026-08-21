@@ -426,6 +426,81 @@ async function* linesFrom(arr) {
   });
 
   // -------------------------------------------------------------------------
+  // Byte-Budget (Review-Fund I4)
+  //
+  // Spec: „Alle Ausgaben … werden wie bei `ssh_exec` bei Überlänge
+  // abgeschnitten." `ssh_exec` ist gedeckelt, weil sein Service stdout bei
+  // 256 KB kappt — für die Kube-Tools gab es nichts Vergleichbares.
+  // `textResult` ist `JSON.stringify(data, null, 2)`, die Einrückung
+  // verdoppelt die Nutzlast nochmal grob. `kube_logs` deckelte ZEILEN, nicht
+  // Bytes: 5000 × LINE_MAX 8192 sind 40 MB in einem einzigen Tool-Ergebnis.
+  // -------------------------------------------------------------------------
+  const BUDGET = 256 * 1024;
+
+  await check('kube_get: eine überlange Liste wird auf das Byte-Budget gekürzt', async () => {
+    const rows = [];
+    for (let i = 0; i < 20000; i += 1) {
+      rows.push({ name: `pod-${i}`, namespace: 'produktion', status: 'Running', node: 'node-1' });
+    }
+    const s = makeServer({
+      kubeClustersService: {}, kubeLogsService: {}, kubeClientService: {},
+      kubeResourcesService: { list: async () => rows },
+    });
+    const res = await s.invoke('kube_get', {
+      clusterId: new Types.ObjectId().toString(), kind: 'Pod',
+    });
+    const text = res.content[0].text;
+    const bytes = Buffer.byteLength(text, 'utf8');
+    assert.ok(bytes <= BUDGET + 512, `Ergebnis war ${bytes} Bytes gross, Budget ${BUDGET}`);
+    assert.match(text, /truncated: \d+ bytes more/,
+      'die Kürzung ist im Ergebnis nicht erkennbar — ein Agent hält den Rest für vollständig');
+  });
+
+  await check('kube_logs: 5000 lange Zeilen sprengen das Budget nicht mehr', async () => {
+    // Der konkrete Fall aus dem Fund: tailLines 5000 × LINE_MAX 8192.
+    async function* fat() {
+      for (let i = 0; i < 5000; i += 1) yield 'x'.repeat(8192);
+    }
+    const s = makeServer({
+      kubeClustersService: {}, kubeResourcesService: {}, kubeClientService: {},
+      kubeLogsService: {
+        open: async () => ({ lines: fat(), close: () => {}, error: () => undefined }),
+      },
+    });
+    const res = await s.invoke('kube_logs', {
+      clusterId: new Types.ObjectId().toString(), namespace: 'default', pod: 'web-1',
+    });
+    const bytes = Buffer.byteLength(res.content[0].text, 'utf8');
+    assert.ok(bytes <= BUDGET + 512, `Ergebnis war ${bytes} Bytes gross (${(bytes / 1024 / 1024).toFixed(1)} MB)`);
+    assert.match(res.content[0].text, /truncated: \d+ bytes more/);
+  });
+
+  await check('eine kurze Kube-Antwort bleibt unangetastet und gültiges JSON', async () => {
+    const s = makeServer({
+      kubeClustersService: {}, kubeLogsService: {}, kubeClientService: {},
+      kubeResourcesService: { list: async () => [{ name: 'web-1', namespace: 'default' }] },
+    });
+    const res = unwrap(await s.invoke('kube_get', {
+      clusterId: new Types.ObjectId().toString(), kind: 'Pod',
+    }));
+    assert.ok(!res.error, `unexpected error: ${res.error}`);
+    assert.deepEqual(res.value, [{ name: 'web-1', namespace: 'default' }]);
+  });
+
+  await check('truncateToolResult zerschneidet kein Mehrbyte-Zeichen', async () => {
+    // „ä" ist 2 Bytes in UTF-8; ein Schnitt genau dazwischen ergäbe bei
+    // buf.toString() ein U+FFFD. Der StringDecoder hält den Rest zurück.
+    const text = 'ä'.repeat(100);
+    const cut = mcpTools.truncateToolResult(text, 51);
+    assert.ok(!cut.includes('�'), 'ein Mehrbyte-Zeichen wurde zerschnitten');
+    assert.match(cut, /truncated: \d+ bytes more/);
+  });
+
+  await check('truncateToolResult lässt kurzen Text unverändert', async () => {
+    assert.equal(mcpTools.truncateToolResult('kurz', 1024), 'kurz');
+  });
+
+  // -------------------------------------------------------------------------
   // kube_top — release() in JEDEM Fall, auch wenn die Metrics-API wirft
   // -------------------------------------------------------------------------
   await check('kube_top: release() läuft auch, wenn die Metrics-Abfrage wirft', async () => {

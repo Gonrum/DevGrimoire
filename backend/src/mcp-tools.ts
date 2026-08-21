@@ -1,3 +1,4 @@
+import { StringDecoder } from 'node:string_decoder';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
@@ -230,8 +231,47 @@ async function backendHttpPostJson(path: string, body: unknown): Promise<unknown
   return res.json();
 }
 
-function textResult(data: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+/**
+ * Byte-Budget für ein einzelnes Kube-Tool-Ergebnis.
+ *
+ * Spec (K2): „Alle Ausgaben … werden wie bei `ssh_exec` bei Überlänge
+ * abgeschnitten." `ssh_exec` ist gedeckelt, weil `SshSessionService` stdout
+ * bei 256 KB kappt — für die Kube-Tools gab es nichts Vergleichbares:
+ * `kube_logs` deckelte ZEILEN (5000 × LINE_MAX 8192 = 40 MB in einem
+ * einzigen Ergebnis), `kube_events`/`kube_describe` erreichten je ~500 KB,
+ * und `JSON.stringify(…, null, 2)` verdoppelt das nochmal grob.
+ *
+ * Derselbe Wert wie `STDOUT_LIMIT` in `ssh-session.service.ts` — die Spec
+ * nennt `ssh_exec` ausdrücklich als Vorbild, also auch dieselbe Zahl.
+ */
+const KUBE_RESULT_MAX_BYTES = 256 * 1024;
+
+/**
+ * Kappt einen Tool-Ergebnistext auf ein Byte-Budget und macht die Kürzung
+ * sichtbar — ein Agent muss erkennen können, dass er nur einen Ausschnitt
+ * liest. Format wie bei `ssh_exec` (`[truncated: N bytes more]`), ergänzt um
+ * den Hinweis, womit sich die Anfrage eingrenzen lässt.
+ *
+ * `StringDecoder` statt `buffer.toString()`: der Schnitt liegt auf einer
+ * Byte-Grenze und trifft irgendwann ein mehrbytiges UTF-8-Zeichen mittendrin.
+ * `toString()` würde daraus ein U+FFFD machen; der Decoder hält den
+ * unvollständigen Rest schlicht zurück (dasselbe Argument wie in
+ * `kube-logs.service.ts`).
+ *
+ * Exportiert, damit der Check die Kante direkt prüfen kann.
+ */
+export function truncateToolResult(text: string, maxBytes: number): string {
+  const total = Buffer.byteLength(text, 'utf8');
+  if (total <= maxBytes) return text;
+  const head = new StringDecoder('utf8').write(Buffer.from(text, 'utf8').subarray(0, maxBytes));
+  const dropped = total - Buffer.byteLength(head, 'utf8');
+  return `${head}\n[truncated: ${dropped} bytes more — Ergebnis über dem Tool-Budget von ${maxBytes} Bytes; enger eingrenzen (namespace, name, limit, tailLines, sinceSeconds)]`;
+}
+
+function textResult(data: unknown, maxBytes?: number) {
+  const json = JSON.stringify(data, null, 2);
+  const text = maxBytes === undefined ? json : truncateToolResult(json, maxBytes);
+  return { content: [{ type: 'text' as const, text }] };
 }
 
 /**
@@ -8238,7 +8278,13 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         ).catch(() => {});
       }
 
-      return textResult(result);
+      // Byte-Budget nur für die Kube-Tools. Die Spec verlangt es für sie
+      // ausdrücklich; andere Tools haben bewusst eigene, grössere Grenzen —
+      // `attachment_download` reicht z.B. bis 5 MB Base64 durch, ein
+      // globales Budget hier machte die Datei stillschweigend unbrauchbar.
+      return name.startsWith('kube_')
+        ? textResult(result, KUBE_RESULT_MAX_BYTES)
+        : textResult(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return errorResult(`Error: ${message}`);
