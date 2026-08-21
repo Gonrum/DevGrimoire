@@ -201,6 +201,13 @@ export class KubeResourcesService {
       const param: Record<string, unknown> = { name };
       if (isNamespaced(kind)) param.namespace = namespace;
       const raw = await this.callApi(client, spec.read, param);
+      // Reihenfolge tragend: `stripHeavyMetadata` VOR `redactSecret`. Es
+      // entfernt die Annotation `kubectl.kubernetes.io/last-applied-
+      // configuration`, die bei einem per `kubectl apply` erzeugten Secret
+      // das vollständige base64-`data` als JSON-Text enthält; `redactSecret`
+      // sieht nur die Felder `data`/`stringData`. Umgekehrt aufgerufen bliebe
+      // der Wert in der Annotation stehen — formal redigiert, tatsächlich
+      // sichtbar. Gleiches gilt in `describe()` und `toYamlSafe`.
       const stripped = stripHeavyMetadata(raw);
       // Secrets verlieren ihre Werte, bevor irgendetwas sie sieht — und
       // zwar weil der ANGEFRAGTE Kind 'Secret' ist, nicht weil das
@@ -311,6 +318,9 @@ export class KubeResourcesService {
       const param: Record<string, unknown> = { name };
       if (spec.namespaced) param.namespace = namespace;
       const raw = await this.callApi(client, spec.read, param);
+      // Reihenfolge tragend — siehe `get()` oben: die last-applied-Annotation
+      // trägt bei einem Secret das vollständige `data`, `redactSecret` sieht
+      // sie nicht.
       const stripped = stripHeavyMetadata(raw);
       const object = kind === 'Secret' ? redactSecret(stripped) : stripped;
 

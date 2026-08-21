@@ -313,6 +313,15 @@ function withRedactedKeysAnnotation(
  * bei kaputter Eingabe".
  */
 export function toYamlSafe(obj: unknown): string {
+  // Die Reihenfolge ist tragend, nicht Geschmack: `stripHeavyMetadata` MUSS
+  // vor `redactSecret` laufen. Es entfernt die Annotation
+  // `kubectl.kubernetes.io/last-applied-configuration`, und die trägt bei
+  // einem per `kubectl apply` erzeugten Secret das vollständige
+  // base64-`data` als JSON-Text mit sich. `redactSecret` schaut nur auf die
+  // Felder `data`/`stringData` — umgekehrt aufgerufen bliebe der Wert also
+  // in der Annotation stehen und wäre im YAML sichtbar, obwohl das Secret
+  // formal redigiert wäre. Dieselbe Reihenfolge gilt in
+  // `KubeResourcesService.get()`/`describe()`.
   const stripped = stripHeavyMetadata(obj);
   const safe =
     isRecord(stripped) && stripped.kind === 'Secret'
