@@ -3356,13 +3356,14 @@ const tools = [
   },
   {
     name: 'kube_events',
-    description: 'Cluster-Events, neueste zuerst. Ohne namespace über alle. Mit involvedName auf ein Objekt eingeschränkt. Events sind der schnellste Weg zu "was ist gerade schiefgegangen".',
+    description: 'Cluster-Events, neueste zuerst. Ohne namespace über alle. Mit involvedName auf ein Objekt eingeschränkt — die Einschränkung läuft serverseitig (fieldSelector), gilt also auch dann, wenn der Namespace mehr Events hat als limit. involvedKind trennt gleichnamige Objekte verschiedener Typen (ein Deployment, ein Service und ein Ingress dürfen alle "api" heissen). Events sind der schnellste Weg zu "was ist gerade schiefgegangen".',
     inputSchema: {
       type: 'object' as const,
       properties: {
         clusterId: { type: 'string' },
         namespace: { type: 'string' },
         involvedName: { type: 'string', description: 'Nur Events zu diesem Objekt' },
+        involvedKind: { type: 'string', enum: [...KUBE_KIND_ENUM], description: 'Zusammen mit involvedName: Typ des Objekts' },
         limit: { type: 'number', description: 'Höchstzahl (max. 500)' },
       },
       required: ['clusterId'],
@@ -7126,6 +7127,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           result = await kubeResourcesService.events(requireString(a, 'clusterId'), {
             namespace: optionalString(a, 'namespace'),
             involvedName: optionalString(a, 'involvedName'),
+            involvedKind: optionalEnum(a, 'involvedKind', KUBE_KIND_ENUM),
             limit: optionalNumber(a, 'limit'),
           });
           break;

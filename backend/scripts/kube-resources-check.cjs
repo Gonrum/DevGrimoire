@@ -29,9 +29,19 @@ function check(label, fn) {
   );
 }
 
-/** Fake-KubeConfig: makeApiClient liefert das vorbereitete Antwortobjekt. */
+/**
+ * Fake-KubeConfig: makeApiClient liefert das vorbereitete Antwortobjekt.
+ *
+ * Ein Eintrag in `responses` darf auch eine Funktion `(param) => antwort`
+ * sein — so kann eine Attrappe die Anfrage-Parameter auswerten, statt sie zu
+ * ignorieren. Gebraucht wird das für den `fieldSelector`: ein Stub, der ihn
+ * ignoriert, kann nicht zeigen, ob serverseitig oder nachträglich gefiltert
+ * wird — genau der Unterschied in Fund I3.
+ *
+ * Alle gesehenen Parameter landen in `_state.calls`.
+ */
 function makeClientStub(responses, opts = {}) {
-  const state = { released: 0, built: 0 };
+  const state = { released: 0, built: 0, calls: [] };
   return {
     _state: state,
     async buildConfig() {
@@ -40,17 +50,46 @@ function makeClientStub(responses, opts = {}) {
       return {
         kc: {
           makeApiClient: () => new Proxy({}, {
-            get: (_t, method) => async () => {
+            get: (_t, method) => async (param) => {
               if (opts.apiThrows) throw new Error('cluster weg');
+              state.calls.push({ method: String(method), param });
               const hit = responses[String(method)];
               if (hit === undefined) throw new Error(`unerwartete Methode ${String(method)}`);
-              return hit;
+              return typeof hit === 'function' ? hit(param) : hit;
             },
           }),
         },
         release: () => { state.released += 1; },
       };
     },
+  };
+}
+
+/**
+ * Attrappe eines echten Event-Endpunkts: wendet `fieldSelector` an, BEVOR
+ * `limit` greift — so wie ein API-Server es tut. Ein Stub, der stattdessen
+ * einfach alles zurückgibt, würde den Unterschied zwischen „serverseitig
+ * gefiltert" und „nachträglich gefiltert" verstecken.
+ *
+ * Unterstützt nur, was hier gebraucht wird: `feld=wert`, komma-getrennt (UND).
+ */
+function eventEndpoint(items) {
+  return (param) => {
+    const selector = param && typeof param.fieldSelector === 'string' ? param.fieldSelector : '';
+    const conditions = selector
+      ? selector.split(',').map((part) => {
+        const [field, ...rest] = part.split('=');
+        return { field, value: rest.join('=') };
+      })
+      : [];
+    const read = (item, field) => {
+      if (field === 'involvedObject.name') return item.involvedObject && item.involvedObject.name;
+      if (field === 'involvedObject.kind') return item.involvedObject && item.involvedObject.kind;
+      throw new Error(`Attrappe kennt das Feld "${field}" nicht`);
+    };
+    const matching = items.filter((item) => conditions.every((c) => read(item, c.field) === c.value));
+    const limit = param && typeof param.limit === 'number' ? param.limit : matching.length;
+    return { items: matching.slice(0, limit) };
   };
 }
 
@@ -247,12 +286,14 @@ const clustersStub = { async findById(id) { return { _id: id, defaultNamespace: 
           { type: 'Ready', status: 'False', reason: 'ContainersNotReady', message: 'warte' },
         ] },
       },
-      listNamespacedEvent: { items: [
+      // Attrappe mit fieldSelector-Auswertung: das Ausfiltern fremder Events
+      // passiert seit Fund I3 serverseitig, nicht mehr nachträglich.
+      listNamespacedEvent: eventEndpoint([
         { type: 'Warning', reason: 'BackOff', lastTimestamp: '2026-08-01T12:00:00Z',
           involvedObject: { kind: 'Pod', name: 'api' }, metadata: { namespace: 'prod' } },
         { type: 'Normal', reason: 'Andere', lastTimestamp: '2026-08-01T12:00:00Z',
           involvedObject: { kind: 'Pod', name: 'nicht-api' }, metadata: { namespace: 'prod' } },
-      ] },
+      ]),
     });
     const svc = new KubeResourcesService(clustersStub, client);
     const out = await svc.describe('c1', 'Pod', 'api', 'prod');
@@ -321,6 +362,97 @@ const clustersStub = { async findById(id) { return { _id: id, defaultNamespace: 
     const out = await svc.describe('c1', 'Pod', 'api', 'prod');
     assert.equal(out.conditions[0].lastTransitionTime, '2026-08-01T11:30:00.000Z',
       'ohne lastTransitionTime kann ein Agent nicht sagen, ob "Ready: False" fünf Sekunden oder fünf Tage alt ist');
+  });
+
+  // -------------------------------------------------------------------------
+  // Events serverseitig filtern statt nachträglich (Review-Fund I3)
+  //
+  // `fetchEvents` holte `limit` Events (Default 200) und filterte DANACH auf
+  // `involvedName`. Bei mehr als `limit` Events im Namespace stehen die
+  // geholten in etcd-Schlüsselreihenfolge, nicht in Zeitreihenfolge — das
+  // gesuchte Objekt ist dann sehr wahrscheinlich nicht dabei, und describe
+  // meldet „keine Events", während sie existieren. Lautlos, und genau
+  // während des Vorfalls, für den das Werkzeug da ist.
+  // -------------------------------------------------------------------------
+  await check('events(involvedName) schickt einen fieldSelector statt nachträglich zu filtern', async () => {
+    const client = makeClientStub({ listNamespacedEvent: eventEndpoint([]) });
+    const svc = new KubeResourcesService(clustersStub, client);
+    await svc.events('c1', { namespace: 'prod', involvedName: 'api' });
+    const call = client._state.calls.find((c) => c.method === 'listNamespacedEvent');
+    assert.ok(call, 'listNamespacedEvent wurde nie aufgerufen');
+    assert.equal(call.param.fieldSelector, 'involvedObject.name=api',
+      `fieldSelector war ${JSON.stringify(call.param.fieldSelector)}`);
+  });
+
+  await check('events() ohne involvedName schickt gar keinen fieldSelector', async () => {
+    const client = makeClientStub({ listNamespacedEvent: eventEndpoint([]) });
+    const svc = new KubeResourcesService(clustersStub, client);
+    await svc.events('c1', { namespace: 'prod' });
+    const call = client._state.calls.find((c) => c.method === 'listNamespacedEvent');
+    assert.equal(call.param.fieldSelector, undefined);
+  });
+
+  await check('describe() schickt Name UND Kind als fieldSelector', async () => {
+    const client = makeClientStub({
+      readNamespacedPod: { kind: 'Pod', metadata: { name: 'api', namespace: 'prod' } },
+      listNamespacedEvent: eventEndpoint([]),
+    });
+    const svc = new KubeResourcesService(clustersStub, client);
+    await svc.describe('c1', 'Pod', 'api', 'prod');
+    const call = client._state.calls.find((c) => c.method === 'listNamespacedEvent');
+    assert.equal(call.param.fieldSelector, 'involvedObject.name=api,involvedObject.kind=Pod',
+      `fieldSelector war ${JSON.stringify(call.param.fieldSelector)} — ohne involvedObject.kind teilen sich ein Deployment, ein Service und ein Ingress namens "api" ihre Events`);
+  });
+
+  await check('describe() findet die Events auch, wenn der Namespace mehr als `limit` Events hat', async () => {
+    // Der eigentliche Fund: 300 fremde Events VOR dem gesuchten, Default-Limit
+    // 200. Fetch-then-filter liefert 0 Treffer; serverseitig gefiltert
+    // kommen die richtigen zurück.
+    const noise = [];
+    for (let i = 0; i < 300; i += 1) {
+      noise.push({
+        type: 'Normal', reason: `Rauschen${i}`, lastTimestamp: new Date('2026-08-01T09:00:00.000Z'),
+        involvedObject: { kind: 'Pod', name: `anderer-pod-${i}` }, metadata: { namespace: 'prod' },
+      });
+    }
+    noise.push({
+      type: 'Warning', reason: 'BackOff', lastTimestamp: new Date('2026-08-01T12:00:00.000Z'),
+      involvedObject: { kind: 'Pod', name: 'api' }, metadata: { namespace: 'prod' },
+    });
+    const client = makeClientStub({
+      readNamespacedPod: { kind: 'Pod', metadata: { name: 'api', namespace: 'prod' } },
+      listNamespacedEvent: eventEndpoint(noise),
+    });
+    const svc = new KubeResourcesService(clustersStub, client);
+    const out = await svc.describe('c1', 'Pod', 'api', 'prod');
+    assert.equal(out.events.length, 1,
+      'die Events des beschriebenen Objekts lagen ausserhalb des geholten Fensters');
+    assert.equal(out.events[0].reason, 'BackOff');
+  });
+
+  await check('describe() trennt gleichnamige Objekte verschiedener Kinds', async () => {
+    const shared = [
+      { type: 'Warning', reason: 'PodEvent', lastTimestamp: new Date('2026-08-01T12:00:00.000Z'),
+        involvedObject: { kind: 'Pod', name: 'api' }, metadata: { namespace: 'prod' } },
+      { type: 'Warning', reason: 'ServiceEvent', lastTimestamp: new Date('2026-08-01T12:00:00.000Z'),
+        involvedObject: { kind: 'Service', name: 'api' }, metadata: { namespace: 'prod' } },
+    ];
+    const client = makeClientStub({
+      readNamespacedService: { kind: 'Service', metadata: { name: 'api', namespace: 'prod' } },
+      listNamespacedEvent: eventEndpoint(shared),
+    });
+    const svc = new KubeResourcesService(clustersStub, client);
+    const out = await svc.describe('c1', 'Service', 'api', 'prod');
+    assert.deepEqual(out.events.map((e) => e.reason), ['ServiceEvent']);
+  });
+
+  await check('ein Name mit Komma/Gleichheitszeichen wird im fieldSelector maskiert', async () => {
+    const client = makeClientStub({ listNamespacedEvent: eventEndpoint([]) });
+    const svc = new KubeResourcesService(clustersStub, client);
+    await svc.events('c1', { namespace: 'prod', involvedName: 'a,b=c' });
+    const call = client._state.calls.find((c) => c.method === 'listNamespacedEvent');
+    assert.equal(call.param.fieldSelector, 'involvedObject.name=a\\,b\\=c',
+      'ein unmaskierter Wert würde als zweite Bedingung gelesen');
   });
 
   await check('describe() gibt den Transport genau einmal frei', async () => {

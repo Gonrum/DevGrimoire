@@ -29,13 +29,22 @@ export class ResourceParamsDto {
   namespace?: string;
 }
 
-/** GET /api/kube-clusters/:id/events?namespace=&involvedName=&limit= */
+/** GET /api/kube-clusters/:id/events?namespace=&involvedName=&involvedKind=&limit= */
 export class EventsQueryDto {
   @IsOptional() @IsString() @MaxLength(253)
   namespace?: string;
 
   @IsOptional() @IsString() @MaxLength(253)
   involvedName?: string;
+
+  /**
+   * Zusammen mit `involvedName`: trennt gleichnamige Objekte verschiedener
+   * Kinds. `@IsIn` statt freiem String — der Wert geht in einen
+   * `fieldSelector`, und die Registry ist ohnehin die Menge, über die dieses
+   * Modul sprechen kann.
+   */
+  @IsOptional() @IsIn([...KUBE_KINDS], { message: 'involvedKind ist kein unterstützter Ressourcentyp' })
+  involvedKind?: string;
 
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(500)
   limit?: number;

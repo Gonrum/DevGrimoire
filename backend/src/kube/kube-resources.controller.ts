@@ -219,7 +219,8 @@ export class KubeResourcesController {
   async events(@Param('id') id: string, @Query() q: EventsQueryDto) {
     // T-477: hier hakt die Projekt-Scope-Prüfung ein, sobald sie existiert.
     return this.guarded(() => this.resources.events(id, {
-      namespace: q.namespace, involvedName: q.involvedName, limit: q.limit,
+      namespace: q.namespace, involvedName: q.involvedName,
+      involvedKind: q.involvedKind, limit: q.limit,
     }));
   }
 

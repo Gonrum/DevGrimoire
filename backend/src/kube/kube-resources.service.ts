@@ -46,6 +46,29 @@ export interface KubeDescribeResult {
   conditions: KubeCondition[];
 }
 
+export interface KubeEventOptions {
+  namespace?: string;
+  /** Nur Events zu diesem Objektnamen (serverseitiger `fieldSelector`). */
+  involvedName?: string;
+  /** Zusammen mit `involvedName`: trennt gleichnamige Objekte verschiedener Kinds. */
+  involvedKind?: string;
+  limit?: number;
+}
+
+/**
+ * Maskiert einen Wert für einen Kubernetes-`fieldSelector`.
+ *
+ * Die Syntax ist `feld=wert`, mehrere Bedingungen mit `,` verkettet — ein
+ * unmaskiertes `,` oder `=` im Wert würde also als zusätzliche Bedingung
+ * gelesen. Objektnamen aus Kubernetes können das zwar nicht enthalten
+ * (RFC-1123), aber `involvedName` kommt aus einem Query-Parameter bzw. einem
+ * MCP-Argument und damit von aussen: der Wert wird maskiert, statt sich auf
+ * die Namenskonvention einer fremden Eingabe zu verlassen.
+ */
+function escapeFieldSelectorValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/,/g, '\\,').replace(/=/g, '\\=');
+}
+
 /**
  * Wie `isNullaryMethod` in `common/narrow.ts`, nur mit einem Parameter: jede
  * Ressourcen-Methode des generierten Clients (`listNamespacedPod`,
@@ -225,19 +248,32 @@ export class KubeResourcesService {
     });
   }
 
-  async events(
-    clusterId: string,
-    opts: { namespace?: string; involvedName?: string; limit?: number },
-  ): Promise<KubeEventRow[]> {
+  async events(clusterId: string, opts: KubeEventOptions): Promise<KubeEventRow[]> {
     const rows = await this.withConfig(clusterId, async (api) =>
       this.fetchEvents(api('core'), opts));
     return rows;
   }
 
-  /** Gemeinsamer Kern für `events()` und `describe()` — eine Verbindung, zwei Nutzer. */
+  /**
+   * Gemeinsamer Kern für `events()` und `describe()` — eine Verbindung, zwei
+   * Nutzer.
+   *
+   * Die Einschränkung auf ein Objekt läuft über den `fieldSelector` der
+   * API, NICHT über einen Filter danach (Review-Fund I3). Vorher wurden
+   * `limit` Events geholt (Default 200) und erst dann auf `involvedName`
+   * gefiltert: hat ein Namespace mehr Events als `limit`, kommen die geholten
+   * in etcd-Schlüsselreihenfolge zurück, nicht in Zeitreihenfolge — das
+   * gesuchte Objekt ist dann wahrscheinlich gar nicht dabei, und
+   * `describe`/der Events-Reiter meldet „Keine Events zu dieser Ressource",
+   * während die Events existieren. Lautlos, und genau während des Vorfalls,
+   * für den das Werkzeug da ist.
+   *
+   * `involvedObject.kind` kommt mit dazu: ohne das teilen sich ein Deployment,
+   * ein Service und ein Ingress namens `api` ihre Events.
+   */
   private async fetchEvents(
     coreClient: unknown,
-    opts: { namespace?: string; involvedName?: string; limit?: number },
+    opts: KubeEventOptions,
   ): Promise<KubeEventRow[]> {
     const spec = KUBE_KIND_SPECS.Event;
     const useNamespaced = Boolean(opts.namespace);
@@ -245,13 +281,14 @@ export class KubeResourcesService {
     const param: Record<string, unknown> = { limit: this.clampLimit(opts.limit) };
     if (useNamespaced) param.namespace = opts.namespace;
 
+    const conditions: string[] = [];
+    if (opts.involvedName) conditions.push(`involvedObject.name=${escapeFieldSelectorValue(opts.involvedName)}`);
+    if (opts.involvedKind) conditions.push(`involvedObject.kind=${escapeFieldSelectorValue(opts.involvedKind)}`);
+    if (conditions.length > 0) param.fieldSelector = conditions.join(',');
+
     const result = await this.callApi(coreClient, method, param);
     const items = isRecord(result) && Array.isArray(result.items) ? result.items : [];
-    let rows = items.map((item) => this.projectEvent(item));
-    if (opts.involvedName) {
-      rows = rows.filter((r) => r.involvedName === opts.involvedName);
-    }
-    return this.sortEvents(rows);
+    return this.sortEvents(items.map((item) => this.projectEvent(item)));
   }
 
   async describe(
@@ -292,7 +329,11 @@ export class KubeResourcesService {
         }
       }
 
-      const events = await this.fetchEvents(api('core'), { namespace, involvedName: name });
+      // `involvedKind: kind` gehört dazu: der Objektname allein poolt die
+      // Events gleichnamiger Objekte verschiedener Kinds (Review-Fund I3).
+      const events = await this.fetchEvents(api('core'), {
+        namespace, involvedName: name, involvedKind: kind,
+      });
       return { object, events, conditions };
     });
   }
