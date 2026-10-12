@@ -29,8 +29,8 @@ export default function NoteEditor({ note, onLocalChange, onSaved, onPromote, on
    * der Effect setzte daraufhin `lastSavedRef.current` auf den *ungespeicherten*
    * Text und den Status zurück auf `idle`. Damit war die Bedingung
    * `status === 'dirty' && content !== lastSavedRef.current` nie erfüllt —
-   * weder der Flush beim Tab-Wechsel noch der `sendBeacon` beim Schliessen der
-   * Seite hat je ausgelöst, und der Status-Indikator sprang sofort auf leer.
+   * weder der Flush beim Tab-Wechsel noch der beim Schliessen der Seite hat je
+   * ausgelöst, und der Status-Indikator sprang sofort auf leer.
    *
    * Ein Notizwechsel braucht hier keine Behandlung: `NotepadDock` rendert den
    * Editor mit `key={note._id}`, ein anderer Tab ist also ein neuer Mount.
@@ -42,6 +42,21 @@ export default function NoteEditor({ note, onLocalChange, onSaved, onPromote, on
   const debounceRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
   const pendingFlushRef = useRef(false);
+  /**
+   * Immer der aktuellste Text — synchron in `handleChange` gesetzt, zusätzlich
+   * nach jedem Render nachgezogen.
+   *
+   * Nötig, weil `flush()` bei jedem Render neu erzeugt und aus dem
+   * Debounce-Timer des Renders VOR dem Tastendruck aufgerufen wird. In dieser
+   * Closure ist `content` also der Stand von vor dem letzten Tastendruck. Der
+   * Re-Flush im `finally` hat genau diesen Closure-Wert gespeichert, während
+   * `lastSavedRef.current` bereits auf dem neueren Text stand — die Bedingung
+   * `latest !== content` war im Überlappungsfall damit IMMER wahr, und
+   * `flush(content)` schrieb den ÄLTEREN Text zurück auf den Server. Das UI
+   * zeigte weiter den neuen Text, beim nächsten Reload war alles seit dem
+   * ersten Put verloren, ohne Fehlermeldung.
+   */
+  const latestContentRef = useRef(content);
 
   const flush = async (value: string) => {
     if (inFlightRef.current) {
@@ -64,10 +79,13 @@ export default function NoteEditor({ note, onLocalChange, onSaved, onPromote, on
       inFlightRef.current = false;
       if (pendingFlushRef.current) {
         pendingFlushRef.current = false;
-        const latest = lastSavedRef.current;
-        // Re-flush with the most recent local state.
-        if (latest !== content) {
-          void flush(content);
+        // Re-flush mit dem AKTUELLSTEN Text, nicht mit dem Closure-`content`.
+        // Der verworfene Aufruf oben setzt nur ein Flag und nimmt seinen
+        // `value` nicht mit — über das Ref ist das egal, weil hier ohnehin der
+        // neueste Stand gespeichert wird.
+        const latest = latestContentRef.current;
+        if (latest !== lastSavedRef.current) {
+          void flush(latest);
         }
       }
     }
@@ -75,6 +93,9 @@ export default function NoteEditor({ note, onLocalChange, onSaved, onPromote, on
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
+    // Synchron, nicht über einen Effect: der Re-Flush oben kann vor dem
+    // nächsten Commit laufen, wenn das Netzwerk schneller ist als React.
+    latestContentRef.current = value;
     setContentEdit(value);
     onLocalChange(note._id, value);
     setStatus('dirty');
@@ -102,6 +123,10 @@ export default function NoteEditor({ note, onLocalChange, onSaved, onPromote, on
   useEffect(() => {
     pendingRef.current = { content, status };
     flushRef.current = flush;
+    // Nachziehen für den Fall, dass `content` sich OHNE handleChange geändert
+    // hat — z.B. weil der Parent nach einem Speichern `note.content`
+    // aktualisiert. handleChange setzt das Ref bereits synchron.
+    latestContentRef.current = content;
   });
 
   useEffect(() => {
@@ -112,15 +137,18 @@ export default function NoteEditor({ note, onLocalChange, onSaved, onPromote, on
 
     const beforeUnload = () => {
       if (!hasUnsavedChanges()) return;
-      // Use sendBeacon for reliable flush on page close.
-      try {
-        const blob = new Blob([JSON.stringify({ content: pendingRef.current.content })], {
-          type: 'application/json',
-        });
-        navigator.sendBeacon?.(`/api/notes/${noteId}`, blob);
-      } catch {
-        /* swallow */
-      }
+      // Fire-and-forget über `keepalive` statt `sendBeacon`: der Beacon ging an
+      // `POST /api/notes/:id`, eine Route die es nicht gibt (das Backend hat
+      // `@Put(':id')`), und konnte mangels Kopfzeilen auch nicht
+      // authentifizieren — der letzte ungespeicherte Rest ging also immer
+      // verloren. Siehe notesApi.updateBeacon für die Herleitung.
+      //
+      // Der Fehler wird bewusst geschluckt: während des Entladens gibt es
+      // keine UI mehr, die ihn anzeigen könnte. Der Wert liegt im Versuch,
+      // nicht in der Bestätigung.
+      notesApi.updateBeacon(noteId, { content: pendingRef.current.content }).catch(() => {
+        /* during unload there is nothing left to report to */
+      });
     };
     window.addEventListener('beforeunload', beforeUnload);
     return () => {
