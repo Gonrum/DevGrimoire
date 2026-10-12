@@ -15,8 +15,12 @@ import { KubeClusterDocument } from './schemas/kube-cluster.schema';
  * Beide Helfer sind bei den Default-Modi ('all') erlaubend. Diese Funktion
  * sperrt also nichts zu, was heute offen ist — sie respektiert die
  * Einschränkungen, die das System bereits kennt und die das Kube-Modul bislang
- * ignoriert (T-477). Die lesenden Routen aus K2 nutzen sie noch nicht; die
- * globale Regel gehört gemeinsam mit den SSH-Routen entworfen.
+ * ignoriert hat (T-477).
+ *
+ * Aufgerufen wird sie aus `KubeClustersService.findById()`, `findBySlug()` und
+ * `visibleToActor()` — also an der einen Stelle, über die jede Cluster-Route
+ * läuft, statt an jeder Route einzeln. Die globale Regel für die SSH-Routen
+ * steht weiterhin aus: `backend/src/ssh/` kennt das Scope-Modell gar nicht.
  */
 export function canAccessCluster(
   cluster: Pick<KubeClusterDocument, 'projectId' | 'customerId' | 'label'>,

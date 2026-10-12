@@ -98,9 +98,13 @@ function isTransportFailure(err: unknown): boolean {
  * Lesende Cluster-Inhalte. Alle Routen sind read-only — schreibende Verben
  * kommen erst mit K3 und hängen dort an `readOnly: false`.
  *
- * T-477: Diese Routen prüfen NICHT, ob der Aufrufer für das Projekt des
- * Clusters berechtigt ist — dieselbe Lücke wie bei den SSH-Routen. Wenn die
- * Scope-Regel kommt, hakt sie hier ein, vor `resources.…`.
+ * T-477: Die Projekt-/Kunden-Scope-Prüfung läuft in
+ * `KubeClustersService.findById()` bzw. `findBySlug()`. Jede Route hier löst
+ * den Cluster darüber auf, bevor sie `resources.…` aufruft — bewusst nicht pro
+ * Route, damit eine neue Route den Check nicht vergessen kann. Noch offen:
+ * die HTTP-MCP-Achse (die MCP-Middleware hängt einen Actor ohne Scope-Felder
+ * an, `projectScopeMode ?? 'all'` lässt einen verengten API-Key durch) und das
+ * SSH-Modul, das gar keine Scope-Prüfung kennt.
  */
 @Controller('kube-clusters')
 export class KubeResourcesController {
@@ -178,7 +182,7 @@ export class KubeResourcesController {
 
   @Get(':id/namespaces')
   async namespaces(@Param('id') id: string, @Req() req: AuthRequest) {
-    // T-477: hier hakt die Projekt-Scope-Prüfung ein, sobald sie existiert.
+    // T-477: Scope-Prüfung läuft in KubeClustersService.findById().
     const started = Date.now();
     const rows = await this.guarded(() => this.resources.listNamespaces(id));
     await this.audit.record({
@@ -191,7 +195,7 @@ export class KubeResourcesController {
 
   @Get(':id/resources')
   async list(@Param('id') id: string, @Query() q: ListResourcesDto, @Req() req: AuthRequest) {
-    // T-477: hier hakt die Projekt-Scope-Prüfung ein, sobald sie existiert.
+    // T-477: Scope-Prüfung läuft in KubeClustersService.findById().
     const started = Date.now();
     const rows = await this.guarded(() => this.resources.list(id, q.kind, {
       namespace: q.namespace, labelSelector: q.labelSelector, limit: q.limit,
@@ -208,7 +212,7 @@ export class KubeResourcesController {
     @Param('id') id: string, @Param('kind') kind: string, @Param('name') name: string,
     @Query() q: ResourceParamsDto, @Req() req: AuthRequest,
   ) {
-    // T-477: hier hakt die Projekt-Scope-Prüfung ein, sobald sie existiert.
+    // T-477: Scope-Prüfung läuft in KubeClustersService.findById().
     const started = Date.now();
     const obj = await this.guarded(() => this.resources.get(id, kind, name, q.namespace));
     await this.audit.record({
@@ -223,7 +227,7 @@ export class KubeResourcesController {
     @Param('id') id: string, @Param('kind') kind: string, @Param('name') name: string,
     @Query() q: ResourceParamsDto, @Req() req: AuthRequest,
   ) {
-    // T-477: hier hakt die Projekt-Scope-Prüfung ein, sobald sie existiert.
+    // T-477: Scope-Prüfung läuft in KubeClustersService.findById().
     const started = Date.now();
     const yaml = await this.guarded(() => this.resources.getYaml(id, kind, name, q.namespace));
     // Auditiert wie jeder andere Read (Review-Fund I2): diese Route liest
@@ -243,7 +247,7 @@ export class KubeResourcesController {
     @Param('id') id: string, @Param('kind') kind: string, @Param('name') name: string,
     @Query() q: ResourceParamsDto, @Req() req: AuthRequest,
   ) {
-    // T-477: hier hakt die Projekt-Scope-Prüfung ein, sobald sie existiert.
+    // T-477: Scope-Prüfung läuft in KubeClustersService.findById().
     const started = Date.now();
     const result = await this.guarded(() => this.resources.describe(id, kind, name, q.namespace));
     await this.audit.record({
@@ -255,7 +259,7 @@ export class KubeResourcesController {
 
   @Get(':id/events')
   async events(@Param('id') id: string, @Query() q: EventsQueryDto, @Req() req: AuthRequest) {
-    // T-477: hier hakt die Projekt-Scope-Prüfung ein, sobald sie existiert.
+    // T-477: Scope-Prüfung läuft in KubeClustersService.findById().
     const started = Date.now();
     const rows = await this.guarded(() => this.resources.events(id, {
       namespace: q.namespace, involvedName: q.involvedName,
@@ -273,7 +277,11 @@ export class KubeResourcesController {
    * Log-Streaming als SSE. Kopfzeilen wie in chat.controller.ts — inklusive
    * `X-Accel-Buffering: no`, sonst puffert der nginx davor den Stream.
    *
-   * T-477: hier hakt die Projekt-Scope-Prüfung ein, sobald sie existiert.
+   * T-477: Scope-Prüfung läuft in `KubeClustersService.findById()` — dieser
+   * Handler ruft sie explizit VOR dem ersten `setHeader` auf (siehe Fix 5
+   * unten), und `KubeLogsService.open()` tut es für den eigentlichen Zugriff
+   * erneut. Eine Absage erreicht den Client also als normale 403-JSON-Antwort,
+   * nicht als halboffener SSE-Stream.
    *
    * Lehren aus zwei Reviews, alle direkt in diesem Handler adressiert:
    *

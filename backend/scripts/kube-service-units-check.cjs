@@ -267,6 +267,152 @@ function makeSecretsService() {
     assert.equal(found[0].slug, 'a');
   });
 
+  // ---------------------------------------------------------------------
+  // T-477: Scope-Prüfung in findById()/findBySlug()/visibleToActor()
+  //
+  // `asActor()` oben setzt bewusst KEINE Scope-Felder — das ist der
+  // HTTP-Default (`projectScopeMode ?? 'all'`) und würde jeden Check trivial
+  // bestehen lassen. Diese Fälle bauen einen echt verengten Actor.
+  // ---------------------------------------------------------------------
+
+  /** Actor mit explizit verengtem Projekt-Scope (die API-Key-Konfiguration, um die es bei T-477 geht). */
+  function asScopedActor(allowedProjectIds, fn) {
+    return RequestContext.run({
+      userId: 'u-scoped', username: 'scoped', role: 'user',
+      projectScopeMode: 'allowlist', allowedProjectIds,
+      customerScopeMode: 'allowlist', allowedCustomerIds: [],
+    }, undefined, fn);
+  }
+
+  /**
+   * Legt zwei Cluster an: einen im eigenen Projekt, einen in einem fremden.
+   * Gibt { svc, clusterModel, secretModel, own, foreign, foreignProject } zurück.
+   */
+  async function twoClusterFixture() {
+    const clusterModel = makeModel();
+    const secretModel = makeModel();
+    const svc = new KubeClustersService(clusterModel, secretModel, makeSecretsService(), makeTransportStub());
+    const foreignProject = String(new Types.ObjectId());
+    // create() läuft ohne Actor (interner Pfad), damit beide Cluster entstehen.
+    const own = await svc.create({
+      label: 'Own', slug: 'own', projectId: String(PROJECT),
+      kubeconfig: GOOD_KUBECONFIG, contextName: 'prod', transport: 'direct',
+    });
+    const foreign = await svc.create({
+      label: 'Foreign', slug: 'foreign', projectId: foreignProject,
+      kubeconfig: GOOD_KUBECONFIG, contextName: 'prod', transport: 'direct',
+    });
+    return { svc, clusterModel, secretModel, own, foreign, foreignProject };
+  }
+
+  await check('T-477: findById verweigert einen fremden Cluster (403)', async () => {
+    const fx = await twoClusterFixture();
+    await asScopedActor([String(PROJECT)], async () => {
+      const err = await fx.svc.findById(String(fx.foreign._id)).then(() => null, (e) => e);
+      assert.ok(err, 'ein verengter Actor hätte den fremden Cluster nicht lesen dürfen');
+      assert.equal(typeof err.getStatus, 'function', 'erwartet eine HttpException');
+      assert.equal(err.getStatus(), 403, `erwartet 403, bekam ${err.getStatus()}`);
+      // Die Meldung nennt laut JSDoc von assertClusterAccess bewusst das Label,
+      // aber nie die Projekt- oder Kunden-Id: wer den Cluster nicht sehen
+      // darf, soll aus der Absage nicht erfahren, wem er gehört.
+      assert.ok(!String(err.message).includes(fx.foreignProject),
+        'die Absage leakt die fremde Projekt-Id');
+      assert.match(String(err.message), /Foreign/,
+        'das Label fehlt — die Meldung soll den Cluster benennen, den der Aufrufer meint');
+      // Der eigene Cluster bleibt erreichbar — sonst wäre die Prüfung kein
+      // Scope, sondern eine Abschaltung.
+      const own = await fx.svc.findById(String(fx.own._id));
+      assert.equal(own.slug, 'own');
+    });
+  });
+
+  await check('T-477: findBySlug verweigert einen fremden Cluster', async () => {
+    const fx = await twoClusterFixture();
+    await asScopedActor([String(PROJECT)], async () => {
+      const err = await fx.svc
+        .findBySlug('foreign', { projectId: fx.foreignProject })
+        .then(() => null, (e) => e);
+      assert.ok(err, 'findBySlug hätte den fremden Cluster nicht liefern dürfen');
+      assert.equal(err.getStatus(), 403);
+      const own = await fx.svc.findBySlug('own', { projectId: String(PROJECT) });
+      assert.equal(own.slug, 'own');
+    });
+  });
+
+  await check('T-477: delete verweigert einen fremden Cluster UND rührt dessen Secret nicht an', async () => {
+    const fx = await twoClusterFixture();
+    let deleteManyCalled = false;
+    fx.secretModel.deleteMany = (_filter) => {
+      deleteManyCalled = true;
+      return { exec: async () => ({ deletedCount: 1 }) };
+    };
+    await asScopedActor([String(PROJECT)], async () => {
+      const err = await fx.svc.delete(String(fx.foreign._id)).then(() => null, (e) => e);
+      assert.ok(err, 'delete hätte den fremden Cluster nicht löschen dürfen');
+      assert.equal(err.getStatus(), 403);
+    });
+    assert.equal(deleteManyCalled, false,
+      'die Secret-Kaskade lief trotz Ablehnung — delete() prüft den Scope zu spät');
+    assert.equal(fx.clusterModel._store.has(String(fx.foreign._id)), true,
+      'der fremde Cluster wurde gelöscht');
+    // Der eigene Cluster muss weiterhin löschbar bleiben, inklusive Kaskade.
+    await asScopedActor([String(PROJECT)], () => fx.svc.delete(String(fx.own._id)));
+    assert.equal(fx.clusterModel._store.has(String(fx.own._id)), false,
+      'der eigene Cluster wurde nicht gelöscht');
+    assert.equal(deleteManyCalled, true, 'die Secret-Kaskade lief für den eigenen Cluster nicht');
+  });
+
+  await check('T-477: findByProjectId filtert fremde Cluster für einen verengten Actor', async () => {
+    const fx = await twoClusterFixture();
+    await asScopedActor([String(PROJECT)], async () => {
+      const ownList = await fx.svc.findByProjectId(String(PROJECT));
+      assert.equal(ownList.length, 1, 'der eigene Cluster fehlt in der Liste');
+      // Der Enumerations-Vektor aus dem Review: die Route beantwortet
+      // „welche Cluster hat Projekt X" für JEDES X, weil projectId aus dem
+      // Query-String kommt. visibleToActor() muss das abschneiden.
+      const foreignList = await fx.svc.findByProjectId(fx.foreignProject);
+      assert.equal(foreignList.length, 0,
+        'fremde Cluster wurden aufgelistet — die Query-String-Enumeration ist offen');
+    });
+  });
+
+  await check('T-477: kein Actor (interner Aufrufer / stdio-MCP) bleibt ungegated', async () => {
+    const fx = await twoClusterFixture();
+    // Dokumentierte Konvention dieses Moduls (siehe assertFlagPermission und
+    // SecretsService): JwtAuthGuard hängt global, jeder echte HTTP-Aufruf hat
+    // einen Actor; ein fehlender Actor ist ein vertrauenswürdiger interner
+    // Aufrufer. Ein fail-closed-Check würde hier den stdio-MCP-Transport
+    // ausschalten, der kein RequestContext.run() aufsetzt.
+    assert.equal(RequestContext.getUser(), undefined, 'Testannahme: kein Actor gesetzt');
+    const doc = await fx.svc.findById(String(fx.foreign._id));
+    assert.equal(doc.slug, 'foreign');
+    const list = await fx.svc.findByProjectId(fx.foreignProject);
+    assert.equal(list.length, 1);
+  });
+
+  await check('T-477: Admin-Rolle umgeht den Daten-Scope NICHT', async () => {
+    const fx = await twoClusterFixture();
+    // permissions.ts dokumentiert das ausdrücklich: der Rollen-Bypass gilt nur
+    // für actorHasPermission (Berechtigungen), nicht für den Daten-Scope. Ein
+    // Admin mit bewusst verengtem API-Key will genau diese Verengung.
+    await RequestContext.run({
+      userId: 'u-admin', username: 'admin', role: UserRole.ADMIN,
+      projectScopeMode: 'allowlist', allowedProjectIds: [String(PROJECT)],
+      customerScopeMode: 'allowlist', allowedCustomerIds: [],
+    }, undefined, async () => {
+      const err = await fx.svc.findById(String(fx.foreign._id)).then(() => null, (e) => e);
+      assert.ok(err, 'ein verengter Admin hätte den fremden Cluster nicht lesen dürfen');
+      assert.equal(err.getStatus(), 403);
+    });
+    // Ohne Verengung (Default 'all') bleibt der Admin uneingeschränkt.
+    await RequestContext.run({
+      userId: 'u-admin2', username: 'admin2', role: UserRole.ADMIN,
+    }, undefined, async () => {
+      const doc = await fx.svc.findById(String(fx.foreign._id));
+      assert.equal(doc.slug, 'foreign');
+    });
+  });
+
   await check('allowMcpWrites bei readOnly wird als BadRequest abgelehnt', async () => {
     const svc = new KubeClustersService(makeModel(), makeModel(), makeSecretsService(), makeTransportStub());
     const err = await svc.create({

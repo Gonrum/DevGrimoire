@@ -8,6 +8,7 @@ import { Secret, SecretDocument } from '../secrets/schemas/secret.schema';
 import { SecretsService } from '../secrets/secrets.service';
 import { parseKubeconfig } from './kubeconfig-parser';
 import { KubeTransportService, requireHttpsUrl } from './kube-transport.service';
+import { assertClusterAccess, canAccessCluster } from './kube-access.guard';
 import { isDuplicateKeyError } from '../common/narrow';
 import { RequestContext } from '../common/request-context';
 import { UserRole } from '../auth/schemas/user.schema';
@@ -212,21 +213,64 @@ export class KubeClustersService {
   async findById(id: string): Promise<KubeClusterDocument> {
     const doc = await this.clusterModel.findById(this.toObjectId(id, 'id')).exec();
     if (!doc) throw new NotFoundException(`Kube-Cluster ${id} nicht gefunden`);
+    // Scope-Prüfung (T-477). Sitzt bewusst HIER und nicht in den zwölf
+    // Controller-Routen: jeder Lese-, Log-, Describe-, YAML-, Event-, Audit-,
+    // Update-, Test- und Delete-Pfad läuft über findById() bzw. über die
+    // Services, die es aufrufen (kube-resources, kube-logs, kube-client) —
+    // eine Zeile an dieser Stelle schliesst alle auf einmal, und eine neue
+    // Route kann sie nicht mehr vergessen.
+    //
+    // `if (actor)` statt fail-closed ist die dokumentierte Konvention dieses
+    // Moduls (siehe assertFlagPermission oben und SecretsService.findById):
+    // JwtAuthGuard hängt global, jeder echte HTTP-Aufruf hat einen Actor; ein
+    // fehlender Actor ist ein vertrauenswürdiger interner Aufrufer (Migration,
+    // stdio-MCP ohne HTTP-Kontext). Ein hartes `assertClusterAccess(doc,
+    // RequestContext.getUser())` würde canAccessCluster(undefined) === false
+    // treffen und damit den stdio-MCP-Transport ausschalten.
+    //
+    // Offen bleibt damit die HTTP-MCP-Achse: main.ts hängt dort zwar einen
+    // Actor an, aber ohne die Scope-Felder — projectScopeMode ?? 'all' lässt
+    // einen verengten API-Key über MCP unbeschränkt. Das ist ein eigener Fund
+    // (MCP-Middleware setzt projectScopeMode/allowedProjectIds nicht) und
+    // gehört an die Middleware, nicht hierher.
+    const actor = RequestContext.getUser();
+    if (actor) assertClusterAccess(doc, actor);
     return doc;
   }
 
+  /**
+   * Filtert eine Cluster-Liste auf das, was der Actor sehen darf.
+   *
+   * Nötig, weil `projectId`/`customerId` bei der List-Route aus dem
+   * Query-String kommen (`GET /kube-clusters?projectId=…`) und bei den
+   * MCP-Tools aus dem Tool-Argument: ohne diesen Filter beantwortet die Route
+   * schlicht die Frage „welche Cluster hat Projekt X" für jedes X der Instanz,
+   * inklusive `clusterServer` und `contextName`. `findById()` schützt dagegen
+   * nur den Einzelzugriff.
+   *
+   * `if (actor)` aus demselben Grund wie in findById() — ein fehlender Actor
+   * ist ein vertrauenswürdiger interner Aufrufer, keine Lücke.
+   */
+  private visibleToActor(docs: KubeClusterDocument[]): KubeClusterDocument[] {
+    const actor = RequestContext.getUser();
+    if (!actor) return docs;
+    return docs.filter((doc) => canAccessCluster(doc, actor));
+  }
+
   async findByProjectId(projectId: string): Promise<KubeClusterDocument[]> {
-    return this.clusterModel
+    const docs = await this.clusterModel
       .find({ projectId: this.toObjectId(projectId, 'projectId') })
       .sort({ label: 1 })
       .exec();
+    return this.visibleToActor(docs);
   }
 
   async findByCustomerId(customerId: string): Promise<KubeClusterDocument[]> {
-    return this.clusterModel
+    const docs = await this.clusterModel
       .find({ customerId: this.toObjectId(customerId, 'customerId') })
       .sort({ label: 1 })
       .exec();
+    return this.visibleToActor(docs);
   }
 
   async findBySlug(
@@ -241,6 +285,10 @@ export class KubeClustersService {
     if (scope.customerId) filter.customerId = this.toObjectId(scope.customerId, 'customerId');
     const doc = await this.clusterModel.findOne(filter).exec();
     if (!doc) throw new NotFoundException(`Kube-Cluster "${slug}" nicht gefunden`);
+    // Derselbe Grund wie in findById(): `scope` kommt vom Aufrufer, nicht aus
+    // seiner Berechtigung.
+    const actor = RequestContext.getUser();
+    if (actor) assertClusterAccess(doc, actor);
     return doc;
   }
 
@@ -310,7 +358,14 @@ export class KubeClustersService {
   }
 
   async delete(id: string): Promise<void> {
-    const _id = this.toObjectId(id, 'id');
+    // Über findById() statt direkt aufs Modell: das ist die einzige Stelle, an
+    // der die Scope-Prüfung (T-477) sitzt, und ein direkter
+    // `clusterModel.deleteOne({ _id })`-Pfad würde sie umgehen — genau die
+    // Lücke, die delete() vorher hatte (jeder authentifizierte Nutzer konnte
+    // jeden Cluster samt kaskadiertem Kubeconfig-Secret löschen). Nebenbei
+    // wird eine unbekannte Id jetzt 404 statt stillschweigend 204.
+    const doc = await this.findById(id);
+    const _id = doc._id instanceof Types.ObjectId ? doc._id : this.toObjectId(id, 'id');
     await this.secretModel.deleteMany({ ownedByKubeClusterId: _id }).exec();
     await this.clusterModel.deleteOne({ _id }).exec();
     // Sonst überleben der Listener und der ssh2-Client die gelöschte
