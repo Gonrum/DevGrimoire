@@ -190,17 +190,32 @@ export class CustomersService {
     };
   }
 
-  async findById(id: string): Promise<CustomerDocument> {
-    const customer = await this.customerModel.findById(this.objectId(id, 'customerId')).exec();
-    if (!customer) throw new NotFoundException(`Customer ${id} not found`);
+  /**
+   * Kunden-Scope-Prüfung (T-220). Stand vorher ausschließlich in findById();
+   * update() und archive() gingen direkt auf findByIdAndUpdate — ein auf
+   * `customerScopeMode: 'allowlist'` verengter Actor konnte damit einen fremden
+   * Kunden überschreiben und archivieren (und ihn damit allen entziehen).
+   *
+   * Läuft auf der Id und VOR dem Load, damit eine fremde Id 403 statt 404
+   * ergibt. `if (actor)` ist die dokumentierte Konvention dieses Projekts: ein
+   * fehlender Actor ist ein vertrauenswürdiger interner Aufrufer.
+   */
+  private assertAccess(id: string): void {
     const actor = RequestContext.getUser();
     if (actor && !actorCanAccessCustomer(actor, id)) {
       throw new ForbiddenException(`Customer ${id} is not in your scope`);
     }
+  }
+
+  async findById(id: string): Promise<CustomerDocument> {
+    const customer = await this.customerModel.findById(this.objectId(id, 'customerId')).exec();
+    if (!customer) throw new NotFoundException(`Customer ${id} not found`);
+    this.assertAccess(id);
     return customer;
   }
 
   async update(id: string, dto: UpdateCustomerDto): Promise<CustomerDocument> {
+    this.assertAccess(id);
     try {
       const customer = await this.customerModel
         .findByIdAndUpdate(this.objectId(id, 'customerId'), dto, { new: true })
@@ -224,6 +239,7 @@ export class CustomersService {
   }
 
   async archive(id: string): Promise<CustomerDocument> {
+    this.assertAccess(id);
     const customer = await this.customerModel
       .findByIdAndUpdate(
         this.objectId(id, 'customerId'),

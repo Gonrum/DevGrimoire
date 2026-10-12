@@ -169,23 +169,56 @@ export class AttachmentsService {
       .exec();
   }
 
-  async findById(id: string): Promise<AttachmentDocument> {
-    const attachment = await this.attachmentModel.findById(id).select('-textContent').exec();
-    if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
+  /**
+   * Projekt-/Kunden-Scope-Prüfung für ein Attachment-Dokument (T-210/T-220).
+   *
+   * Stand vorher AUSSCHLIESSLICH in findById(). Die Schreib- und Download-Pfade
+   * (update, download, getContent, getText, remove) gingen direkt aufs Modell —
+   * damit waren die Metadaten geschützt, die DATEIBYTES aber nicht:
+   * GET /api/attachments/:id/download lieferte jeden Anhang aus jedem Projekt
+   * (Verträge, Zertifikate, .env-Exporte), und DELETE löschte ihn samt
+   * MinIO-Objekt unwiederbringlich. getText() war derselbe Fall für den
+   * extrahierten Volltext.
+   *
+   * `if (actor)` statt fail-closed ist die dokumentierte Konvention dieses
+   * Projekts (SecretsService, KubeClustersService, http-requests): JwtAuthGuard
+   * hängt global, jeder echte HTTP-Aufruf hat einen Actor; ein fehlender Actor
+   * ist ein vertrauenswürdiger interner Aufrufer (Replikation, Migration,
+   * stdio-MCP ohne HTTP-Kontext).
+   */
+  private assertAccess(attachment: AttachmentDocument): void {
     const actor = RequestContext.getUser();
-    if (actor) {
-      const projectId = attachment.projectId?.toString() || null;
-      const customerId = attachment.customerId?.toString() || null;
-      const projectOk = !projectId || actorCanAccessProject(actor, projectId);
-      const customerOk = !customerId || actorCanAccessCustomer(actor, customerId);
-      if (!projectOk || !customerOk) {
-        throw new ForbiddenException(`Attachment ${id} is not in your scope`);
-      }
+    if (!actor) return;
+    const projectId = attachment.projectId?.toString() || null;
+    const customerId = attachment.customerId?.toString() || null;
+    const projectOk = !projectId || actorCanAccessProject(actor, projectId);
+    const customerOk = !customerId || actorCanAccessCustomer(actor, customerId);
+    if (!projectOk || !customerOk) {
+      throw new ForbiddenException(`Attachment ${attachment._id.toString()} is not in your scope`);
     }
+  }
+
+  /**
+   * Lädt ein Attachment, prüft 404 und den Scope — die eine Stelle, die jeder
+   * Pfad benutzt, damit eine neue Methode die Prüfung nicht vergessen kann.
+   * `withText` nur für getText(): alle anderen Pfade brauchen den extrahierten
+   * Volltext nicht und schleppen ihn sonst unnötig durch den Speicher.
+   */
+  private async findScoped(id: string, withText = false): Promise<AttachmentDocument> {
+    const query = this.attachmentModel.findById(id);
+    const attachment = await (withText ? query : query.select('-textContent')).exec();
+    if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
+    this.assertAccess(attachment);
     return attachment;
   }
 
+  async findById(id: string): Promise<AttachmentDocument> {
+    return this.findScoped(id);
+  }
+
   async update(id: string, dto: UpdateAttachmentDto): Promise<AttachmentDocument> {
+    // VOR der Mutation prüfen: findByIdAndUpdate hätte sonst schon geschrieben.
+    await this.findScoped(id);
     const attachment = await this.attachmentModel
       .findByIdAndUpdate(id, dto, { new: true })
       .select('-textContent')
@@ -203,15 +236,13 @@ export class AttachmentsService {
   }
 
   async download(id: string): Promise<{ stream: Readable; attachment: AttachmentDocument }> {
-    const attachment = await this.attachmentModel.findById(id).select('-textContent').exec();
-    if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
+    const attachment = await this.findScoped(id);
     const stream = await this.minioService.getObject(attachment.storageKey);
     return { stream, attachment };
   }
 
   async getContent(id: string): Promise<{ buffer: Buffer; attachment: AttachmentDocument }> {
-    const attachment = await this.attachmentModel.findById(id).select('-textContent').exec();
-    if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
+    const attachment = await this.findScoped(id);
     const stream = await this.minioService.getObject(attachment.storageKey);
     return { buffer: await streamToBuffer(stream), attachment };
   }
@@ -222,13 +253,15 @@ export class AttachmentsService {
    * Used by the chat module to inject file contents into prompt context.
    */
   async getText(id: string): Promise<{ text: string | null; attachment: AttachmentDocument }> {
-    const attachment = await this.attachmentModel.findById(id).exec();
-    if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
+    const attachment = await this.findScoped(id, true);
     const raw = attachment.textContent;
     return { text: raw && raw.length > 0 ? raw : null, attachment };
   }
 
   async remove(id: string): Promise<void> {
+    // VOR findByIdAndDelete prüfen — die Methode löscht sonst erst und liefert
+    // dann das gelöschte Dokument, und die MinIO-Kaskade ist unwiederbringlich.
+    await this.findScoped(id);
     const attachment = await this.attachmentModel.findByIdAndDelete(id).exec();
     if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
     await this.minioService.removeObject(attachment.storageKey).catch((err) =>

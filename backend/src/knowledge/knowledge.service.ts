@@ -112,26 +112,45 @@ export class KnowledgeService {
       .exec();
   }
 
-  async findById(id: string): Promise<KnowledgeDocument> {
+  /**
+   * Projekt-/Kunden-Scope-Prüfung (T-210/T-220). Stand vorher ausschließlich in
+   * findById(); update() und remove() gingen direkt auf findByIdAndUpdate bzw.
+   * findByIdAndDelete — ein verengter Actor konnte damit fremde
+   * Wissenseinträge überschreiben und löschen, und über UpdateKnowledgeDto
+   * zusätzlich `projectId`/`scope` umsetzen.
+   *
+   * `if (actor)` ist die dokumentierte Konvention (siehe AttachmentsService).
+   */
+  private assertAccess(entry: KnowledgeDocument): void {
+    const actor = RequestContext.getUser();
+    if (!actor) return;
+    const projectId = entry.projectId?.toString() || null;
+    const customerId = entry.customerId?.toString() || null;
+    const projectOk = !projectId || actorCanAccessProject(actor, projectId);
+    const customerOk = !customerId || actorCanAccessCustomer(actor, customerId);
+    if (!projectOk || !customerOk) {
+      throw new ForbiddenException(`Knowledge ${entry._id.toString()} is not in your scope`);
+    }
+  }
+
+  /** Lädt, prüft 404 und Scope — die eine Stelle, die jeder Pfad benutzt. */
+  private async findScoped(id: string): Promise<KnowledgeDocument> {
     const entry = await this.knowledgeModel.findById(id).exec();
     if (!entry) throw new NotFoundException(`Knowledge ${id} not found`);
-    const actor = RequestContext.getUser();
-    if (actor) {
-      const projectId = entry.projectId?.toString() || null;
-      const customerId = entry.customerId?.toString() || null;
-      const projectOk = !projectId || actorCanAccessProject(actor, projectId);
-      const customerOk = !customerId || actorCanAccessCustomer(actor, customerId);
-      if (!projectOk || !customerOk) {
-        throw new ForbiddenException(`Knowledge ${id} is not in your scope`);
-      }
-    }
+    this.assertAccess(entry);
     return entry;
+  }
+
+  async findById(id: string): Promise<KnowledgeDocument> {
+    return this.findScoped(id);
   }
 
   async update(
     id: string,
     dto: UpdateKnowledgeDto,
   ): Promise<KnowledgeDocument> {
+    // VOR der Mutation prüfen — findByIdAndUpdate hätte sonst schon geschrieben.
+    await this.findScoped(id);
     const entry = await this.knowledgeModel
       .findByIdAndUpdate(id, dto, { new: true })
       .exec();
@@ -148,15 +167,16 @@ export class KnowledgeService {
   }
 
   async remove(id: string): Promise<void> {
-    const result = await this.knowledgeModel.findByIdAndDelete(id).exec();
-    if (!result) throw new NotFoundException(`Knowledge ${id} not found`);
+    // VOR dem Löschen prüfen; das geladene Dokument trägt alles für das Event.
+    const existing = await this.findScoped(id);
+    await this.knowledgeModel.deleteOne({ _id: existing._id }).exec();
     this.eventEmitter.emit(PROJECT_CHANGED, {
-      projectId: result.projectId?.toString() || null,
-      customerId: result.customerId?.toString() || null,
+      projectId: existing.projectId?.toString() || null,
+      customerId: existing.customerId?.toString() || null,
       entity: 'knowledge',
       action: 'deleted',
       entityId: id,
-      summary: `Wissen "${result.topic}" gelöscht`,
+      summary: `Wissen "${existing.topic}" gelöscht`,
     });
   }
 

@@ -95,13 +95,33 @@ export class ProjectsService {
     return this.projectModel.find(filter).sort({ updatedAt: -1 }).exec();
   }
 
-  async findById(id: string): Promise<ProjectDocument> {
-    const project = await this.projectModel.findById(id).exec();
-    if (!project) throw new NotFoundException(`Project ${id} not found`);
+  /**
+   * Projekt-Scope-Prüfung (T-210). Stand vorher ausschließlich in findById();
+   * update(), updateRaw() und remove() gingen direkt auf findByIdAndUpdate bzw.
+   * findByIdAndDelete — ein auf `projectScopeMode: 'allowlist'` verengter Actor
+   * konnte damit ein FREMDES Projekt überschreiben (Name, gitRepositories inkl.
+   * Token-Secret-Ids, replicationConfig) und löschen, wobei der
+   * PROJECT_CHANGED-Event die Kaskade über 21 Services auslöst.
+   *
+   * Die Prüfung läuft auf der Id, nicht auf dem geladenen Dokument: das Projekt
+   * IST der Scope-Träger. Sie steht bewusst VOR dem Load, damit eine fremde Id
+   * 403 statt 404 ergibt und nicht einmal verrät, ob es das Projekt gibt.
+   *
+   * `if (actor)` ist die dokumentierte Konvention dieses Projekts: ein
+   * fehlender Actor ist ein vertrauenswürdiger interner Aufrufer (Replikation,
+   * Migration, stdio-MCP ohne HTTP-Kontext).
+   */
+  private assertAccess(id: string): void {
     const actor = RequestContext.getUser();
     if (actor && !actorCanAccessProject(actor, id)) {
       throw new ForbiddenException(`Project ${id} is not in your scope`);
     }
+  }
+
+  async findById(id: string): Promise<ProjectDocument> {
+    const project = await this.projectModel.findById(id).exec();
+    if (!project) throw new NotFoundException(`Project ${id} not found`);
+    this.assertAccess(id);
     return project;
   }
 
@@ -319,6 +339,7 @@ export class ProjectsService {
   }
 
   async update(id: string, dto: UpdateProjectDto): Promise<ProjectDocument> {
+    this.assertAccess(id);
     const project = await this.projectModel
       .findByIdAndUpdate(id, dto, { new: true })
       .exec();
@@ -334,6 +355,9 @@ export class ProjectsService {
   }
 
   async updateRaw(id: string, update: Record<string, unknown>): Promise<ProjectDocument> {
+    // Derselbe Grund wie bei update(): ein roher Update-Record ist der
+    // mächtigste Schreibpfad auf ein Projekt und war ungeprüft.
+    this.assertAccess(id);
     const project = await this.projectModel
       .findByIdAndUpdate(id, update, { new: true })
       .exec();
@@ -419,6 +443,10 @@ export class ProjectsService {
   }
 
   async remove(id: string): Promise<void> {
+    // VOR findByIdAndDelete: die Methode löschte sonst erst und lieferte dann
+    // das gelöschte Dokument. Der PROJECT_CHANGED-Event danach löst die
+    // removeByProject-Kaskade über 21 Services aus — unwiederbringlich.
+    this.assertAccess(id);
     const result = await this.projectModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException(`Project ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {

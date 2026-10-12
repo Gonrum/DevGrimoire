@@ -155,30 +155,46 @@ export class TodosService {
     return this.todoModel.find(query).sort({ priority: 1, createdAt: -1 }).exec();
   }
 
-  async findById(id: string): Promise<TodoDocument> {
+  /**
+   * Projekt-/Kunden-Scope-Prüfung (T-210/T-220). Stand vorher ausschließlich in
+   * findById(); update() und remove() gingen direkt aufs Modell — ein auf
+   * `projectScopeMode: 'allowlist'` verengter Actor konnte damit fremde
+   * Arbeitsstände überschreiben und löschen, und `POST /todos/:id/comments`
+   * zusätzlich mit frei wählbarem `author` schreiben.
+   *
+   * `if (actor)` ist die dokumentierte Konvention (siehe AttachmentsService):
+   * ein fehlender Actor ist ein vertrauenswürdiger interner Aufrufer.
+   */
+  private assertAccess(todo: TodoDocument): void {
+    const actor = RequestContext.getUser();
+    if (!actor) return;
+    const projectId = todo.projectId?.toString() || null;
+    const customerId = todo.customerId?.toString() || null;
+    const projectOk = !projectId || actorCanAccessProject(actor, projectId);
+    const customerOk = !customerId || actorCanAccessCustomer(actor, customerId);
+    if (!projectOk || !customerOk) {
+      throw new ForbiddenException(`Todo ${todo._id.toString()} is not in your scope`);
+    }
+  }
+
+  /** Lädt, prüft 404 und Scope — die eine Stelle, die jeder Pfad benutzt. */
+  private async findScoped(id: string): Promise<TodoDocument> {
     const todo = await this.todoModel.findById(id).exec();
     if (!todo) throw new NotFoundException(`Todo ${id} not found`);
-    const actor = RequestContext.getUser();
-    if (actor) {
-      const projectId = todo.projectId?.toString() || null;
-      const customerId = todo.customerId?.toString() || null;
-      const projectOk = !projectId || actorCanAccessProject(actor, projectId);
-      const customerOk = !customerId || actorCanAccessCustomer(actor, customerId);
-      if (!projectOk || !customerOk) {
-        throw new ForbiddenException(`Todo ${id} is not in your scope`);
-      }
-    }
+    this.assertAccess(todo);
     return todo;
   }
 
+  async findById(id: string): Promise<TodoDocument> {
+    return this.findScoped(id);
+  }
+
   async update(id: string, dto: UpdateTodoDto): Promise<TodoDocument> {
+    // VOR der Mutation prüfen — findByIdAndUpdate hätte sonst schon
+    // geschrieben. Derselbe Load liefert den bisherigen Status für die
+    // Übergangs-Prüfung und ersetzt damit das separate .select('status').lean().
+    const existing = await this.findScoped(id);
     if (dto.status) {
-      const existing = await this.todoModel
-        .findById(id)
-        .select('status')
-        .lean()
-        .exec();
-      if (!existing) throw new NotFoundException(`Todo ${id} not found`);
       this.validateStatusTransition(existing.status, dto.status);
 
       // Block review → done when there are still open (pending/expired) questions.
@@ -217,19 +233,26 @@ export class TodosService {
   }
 
   async remove(id: string): Promise<void> {
-    const result = await this.todoModel.findByIdAndDelete(id).exec();
-    if (!result) throw new NotFoundException(`Todo ${id} not found`);
+    // VOR dem Löschen prüfen; das geladene Dokument trägt alles, was das Event
+    // braucht, also bleibt es bei einem Read plus einem Delete.
+    const existing = await this.findScoped(id);
+    await this.todoModel.deleteOne({ _id: existing._id }).exec();
     this.eventEmitter.emit(PROJECT_CHANGED, {
-      projectId: result.projectId?.toString() || null,
-      customerId: result.customerId?.toString() || null,
+      projectId: existing.projectId?.toString() || null,
+      customerId: existing.customerId?.toString() || null,
       entity: 'todo',
       action: 'deleted',
       entityId: id,
-      summary: `Todo "${result.title}" gelöscht`,
+      summary: `Todo "${existing.title}" gelöscht`,
     });
   }
 
   async addComment(id: string, text: string, author = 'user'): Promise<TodoDocument> {
+    // Scope-Prüfung vor dem $push. Offen bleibt, dass `author` ein
+    // Aufrufer-String ist und damit fälschbar — das zu ändern heißt, den Autor
+    // aus dem Actor abzuleiten, und ist eine Verhaltensänderung über diesen
+    // Fix hinaus.
+    await this.findScoped(id);
     const todo = await this.todoModel
       .findByIdAndUpdate(
         id,

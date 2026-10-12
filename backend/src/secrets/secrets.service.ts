@@ -111,20 +111,38 @@ export class SecretsService {
     return secrets.map((s) => this.toListItem(s));
   }
 
+  /**
+   * Projekt-/Kunden-Scope-Prüfung (T-210/T-220). Stand vorher ausschließlich in
+   * findById() — update() und delete() prüften nicht.
+   *
+   * Das war hier folgenreicher als anderswo: ein auf `projectScopeMode: 'none'`
+   * gesetzter Actor konnte mit Kenntnis einer Secret-Id den Wert JEDES Secrets
+   * der Instanz überschreiben, darunter die SSH-Private-Keys und Kubeconfigs
+   * (`ownedBySshConnectionId` / `ownedByKubeClusterId`). Damit lassen sich
+   * fremde SSH-Verbindungen und Cluster übernehmen, OHNE den Klartext je zu
+   * sehen — der Scope-Check in findById() schützt nur das Lesen. delete()
+   * zerstörte sie unwiederbringlich (Kubeconfig weg → Cluster nicht erreichbar).
+   *
+   * `if (actor)` ist die dokumentierte Konvention dieses Projekts: ein
+   * fehlender Actor ist ein vertrauenswürdiger interner Aufrufer (Replikation,
+   * Migration, stdio-MCP ohne HTTP-Kontext).
+   */
+  private assertAccess(secret: SecretDocument): void {
+    const actor = RequestContext.getUser();
+    if (!actor) return;
+    const projectId = secret.projectId?.toString() || null;
+    const customerId = secret.customerId?.toString() || null;
+    const projectOk = !projectId || actorCanAccessProject(actor, projectId);
+    const customerOk = !customerId || actorCanAccessCustomer(actor, customerId);
+    if (!projectOk || !customerOk) {
+      throw new ForbiddenException(`Secret ${secret._id.toString()} is not in your scope`);
+    }
+  }
+
   async findById(id: string): Promise<SecretListItem & { value: string }> {
     const secret = await this.secretModel.findById(id).exec();
     if (!secret) throw new NotFoundException('Secret not found');
-
-    const actor = RequestContext.getUser();
-    if (actor) {
-      const projectId = secret.projectId?.toString() || null;
-      const customerId = secret.customerId?.toString() || null;
-      const projectOk = !projectId || actorCanAccessProject(actor, projectId);
-      const customerOk = !customerId || actorCanAccessCustomer(actor, customerId);
-      if (!projectOk || !customerOk) {
-        throw new ForbiddenException(`Secret ${id} is not in your scope`);
-      }
-    }
+    this.assertAccess(secret);
 
     const value = this.encryptionService.decrypt(secret.encryptedValue);
     return { ...this.toListItem(secret), value };
@@ -133,6 +151,10 @@ export class SecretsService {
   async update(id: string, dto: UpdateSecretDto): Promise<SecretListItem> {
     const secret = await this.secretModel.findById(id).exec();
     if (!secret) throw new NotFoundException('Secret not found');
+    // VOR dem Schreiben — und bewusst ohne findById(), weil das den Wert
+    // entschlüsseln würde, was für eine reine Metadaten-/Wert-Änderung
+    // unnötig ist.
+    this.assertAccess(secret);
 
     if (dto.key !== undefined) secret.key = dto.key;
     if (dto.description !== undefined) secret.description = dto.description;
@@ -149,6 +171,12 @@ export class SecretsService {
   }
 
   async delete(id: string): Promise<void> {
+    // VOR findByIdAndDelete prüfen — die Methode löschte sonst erst und lieferte
+    // dann das gelöschte Dokument zurück.
+    const existing = await this.secretModel.findById(id).exec();
+    if (!existing) throw new NotFoundException('Secret not found');
+    this.assertAccess(existing);
+
     const result = await this.secretModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException('Secret not found');
     this.eventEmitter.emit(PROJECT_CHANGED, {
