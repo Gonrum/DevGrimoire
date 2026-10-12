@@ -669,7 +669,7 @@ function makeFakeSftp({
     capturedStream.emit('data', Buffer.from('hello\n'));
     capturedStream.stderr.emit('data', Buffer.from('warn\n'));
 
-    const mid = svc.getJobStatus(started.jobId);
+    const mid = await svc.getJobStatus(started.jobId);
     assert.ok(mid, 'status snapshot should exist for running job');
     assert.equal(mid.state, 'running');
     assert.equal(mid.stdoutBytes, 6);
@@ -681,9 +681,9 @@ function makeFakeSftp({
     // terminal state into the job table.
     capturedStream.emit('exit', 0);
     capturedStream.emit('close');
-    await waitFor(() => svc.getJobStatus(started.jobId)?.state !== 'running');
+    await waitFor(() => svc.execJobs.get(started.jobId)?.state !== 'running');
 
-    const done = svc.getJobStatus(started.jobId);
+    const done = await svc.getJobStatus(started.jobId);
     assert.equal(done.state, 'done');
     assert.equal(done.exitCode, 0);
     assert.equal(done.aborted, null);
@@ -732,7 +732,7 @@ function makeFakeSftp({
     const realSetTimeout = global.setTimeout;
     global.setTimeout = (fn, ms) => realSetTimeout(fn, (ms ?? 0) < 10_000 ? 0 : ms);
     try {
-      const snap = svc.cancelJob(started.jobId);
+      const snap = await svc.cancelJob(started.jobId);
       assert.ok(snap, 'cancelJob should return a snapshot');
       // Give the SIGKILL grace timer a real chunk of wall-clock time to
       // fire and the post-finalize microtasks (runJobBackground's
@@ -740,7 +740,7 @@ function makeFakeSftp({
       // races against the timer queue under load; a small real-time wait
       // makes this deterministic.
       await new Promise((r) => realSetTimeout(r, 50));
-      const after = svc.getJobStatus(started.jobId);
+      const after = await svc.getJobStatus(started.jobId);
       assert.equal(after.state, 'aborted', `expected aborted, got ${after.state}; captured=${captured.join(',')}`);
       assert.equal(after.aborted, 'cancelled');
       assert.ok(captured.includes('TERM'), `expected TERM signal, got ${captured.join(',')}`);
@@ -762,8 +762,8 @@ function makeFakeSftp({
     const factory = makeClientFactory();
     const svc = new SshSessionService(sshService, secrets, audit, makeNotificationsStub(), makeSettingsStub(), factory);
 
-    assert.equal(svc.getJobStatus('ssh-job-does-not-exist'), null);
-    assert.equal(svc.cancelJob('ssh-job-does-not-exist'), null);
+    assert.equal(await svc.getJobStatus('ssh-job-does-not-exist'), null);
+    assert.equal(await svc.cancelJob('ssh-job-does-not-exist'), null);
   });
 
   // 7) exec with cwd → shell-quoted prefix

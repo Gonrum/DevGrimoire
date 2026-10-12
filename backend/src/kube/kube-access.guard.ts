@@ -19,8 +19,8 @@ import { KubeClusterDocument } from './schemas/kube-cluster.schema';
  *
  * Aufgerufen wird sie aus `KubeClustersService.findById()`, `findBySlug()` und
  * `visibleToActor()` — also an der einen Stelle, über die jede Cluster-Route
- * läuft, statt an jeder Route einzeln. Die globale Regel für die SSH-Routen
- * steht weiterhin aus: `backend/src/ssh/` kennt das Scope-Modell gar nicht.
+ * läuft, statt an jeder Route einzeln. Das SSH-Modul spiegelt das in
+ * `ssh/ssh-access.guard.ts`.
  */
 export function canAccessCluster(
   cluster: Pick<KubeClusterDocument, 'projectId' | 'customerId' | 'label'>,

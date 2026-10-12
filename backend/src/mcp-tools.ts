@@ -7127,14 +7127,14 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'ssh_exec_status': {
           const jobId = requireString(a, 'jobId');
-          const snap = sshSessionService.getJobStatus(jobId);
+          const snap = await sshSessionService.getJobStatus(jobId);
           if (!snap) throw new Error('job_not_found');
           result = snap;
           break;
         }
         case 'ssh_exec_cancel': {
           const jobId = requireString(a, 'jobId');
-          const snap = sshSessionService.cancelJob(jobId);
+          const snap = await sshSessionService.cancelJob(jobId);
           if (!snap) throw new Error('job_not_found');
           result = snap;
           break;

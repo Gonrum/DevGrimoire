@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -29,6 +30,9 @@ import { errorMessage, isRecord } from '../common/narrow';
 import { CreateSshConnectionDto } from './dto/create-ssh-connection.dto';
 import { UpdateSshConnectionDto } from './dto/update-ssh-connection.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { RequestContext } from '../common/request-context';
+import { actorCanAccessCustomer, actorCanAccessProject } from '../common/permissions';
+import { assertConnectionAccess, canAccessConnection } from './ssh-access.guard';
 
 interface CreatedOwnedSecretRef {
   id: Types.ObjectId;
@@ -117,6 +121,10 @@ export class SshService {
     void userId;
     this.validateScope(dto.customerId, dto.projectId);
     this.validateAuthInputs(dto);
+    this.assertTargetScope(dto.projectId, dto.customerId);
+    await this.assertSecretRefsAccessible([
+      dto.privateKeySecretId, dto.passphraseSecretId, dto.passwordSecretId,
+    ]);
 
     // (b) Create inline secrets, collect rollback refs.
     const createdSecrets: CreatedOwnedSecretRef[] = [];
@@ -239,14 +247,83 @@ export class SshService {
     }
     const doc = await this.sshModel.findById(id).exec();
     if (!doc) throw new NotFoundException('SshConnection not found');
+    // Scope-Prüfung (C-5). Sitzt bewusst HIER: jede Controller-Route, jedes
+    // MCP-Tool (resolveSshConnection), der WS-Terminal-Upgrade, ssh_exec(_async),
+    // SFTP-Up-/Download, Tunnel und Test laufen über findById() — eine Stelle
+    // schliesst alle, und eine neue Route kann sie nicht vergessen.
+    //
+    // `if (actor)` ist die dokumentierte Projekt-Konvention (KubeClustersService,
+    // SecretsService): ein fehlender Actor ist ein vertrauenswürdiger interner
+    // Aufrufer (Scheduler, stdio-MCP), keine Lücke.
+    const actor = RequestContext.getUser();
+    if (actor) assertConnectionAccess(doc, actor);
     return doc;
   }
 
+  /**
+   * Filtert eine Verbindungsliste auf das, was der Actor sehen darf. Nötig,
+   * weil projectId/customerId der List-Pfade aus Query-String bzw.
+   * Tool-Argument kommen — ohne Filter beantworten sie „welche Server hat
+   * Projekt X" für jedes X, inklusive host/username.
+   */
+  private visibleToActor<T extends SshConnectionDocument>(docs: T[]): T[] {
+    const actor = RequestContext.getUser();
+    if (!actor) return docs;
+    return docs.filter((doc) => canAccessConnection(doc, actor));
+  }
+
+  /**
+   * Darf der Actor eine Verbindung in diesem Scope anlegen? Ohne die Prüfung
+   * könnte ein verengter Actor Verbindungen in fremde Projekte/Kunden legen.
+   */
+  private assertTargetScope(projectId?: string, customerId?: string): void {
+    const actor = RequestContext.getUser();
+    if (!actor) return;
+    if (projectId && !actorCanAccessProject(actor, projectId)) {
+      throw new ForbiddenException('Kein Zugriff auf das Ziel-Projekt');
+    }
+    if (customerId && !actorCanAccessCustomer(actor, customerId)) {
+      throw new ForbiddenException('Kein Zugriff auf den Ziel-Kunden');
+    }
+  }
+
+  /**
+   * Pick-Existing-Refs müssen im Scope des Actors liegen. Sonst legt ein
+   * verengter Actor in SEINEM Projekt eine Verbindung auf SEINEN Host an,
+   * referenziert dabei den Private-Key eines fremden Projekts — und das Backend
+   * entschlüsselt ihn beim ersten Connect und authentifiziert sich damit gegen
+   * den Angreifer-Host. Dieselbe Regel wie SecretsService.assertAccess().
+   *
+   * Eine unbekannte Id ist kein Scope-Problem (es gibt nichts zu exfiltrieren)
+   * und bleibt beim bisherigen Verhalten: der Fehler kommt beim Connect.
+   */
+  private async assertSecretRefsAccessible(ids: (string | undefined)[]): Promise<void> {
+    const actor = RequestContext.getUser();
+    if (!actor) return;
+    const valid = ids.filter((id): id is string => !!id && Types.ObjectId.isValid(id));
+    if (valid.length === 0) return;
+    const secrets = await this.secretModel
+      .find({ _id: { $in: valid.map((id) => new Types.ObjectId(id)) } })
+      .select('projectId customerId')
+      .lean()
+      .exec();
+    for (const secret of secrets) {
+      const projectId = secret.projectId?.toString() || null;
+      const customerId = secret.customerId?.toString() || null;
+      const projectOk = !projectId || actorCanAccessProject(actor, projectId);
+      const customerOk = !customerId || actorCanAccessCustomer(actor, customerId);
+      if (!projectOk || !customerOk) {
+        throw new ForbiddenException(`Secret ${secret._id.toString()} is not in your scope`);
+      }
+    }
+  }
+
   async findByCustomerId(customerId: string): Promise<SshConnectionDocument[]> {
-    return this.sshModel
+    const docs = await this.sshModel
       .find({ customerId: this.toObjectId(customerId, 'customerId') })
       .sort({ label: 1 })
       .exec();
+    return this.visibleToActor(docs);
   }
 
   /**
@@ -281,7 +358,7 @@ export class SshService {
       .lean()
       .exec();
     if (links.length === 0) {
-      return ownConnections;
+      return this.visibleToActor(ownConnections);
     }
 
     const linkedCustomerIds = links.map((l) => l.customerId);
@@ -294,10 +371,13 @@ export class SshService {
         conn.customerId?.toString();
     }
 
-    return [
+    // Geerbte Verbindungen sind kunden-gebunden: canAccessConnection prüft
+    // dort die Kunden-Achse, nicht die Projekt-Achse — Zugriff auf das
+    // Projekt öffnet nicht automatisch die Server seiner Kunden.
+    return this.visibleToActor<SshConnectionWithInheritance>([
       ...(ownConnections as SshConnectionWithInheritance[]),
       ...(inheritedConnections as SshConnectionWithInheritance[]),
-    ];
+    ]);
   }
 
   /**
@@ -316,6 +396,21 @@ export class SshService {
   async update(id: string, dto: UpdateSshConnectionDto): Promise<SshConnectionDocument> {
     const doc = await this.findById(id);
     const expectedVersion = this.docVersion(doc);
+    await this.assertSecretRefsAccessible([
+      dto.privateKeySecretId, dto.passphraseSecretId, dto.passwordSecretId,
+    ]);
+
+    // Ändert sich der Endpunkt, gilt der gespeicherte Fingerprint nicht mehr —
+    // TOFU wird neu erzwungen (C-5). Sonst reicht ein `accept-fingerprint` mit
+    // dem vom `test` gelieferten Fingerprint, und das Backend authentifiziert
+    // sich mit den entschlüsselten Credentials gegen den umgebogenen Host.
+    const endpointChanged =
+      (dto.host !== undefined && dto.host !== doc.host) ||
+      (dto.port !== undefined && dto.port !== doc.port);
+    const tofuReset: Record<string, unknown> = endpointChanged
+      ? { $unset: { knownHostFingerprint: 1 } }
+      : {};
+    if (endpointChanged) doc.knownHostFingerprint = undefined;
 
     // Snapshot the original credential refs so we can restore them on the
     // in-memory `doc` if the conditional write fails (Important #4).
@@ -470,6 +565,7 @@ export class SshService {
                 passphraseSecretId: doc.passphraseSecretId,
                 passwordSecretId: doc.passwordSecretId,
               },
+              ...tofuReset,
               $inc: { __v: 1 },
             },
             { new: true },
@@ -572,6 +668,7 @@ export class SshService {
               passphraseSecretId: doc.passphraseSecretId,
               passwordSecretId: doc.passwordSecretId,
             },
+            ...tofuReset,
             $inc: { __v: 1 },
           },
           { new: true },
@@ -594,7 +691,7 @@ export class SshService {
     const updated = await this.sshModel
       .findOneAndUpdate(
         { _id: doc._id, __v: expectedVersion },
-        { $set: metaPatch, $inc: { __v: 1 } },
+        { $set: metaPatch, ...tofuReset, $inc: { __v: 1 } },
         { new: true },
       )
       .exec();
@@ -674,7 +771,12 @@ export class SshService {
     } else {
       return null;
     }
-    return this.sshModel.findOne(filter).exec();
+    const doc = await this.sshModel.findOne(filter).exec();
+    if (!doc) return null;
+    // `scope` kommt vom Aufrufer, nicht aus seiner Berechtigung.
+    const actor = RequestContext.getUser();
+    if (actor) assertConnectionAccess(doc, actor);
+    return doc;
   }
 
   /**
@@ -723,10 +825,11 @@ export class SshService {
       if (args.tags && args.tags.length > 0) {
         filter.tags = { $all: args.tags };
       }
-      return this.sshModel
+      const docs = await this.sshModel
         .find(filter)
         .sort({ label: 1 })
         .exec();
+      return this.visibleToActor(docs);
     }
     return [];
   }

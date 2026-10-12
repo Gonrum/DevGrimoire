@@ -554,15 +554,15 @@ export class SshSessionService {
     // await — control returns to the caller with the jobId immediately.
     void this.runJobBackground(job, opts).catch((err: unknown) => {
       // Catastrophic errors (credential_missing, openClient reject, etc.)
-      // land here. Stamp the job as aborted/error and release the slot
-      // we acquired synchronously above.
+      // land here. Only stamp the job: the `finally` in runJobBackground
+      // already released the slot and armed the cleanup timer. A second
+      // releaseSlot() here decremented `active` twice per acquire and
+      // silently disabled CONCURRENCY_LIMIT after a few failures (H-32).
       const msg = errorMessage(err);
       this.logger.warn(`Async exec job ${jobId} failed before runExec: ${msg}`);
       job.state = 'aborted';
       job.errorMsg = msg;
       job.durationMs = Date.now() - job.startedAt;
-      this.releaseSlot(connId);
-      this.scheduleJobCleanup(job);
     });
 
     return {
@@ -578,9 +578,12 @@ export class SshSessionService {
    * or already-reaped jobIds so the MCP layer can map it to a clean
    * `job_not_found` error.
    */
-  getJobStatus(jobId: string): SshExecJobStatus | null {
+  async getJobStatus(jobId: string): Promise<SshExecJobStatus | null> {
     const job = this.execJobs.get(jobId);
     if (!job) return null;
+    // Scope der Verbindung prüfen (C-5): der Job-Tail enthält stdout/stderr
+    // eines Kommandos auf diesem Host.
+    await this.sshService.findById(job.connectionId);
     return this.serialiseJob(job);
   }
 
@@ -589,9 +592,10 @@ export class SshSessionService {
    * cancelling a done/aborted job returns the existing status without
    * touching anything. Returns `null` for unknown jobIds.
    */
-  cancelJob(jobId: string): SshExecJobStatus | null {
+  async cancelJob(jobId: string): Promise<SshExecJobStatus | null> {
     const job = this.execJobs.get(jobId);
     if (!job) return null;
+    await this.sshService.findById(job.connectionId);
     if (job.state === 'running' && job.cancel) {
       try { job.cancel(); } catch { /* noop */ }
     }
