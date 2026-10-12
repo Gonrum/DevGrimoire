@@ -71,6 +71,12 @@ services:
       dockerfile: Dockerfile
     container_name: devgrimoire-workspace
     restart: unless-stopped
+    # M-25: tini als PID 1. node als PID 1 reapt keine Waisen — Enkel aus
+    # /exec-Prozessgruppen (detached) blieben als Zombies liegen, bis die
+    # PID-Tabelle voll war. Das PID-Limit steht unten bei deploy.resources
+    # (Compose erlaubt es nicht an beiden Stellen); Fork-Bomben fängt die
+    # Blacklist nur als Muster.
+    init: true
     environment:
       WORKSPACE_API_TOKEN: ${WORKSPACE_API_TOKEN:?WORKSPACE_API_TOKEN must be set (>=16 chars) for the sidecar}
       WORKSPACE_ROOT: /workspaces
@@ -93,6 +99,7 @@ services:
         limits:
           cpus: '2'
           memory: 2G
+          pids: 1024
         reservations:
           cpus: '0.25'
           memory: 256M

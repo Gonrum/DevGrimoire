@@ -1,7 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import { errorMessage } from '../common/narrow';
 import { Request, Response } from 'express';
-import { Readable } from 'stream';
 import { pipeline } from 'node:stream';
 import { HttpRequestsService } from './http-requests.service';
 import { CreateCollectionDto } from './dto/create-collection.dto';
@@ -123,22 +122,17 @@ export class HttpRequestsController {
     // Wirft UnauthorizedException (→ 401 via Exception-Filter) bei ungültig/abgelaufen/verbraucht.
     const { environmentId } = this.tickets.verifyAndConsume(ticket, id);
     try {
-      const { upstream, filename } = await this.svc.openStream(id, { environmentId });
+      const { upstream, body, filename } = await this.svc.openStream(id, { environmentId });
       res.status(upstream.status);
       const ct = upstream.headers.get('content-type');
       if (ct) res.setHeader('Content-Type', ct);
       const cl = upstream.headers.get('content-length');
       if (cl && !upstream.headers.get('content-encoding')) res.setHeader('Content-Length', cl);
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      if (!upstream.body) { res.end(); return; }
-      // `Readable.from` statt `Readable.fromWeb`: der Body von fetch() ist der
-      // `ReadableStream` aus undici-types, `fromWeb` erwartet den aus
-      // `node:stream/web` — zwei Deklarationen, die TS nicht ineinander
-      // zuweisen lässt (`ReadableStreamReadDoneResult.value` optional vs.
-      // pflichtig). Genau dafür stand hier vorher `as any`. Der Body ist
-      // async-iterierbar, `from` braucht keine Behauptung; `objectMode: false`
-      // hält den Stream im Buffer-Modus wie beim Durchpipen üblich.
-      pipeline(Readable.from(upstream.body, { objectMode: false }), res, (err) => {
+      if (!body) { res.end(); return; }
+      // `body` ist bereits ein Node-Readable mit Leerlauf-Timeout und
+      // Byte-Obergrenze (M-52, HttpRequestsService.openStream).
+      pipeline(body, res, (err) => {
         if (err && !res.headersSent) {
           res.status(502).json({ message: 'Stream-Fehler: ' + err.message });
         }

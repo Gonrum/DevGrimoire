@@ -11,11 +11,28 @@ const { WebSocketServer } = require('ws');
 const pty = require('node-pty');
 const { validateKubectlArgs } = require('./kube-args');
 
-const PORT = parseInt(process.env.PORT || '9000', 10);
+/**
+ * Positive Ganzzahl aus der Umgebung, sonst Abbruch (M-24). Vorher
+ * `parseInt(...)` ohne Prüfung: `READ_MAX_BYTES=50MB` wurde zu 50,
+ * `READ_MAX_BYTES=MB50` zu NaN — und `size > NaN` ist immer false, die
+ * Grössenprüfung feuerte nie. Ein Tippfehler hob also das Limit auf. Lieber
+ * laut beim Start scheitern als still ohne Grenze laufen.
+ */
+function positiveIntEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  if (!/^\d+$/.test(raw) || Number(raw) <= 0 || !Number.isSafeInteger(Number(raw))) {
+    console.error(`FATAL: ${name}=${JSON.stringify(raw)} ist keine positive Ganzzahl`);
+    process.exit(1);
+  }
+  return Number(raw);
+}
+
+const PORT = positiveIntEnv('PORT', 9000);
 const ROOT = process.env.WORKSPACE_ROOT || '/workspaces';
 const TOKEN = process.env.WORKSPACE_API_TOKEN || '';
-const READ_MAX_BYTES = parseInt(process.env.READ_MAX_BYTES || `${5 * 1024 * 1024}`, 10);
-const STREAM_MAX_BYTES = parseInt(process.env.STREAM_MAX_BYTES || `${500 * 1024 * 1024}`, 10);
+const READ_MAX_BYTES = positiveIntEnv('READ_MAX_BYTES', 5 * 1024 * 1024);
+const STREAM_MAX_BYTES = positiveIntEnv('STREAM_MAX_BYTES', 500 * 1024 * 1024);
 const DEFAULT_TREE_DEPTH = 3;
 const MAX_TREE_DEPTH = 8;
 const MAX_TREE_ENTRIES = 5000;
@@ -50,6 +67,19 @@ if (!TOKEN || TOKEN.length < 16) {
   console.error('FATAL: WORKSPACE_API_TOKEN env var must be set and at least 16 chars long');
   process.exit(1);
 }
+
+// H-5: Ohne diese Handler beendete JEDER einzelne unbehandelte Fehler den
+// Prozess — ein ENOSPC beim Cleanup, ein ECONNRESET auf einem Terminal-Socket,
+// ein fehlendes `rg` — und mit ihm alle PTYs, laufenden Builds und
+// Kube-Sessions. Geloggt wird laut; weitergelaufen wird bewusst: ein
+// Sidecar-Neustart trifft jeden Nutzer, ein einzelner fehlgeschlagener
+// Request nur einen.
+process.on('unhandledRejection', (reason) => {
+  console.error(JSON.stringify({ type: 'unhandled-rejection', error: String(reason && reason.stack ? reason.stack : reason) }));
+});
+process.on('uncaughtException', (err) => {
+  console.error(JSON.stringify({ type: 'uncaught-exception', error: String(err && err.stack ? err.stack : err) }));
+});
 
 // Slug-style workspace ID — matches the API-side schema validator. Restricts
 // the segment to a safe character set so path joins cannot escape ROOT.
@@ -189,13 +219,34 @@ async function workspaceExists(workspaceId) {
   }
 }
 
+/**
+ * Minimale Umgebung für Kindprozesse (M-21): nur die Whitelist, nie das volle
+ * `process.env`. Vorher erbten git/rg/du — anders als /exec — alles,
+ * inklusive WORKSPACE_API_TOKEN. Über /exec liess sich `.git/config` mit
+ * `core.fsmonitor`/`core.hooksPath` präparieren; das nächste /pull führte den
+ * Code dann MIT dem Sidecar-Token in der Umgebung aus — und mit dem Token
+ * /exec auf jeden Workspace. `env` ist hier immer intern gesetzt, kein
+ * Caller-Input.
+ */
+function baseChildEnv() {
+  const safe = {};
+  for (const key of EXEC_ENV_WHITELIST_KEYS) {
+    if (process.env[key] !== undefined) safe[key] = process.env[key];
+  }
+  return safe;
+}
+
 function runProcess(cmd, args, { cwd, timeoutMs, maxOutputBytes = 10 * 1024 * 1024, env } = {}) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, {
       cwd,
-      env: { ...process.env, ...(env || {}) },
+      env: { ...baseChildEnv(), GIT_TERMINAL_PROMPT: '0', ...(env || {}) },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    // H-5: ohne 'error'-Listener (z. B. ENOENT, wenn rg/git/du fehlt) warf
+    // spawn asynchron ein 'error'-Event ohne Abnehmer -> Prozess-Ende.
+    let spawnError = null;
+    child.on('error', (err) => { spawnError = err; });
 
     let stdout = Buffer.alloc(0);
     let stderr = Buffer.alloc(0);
@@ -226,18 +277,45 @@ function runProcess(cmd, args, { cwd, timeoutMs, maxOutputBytes = 10 * 1024 * 10
     child.on('close', (code, signal) => {
       if (timer) clearTimeout(timer);
       resolve({
-        exitCode: code,
+        exitCode: spawnError ? null : code,
         signal,
         timedOut,
         truncated,
         stdout: stdout.toString('utf8'),
-        stderr: stderr.toString('utf8'),
+        stderr: spawnError ? `${stderr.toString('utf8')}${spawnError.message}` : stderr.toString('utf8'),
       });
     });
   });
 }
 
 const app = express();
+
+/**
+ * Express 4 fängt Rejections aus async Handlern nicht (H-5): ein `await`,
+ * das wirft (ensureWorkspaceDir, fsp.rm mit ENOSPC/EBUSY …), wurde zur
+ * unhandled rejection. Statt jede Route einzeln zu wrappen, reichen die
+ * Routing-Methoden jede Handler-Promise an `next(err)` weiter — eine neue
+ * Route kann es damit nicht vergessen. `app.get(name)` mit einem Argument
+ * ist der Settings-Getter und bleibt unangetastet.
+ */
+function asyncHandler(fn) {
+  return (req, res, next) => {
+    try {
+      const out = fn(req, res, next);
+      if (out && typeof out.then === 'function') out.catch(next);
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+for (const method of ['get', 'post', 'put', 'delete']) {
+  const original = app[method].bind(app);
+  app[method] = (routePath, ...handlers) => {
+    if (handlers.length === 0) return original(routePath);
+    return original(routePath, ...handlers.map((h) => (typeof h === 'function' && h.length < 4 ? asyncHandler(h) : h)));
+  };
+}
+
 app.use(express.json({ limit: '256kb' }));
 app.use(authMiddleware);
 
@@ -683,7 +761,11 @@ app.post('/exec', async (req, res) => {
     exitCode: result.exitCode,
     timedOut: result.timedOut,
     cmdLen: command.length,
-    cmdPreview: command.slice(0, 120),
+    // M-26: kein Klartext-Ausschnitt mehr. `curl -H "Authorization: …"`,
+    // `export DB_PASS=…`, `git clone https://user:pass@…` landeten sonst in
+    // docker logs und jedem Log-Driver. Der Hash erlaubt Korrelation, ohne
+    // den Inhalt preiszugeben — dieselbe Entscheidung wie beim Kubeconfig.
+    cmdSha256: crypto.createHash('sha256').update(command).digest('hex').slice(0, 16),
   }));
   res.json(result);
 });
@@ -759,7 +841,7 @@ app.post('/exec/stream', async (req, res) => {
     timedOut: done ? done.timedOut : true,
     killReason: done ? done.killReason : 'aborted',
     cmdLen: command.length,
-    cmdPreview: command.slice(0, 120),
+    cmdSha256: crypto.createHash('sha256').update(command).digest('hex').slice(0, 16),
   }));
 });
 
@@ -1043,8 +1125,13 @@ app.post('/kube/exec', async (req, res) => {
 });
 
 app.use((err, _req, res, _next) => {
-  console.error('unhandled error', err);
-  res.status(500).json({ error: err.message || 'internal error' });
+  console.error(JSON.stringify({ type: 'route-error', error: String(err && err.stack ? err.stack : err) }));
+  if (res.headersSent) {
+    // Streaming-Route mitten in der Antwort: nur noch beenden.
+    try { res.end(); } catch { /* noop */ }
+    return;
+  }
+  res.status(500).json({ error: (err && err.message) || 'internal error' });
 });
 
 // ---------------------------------------------------------------------------
@@ -1055,7 +1142,7 @@ app.use((err, _req, res, _next) => {
 // ---------------------------------------------------------------------------
 
 /**
- * Active PTYs keyed by `<workspaceId>:<sessionId>`. We keep a reference so an
+ * Active PTYs keyed by `ws:<workspaceId>:<sessionId>` bzw. `kube:<id>:<sessionId>`. We keep a reference so an
  * accidental WS close (browser tab refresh, transient network drop) gives the
  * user a few seconds to reconnect before we kill bash.
  */
@@ -1089,11 +1176,28 @@ function timingSafeTokenMatch(supplied) {
   return crypto.timingSafeEqual(a, b);
 }
 
-const wss = new WebSocketServer({ noServer: true });
+// M-22: `ws` erlaubt per Default 100 MiB pro Frame, und `term.write(raw)`
+// schob den kompletten Frame ins PTY. Tastatureingaben und Resize-Nachrichten
+// sind winzig; 1 MiB deckt auch grosses Einfügen aus der Zwischenablage ab.
+const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+
+/**
+ * sessionId kommt aus dem Query-String (M-23). Ohne Prüfung überschrieb eine
+ * wiederverwendete Id den Map-Eintrag: das alte PTY lief weiter, war aber für
+ * Limit und Idle-Reaper unsichtbar, und sein onExit löschte später den
+ * Eintrag des NEUEN Terminals — unbegrenzt PTYs trotz Limit. `:` ist der
+ * Trenner der Map-Keys und deshalb nicht erlaubt.
+ */
+const TERMINAL_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 const server = http.createServer(app);
 
 server.on('upgrade', (req, socket, head) => {
+  // H-5: ohne Listener beendete ein Socket-Fehler (ECONNRESET während des
+  // Handshakes) den Prozess.
+  socket.on('error', (err) => {
+    console.error(JSON.stringify({ type: 'upgrade-socket-error', error: String(err && err.message ? err.message : err) }));
+  });
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   if (url.pathname !== '/term') {
     socket.destroy();
@@ -1123,6 +1227,19 @@ server.on('upgrade', (req, socket, head) => {
   }
 
   const sessionId = url.searchParams.get('sessionId') || crypto.randomUUID();
+  if (!TERMINAL_SESSION_ID_PATTERN.test(sessionId)) {
+    socket.write('HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  const terminalKey = kubeSessionId
+    ? `kube:${kubeSessionId}:${sessionId}`
+    : `ws:${workspaceId}:${sessionId}`;
+  if (activeTerminals.has(terminalKey)) {
+    socket.write('HTTP/1.1 409 Conflict\r\nContent-Length: 0\r\n\r\n');
+    socket.destroy();
+    return;
+  }
 
   if (kubeSessionId) {
     if (!KUBE_SESSION_DIR_IS_TMPFS) {
@@ -1163,7 +1280,9 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
-  if (countTerminalsFor(workspaceId) >= TERMINAL_MAX_PER_WORKSPACE) {
+  // Eigener Key-Präfix `ws:` (M-23): WORKSPACE_ID_PATTERN erlaubt den Slug
+  // `kube`, dessen Terminals sonst mit den Kube-Session-Keys kollidierten.
+  if (countTerminalsFor(`ws:${workspaceId}`) >= TERMINAL_MAX_PER_WORKSPACE) {
     socket.write('HTTP/1.1 429 Too Many Terminals\r\nContent-Length: 0\r\n\r\n');
     socket.destroy();
     return;
@@ -1181,16 +1300,54 @@ server.on('upgrade', (req, socket, head) => {
  * routes socket input to keystrokes (or a resize control message), and
  * tears both down together on exit/close. Shared verbatim by the workspace
  * terminal and the kube-cluster terminal — `key` is whatever activeTerminals
- * key the caller used (`<workspaceId>:<sessionId>` or
+ * key the caller used (`ws:<workspaceId>:<sessionId>` or
  * `kube:<kubeSessionId>:<sessionId>`); this function treats it as an opaque
  * bookkeeping/log id, never branches on its shape.
  */
 function wireTerminal(ws, term, state, key) {
+  // Nur den EIGENEN Eintrag entfernen (M-23) — nie einen, den inzwischen ein
+  // anderes Terminal unter demselben Key hält.
+  const release = () => {
+    if (activeTerminals.get(key) === state) activeTerminals.delete(key);
+  };
+
+  // M-22: Backpressure. Ohne sie wuchs der Sendepuffer bei einem langsamen
+  // Client unbegrenzt (`yes | base64`), bis der OOM-Kill node traf — und mit
+  // ihm alle Terminals. Über HIGH wird das PTY pausiert, unter LOW fortgesetzt.
+  const HIGH_WATER = 4 * 1024 * 1024;
+  const LOW_WATER = 512 * 1024;
+  let paused = false;
+  let drainTimer = null;
+  const resumeWhenDrained = () => {
+    if (drainTimer) return;
+    drainTimer = setInterval(() => {
+      if (ws.readyState !== ws.OPEN || ws.bufferedAmount < LOW_WATER) {
+        clearInterval(drainTimer);
+        drainTimer = null;
+        paused = false;
+        try { term.resume(); } catch { /* pty dead */ }
+      }
+    }, 50);
+  };
+
   term.onData((data) => {
     state.lastActivity = Date.now();
     if (ws.readyState === ws.OPEN) {
       try { ws.send(data); } catch { /* socket dying */ }
+      if (!paused && ws.bufferedAmount > HIGH_WATER) {
+        paused = true;
+        try { term.pause(); } catch { /* pty dead */ }
+        resumeWhenDrained();
+      }
     }
+  });
+
+  // H-5: Socket-Fehler kommen als Event, nicht als Throw aus send(); ohne
+  // Listener beendete ein ECONNRESET den Prozess.
+  ws.on('error', (err) => {
+    console.error(JSON.stringify({ type: 'terminal-ws-error', key, error: String(err && err.message ? err.message : err) }));
+    try { term.kill(); } catch { /* noop */ }
+    release();
   });
   term.onExit(({ exitCode, signal }) => {
     console.log(JSON.stringify({
@@ -1202,7 +1359,8 @@ function wireTerminal(ws, term, state, key) {
         ws.close(1000, 'shell exited');
       } catch { /* noop */ }
     }
-    activeTerminals.delete(key);
+    if (drainTimer) clearInterval(drainTimer);
+    release();
   });
 
   ws.on('message', (raw, isBinary) => {
@@ -1229,7 +1387,8 @@ function wireTerminal(ws, term, state, key) {
 
   ws.on('close', () => {
     try { term.kill(); } catch { /* noop */ }
-    activeTerminals.delete(key);
+    if (drainTimer) clearInterval(drainTimer);
+    release();
     // Snapshot the last-known cwd so the per-command /exec path picks up
     // where the interactive session left off. node-pty doesn't expose a
     // cwd field directly, but bash's PWD env via a final command would —
@@ -1259,7 +1418,7 @@ async function handleTerminalConnection(ws, workspaceId, sessionId) {
     },
   });
 
-  const key = `${workspaceId}:${sessionId}`;
+  const key = `ws:${workspaceId}:${sessionId}`;
   const state = { pty: term, ws, lastActivity: Date.now() };
   activeTerminals.set(key, state);
 
@@ -1313,6 +1472,20 @@ async function handleKubeTerminalConnection(ws, kubeSessionId, sessionId) {
 
   wireTerminal(ws, term, state, key);
 }
+
+// M-25: SIGTERM sauber behandeln (docker stop). Vorher gab es keinen Handler;
+// node als PID 1 ignoriert SIGTERM ohne Handler, docker wartete die 10 s ab
+// und schickte SIGKILL — PTYs ohne Gelegenheit zum Aufräumen.
+function shutdown(signal) {
+  console.log(JSON.stringify({ type: 'shutdown', signal, terminals: activeTerminals.size }));
+  for (const state of activeTerminals.values()) {
+    try { state.pty.kill(); } catch { /* noop */ }
+  }
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 5000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 server.listen(PORT, () => {
   console.log(`devgrimoire-workspace sidecar listening on :${PORT}, root=${ROOT}`);

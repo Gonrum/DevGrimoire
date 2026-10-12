@@ -810,11 +810,31 @@ async function bootstrap() {
     upstreamUrl.searchParams.set('workspaceId', workspaceId);
     if (sessionId) upstreamUrl.searchParams.set('sessionId', sessionId);
 
+    // M-53: `ws` hat per Default KEIN Handshake-Timeout. Hing der Sidecar
+    // (SYN-Blackhole, DROP statt REJECT, halbtoter Container), kam weder
+    // `open` noch `error`, und der Browser-Socket blieb unbeantwortet offen —
+    // pro Versuch ein FD-Paar, das nichts mehr aufräumte.
     const upstream = new WebSocket(upstreamUrl.toString(), {
       headers: { Authorization: `Bearer ${SIDECAR_TOKEN}` },
+      handshakeTimeout: 10_000,
     });
+    // Bricht der Browser ab, bevor der Sidecar antwortet, den Upstream nicht
+    // weiter offenhalten.
+    const onEarlyClose = () => { try { upstream.terminate(); } catch { /* noop */ } };
+    socket.once('close', onEarlyClose);
+    socket.on('error', onEarlyClose);
+    // Gilt NUR bis zum Upgrade: danach ist `socket` ein WebSocket, und ein
+    // `HTTP/1.1 502` roh hineinzuschreiben (vorher der Fall) zerstört den
+    // Frame-Strom. Nach dem Upgrade übernimmt der Handler im open-Zweig.
+    const onUpstreamPreOpenError = () => reject(502, 'Bad Gateway');
+    upstream.once('error', onUpstreamPreOpenError);
 
     upstream.on('open', () => {
+      upstream.off('error', onUpstreamPreOpenError);
+      socket.off('close', onEarlyClose);
+      // Lückenlos ein Listener: zwischen `open` und dem Upgrade-Callback gäbe
+      // es sonst keinen, und ein 'error'-Event ohne Abnehmer beendet node.
+      upstream.on('error', () => { try { upstream.terminate(); } catch { /* noop */ } });
       // RequestContext um den Callback: die hier registrierten Listener erben
       // den Kontext über die AsyncLocalStorage, und jeder künftige Service-
       // Aufruf in diesem Pfad sieht denselben Actor wie die Prüfung oben.
@@ -839,8 +859,6 @@ async function bootstrap() {
         upstream.on('error', () => close(1011, 'upstream error'));
       }));
     });
-
-    upstream.on('error', () => reject(502, 'Bad Gateway'));
   }));
 
   // ─── WebSocket SSH terminal ──────────────────────────────────────────

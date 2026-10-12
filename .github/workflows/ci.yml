@@ -42,6 +42,8 @@ jobs:
       # Frischer Build, kein inkrementelles tsbuildinfo aus dist/ (siehe
       # Review: veraltetes dist/ lässt die Checks gegen alten Code laufen).
       - run: rm -rf dist && npx nest build
+      # check:socket-safety startet den echten Workspace-Sidecar (node-pty).
+      - run: npm ci --prefix ../workspace/server
       # Alle check:*-Skripte ausser den drei Live-Checks; die Liste steht in
       # scripts/run-checks.cjs. Der i18n-Check liest frontend/src mit.
       - run: npm run checks

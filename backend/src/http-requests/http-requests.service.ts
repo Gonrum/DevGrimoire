@@ -27,9 +27,18 @@ import {
 import { SendRequestDto } from './dto/send-request.dto';
 import { buildResolutionContext, resolveRequest, maskSecrets } from './template-resolver';
 import { readBodyCapped } from '../common/read-body-capped';
+import { Readable } from 'node:stream';
+import { guardStream } from '../common/stream-guard';
 
 const HISTORY_TTL_DAYS = 30;
 const MAX_RESPONSE_BODY = 1_000_000; // 1 MB, wie in der Spec
+/** Streaming-Download (M-52): Abbruch nach so langer Funkstille. */
+const DOWNLOAD_IDLE_TIMEOUT_MS = 60_000;
+/** Streaming-Download (M-52): Obergrenze, über HTTP_REQUESTS_DOWNLOAD_MAX_BYTES einstellbar. */
+const DOWNLOAD_MAX_BYTES = (() => {
+  const n = Number(process.env.HTTP_REQUESTS_DOWNLOAD_MAX_BYTES);
+  return Number.isSafeInteger(n) && n > 0 ? n : 2 * 1024 * 1024 * 1024;
+})();
 
 export interface SendResult {
   historyId: string;
@@ -546,22 +555,41 @@ export class HttpRequestsService {
   }
 
   // Streaming-Pfad: löst den Request auf, macht fetch OHNE den Body zu lesen und
-  // gibt die rohe Response zum Durchpipen zurück. Kein Cap, kein Timeout-Abort
-  // (der Download darf beliebig lange laufen).
+  // gibt den Body bewacht zum Durchpipen zurück (M-52). Vorher „kein Cap, kein
+  // Timeout-Abort": ein Upstream, der nie antwortet, hielt beide Sockets
+  // unbegrenzt offen. Jetzt: Header-Timeout wie bei send(), danach ein
+  // Leerlauf-Timeout und eine Byte-Obergrenze. Ein grosser Download, der
+  // fliesst, darf weiter beliebig lange dauern.
   async openStream(
     id: string,
     opts: { environmentId?: string } = {},
-  ): Promise<{ upstream: Response; filename: string; environmentName?: string }> {
+  ): Promise<{ upstream: Response; body: Readable | null; filename: string; environmentName?: string }> {
     const base = await this.getRequest(id);
     const prep = await this.prepareOutgoing(base, opts);
+    const controller = new AbortController();
+    const headerTimeoutMs = Math.min(prep.resolved.timeoutMs ?? 30000, 120000);
+    const headerTimer = setTimeout(() => controller.abort(), headerTimeoutMs);
     const init: RequestInit = {
       method: prep.method,
       headers: prep.headers,
       redirect: prep.resolved.followRedirects ? 'follow' : 'manual',
+      signal: controller.signal,
     };
     if (prep.bodyInit !== undefined) init.body = prep.bodyInit;
-    const upstream = await fetch(prep.target.toString(), init);
-    return { upstream, filename: deriveFilename(upstream, base), environmentName: prep.environmentName };
+    let upstream: Response;
+    try {
+      upstream = await fetch(prep.target.toString(), init);
+    } finally {
+      clearTimeout(headerTimer);
+    }
+    const body = upstream.body
+      ? guardStream(Readable.from(upstream.body, { objectMode: false }), {
+        idleMs: DOWNLOAD_IDLE_TIMEOUT_MS,
+        maxBytes: DOWNLOAD_MAX_BYTES,
+        onAbort: () => controller.abort(),
+      })
+      : null;
+    return { upstream, body, filename: deriveFilename(upstream, base), environmentName: prep.environmentName };
   }
 
   // ---- Cascade cleanup ----------------------------------------------------

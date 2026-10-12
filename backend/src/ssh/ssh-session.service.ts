@@ -76,6 +76,13 @@ const STDOUT_LIMIT = 256 * 1024;
 const STDERR_LIMIT = 64 * 1024;
 const SIGKILL_GRACE_MS = 5_000;
 const DEFAULT_DOWNLOAD_BYTES = 1_048_576; // 1 MB
+/** M-44: Obergrenze für Up-/Downloads per SFTP (SSH_SFTP_TIMEOUT_MS, Default 15 min). */
+const SFTP_TRANSFER_TIMEOUT_MS = (() => {
+  const n = Number(process.env.SSH_SFTP_TIMEOUT_MS);
+  return Number.isSafeInteger(n) && n > 0 ? n : 15 * 60_000;
+})();
+/** M-44: Obergrenze für Verzeichnislisten per SFTP. */
+const SFTP_LIST_TIMEOUT_MS = 2 * 60_000;
 const HARD_MAX_DOWNLOAD_BYTES = 10_485_760; // 10 MB
 const DEFAULT_LIST_ENTRIES = 200;
 const HARD_MAX_LIST_ENTRIES = 2000;
@@ -814,57 +821,63 @@ export class SshSessionService {
     const startedAt = Date.now();
     const sourceContext = opts.sourceContext ?? 'mcp';
     await this.acquireSlot(connId);
-    let client: Ssh2Client | null = null;
+    // Halter statt `let`: die Zuweisung passiert im Watchdog-Callback, die
+    // Kontrollflussanalyse sähe im finally sonst immer `null`.
+    const held: { client: Ssh2Client | null } = { client: null };
     try {
-      const connection = await this.sshService.findById(connId);
-      // Effective per-connection cap (global setting > override > default,
-      // clamped to 500 MB). Checked inside the slot so the finally still
-      // balances, but before we open any network resource.
-      const limit = await this.resolveUploadLimit(connection);
-      if (content.length > limit) {
-        throw new Error(`upload_too_large: ${content.length} > ${limit}`);
-      }
-      const creds = await this.resolveCredentialsOrFail(connection);
-      client = await this.openClient(connection, creds);
-      const sftp = await this.openSftp(client);
-
-      if (opts.createDirs) {
-        await this.ensureParentDirs(sftp, remotePath);
-      }
-
-      // For append the chunk alone says nothing about the limit — what matters
-      // is what the file grows to. A missing remote file counts as size 0 so
-      // the first chunk creates it.
-      if (opts.append) {
-        const existing = await this.statAppendBaseline(sftp, remotePath);
-        if (existing + content.length > limit) {
-          throw new Error(
-            `upload_too_large: ${existing} existing + ${content.length} appended > ${limit}`,
-          );
+      return await this.withOpTimeout(SFTP_TRANSFER_TIMEOUT_MS, 'sftpUpload', async () => {
+        const connection = await this.sshService.findById(connId);
+        // Effective per-connection cap (global setting > override > default,
+        // clamped to 500 MB). Checked inside the slot so the finally still
+        // balances, but before we open any network resource.
+        const limit = await this.resolveUploadLimit(connection);
+        if (content.length > limit) {
+          throw new Error(`upload_too_large: ${content.length} > ${limit}`);
         }
-      }
+        const creds = await this.resolveCredentialsOrFail(connection);
+        const client = await this.openClient(connection, creds);
+        held.client = client;
+        const sftp = await this.openSftp(client);
 
-      const result = await this.runSftpWrite(
-        sftp,
-        remotePath,
-        content,
-        opts.mode ?? 0o644,
-        opts.append ? 'a' : 'w',
-      );
-      result.sha256 = sha256Hex(content);
+        if (opts.createDirs) {
+          await this.ensureParentDirs(sftp, remotePath);
+        }
 
-      void this.writeAudit({
-        connectionId: connection._id,
-        action: 'upload',
-        sourceContext,
-        userId: opts.userId,
-        remotePath,
-        bytes: result.bytesWritten,
-        durationMs: Date.now() - startedAt,
+        // For append the chunk alone says nothing about the limit — what matters
+        // is what the file grows to. A missing remote file counts as size 0 so
+        // the first chunk creates it.
+        if (opts.append) {
+          const existing = await this.statAppendBaseline(sftp, remotePath);
+          if (existing + content.length > limit) {
+            throw new Error(
+              `upload_too_large: ${existing} existing + ${content.length} appended > ${limit}`,
+            );
+          }
+        }
+
+        const result = await this.runSftpWrite(
+          sftp,
+          remotePath,
+          content,
+          opts.mode ?? 0o644,
+          opts.append ? 'a' : 'w',
+        );
+        result.sha256 = sha256Hex(content);
+
+        void this.writeAudit({
+          connectionId: connection._id,
+          action: 'upload',
+          sourceContext,
+          userId: opts.userId,
+          remotePath,
+          bytes: result.bytesWritten,
+          durationMs: Date.now() - startedAt,
+        });
+
+        return result;
       });
-
-      return result;
     } finally {
+      const client = held.client;
       if (client) {
         try { client.end(); } catch { /* noop */ }
         try { client.destroy(); } catch { /* noop */ }
@@ -889,43 +902,49 @@ export class SshSessionService {
     const startedAt = Date.now();
     const sourceContext = opts.sourceContext ?? 'mcp';
     await this.acquireSlot(connId);
-    let client: Ssh2Client | null = null;
+    // Halter statt `let`: die Zuweisung passiert im Watchdog-Callback, die
+    // Kontrollflussanalyse sähe im finally sonst immer `null`.
+    const held: { client: Ssh2Client | null } = { client: null };
     try {
-      const connection = await this.sshService.findById(connId);
-      const limit = opts.limitBytes ?? (await this.resolveUploadLimit(connection));
-      if (opts.expectedSize !== undefined && opts.expectedSize > limit) {
-        // Pre-check before opening any network resource.
-        try { source.destroy(); } catch { /* noop */ }
-        throw new Error(`upload_too_large: ${opts.expectedSize} > ${limit}`);
-      }
-      const creds = await this.resolveCredentialsOrFail(connection);
-      client = await this.openClient(connection, creds);
-      const sftp = await this.openSftp(client);
+      return await this.withOpTimeout(SFTP_TRANSFER_TIMEOUT_MS, 'sftpUploadStream', async () => {
+        const connection = await this.sshService.findById(connId);
+        const limit = opts.limitBytes ?? (await this.resolveUploadLimit(connection));
+        if (opts.expectedSize !== undefined && opts.expectedSize > limit) {
+          // Pre-check before opening any network resource.
+          try { source.destroy(); } catch { /* noop */ }
+          throw new Error(`upload_too_large: ${opts.expectedSize} > ${limit}`);
+        }
+        const creds = await this.resolveCredentialsOrFail(connection);
+        const client = await this.openClient(connection, creds);
+        held.client = client;
+        const sftp = await this.openSftp(client);
 
-      if (opts.createDirs) {
-        await this.ensureParentDirs(sftp, remotePath);
-      }
+        if (opts.createDirs) {
+          await this.ensureParentDirs(sftp, remotePath);
+        }
 
-      const result = await this.runSftpWriteStream(
-        sftp,
-        remotePath,
-        source,
-        opts.mode ?? 0o644,
-        limit,
-      );
+        const result = await this.runSftpWriteStream(
+          sftp,
+          remotePath,
+          source,
+          opts.mode ?? 0o644,
+          limit,
+        );
 
-      void this.writeAudit({
-        connectionId: connection._id,
-        action: 'upload',
-        sourceContext,
-        userId: opts.userId,
-        remotePath,
-        bytes: result.bytesWritten,
-        durationMs: Date.now() - startedAt,
+        void this.writeAudit({
+          connectionId: connection._id,
+          action: 'upload',
+          sourceContext,
+          userId: opts.userId,
+          remotePath,
+          bytes: result.bytesWritten,
+          durationMs: Date.now() - startedAt,
+        });
+
+        return result;
       });
-
-      return result;
     } finally {
+      const client = held.client;
       if (client) {
         try { client.end(); } catch { /* noop */ }
         try { client.destroy(); } catch { /* noop */ }
@@ -946,26 +965,32 @@ export class SshSessionService {
       HARD_MAX_DOWNLOAD_BYTES,
     );
     await this.acquireSlot(connId);
-    let client: Ssh2Client | null = null;
+    // Halter statt `let`: die Zuweisung passiert im Watchdog-Callback, die
+    // Kontrollflussanalyse sähe im finally sonst immer `null`.
+    const held: { client: Ssh2Client | null } = { client: null };
     try {
-      const connection = await this.sshService.findById(connId);
-      const creds = await this.resolveCredentialsOrFail(connection);
-      client = await this.openClient(connection, creds);
-      const sftp = await this.openSftp(client);
-      const result = await this.runSftpRead(sftp, remotePath, maxBytes);
+      return await this.withOpTimeout(SFTP_TRANSFER_TIMEOUT_MS, 'sftpDownload', async () => {
+        const connection = await this.sshService.findById(connId);
+        const creds = await this.resolveCredentialsOrFail(connection);
+        const client = await this.openClient(connection, creds);
+        held.client = client;
+        const sftp = await this.openSftp(client);
+        const result = await this.runSftpRead(sftp, remotePath, maxBytes);
 
-      void this.writeAudit({
-        connectionId: connection._id,
-        action: 'download',
-        sourceContext,
-        userId: opts.userId,
-        remotePath,
-        bytes: result.bytesRead,
-        durationMs: Date.now() - startedAt,
+        void this.writeAudit({
+          connectionId: connection._id,
+          action: 'download',
+          sourceContext,
+          userId: opts.userId,
+          remotePath,
+          bytes: result.bytesRead,
+          durationMs: Date.now() - startedAt,
+        });
+
+        return result;
       });
-
-      return result;
     } finally {
+      const client = held.client;
       if (client) {
         try { client.end(); } catch { /* noop */ }
         try { client.destroy(); } catch { /* noop */ }
@@ -986,30 +1011,36 @@ export class SshSessionService {
       HARD_MAX_LIST_ENTRIES,
     );
     await this.acquireSlot(connId);
-    let client: Ssh2Client | null = null;
+    // Halter statt `let`: die Zuweisung passiert im Watchdog-Callback, die
+    // Kontrollflussanalyse sähe im finally sonst immer `null`.
+    const held: { client: Ssh2Client | null } = { client: null };
     try {
-      const connection = await this.sshService.findById(connId);
-      const creds = await this.resolveCredentialsOrFail(connection);
-      client = await this.openClient(connection, creds);
-      const sftp = await this.openSftp(client);
-      const result = await this.runListFiles(
-        sftp,
-        remotePath,
-        maxEntries,
-        !!opts.recursive,
-      );
+      return await this.withOpTimeout(SFTP_LIST_TIMEOUT_MS, 'listFiles', async () => {
+        const connection = await this.sshService.findById(connId);
+        const creds = await this.resolveCredentialsOrFail(connection);
+        const client = await this.openClient(connection, creds);
+        held.client = client;
+        const sftp = await this.openSftp(client);
+        const result = await this.runListFiles(
+          sftp,
+          remotePath,
+          maxEntries,
+          !!opts.recursive,
+        );
 
-      void this.writeAudit({
-        connectionId: connection._id,
-        action: 'list_files',
-        sourceContext,
-        userId: opts.userId,
-        remotePath,
-        durationMs: Date.now() - startedAt,
+        void this.writeAudit({
+          connectionId: connection._id,
+          action: 'list_files',
+          sourceContext,
+          userId: opts.userId,
+          remotePath,
+          durationMs: Date.now() - startedAt,
+        });
+
+        return result;
       });
-
-      return result;
     } finally {
+      const client = held.client;
       if (client) {
         try { client.end(); } catch { /* noop */ }
         try { client.destroy(); } catch { /* noop */ }
@@ -1845,6 +1876,33 @@ export class SshSessionService {
       }, CONCURRENCY_WAIT_MS);
       state.queue.push({ resolve, reject, timer });
     });
+  }
+
+  /**
+   * Watchdog für SFTP-Operationen (M-44). `runExec` hat drei (absolut, idle,
+   * SIGKILL-Grace), die SFTP-Pfade hatten keinen: hing das SFTP-Subsystem der
+   * Gegenstelle (Write-Callback kommt nie), settlete die Promise nie, das
+   * `finally` lief nie, und `releaseSlot` + `client.destroy()` blieben aus.
+   * Nach fünf Hängern war CONCURRENCY_LIMIT erschöpft — jede weitere
+   * Operation gegen diese Verbindung, auch von anderen Nutzern, scheiterte.
+   *
+   * Läuft die Zeit ab, wird abgelehnt; das `finally` des Aufrufers räumt dann
+   * Client und Slot auf. Die hängende innere Promise wird aufgegeben — mit
+   * zerstörtem Client kann sie nichts mehr anrichten.
+   */
+  private async withOpTimeout<T>(ms: number, op: string, work: () => Promise<T>): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, rejectTimeout) => {
+      timer = setTimeout(() => rejectTimeout(new Error(`timeout: ${op} nach ${ms} ms`)), ms);
+    });
+    const running = work();
+    // Eine spätere Ablehnung der aufgegebenen Promise darf nicht unbehandelt bleiben.
+    running.catch(() => undefined);
+    try {
+      return await Promise.race([running, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   private releaseSlot(connId: string): void {

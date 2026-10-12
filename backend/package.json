@@ -41,6 +41,7 @@
     "check:actor-scope": "node scripts/actor-scope-check.cjs",
     "check:entity-scope": "node scripts/entity-scope-check.cjs",
     "check:ssh-scope": "node scripts/ssh-scope-check.cjs",
+    "check:socket-safety": "node scripts/socket-safety-check.cjs",
     "check:query-filter-safety": "node scripts/query-filter-safety-check.cjs",
     "check:load-safety": "node scripts/load-safety-check.cjs",
     "check:notifications-user-scope": "node scripts/notifications-user-scope-check.cjs",
