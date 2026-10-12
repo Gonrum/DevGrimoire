@@ -28,6 +28,7 @@ import {
 } from '../doc-update-proposals/schemas/doc-update-proposal.schema';
 import { Commit, CommitDocument } from '../commits/schemas/commit.schema';
 import { projectIdFilter } from '../common/project-id-filter';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 const REBUILD_ENTITIES: Array<ProjectChangeEvent['entity']> = [
   'todo',
@@ -161,6 +162,7 @@ export class KnowledgeGraphService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     if (!Types.ObjectId.isValid(projectId)) return;
     await this.edgeModel.deleteMany({ projectId: new Types.ObjectId(projectId) }).exec();
   }

@@ -7,6 +7,7 @@ import { CreateResearchDto } from './dto/create-research.dto';
 import { UpdateResearchDto } from './dto/update-research.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 @Injectable()
 export class ResearchService {
@@ -87,10 +88,12 @@ export class ResearchService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.researchModel.deleteMany({ projectId }).exec();
   }
 
   async removeByCustomer(customerId: string): Promise<void> {
+    assertSafeCascadeId(customerId, 'customerId');
     await this.researchModel.deleteMany({ customerId }).exec();
   }
 }

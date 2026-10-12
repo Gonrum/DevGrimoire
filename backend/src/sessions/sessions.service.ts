@@ -6,6 +6,7 @@ import { Session, SessionDocument } from './schemas/session.schema';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 @Injectable()
 export class SessionsService {
@@ -51,6 +52,7 @@ export class SessionsService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.sessionModel.deleteMany({ projectId }).exec();
   }
 }

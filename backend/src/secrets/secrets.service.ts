@@ -18,6 +18,7 @@ import {
   actorCanAccessCustomer,
   actorCanAccessProject,
 } from '../common/permissions';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 export interface SecretListItem {
   _id: string;
@@ -190,10 +191,12 @@ export class SecretsService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.secretModel.deleteMany({ projectId }).exec();
   }
 
   async removeByCustomer(customerId: string): Promise<void> {
+    assertSafeCascadeId(customerId, 'customerId');
     await this.secretModel.deleteMany({ customerId }).exec();
   }
 

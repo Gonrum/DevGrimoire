@@ -15,6 +15,7 @@ import {
 } from '../common/permissions';
 import { buildDualScopeFilter } from '../common/scope';
 import { ForbiddenException } from '@nestjs/common';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 @Injectable()
 export class KnowledgeService {
@@ -181,10 +182,12 @@ export class KnowledgeService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.knowledgeModel.deleteMany({ projectId }).exec();
   }
 
   async removeByCustomer(customerId: string): Promise<void> {
+    assertSafeCascadeId(customerId, 'customerId');
     await this.knowledgeModel.deleteMany({ customerId }).exec();
   }
 }

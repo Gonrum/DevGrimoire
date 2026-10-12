@@ -8,6 +8,7 @@ import { CreateSchemaDto } from './dto/create-schema.dto';
 import { UpdateSchemaDto } from './dto/update-schema.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 @Injectable()
 export class SchemasService {
@@ -117,6 +118,7 @@ export class SchemasService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     const schemas = await this.dbSchemaModel.find({ projectId }).exec();
     const schemaIds = schemas.map((s) => s._id);
     await this.schemaVersionModel.deleteMany({ schemaId: { $in: schemaIds } }).exec();

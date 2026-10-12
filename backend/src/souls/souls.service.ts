@@ -5,6 +5,7 @@ import { Model } from 'mongoose';
 import { Soul, SoulDocument } from './schemas/soul.schema';
 import { UpdateSoulDto } from './dto/update-soul.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 interface SoulOwner {
   projectId?: string;
@@ -62,10 +63,12 @@ export class SoulsService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.soulModel.deleteMany({ projectId }).exec();
   }
 
   async removeByCustomer(customerId: string): Promise<void> {
+    assertSafeCascadeId(customerId, 'customerId');
     await this.soulModel.deleteMany({ customerId }).exec();
   }
 

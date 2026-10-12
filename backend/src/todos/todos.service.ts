@@ -25,6 +25,7 @@ import {
   actorCanAccessProject,
 } from '../common/permissions';
 import { buildDualScopeFilter } from '../common/scope';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 const STATUS_ORDER: TodoStatus[] = [
   TodoStatus.OPEN,
@@ -282,10 +283,12 @@ export class TodosService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.todoModel.deleteMany({ projectId }).exec();
   }
 
   async removeByCustomer(customerId: string): Promise<void> {
+    assertSafeCascadeId(customerId, 'customerId');
     await this.todoModel.deleteMany({ customerId }).exec();
   }
 }

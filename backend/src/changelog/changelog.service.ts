@@ -7,6 +7,7 @@ import { CreateChangelogDto } from './dto/create-changelog.dto';
 import { UpdateChangelogDto } from './dto/update-changelog.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 @Injectable()
 export class ChangelogService {
@@ -71,6 +72,7 @@ export class ChangelogService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.changelogModel.deleteMany({ projectId }).exec();
   }
 }

@@ -22,6 +22,7 @@ import {
   actorCanAccessProject,
 } from '../common/permissions';
 import { MAX_ATTACHMENT_SIZE, base64DecodedSize } from './attachment-limits';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 /** Mimetypes treated as extractable text */
 const TEXT_MIMETYPES = new Set([
@@ -293,6 +294,7 @@ export class AttachmentsService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     const attachments = await this.attachmentModel.find({ projectId }).exec();
     if (attachments.length === 0) return;
     const keys = attachments.map((a) => a.storageKey);
@@ -303,6 +305,7 @@ export class AttachmentsService {
   }
 
   async removeByCustomer(customerId: string): Promise<void> {
+    assertSafeCascadeId(customerId, 'customerId');
     const attachments = await this.attachmentModel.find({ customerId }).exec();
     if (attachments.length === 0) return;
     const keys = attachments.map((a) => a.storageKey);

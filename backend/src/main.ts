@@ -86,6 +86,7 @@ import { resolveTrustProxy } from './common/trust-proxy';
 import { EventsBusService, QuestionEvent } from './events/events-bus.service';
 import { ProjectChangeEvent } from './events/project-event';
 import { Subscription } from 'rxjs';
+import { ScalarQueryPipe } from './common/scalar-query.pipe';
 
 function createMcpServer(services: McpServices): Server {
   const server = new Server(
@@ -725,6 +726,9 @@ async function bootstrap() {
     origin: process.env.CORS_ORIGIN || 'http://localhost:8080',
   });
   app.useGlobalPipes(
+    // Vor der ValidationPipe: skalare String-Query-Parameter dürfen weder
+    // Objekt noch Array sein (M-2).
+    new ScalarQueryPipe(),
     new ValidationPipe({
       whitelist: true,
       transform: true,

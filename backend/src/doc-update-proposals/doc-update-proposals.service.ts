@@ -26,6 +26,7 @@ import { TodosService } from '../todos/todos.service';
 import { TodoDocument, TodoPriority, TodoStatus } from '../todos/schemas/todo.schema';
 import { Manual, ManualDocument } from '../manuals/schemas/manual.schema';
 import { Knowledge, KnowledgeDocument } from '../knowledge/schemas/knowledge.schema';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 const ALLOWED_TRANSITIONS: Record<DocProposalStatus, DocProposalStatus[]> = {
   [DocProposalStatus.OPEN]: [
@@ -229,6 +230,7 @@ export class DocUpdateProposalsService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     if (!Types.ObjectId.isValid(projectId)) return;
     await this.proposalModel.deleteMany({ projectId: new Types.ObjectId(projectId) }).exec();
   }

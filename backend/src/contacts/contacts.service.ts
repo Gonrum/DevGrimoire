@@ -7,6 +7,7 @@ import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 import { CustomersService } from '../customers/customers.service';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 @Injectable()
 export class ContactsService {
@@ -76,6 +77,7 @@ export class ContactsService {
   }
 
   async removeByCustomer(customerId: string): Promise<void> {
+    assertSafeCascadeId(customerId, 'customerId');
     await this.contactModel
       .deleteMany({ customerId: this.objectId(customerId, 'customerId') })
       .exec();

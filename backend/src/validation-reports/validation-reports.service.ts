@@ -11,6 +11,7 @@ import {
 import { PROJECT_CHANGED } from '../events/project-event';
 import { TodosService } from '../todos/todos.service';
 import { TodoPriority, TodoStatus, TodoDocument } from '../todos/schemas/todo.schema';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/(Authorization:\s*Bearer\s+)[^\s]+/gi, '$1***'],
@@ -86,6 +87,7 @@ export class ValidationReportsService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.reportModel.deleteMany({ projectId: new Types.ObjectId(projectId) }).exec();
   }
 

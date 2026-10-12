@@ -23,6 +23,7 @@ import {
   OracleSuggestionStatus,
 } from './schemas/oracle-suggestion.schema';
 import { KgEntityType } from '../knowledge-graph/schemas/knowledge-graph-edge.schema';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 const STAGNATION_DAYS = 14;
 const STAGNATION_CRITICAL_DAYS = 30;
@@ -512,6 +513,7 @@ export class OracleService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     if (!Types.ObjectId.isValid(projectId)) return;
     await this.suggestionModel.deleteMany({ projectId: new Types.ObjectId(projectId) }).exec();
   }

@@ -7,6 +7,7 @@ import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { RequestContext } from '../common/request-context';
 import { projectIdFilter } from '../common/project-id-filter';
 import { actorCanAccessProject, actorCanAccessCustomer } from '../common/permissions';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 @Injectable()
 export class ActivitiesService {
@@ -104,10 +105,12 @@ export class ActivitiesService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.activityModel.deleteMany({ projectId }).exec();
   }
 
   async removeByCustomer(customerId: string): Promise<void> {
+    assertSafeCascadeId(customerId, 'customerId');
     await this.activityModel.deleteMany({ customerId }).exec();
   }
 }

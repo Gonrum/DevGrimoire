@@ -8,6 +8,7 @@ import { UpdateDependencyDto } from './dto/update-dependency.dto';
 import { BulkCreateDependencyDto } from './dto/bulk-create-dependency.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 @Injectable()
 export class DependenciesService {
@@ -115,6 +116,7 @@ export class DependenciesService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.dependencyModel.deleteMany({ projectId }).exec();
   }
 }

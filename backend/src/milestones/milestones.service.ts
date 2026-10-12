@@ -14,6 +14,7 @@ import { projectIdFilter } from '../common/project-id-filter';
 import { TodosService } from '../todos/todos.service';
 import { TodoDocument, TodoPriority, TodoStatus } from '../todos/schemas/todo.schema';
 import { ChatLlmService } from '../chat/chat-llm.service';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 // ── AI-Complete types ─────────────────────────────────────────────────────────
 
@@ -673,6 +674,7 @@ export class MilestonesService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.milestoneModel.deleteMany({ projectId }).exec();
   }
 

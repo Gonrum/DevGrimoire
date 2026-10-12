@@ -145,7 +145,11 @@ export class AuditLogService {
       query.actorUserId = new Types.ObjectId(filters.actorUserId);
     }
     if (filters.actorType === 'user') {
-      query.actorUserId = { ...((query.actorUserId) ?? {}), $exists: true };
+      // M-1: vorher `{ ...query.actorUserId, $exists: true }`. Ein ObjectId
+      // spreadet zu `{}` (seine Bytes sind nicht enumerierbar) — die Id-
+      // Bedingung verschwand, und `?actorUserId=X&actorType=user` lieferte die
+      // Zeilen ALLER Nutzer. Eine konkrete Id impliziert $exists bereits.
+      if (!query.actorUserId) query.actorUserId = { $exists: true };
     } else if (filters.actorType === 'apikey') {
       query.actorApiKeyId = { $exists: true };
     } else if (filters.actorType === 'system') {

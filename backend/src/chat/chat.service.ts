@@ -14,6 +14,7 @@ import {
 import { User, UserDocument, UserRole } from '../auth/schemas/user.schema';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { errorMessage } from '../common/narrow';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 interface AppendMessageInput {
   role: ChatMessage['role'];
@@ -190,6 +191,7 @@ export class ChatService implements OnModuleInit {
   }
 
   async removeByProject(projectId: string): Promise<number> {
+    assertSafeCascadeId(projectId, 'projectId');
     const result = await this.chatModel.deleteMany({ projectId }).exec();
     return result.deletedCount ?? 0;
   }

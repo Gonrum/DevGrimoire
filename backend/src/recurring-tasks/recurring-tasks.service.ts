@@ -22,6 +22,7 @@ import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
 import { RequestContext } from '../common/request-context';
 import { errorMessage } from '../common/narrow';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 /**
  * Wie oft `computeNextRunFromDate` höchstens einen Zyklus nachlegt, um `from` zu
@@ -189,10 +190,12 @@ export class RecurringTasksService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.recurringTaskModel.deleteMany({ projectId }).exec();
   }
 
   async removeByCustomer(customerId: string): Promise<void> {
+    assertSafeCascadeId(customerId, 'customerId');
     await this.recurringTaskModel.deleteMany({ customerId }).exec();
   }
 

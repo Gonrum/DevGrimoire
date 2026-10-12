@@ -10,6 +10,7 @@ import { SecretsService } from '../secrets/secrets.service';
 import { ProjectsService } from '../projects/projects.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 /**
  * MongoDB-Duplikatsfehler (E11000). Verengung statt Cast: der Treiber wirft
@@ -290,6 +291,7 @@ export class CommitsService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     // Ebenfalls beide Repräsentationen — sonst bleiben beim Projekt-Löschen
     // string-gespeicherte Commits als Waisen liegen.
     await this.commitModel.deleteMany({ projectId: projectIdFilter(projectId) }).exec();

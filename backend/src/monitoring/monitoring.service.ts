@@ -26,6 +26,7 @@ import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { NotificationsService } from '../notifications/notifications.service';
 import { errorMessage, isDuplicateKeyError, isRecord } from '../common/narrow';
 import { discardBody, readBodyCapped } from '../common/read-body-capped';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 /**
  * Wie viele Healthchecks gleichzeitig laufen (M-45). Über
@@ -591,6 +592,7 @@ export class MonitoringService {
   }
 
   async removeByCustomer(customerId: string): Promise<void> {
+    assertSafeCascadeId(customerId, 'customerId');
     if (!Types.ObjectId.isValid(customerId)) return;
     const oid = new Types.ObjectId(customerId);
     const ids = await this.checkModel.find({ customerId: oid }).distinct('_id').exec();
@@ -600,6 +602,7 @@ export class MonitoringService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     if (!Types.ObjectId.isValid(projectId)) return;
     const oid = new Types.ObjectId(projectId);
     // Project-bound checks (customer monitor a project) — delete; environment-only refs handled separately.

@@ -8,6 +8,7 @@ import { UpdateManualDto } from './dto/update-manual.dto';
 import { CustomersService } from '../customers/customers.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 @Injectable()
 export class ManualsService {
@@ -94,10 +95,12 @@ export class ManualsService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.manualModel.deleteMany({ projectId }).exec();
   }
 
   async removeByCustomer(customerId: string): Promise<void> {
+    assertSafeCascadeId(customerId, 'customerId');
     await this.manualModel.deleteMany({ customerId }).exec();
   }
 }

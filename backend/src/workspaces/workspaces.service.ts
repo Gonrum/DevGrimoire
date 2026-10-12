@@ -11,6 +11,7 @@ import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { RequestContext } from '../common/request-context';
 import { actorCanAccessProject } from '../common/permissions';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 @Injectable()
 export class WorkspacesService {
@@ -136,6 +137,7 @@ export class WorkspacesService {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.workspaceModel
       .deleteMany({ projectId: new Types.ObjectId(projectId) })
       .exec();

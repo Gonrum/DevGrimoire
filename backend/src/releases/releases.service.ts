@@ -11,6 +11,7 @@ import { SecretsService } from '../secrets/secrets.service';
 import { projectIdFilter } from '../common/project-id-filter';
 import { GitProviderRegistry } from '../commits/providers/git-provider.registry';
 import { GitProvider, GitRepository } from '../commits/schemas/git-repository.schema';
+import { assertSafeCascadeId } from '../common/cascade-guard';
 
 /**
  * MongoDB duplicate-key error (E11000). Narrowing instead of casting: the
@@ -127,6 +128,7 @@ export class ReleasesService implements OnApplicationBootstrap {
   }
 
   async removeByProject(projectId: string): Promise<void> {
+    assertSafeCascadeId(projectId, 'projectId');
     await this.releaseModel.deleteMany({ projectId }).exec();
   }
 
