@@ -9,6 +9,7 @@ import { User, UserDocument, UserRole, UserLlmConfig } from './schemas/user.sche
 import type { ScopeMode } from '../common/permissions';
 import { LlmConfigDto } from './dto/update-profile.dto';
 import { EncryptionService } from '../common/encryption.service';
+import { errorMessage, isDuplicateKeyError } from '../common/narrow';
 import { AuditLogService } from '../audit-log/audit-log.service';
 
 const API_KEY_MASK = '***';
@@ -65,11 +66,26 @@ export class AuthService {
     private readonly encryptionService: EncryptionService,
     private readonly auditLog: AuditLogService,
   ) {
-    // `void`: der Seed lief hier schon vorher unbeobachtet los. Ein `.catch()`
-    // wäre eine Verhaltensänderung (Fehler würden geschluckt statt als
-    // unhandled rejection sichtbar zu werden) — `void` markiert nur, dass das
-    // Ignorieren beabsichtigt ist.
-    void this.seedAdminUser();
+    // Der Seed läuft unbeobachtet los, damit ein langsames bcrypt.hash() den
+    // Nest-Bootstrap nicht aufhält.
+    //
+    // `.catch()` ist hier KEINE Verschlechterung gegenüber `void`, sondern das
+    // Gegenteil. Der vorherige Kommentar behauptete, eine Ablehnung würde so
+    // „als unhandled rejection sichtbar" — tatsächlich beendet sie den Prozess:
+    // Node >= 15 fährt default `--unhandled-rejections=throw`, und im Backend
+    // gibt es keinen `process.on('unhandledRejection')`-Handler (grep über
+    // src/: 0 Treffer). Der Container stirbt also mitten im Bootstrap,
+    // restartet und läuft erneut in dasselbe Rennen — ein Crash-Loop, nicht
+    // eine sichtbare Warnung. Auslösen kann das real: `username` ist unique,
+    // und zwei gleichzeitig startende Replicas, die beide keinen Admin finden,
+    // laufen beide in E11000.
+    //
+    // seedAdminUser() fängt innen selbst ab und unterscheidet E11000 von
+    // allem anderen; dieser Handler ist die Garantie, dass trotzdem nie eine
+    // Ablehnung ungefangen entkommt.
+    this.seedAdminUser().catch((err: unknown) => {
+      this.logger.error(`Admin seed failed: ${errorMessage(err)}`);
+    });
     // Clean up old refresh tokens from pre-migration (had username field instead of userId)
     this.refreshTokenModel.deleteMany({ userId: { $exists: false } }).exec().catch(() => {});
     // Encrypt any plaintext llmConfig.apiKey values (T-57 migration)
@@ -113,20 +129,37 @@ export class AuthService {
       return;
     }
 
-    const existing = await this.userModel.findOne({ username }).exec();
-    if (existing) {
-      this.logger.log(`Admin user "${username}" already exists`);
-      return;
-    }
+    try {
+      const existing = await this.userModel.findOne({ username }).exec();
+      if (existing) {
+        this.logger.log(`Admin user "${username}" already exists`);
+        return;
+      }
 
-    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    await this.userModel.create({
-      username,
-      passwordHash,
-      role: UserRole.ADMIN,
-      active: true,
-    });
-    this.logger.log(`Admin user "${username}" created from environment variables`);
+      const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+      await this.userModel.create({
+        username,
+        passwordHash,
+        role: UserRole.ADMIN,
+        active: true,
+      });
+      this.logger.log(`Admin user "${username}" created from environment variables`);
+    } catch (err: unknown) {
+      // findOne() -> create() ist read-then-write ohne atomaren Claim. Starten
+      // zwei Backend-Replikas gleichzeitig und finden beide keinen Admin,
+      // gewinnt eine und die andere läuft in E11000 auf `username` (unique).
+      // Das ist der erwartete Ausgang des Rennens, kein Fehler — deshalb log,
+      // nicht error. Ein transienter Mongo-Fehler beim Bootstrap wäre
+      // derselbe Ausgang: ohne .catch() am Aufrufer würde beides den Prozess
+      // beenden (siehe Kommentar im Konstruktor).
+      if (isDuplicateKeyError(err)) {
+        this.logger.log(
+          `Admin user "${username}" was created concurrently by another instance`,
+        );
+        return;
+      }
+      this.logger.error(`Admin seed failed: ${errorMessage(err)}`);
+    }
   }
 
   isAuthEnabled(): boolean {
