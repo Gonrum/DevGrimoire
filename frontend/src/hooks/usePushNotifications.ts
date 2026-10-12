@@ -39,6 +39,10 @@ export function usePushNotifications() {
         const registration = await navigator.serviceWorker.ready;
         const subscription = await registration.pushManager.getSubscription();
         if (!cancelled) setSubscribed(subscription !== null);
+        // Bestehendes Abo erneut melden: das Backend bindet es an den
+        // angemeldeten Nutzer (H-12). Das migriert Abos aus der Zeit ohne
+        // Nutzerbezug und zieht ein geteiltes Gerät auf den aktuellen Nutzer um.
+        if (subscription) await api.push.subscribe(subscription.toJSON());
       } catch {
         // Kein erreichbarer Service Worker → als "nicht abonniert" behandeln.
         // Vorher blieb dieselbe Rejection unbehandelt stehen.

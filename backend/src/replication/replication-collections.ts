@@ -82,6 +82,7 @@ export const REPLICATED_COLLECTIONS: ReplicatedCollection[] = [
  * should actually sync.
  */
 export const EXCLUDED_COLLECTIONS: { className: string; reason: string }[] = [
+  { className: 'AppNotification', reason: 'In-App-Benachrichtigungen mit instanzlokalen Empfängern (userId) und Lesestatus pro Nutzer — Nutzer-Ids sind pro Instanz verschieden' },
   { className: 'ChatSession', reason: 'Lokale Chat-Sessions mit instanzgebundenen LLM-Endpoints' },
   { className: 'ChatActivity', reason: 'Chat-Aktivitätslog, instanzlokal' },
   { className: 'Counter', reason: 'Interne Sequenz-Zähler — instanzlokal, würde Nummern-Kollisionen erzeugen' },

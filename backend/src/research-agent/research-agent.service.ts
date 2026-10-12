@@ -601,6 +601,9 @@ export class ResearchAgentService {
           : 'abgebrochen';
     const title = `Recherche "${topic.title}" ${statusLabel}`;
     const body = run.summary || run.error || `Lauf #${run.number} beendet.`;
-    await this.notificationsService.create(title, body, undefined, 'research_agent');
+    // An den Besitzer des Themas (H-12), nicht an alle.
+    await this.notificationsService.create(title, body, undefined, 'research_agent', {
+      userId: topic.ownerUserId.toString(),
+    });
   }
 }

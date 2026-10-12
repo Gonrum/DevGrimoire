@@ -4,6 +4,15 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as webpush from 'web-push';
 import { PushSubscriptionEntry, PushSubscriptionDocument } from './schemas/push-subscription.schema';
+import { User, UserDocument } from '../auth/schemas/user.schema';
+import { actorFromUser } from '../common/actor-scope';
+import { actorCanAccessProject } from '../common/permissions';
+
+/** Empfänger/Projekt einer Push-Nachricht — dieselbe Form wie NotificationTarget. */
+export interface PushTarget {
+  userId?: string | null;
+  projectId?: string | null;
+}
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
@@ -20,30 +29,73 @@ export class PushService {
 
   constructor(
     @InjectModel(PushSubscriptionEntry.name) private subModel: Model<PushSubscriptionDocument>,
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
   ) {}
 
   getPublicKey(): string {
     return VAPID_PUBLIC_KEY || '';
   }
 
-  async subscribe(subscription: { endpoint: string; keys: { p256dh: string; auth: string } }): Promise<void> {
+  /**
+   * `userId` kommt aus der Authentifizierung, nicht aus dem Body. Ein
+   * erneutes Melden desselben Endpoints zieht das Abo auf den aktuellen
+   * Nutzer um (geteiltes Gerät, Account-Wechsel).
+   */
+  async subscribe(
+    subscription: { endpoint: string; keys: { p256dh: string; auth: string } },
+    userId: string | null,
+  ): Promise<void> {
     await this.subModel.updateOne(
       { endpoint: subscription.endpoint },
-      { $set: subscription },
+      { $set: { endpoint: subscription.endpoint, keys: subscription.keys, userId } },
       { upsert: true },
     ).exec();
   }
 
-  async unsubscribe(endpoint: string): Promise<void> {
-    await this.subModel.deleteOne({ endpoint }).exec();
+  /**
+   * Nur das eigene Abo (oder ein besitzerloses aus der Zeit vor H-12). Ohne
+   * Nutzer (Auth deaktiviert) wie bisher.
+   */
+  async unsubscribe(endpoint: string, userId: string | null): Promise<void> {
+    const filter = userId
+      ? { endpoint, $or: [{ userId }, { userId: null }] }
+      : { endpoint };
+    await this.subModel.deleteOne(filter).exec();
   }
 
-  async sendNotification(title: string, body: string, url?: string): Promise<{ sent: number; failed: number }> {
+  /**
+   * Welche Abos dürfen diese Nachricht bekommen? (H-12)
+   * - mit Empfänger: nur dessen Abos
+   * - mit Projekt: nur Besitzer mit Zugriff auf das Projekt (aktive Nutzer)
+   * - Abos ohne Besitzer (Altbestand): nur reine Broadcasts ohne Projekt
+   */
+  private async recipients(target: PushTarget) {
+    const subs = await this.subModel
+      .find(target.userId ? { userId: target.userId } : {})
+      .lean()
+      .exec();
+    if (!target.projectId) return subs;
+    const ownerIds = [...new Set(subs.map((s) => s.userId).filter((id): id is string => !!id))];
+    const owners = await this.userModel.find({ _id: { $in: ownerIds } }).lean().exec();
+    const allowed = new Set(
+      owners
+        .filter((u) => u.active && actorCanAccessProject(actorFromUser(u), String(target.projectId)))
+        .map((u) => u._id.toString()),
+    );
+    return subs.filter((s) => !!s.userId && allowed.has(s.userId));
+  }
+
+  async sendNotification(
+    title: string,
+    body: string,
+    url?: string,
+    target: PushTarget = {},
+  ): Promise<{ sent: number; failed: number }> {
     if (!PUSH_ENABLED) {
       this.logger.warn('Push notifications disabled: VAPID keys not configured');
       return { sent: 0, failed: 0 };
     }
-    const subs = await this.subModel.find().lean().exec();
+    const subs = await this.recipients(target);
     const payload = JSON.stringify({ title, body, url });
 
     let sent = 0;

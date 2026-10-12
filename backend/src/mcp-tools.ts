@@ -5498,7 +5498,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const nTitle = requireString(a, 'title');
           const nBody = requireString(a, 'body');
           const nUrl = optionalString(a, 'url');
-          const notification = await notificationsService.create(nTitle, nBody, nUrl, 'notify_user');
+          // An den Besitzer des Keys, der das Tool aufruft (H-12) — vorher ein
+          // Broadcast an jeden Nutzer und jedes Push-Abo der Instanz.
+          const notification = await notificationsService.create(nTitle, nBody, nUrl, 'notify_user', {
+            userId: RequestContext.getUser()?.userId ?? null,
+            projectId: optionalString(a, 'projectId') ?? null,
+          });
           result = { notificationId: notification._id.toString() };
           break;
         }
@@ -8365,11 +8370,17 @@ export function registerMcpTools(server: Server, services: McpServices): void {
       if (name !== 'notify_user' && name !== 'ask_user' && name !== 'todo_ask_question') {
         const toolPrefix = name.split('_')[0];
         const derivedUrl = deriveNotificationUrl(name, a, result);
+        // Empfänger = Aufrufer, Projekt = Tool-Argument (H-12). Titel und Text
+        // tragen Inhalte aus dem Projekt; als Broadcast sah sie jeder Nutzer.
         notificationsService.create(
           formatToolTitle(name, result),
           formatToolBody(name, a, result),
           derivedUrl,
           `mcp_${toolPrefix}`,
+          {
+            userId: RequestContext.getUser()?.userId ?? null,
+            projectId: typeof a.projectId === 'string' ? a.projectId : null,
+          },
         ).catch(() => {});
       }
 
