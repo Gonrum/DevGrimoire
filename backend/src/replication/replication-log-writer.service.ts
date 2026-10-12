@@ -9,7 +9,7 @@ import { ReplicationCounterService } from './replication-counter.service';
 import { isReplicatedCollection, getReplicatedByCollection, replicatedCollectionNames } from './replication-collections';
 import { mapOperation, deriveEventId, makeAppliedKey } from './replication-log.helpers';
 import { ReplDoc, errorMessage, isRecord, mongoErrorCode } from './replication-narrow.helpers';
-import { REPL_WATCHER_RESUME_TOKEN, REPL_INSTANCE_ID, REPL_WATCHER_HEARTBEAT } from './replication.constants';
+import { REPL_WATCHER_RESUME_TOKEN, REPL_INSTANCE_ID, REPL_WATCHER_HEARTBEAT, REPL_FULL_SYNC_CRON } from './replication.constants';
 
 /**
  * Absichtlich offene Dokumentform (`ReplDoc`, siehe
@@ -48,6 +48,42 @@ function idToPlainString(value: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * Mongo-Fehlercode für `ChangeStreamHistoryLost`: der Resume-Token zeigt in
+ * einen Oplog-Bereich, den es nicht mehr gibt (capped Oplog ist übergelaufen).
+ */
+const MONGO_CHANGE_STREAM_HISTORY_LOST = 286;
+
+/**
+ * Obergrenze für Neustarts ohne Resume-Token pro Prozess-Lebensdauer. Begrenzt
+ * den Schaden, falls nicht der Token das Problem ist sondern der Change Stream
+ * selbst — sonst entstünde eine stille Endlosschleife aus Neustart → Fehler →
+ * Neustart. Der Zähler wird zurückgesetzt, sobald ein Change erfolgreich
+ * verarbeitet wurde (siehe `freshRestarts`).
+ */
+const MAX_FRESH_RESTARTS = 3;
+
+/**
+ * Erkennt den einen Fehler, bei dem ein Neustart ohne Token die richtige
+ * Reaktion ist.
+ *
+ * Drei Wege, weil die Treiberversionen unterschiedlich viel mitgeben: der
+ * Fehlercode, das `errorLabels`-Array (der offizielle Weg) und zuletzt der
+ * Meldungstext. Beobachtet wurde im Live-Betrieb:
+ * `PlanExecutor error during aggregation :: caused by :: Resume of change
+ * stream was not possible, as the resume point may no longer be in the oplog.`
+ */
+function isResumeTokenLost(err: unknown): boolean {
+  if (mongoErrorCode(err) === MONGO_CHANGE_STREAM_HISTORY_LOST) return true;
+  if (isRecord(err) && isUnknownArray(err.errorLabels)) {
+    const hit = err.errorLabels.some((label: unknown) => label === 'ChangeStreamHistoryLost');
+    if (hit) return true;
+  }
+  return /resume point may no longer be in the oplog|ChangeStreamHistoryLost/i.test(
+    errorMessage(err),
+  );
+}
+
 function isUnknownArray(value: unknown): value is unknown[] {
   return Array.isArray(value);
 }
@@ -80,6 +116,14 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
   private readonly standalone: boolean;
   private selfInstanceId: string | null = null;
   private closing = false;
+  /**
+   * Zähler für Neustarts ohne Resume-Token. Begrenzt, damit ein Dauerfehler
+   * (etwa ein wirklich kaputter Change Stream) keine Endlosschleife aus
+   * Neustart → Fehler → Neustart wird. Wird auf 0 zurückgesetzt, sobald ein
+   * Change erfolgreich verarbeitet wurde — das beweist, dass der Stream lebt,
+   * und ein späterer Oplog-Rollover darf dann wieder selbst heilen.
+   */
+  private freshRestarts = 0;
 
   constructor(
     @InjectConnection() private readonly connection: Connection,
@@ -169,7 +213,7 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
     }
   }
 
-  private async start() {
+  private async start(opts: { discardResumeToken?: boolean } = {}) {
     const db = this.connection.db;
     if (!db) {
       this.logger.warn('Database not available — log writer not started');
@@ -181,8 +225,12 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
     await this.ensurePreImages(db, watched);
     const pipeline = [{ $match: { 'ns.coll': { $in: watched } } }];
 
-    // Resume from the persisted token if present.
-    const tokenRaw = await this.settingsService.get(REPL_WATCHER_RESUME_TOKEN);
+    // Resume from the persisted token if present — außer nach einem
+    // ChangeStreamHistoryLost: dann ist genau dieser Token die Fehlerursache
+    // und würde denselben Fehler sofort wieder erzeugen.
+    const tokenRaw = opts.discardResumeToken
+      ? undefined
+      : await this.settingsService.get(REPL_WATCHER_RESUME_TOKEN);
     const options: mongo.ChangeStreamOptions = {
       fullDocument: 'updateLookup',
       fullDocumentBeforeChange: 'whenAvailable',
@@ -197,7 +245,9 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
 
     try {
       this.changeStream = db.watch(pipeline, options);
-      this.logger.log(`Replication log writer watching: ${watched.join(', ')}`);
+      this.logger.log(
+        `Replication log writer watching${opts.discardResumeToken ? ' (frisch, ohne Resume-Token)' : ''}: ${watched.join(', ')}`,
+      );
       this.startHeartbeat();
       // Drive the stream with an async iterator (NOT fire-and-forget .on('change')):
       // for-await pulls the next event only after the current handleChange resolves,
@@ -213,22 +263,98 @@ export class ReplicationLogWriterService implements OnModuleInit, OnModuleDestro
   /** Serial consumer loop. One handleChange at a time, in oplog order. */
   private async consume(): Promise<void> {
     try {
-      if (!this.changeStream) return;
+      if (!this.changeStream) {
+        this.stopHeartbeat();
+        return;
+      }
       for await (const change of this.changeStream) {
         if (this.closing) break;
         await this.handleChange(change);
+        // Der Stream lebt nachweislich — ein späterer Oplog-Rollover soll dann
+        // wieder selbst heilen dürfen, statt am Zähler-Limit zu scheitern.
+        this.freshRestarts = 0;
       }
+      // Reguläres Schleifenende, nur über `closing` erreichbar.
+      this.stopHeartbeat();
     } catch (err) {
-      // ChangeStreamHistoryLost (resume token aged out of oplog) → Plan 3 auto full-sync.
-      // For now: log prominently; suppress noise during shutdown.
-      if (!this.closing) {
-        this.logger.error(`Replication change stream error: ${errorMessage(err)}`);
+      // Shutdown: der Stream wird absichtlich beendet — kein Neustart, kein
+      // Fehler-Log (vorher unterdrückte `if (!this.closing)` nur die Meldung).
+      if (this.closing) {
+        this.stopHeartbeat();
+        return;
       }
-    } finally {
-      // Watcher loop ended (error or shutdown) → stop stamping so the heartbeat
-      // goes stale and getSyncStatus can surface a dead watcher.
+      if (isResumeTokenLost(err)) {
+        await this.restartWithoutToken(err);
+        return;
+      }
+      this.logger.error(`Replication change stream error: ${errorMessage(err)}`);
+      // Watcher loop ended → stop stamping so the heartbeat goes stale and
+      // getSyncStatus can surface a dead watcher.
       this.stopHeartbeat();
     }
+  }
+
+  /**
+   * Neustart ohne Resume-Token nach `ChangeStreamHistoryLost`.
+   *
+   * Vorher stand hier nur ein `logger.error` mit dem Kommentar „Plan 3 auto
+   * full-sync — For now: log prominently". Das „for now" war dauerhaft: der
+   * Watcher blieb tot, und weil der ungültige Token persistiert blieb, las ihn
+   * jeder Backend-Neustart erneut und starb sofort wieder. Live beobachtet
+   * (2026-10-12): seit sechs Tagen kein einziger `replication_log`-Eintrag,
+   * obwohl 83 Todos, 7 Projekte, 2 Knowledge-Einträge und 439 Activities
+   * geschrieben wurden — bei `replication.role = peer`, 2,2 Mio. Log-Einträgen
+   * und einem Container, der durchgehend `healthy` meldete.
+   *
+   * Der Neustart ohne Token kostet eine Lücke: alles zwischen dem letzten
+   * persistierten Token und jetzt fehlt im inkrementellen Log. Die schließt der
+   * Vollabgleich (`replication.fullSyncCron`, Default `0 3 * * *`) — genau dafür
+   * ist er da. Eine Lücke mit nächtlicher Heilung ist besser als ein toter
+   * Watcher, den niemand bemerkt.
+   */
+  private async restartWithoutToken(err: unknown): Promise<void> {
+    if (this.freshRestarts >= MAX_FRESH_RESTARTS) {
+      this.logger.error(
+        `Replication change stream: ${MAX_FRESH_RESTARTS} Neustarts ohne Resume-Token haben nicht ` +
+        `geholfen — der Watcher bleibt inaktiv, das Problem ist nicht der Token. ` +
+        `Letzter Fehler: ${errorMessage(err)}`,
+      );
+      this.stopHeartbeat();
+      return;
+    }
+    this.freshRestarts += 1;
+
+    // Den konfigurierten Vollabgleich mitmelden, damit aus dem Log hervorgeht,
+    // wann die Lücke geschlossen wird. Best-effort: ein Lesefehler darf den
+    // Neustart nicht aufhalten.
+    const fullSyncCron = await this.settingsService
+      .get(REPL_FULL_SYNC_CRON)
+      .catch(() => null);
+    this.logger.warn(
+      `Resume-Token ungültig (${errorMessage(err)}) — Token verworfen, Change Stream startet frisch ` +
+      `(Versuch ${this.freshRestarts}/${MAX_FRESH_RESTARTS}). Änderungen seit dem letzten persistierten ` +
+      `Token fehlen im inkrementellen Log; der Vollabgleich (Cron: ${fullSyncCron || '0 3 * * *'}) ` +
+      `schließt die Lücke.`,
+    );
+
+    const stale = this.changeStream;
+    this.changeStream = null;
+    if (stale) {
+      await stale.close().catch((closeErr: unknown) => {
+        this.logger.warn(`Schließen des toten Change Streams fehlgeschlagen: ${errorMessage(closeErr)}`);
+      });
+    }
+    // Leeren statt stehen lassen: `get()` liefert '', und `if (tokenRaw)` ist
+    // damit falsy — derselbe Effekt wie ein gelöschter Eintrag, ohne dass
+    // SettingsService eine delete()-Methode bräuchte.
+    await this.settingsService
+      .set(REPL_WATCHER_RESUME_TOKEN, '')
+      .catch((clearErr: unknown) => {
+        this.logger.warn(`Resume-Token konnte nicht geleert werden: ${errorMessage(clearErr)}`);
+      });
+
+    this.stopHeartbeat();
+    await this.start({ discardResumeToken: true });
   }
 
   private async handleChange(change: ReplChange): Promise<void> {
