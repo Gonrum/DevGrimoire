@@ -8,6 +8,7 @@ import { ProjectsService } from '../projects/projects.service';
 import { ReplicationPayload, REPL_INSTANCE_ID } from './replication.constants';
 import { ReplDoc, errorMessage, isRecord } from './replication-narrow.helpers';
 import { ENTITY_COLLECTION, EXPORT_COLLECTION } from './replication-collections';
+import { compareLww } from './replication-log.helpers';
 
 
 @Injectable()
@@ -92,8 +93,28 @@ export class ReplicationReceiveService {
     // nichts, erzwingt aber eine Prüfung pro Feldzugriff.
     const coll = db.collection<ReplDoc>(collection);
 
+    const tieBreak = { localInstanceId: myId, incomingInstanceId: payload.sourceInstanceId };
+
     try {
       if (payload.event.action === 'deleted') {
+        // LWW auch für Deletes (H-33). Vorher lief der Delete unbedingt — ein
+        // verspätet oder erneut zugestelltes Delete (Outbox-Retry, oder ein
+        // Full-Sync, der das Dokument inzwischen wieder angelegt hat) löschte
+        // auch eine lokal neuere Fassung. Vergleichswert ist der Zeitpunkt
+        // des Deletes beim Sender (`payload.timestamp`; bei Queue-Einträgen
+        // deren createdAt, nicht der Sendezeitpunkt).
+        const localForDelete = await coll.findOne(
+          { _id: new ObjectId(payload.event.entityId) },
+          { projection: { updatedAt: 1 } },
+        );
+        const localMs = localForDelete ? this.parseTimestamp(localForDelete.updatedAt)?.getTime() ?? null : null;
+        const deletedAtMs = this.parseTimestamp(payload.timestamp)?.getTime() ?? null;
+        if (compareLww(localMs, deletedAtMs, tieBreak) === 'skip') {
+          this.logger.debug(
+            `LWW skipped delete: local ${payload.event.entity}/${payload.event.entityId} is newer than the delete`,
+          );
+          return { applied: false, reason: 'LWW: local version is newer than delete' };
+        }
         await coll.deleteOne({ _id: new ObjectId(payload.event.entityId) });
 
         // For attachments, also remove from MinIO
@@ -129,9 +150,12 @@ export class ReplicationReceiveService {
           { projection: { updatedAt: 1 } },
         );
         const localTs = local ? this.parseTimestamp(local.updatedAt) : null;
-        if (localTs && localTs > incomingTs) {
+        // compareLww statt `localTs > incomingTs`: derselbe Tie-Break wie in
+        // der Log-Engine, sonst tauschen zwei Peers bei gleichem updatedAt
+        // ihre Inhalte (H-34).
+        if (compareLww(localTs?.getTime() ?? null, incomingTs.getTime(), tieBreak) === 'skip') {
           this.logger.debug(
-            `LWW skipped: local ${payload.event.entity}/${payload.event.entityId} is newer (${localTs.toISOString()} > ${incomingTs.toISOString()})`,
+            `LWW skipped: local ${payload.event.entity}/${payload.event.entityId} is newer or wins the tie (${localTs?.toISOString()} >= ${incomingTs.toISOString()})`,
           );
           return { applied: false, reason: 'LWW: local version is newer' };
         }
@@ -238,6 +262,13 @@ export class ReplicationReceiveService {
     // Collections without an `updatedAt` field (append-only or timestamped via
     // different fields) — always upsert without LWW check.
     const lwwExemptCollections = new Set(['activities', 'commits']);
+    // Tie-Break wie in applyChange (H-34). Ohne ihn hebt ein Full-Sync in
+    // beide Richtungen eine Konvergenz sofort wieder auf. Ältere Sender
+    // liefern das Feld nicht → altes Verhalten (apply bei Gleichstand).
+    const tieBreak = {
+      localInstanceId: await this.settingsService.get(REPL_INSTANCE_ID),
+      incomingInstanceId: asString(projectExport._sourceInstanceId),
+    };
 
 
     for (const [key, collectionName] of Object.entries(EXPORT_COLLECTION)) {
@@ -286,7 +317,7 @@ export class ReplicationReceiveService {
                 { projection: { updatedAt: 1 } },
               );
               const localTs = local ? this.parseTimestamp(local.updatedAt) : null;
-              if (localTs && localTs > incomingTs) {
+              if (compareLww(localTs?.getTime() ?? null, incomingTs.getTime(), tieBreak) === 'skip') {
                 skipped++;
                 continue;
               }

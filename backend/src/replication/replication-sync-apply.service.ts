@@ -92,9 +92,10 @@ export class ReplicationSyncApplyService {
       // LWW: read the local doc's updatedAt once.
       const local = await coll.findOne({ _id: oid }, { projection: { updatedAt: 1 } });
       const localMs = local ? toMs(local.updatedAt) : null;
+      const tieBreak = { localInstanceId: self, incomingInstanceId: entry.originInstanceId };
 
       if (entry.op === 'delete') {
-        if (compareLww(localMs, entry.deletedAtMs) === 'skip') {
+        if (compareLww(localMs, entry.deletedAtMs, tieBreak) === 'skip') {
           return { seq, applied: false, outcome: 'skipped_lww', reason: 'LWW: local newer than delete' };
         }
         await coll.deleteOne({ _id: oid });
@@ -102,7 +103,7 @@ export class ReplicationSyncApplyService {
       }
 
       if (!entry.document) return { seq, applied: false, outcome: 'skipped_invalid', reason: 'no document for upsert' };
-      if (compareLww(localMs, entry.updatedAtMs) === 'skip') {
+      if (compareLww(localMs, entry.updatedAtMs, tieBreak) === 'skip') {
         return { seq, applied: false, outcome: 'skipped_lww', reason: 'LWW: local newer' };
       }
 

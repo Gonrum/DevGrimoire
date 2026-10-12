@@ -256,7 +256,10 @@ export class ReplicationPushService {
         },
         document: item.document ?? null,
         attachmentData: item.attachmentData,
-        timestamp: new Date().toISOString(),
+        // Zeitpunkt des Ereignisses, nicht des (Wieder-)Sendens: der Empfänger
+        // vergleicht ihn bei Deletes per LWW (H-33). Ein Retry Stunden später
+        // hätte sonst jede zwischenzeitliche lokale Änderung „überholt".
+        timestamp: (item.createdAt ?? new Date()).toISOString(),
         sourceInstanceId: instanceId,
       };
 

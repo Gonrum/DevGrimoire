@@ -11,6 +11,7 @@ import {
   REPL_ROLE, REPL_SLAVE_URL, REPL_SLAVE_API_KEY,
   REPL_PEER_URL, REPL_PEER_API_KEY,
   REPL_LAST_FULL_SYNC,
+  REPL_INSTANCE_ID,
   PUSHING_ROLES,
 } from './replication.constants';
 import {
@@ -115,6 +116,9 @@ export class ReplicationFullSyncService {
         }
         const exportData: Record<string, unknown> = {
           project: project,
+          // Für den LWW-Tie-Break des Empfängers (H-34). Kein Eintrag in
+          // EXPORT_COLLECTION, wird also nicht als Collection gelesen.
+          _sourceInstanceId: await this.settingsService.get(REPL_INSTANCE_ID),
         };
 
         // Fetch all entities for this project. projectId is stored as ObjectId
