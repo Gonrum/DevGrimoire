@@ -25,6 +25,16 @@ import { SecretsService } from '../secrets/secrets.service';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { NotificationsService } from '../notifications/notifications.service';
 import { errorMessage, isDuplicateKeyError, isRecord } from '../common/narrow';
+import { discardBody, readBodyCapped } from '../common/read-body-capped';
+
+/**
+ * Wie viele Healthchecks gleichzeitig laufen (M-45). Über
+ * MONITORING_CONCURRENCY einstellbar; ungültige Werte fallen auf 5 zurück.
+ */
+const MONITORING_CONCURRENCY = (() => {
+  const n = Number(process.env.MONITORING_CONCURRENCY);
+  return Number.isInteger(n) && n > 0 && n <= 50 ? n : 5;
+})();
 
 const HISTORY_TTL_DAYS = 30;
 const RUN_TIMEOUT_BUDGET_MS = 130_000; // hard ceiling for a check execution
@@ -305,20 +315,32 @@ export class MonitoringService {
       })
       .exec();
 
+    // Begrenzt parallel statt sequentiell (M-45). Vorher lief jeder Check
+    // nach dem vorigen: ein unerreichbares Ziel (Timeout bis 120 s) hielt
+    // alle nachfolgenden Checks aller Kunden auf, und mit wenigen Dutzend
+    // fälligen Checks dauerte ein Zyklus länger als der Minuten-Tick.
+    // `inflight` bleibt der Schutz gegen Doppelausführung pro Check-Id; das
+    // Check-und-Set liegt ohne await dazwischen, ist also atomar im JS-Turn.
     let count = 0;
-    for (const check of due) {
-      const id = check._id.toString();
-      if (this.inflight.has(id)) continue;
-      this.inflight.add(id);
-      try {
-        await this.executeCheck(check);
-        count++;
-      } catch (err: unknown) {
-        this.logger.error(`Healthcheck ${id} execution crashed: ${errorMessage(err)}`);
-      } finally {
-        this.inflight.delete(id);
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (next < due.length) {
+        const check = due[next++];
+        const id = check._id.toString();
+        if (this.inflight.has(id)) continue;
+        this.inflight.add(id);
+        try {
+          await this.executeCheck(check);
+          count++;
+        } catch (err: unknown) {
+          this.logger.error(`Healthcheck ${id} execution crashed: ${errorMessage(err)}`);
+        } finally {
+          this.inflight.delete(id);
+        }
       }
-    }
+    };
+    const workers = Math.min(MONITORING_CONCURRENCY, due.length);
+    await Promise.all(Array.from({ length: workers }, () => worker()));
     return count;
   }
 
@@ -356,9 +378,15 @@ export class MonitoringService {
       statusCode = res.status;
       networkOk = true;
       if (check.expectedContent && method !== HealthcheckMethod.HEAD) {
-        // Cap body read for safety.
-        const text = await res.text();
-        bodySnippet = text.slice(0, 4000);
+        // Gedeckelt lesen (H-35). Vorher `res.text()` und DANACH auf 4000
+        // Zeichen gekürzt — ein grosses oder endlos streamendes Ziel holte
+        // jeden Minuten-Tick erneut das Backend herunter. 16 KB Bytes decken
+        // 4000 Zeichen auch bei Mehrbyte-UTF-8 ab.
+        const capped = await readBodyCapped(res, 16_384);
+        bodySnippet = capped.text.slice(0, 4000);
+      } else {
+        // Ungelesener Body hält sonst die Verbindung bis zum GC offen.
+        await discardBody(res);
       }
     } catch (err: unknown) {
       latencyMs = Date.now() - t0;
@@ -429,24 +457,34 @@ export class MonitoringService {
       const wasUnhealthy = previousStatus === HealthcheckStatus.UNHEALTHY;
       const isUnhealthy = newStatus === HealthcheckStatus.UNHEALTHY;
       const monitoringUrl = `/customers/${check.customerId.toString()}?tab=monitoring`;
+      // Debounce atomar (M-45): erst den Status per bedingtem Update
+      // beanspruchen, dann benachrichtigen. Vorher Lesen -> Notify ->
+      // Schreiben: zwei Instanzen (oder zwei überlappende Läufe) lasen
+      // beide den alten Wert und benachrichtigten doppelt.
       if (isUnhealthy && check.lastNotifiedStatus !== HealthcheckStatus.UNHEALTHY) {
-        await this.safeNotify(
-          `🔴 ${check.name} ist nicht erreichbar`,
-          evaluation.errorMessage || error || `HTTP ${statusCode}`,
-          monitoringUrl,
-        );
-        await this.checkModel.findByIdAndUpdate(check._id, {
-          lastNotifiedStatus: HealthcheckStatus.UNHEALTHY,
-        }).exec();
+        const claim = await this.checkModel.updateOne(
+          { _id: check._id, lastNotifiedStatus: { $ne: HealthcheckStatus.UNHEALTHY } },
+          { $set: { lastNotifiedStatus: HealthcheckStatus.UNHEALTHY } },
+        ).exec();
+        if (claim.modifiedCount === 1) {
+          await this.safeNotify(
+            `🔴 ${check.name} ist nicht erreichbar`,
+            evaluation.errorMessage || error || `HTTP ${statusCode}`,
+            monitoringUrl,
+          );
+        }
       } else if (!isUnhealthy && wasUnhealthy) {
-        await this.safeNotify(
-          `🟢 ${check.name} wieder verfügbar`,
-          `HTTP ${statusCode ?? '-'} in ${latencyMs}ms`,
-          monitoringUrl,
-        );
-        await this.checkModel.findByIdAndUpdate(check._id, {
-          lastNotifiedStatus: newStatus,
-        }).exec();
+        const claim = await this.checkModel.updateOne(
+          { _id: check._id, lastNotifiedStatus: HealthcheckStatus.UNHEALTHY },
+          { $set: { lastNotifiedStatus: newStatus } },
+        ).exec();
+        if (claim.modifiedCount === 1) {
+          await this.safeNotify(
+            `🟢 ${check.name} wieder verfügbar`,
+            `HTTP ${statusCode ?? '-'} in ${latencyMs}ms`,
+            monitoringUrl,
+          );
+        }
       }
     }
   }

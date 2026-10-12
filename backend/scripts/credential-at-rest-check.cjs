@@ -13,7 +13,6 @@
  * Lädt aus dist/; vorher `npm run build`.
  */
 const path = require('node:path');
-const zlib = require('node:zlib');
 const assert = require('node:assert/strict');
 
 function loadCompiled(rel) {
@@ -135,11 +134,13 @@ function settingsModel(initial = {}) {
     const connection = {
       db: {
         listCollections: () => ({ toArray: async () => Object.keys(data).map((name) => ({ name })) }),
-        collection: (name) => ({ find: () => ({ toArray: async () => data[name] }) }),
+        collection: (name) => ({ find: () => data[name] }),
       },
     };
     const svc = new BackupsService({}, connection, {}, {});
-    const dump = JSON.parse(zlib.gunzipSync(await svc.exportDatabase()).toString('utf-8'));
+    let json = '';
+    for await (const chunk of svc.exportDatabaseStream()) json += chunk;
+    const dump = JSON.parse(json);
     assert.deepEqual(Object.keys(dump.collections), ['todos']);
     const manifest = svc.buildManifest({
       jobId: 'j', startedAt: new Date(), finishedAt: new Date(), mode: 'full_system', trigger: 'manual',

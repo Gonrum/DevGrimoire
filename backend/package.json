@@ -41,6 +41,7 @@
     "check:actor-scope": "node scripts/actor-scope-check.cjs",
     "check:entity-scope": "node scripts/entity-scope-check.cjs",
     "check:ssh-scope": "node scripts/ssh-scope-check.cjs",
+    "check:load-safety": "node scripts/load-safety-check.cjs",
     "check:notifications-user-scope": "node scripts/notifications-user-scope-check.cjs",
     "check:events-scope": "node scripts/events-scope-check.cjs",
     "check:i18n-keys": "node scripts/i18n-keys-check.cjs",

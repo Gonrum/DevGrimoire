@@ -3,8 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
-  NotFoundException,
-} from '@nestjs/common';
+  NotFoundException, PayloadTooLargeException } from '@nestjs/common';
 import { errorMessage, streamToBuffer } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -22,6 +21,7 @@ import {
   actorCanAccessCustomer,
   actorCanAccessProject,
 } from '../common/permissions';
+import { MAX_ATTACHMENT_SIZE, base64DecodedSize } from './attachment-limits';
 
 /** Mimetypes treated as extractable text */
 const TEXT_MIMETYPES = new Set([
@@ -81,6 +81,11 @@ export class AttachmentsService {
     },
     file: { buffer: Buffer; originalname: string; mimetype: string },
   ): Promise<AttachmentDocument> {
+    if (file.buffer.length > MAX_ATTACHMENT_SIZE) {
+      throw new PayloadTooLargeException(
+        `Datei zu gross: ${file.buffer.length} Bytes, erlaubt sind ${MAX_ATTACHMENT_SIZE} (MINIO_MAX_FILE_SIZE)`,
+      );
+    }
     if (!fields.projectId && !fields.customerId) {
       throw new BadRequestException('projectId or customerId is required');
     }
@@ -321,6 +326,14 @@ export class AttachmentsService {
     },
     base64Content: string,
   ): Promise<AttachmentDocument> {
+    // VOR dem Decodieren prüfen — sonst läge der übergrosse Buffer schon im
+    // Speicher, bevor create() ihn ablehnt.
+    const decodedSize = base64DecodedSize(base64Content);
+    if (decodedSize > MAX_ATTACHMENT_SIZE) {
+      throw new PayloadTooLargeException(
+        `Datei zu gross: ${decodedSize} Bytes, erlaubt sind ${MAX_ATTACHMENT_SIZE} (MINIO_MAX_FILE_SIZE)`,
+      );
+    }
     const buffer = Buffer.from(base64Content, 'base64');
     const mimeType = fields.mimeType || this.guessMimeType(fields.fileName);
     return this.create(

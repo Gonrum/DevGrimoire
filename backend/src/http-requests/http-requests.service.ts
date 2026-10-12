@@ -26,6 +26,7 @@ import {
 } from './http-requests.types';
 import { SendRequestDto } from './dto/send-request.dto';
 import { buildResolutionContext, resolveRequest, maskSecrets } from './template-resolver';
+import { readBodyCapped } from '../common/read-body-capped';
 
 const HISTORY_TTL_DAYS = 30;
 const MAX_RESPONSE_BODY = 1_000_000; // 1 MB, wie in der Spec
@@ -471,10 +472,17 @@ export class HttpRequestsService {
       ok = res.ok;
       contentType = res.headers.get('content-type') ?? undefined;
       res.headers.forEach((value, name) => responseHeaders.push({ name, value }));
-      const rawText = await res.text();
-      bodySize = Buffer.byteLength(rawText);
-      truncated = rawText.length > MAX_RESPONSE_BODY;
-      liveBody = truncated ? rawText.slice(0, MAX_RESPONSE_BODY) : rawText;
+      // Gedeckelt lesen (H-35) statt res.text(): vorher wurde der ganze Body
+      // geladen und erst danach auf MAX_RESPONSE_BODY gekürzt.
+      const capped = await readBodyCapped(res, MAX_RESPONSE_BODY);
+      liveBody = capped.text;
+      truncated = capped.truncated;
+      // Bei Abbruch kennt nur der Server die echte Größe; Content-Length,
+      // wenn er sie mitschickt, sonst „mindestens so viel wie gelesen".
+      const declared = Number(res.headers.get('content-length'));
+      bodySize = truncated && Number.isFinite(declared) && declared > capped.bytesRead
+        ? declared
+        : capped.bytesRead;
     } catch (err: unknown) {
       // `name` wird über `isRecord` gelesen statt über `instanceof Error`: der
       // Abbruch von fetch() kommt als DOMException, und ob die in der

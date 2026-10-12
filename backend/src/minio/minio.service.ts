@@ -92,6 +92,17 @@ export class MinioService implements OnModuleInit {
     });
   }
 
+  /**
+   * Stream ohne bekannte Größe hochladen (H-36). minio zerlegt ihn selbst in
+   * Multipart-Teile; der Aufrufer muss nichts puffern.
+   */
+  async putStreamInBucket(bucket: string, key: string, stream: Readable, mimetype: string): Promise<void> {
+    if (!this.client) throw new Error('MinIO not available');
+    await this.client.putObject(bucket, key, stream, undefined, {
+      'Content-Type': mimetype,
+    });
+  }
+
   async ensureBucket(bucket: string): Promise<void> {
     if (!this.client) throw new Error('MinIO not available');
     const exists = await this.client.bucketExists(bucket);

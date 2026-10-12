@@ -19,8 +19,27 @@ import { Response } from 'express';
 import { AttachmentsService } from './attachments.service';
 import { UpdateAttachmentDto } from './dto/update-attachment.dto';
 import { MinioService } from '../minio/minio.service';
+import { pipeline } from 'node:stream';
+import { MAX_ATTACHMENT_SIZE } from './attachment-limits';
 
-const MAX_FILE_SIZE = parseInt(process.env.MINIO_MAX_FILE_SIZE || String(50 * 1024 * 1024), 10);
+const MAX_FILE_SIZE = MAX_ATTACHMENT_SIZE;
+
+/**
+ * Objekt-Stream an die Response hängen (M-47). `stream.pipe(res)` reicht
+ * Fehler der Quelle nicht weiter: brach der MinIO-Stream mitten im Transfer
+ * ab, wurde `res` nie beendet, und mit Content-Length aus der DB wartete der
+ * Client dauerhaft. `pipeline` zerstört beide Seiten bei einem Fehler.
+ */
+function sendStream(stream: NodeJS.ReadableStream, res: Response): void {
+  pipeline(stream, res, (err) => {
+    if (!err) return;
+    if (!res.headersSent) {
+      res.status(502).json({ message: 'Anhang konnte nicht gelesen werden' });
+    } else {
+      res.destroy(err);
+    }
+  });
+}
 
 @Controller('attachments')
 export class AttachmentsController {
@@ -108,7 +127,7 @@ export class AttachmentsController {
     res.setHeader('Content-Type', attachment.mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
     res.setHeader('Content-Length', attachment.size);
-    stream.pipe(res);
+    sendStream(stream, res);
   }
 
   @Get(':id/preview')
@@ -118,7 +137,7 @@ export class AttachmentsController {
     res.setHeader('Content-Type', attachment.mimeType);
     res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
     res.setHeader('Content-Length', attachment.size);
-    stream.pipe(res);
+    sendStream(stream, res);
   }
 
   @Put(':id')

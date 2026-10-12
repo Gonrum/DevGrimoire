@@ -4,7 +4,9 @@ import { Cron } from '@nestjs/schedule';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model } from 'mongoose';
 import { createHash } from 'crypto';
-import { gzipSync, gunzipSync } from 'zlib';
+import { createGzip, gunzipSync } from 'zlib';
+import { PassThrough, Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { BackupJob, BackupJobDocument, BackupMode, BackupStatus } from './schemas/backup-job.schema';
 import { CreateBackupDto } from './dto/create-backup.dto';
 import { MinioService } from '../minio/minio.service';
@@ -204,13 +206,22 @@ export class BackupsService {
       const includeAttachments = options.includeAttachments ?? options.mode === BackupMode.FULL_SYSTEM;
       const artifacts: BackupArtifact[] = [];
 
-      const databasePayload = await this.exportDatabase();
-      artifacts.push(await this.writeArtifact(bucket, `${objectPrefix}/mongodb.json.gz`, databasePayload, 'application/gzip'));
+      // Gestreamt (H-36): Cursor -> JSON -> async gzip -> MinIO-Multipart.
+      // Vorher lag die ganze DB viermal im Speicher (toArray, Objekt, String,
+      // Buffer) und `gzipSync` blockierte den Event Loop für die gesamte
+      // Kompression — Terminals, MCP und Healthchecks standen still.
+      artifacts.push(await this.writeStreamArtifact(
+        bucket, `${objectPrefix}/mongodb.json.gz`, this.exportDatabaseStream(), 'application/gzip',
+      ));
 
       if (includeAttachments) {
         const attachmentManifest = await this.snapshotAttachments(bucket, objectPrefix);
-        const attachmentPayload = gzipSync(Buffer.from(JSON.stringify(attachmentManifest, null, 2), 'utf-8'));
-        artifacts.push(await this.writeArtifact(bucket, `${objectPrefix}/attachments-manifest.json.gz`, attachmentPayload, 'application/gzip'));
+        artifacts.push(await this.writeStreamArtifact(
+          bucket,
+          `${objectPrefix}/attachments-manifest.json.gz`,
+          Readable.from([JSON.stringify(attachmentManifest, null, 2)]),
+          'application/gzip',
+        ));
       }
 
       const manifest = this.buildManifest({
@@ -262,25 +273,50 @@ export class BackupsService {
     }
   }
 
-  private async exportDatabase(): Promise<Buffer> {
-    const db = this.connection.db;
-    if (!db) throw new Error('MongoDB connection is not ready');
-    const collections = await db.listCollections().toArray();
-    const dump: Record<string, unknown[]> = {};
-
-    for (const collectionInfo of collections) {
-      const name = collectionInfo.name;
-      if (name.startsWith('system.')) continue;
-      if (EXCLUDED_BACKUP_COLLECTIONS.includes(name)) continue;
-      dump[name] = await db.collection(name).find({}).toArray();
+  /**
+   * Der Datenbank-Dump als JSON-Stream (unkomprimiert). Format und Inhalt
+   * identisch zu vorher (`JSON.stringify(payload)`, kompakt), nur dass immer
+   * ein Dokument nach dem anderen aus dem Cursor kommt statt der ganzen
+   * Collection per `toArray()`.
+   */
+  exportDatabaseStream(): Readable {
+    const maybeDb = this.connection.db;
+    if (!maybeDb) throw new Error('MongoDB connection is not ready');
+    const db = maybeDb;
+    async function* documents(): AsyncGenerator<string> {
+      yield `{"format":"devgrimoire.system-backup.database.v1","exportedAt":${JSON.stringify(new Date().toISOString())},"collections":{`;
+      const collections = await db.listCollections().toArray();
+      let firstCollection = true;
+      for (const collectionInfo of collections) {
+        const name = collectionInfo.name;
+        if (name.startsWith('system.')) continue;
+        if (EXCLUDED_BACKUP_COLLECTIONS.includes(name)) continue;
+        yield `${firstCollection ? '' : ','}${JSON.stringify(name)}:[`;
+        firstCollection = false;
+        let firstDoc = true;
+        for await (const doc of db.collection(name).find({})) {
+          yield `${firstDoc ? '' : ','}${JSON.stringify(doc)}`;
+          firstDoc = false;
+        }
+        yield ']';
+      }
+      yield '}}';
     }
-
-    const payload = {
-      format: 'devgrimoire.system-backup.database.v1',
-      exportedAt: new Date().toISOString(),
-      collections: dump,
-    };
-    return gzipSync(Buffer.from(JSON.stringify(payload), 'utf-8'));
+    // Zu ~64-KB-Chunks bündeln: ein Chunk pro Dokument schickte jedes
+    // Dokument einzeln durch gzip und Upload — gemessen 43 s für 200.000
+    // kleine Dokumente.
+    async function* batched(): AsyncGenerator<string> {
+      let buf = '';
+      for await (const piece of documents()) {
+        buf += piece;
+        if (buf.length >= 65_536) {
+          yield buf;
+          buf = '';
+        }
+      }
+      if (buf) yield buf;
+    }
+    return Readable.from(batched());
   }
 
   private async snapshotAttachments(bucket: string, objectPrefix: string): Promise<Record<string, unknown>> {
@@ -348,6 +384,37 @@ export class BackupsService {
       },
       artifacts: input.artifacts,
     };
+  }
+
+  /**
+   * Komprimiert einen Stream asynchron und lädt ihn hoch; Größe und SHA-256
+   * werden unterwegs gezählt, ohne das Artefakt je ganz zu puffern.
+   */
+  private async writeStreamArtifact(bucket: string, key: string, source: Readable, contentType: string): Promise<BackupArtifact> {
+    const hash = createHash('sha256');
+    let size = 0;
+    const tap = new Transform({
+      transform(chunk: Buffer, _enc, cb) {
+        hash.update(chunk);
+        size += chunk.length;
+        cb(null, chunk);
+      },
+    });
+    const out = new PassThrough();
+    const upload = this.minioService.putStreamInBucket(bucket, key, out, contentType);
+    // Beide Seiten gemeinsam abwarten: scheitert der Upload, soll der
+    // Producer nicht ewig in einen vollen Puffer schreiben, und umgekehrt.
+    await Promise.all([
+      pipeline(source, createGzip(), tap, out).catch((err: unknown) => {
+        out.destroy(err instanceof Error ? err : new Error(String(err)));
+        throw err;
+      }),
+      upload.catch((err: unknown) => {
+        source.destroy();
+        throw err;
+      }),
+    ]);
+    return { key, size, sha256: hash.digest('hex'), contentType };
   }
 
   private async writeArtifact(bucket: string, key: string, buffer: Buffer, contentType: string): Promise<BackupArtifact> {
@@ -419,14 +486,22 @@ export class BackupsService {
 
   private async verifyArtifact(bucket: string, artifact: BackupArtifact): Promise<Record<string, unknown>> {
     try {
-      const payload = await this.readObjectBuffer(bucket, artifact.key);
-      const sha256 = createHash('sha256').update(payload).digest('hex');
-      const sizeMatches = payload.length === artifact.size;
+      // Gestreamt hashen statt das ganze Artefakt zu puffern (H-36).
+      const stream = await this.minioService.getObjectInBucket(bucket, artifact.key);
+      const hash = createHash('sha256');
+      let size = 0;
+      for await (const chunk of stream) {
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+        hash.update(buf);
+        size += buf.length;
+      }
+      const sha256 = hash.digest('hex');
+      const sizeMatches = size === artifact.size;
       const sha256Matches = sha256 === artifact.sha256;
       return {
         key: artifact.key,
         exists: true,
-        size: payload.length,
+        size,
         expectedSize: artifact.size,
         sizeMatches,
         sha256Matches,
