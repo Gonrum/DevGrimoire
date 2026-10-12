@@ -75,6 +75,7 @@ import { getToolCatalog, registerMcpTools, McpServices } from './mcp-tools';
 import { ApiKey } from './api-keys/schemas/api-key.schema';
 import { ApiKeysService } from './api-keys/api-keys.service';
 import { AuthService } from './auth/auth.service';
+import { isProjectEventVisible, isQuestionEventVisible } from './events/event-visibility';
 import { JwtService } from '@nestjs/jwt';
 import WebSocket, { WebSocketServer } from 'ws';
 import { errorMessage, isRecord } from './common/narrow';
@@ -1146,8 +1147,9 @@ async function bootstrap() {
       };
 
       const matchProjectEvent = (event: ProjectChangeEvent): string[] => {
-        // Privacy filter first — userId-scoped events never leak across users.
-        if (event.userId && event.userId !== userId) return [];
+        // Privacy- und Projekt-Filter: siehe events/event-visibility.ts, dort
+        // teilt sich die Regel mit der Legacy-SSE-Route.
+        //
         // Projekt-Scope (Review-Fund H-13, WebSocket-Variante). `projectId`
         // kommt bei einer Projekt-Subscription aus der Client-Nachricht, und
         // eine Global-Subscription bekam per Design ALLE nicht-privaten Events
@@ -1160,9 +1162,7 @@ async function bootstrap() {
         // den Projekt-Fall abdecken würde — die Global-Subscription ist der
         // breitere Weg. `actor === undefined` nur bei deaktivierter Auth; dann
         // ist die Instanz ohnehin offen.
-        if (actor && event.projectId !== null && !actorCanAccessProject(actor, String(event.projectId))) {
-          return [];
-        }
+        if (!isProjectEventVisible(event, userId, actor)) return [];
         const hits: string[] = [];
         for (const sub of subs.values()) {
           // Notifications and global (projectId === null) events broadcast to
@@ -1183,8 +1183,9 @@ async function bootstrap() {
 
       const matchQuestionEvent = (event: QuestionEvent): string[] => {
         // Targeted questions only flow to the addressed user. Broadcast
-        // questions (no targetUserId) flow to every subscription.
-        if (event.targetUserId && event.targetUserId !== userId) return [];
+        // questions flow to every subscription — sofern ihr Projekt im Scope
+        // des Actors liegt (fehlte bisher auch hier).
+        if (!isQuestionEventVisible(event, userId, actor)) return [];
         return Array.from(subs.keys());
       };
 

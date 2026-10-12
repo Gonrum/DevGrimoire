@@ -1,7 +1,10 @@
-import { Controller, Logger, Query, Req, Sse } from '@nestjs/common';
+import { Controller, ForbiddenException, Logger, Query, Req, Sse } from '@nestjs/common';
 import type { Request } from 'express';
 import { Observable, filter, map, merge } from 'rxjs';
 import { EventsBusService } from './events-bus.service';
+import { AuthRequest } from '../common/request-context';
+import { actorCanAccessProject } from '../common/permissions';
+import { isProjectEventVisible, isQuestionEventVisible } from './event-visibility';
 
 interface MessageEvent {
   data: string;
@@ -12,6 +15,12 @@ interface MessageEvent {
  * subscribe to /api/events. First-party UI moved to the WebSocket multiplex
  * endpoint at /api/ws/events (see main.ts) which avoids the HTTP/1.1
  * 6-connections-per-origin limit when multiple tabs are open.
+ *
+ * H-13: Die Route nahm `userId` als Query-Fallback und `projectId` ungeprüft
+ * aus dem Query-String. `?userId=` ist ersatzlos entfallen — die Identität
+ * kommt nur aus der Authentifizierung —, `projectId` wird gegen den Scope des
+ * Actors geprüft, und jedes Event läuft durch dieselbe Sichtbarkeitsregel wie
+ * im WebSocket-Pfad (event-visibility.ts).
  */
 @Controller('events')
 export class EventsController {
@@ -21,21 +30,22 @@ export class EventsController {
 
   @Sse()
   sse(
-    @Req() req: Request,
+    @Req() req: Request & AuthRequest,
     @Query('projectId') projectId?: string,
-    @Query('userId') queryUserId?: string,
   ): Observable<MessageEvent> {
     this.logger.warn(
       `Deprecated SSE /api/events used (UA="${req.headers['user-agent'] || ''}"). Migrate to /api/ws/events.`,
     );
-    const authedUserId =
-      (req as Request & { user?: { userId?: string } }).user?.userId || queryUserId;
+    const actor = req.user;
+    const userId = actor?.userId;
+    if (projectId && actor && !actorCanAccessProject(actor, projectId)) {
+      throw new ForbiddenException('Kein Zugriff auf dieses Projekt');
+    }
 
     const projectEvents$ = this.bus.events$.pipe(
       filter((event) => {
-        if (event.userId) {
-          return !!authedUserId && event.userId === authedUserId;
-        }
+        if (!isProjectEventVisible(event, userId, actor)) return false;
+        if (event.userId) return true;
         if (event.entity === 'notification') return true;
         if (event.projectId === null) return true;
         if (projectId) return event.projectId === projectId;
@@ -45,11 +55,7 @@ export class EventsController {
     );
 
     const questionStream$ = this.bus.questionEvents$.pipe(
-      filter((event) => {
-        if (!event.targetUserId) return true;
-        if (authedUserId) return event.targetUserId === authedUserId;
-        return true;
-      }),
+      filter((event) => isQuestionEventVisible(event, userId, actor)),
       map((event) => ({ data: JSON.stringify(event) })),
     );
 
