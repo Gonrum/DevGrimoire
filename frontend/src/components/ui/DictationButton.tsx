@@ -48,7 +48,7 @@ export const DictationButton: React.FC<DictationButtonProps> = ({ onTextUpdate }
         variant="secondary"
         size="sm"
         disabled
-        title={t('common.speech.notSupported')}
+        title={t('notifications.speech.notSupported')}
         className="p-2"
       >
         <MicIcon className="w-4 h-4 opacity-50" />
@@ -77,7 +77,7 @@ export const DictationButton: React.FC<DictationButtonProps> = ({ onTextUpdate }
         });
       }}
       className={`p-2 transition-all ${isListening ? 'animate-pulse' : ''}`}
-      title={isListening ? t('common.speech.stopDictation') : t('common.speech.dictation')}
+      title={isListening ? t('notifications.speech.stopDictation') : t('notifications.speech.dictation')}
     >
       <MicIcon className="w-4 h-4" />
     </Button>

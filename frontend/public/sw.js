@@ -1,4 +1,7 @@
-const CACHE_NAME = 'devgrimoire-v1';
+// v2 (H-23): v1 enthielt gecachte /api/-Antworten. Der Namenswechsel lässt
+// `activate` den alten Cache samt dieser Daten löschen. Bei jeder Änderung an
+// der Cache-Strategie hochzählen.
+const CACHE_NAME = 'devgrimoire-v2';
 const APP_SHELL = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {
@@ -25,19 +28,13 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // API calls: network-first, cache-fallback
-  if (url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          return response;
-        })
-        .catch(() => caches.match(request))
-    );
-    return;
-  }
+  // API calls: nie cachen (H-23). Vorher landete jede GET-Antwort unter /api/
+  // ungefiltert und unbefristet im CacheStorage — Todos, Chats, Audit-Log,
+  // Secret-Metadaten. Der Cache-Key ist die URL ohne Authorization-Header, im
+  // Offline-Fallback sah Nutzer B also die Daten von Nutzer A, und bei
+  // Netzproblemen zeigte die UI veraltete Daten ohne Hinweis. Kein
+  // respondWith: der Browser geht direkt ans Netz.
+  if (url.pathname.startsWith('/api/')) return;
 
   // Static assets: cache-first, network-fallback
   if (/\.(js|css|png|jpg|jpeg|svg|woff2?|ico)$/.test(url.pathname)) {

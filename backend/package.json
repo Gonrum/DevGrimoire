@@ -41,6 +41,7 @@
     "check:actor-scope": "node scripts/actor-scope-check.cjs",
     "check:entity-scope": "node scripts/entity-scope-check.cjs",
     "check:ssh-scope": "node scripts/ssh-scope-check.cjs",
+    "check:i18n-keys": "node scripts/i18n-keys-check.cjs",
     "check:credential-at-rest": "node scripts/credential-at-rest-check.cjs",
     "check:replication-lww": "node scripts/replication-lww-check.cjs",
     "check:kube-exec-args": "node scripts/kube-exec-args-check.cjs",

@@ -79,6 +79,29 @@ interface PendingAttachment {
 const CHAT_ATTACHMENT_ACCEPT =
   '.md,.txt,.json,.csv,.xml,.yaml,.yml,.toml,.ts,.tsx,.js,.jsx,.py,.go,.rs,.sh,.bash,.java,.c,.cpp,.h,.hpp,.cs,.php,.rb,.sql,.graphql,.svelte,.vue,.prisma,.ini,.cfg,.html,.css,.pdf,text/*,application/json,application/pdf,application/x-yaml,image/jpeg,image/png,image/webp,image/gif';
 
+/**
+ * Thumbnail eines Chat-Anhangs. Schlägt das Laden fehl (abgelaufenes Token,
+ * gelöschter Anhang), steht statt eines kaputten Bild-Icons der Dateiname da.
+ */
+function ChatAttachmentImage({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-900/70 border border-gray-700 text-gray-400 font-mono">
+        🖼 {alt}
+      </span>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      onError={() => setFailed(true)}
+      className="max-h-32 max-w-[180px] rounded border border-gray-700 object-cover"
+    />
+  );
+}
+
 function isImageFile(file: File): boolean {
   return file.type.startsWith('image/');
 }
@@ -1493,7 +1516,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         <div className="mt-2 pt-2 border-t border-gray-700/60 flex flex-wrap gap-1.5">
           {message.attachments.map((att) => {
             const isImg = att.kind === 'image';
-            const href = `/api/attachments/${att.attachmentId}/download`;
+            // downloadUrl hängt `?token=` an (H-25): <img> und <a> senden keinen
+            // Authorization-Header, die nackte Route lieferte mit aktivierter
+            // Auth 401 — kaputte Thumbnails, Tabs mit JSON-Fehler.
+            const href = api.attachments.downloadUrl(att.attachmentId);
             if (isImg) {
               return (
                 <a
@@ -1504,11 +1530,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
                   className="block"
                   title={att.fileName}
                 >
-                  <img
-                    src={href}
-                    alt={att.fileName}
-                    className="max-h-32 max-w-[180px] rounded border border-gray-700 object-cover"
-                  />
+                  <ChatAttachmentImage src={href} alt={att.fileName} />
                 </a>
               );
             }

@@ -68,7 +68,9 @@
     "applied": "angewendet",
     "errors": "Fehler",
     "chars": "Zeichen",
-    "uploadFile": "Datei hochladen"
+    "uploadFile": "Datei hochladen",
+    "add": "Hinzufügen",
+    "errorCreating": "Fehler beim Erstellen"
   },
   "nav": {
     "dashboard": "Grimoire",
@@ -906,7 +908,8 @@
     "contentPlaceholder": "Wissen, Entscheidungen oder Hinweise als Markdown festhalten...",
     "created": "Lore \"{{topic}}\" erstellt",
     "updated": "Lore \"{{topic}}\" aktualisiert",
-    "deleted": "Lore \"{{topic}}\" gelöscht"
+    "deleted": "Lore \"{{topic}}\" gelöscht",
+    "categoryPlaceholder": "Kategorie (z. B. Architektur)"
   },
   "changelog": {
     "noChangelog": "Noch keine Chronik-Einträge. Claude kann welche per MCP anlegen.",
@@ -1820,7 +1823,11 @@
     "tabSsh": "SSH",
     "tabHarness": "Harness (global)",
     "harnessTitle": "Globaler Harness",
-    "harnessHint": "Die oberste Ebene. Jede Kunden- und Projektebene erbt diese Abschnitte und kann sie ergänzen oder überschreiben."
+    "harnessHint": "Die oberste Ebene. Jede Kunden- und Projektebene erbt diese Abschnitte und kann sie ergänzen oder überschreiben.",
+    "dictationEnabled": "Spracheingabe",
+    "dictationEnabledDesc": "Zeigt den Diktier-Button in Eingabefeldern. Audio geht an den STT-Provider deines Browsers.",
+    "dictationResetConsent": "Zustimmung zurücksetzen",
+    "dictationConsentReset": "Zustimmung zur Spracheingabe zurückgesetzt. Beim nächsten Diktat wirst du erneut gefragt."
   },
   "chat": {
     "open": "Chat öffnen",

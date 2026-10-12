@@ -68,7 +68,9 @@
     "applied": "applied",
     "errors": "errors",
     "chars": "chars",
-    "uploadFile": "Upload file"
+    "uploadFile": "Upload file",
+    "add": "Add",
+    "errorCreating": "Error creating"
   },
   "globalLogs": {
     "title": "Cross-project logs",
@@ -906,7 +908,8 @@
     "contentPlaceholder": "Capture knowledge, decisions, or notes as Markdown...",
     "created": "Arcana \"{{topic}}\" created",
     "updated": "Arcana \"{{topic}}\" updated",
-    "deleted": "Arcana \"{{topic}}\" deleted"
+    "deleted": "Arcana \"{{topic}}\" deleted",
+    "categoryPlaceholder": "Category (e.g. Architecture)"
   },
   "changelog": {
     "noChangelog": "No chronicle entries yet. Claude can create them via MCP.",
@@ -1820,7 +1823,11 @@
     "tabSsh": "SSH",
     "tabHarness": "Harness (global)",
     "harnessTitle": "Global harness",
-    "harnessHint": "The top level. Every customer and project level inherits these sections and can extend or override them."
+    "harnessHint": "The top level. Every customer and project level inherits these sections and can extend or override them.",
+    "dictationEnabled": "Speech input",
+    "dictationEnabledDesc": "Shows the dictation button in input fields. Audio is sent to your browser's STT provider.",
+    "dictationResetConsent": "Reset consent",
+    "dictationConsentReset": "Speech input consent reset. You will be asked again on the next dictation."
   },
   "chat": {
     "open": "Open chat",

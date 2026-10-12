@@ -226,6 +226,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     accessTokenRef.current = null;
     localStorage.removeItem(REFRESH_TOKEN_KEY);
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    // Service-Worker-Caches leeren (H-23): ältere SW-Versionen haben
+    // API-Antworten gecacht, und auf einem geteilten Rechner soll nach dem
+    // Logout nichts vom vorigen Account zurückbleiben. Die App-Shell lädt der
+    // SW beim nächsten Besuch neu.
+    if ('caches' in window) {
+      void caches.keys()
+        .then((names) => Promise.all(names.map((name) => caches.delete(name))))
+        .catch(() => undefined);
+    }
     setIsAuthenticated(false);
     setUser(null);
   };

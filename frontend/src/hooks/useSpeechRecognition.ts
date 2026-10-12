@@ -16,7 +16,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
  * Fall behandeln. Er tut es (`recognitionCtor === null`).
  *
  * Deklariert ist nur, was dieser Hook benutzt. Der Rest der Spec (`grammars`,
- * `maxAlternatives`, `abort()`, `onaudiostart`, `onspeechend`, …) fehlt
+ * `maxAlternatives`, `onaudiostart`, `onspeechend`, …) fehlt
  * absichtlich: was nicht behauptet wird, kann auch nicht falsch behauptet sein.
  */
 
@@ -41,6 +41,8 @@ interface SpeechRecognitionInstance {
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   start: () => void;
   stop: () => void;
+  /** Sofortiger Abbruch ohne finales Ergebnis — für den Unmount-Cleanup. */
+  abort: () => void;
 }
 
 type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
@@ -165,6 +167,28 @@ export function useSpeechRecognition(options: SpeechRecognitionEvents) {
 
   const stopListening = useCallback(() => {
     recognitionRef.current?.stop();
+  }, []);
+
+  /*
+   * Unmount-Cleanup (H-24). `continuous = true` lässt die Erkennung laufen,
+   * bis jemand `stop()` ruft — und das tat bisher nur der Klick-Handler.
+   * Formular schliessen oder wegnavigieren während des Diktats liess das
+   * Mikrofon aktiv und schickte weiter Audio an den STT-Provider.
+   *
+   * Erst die Handler lösen (sonst rufen onend/onerror nach dem Unmount noch
+   * setState und die Options-Callbacks), dann `abort()` statt `stop()`: stop
+   * liefert noch ein finales Ergebnis an einen Konsumenten, den es nicht
+   * mehr gibt.
+   */
+  useEffect(() => () => {
+    const recognition = recognitionRef.current;
+    if (!recognition) return;
+    recognition.onstart = null;
+    recognition.onend = null;
+    recognition.onerror = null;
+    recognition.onresult = null;
+    try { recognition.abort(); } catch { /* bereits beendet */ }
+    recognitionRef.current = null;
   }, []);
 
   return {

@@ -160,7 +160,7 @@ export default function NotificationsSettings() {
 
   const resetDictationConsent = () => {
     localStorage.removeItem('speech_consent');
-    alert(t('settings.dictationConsentReset') || 'Consent zurückgesetzt');
+    alert(t('settings.dictationConsentReset'));
   };
 
   const systemCats = PUSH_CATEGORIES.filter((c) => c.group === 'system');
