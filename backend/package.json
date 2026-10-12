@@ -37,6 +37,7 @@
     "check:replication-gc": "node scripts/replication-gc-units-check.cjs",
     "check:replication-engine": "node scripts/replication-engine-units-check.cjs",
     "check:route-gates": "node scripts/route-gates-check.cjs",
+    "check:trust-proxy": "node scripts/trust-proxy-check.cjs",
     "check:http-requests-template": "node scripts/http-requests-template-check.cjs",
     "check:http-requests-curl": "node scripts/http-requests-curl-check.cjs",
     "check:llm-endpoints-merge": "node scripts/llm-endpoints-merge-check.cjs",

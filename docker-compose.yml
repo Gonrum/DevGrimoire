@@ -141,6 +141,21 @@ services:
       MONGODB_URI: ${MONGODB_URI}
       PORT: 3000
       CORS_ORIGIN: http://localhost
+      # Ein Hop = der nginx, den dieses Compose-File davorschaltet. Ohne die
+      # Einstellung ist req.ip für jeden Request die nginx-Container-Adresse,
+      # und damit war das Login-Throttling ein GLOBALER Eimer (5 Fehlversuche
+      # von irgendwo sperren die ganze Instanz), die IP-Bindung der
+      # Refresh-Tokens toter Code und jedes ipAddress im Audit-Log wertlos.
+      #
+      # ACHTUNG Wechselwirkung mit der Port-Bindung unten (`"3200:3000"` ohne
+      # 127.0.0.1-Präfix): das Backend ist damit auch DIREKT erreichbar und
+      # umgeht nginx. Auf diesem Weg kann ein Client mit eigenem
+      # X-Forwarded-For das Throttling umgehen, weil Express genau einen Hop
+      # vertraut und der Client selbst dieser Hop ist. Entweder die Bindung auf
+      # `127.0.0.1:3200:3000` setzen, oder TRUST_PROXY=false — dann ist
+      # allerdings auch der reguläre Weg über nginx wieder blind für die
+      # Client-Adresse.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
       AUTH_USERNAME: ${AUTH_USERNAME:-}
       AUTH_PASSWORD: ${AUTH_PASSWORD:-}
       JWT_SECRET: ${JWT_SECRET:-}

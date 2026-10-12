@@ -116,6 +116,10 @@ services:
       PORT: 3000
       NODE_HEAP_SIZE: 384
       CORS_ORIGIN: http://localhost
+      # Ein Hop = der nginx dieses Stacks (Service `frontend` unten). Siehe
+      # docker-compose.yml für die ausführliche Begründung; auch hier gilt die
+      # Wechselwirkung mit der direkten Port-Bindung `"3200:3000"`.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
       AUTH_USERNAME: ${AUTH_USERNAME:-}
       AUTH_PASSWORD: ${AUTH_PASSWORD:-}
       JWT_SECRET: ${JWT_SECRET:-}

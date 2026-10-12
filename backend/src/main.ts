@@ -79,6 +79,7 @@ import { JwtService } from '@nestjs/jwt';
 import WebSocket, { WebSocketServer } from 'ws';
 import { errorMessage, isRecord } from './common/narrow';
 import { RequestContext, RequestUser } from './common/request-context';
+import { resolveTrustProxy } from './common/trust-proxy';
 import { EventsBusService, QuestionEvent } from './events/events-bus.service';
 import { ProjectChangeEvent } from './events/project-event';
 import { Subscription } from 'rxjs';
@@ -196,6 +197,23 @@ async function bootstrap() {
   });
 
   const expressApp = app.getHttpAdapter().getInstance();
+
+  // Muss VOR allem anderen stehen: Express wertet `X-Forwarded-For`/`X-Real-IP`
+  // nur aus, wenn `trust proxy` gesetzt ist, und `req.ip` hängt davon ab.
+  // Ohne das war `req.ip` für jeden Request die Adresse des nginx-Containers —
+  // damit war das Login-Throttling ein globaler Eimer (fünf Fehlversuche
+  // irgendeines Clients sperrten die ganze Instanz), die IP-Bindung der
+  // Refresh-Tokens toter Code und jedes `ipAddress` im Audit-Log wertlos.
+  // Siehe common/trust-proxy.ts für die Herleitung und den Default.
+  const trustProxy = resolveTrustProxy(process.env.TRUST_PROXY);
+  expressApp.set('trust proxy', trustProxy);
+  // Geloggt, weil die Einstellung sonst unsichtbar ist und ein falsch
+  // gesetzter Wert zwei sehr verschiedene Fehlerbilder hat: `false` hinter
+  // einem Proxy macht das Throttling wieder global, `1` ohne Proxy macht es
+  // per Header umgehbar.
+  new Logger('Bootstrap').log(
+    `trust proxy = ${JSON.stringify(trustProxy)} (TRUST_PROXY=${process.env.TRUST_PROXY ?? 'unset → Default'})`,
+  );
 
   // JSON body parser for all routes (100MB limit for MCP + replication payloads with attachments)
   expressApp.use(json({ limit: '100mb' }));
