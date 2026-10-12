@@ -28,6 +28,9 @@ function loadCompiled(rel) {
 
 const { SettingsController } = loadCompiled('settings/settings.controller.js');
 const { ReplicationController } = loadCompiled('replication/replication.controller.js');
+const { RagController } = loadCompiled('rag/rag.controller.js');
+const { RagService } = loadCompiled('rag/rag.service.js');
+const { ChatController } = loadCompiled('chat/chat.controller.js');
 const { RequestContext } = loadCompiled('common/request-context.js');
 const { UserRole } = loadCompiled('auth/schemas/user.schema.js');
 const { ROLES_KEY } = loadCompiled('auth/decorators/roles.decorator.js');
@@ -38,7 +41,7 @@ const PATH_METADATA = 'path';
 const METHOD_METADATA = 'method';
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD', 'ALL'];
 
-const EXPECTED_CHECKS = 12;
+const EXPECTED_CHECKS = 18;
 
 let failures = 0, total = 0;
 function check(label, fn) {
@@ -272,6 +275,121 @@ const UNGATED_UI = new Set([
       assert.equal(route.roles, undefined,
         `"${key}" ist als ungegated klassifiziert, trägt aber @Roles — Matrix anpassen`);
     }
+  });
+
+  // ── Teil C: RagController-Gate-Matrix (Review-Fund C-11 / C-12) ─────────
+
+  const RAG_ADMIN_ONLY = new Set(['POST reindex', 'PUT config', 'POST config/test']);
+  // Lesbar für jeden Authentifizierten. `GET search` ist über
+  // buildDualScopeFilter/allowedProjectIds gescoped; `GET status` und
+  // `GET config` liefern Zählungen bzw. Endpoint-Metadaten mit
+  // hasApiKey-Flags statt Werten.
+  const RAG_UNGATED = new Set(['GET search', 'GET status', 'GET config']);
+
+  const ragRoutes = routesOf(RagController);
+
+  check('rag: reindex und beide config-Routen tragen @Roles(ADMIN)', () => {
+    for (const key of RAG_ADMIN_ONLY) {
+      const route = ragRoutes.get(key);
+      assert.ok(route, `Route "${key}" existiert nicht mehr — Matrix ist veraltet`);
+      assert.deepEqual(route.roles, [UserRole.ADMIN],
+        `"${key}" (Handler ${route.name}) ist NICHT admin-gegated`);
+    }
+  });
+
+  await checkAsync('rag: jede Route ist in der Matrix klassifiziert', async () => {
+    const unclassified = [];
+    for (const [key, route] of ragRoutes) {
+      if (RAG_ADMIN_ONLY.has(key) || RAG_UNGATED.has(key)) continue;
+      unclassified.push(`${key} (Handler ${route.name})`);
+    }
+    assert.deepEqual(unclassified, [],
+      'Diese RAG-Routen sind nicht klassifiziert — bitte bewusst einordnen');
+  });
+
+  check('chat: PUT config und POST config/test tragen @Roles(ADMIN)', () => {
+    // Gezielt statt vollständig: ChatController hat ~30 Routen, von denen die
+    // meisten bewusst für jeden Nutzer offen sind (Session-CRUD, Streaming).
+    // Geprüft werden hier nur die beiden Admin-Werkzeuge, die den
+    // Outbound-Fetch an eine Body-URL auslösen.
+    const routes = routesOf(ChatController);
+    for (const key of ['PUT config', 'POST config/test']) {
+      const route = routes.get(key);
+      assert.ok(route, `Route "${key}" existiert nicht mehr`);
+      assert.deepEqual(route.roles, [UserRole.ADMIN],
+        `"${key}" (Handler ${route.name}) ist NICHT admin-gegated`);
+    }
+  });
+
+  // ── Teil D: reindex() lehnt injizierbare Ids ab ────────────────────────
+  //
+  // `table.delete()` nimmt eine SQL-WHERE-Zeichenkette. Die Ids kamen als rohe
+  // Query-Strings an (kein DTO, die globale ValidationPipe greift nicht) und
+  // wurden direkt interpoliert.
+  const rag = new RagService({ db: null }, {}, {}, {});
+
+  check('rag.reindex: injizierbare Ids werden als 400 abgelehnt', () => {
+    for (const bad of [
+      'x" OR id != "',
+      'x" OR 1=1 --',
+      '../../../etc/passwd',
+      '',
+      ' ',
+      'x" OR id!="aaaaaaaaaaaaa', // exakt 24 Zeichen — bricht aus dem Literal aus
+      'z'.repeat(24),        // 24 Zeichen, aber kein Hex
+      '0'.repeat(23),        // zu kurz
+      '0'.repeat(25),        // zu lang
+      '507f1f77bcf86cd799439011 ', // trailing space
+      '507f1f77bcf86cd799439011"', // trailing quote
+    ]) {
+      const err = (() => { try { rag.toIdHex(bad, 'projectId'); return null; } catch (e) { return e; } })();
+      assert.ok(err, `toIdHex("${bad}") hätte werfen müssen`);
+      assert.equal(err.getStatus(), 400, `"${bad}": erwartet 400, bekam ${err.getStatus()}`);
+    }
+  });
+
+  check('rag.reindex: die Interpolations-Sicherheit hängt nicht an der Treiber-Version', () => {
+    // `table.delete()` nimmt eine SQL-WHERE-Zeichenkette. Die benötigte
+    // Eigenschaft ist: was toIdHex() zurückgibt, kann das String-Literal nicht
+    // verlassen. Geprüft wird das als EIGENSCHAFT, nicht über einen Vergleich
+    // mit ObjectId.isValid() — die Treiber-Semantik ist dafür keine
+    // verlässliche Basis. Empirisch lehnen die aktuell installierten
+    // Versionen (`mongodb`, `mongoose`) das 24-Zeichen-Payload oben ab; ältere
+    // haben jeden 24-Zeichen-String durchgewinkt. Eine Prüfung, die an
+    // isValid() hängt, könnte bei einem Downgrade oder Bibliothekswechsel
+    // still aufgehen — das Regexp an der Interpolationsstelle nicht.
+    for (const good of [
+      '507f1f77bcf86cd799439011',
+      '000000000000000000000000',
+      'ffffffffffffffffffffffff',
+      'ABCDEF0123456789abcdef01',
+    ]) {
+      const out = rag.toIdHex(good, 'projectId');
+      assert.match(out, /^[0-9a-f]{24}$/,
+        `"${good}" -> "${out}" ist kein reiner lowercase-Hex-String`);
+      for (const forbidden of ['"', "'", ' ', '--', ';', '\\', '/', '*']) {
+        assert.ok(!out.includes(forbidden),
+          `"${good}" -> "${out}" enthält "${forbidden}" — Interpolation nicht sicher`);
+      }
+      // Das interpolierte Prädikat darf genau zwei Anführungszeichen haben:
+      // die begrenzenden. Mehr bedeutet, dass der Wert ausbricht.
+      const predicate = `projectId = "${out}"`;
+      assert.equal((predicate.match(/"/g) || []).length, 2,
+        `das Prädikat ${predicate} hat mehr als die zwei begrenzenden Anführungszeichen`);
+    }
+  });
+
+  check('rag.reindex: gültige Ids werden kanonisch lowercase durchgereicht', () => {
+    const hex = '507f1f77bcf86cd799439011';
+    assert.equal(rag.toIdHex(hex, 'projectId'), hex, 'eine gültige Id wurde verändert');
+    // Lowercase ist keine Kosmetik: asText() schreibt über toHexString(), also
+    // klein. Ohne die Normalisierung würde eine uppercase-Id beim scoped
+    // Reindex still nichts löschen.
+    assert.equal(rag.toIdHex(hex.toUpperCase(), 'projectId'), hex,
+      'eine uppercase-Id wurde nicht auf lowercase kanonisiert');
+    // Und das Ergebnis ist garantiert interpolations-sicher.
+    const out = rag.toIdHex(hex, 'projectId');
+    assert.match(out, /^[0-9a-f]{24}$/, 'das Ergebnis ist kein reiner Hex-String');
   });
 
   console.log('');

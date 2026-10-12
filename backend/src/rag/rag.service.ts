@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { pickAllowed } from '../common/narrow';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectConnection } from '@nestjs/mongoose';
@@ -156,6 +156,28 @@ function asTextList(value: unknown): string[] {
 function asNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
+
+/**
+ * Exakte Hex-Form einer Mongo-ObjectId (24 Zeichen).
+ *
+ * Die Sicherheitseigenschaft, die `table.delete()` braucht, ist: der Wert darf
+ * kein Anführungszeichen, kein Leerzeichen und keinen SQL-Kommentar enthalten.
+ * Dieses Regexp sagt sie DIREKT aus, statt sie aus „ist zufällig eine gültige
+ * ObjectId" abzuleiten.
+ *
+ * Bewusst nicht `Types.ObjectId.isValid()`: die Treiber-Versionen sind hier
+ * unterschiedlich streng. Empirisch lehnen die aktuell installierten
+ * (`mongodb`/`mongoose`) ein 24-Zeichen-Payload wie `x" OR id!="aaaaaaaaaaaaa`
+ * ab — ältere Versionen haben jeden 24-Zeichen-String durchgewinkt. Eine
+ * Prüfung, die an der Treiber-Semantik hängt, kann bei einem Downgrade oder
+ * einem Wechsel der Bibliothek still aufgehen; ein Regexp an der
+ * Interpolationsstelle nicht. Zusätzlich entfällt der Import (die Datei nutzt
+ * für ObjectId sonst dynamische `await import('mongodb')`-Aufrufe).
+ */
+const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
+
+/** Obergrenze für Upstream-Fehlertexte, die in eine Meldung wandern. */
+const UPSTREAM_ERROR_TEXT_MAX = 200;
 
 /** Message of an unknown throwable, without stringifying non-Error objects. */
 function errorMessage(err: unknown): string {
@@ -582,7 +604,16 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (!res.ok) {
-        throw new Error(`Embedding API failed (${res.status}): ${await res.text()}`);
+        // Body gekappt. Die Meldung wandert über testEndpoint() als
+        // `{ ok: false, error }` unverändert an den Aufrufer — ungekürzt war
+        // das ein Full-Read-SSRF-Orakel: wer die URL frei wählen kann, bekommt
+        // den kompletten Antworttext eines beliebigen Ziels zurück
+        // (Cloud-Metadaten unter 169.254.169.254, interne Admin-Panels). Der
+        // Rollen-Gate auf POST /rag/config/test ist die eigentliche Abwehr;
+        // das Cap ist Defense-in-Depth, weil der Text zusätzlich in Logs und
+        // in die Settings-UI wandert. 200 Zeichen reichen zur Diagnose.
+        const detail = (await res.text()).slice(0, UPSTREAM_ERROR_TEXT_MAX);
+        throw new Error(`Embedding API failed (${res.status}): ${detail}`);
       }
       const body: unknown = await res.json();
       const first = isRecord(body) && isUnknownArray(body.data) ? body.data[0] : undefined;
@@ -1053,6 +1084,21 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return mergeScopeHits(hitLists, effectiveLimit);
   }
 
+  /**
+   * Kanonische 24-Hex-Form einer Mongo-Id, oder 400.
+   *
+   * Lowercase ist keine Kosmetik: `asText()` schreibt Ids über
+   * `toHexString()` in den Vektor-Store, also klein. Eine uppercase übergebene
+   * Id würde ohne die Normalisierung beim scoped Reindex still nichts löschen
+   * — der Index bliebe voll mit veralteten Zeilen, ohne Fehlermeldung.
+   */
+  private toIdHex(value: string, field: string): string {
+    if (!OBJECT_ID_HEX_RE.test(value)) {
+      throw new BadRequestException(`${field} ist keine gültige ObjectId`);
+    }
+    return value.toLowerCase();
+  }
+
   /** Full reindex of all indexable entities (optionally scoped to a project or customer) */
   async reindex(projectId?: string, customerId?: string): Promise<{ indexed: number; entities: Record<string, number> }> {
     if (!(await this.ensureReady())) {
@@ -1063,10 +1109,27 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     if (!db) throw new Error('MongoDB not available');
 
     // Clear existing data for the scope
-    if (projectId) {
-      await this.table!.delete(`projectId = "${projectId}"`);
-    } else if (customerId) {
-      await this.table!.delete(`customerId = "${customerId}"`);
+    //
+    // `table.delete()` nimmt eine SQL-WHERE-ZEICHENKETTE, keine
+    // parametrisierte Abfrage — der Wert wurde hier direkt interpoliert, und
+    // beide Ids kommen als rohe Query-Strings aus dem Controller (kein DTO,
+    // also greift die globale ValidationPipe nicht). Ein projectId wie
+    // `x" OR id != "` machte das Prädikat all-wahr und löschte den GESAMTEN
+    // Vektorindex; Wiederherstellung nur per Voll-Reindex, also einem kompletten
+    // Re-Embed-Durchlauf über alle Dokumente.
+    //
+    // Geprüft wird per striktem Hex-Regexp statt `Types.ObjectId.isValid()`,
+    // damit die Sicherheitseigenschaft (kein Anführungszeichen, kein
+    // Leerzeichen, kein Kommentar im interpolierten Wert) direkt an dieser
+    // Stelle gilt und nicht an der Semantik einer Treiber-Version hängt.
+    // Siehe OBJECT_ID_HEX_RE.
+    const projectIdHex = projectId === undefined ? undefined : this.toIdHex(projectId, 'projectId');
+    const customerIdHex = customerId === undefined ? undefined : this.toIdHex(customerId, 'customerId');
+
+    if (projectIdHex) {
+      await this.table!.delete(`projectId = "${projectIdHex}"`);
+    } else if (customerIdHex) {
+      await this.table!.delete(`customerId = "${customerIdHex}"`);
     } else {
       // Full reindex: drop and recreate table
       await this.db!.dropTable('documents');

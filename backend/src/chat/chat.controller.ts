@@ -431,7 +431,25 @@ export class ChatController {
     }
   }
 
+  /**
+   * Admin-only, wie `PUT config` daneben.
+   *
+   * War ungegated: ein Outbound-Fetch an eine URL aus dem Request-Body
+   * (`fetch(`${endpoint.url}/v1/models`)` bzw. `/v1/messages`), wobei
+   * `TestChatEndpointDto extends ChatEndpointDto {}` die `url` nur mit
+   * `@IsString()` prüft — kein Schema, kein Host. Ein Nicht-Admin konnte damit
+   * interne Ziele vom Backend-Container aus anfragen. Schwächer als die
+   * RAG-Variante, weil hier kein Response-Body zurückgegeben wird (nur
+   * `HTTP <status>` plus 140 Zeichen), aber Status und Antwortzeit reichen für
+   * Port-Scanning und Dienst-Erkennung im Docker-Netz.
+   *
+   * Bewusst KEINE Private-IP-Blockade: Chat-Endpoints liegen laut
+   * `.env.example` regulär auf `http://host.docker.internal:11434`,
+   * `http://gpu:1234` oder `http://localhost:11434` — alles privat. Eine
+   * Sperre würde die dokumentierte Default-Konfiguration abschalten.
+   */
   @Post('config/test')
+  @Roles(UserRole.ADMIN)
   @HttpCode(200)
   async testConfig(@Body() dto: TestChatEndpointDto) {
     await this.assertEnabled();
