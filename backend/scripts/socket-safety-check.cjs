@@ -44,7 +44,7 @@ const WebSocket = require(path.resolve(__dirname, '..', 'node_modules', 'ws'));
 const SIDECAR = path.resolve(__dirname, '..', '..', 'workspace', 'server', 'index.js');
 const TOKEN = 'socket-safety-check-token-0123456789';
 
-const EXPECTED_CHECKS = 8;
+const EXPECTED_CHECKS = 9;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -135,6 +135,14 @@ function wsStatus(port, query) {
       const dup = await wsStatus(sc.port, `workspaceId=${id}&sessionId=s1`);
       assert.equal(dup.status, 409);
       first.ws.close();
+    });
+
+    await check('C-3: Kube-Sessions sind ohne KUBE_SESSIONS_ENABLED gesperrt (HTTP und Terminal)', async () => {
+      const res = await sc.post('/kube/session', { kubeconfig: 'apiVersion: v1' });
+      assert.equal(res.status, 503);
+      assert.match((await res.json()).error, /disabled/);
+      const term = await wsStatus(sc.port, 'kubeSessionId=' + 'a'.repeat(32));
+      assert.equal(term.status, 503);
     });
 
     await check('M-25: SIGTERM beendet den Sidecar sauber', async () => {

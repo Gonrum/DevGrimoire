@@ -961,7 +961,29 @@ if (!KUBE_SESSION_DIR_IS_TMPFS) {
   }));
 }
 
+/**
+ * Kube-Sessions sind per Default AUS (C-3).
+ *
+ * Die Session-Kubeconfigs liegen in diesem Container unter derselben UID
+ * (10001), unter der jede Workspace-Shell und jedes /exec läuft. 0600/0700
+ * schützen dann gegen niemanden: `cat /run/kube-sessions/*.yaml` aus einem
+ * beliebigen Workspace liefert die Cluster-Credentials ALLER aktiven Sessions,
+ * projektübergreifend. Auch ein Injektions-Proxy mit Token im Env hilft nicht —
+ * /proc/<pid>/environ ist für dieselbe UID ebenso lesbar.
+ *
+ * Heute ruft das Backend diese Routen noch nicht auf (K3 Task 3 fehlt), der
+ * Befund ist latent. Damit er nicht unbemerkt scharf wird, wenn Task 3 landet,
+ * bleiben die Routen gesperrt, bis die Isolation steht (eigener Container
+ * bzw. eigene UID pro Session) und jemand bewusst KUBE_SESSIONS_ENABLED=true
+ * setzt. Für die E2E-Tests (test/kube-sidecar-session.sh) ebenso.
+ */
+const KUBE_SESSIONS_ENABLED = process.env.KUBE_SESSIONS_ENABLED === 'true';
+
 function requireKubeSessionTmpfs(res) {
+  if (!KUBE_SESSIONS_ENABLED) {
+    res.status(503).json({ error: 'kube sessions disabled: not isolated from workspace shells (set KUBE_SESSIONS_ENABLED=true only once they are)' });
+    return false;
+  }
   if (KUBE_SESSION_DIR_IS_TMPFS) return true;
   res.status(503).json({ error: 'kube sessions unavailable: session directory is not a tmpfs mount' });
   return false;
@@ -1242,7 +1264,7 @@ server.on('upgrade', (req, socket, head) => {
   }
 
   if (kubeSessionId) {
-    if (!KUBE_SESSION_DIR_IS_TMPFS) {
+    if (!KUBE_SESSIONS_ENABLED || !KUBE_SESSION_DIR_IS_TMPFS) {
       socket.write('HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n');
       socket.destroy();
       return;

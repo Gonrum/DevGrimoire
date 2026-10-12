@@ -2,6 +2,11 @@
 # E2E für den Kube-Session-Endpunkt des Sidecars (K3, Task 2).
 # Läuft gegen den laufenden workspace-Container.
 #
+# VORAUSSETZUNG (C-3): Kube-Sessions sind im Sidecar per Default gesperrt,
+# solange sie nicht von den Workspace-Shells isoliert sind. Für diesen Test
+# den Sidecar mit KUBE_SESSIONS_ENABLED=true starten, danach wieder ohne:
+#   KUBE_SESSIONS_ENABLED=true docker compose up -d workspace
+#
 # SIDECAR_URL: der `workspace`-Service published in docker-compose.yml
 # KEINEN Host-Port (nur `workspace-net`/`workspace-api-net`, letzteres
 # `internal: true`). Der Default unten (http://localhost:9000) funktioniert
