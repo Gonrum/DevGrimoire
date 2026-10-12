@@ -177,6 +177,10 @@ export class ReplicationReceiveService {
       if (doc.milestoneId && typeof doc.milestoneId === 'string') {
         doc.milestoneId = new ObjectId(doc.milestoneId);
       }
+      // M-50: wie in der Log-Engine — sonst landet changelogId als String.
+      if (doc.changelogId && typeof doc.changelogId === 'string' && ObjectId.isValid(doc.changelogId)) {
+        doc.changelogId = new ObjectId(doc.changelogId);
+      }
       if (doc.entityId && typeof doc.entityId === 'string' && payload.event.entity === 'attachment') {
         doc.entityId = new ObjectId(doc.entityId);
       }

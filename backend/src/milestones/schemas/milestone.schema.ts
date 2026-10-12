@@ -46,6 +46,14 @@ export class Milestone {
 
 export const MilestoneSchema = SchemaFactory.createForClass(Milestone);
 MilestoneSchema.index({ projectId: 1, status: 1, createdAt: -1 });
+// M-50: „jeder Changelog nur einmal" als Datenbank-Garantie. Vorher nur eine
+// Anwendungsprüfung auf EINEM von drei Pfaden (status=done), dazu TOCTOU:
+// zwei parallele Aufrufe bestanden beide. Partiell, weil die meisten
+// Milestones (noch) keinen Changelog haben.
+MilestoneSchema.index(
+  { changelogId: 1 },
+  { unique: true, partialFilterExpression: { changelogId: { $type: 'objectId' } } },
+);
 MilestoneSchema.index(
   { projectId: 1, number: 1 },
   { unique: true, partialFilterExpression: { number: { $type: 'number' } } },

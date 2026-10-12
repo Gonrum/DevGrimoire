@@ -28,9 +28,10 @@ const { AuditLogService } = loadCompiled('audit-log/audit-log.service.js');
 const { ScalarQueryPipe } = loadCompiled('common/scalar-query.pipe.js');
 const { assertSafeCascadeId } = loadCompiled('common/cascade-guard.js');
 const { TodosService } = loadCompiled('todos/todos.service.js');
+const { MilestonesService } = loadCompiled('milestones/milestones.service.js');
 const { Types } = require(path.resolve(__dirname, '..', 'node_modules', 'mongoose'));
 
-const EXPECTED_CHECKS = 5;
+const EXPECTED_CHECKS = 7;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -91,6 +92,36 @@ async function check(label, fn) {
       }
     })(path.resolve(__dirname, '..', 'src'));
     assert.deepEqual(missing, [], 'neue Kaskaden-Methode ohne Guard');
+  });
+
+  // M-50 ---------------------------------------------------------------------
+  function makeMilestones(otherHolder) {
+    const svc = Object.create(MilestonesService.prototype);
+    const writes = [];
+    svc.changelogModel = { findById: () => ({ exec: async () => ({ _id: 'c' }) }) };
+    svc.milestoneModel = {
+      collection: { findOne: async (f) => otherHolder(f) },
+      findById: () => ({ exec: async () => ({ changelogId: undefined }) }),
+      findByIdAndUpdate: (id, dto) => ({ exec: async () => { writes.push(dto); return { projectId: 'p', name: 'm', ...dto }; } }),
+    };
+    svc.eventEmitter = { emit() {} };
+    return { svc, writes };
+  }
+
+  await check('M-50: changelogId ohne status=done wird ebenfalls auf Eindeutigkeit geprüft', async () => {
+    const cl = new Types.ObjectId().toString();
+    const { svc, writes } = makeMilestones(() => ({ name: 'M-7' }));
+    await assert.rejects(() => svc.update(new Types.ObjectId().toString(), { changelogId: cl }), /bereits dem Milestone/);
+    assert.equal(writes.length, 0);
+  });
+
+  await check('M-50: Prüfung trifft auch Altbestand mit changelogId als String', async () => {
+    const cl = new Types.ObjectId().toString();
+    let seenFilter = null;
+    const { svc } = makeMilestones((f) => { seenFilter = f; return null; });
+    await svc.update(new Types.ObjectId().toString(), { changelogId: cl });
+    const variants = seenFilter.changelogId.$in.map((v) => typeof v === 'string' ? 'string' : 'objectId').sort();
+    assert.deepEqual(variants, ['objectId', 'string']);
   });
 
   console.log(`\n${total - failures}/${total} passed`);

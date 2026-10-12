@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
+import { errorMessage, isDuplicateKeyError } from '../common/narrow';
 import { Milestone, MilestoneDocument, MilestoneStatus } from './schemas/milestone.schema';
 import { Changelog, ChangelogDocument } from '../changelog/schemas/changelog.schema';
 import { Project, ProjectDocument } from '../projects/schemas/project.schema';
@@ -127,7 +128,7 @@ function isUnknownArray(value: unknown): value is unknown[] {
 }
 
 @Injectable()
-export class MilestonesService {
+export class MilestonesService implements OnModuleInit {
   private readonly logger = new Logger(MilestonesService.name);
 
   constructor(
@@ -198,7 +199,56 @@ export class MilestonesService {
     return milestone;
   }
 
+  /**
+   * M-50: changelogId kam über die Replikation als String an (live 205 von
+   * 299 Milestones). Normalisiert auf ObjectId, damit Eindeutigkeitsprüfung
+   * und Unique-Index sie sehen. Idempotent; nur gültige 24-Hex-Strings.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      const res = await this.milestoneModel.collection.updateMany(
+        { changelogId: { $type: 'string', $regex: /^[0-9a-fA-F]{24}$/ } },
+        [{ $set: { changelogId: { $toObjectId: '$changelogId' } } }],
+      );
+      if (res.modifiedCount > 0) {
+        this.logger.log(`${res.modifiedCount} Milestone-changelogId(s) von String auf ObjectId normalisiert (M-50)`);
+      }
+    } catch (err: unknown) {
+      // Ein Duplikat würde hier am Unique-Index scheitern — laut melden, nicht
+      // den Start verhindern.
+      this.logger.error(`changelogId-Normalisierung fehlgeschlagen: ${errorMessage(err)}`);
+    }
+  }
+
+  /**
+   * „Jeder Changelog nur einmal" (M-50) — auf JEDEM Pfad, der changelogId
+   * setzt, nicht nur bei status=done. Prüft beide Speicherformen (ObjectId und
+   * Altbestand als String). Der Unique-Index fängt die verbleibende Race.
+   */
+  private async assertChangelogAssignable(changelogId: string, milestoneId: string): Promise<void> {
+    if (!Types.ObjectId.isValid(changelogId)) {
+      throw new BadRequestException(`Ungültige changelogId ${changelogId}`);
+    }
+    const changelog = await this.changelogModel.findById(changelogId).exec();
+    if (!changelog) {
+      throw new BadRequestException(`Changelog ${changelogId} nicht gefunden.`);
+    }
+    const other = await this.milestoneModel.collection.findOne({
+      changelogId: { $in: [new Types.ObjectId(changelogId), changelogId] },
+      _id: { $ne: new Types.ObjectId(milestoneId) },
+    });
+    if (other) {
+      throw new BadRequestException(
+        `Changelog ${changelogId} ist bereits dem Milestone "${String(other.name)}" zugeordnet. Erstelle einen neuen Changelog-Eintrag.`,
+      );
+    }
+  }
+
   async update(id: string, dto: UpdateMilestoneDto): Promise<MilestoneDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException(`Milestone ${id} not found`);
+    if (dto.changelogId) {
+      await this.assertChangelogAssignable(dto.changelogId, id);
+    }
     // When setting status to done, require a changelogId
     if (dto.status === MilestoneStatus.DONE) {
       const current = await this.milestoneModel.findById(id).exec();
@@ -212,27 +262,24 @@ export class MilestonesService {
         );
       }
 
-      // Verify changelog exists
-      const changelog = await this.changelogModel.findById(changelogId).exec();
-      if (!changelog) {
-        throw new BadRequestException(`Changelog ${changelogId} nicht gefunden.`);
-      }
-
-      // Verify changelog is not already used by another milestone
-      const other = await this.milestoneModel.findOne({
-        changelogId,
-        _id: { $ne: id },
-      }).exec();
-      if (other) {
-        throw new BadRequestException(
-          `Changelog ${changelogId} ist bereits dem Milestone "${other.name}" zugeordnet. Erstelle einen neuen Changelog-Eintrag.`,
-        );
-      }
+      // Existenz und Eindeutigkeit (für einen schon gesetzten changelogId,
+      // der nicht im dto steht; ein dto.changelogId ist oben geprüft).
+      if (!dto.changelogId) await this.assertChangelogAssignable(changelogId, id);
     }
 
-    const milestone = await this.milestoneModel
-      .findByIdAndUpdate(id, dto, { new: true })
-      .exec();
+    let milestone: MilestoneDocument | null;
+    try {
+      milestone = await this.milestoneModel
+        .findByIdAndUpdate(id, dto, { new: true })
+        .exec();
+    } catch (err: unknown) {
+      if (isDuplicateKeyError(err)) {
+        throw new BadRequestException(
+          `Changelog ${dto.changelogId ?? ''} ist bereits einem anderen Milestone zugeordnet.`,
+        );
+      }
+      throw err;
+    }
     if (!milestone) throw new NotFoundException(`Milestone ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: milestone.projectId.toString(),

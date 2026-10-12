@@ -14,7 +14,10 @@ import { ReplDoc, errorMessage, isRecord } from './replication-narrow.helpers';
 import { isUnknownArray } from '../common/tool-args';
 
 /** ObjectId-typed fields that arrive as strings over JSON and must be cast back. */
-const OBJECTID_FIELDS = ['projectId', 'customerId', 'milestoneId', 'entityId', 'topicId', 'lastRunId', 'ownerUserId'];
+// `changelogId` (M-50): fehlte, Milestones kamen beim Peer mit String-Id an —
+// live 205 von 299 Milestones. Die Eindeutigkeitsprüfung „ein Changelog pro
+// Milestone" fragt per ObjectId und fand diese Werte nie.
+const OBJECTID_FIELDS = ['projectId', 'customerId', 'milestoneId', 'entityId', 'topicId', 'lastRunId', 'ownerUserId', 'changelogId'];
 
 @Injectable()
 export class ReplicationSyncApplyService {
