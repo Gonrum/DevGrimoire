@@ -256,7 +256,25 @@ export class ReplicationController {
     };
   }
 
+  /**
+   * Admin-only, wie die sechs anderen Schreib-/Aktionsrouten dieser Datei.
+   *
+   * War ungegated und ist damit die folgenreichste der Lücken: `role: 'slave'`
+   * aktiviert den globalen `ReplicationReadonlyGuard` und legt die Instanz für
+   * ALLE Nutzer lahm; `peerUrl`/`slaveUrl`/`masterUrl` werden ungeprüft
+   * persistiert (kein `new URL()`, keine Schema- oder IP-Prüfung) und sind das
+   * Ziel von `test-connection` (SSRF-Leseorakel, gibt den Fehlertext zurück)
+   * und `trigger-full-sync` (schickt alle replizierten Projekte inkl.
+   * Base64-Anhängen an diese URL). Zusammen mit dem ebenfalls ungegateden
+   * `GET /api/settings/:key` war die Kette vollständig: erst den Peer-API-Key
+   * lesen, dann die eigene Gegenstelle aufsetzen.
+   *
+   * `@Body() body: Partial<ReplicationConfig>` ist ein Interface, die globale
+   * ValidationPipe überspringt es also — die manuellen Prüfungen unten sind
+   * derzeit die einzigen. Ein echtes DTO mit class-validator steht noch aus.
+   */
   @Put('config')
+  @Roles(UserRole.ADMIN)
   async updateConfig(@Body() body: Partial<ReplicationConfig>): Promise<ReplicationConfig> {
     if (body.role && !['standalone', 'master', 'slave', 'peer'].includes(body.role)) {
       throw new BadRequestException('Invalid role');
@@ -555,6 +573,7 @@ export class ReplicationController {
 
   /** Trigger an inbound pull from the configured peer (manual UI button). */
   @Post('trigger-pull')
+  @Roles(UserRole.ADMIN)
   @HttpCode(200)
   async triggerPull() {
     const result = await this.pullService.runPull();
@@ -564,6 +583,7 @@ export class ReplicationController {
   // ── Master Actions ───────────────────────────────
 
   @Post('test-connection')
+  @Roles(UserRole.ADMIN)
   @HttpCode(200)
   async testConnection() {
     const role = await this.settingsService.get(REPL_ROLE);
@@ -596,6 +616,7 @@ export class ReplicationController {
   // Absichtlich synchron: der Full-Sync wird fire-and-forget gestartet, es gibt
   // hier nichts zu erwarten. Als `async` ohne `await` war das nur Rauschen.
   @Post('trigger-full-sync')
+  @Roles(UserRole.ADMIN)
   @HttpCode(200)
   triggerFullSync(@Query('projectId') projectId?: string) {
     if (this.fullSyncService.isSyncing()) {
@@ -609,6 +630,7 @@ export class ReplicationController {
   }
 
   @Post('queue/clear-failed')
+  @Roles(UserRole.ADMIN)
   @HttpCode(200)
   async clearFailed() {
     const cleared = await this.pushService.clearFailed();
@@ -618,6 +640,7 @@ export class ReplicationController {
   // ── Promote (Slave → Master) ─────────────────────
 
   @Post('promote')
+  @Roles(UserRole.ADMIN)
   @HttpCode(200)
   async promote() {
     const role = await this.settingsService.get(REPL_ROLE);
