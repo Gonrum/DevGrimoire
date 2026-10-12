@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { RefreshToken, RefreshTokenDocument } from './schemas/refresh-token.schema';
 import { User, UserDocument, UserRole, UserLlmConfig } from './schemas/user.schema';
 import type { ScopeMode } from '../common/permissions';
@@ -55,6 +55,17 @@ interface UserUpdatePatch {
   allowedCustomerIds?: string[];
 }
 
+/**
+ * Refresh-Tokens werden wie API-Keys nur als SHA-256 persistiert (H-8). Der
+ * Klartext existiert nur beim Client; ein Lesezugriff auf die DB (Dump,
+ * Backup-Artefakt, Replica-Node) liefert damit keine einlösbaren Sessions mehr.
+ * Ein schneller Hash genügt: das Token hat 384 Bit Entropie, Brute-Force
+ * scheidet aus — bcrypt wäre hier nur Latenz.
+ */
+export function hashRefreshToken(token: string): string {
+  return createHash('sha256').update(String(token)).digest('hex');
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -88,6 +99,12 @@ export class AuthService {
     });
     // Clean up old refresh tokens from pre-migration (had username field instead of userId)
     this.refreshTokenModel.deleteMany({ userId: { $exists: false } }).exec().catch(() => {});
+    // H-8: Refresh-Tokens liegen nur noch als SHA-256 (64 Hex-Zeichen) in der
+    // DB. Altbestand im Klartext (96 Hex-Zeichen aus randomBytes(48)) ist
+    // nach der Umstellung ohnehin nicht mehr einlösbar — gelöscht wird er,
+    // damit er nicht weitere 7 Tage in Dumps und Backups liegt. Einmaliger
+    // Effekt: alle laufenden Sessions müssen sich neu anmelden.
+    this.refreshTokenModel.deleteMany({ token: { $regex: /^[0-9a-f]{96}$/ } }).exec().catch(() => {});
     // Encrypt any plaintext llmConfig.apiKey values (T-57 migration)
     this.migrateLegacyApiKeys().catch(() => {});
   }
@@ -191,7 +208,7 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string, clientInfo?: { ip?: string; userAgent?: string }): Promise<{ accessToken: string; refreshToken: string }> {
-    const stored = await this.refreshTokenModel.findOne({ token: refreshToken }).exec();
+    const stored = await this.refreshTokenModel.findOne({ token: hashRefreshToken(refreshToken) }).exec();
     if (!stored || stored.expiresAt < new Date()) {
       if (stored) await stored.deleteOne();
       throw new UnauthorizedException('Invalid or expired refresh token');
@@ -217,7 +234,7 @@ export class AuthService {
   }
 
   async logout(refreshToken: string): Promise<void> {
-    await this.refreshTokenModel.deleteOne({ token: refreshToken }).exec();
+    await this.refreshTokenModel.deleteOne({ token: hashRefreshToken(refreshToken) }).exec();
   }
 
   /**
@@ -584,7 +601,7 @@ export class AuthService {
     expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRY_DAYS);
 
     await this.refreshTokenModel.create({
-      token,
+      token: hashRefreshToken(token),
       userId,
       expiresAt,
       ip: clientInfo?.ip,

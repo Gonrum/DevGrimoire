@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { Setting, SettingSchema } from './schemas/setting.schema';
 import { SettingsService } from './settings.service';
 import { SettingsController } from './settings.controller';
+import { EncryptionService } from '../common/encryption.service';
 
 @Module({
   imports: [
@@ -11,7 +12,7 @@ import { SettingsController } from './settings.controller';
     ]),
   ],
   controllers: [SettingsController],
-  providers: [SettingsService],
+  providers: [SettingsService, EncryptionService],
   exports: [SettingsService],
 })
 export class SettingsModule {}

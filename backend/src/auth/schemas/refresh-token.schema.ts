@@ -5,6 +5,11 @@ export type RefreshTokenDocument = HydratedDocument<RefreshToken>;
 
 @Schema({ timestamps: true })
 export class RefreshToken {
+  // SHA-256 (hex) des Tokens, NIE der Klartext — siehe hashRefreshToken() in
+  // auth.service.ts (H-8). Der Feldname bleibt `token`, weil der bestehende
+  // unique-Index darauf liegt: ein neues Feld liesse den alten Index auf
+  // `token` zurück, und jedes neue Dokument ohne `token` kollidierte dort
+  // als `null` (E11000).
   @Prop({ required: true })
   token: string;
 

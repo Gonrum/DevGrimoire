@@ -1,5 +1,5 @@
 import { Controller, ForbiddenException, Get, Put, Param, Body, UseGuards } from '@nestjs/common';
-import { SettingsService } from './settings.service';
+import { SettingsService, isEncryptedSettingKey } from './settings.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../auth/schemas/user.schema';
@@ -77,6 +77,10 @@ export class SettingsController {
       }
     }
     const value = await this.settingsService.get(key);
+    // Verschlüsselt gespeicherte Keys (Replikations-API-Keys) gibt die
+    // generische Route auch Admins nur maskiert zurück — wie der
+    // Replikations-Konfig-Endpoint. Den Klartext braucht nur das Backend.
+    if (isEncryptedSettingKey(key)) return { key, value: value ? '***' : null };
     return { key, value };
   }
 
@@ -85,6 +89,7 @@ export class SettingsController {
   @Roles(UserRole.ADMIN)
   async set(@Param('key') key: string, @Body() body: { value: string }) {
     const setting = await this.settingsService.set(key, body.value);
+    if (isEncryptedSettingKey(key)) return { key: setting.key, value: setting.value ? '***' : null };
     return { key: setting.key, value: setting.value };
   }
 }

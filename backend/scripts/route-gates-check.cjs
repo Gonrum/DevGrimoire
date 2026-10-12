@@ -129,6 +129,8 @@ const UNGATED_UI = new Set([
   const settings = new SettingsController(settingsStub);
 
   const SENSITIVE = 'replication.peer.apiKey';
+  // Admin-only, aber nicht at-rest-verschlüsselt — die Route liefert den Wert.
+  const ADMIN_ONLY_KEY = 'chat_llm_endpoints_v2';
 
   await checkAsync('settings: sensitiver Key ohne Actor wird verweigert (403)', async () => {
     assert.equal(RequestContext.getUser(), undefined, 'Testannahme: kein Actor');
@@ -154,7 +156,11 @@ const UNGATED_UI = new Set([
       async () => {
         const res = await settings.get(SENSITIVE);
         assert.equal(res.key, SENSITIVE);
-        assert.equal(res.value, `wert-von-${SENSITIVE}`);
+        // Gate passiert; der Wert selbst kommt seit H-37 maskiert zurück —
+        // den Klartext des Replikations-Keys braucht nur das Backend.
+        assert.equal(res.value, '***');
+        const other = await settings.get(ADMIN_ONLY_KEY);
+        assert.equal(other.value, `wert-von-${ADMIN_ONLY_KEY}`);
       },
     );
   });
@@ -167,8 +173,8 @@ const UNGATED_UI = new Set([
       userId: 'o1', username: 'operator', role: 'user',
       permissions: ['admin:settings:manage'],
     }, undefined, async () => {
-      const res = await settings.get(SENSITIVE);
-      assert.equal(res.value, `wert-von-${SENSITIVE}`);
+      const res = await settings.get(ADMIN_ONLY_KEY);
+      assert.equal(res.value, `wert-von-${ADMIN_ONLY_KEY}`);
     });
   });
 

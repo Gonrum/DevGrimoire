@@ -342,7 +342,12 @@ export interface BackupManifest {
   includes?: {
     database?: boolean;
     attachments?: boolean;
-    plaintextSecrets?: boolean;
+  };
+  excludedCollections?: string[];
+  credentialMaterial?: {
+    containsCredentialMaterial?: boolean;
+    items?: string[];
+    restoreRequiresSameEncryptionKey?: boolean;
   };
   artifacts?: BackupArtifact[];
   restore?: { note?: string };

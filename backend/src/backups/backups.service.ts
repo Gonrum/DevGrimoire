@@ -46,6 +46,22 @@ interface RetentionCandidate {
 
 const RETENTION_CONFIRMATION = 'DELETE_EXPIRED_BACKUPS';
 
+/**
+ * Collections, die nie ins Backup gehören (H-37). `refreshtokens` sind live
+ * einlösbare Sessions — als Hash zwar nicht mehr direkt nutzbar (H-8), aber
+ * ein Restore soll ohnehin keine alten Sessions wiederbeleben.
+ */
+const EXCLUDED_BACKUP_COLLECTIONS: string[] = ['refreshtokens'];
+
+/** Ehrliche Aufzählung des Credential-Materials im Dump, fürs Manifest. */
+const CREDENTIAL_MATERIAL_ITEMS: string[] = [
+  'users.passwordHash (bcrypt) — Offline-Cracking-Material',
+  'secrets.encryptedValue (AES-256-GCM, SECRETS_ENCRYPTION_KEY)',
+  'settings replication.*.apiKey (AES-256-GCM; Klartext, falls SECRETS_ENCRYPTION_KEY fehlt)',
+  'settings chat/rag/web-search endpoint keys (AES-256-GCM)',
+  'apikeys.keyHash (SHA-256, nicht umkehrbar)',
+];
+
 @Injectable()
 export class BackupsService {
   private readonly logger = new Logger(BackupsService.name);
@@ -255,6 +271,7 @@ export class BackupsService {
     for (const collectionInfo of collections) {
       const name = collectionInfo.name;
       if (name.startsWith('system.')) continue;
+      if (EXCLUDED_BACKUP_COLLECTIONS.includes(name)) continue;
       dump[name] = await db.collection(name).find({}).toArray();
     }
 
@@ -314,7 +331,17 @@ export class BackupsService {
       includes: {
         database: true,
         attachments: input.includeAttachments,
-        plaintextSecrets: false,
+      },
+      excludedCollections: EXCLUDED_BACKUP_COLLECTIONS,
+      // Vorher stand hier `plaintextSecrets: false` — wahr nur für die
+      // `secrets`-Collection, während Klartext-Refresh-Tokens und
+      // Replikations-API-Keys im Dump lagen (H-37). Das Feld lud dazu ein,
+      // das Artefakt als unkritisch zu behandeln. Jetzt: was drinsteckt, und
+      // in welcher Form. Das Artefakt bleibt schutzbedürftig.
+      credentialMaterial: {
+        containsCredentialMaterial: true,
+        items: CREDENTIAL_MATERIAL_ITEMS,
+        restoreRequiresSameEncryptionKey: true,
       },
       restore: {
         note: 'Restore into a stopped or maintenance-mode instance. Verify checksums, restore MongoDB first, copy attachments, then reindex RAG content.',
