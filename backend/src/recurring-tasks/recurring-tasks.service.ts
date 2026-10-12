@@ -236,6 +236,20 @@ export class RecurringTasksService {
         );
         continue;
       }
+      // Atomarer Claim VOR der Ausführung (H-17). Vorher wurde nextRun erst
+      // im finally geschrieben: lief ein Task (z. B. ein LLM-Agent-Loop)
+      // länger als der Minuten-Tick, fand der nächste Tick ihn weiter fällig
+      // und führte ihn erneut aus — doppelte Todos, doppelte Chat-Nachrichten,
+      // doppelte LLM-Kosten, mit maxCatchUp multipliziert. Der Filter auf den
+      // gelesenen nextRun-Wert macht den Claim exklusiv: wer ihn verliert
+      // (überlappender Tick, zweite Instanz), überspringt den Task.
+      const claimed = await this.recurringTaskModel
+        .findOneAndUpdate(
+          { _id: task._id, active: true, nextRun: task.nextRun },
+          { $set: { lastRun: now, nextRun } },
+        )
+        .exec();
+      if (!claimed) continue;
       try {
         let runs = 0;
         const maxRuns = task.maxCatchUp || 3;
@@ -259,10 +273,6 @@ export class RecurringTasksService {
         this.logger.error(
           `Failed to process recurring task ${task._id.toString()}: ${errorMessage(err)}`,
         );
-      } finally {
-        await this.recurringTaskModel
-          .findByIdAndUpdate(task._id, { lastRun: now, nextRun })
-          .exec();
       }
     }
 

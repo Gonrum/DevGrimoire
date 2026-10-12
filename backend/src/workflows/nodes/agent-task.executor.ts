@@ -54,6 +54,7 @@ export class AgentTaskExecutor implements NodeExecutor {
         callerScope: { projectId, customerId },
         timeoutMs: asNumber(expanded.timeoutMs) ?? 60000,
         maxToolIterations: asNumber(expanded.maxToolIterations),
+        signal: ctx.signal,
       });
       return {
         status: 'success',

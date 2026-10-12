@@ -11,6 +11,16 @@ import { StreamRelay } from './stream-relay.service';
 import { ChatRunner, hasCommittedOutput, readChatJobPayload } from './chat-runner.service';
 import { errorMessage } from '../common/narrow';
 
+/**
+ * Wie lange ein Job auf einen freien, gesunden Endpunkt wartet (H-19).
+ * Etwas länger als das Client-Idle-Timeout (POOL_WAIT_TIMEOUT_MS), damit der
+ * Client zuerst aufgibt und der Job dann am cancel-Flag endet.
+ */
+const MAX_QUEUE_WAIT_MS = (() => {
+  const n = Number(process.env.POOL_WAIT_TIMEOUT_MS);
+  return (Number.isFinite(n) && n > 0 ? n : 120_000) + 30_000;
+})();
+
 @Processor(BALANCER_QUEUE, { concurrency: 16 })
 export class GatewayProcessor extends WorkerHost {
   constructor(
@@ -48,7 +58,24 @@ export class GatewayProcessor extends WorkerHost {
       const slot = await this.allocator.acquire(purpose, { requireVision, exclude: tried });
       if (!slot) {
         if (tried.size === 0) {
-          // Nothing free & healthy right now (all busy / unhealthy / none) → wait, never drop.
+          // Nothing free & healthy right now (all busy / unhealthy / none) → wait.
+          //
+          // Aber nicht ewig (H-19): moveToDelayed zählt nicht als Attempt,
+          // `attempts` und `removeOnFail` griffen also nie. Ein Job ohne
+          // gesunden Endpunkt lief alle 2 s erneut durch acquire() — für
+          // immer, auch nachdem der Client längst aufgegeben hatte. Abbruch,
+          // wenn der Client abgebrochen hat oder die Wartezeit abgelaufen ist.
+          const waitedMs = Date.now() - (job.timestamp || Date.now());
+          if (this.relay.isCancelled(jobId) || waitedMs > MAX_QUEUE_WAIT_MS) {
+            this.relay.publish(jobId, {
+              type: 'error',
+              status: 503,
+              message: this.relay.isCancelled(jobId)
+                ? 'abgebrochen, bevor ein Endpunkt frei wurde'
+                : `kein gesunder ${purpose}-Endpunkt nach ${Math.round(waitedMs / 1000)} s`,
+            });
+            return;
+          }
           await job.moveToDelayed(Date.now() + 2000, token);
           throw new DelayedError();
         }

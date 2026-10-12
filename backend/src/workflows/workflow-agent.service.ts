@@ -178,6 +178,8 @@ export class WorkflowAgentService {
     callerScope: { projectId?: string; customerId?: string };
     timeoutMs: number;
     maxToolIterations?: number;
+    /** Bricht laufende LLM-Aufrufe ab, wenn der Aufrufer aufgibt (M-13). */
+    signal?: AbortSignal;
   }): Promise<{
     response: string;
     iterations: number;
@@ -244,6 +246,11 @@ export class WorkflowAgentService {
           baseUrl: endpoint.baseUrl,
           apiKey: endpoint.apiKey,
           body,
+          // Restzeit bis zur Deadline (H-16): vorher wurde sie nur ZWISCHEN
+          // den Iterationen geprüft, ein einzelner hängender Aufruf lief
+          // unbegrenzt.
+          timeoutMs: deadline - Date.now(),
+          signal: input.signal,
         });
         json = resp.json;
       } catch (e: unknown) {
@@ -351,6 +358,11 @@ export class WorkflowAgentService {
           baseUrl: endpoint.baseUrl,
           apiKey: endpoint.apiKey,
           body,
+          // Restzeit bis zur Deadline (H-16): vorher wurde sie nur ZWISCHEN
+          // den Iterationen geprüft, ein einzelner hängender Aufruf lief
+          // unbegrenzt.
+          timeoutMs: deadline - Date.now(),
+          signal: input.signal,
         });
         json = resp.json;
       } catch (e: unknown) {

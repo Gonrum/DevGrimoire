@@ -57,6 +57,49 @@ const NODE_LOG_CAP = Number(process.env.WORKFLOW_NODE_LOG_CAP ?? 200);
 const RECOVERY_AGE_MS = Number(process.env.WORKFLOW_RUN_RECOVERY_AGE_MS ?? 5 * 60_000);
 const WORKER_CONCURRENCY = Number(process.env.WORKFLOW_WORKER_CONCURRENCY ?? 4);
 
+/**
+ * Update-Pipeline für `run.context` (M-12): setzt `context.nodes[nodeId]` und
+ * `context.fromEdges[edgeId]` atomar, ohne den Rest des Kontexts anzufassen.
+ * `$setField` + `$literal` statt Punkt-Pfaden, weil Node- und Edge-Ids frei
+ * wählbar sind (Punkte, `$`) — als Pfad wären sie Struktur, hier bleiben sie
+ * Schlüssel. `$literal` verhindert, dass Werte mit `$` als Ausdruck gelesen
+ * werden.
+ */
+export function contextUpdatePipeline(
+  nodeId: string,
+  output: Record<string, unknown>,
+  edges: Array<{ edgeId: string; mapped: Record<string, unknown> }>,
+): Record<string, unknown>[] {
+  const stages: Record<string, unknown>[] = [
+    { $set: { context: { $ifNull: ['$context', {}] } } },
+    {
+      $set: {
+        'context.nodes': {
+          $setField: {
+            field: { $literal: nodeId },
+            input: { $ifNull: ['$context.nodes', {}] },
+            value: { $literal: output },
+          },
+        },
+      },
+    },
+  ];
+  for (const { edgeId, mapped } of edges) {
+    stages.push({
+      $set: {
+        'context.fromEdges': {
+          $setField: {
+            field: { $literal: edgeId },
+            input: { $ifNull: ['$context.fromEdges', {}] },
+            value: { $literal: mapped },
+          },
+        },
+      },
+    });
+  }
+  return stages;
+}
+
 @Injectable()
 export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstrap {
   private readonly logger = new Logger(WorkflowEngineService.name);
@@ -99,12 +142,21 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
 
   @OnEvent('workflow.run.queued')
   async handleRunQueued(payload: { runId: string }): Promise<void> {
-    const run = await this.runModel.findById(payload.runId).exec();
+    // Atomarer Claim (H-18). Vorher Lesen -> Status prüfen -> Speichern: bei
+    // mehreren Instanzen oder doppelt emittiertem Event startete derselbe Run
+    // mehrfach — mit jeweils allen Trigger-Nodes.
+    const run = await this.runModel
+      .findOneAndUpdate(
+        { _id: payload.runId, status: WorkflowRunStatus.QUEUED },
+        { $set: { status: WorkflowRunStatus.RUNNING } },
+        { new: true },
+      )
+      .exec();
     if (!run) return;
-    if (run.status !== WorkflowRunStatus.QUEUED) return;
-    run.status = WorkflowRunStatus.RUNNING;
-    run.startedAt ??= new Date();
-    await run.save();
+    if (!run.startedAt) {
+      run.startedAt = new Date();
+      await run.save();
+    }
     this.audit('workflow.run.started', {
       runId: run._id.toString(),
       definitionId: run.definitionId.toString(),
@@ -250,10 +302,11 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     this.eventEmitter.emit(WORKFLOW_RUN_PROGRESS, { runId: run._id.toString() });
 
     const timeoutMs = Number(((node.config ?? {})).timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    const ctx = this.buildContext(run, nodeRun, node);
+    const abort = new AbortController();
+    const ctx = this.buildContext(run, nodeRun, node, abort.signal);
     let result: NodeResult;
     try {
-      result = await this.withTimeout(executor.execute(ctx), timeoutMs);
+      result = await this.withTimeout(executor.execute(ctx), timeoutMs, abort);
     } catch (err: unknown) {
       result = {
         status: 'failed',
@@ -267,7 +320,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     await this.applyResult(run, nodeRun, node, result);
   }
 
-  private async withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  private async withTimeout<T>(p: Promise<T>, ms: number, abort?: AbortController): Promise<T> {
     let timer: NodeJS.Timeout | null = null;
     try {
       return await Promise.race([
@@ -276,6 +329,9 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
           timer = setTimeout(() => {
             const e = new Error(`node exceeded ${ms}ms`);
             e.name = 'TimeoutError';
+            // M-13: den Executor tatsächlich abbrechen, nicht nur aufhören zu
+            // warten — sonst läuft er neben dem Retry weiter.
+            abort?.abort(e);
             rej(e);
           }, ms);
         }),
@@ -339,6 +395,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     // die Defaults setzt `workflowNodeFromDto`, statt den Unterschied mit
     // `as never` zu überschreiben.
     const testNodeShape = workflowNodeFromDto(node);
+    const testAbort = new AbortController();
     const result = await this.withTimeout(
       executor.execute({
         run: {
@@ -378,8 +435,10 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
           error: (msg: string, data?: Record<string, unknown>) => logs.push({ level: 'error', msg, ...(data ?? {}) }),
         },
         askUser: () => Promise.reject(new Error('askUser is disabled in node test mode')),
+        signal: testAbort.signal,
       }),
       Number(parsedConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      testAbort,
     );
 
     return {
@@ -404,6 +463,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     run: WorkflowRunDocument,
     nodeRun: WorkflowNodeRunDocument,
     node: WorkflowNode,
+    signal: AbortSignal = new AbortController().signal,
   ): NodeExecutionContext {
     const logs: Array<Record<string, unknown>> = nodeRun.logs;
     const append = (level: 'info' | 'warn' | 'error', msg: string, data?: Record<string, unknown>) => {
@@ -456,6 +516,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
         });
         return { refId: question._id };
       },
+      signal,
     };
   }
 
@@ -484,18 +545,14 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
   ): Promise<void> {
     if (result.status === 'success') {
       await this.completeNodeRun(nodeRun, result);
-      const ctx = isRecord(run.context) ? run.context : {};
-      const ctxNodes = isRecord(ctx.nodes) ? ctx.nodes : {};
       // Persist redacted output to run.context so downstream nodes can read
       // upstream output without re-leaking secrets via the context object.
       const redactedOutput = redactRecord(result.output ?? {});
-      ctxNodes[node.id] = redactedOutput;
-      ctx.nodes = ctxNodes;
-
       const graph = readGraph(run.definitionSnapshot);
 
       // T-325: evaluate payloadMapping for outgoing edges and persist the
       // mapped value per edge. Target nodes pick it up in buildContext.
+      const edgeValues: Array<{ edgeId: string; mapped: Record<string, unknown> }> = [];
       for (const edge of graph.edges) {
         if (edge.source !== node.id) continue;
         const mapping = edge.payloadMapping;
@@ -504,18 +561,23 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
         for (const [targetKey, sourcePath] of Object.entries(mapping)) {
           mapped[targetKey] = lookupPath(sourcePath, redactedOutput);
         }
-        const fromEdges = isRecord(ctx.fromEdges) ? ctx.fromEdges : {};
-        fromEdges[edge.id] = mapped;
-        ctx.fromEdges = fromEdges;
+        edgeValues.push({ edgeId: edge.id, mapped });
       }
 
-      run.context = ctx;
-      run.markModified('context');
-      await run.save();
+      // M-12: atomar NUR die eigenen Einträge setzen, statt das ganze
+      // context-Objekt aus einem bis zu 10 min alten Dokument zurückzuschreiben.
+      // resumeDelayedNode und handleQuestionAnswered laufen ohne den
+      // Definitions-Lock; zwei Pfade überschrieben sich gegenseitig den
+      // nodes[]-Eintrag, und im nächsten Prompt stand `{{nodes.X.field}}`
+      // wörtlich.
+      const fresh = await this.runModel
+        .findByIdAndUpdate(run._id, contextUpdatePipeline(node.id, redactedOutput, edgeValues), { new: true })
+        .exec();
+      const current = fresh ?? run;
 
       const succs = nextNodes(node.id, result.branch ?? 'success', graph);
-      for (const succ of succs) await this.enqueueNode(run, succ, 1);
-      await this.maybeFinishRun(run);
+      for (const succ of succs) await this.enqueueNode(current, succ, 1);
+      await this.maybeFinishRun(current);
       return;
     }
 
@@ -642,12 +704,19 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
 
   @OnEvent(QUESTION_ANSWERED)
   async handleQuestionAnswered(payload: { questionId: string; answer: string }): Promise<void> {
+    if (!Types.ObjectId.isValid(payload.questionId)) return;
+    // Atomarer Claim (M-14): WAITING -> RUNNING in EINEM Schritt, damit eine
+    // doppelt zugestellte Antwort den Node nicht zweimal fortsetzt.
     const nodeRun = await this.nodeRunModel
-      .findOne({
-        'waitingFor.type': 'question',
-        'waitingFor.refId': new Types.ObjectId(payload.questionId),
-        status: WorkflowNodeRunStatus.WAITING,
-      })
+      .findOneAndUpdate(
+        {
+          'waitingFor.type': 'question',
+          'waitingFor.refId': new Types.ObjectId(payload.questionId),
+          status: WorkflowNodeRunStatus.WAITING,
+        },
+        { $set: { status: WorkflowNodeRunStatus.RUNNING }, $unset: { waitingFor: 1 } },
+        { new: true },
+      )
       .exec();
     if (!nodeRun) return;
 
@@ -656,9 +725,6 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     const node = readGraph(run.definitionSnapshot).nodes.find((n) => n.id === nodeRun.nodeId);
     if (!node) return;
 
-    nodeRun.set('waitingFor', undefined);
-    nodeRun.status = WorkflowNodeRunStatus.RUNNING;
-    await nodeRun.save();
     run.status = WorkflowRunStatus.RUNNING;
     await run.save();
     const branchMap = isRecord(node.config.branchMap) ? node.config.branchMap : undefined;
@@ -673,10 +739,17 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
   }
 
   async resumeDelayedNode(nodeRunId: string | Types.ObjectId): Promise<void> {
-    const nodeRun = await this.nodeRunModel.findById(nodeRunId).exec();
+    // Atomarer Claim (M-14). Vorher Status prüfen und in einem zweiten
+    // Schritt RUNNING setzen: zwei überlappende Delay-Ticks (oder Instanzen)
+    // setzten denselben Node doppelt fort.
+    const nodeRun = await this.nodeRunModel
+      .findOneAndUpdate(
+        { _id: nodeRunId, status: WorkflowNodeRunStatus.WAITING, 'waitingFor.type': 'delay' },
+        { $set: { status: WorkflowNodeRunStatus.RUNNING }, $unset: { waitingFor: 1 } },
+        { new: true },
+      )
+      .exec();
     if (!nodeRun) return;
-    if (nodeRun.status !== WorkflowNodeRunStatus.WAITING) return;
-    if (nodeRun.waitingFor?.type !== 'delay') return;
 
     const run = await this.runModel.findById(nodeRun.runId).exec();
     if (!run) return;
@@ -687,9 +760,6 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       ? Date.now() - nodeRun.startedAt.getTime()
       : 0;
 
-    nodeRun.set('waitingFor', undefined);
-    nodeRun.status = WorkflowNodeRunStatus.RUNNING;
-    await nodeRun.save();
     run.status = WorkflowRunStatus.RUNNING;
     await run.save();
     await this.applyResult(run, nodeRun, node, {
@@ -782,17 +852,41 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     const stale = await this.runModel
       .find({ status: WorkflowRunStatus.RUNNING, updatedAt: { $lt: cutoff } })
       .exec();
+    // H-18: Vorher wurde jeder unterbrochene Run auf QUEUED gesetzt und
+    // startete am TRIGGER neu — jeder bereits erfolgreiche Node lief noch
+    // einmal: doppelte Todos, Changelogs, Notifications. Jetzt werden nur die
+    // Nodes neu eingereiht, die beim Absturz QUEUED oder RUNNING waren; was
+    // SUCCEEDED ist, bleibt erledigt. Für einen RUNNING-Node bleibt es bei
+    // „mindestens einmal": ob seine Seiteneffekte vor dem Absturz geschahen,
+    // ist nicht feststellbar.
     for (const run of stale) {
+      const interrupted = await this.nodeRunModel
+        .find({ runId: run._id, status: { $in: [WorkflowNodeRunStatus.RUNNING, WorkflowNodeRunStatus.QUEUED] } })
+        .exec();
       await this.nodeRunModel
         .updateMany(
-          { runId: run._id, status: { $in: [WorkflowNodeRunStatus.RUNNING, WorkflowNodeRunStatus.QUEUED] } },
+          { _id: { $in: interrupted.map((n) => n._id) } },
           { $set: { status: WorkflowNodeRunStatus.INTERRUPTED, finishedAt: new Date() } },
         )
         .exec();
-      run.status = WorkflowRunStatus.QUEUED;
-      await run.save();
-      this.eventEmitter.emit('workflow.run.queued', { runId: run._id.toString() });
-      this.logger.warn(`Recovered interrupted run ${run._id.toString()}`);
+      const graph = readGraph(run.definitionSnapshot);
+      const resumable: Array<{ attempt: number; node: WorkflowNode }> = [];
+      for (const nr of interrupted) {
+        const node = graph.nodes.find((n) => n.id === nr.nodeId);
+        if (node) resumable.push({ attempt: nr.attempt, node });
+      }
+      if (resumable.length === 0) {
+        // Kein Anknüpfungspunkt (z. B. Absturz zwischen dem Speichern eines
+        // Ergebnisses und dem Einreihen der Nachfolger). Lieber sichtbar
+        // scheitern als blind am Trigger neu starten.
+        await this.failRun(run, { code: 'interrupted', message: 'Run beim Neustart unterbrochen, kein fortsetzbarer Node' });
+        this.logger.warn(`Interrupted run ${run._id.toString()} failed: nothing resumable`);
+        continue;
+      }
+      for (const { attempt, node } of resumable) {
+        await this.enqueueNode(run, node, attempt + 1);
+      }
+      this.logger.warn(`Resumed interrupted run ${run._id.toString()} at ${resumable.map((x) => x.node.id).join(', ')}`);
     }
 
     const queued = await this.runModel.find({ status: WorkflowRunStatus.QUEUED }).exec();

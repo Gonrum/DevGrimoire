@@ -51,6 +51,13 @@ export interface NodeExecutionContext {
   /** Creates a question record and returns its id. Caller must subsequently
    *  return `{ status: 'waiting', waitingFor: { type: 'question', refId } }`. */
   askUser(question: string, options?: string[]): Promise<{ refId: Types.ObjectId }>;
+  /**
+   * Wird ausgelöst, wenn die Engine den Node aufgibt (Timeout). Executoren mit
+   * langlaufender I/O sollen es durchreichen (M-13): vorher lief der Executor
+   * nach dem Timeout unbemerkt weiter, und der Retry erzeugte dieselben
+   * Seiteneffekte ein zweites Mal.
+   */
+  signal: AbortSignal;
 }
 
 export interface NodeExecutor {

@@ -578,6 +578,15 @@ export class LlmClient {
     baseUrl: string;
     apiKey: string | null;
     body: Record<string, unknown>;
+    /**
+     * Obergrenze für diesen einen Aufruf (H-16). Ohne sie hing ein Upstream,
+     * der den Connect annimmt und nie antwortet, für immer — und mit ihm der
+     * geleaste Pool-Slot, denn runAgent gibt ihn erst im finally frei.
+     * Default 5 min.
+     */
+    timeoutMs?: number;
+    /** Abbruch von aussen, z. B. wenn die Workflow-Engine den Node aufgibt (M-13). */
+    signal?: AbortSignal;
   }): Promise<{ json: Record<string, unknown>; usage: TokenUsage }> {
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     let url: string;
@@ -591,7 +600,9 @@ export class LlmClient {
       url = `${o.baseUrl}/v1/chat/completions`;
       if (o.apiKey) headers['authorization'] = `Bearer ${o.apiKey}`;
     }
-    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(o.body) });
+    const timeoutSignal = AbortSignal.timeout(Math.max(1, o.timeoutMs ?? 300_000));
+    const signal = o.signal ? AbortSignal.any([o.signal, timeoutSignal]) : timeoutSignal;
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(o.body), signal });
     if (!res.ok) throw new Error(`upstream HTTP ${res.status}: ${await res.text().catch(() => '')}`);
     const parsed: unknown = await res.json();
     // Ein JSON-Array oder Skalar hatte vorher als `Record<string, unknown>`

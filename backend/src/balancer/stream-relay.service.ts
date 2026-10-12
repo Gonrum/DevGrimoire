@@ -29,7 +29,22 @@ export class StreamRelay {
 
   subscribe(jobId: string): Observable<RelayEvent> { return this.subjectFor(jobId).asObservable(); }
 
-  /** Signal a client disconnect so the worker can abort the upstream call. */
-  cancel(jobId: string): void { this.cancelled.add(jobId); }
+  /**
+   * Signal a client disconnect so the worker can abort the upstream call.
+   *
+   * Räumt jetzt auch selbst auf (H-19): vorher löschte ausschliesslich
+   * publish() bei einem terminalen Event — und genau im Fehlerfall „kein
+   * Endpunkt frei" kam nie eines. Jede abgebrochene Anfrage liess einen
+   * ReplaySubject und einen Set-Eintrag für die Prozess-Lebensdauer liegen.
+   * Die Frist lässt dem Worker Zeit, das Flag noch zu sehen.
+   */
+  cancel(jobId: string): void {
+    this.cancelled.add(jobId);
+    setTimeout(() => {
+      this.subjects.get(jobId)?.complete();
+      this.subjects.delete(jobId);
+      this.cancelled.delete(jobId);
+    }, 60_000).unref();
+  }
   isCancelled(jobId: string): boolean { return this.cancelled.has(jobId); }
 }
