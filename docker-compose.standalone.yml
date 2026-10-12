@@ -11,7 +11,15 @@
 
 services:
   mongodb:
-    entrypoint: ["mongod", "--bind_ip_all", "--auth", "--wiredTigerCacheSizeGB", "0.25"]
+    # H-29: vorher `entrypoint: ["mongod", …]`. Das ersetzte den Image-
+    # Entrypoint — und nur der legt aus MONGO_INITDB_ROOT_* den Admin-User an.
+    # Auf frischem Volume lief mongod dann mit --auth und ohne einen einzigen
+    # User, der Healthcheck schlug dauerhaft fehl, das Backend startete nie.
+    # Jetzt: Image-Entrypoint behalten, nur die mongod-Argumente setzen
+    # (docker-entrypoint.sh ergänzt --auth selbst, sobald ein Root-User
+    # konfiguriert ist).
+    entrypoint: ["docker-entrypoint.sh"]
+    command: ["mongod", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25"]
     healthcheck:
       test: ["CMD", "mongosh", "-u", "${MONGO_USER}", "-p", "${MONGO_PASSWORD}", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
       interval: 10s
@@ -23,8 +31,16 @@ services:
     profiles: ["disabled"]
 
   backend:
-    depends_on:
+    # `!override` statt Merge: die Basis-Datei lässt das Backend auf
+    # `mongodb-init` warten, das hier per Profil abgeschaltet ist. Gemergt
+    # blieb diese Abhängigkeit stehen, und aktuelles `docker compose` lehnte
+    # die Kombination ab ("depends on undefined service mongodb-init").
+    depends_on: !override
       mongodb:
+        condition: service_healthy
+      searxng:
+        condition: service_started
+      redis:
         condition: service_healthy
     environment:
       MONGODB_STANDALONE: "true"
