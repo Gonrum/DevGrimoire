@@ -41,6 +41,7 @@
     "check:actor-scope": "node scripts/actor-scope-check.cjs",
     "check:entity-scope": "node scripts/entity-scope-check.cjs",
     "check:ssh-scope": "node scripts/ssh-scope-check.cjs",
+    "check:workspace-research-scope": "node scripts/workspace-research-scope-check.cjs",
     "check:auth-seed": "node scripts/auth-seed-check.cjs",
     "check:trust-proxy": "node scripts/trust-proxy-check.cjs",
     "check:http-requests-template": "node scripts/http-requests-template-check.cjs",

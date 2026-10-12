@@ -24,6 +24,8 @@ import {
 } from './dto/research-topic.dto';
 import { CountersService } from '../counters/counters.service';
 import { computeNextRun, nextStatusUpdate } from './research-schedule.util';
+import { assertTopicOwner } from './research-access';
+import { RequestContext } from '../common/request-context';
 
 export interface ResearchTopicListFilter {
   active?: boolean;
@@ -161,6 +163,12 @@ export class ResearchTopicService {
 
   async list(filter?: ResearchTopicListFilter): Promise<ResearchTopicDocument[]> {
     const query: Record<string, unknown> = {};
+    // Nur eigene Themen (C-13). Ohne Actor (interner Aufrufer) alle.
+    const actor = RequestContext.getUser();
+    if (actor) {
+      if (!isValidObjectId(actor.userId)) return [];
+      query.ownerUserId = new Types.ObjectId(actor.userId);
+    }
     if (filter?.active !== undefined) query['schedule.active'] = filter.active;
     if (filter?.q) query.title = { $regex: filter.q, $options: 'i' };
     return this.topicModel.find(query).sort({ number: -1 }).exec();
@@ -169,6 +177,9 @@ export class ResearchTopicService {
   async get(id: string): Promise<ResearchTopicDocument> {
     const topic = await this.topicModel.findById(id).exec();
     if (!topic) throw new NotFoundException(`ResearchTopic ${id} not found`);
+    // update() und remove() laufen über get() — die Prüfung steht damit VOR
+    // jeder Mutation und vor der Lösch-Kaskade über Artefakte und Runs.
+    assertTopicOwner(topic, id);
     return topic;
   }
 

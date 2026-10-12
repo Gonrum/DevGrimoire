@@ -7,7 +7,10 @@ import {
   ResearchArtifactVersion,
   ResearchArtifactVersionDocument,
 } from './schemas/research-artifact-version.schema';
-import { ResearchScope } from './schemas/research-topic.schema';
+import {
+  ResearchScope, ResearchTopic, ResearchTopicDocument,
+} from './schemas/research-topic.schema';
+import { assertTopicAccessible } from './research-access';
 import { PROJECT_CHANGED } from '../events/project-event';
 
 /** Fields the research agent (or an operator) supplies when writing an artifact. */
@@ -60,9 +63,16 @@ export class ResearchArtifactService {
     @InjectModel(ResearchArtifactVersion.name)
     private readonly artifactVersionModel: Model<ResearchArtifactVersionDocument>,
     private readonly eventEmitter: EventEmitter2,
+    @InjectModel(ResearchTopic.name)
+    private readonly topicModel: Model<ResearchTopicDocument>,
   ) {}
 
+  // Jeder öffentliche Pfad prüft zuerst den Owner des Themas (C-13);
+  // Artefakte tragen selbst kein Owner-Feld. Der Agent ruft dieselben
+  // Methoden im Kontext des Owners auf und besteht die Prüfung.
+
   async listByTopic(topicId: string): Promise<ArtifactSummary[]> {
+    await assertTopicAccessible(this.topicModel, topicId);
     const artifacts = await this.artifactModel
       .find({ topicId: new Types.ObjectId(topicId) }, { slug: 1, title: 1, summary: 1, version: 1 })
       .sort({ updatedAt: -1 })
@@ -71,6 +81,7 @@ export class ResearchArtifactService {
   }
 
   async getBySlug(topicId: string, slug: string): Promise<ResearchArtifactDocument | null> {
+    await assertTopicAccessible(this.topicModel, topicId);
     return this.artifactModel
       .findOne({ topicId: new Types.ObjectId(topicId), slug: normalizeSlug(slug) })
       .exec();
@@ -114,6 +125,7 @@ export class ResearchArtifactService {
     input: WriteArtifactInput,
     scope: ResearchScope,
   ): Promise<ResearchArtifactDocument> {
+    await assertTopicAccessible(this.topicModel, topicId);
     const topicObjectId = new Types.ObjectId(topicId);
     const slug = normalizeSlug(input.slug);
     const ownership = this.deriveOwnership(scope);
@@ -172,6 +184,7 @@ export class ResearchArtifactService {
 
   /** Deletes an artifact together with all its version snapshots. */
   async remove(topicId: string, slug: string): Promise<void> {
+    await assertTopicAccessible(this.topicModel, topicId);
     const normalized = normalizeSlug(slug);
     const artifact = await this.artifactModel
       .findOne({ topicId: new Types.ObjectId(topicId), slug: normalized })
@@ -187,6 +200,11 @@ export class ResearchArtifactService {
   }
 
   async listVersions(artifactId: string): Promise<ResearchArtifactVersionDocument[]> {
+    const artifact = Types.ObjectId.isValid(artifactId)
+      ? await this.artifactModel.findById(artifactId).select('topicId').lean().exec()
+      : null;
+    if (!artifact) throw new NotFoundException(`ResearchArtifact ${artifactId} not found`);
+    await assertTopicAccessible(this.topicModel, artifact.topicId);
     return this.artifactVersionModel
       .find({ artifactId: new Types.ObjectId(artifactId) })
       .sort({ version: -1 })

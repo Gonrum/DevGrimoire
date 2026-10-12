@@ -1,4 +1,6 @@
-import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException, ForbiddenException, Injectable, Logger, NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
@@ -7,6 +9,8 @@ import { isDuplicateKeyError } from '../common/narrow';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
+import { RequestContext } from '../common/request-context';
+import { actorCanAccessProject } from '../common/permissions';
 
 @Injectable()
 export class WorkspacesService {
@@ -17,7 +21,26 @@ export class WorkspacesService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
+  /**
+   * Projekt-Scope (C-10). Ein Workspace ist ein Shell-fähiger Container mit
+   * den Git-Tokens seines Projekts im Env — wer ihn erreicht, führt dort
+   * beliebige Kommandos aus. Bis hierhin war die 24-Hex-Id die einzige Hürde
+   * (REST /exec/stream, alle workspace_*-MCP-Tools); nur der WS-Terminal-Pfad
+   * in main.ts prüfte den Scope.
+   *
+   * `if (actor)` nach der Projekt-Konvention: ohne Actor ist der Aufrufer
+   * intern (TTL-Sweep, stdio-MCP).
+   */
+  private assertProjectAccess(projectId: string | Types.ObjectId | undefined): void {
+    const actor = RequestContext.getUser();
+    if (!actor) return;
+    if (!actorCanAccessProject(actor, projectId?.toString())) {
+      throw new ForbiddenException('Kein Zugriff auf den Workspace dieses Projekts');
+    }
+  }
+
   async create(dto: CreateWorkspaceDto): Promise<WorkspaceDocument> {
+    this.assertProjectAccess(dto.projectId);
     const _id = new Types.ObjectId();
     const path = `/workspaces/${_id.toHexString()}/`;
     try {
@@ -51,6 +74,7 @@ export class WorkspacesService {
     projectId: string,
     status?: WorkspaceStatus,
   ): Promise<WorkspaceDocument[]> {
+    this.assertProjectAccess(projectId);
     const query: Record<string, unknown> = { projectId: new Types.ObjectId(projectId) };
     if (status) query.status = status;
     return this.workspaceModel.find(query).sort({ lastActivityAt: -1 }).exec();
@@ -59,10 +83,12 @@ export class WorkspacesService {
   async findById(id: string): Promise<WorkspaceDocument> {
     const ws = await this.workspaceModel.findById(id).exec();
     if (!ws) throw new NotFoundException(`Workspace ${id} not found`);
+    this.assertProjectAccess(ws.projectId);
     return ws;
   }
 
   async findByName(projectId: string, name: string): Promise<WorkspaceDocument> {
+    this.assertProjectAccess(projectId);
     const ws = await this.workspaceModel
       .findOne({ projectId: new Types.ObjectId(projectId), name })
       .exec();
@@ -73,6 +99,8 @@ export class WorkspacesService {
   }
 
   async update(id: string, dto: UpdateWorkspaceDto): Promise<WorkspaceDocument> {
+    // Laden und prüfen VOR findByIdAndUpdate — sonst wäre erst geschrieben.
+    await this.findById(id);
     try {
       const ws = await this.workspaceModel
         .findByIdAndUpdate(id, { ...dto, lastActivityAt: new Date() }, { new: true })
@@ -91,6 +119,7 @@ export class WorkspacesService {
   }
 
   async archive(id: string): Promise<WorkspaceDocument> {
+    await this.findById(id);
     const ws = await this.workspaceModel
       .findByIdAndUpdate(id, { status: 'archived', lastActivityAt: new Date() }, { new: true })
       .exec();
@@ -100,6 +129,7 @@ export class WorkspacesService {
   }
 
   async remove(id: string): Promise<void> {
+    await this.findById(id);
     const ws = await this.workspaceModel.findByIdAndDelete(id).exec();
     if (!ws) throw new NotFoundException(`Workspace ${id} not found`);
     this.emit(ws, 'deleted', `Workspace "${ws.name}" gelöscht`);

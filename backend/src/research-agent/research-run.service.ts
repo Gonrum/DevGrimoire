@@ -8,6 +8,8 @@ import {
   RunStep,
   RunTokenUsage,
 } from './schemas/research-run.schema';
+import { ResearchTopic, ResearchTopicDocument } from './schemas/research-topic.schema';
+import { assertTopicAccessible } from './research-access';
 
 /** One SSE-shaped event fanned out for a single run. `[k: string]: unknown` lets
  * each `type` carry its own payload shape without a discriminated-union per call site. */
@@ -92,6 +94,8 @@ export class ResearchRunService {
   constructor(
     @InjectModel(ResearchRun.name)
     private readonly runModel: Model<ResearchRunDocument>,
+    @InjectModel(ResearchTopic.name)
+    private readonly topicModel: Model<ResearchTopicDocument>,
   ) {}
 
   /**
@@ -195,10 +199,14 @@ export class ResearchRunService {
     if (!run) {
       throw new NotFoundException(`ResearchRun ${id} not found`);
     }
+    // Runs tragen kein Owner-Feld; der Owner steht am Thema (C-13). Die Steps
+    // enthalten Tool-Aufrufe und -Ergebnisse aus dem Kontext des Owners.
+    await assertTopicAccessible(this.topicModel, run.topicId);
     return run;
   }
 
   async listByTopic(topicId: string): Promise<ResearchRunDocument[]> {
+    await assertTopicAccessible(this.topicModel, topicId);
     return this.runModel
       .find({ topicId: new Types.ObjectId(topicId) })
       .sort({ number: -1 })
