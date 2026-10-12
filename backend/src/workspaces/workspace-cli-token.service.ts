@@ -33,8 +33,8 @@ export class WorkspaceCliTokenService {
 
   /**
    * Build the DG_* env block for workspace_exec injection. Returns an empty
-   * object if auth is disabled (we never mint tokens in dev-only mode where
-   * the JWT secret is the placeholder default).
+   * object if JWT_SECRET is unset (then the secret is a per-process random
+   * value, see common/jwt-secret.ts, and tokens would not survive a restart).
    */
   buildEnvFor(workspaceId: string, projectId: string): Record<string, string> {
     if (!process.env.JWT_SECRET) return {};

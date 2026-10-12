@@ -26,8 +26,8 @@ services:
     ports:
       - "127.0.0.1:27017:27017"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:?MONGO_USER must be set — otherwise MongoDB starts without an admin user}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?MONGO_PASSWORD must be set — otherwise MongoDB starts without an admin user}
       MONGO_INITDB_DATABASE: ${MONGO_DB}
     entrypoint: ["/bin/bash", "-c", "if [ ! -f /keyfile/mongo-keyfile ]; then openssl rand -base64 756 > /keyfile/mongo-keyfile; fi && chmod 400 /keyfile/mongo-keyfile && chown 999:999 /keyfile/mongo-keyfile && exec docker-entrypoint.sh mongod --replSet rs0 --keyFile /keyfile/mongo-keyfile --wiredTigerCacheSizeGB 0.5"]
     volumes:
@@ -110,7 +110,11 @@ services:
     container_name: devgrimoire-backend
     restart: unless-stopped
     ports:
-      - "3200:3000"
+      # H-2: per Default nur lokal. Direkt erreichbar umgeht das Backend nginx
+      # (Header, Timeouts, künftiges TLS) und kann mit TRUST_PROXY=1 das
+      # Login-Throttling per eigenem X-Forwarded-For aushebeln. Wer den
+      # direkten Port im LAN braucht: BACKEND_BIND=0.0.0.0 in .env.
+      - "${BACKEND_BIND:-127.0.0.1}:3200:3000"
     environment:
       MONGODB_URI: ${MONGODB_URI}
       PORT: 3000
@@ -118,11 +122,11 @@ services:
       CORS_ORIGIN: http://localhost
       # Ein Hop = der nginx dieses Stacks (Service `frontend` unten). Siehe
       # docker-compose.yml für die ausführliche Begründung; auch hier gilt die
-      # Wechselwirkung mit der direkten Port-Bindung `"3200:3000"`.
+      # Wechselwirkung mit BACKEND_BIND an der direkten Port-Bindung.
       TRUST_PROXY: ${TRUST_PROXY:-1}
-      AUTH_USERNAME: ${AUTH_USERNAME:-}
-      AUTH_PASSWORD: ${AUTH_PASSWORD:-}
-      JWT_SECRET: ${JWT_SECRET:-}
+      AUTH_USERNAME: ${AUTH_USERNAME:?AUTH_USERNAME must be set — without it the instance runs WITHOUT authentication}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:?AUTH_PASSWORD must be set — without it the instance runs WITHOUT authentication}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (openssl rand -hex 32)}
       SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}

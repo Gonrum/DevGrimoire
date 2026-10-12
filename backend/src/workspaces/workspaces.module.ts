@@ -18,6 +18,7 @@ import { SecretsModule } from '../secrets/secrets.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { TodosModule } from '../todos/todos.module';
+import { resolveJwtSecret } from '../common/jwt-secret';
 
 @Module({
   imports: [
@@ -27,7 +28,7 @@ import { TodosModule } from '../todos/todos.module';
     // same secret so WorkspaceCliTokenService can sign/verify dg-CLI tokens
     // (T-168). Both instances share JWT_SECRET, so tokens are interchangeable.
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'dev-only-auth-disabled',
+      secret: resolveJwtSecret(),
     }),
     LogsModule,
     SettingsModule,

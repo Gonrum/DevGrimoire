@@ -12,6 +12,7 @@ import { RefreshToken, RefreshTokenSchema } from './schemas/refresh-token.schema
 import { User, UserSchema } from './schemas/user.schema';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { EncryptionService } from '../common/encryption.service';
+import { resolveJwtSecret } from '../common/jwt-secret';
 
 @Global()
 @Module({
@@ -24,7 +25,7 @@ import { EncryptionService } from '../common/encryption.service';
         if (authEnabled && !secret) {
           throw new Error('SECURITY: JWT_SECRET must be set when authentication is enabled (AUTH_USERNAME/AUTH_PASSWORD are set)');
         }
-        return secret || 'dev-only-auth-disabled';
+        return resolveJwtSecret();
       })(),
       signOptions: { expiresIn: '15m' },
     }),

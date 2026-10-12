@@ -181,6 +181,8 @@ openssl rand -hex 32
 
 When the Docker stack is running, Claude can access DevGrimoire from any machine on the network -- no local installation required.
 
+Connect through nginx on port 80 (`/mcp`, `/sse`, `/messages`). The backend's direct port 3200 is bound to `127.0.0.1` by default; set `BACKEND_BIND=0.0.0.0` in `.env` only if a client really has to bypass nginx.
+
 In `~/.claude.json` (Claude Code) or `claude_desktop_config.json` (Claude Desktop):
 
 ```json
@@ -188,7 +190,7 @@ In `~/.claude.json` (Claude Code) or `claude_desktop_config.json` (Claude Deskto
   "mcpServers": {
     "devgrimoire": {
       "type": "sse",
-      "url": "http://<hostname>:3200/sse"
+      "url": "http://<hostname>/sse"
     }
   }
 }

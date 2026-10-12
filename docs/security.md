@@ -27,7 +27,7 @@ The HTTP MCP transports are protected by API keys when auth is enabled:
   "mcpServers": {
     "devgrimoire": {
       "type": "http",
-      "url": "http://server:3200/mcp",
+      "url": "http://server/mcp",
       "headers": {
         "Authorization": "Bearer cv_..."
       }
@@ -43,7 +43,7 @@ For legacy SSE clients that cannot send headers:
   "mcpServers": {
     "devgrimoire": {
       "type": "sse",
-      "url": "http://server:3200/sse?apiKey=cv_..."
+      "url": "http://server/sse?apiKey=cv_..."
     }
   }
 }
