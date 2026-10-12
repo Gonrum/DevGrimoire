@@ -1,9 +1,10 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
 import { PassThrough, Readable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 import { KubeConfig, Log, LogOptions } from '@kubernetes/client-node';
 import { KubeClustersService } from './kube-clusters.service';
 import { KubeClientService } from './kube-client.service';
+import { isKubeNameLabel, isKubeNameSubdomain } from './kube-normalize';
 import { errorMessage } from '../common/narrow';
 
 export interface KubeLogOptions {
@@ -88,6 +89,29 @@ export class KubeLogsService {
     pod: string,
     opts: KubeLogOptions,
   ): Promise<KubeLogSession> {
+    // VOR jeder Ressourcen-Anforderung: `Log.log()` interpoliert namespace und
+    // pod uncodiert in den URL-Pfad (einzige handgeschriebene URL im Client,
+    // alle generierten Methoden nutzen `encodeURIComponent`). Ohne diese
+    // Prüfung liest ein Wert wie `default/../../../api/v1/namespaces/
+    // kube-system/secrets/foo?x=` ein beliebiges anderes Objekt aus dem
+    // Cluster — vorbei an `redactSecret` und der Kind-Allowlist.
+    //
+    // Die DTOs prüfen dasselbe bereits (`@Matches` in LogsQueryDto), aber der
+    // MCP-Pfad tut es nicht und jeder künftige Aufrufer könnte es umgehen —
+    // die Senke selbst ist die verlässliche Stelle. Steht bewusst vor
+    // `findById`/`buildConfig`: ein Wurf NACH `buildConfig()` müsste den
+    // Tunnel wieder freigeben, und genau das ist die Regel, die dieses Modul
+    // am teuersten gelernt hat.
+    if (!isKubeNameLabel(namespace)) {
+      throw new BadRequestException('namespace ist kein gültiger Kubernetes-Namespace-Name (RFC 1123)');
+    }
+    if (!isKubeNameSubdomain(pod)) {
+      throw new BadRequestException('pod ist kein gültiger Kubernetes-Objektname (RFC 1123)');
+    }
+    if (opts.container !== undefined && !isKubeNameLabel(opts.container)) {
+      throw new BadRequestException('container ist kein gültiger Kubernetes-Containername (RFC 1123)');
+    }
+
     const cluster = await this.clusters.findById(clusterId);
     const { kc, release } = await this.client.buildConfig(cluster);
 

@@ -17,8 +17,11 @@ function loadCompiled(rel) {
   }
 }
 
-const { stripHeavyMetadata, projectRow, redactSecret, toYamlSafe } =
-  loadCompiled('kube/kube-normalize.js');
+const {
+  stripHeavyMetadata, projectRow, redactSecret, toYamlSafe,
+  isKubeNameLabel, isKubeNameSubdomain,
+  KUBE_NAME_LABEL_MAX, KUBE_NAME_SUBDOMAIN_MAX,
+} = loadCompiled('kube/kube-normalize.js');
 
 let failures = 0, total = 0;
 function check(label, fn) {
@@ -287,6 +290,90 @@ check('toYamlSafe(null) wirft nicht', () => {
 
 check('toYamlSafe(undefined) wirft nicht', () => {
   assert.doesNotThrow(() => toYamlSafe(undefined));
+});
+
+// ---------------------------------------------------------------------------
+// RFC-1123-Namensprüfung (Review-Fund C-1, 2026-10-11)
+//
+// `Log.log()` aus @kubernetes/client-node interpoliert namespace/pod UNCODIERT
+// in den URL-Pfad — im Gegensatz zu jeder generierten API-Methode, die
+// `encodeURIComponent` nutzt. Diese Prädikate sind die einzige Verteidigung
+// dagegen; DTOs und die Logs-Senke teilen sie sich.
+// ---------------------------------------------------------------------------
+
+/** Die konkreten Payloads aus dem Review — müssen von BEIDEN Prädikaten abprallen. */
+const INJECTIONS = [
+  'default/../../../../api/v1/namespaces/kube-system/secrets/registry-pull?x=',
+  '../../../api/v1/namespaces/kube-system/secrets/foo',
+  'prod?limit=1',
+  'prod#frag',
+  'prod/x',
+  'a b',
+];
+
+check('isKubeNameLabel: gültige DNS-1123-Labels', () => {
+  assert.equal(KUBE_NAME_LABEL_MAX, 63, 'LABEL_MAX muss 63 sein (Kubernetes-Grenze)');
+  for (const ok of ['prod', 'kube-system', 'default', 'a', 'ns1', 'a-b-c', '0', 'abc123']) {
+    assert.equal(isKubeNameLabel(ok), true, `"${ok}" ist ein gültiges Label`);
+  }
+  assert.equal(isKubeNameLabel('a'.repeat(63)), true, '63 Zeichen sind erlaubt');
+});
+
+check('isKubeNameLabel: ungültige Labels', () => {
+  for (const bad of ['', '-a', 'a-', '.a', 'a.', 'a.b', 'A', 'aBc', 'a_b', 'a b', 'ä', 'a'.repeat(64)]) {
+    assert.equal(isKubeNameLabel(bad), false, `"${bad}" hätte abgelehnt werden müssen`);
+  }
+});
+
+check('isKubeNameLabel: Nicht-Strings werden abgelehnt', () => {
+  for (const bad of [undefined, null, 42, {}, [], true, Symbol('x')]) {
+    assert.equal(isKubeNameLabel(bad), false, `${String(bad)} hätte abgelehnt werden müssen`);
+  }
+});
+
+check('isKubeNameSubdomain: gültige DNS-1123-Subdomains (Punkte erlaubt)', () => {
+  assert.equal(KUBE_NAME_SUBDOMAIN_MAX, 253, 'SUBDOMAIN_MAX muss 253 sein (Kubernetes-Grenze)');
+  for (const ok of ['a', 'pod-1', 'coredns-5d78c9869d-abcde', 'a.b', 'a.b.c', 'ns1.svc.cluster.local']) {
+    assert.equal(isKubeNameSubdomain(ok), true, `"${ok}" ist eine gültige Subdomain`);
+  }
+  const long = `${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(60)}`;
+  assert.ok(long.length <= 253, 'Testannahme verletzt');
+  assert.equal(isKubeNameSubdomain(long), true, 'eine 253-Zeichen-Subdomain ist erlaubt');
+});
+
+check('isKubeNameSubdomain: ungültige Subdomains', () => {
+  for (const bad of ['', '.a', 'a.', 'a..b', '-a', 'a-', 'A', 'a_b', 'a b', 'ä', 'a'.repeat(254)]) {
+    assert.equal(isKubeNameSubdomain(bad), false, `"${bad}" hätte abgelehnt werden müssen`);
+  }
+});
+
+check('isKubeNameSubdomain: Nicht-Strings werden abgelehnt', () => {
+  for (const bad of [undefined, null, 42, {}, [], true]) {
+    assert.equal(isKubeNameSubdomain(bad), false, `${String(bad)} hätte abgelehnt werden müssen`);
+  }
+});
+
+check('beide Prädikate lehnen die Review-Injection-Payloads ab', () => {
+  for (const payload of INJECTIONS) {
+    assert.equal(isKubeNameLabel(payload), false, `Label-Prüfung ließ "${payload}" durch`);
+    assert.equal(isKubeNameSubdomain(payload), false, `Subdomain-Prüfung ließ "${payload}" durch`);
+  }
+});
+
+check('die Payload aus dem Review-PoC ergibt encodiert einen anderen Pfad', () => {
+  // Belegt den Kern des Fundes: roh interpoliert trifft die Injection ein
+  // fremdes Objekt, encodiert (wie die generierten APIs es tun) nicht.
+  const payload = INJECTIONS[0];
+  const server = 'https://127.0.0.1:6443';
+  const raw = new URL(`${server}/api/v1/namespaces/${payload}/pods/y/log`);
+  const encoded = new URL(
+    `${server}/api/v1/namespaces/${encodeURIComponent(payload)}/pods/y/log`,
+  );
+  assert.equal(raw.pathname, '/api/v1/namespaces/kube-system/secrets/registry-pull',
+    'PoC-Annahme: roh interpoliert landet die Injection auf einem Secret-Pfad');
+  assert.ok(encoded.pathname.includes('default%2F..'),
+    'encodiert bleibt die Injection ein einziges (ungültiges) Pfadsegment');
+  assert.notEqual(raw.pathname, encoded.pathname);
 });
 
 console.log('');

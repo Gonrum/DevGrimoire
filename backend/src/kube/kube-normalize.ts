@@ -87,6 +87,55 @@ export function asString(value: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * Kubernetes-Namensmuster nach RFC 1123 — Kleinbuchstaben zwingend, so wie
+ * der Apiserver selbst validiert (`IsDNS1123Label` / `IsDNS1123Subdomain`).
+ *
+ * Warum das Modul die Muster selbst nachprüft, statt sich auf die Client-
+ * Bibliothek zu verlassen: die generierten API-Methoden bauen ihre Pfade mit
+ * `encodeURIComponent` (CoreV1Api.js), aber `Log.log()` ist die einzige
+ * handgeschriebene URL im Client und interpoliert roh —
+ *
+ *     `/api/v1/namespaces/${namespace}/pods/${podName}/log`
+ *
+ * Ein `namespace` wie `default/../../../../api/v1/namespaces/kube-system/
+ * secrets/foo?x=` (74 Zeichen, jedes Längenlimit einhaltend) wird dort zum
+ * Pfadbestandteil und trifft ein beliebiges anderes API-Objekt. Die Antwort
+ * wird von `Log.log()` ungeprüft in den Stream gepipt, also käme der Inhalt —
+ * bei einem Secret dessen `data` im Klartext — als vermeintliche Log-Zeile
+ * zurück und umginge `redactSecret`, `stripHeavyMetadata` und die
+ * Kind-Allowlist vollständig. Maskieren hilft hier nicht (es geht um ein
+ * Pfadsegment, nicht um einen `fieldSelector` wie bei
+ * `escapeFieldSelectorValue`), und encodieren kann dieses Modul nicht, weil
+ * die Bibliothek den String selbst zusammensetzt. Bleibt: ablehnen.
+ *
+ * Ablehnen kostet nichts Legitimes — ein Name, der diese Muster verletzt,
+ * kann in einem Kubernetes-Cluster nicht existieren.
+ */
+export const KUBE_NAME_LABEL_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+export const KUBE_NAME_SUBDOMAIN_RE =
+  /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+export const KUBE_NAME_LABEL_MAX = 63;
+export const KUBE_NAME_SUBDOMAIN_MAX = 253;
+
+/** Namespace- und Container-Namen: DNS-1123-Label (≤ 63, keine Punkte). */
+export function isKubeNameLabel(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= KUBE_NAME_LABEL_MAX &&
+    KUBE_NAME_LABEL_RE.test(value)
+  );
+}
+
+/** Objekt-Namen (Pod, Deployment, …): DNS-1123-Subdomain (≤ 253, Punkte erlaubt). */
+export function isKubeNameSubdomain(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= KUBE_NAME_SUBDOMAIN_MAX &&
+    KUBE_NAME_SUBDOMAIN_RE.test(value)
+  );
+}
+
 function readString(source: unknown, ...pathSegments: string[]): string | undefined {
   let cursor: unknown = source;
   for (const segment of pathSegments) {

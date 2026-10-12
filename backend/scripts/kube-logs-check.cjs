@@ -25,7 +25,7 @@ const { KubeLogsService } = loadCompiled('kube/kube-logs.service.js');
 // hängt und der Event-Loop danach einfach leerläuft — Exit 0 und druckt
 // die Zusammenfassung nie. Ein Timeout pro Fall (unten in `check()`) ist
 // die primäre Abwehr; diese Zählung ist das zweite Netz.
-const EXPECTED_CHECKS = 18;
+const EXPECTED_CHECKS = 21;
 const CHECK_TIMEOUT_MS = 3000;
 
 let failures = 0, total = 0;
@@ -254,6 +254,106 @@ async function collect(iterable, max = 10) {
     assert.equal(seen.container, 'side');
     assert.equal(seen.options.tailLines, 42);
     assert.equal(seen.options.previous, true);
+  });
+
+  // Review-Fund C-1 (2026-10-11): `Log.log()` ist die einzige handgeschriebene
+  // URL in @kubernetes/client-node und interpoliert namespace/pod UNCODIERT —
+  // jede generierte API-Methode nutzt dagegen `encodeURIComponent`. Ohne
+  // Namensprüfung wird ein Wert wie `default/../../../api/v1/namespaces/
+  // kube-system/secrets/foo?x=` zum Pfadbestandteil und liest ein beliebiges
+  // anderes Objekt; die Antwort wird ungeprüft in den Stream gepipt, also
+  // käme bei einem Secret dessen `data` im Klartext als "Log-Zeile" zurück —
+  // vorbei an redactSecret, stripHeavyMetadata und der Kind-Allowlist.
+  await check('ein injizierter namespace erreicht die Cluster-API nie', async () => {
+    let logCalled = 0;
+    let released = 0;
+    const client = {
+      async buildConfig() { return { kc: {}, release: () => { released += 1; } }; },
+    };
+    const logFactory = () => ({
+      async log(ns, pod, container, stream) {
+        logCalled += 1;
+        stream.end();
+        return { abort: () => {} };
+      },
+    });
+    const svc = new KubeLogsService(clustersStub, client, logFactory);
+    const injected = 'default/../../../../api/v1/namespaces/kube-system/secrets/registry-pull?x=';
+    const err = await svc.open('c1', injected, 'api', {})
+      .then(() => null, (e) => e);
+    assert.ok(err, 'open() hätte den injizierten namespace ablehnen müssen');
+    assert.equal(typeof err.getStatus, 'function', 'erwartet eine HttpException (getStatus)');
+    assert.equal(err.getStatus(), 400, `erwartet 400, bekam ${err.getStatus()}`);
+    assert.equal(logCalled, 0, 'Log.log() wurde trotz Ablehnung aufgerufen');
+    // Die Prüfung steht bewusst VOR findById/buildConfig: ein Wurf danach
+    // müsste den Tunnel freigeben, und genau das ist die teuerste Regel
+    // dieses Moduls (release() genau einmal pro buildConfig()).
+    assert.equal(released, 0, `released=${released} — der Transport wurde trotz Ablehnung angefordert`);
+  });
+
+  await check('ein injizierter pod-Name wird abgelehnt', async () => {
+    let logCalled = 0;
+    const client = { async buildConfig() { return { kc: {}, release: () => {} }; } };
+    const logFactory = () => ({
+      async log(ns, pod, container, stream) {
+        logCalled += 1;
+        stream.end();
+        return { abort: () => {} };
+      },
+    });
+    const svc = new KubeLogsService(clustersStub, client, logFactory);
+    for (const bad of [
+      'api/../../kube-system/secrets/foo',
+      'api?x=1',
+      'api#frag',
+      'API',            // RFC 1123 ist kleinschreibungspflichtig
+      '-api',
+      'api-',
+      '',
+    ]) {
+      const err = await svc.open('c1', 'prod', bad, {})
+        .then(() => null, (e) => e);
+      assert.ok(err, `pod="${bad}" hätte abgelehnt werden müssen`);
+      assert.equal(err.getStatus(), 400, `pod="${bad}": erwartet 400, bekam ${err.getStatus()}`);
+    }
+    assert.equal(logCalled, 0, 'Log.log() wurde trotz Ablehnung aufgerufen');
+  });
+
+  await check('ein injizierter container-Name wird abgelehnt, gültige Namen gehen durch', async () => {
+    const seen = [];
+    const client = { async buildConfig() { return { kc: {}, release: () => {} }; } };
+    const logFactory = () => ({
+      async log(ns, pod, container, stream) {
+        seen.push({ ns, pod, container });
+        stream.end();
+        return { abort: () => {} };
+      },
+    });
+    const svc = new KubeLogsService(clustersStub, client, logFactory);
+
+    const err = await svc.open('c1', 'prod', 'api', { container: 'side/../other' })
+      .then(() => null, (e) => e);
+    assert.ok(err, 'ein injizierter container-Name hätte abgelehnt werden müssen');
+    assert.equal(err.getStatus(), 400);
+    assert.equal(seen.length, 0);
+
+    // Gültige Namen müssen durchkommen — sonst ist die Prüfung kein
+    // Sicherheitsgewinn, sondern ein Funktionsverlust. Ein Pod-Name ist eine
+    // DNS-1123-Subdomain (Punkte erlaubt), namespace/container sind Labels.
+    const label63 = 'a'.repeat(63);
+    const subdomain = `${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(60)}`;
+    assert.ok(subdomain.length <= 253, 'Testannahme: Subdomain zu lang gebaut');
+    for (const [ns, pod, container] of [
+      ['prod', 'api', undefined],
+      ['kube-system', 'coredns-5d78c9869d-abcde', 'coredns'],
+      ['default', subdomain, label63],
+      ['ns1', 'a', 'b'],
+    ]) {
+      const session = await svc.open('c1', ns, pod, container === undefined ? {} : { container });
+      await collect(session.lines);
+      assert.equal(seen[seen.length - 1].ns, ns, 'namespace wurde nicht unverändert durchgereicht');
+    }
+    assert.equal(seen.length, 4, `erwartet 4 durchgelassene Aufrufe, bekam ${seen.length}`);
   });
 
   // Über die sieben Basisfälle hinaus: Lebenszyklus-Pfade, die die
