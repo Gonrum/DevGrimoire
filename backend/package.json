@@ -41,6 +41,7 @@
     "check:actor-scope": "node scripts/actor-scope-check.cjs",
     "check:entity-scope": "node scripts/entity-scope-check.cjs",
     "check:ssh-scope": "node scripts/ssh-scope-check.cjs",
+    "check:env-example": "node scripts/env-example-check.cjs",
     "check:concurrency": "node scripts/concurrency-check.cjs",
     "check:socket-safety": "node scripts/socket-safety-check.cjs",
     "check:query-filter-safety": "node scripts/query-filter-safety-check.cjs",

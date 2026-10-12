@@ -51,7 +51,9 @@ services:
     depends_on:
       mongodb:
         condition: service_started
-    entrypoint: ["/bin/bash", "-c", "sleep 15 && mongosh 'mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongodb:27017/?authSource=admin&directConnection=true' --eval 'try { rs.status(); print(\"Replica set already initialized\"); } catch(e) { rs.initiate({ _id: \"rs0\", members: [{ _id: 0, host: \"mongodb:27017\" }] }); print(\"Replica set initiated\"); }'"]
+    # M-28: warten statt `sleep 15`, Credentials zur Laufzeit aus der Umgebung
+    # (siehe docker-compose.yml).
+    entrypoint: ["/bin/bash", "-c", "for i in $$(seq 1 90); do mongosh --quiet --host mongodb --eval 'db.adminCommand(\"ping\").ok' >/dev/null 2>&1 && break; sleep 2; done; mongosh --quiet --host mongodb -u \"$$MONGO_USER\" -p \"$$MONGO_PASSWORD\" --authenticationDatabase admin --eval 'try { rs.status(); print(\"Replica set already initialized\"); } catch(e) { rs.initiate({ _id: \"rs0\", members: [{ _id: 0, host: \"mongodb:27017\" }] }); print(\"Replica set initiated\"); }'"]
     environment:
       MONGO_USER: ${MONGO_USER}
       MONGO_PASSWORD: ${MONGO_PASSWORD}
@@ -85,7 +87,7 @@ services:
     restart: unless-stopped
     environment:
       SEARXNG_BASE_URL: "http://searxng:8888/"
-      SEARXNG_SECRET: ${SEARXNG_SECRET:-change-me-to-a-random-32-char-string}
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?SEARXNG_SECRET must be set (openssl rand -hex 32)}
       UWSGI_WORKERS: 1
       UWSGI_THREADS: 2
     volumes:
@@ -144,8 +146,13 @@ services:
       # MinIO
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      # M-29: keine minioadmin-Defaults mehr — MinIO hält alle Anhänge und
+      # Backups und ist für jeden Prozess auf dem Jetson erreichbar.
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY must be set}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set}
+      # H-30: BullMQ (LLM-Balancer) braucht Redis.
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set (openssl rand -hex 32)}
       MINIO_BUCKET: ${MINIO_BUCKET:-devgrimoire}
       MINIO_USE_SSL: "false"
     volumes:
@@ -161,12 +168,33 @@ services:
         condition: service_healthy
       searxng:
         condition: service_started
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/auth/status').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 45s
+
+  # H-30: Ohne Redis verband das Backend auf localhost:6379 ins Leere — der
+  # LLM-Balancer (BullMQ, Pflicht-Import) war tot, und der Healthcheck
+  # (/api/auth/status) blieb trotzdem grün. Klein genug für den Jetson.
+  redis:
+    image: redis:7-alpine
+    container_name: devgrimoire-redis
+    restart: unless-stopped
+    command: ["sh", "-c", "exec redis-server --appendonly yes --save 60 1 --maxmemory 64mb --maxmemory-policy noeviction --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set (openssl rand -hex 32)}
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   minio:
     image: minio/minio:latest
@@ -177,8 +205,8 @@ services:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY must be set}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set}
     volumes:
       - minio_data:/data
     deploy:
@@ -209,6 +237,7 @@ services:
         condition: service_healthy
 
 volumes:
+  redis_data:
   mongodb_data:
   mongodb_keyfile:
   lancedb_data:

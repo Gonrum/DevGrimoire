@@ -27,19 +27,38 @@ services:
     depends_on:
       mongodb:
         condition: service_started
-    entrypoint: ["/bin/bash", "-c", "sleep 10 && mongosh 'mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongodb:27017/?authSource=admin&directConnection=true' --eval 'try { rs.status(); print(\"Replica set already initialized\"); } catch(e) { rs.initiate({ _id: \"rs0\", members: [{ _id: 0, host: \"mongodb:27017\" }] }); print(\"Replica set initiated\"); }'"]
+    # M-28: vorher `sleep 10 && mongosh …`. War mongod nach 10 s nicht bereit,
+    # scheiterte die Verbindung (der try/catch im --eval fängt nur rs.status()),
+    # der Job endete mit Exit != 0, und das Backend (service_completed_
+    # successfully) startete nie. Jetzt: bis zu 120 s auf mongod warten.
+    # Ausserdem `$$`: die Credentials expandiert jetzt die Shell IM Container
+    # aus der Umgebung, statt dass Compose sie in den Entrypoint-String
+    # schreibt — dort standen sie dauerhaft in der Container-Config und in
+    # der Prozessliste.
+    entrypoint: ["/bin/bash", "-c", "for i in $$(seq 1 60); do mongosh --quiet --host mongodb --eval 'db.adminCommand(\"ping\").ok' >/dev/null 2>&1 && break; sleep 2; done; mongosh --quiet --host mongodb -u \"$$MONGO_USER\" -p \"$$MONGO_PASSWORD\" --authenticationDatabase admin --eval 'try { rs.status(); print(\"Replica set already initialized\"); } catch(e) { rs.initiate({ _id: \"rs0\", members: [{ _id: 0, host: \"mongodb:27017\" }] }); print(\"Replica set initiated\"); }'"]
     environment:
       MONGO_USER: ${MONGO_USER}
       MONGO_PASSWORD: ${MONGO_PASSWORD}
 
   # SearXNG — self-hosted meta search engine for MCP web_search/web_fetch tools
   searxng:
-    image: searxng/searxng:latest
+    # M-27: per Digest gepinnt statt `:latest` (reproduzierbar, kein
+    # ungeprüftes Update bei jedem Pull). Bewusst aktualisieren.
+    image: searxng/searxng@sha256:a7f9188cc7fa8b6b037e0d85709c0dced8f05d0eba84145eb7fe7027a4c00850
     container_name: devgrimoire-searxng
     restart: unless-stopped
+    # Bekommt nutzerkontrollierte Suchanfragen vom Backend und läuft im Image
+    # als root — wenigstens keine neuen Privilegien und begrenzte PIDs.
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          pids: 256
     environment:
       SEARXNG_BASE_URL: "http://searxng:8080/"
-      SEARXNG_SECRET: ${SEARXNG_SECRET:-change-me-to-a-random-32-char-string}
+      # M-29: vorher ein Klartext-Default im Repo.
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?SEARXNG_SECRET must be set (openssl rand -hex 32)}
       UWSGI_WORKERS: 2
       UWSGI_THREADS: 4
     volumes:
@@ -54,7 +73,14 @@ services:
 
   # Workspace sidecar — isolated container that owns the per-project clone
   # volume and exposes a small HTTP API consumed only by the API backend over
-  # the internal `workspace-api-net`. It has no route to MongoDB or the API.
+  # the internal `workspace-api-net`. It has no route to MongoDB or Redis.
+  #
+  # ACHTUNG (H-6): eine Route zum BACKEND hat er sehr wohl — workspace-api-net
+  # ist eine gewöhnliche, bidirektionale Bridge (live gemessen: aus dem
+  # Sidecar liefert `http://backend:3000/api/auth/status` HTTP 200). Code aus
+  # workspace_exec erreicht die API also direkt, ohne nginx. Schutz ist allein
+  # die Authentifizierung (AUTH_* ist deshalb Pflicht, H-3) — ein
+  # Einbahn-Netz gibt es hier nicht.
   #
   # NETWORK REACH (operator note): the sidecar joins `workspace-net` (a
   # regular bridge with NAT), so workspace_exec commands CAN reach hosts on
@@ -122,7 +148,20 @@ services:
     image: redis:7-alpine
     container_name: devgrimoire-redis
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    # M-27: vorher ohne Authentifizierung, von jedem Container im default-Netz
+    # erreichbar — auch von SearXNG, das nutzerkontrollierte Anfragen
+    # verarbeitet. Das Passwort expandiert die Shell im Container (`$$`),
+    # damit es nicht im Command der Container-Config steht.
+    command: ["sh", "-c", "exec redis-server --appendonly yes --save 60 1 --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set (openssl rand -hex 32)}
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          pids: 256
     volumes:
       - redis_data:/data
     healthcheck:
@@ -155,7 +194,9 @@ services:
       WORKSPACE_API_TOKEN: ${WORKSPACE_API_TOKEN:-}
       MONGODB_URI: ${MONGODB_URI}
       PORT: 3000
-      CORS_ORIGIN: http://localhost
+      # M-38: vorher ein Literal, per .env nicht änderbar.
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       # Ein Hop = der nginx, den dieses Compose-File davorschaltet. Ohne die
       # Einstellung ist req.ip für jeden Request die nginx-Container-Adresse,
       # und damit war das Login-Throttling ein GLOBALER Eimer (5 Fehlversuche
@@ -195,6 +236,10 @@ services:
       BACKUP_DAILY_ENABLED: ${BACKUP_DAILY_ENABLED:-true}
       BACKUP_CRON: ${BACKUP_CRON:-0 6 * * *}
       BACKUP_MINIO_BUCKET: ${BACKUP_MINIO_BUCKET:-devgrimoire-backups}
+      # M-37: vorher im Code gelesen und in operations.md dokumentiert, aber
+      # nie an den Container durchgereicht — per .env wirkungslos.
+      BACKUP_RETENTION_KEEP_LAST: ${BACKUP_RETENTION_KEEP_LAST:-14}
+      BACKUP_RETENTION_KEEP_DAYS: ${BACKUP_RETENTION_KEEP_DAYS:-30}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
       POOL_WAIT_TIMEOUT_MS: ${POOL_WAIT_TIMEOUT_MS:-120000}

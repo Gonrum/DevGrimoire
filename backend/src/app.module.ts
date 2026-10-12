@@ -83,6 +83,8 @@ if (!MONGODB_URI) {
       connection: {
         host: process.env.REDIS_HOST || 'localhost',
         port: Number(process.env.REDIS_PORT || 6379),
+        // M-27: Redis verlangt im Compose-Stack ein Passwort.
+        password: process.env.REDIS_PASSWORD || undefined,
       },
     }),
     ProjectsModule,

@@ -114,6 +114,10 @@ jobs:
           MONGO_DB: ci
           MONGODB_URI: mongodb://ci:ci@mongodb:27017/ci
           WORKSPACE_API_TOKEN: ci-token-0123456789
+          SEARXNG_SECRET: ci
+          REDIS_PASSWORD: ci
+          MINIO_ACCESS_KEY: ci
+          MINIO_SECRET_KEY: ci
         run: |
           docker compose -f docker-compose.yml config -q
           docker compose -f docker-compose.yml -f docker-compose.standalone.yml config -q
