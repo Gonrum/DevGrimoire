@@ -35,7 +35,7 @@ lint_package() {
   #
   # Umfang: das ganze Paket, nicht nur `src`. Die `.cjs`-Prüfskripte
   # (`scripts/`, `test/`) und die Build-Dateien des Frontends (`vite.config.ts`,
-  # `postcss.config.js`, `tailwind.config.js`, `public/sw.js`) haben eigene
+  # `postcss.config.js`, `public/sw.js`) haben eigene
   # Config-Blöcke und gehören genauso ins Gate — sonst prüft es weniger, als
   # `npm run lint` meldet.
   while IFS= read -r -d '' file; do
@@ -58,6 +58,8 @@ lint_package() {
 
 lint_package backend
 lint_package frontend
+# Workspace-Sidecar (M-30): sicherheitskritisches JS, bis dahin ohne Linter.
+lint_package workspace/server
 
 if [ "$FAILED" -ne 0 ]; then
   cat >&2 <<'MSG'

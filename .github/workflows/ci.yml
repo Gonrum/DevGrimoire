@@ -1,0 +1,127 @@
+# CI (Review-Fund M-30). Bis hierhin lief nichts automatisch: der
+# Pre-Commit-Hook ist opt-in, mit --no-verify umgehbar (der Auto-Commit-Job
+# tut genau das) und prüfte nur Lint. Hier läuft dasselbe, was vor jedem
+# Push lokal grün sein soll — Lint, Typecheck, Build und die Check-Suite —,
+# plus die drei Docker-Images und die Compose-Dateien.
+#
+# Nicht hier: backend/test/*.sh. Die brauchen einen laufenden Stack mit
+# Daten und dokumentieren ihre Voraussetzungen jeweils im Header.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_OPTIONS: --max-old-space-size=8192
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit -p tsconfig.json
+      # Frischer Build, kein inkrementelles tsbuildinfo aus dist/ (siehe
+      # Review: veraltetes dist/ lässt die Checks gegen alten Code laufen).
+      - run: rm -rf dist && npx nest build
+      # Alle check:*-Skripte ausser den drei Live-Checks; die Liste steht in
+      # scripts/run-checks.cjs. Der i18n-Check liest frontend/src mit.
+      - run: npm run checks
+      - name: Prod-Audit (nur high/critical brechen)
+        run: npm audit --omit=dev --audit-level=high
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc -b --force
+      - run: npx vite build
+      - name: Audit (nur high/critical brechen)
+        run: npm audit --audit-level=high
+
+  workspace:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workspace/server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: workspace/server/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: node --check index.js && node --check kube-args.js
+      - name: Prod-Audit (nur high/critical brechen)
+        run: npm audit --omit=dev --audit-level=high
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Pflichtvariablen (H-3) mit Platzhaltern, damit `config` die Dateien
+      # selbst prüft. Ohne sie MUSS es scheitern — das prüft der zweite Schritt.
+      - name: docker compose config (alle Varianten)
+        env:
+          AUTH_USERNAME: ci
+          AUTH_PASSWORD: ci
+          JWT_SECRET: ci
+          MONGO_USER: ci
+          MONGO_PASSWORD: ci
+          MONGO_DB: ci
+          MONGODB_URI: mongodb://ci:ci@mongodb:27017/ci
+          WORKSPACE_API_TOKEN: ci-token-0123456789
+        run: |
+          docker compose -f docker-compose.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.standalone.yml config -q
+          docker compose -f docker-compose.jetson.yml config -q
+      - name: Ohne Pflichtvariablen bricht compose ab (H-3)
+        run: |
+          if docker compose -f docker-compose.yml config -q 2>/dev/null; then
+            echo "docker-compose.yml startet ohne AUTH_*/JWT_SECRET — fail-open" >&2
+            exit 1
+          fi
+
+  images:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend, workspace]
+    strategy:
+      matrix:
+        image:
+          - { name: backend, context: backend }
+          - { name: frontend, context: frontend }
+          - { name: workspace, context: workspace }
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build ${{ matrix.image.name }}
+        run: docker build -t devgrimoire-${{ matrix.image.name }}:ci ${{ matrix.image.context }}
