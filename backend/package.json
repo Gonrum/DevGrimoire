@@ -40,6 +40,7 @@
     "check:auth-seed": "node scripts/auth-seed-check.cjs",
     "check:trust-proxy": "node scripts/trust-proxy-check.cjs",
     "check:http-requests-template": "node scripts/http-requests-template-check.cjs",
+    "check:http-requests-scope": "node scripts/http-requests-scope-check.cjs",
     "check:http-requests-curl": "node scripts/http-requests-curl-check.cjs",
     "check:llm-endpoints-merge": "node scripts/llm-endpoints-merge-check.cjs",
     "check:llm-migrator-merge": "node scripts/llm-migrator-merge-check.cjs",

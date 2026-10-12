@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
@@ -15,6 +15,8 @@ import { UpdateRequestDto } from './dto/update-request.dto';
 import { SecretsService } from '../secrets/secrets.service';
 import { EnvironmentsService } from '../environments/environments.service';
 import { projectIdFilter } from '../common/project-id-filter';
+import { actorCanAccessProject } from '../common/permissions';
+import { RequestContext } from '../common/request-context';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { parseCurl } from './curl-parser';
 import { isRecord, errorMessage } from '../common/narrow';
@@ -111,9 +113,54 @@ export class HttpRequestsService {
     return new Types.ObjectId(id);
   }
 
+  // ---- Scope --------------------------------------------------------------
+
+  /**
+   * Projekt-Scope-Prüfung für Collections und gespeicherte Requests.
+   *
+   * Nötig, weil `SavedRequest.auth` Basic-Auth-Passwörter und Bearer-Tokens
+   * ALS KLARTEXT speichert (`saved-request.schema.ts`: nackte `@Prop()`-Strings
+   * für `password` und `token`, kein `EncryptionService`). `replication-
+   * collections.ts` schliesst `SavedRequest` ausdrücklich aus der Replikation
+   * aus und begründet das mit genau dieser Klartext-Speicherung — gelesen
+   * werden durfte sie trotzdem von jedem.
+   *
+   * Diese Datei importierte vorher weder `RequestContext` noch
+   * `common/permissions`, während `projects`, `todos`, `knowledge`, `secrets`,
+   * `customers`, `attachments`, `logs` und `activities` das T-210-Scope-Modell
+   * durchziehen. Ein Actor mit `projectScopeMode: 'allowlist'` oder `'none'`
+   * konnte damit über `GET /api/requests/:id` die Credentials jedes anderen
+   * Projekts lesen und über `send` Requests mit fremden Environment-Secrets
+   * ausführen.
+   *
+   * `if (actor)` statt fail-closed ist dieselbe Konvention wie in
+   * `SecretsService.findById` und `KubeClustersService.findById`: JwtAuthGuard
+   * hängt global, jeder echte HTTP-Aufruf hat einen Actor; ein fehlender Actor
+   * ist ein vertrauenswürdiger interner Aufrufer (Replikation, Migration,
+   * stdio-MCP ohne HTTP-Kontext).
+   */
+  private assertProjectAccess(
+    projectId: Types.ObjectId | string | undefined,
+    what: string,
+  ): void {
+    const actor = RequestContext.getUser();
+    if (!actor) return;
+    if (!actorCanAccessProject(actor, projectId?.toString())) {
+      throw new ForbiddenException(`Kein Zugriff auf ${what}`);
+    }
+  }
+
+  /** Filtert eine Liste auf das, was der Actor sehen darf (siehe assertProjectAccess). */
+  private filterByActorScope<T extends { projectId?: Types.ObjectId }>(docs: T[]): T[] {
+    const actor = RequestContext.getUser();
+    if (!actor) return docs;
+    return docs.filter((doc) => actorCanAccessProject(actor, doc.projectId?.toString()));
+  }
+
   // ---- Collections --------------------------------------------------------
   async createCollection(dto: CreateCollectionDto): Promise<RequestCollectionDocument> {
     if (!dto.projectId) throw new BadRequestException('projectId is required');
+    this.assertProjectAccess(dto.projectId, 'dieses Projekt');
     return this.collectionModel.create({
       projectId: this.objectId(dto.projectId, 'projectId'),
       name: dto.name,
@@ -123,13 +170,19 @@ export class HttpRequestsService {
   }
 
   async listCollections(projectId: string): Promise<RequestCollectionDocument[]> {
-    return this.collectionModel
+    const docs = await this.collectionModel
       .find({ projectId: projectIdFilter(projectId) })
       .sort({ order: 1, name: 1 })
       .exec();
+    return this.filterByActorScope(docs);
   }
 
   async updateCollection(id: string, dto: UpdateCollectionDto): Promise<RequestCollectionDocument> {
+    // Vorher laden statt direkt findByIdAndUpdate: die Prüfung muss VOR dem
+    // Schreiben laufen, sonst ist die Änderung schon drin.
+    const existing = await this.collectionModel.findById(this.objectId(id)).exec();
+    if (!existing) throw new NotFoundException('Collection not found');
+    this.assertProjectAccess(existing.projectId, 'diese Collection');
     const doc = await this.collectionModel.findByIdAndUpdate(this.objectId(id), { $set: dto }, { new: true }).exec();
     if (!doc) throw new NotFoundException('Collection not found');
     return doc;
@@ -137,6 +190,11 @@ export class HttpRequestsService {
 
   async deleteCollection(id: string): Promise<void> {
     const oid = this.objectId(id);
+    // Prüfung VOR findByIdAndDelete: die Methode kaskadiert und löscht alle
+    // Requests der Collection samt ihrer History — unwiederbringlich.
+    const existing = await this.collectionModel.findById(oid).exec();
+    if (!existing) throw new NotFoundException('Collection not found');
+    this.assertProjectAccess(existing.projectId, 'diese Collection');
     const col = await this.collectionModel.findByIdAndDelete(oid).exec();
     if (!col) throw new NotFoundException('Collection not found');
     const reqIds = await this.requestModel.find({ collectionId: oid }).distinct('_id').exec();
@@ -151,6 +209,7 @@ export class HttpRequestsService {
     if (!dto.collectionId) throw new BadRequestException('collectionId is required');
     const col = await this.collectionModel.findById(this.objectId(dto.collectionId, 'collectionId')).exec();
     if (!col) throw new NotFoundException('Collection not found');
+    this.assertProjectAccess(col.projectId, 'diese Collection');
     return this.requestModel.create({
       projectId: col.projectId,
       collectionId: col._id,
@@ -173,12 +232,19 @@ export class HttpRequestsService {
     if (filter.collectionId) q.collectionId = this.objectId(filter.collectionId, 'collectionId');
     if (filter.projectId) q.projectId = projectIdFilter(filter.projectId);
     if (!q.collectionId && !q.projectId) throw new BadRequestException('collectionId or projectId is required');
-    return this.requestModel.find(q).sort({ order: 1, name: 1 }).exec();
+    const docs = await this.requestModel.find(q).sort({ order: 1, name: 1 }).exec();
+    // `collectionId` kommt vom Aufrufer und ist kein Berechtigungsnachweis:
+    // ohne diesen Filter beantwortet die Route „welche Requests hat Collection
+    // X" für jede Collection der Instanz — inklusive der Klartext-Auth.
+    return this.filterByActorScope(docs);
   }
 
   async getRequest(id: string): Promise<SavedRequestDocument> {
     const doc = await this.requestModel.findById(this.objectId(id)).exec();
     if (!doc) throw new NotFoundException('Request not found');
+    // Deckt automatisch `send()` und `openStream()` mit ab — beide lösen den
+    // Request darüber auf, bevor sie etwas nach draussen schicken.
+    this.assertProjectAccess(doc.projectId, 'diesen Request');
     return doc;
   }
 
@@ -188,6 +254,9 @@ export class HttpRequestsService {
       const value = dto[key];
       if (value !== undefined) $set[key] = value;
     }
+    // Prüfung VOR dem Schreiben: `findByIdAndUpdate` würde die Änderung
+    // ausführen und erst das Ergebnis liefern. `getRequest` wirft 403 bzw. 404.
+    await this.getRequest(id);
     const doc = await this.requestModel.findByIdAndUpdate(this.objectId(id), { $set }, { new: true }).exec();
     if (!doc) throw new NotFoundException('Request not found');
     return doc;
@@ -195,6 +264,9 @@ export class HttpRequestsService {
 
   async deleteRequest(id: string): Promise<void> {
     const oid = this.objectId(id);
+    // Derselbe Grund wie bei updateRequest — und `findByIdAndDelete` hätte
+    // zusätzlich die History-Kaskade ausgelöst, bevor irgendjemand gefragt wurde.
+    await this.getRequest(id);
     const doc = await this.requestModel.findByIdAndDelete(oid).exec();
     if (!doc) throw new NotFoundException('Request not found');
     await this.historyModel.deleteMany({ requestId: oid }).exec();
@@ -202,6 +274,10 @@ export class HttpRequestsService {
 
   // ---- History ------------------------------------------------------------
   async listHistory(requestId: string, limit = 50, offset = 0): Promise<RequestHistoryDocument[]> {
+    // History-Einträge tragen den vollständigen Response-Body
+    // (`MAX_RESPONSE_BODY` 1 MB) und die aufgelösten Header. Der Scope liegt am
+    // Eltern-Request, nicht am Eintrag — dessen `projectId` ist optional.
+    await this.getRequest(requestId);
     return this.historyModel
       .find({ requestId: this.objectId(requestId, 'requestId') })
       .sort({ sentAt: -1 })
@@ -213,6 +289,10 @@ export class HttpRequestsService {
   async getHistoryEntry(id: string): Promise<RequestHistoryDocument> {
     const doc = await this.historyModel.findById(this.objectId(id)).exec();
     if (!doc) throw new NotFoundException('History entry not found');
+    // Über den Eltern-Request statt über `doc.projectId`: das Feld ist optional
+    // (ältere Einträge können es nicht haben), und fail-closed über eine
+    // fehlende Angabe wäre ein stiller Funktionsverlust.
+    await this.getRequest(doc.requestId.toString());
     return doc;
   }
 
