@@ -70,7 +70,7 @@ export default function MilestoneForm({
       className={`space-y-5 ${className}`}
     >
       {error && (
-        <div className="bg-red-900/20 border border-red-800 rounded px-3 py-2 text-sm text-red-400">
+        <div className="bg-red-900/20 border border-red-800 rounded-sm px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}

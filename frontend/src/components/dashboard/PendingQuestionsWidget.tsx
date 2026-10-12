@@ -226,7 +226,7 @@ function QuestionRow({
     <>
       <div className="flex items-center justify-between gap-2 mb-0.5">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className={`inline-flex items-center text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded border ${directionAccent}`}>
+          <span className={`inline-flex items-center text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded-sm border ${directionAccent}`}>
             {directionLabel}
           </span>
           <QuestionAudienceBadge question={question} usersById={usersById} />
@@ -254,14 +254,14 @@ function QuestionRow({
       return (
         <Link
           to={todoLink}
-          className="block rounded border border-gray-800 bg-gray-950/50 px-3 py-2 hover:border-violet-700 transition-colors"
+          className="block rounded-sm border border-gray-800 bg-gray-950/50 px-3 py-2 hover:border-violet-700 transition-colors"
         >
           {inner}
         </Link>
       );
     }
     return (
-      <div className="rounded border border-gray-800 bg-gray-950/50 px-3 py-2">
+      <div className="rounded-sm border border-gray-800 bg-gray-950/50 px-3 py-2">
         {inner}
       </div>
     );
@@ -273,7 +273,7 @@ function QuestionRow({
       type="button"
       onClick={onAnswer}
       aria-label={t('questions.openAnswerDialog')}
-      className="w-full text-left rounded border border-gray-800 bg-gray-950/50 px-3 py-2 hover:border-violet-700 transition-colors"
+      className="w-full text-left rounded-sm border border-gray-800 bg-gray-950/50 px-3 py-2 hover:border-violet-700 transition-colors"
     >
       {inner}
     </button>
@@ -355,7 +355,7 @@ function AnswerQuestionModal({
               rows={3}
               autoFocus
               placeholder={t('questions.answerPlaceholder')}
-              className="flex-1 min-w-0 bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+              className="flex-1 min-w-0 bg-gray-950 border border-gray-700 rounded-sm px-2 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500"
             />
             <Button
               type="button"

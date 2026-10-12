@@ -227,7 +227,7 @@ export default function RecurringTaskDetailPage() {
               <div className="flex-1">
                 <label className="block text-xs text-gray-500 mb-1">{t('common.tags')}</label>
                 <input type="text" value={tags} onChange={(e) => setTags(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500" />
+                  className="w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500" />
               </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-4">

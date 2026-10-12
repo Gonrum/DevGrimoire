@@ -140,7 +140,7 @@ function ChangelogForm({
                   value={change}
                   onChange={(e) => updateChange(i, e.target.value)}
                   placeholder={t('changelog.changePlaceholder')}
-                  className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 font-mono"
+                  className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500 font-mono"
                 />
                 <Button type="button" size="sm" variant="secondary" onClick={() => removeChange(i)} disabled={form.changes.length === 1 && !change}>
                   −
@@ -157,7 +157,7 @@ function ChangelogForm({
                 key={p}
                 type="button"
                 onClick={() => addChange(p)}
-                className="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors font-mono"
+                className="text-xs px-2 py-0.5 rounded-sm bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors font-mono"
               >
                 + {p}
               </button>

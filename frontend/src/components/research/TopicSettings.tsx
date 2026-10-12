@@ -31,7 +31,7 @@ const PROVIDER_LABEL_KEY: Record<WebSearchProviderType, string> = {
   serpapi: 'settings.webSearch.providerSerpapi',
 };
 
-const checkboxClass = 'rounded border-gray-600 bg-gray-800 text-violet-500 focus:ring-violet-500';
+const checkboxClass = 'rounded-sm border-gray-600 bg-gray-800 text-violet-500 focus:ring-violet-500';
 const radioClass = 'border-gray-600 bg-gray-800 text-violet-500 focus:ring-violet-500';
 
 interface FormState {
@@ -212,7 +212,7 @@ export default function TopicSettings({ topic, projects, customers, onSaved }: T
                   <p className="text-xs text-gray-500 px-2 py-1">{t('researchTopics.noProjects')}</p>
                 ) : (
                   projects.map((p) => (
-                    <label key={p._id} className="flex items-center gap-2 px-2 py-1 hover:bg-gray-800 rounded cursor-pointer text-sm text-gray-200">
+                    <label key={p._id} className="flex items-center gap-2 px-2 py-1 hover:bg-gray-800 rounded-sm cursor-pointer text-sm text-gray-200">
                       <input type="checkbox" checked={form.selectedProjectIds.has(p._id)} onChange={() => toggleProject(p._id)} className={checkboxClass} />
                       <span>{p.name}</span>
                     </label>
@@ -227,7 +227,7 @@ export default function TopicSettings({ topic, projects, customers, onSaved }: T
                   <p className="text-xs text-gray-500 px-2 py-1">{t('researchTopics.noCustomers')}</p>
                 ) : (
                   customers.map((c) => (
-                    <label key={c._id} className="flex items-center gap-2 px-2 py-1 hover:bg-gray-800 rounded cursor-pointer text-sm text-gray-200">
+                    <label key={c._id} className="flex items-center gap-2 px-2 py-1 hover:bg-gray-800 rounded-sm cursor-pointer text-sm text-gray-200">
                       <input type="checkbox" checked={form.selectedCustomerIds.has(c._id)} onChange={() => toggleCustomer(c._id)} className={checkboxClass} />
                       <span>{c.name}</span>
                     </label>
@@ -247,7 +247,7 @@ export default function TopicSettings({ topic, projects, customers, onSaved }: T
       <DetailSection title={t('researchTopics.scheduleLabel')}>
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <FormSelect
-            fieldClassName="w-full sm:flex-1 sm:min-w-[9rem]"
+            fieldClassName="w-full sm:flex-1 sm:min-w-36"
             label={t('recurringTasks.frequency')}
             value={form.frequency}
             onChange={(e) => update({ frequency: optionOr(e.target.value, FREQUENCIES, form.frequency) })}
@@ -259,7 +259,7 @@ export default function TopicSettings({ topic, projects, customers, onSaved }: T
 
           {showDayOfWeek && (
             <FormSelect
-              fieldClassName="w-full sm:flex-1 sm:min-w-[9rem]"
+              fieldClassName="w-full sm:flex-1 sm:min-w-36"
               label={t('recurringTasks.dayOfWeek')}
               value={String(form.dayOfWeek)}
               onChange={(e) => update({ dayOfWeek: Number(e.target.value) })}
@@ -272,7 +272,7 @@ export default function TopicSettings({ topic, projects, customers, onSaved }: T
 
           {showDayOfMonth && (
             <FormSelect
-              fieldClassName="w-full sm:flex-1 sm:min-w-[9rem]"
+              fieldClassName="w-full sm:flex-1 sm:min-w-36"
               label={t('recurringTasks.dayOfMonth')}
               value={String(form.dayOfMonth)}
               onChange={(e) => update({ dayOfMonth: Number(e.target.value) })}
@@ -284,7 +284,7 @@ export default function TopicSettings({ topic, projects, customers, onSaved }: T
           )}
 
           <FormSelect
-            fieldClassName="w-full sm:flex-1 sm:min-w-[9rem]"
+            fieldClassName="w-full sm:flex-1 sm:min-w-36"
             label={t('recurringTasks.hour')}
             value={String(form.hour)}
             onChange={(e) => update({ hour: Number(e.target.value) })}

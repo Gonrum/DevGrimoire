@@ -79,7 +79,7 @@ export function KubeClusterView({ cluster, onBack }: Props) {
         <label className="block">
           <span className="text-xs text-gray-500">{t('kube.view.namespace')}</span>
           <select
-            className="mt-1 w-full rounded border border-gray-700 bg-gray-800 p-1 text-sm text-gray-200"
+            className="mt-1 w-full rounded-sm border border-gray-700 bg-gray-800 p-1 text-sm text-gray-200"
             value={namespace ?? ''}
             onChange={(e) => setNamespace(e.target.value === '' ? null : e.target.value)}
           >
@@ -99,8 +99,8 @@ export function KubeClusterView({ cluster, onBack }: Props) {
                     type="button"
                     className={
                       k === kind
-                        ? 'w-full rounded bg-gray-700 px-2 py-1 text-left text-sm text-gray-100'
-                        : 'w-full rounded px-2 py-1 text-left text-sm text-gray-300 hover:bg-gray-800'
+                        ? 'w-full rounded-sm bg-gray-700 px-2 py-1 text-left text-sm text-gray-100'
+                        : 'w-full rounded-sm px-2 py-1 text-left text-sm text-gray-300 hover:bg-gray-800'
                     }
                     onClick={() => { setKind(k); setSelected(null); }}
                   >
@@ -133,7 +133,7 @@ export function KubeClusterView({ cluster, onBack }: Props) {
         </div>
 
         {error !== null && (
-          <div className="mb-3 rounded border border-red-700 bg-red-900/40 px-3 py-2 text-xs text-red-200">
+          <div className="mb-3 rounded-sm border border-red-700 bg-red-900/40 px-3 py-2 text-xs text-red-200">
             {t('common.errorLoading', { error })}
           </div>
         )}

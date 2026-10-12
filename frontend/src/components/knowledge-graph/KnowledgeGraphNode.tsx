@@ -20,7 +20,7 @@ export function KnowledgeGraphNode({ data: d, selected }: NodeProps<KgNode>) {
   const colors = ENTITY_TYPE_COLORS[d.entityType] ?? ENTITY_TYPE_COLORS.session;
   return (
     <div
-      className="rounded px-2 py-1 text-xs shadow border"
+      className="rounded-sm px-2 py-1 text-xs shadow-sm border"
       style={{
         background: colors.bg,
         color: colors.text,

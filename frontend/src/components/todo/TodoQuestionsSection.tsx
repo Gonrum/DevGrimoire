@@ -103,7 +103,7 @@ export default function TodoQuestionsSection({ todoId, projectId, questions, onC
           />
         ))}
         {answered.length > 0 && (
-          <details className="rounded border border-gray-800 bg-gray-900/40 p-2">
+          <details className="rounded-sm border border-gray-800 bg-gray-900/40 p-2">
             <summary className="cursor-pointer text-xs text-gray-500 hover:text-gray-300">
               {t('questions.historyHeading', { count: answered.length })}
             </summary>
@@ -178,7 +178,7 @@ function QuestionCard({
   };
 
   return (
-    <div className={`rounded border p-3 ${accent}`}>
+    <div className={`rounded-sm border p-3 ${accent}`}>
       <div className="flex items-center justify-between gap-2 text-[11px] text-gray-500 mb-1.5">
         <div className="flex items-center gap-2 min-w-0">
           <span className="font-medium tracking-wide uppercase">
@@ -224,7 +224,7 @@ function QuestionCard({
                 onChange={(e) => setAnswer(e.target.value)}
                 rows={2}
                 placeholder={t('questions.answerPlaceholder')}
-                className="flex-1 min-w-0 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+                className="flex-1 min-w-0 bg-gray-950 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500"
               />
               <Button
                 type="button"
@@ -319,7 +319,7 @@ function AnsweredQuestionCard({
   const hasMultipleResponses = (question.responses?.length ?? 0) > 1;
 
   return (
-    <div className="rounded border border-gray-800 bg-gray-950/40 p-2.5">
+    <div className="rounded-sm border border-gray-800 bg-gray-950/40 p-2.5">
       <div className="flex items-center justify-between gap-2 text-[11px] text-gray-500 mb-1">
         <div className="flex items-center gap-2 min-w-0">
           <span className="font-medium tracking-wide uppercase">{t(headerKey)}</span>
@@ -412,7 +412,7 @@ function AnsweredQuestionCard({
       </div>
 
       {showSaveForm && !question.knowledgeId && (
-        <div className="mt-3 p-3 rounded border border-violet-800/40 bg-violet-950/20 space-y-2">
+        <div className="mt-3 p-3 rounded-sm border border-violet-800/40 bg-violet-950/20 space-y-2">
           <p className="text-xs font-medium text-violet-300">{t('questions.saveAsKnowledgeTitle')}</p>
           <div>
             <label className="block text-[11px] text-gray-500 mb-0.5">{t('questions.saveAsKnowledgeTopic')}</label>
@@ -420,7 +420,7 @@ function AnsweredQuestionCard({
               type="text"
               value={saveTopic}
               onChange={(e) => setSaveTopic(e.target.value)}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-violet-500"
+              className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-200 focus:outline-hidden focus:border-violet-500"
             />
           </div>
           <div>
@@ -439,7 +439,7 @@ function AnsweredQuestionCard({
               value={saveTags}
               onChange={(e) => setSaveTags(e.target.value)}
               placeholder={t('common.commaSeparated')}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-violet-500"
+              className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-200 focus:outline-hidden focus:border-violet-500"
             />
           </div>
           <div>
@@ -449,7 +449,7 @@ function AnsweredQuestionCard({
               value={saveCategory}
               onChange={(e) => setSaveCategory(e.target.value)}
               placeholder={t('questions.categoryPlaceholder')}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-violet-500"
+              className="w-full bg-gray-900 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-200 focus:outline-hidden focus:border-violet-500"
             />
           </div>
           <div className="flex gap-2 pt-1">
@@ -489,7 +489,7 @@ function AskAgentForm({
           onChange={(e) => setDraft(e.target.value)}
           rows={2}
           placeholder={t('questions.askAgentPlaceholder')}
-          className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-cyan-500"
+          className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded-sm px-2 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-cyan-500"
         />
         <Button
           type="button"

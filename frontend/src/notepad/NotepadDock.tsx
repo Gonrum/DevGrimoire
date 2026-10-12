@@ -282,7 +282,7 @@ export default function NotepadDock() {
       {/* Slide-in panel from the left */}
       {open && (
         <div
-          className="fixed top-0 left-0 z-50 h-full w-full bg-gray-900 border-r border-gray-800 shadow-2xl flex flex-col sm:w-[var(--dock-w)]"
+          className="fixed top-0 left-0 z-50 h-full w-full bg-gray-900 border-r border-gray-800 shadow-2xl flex flex-col sm:w-(--dock-w)"
           style={dockStyle}
         >
           {/* Resize handle on the right edge (sm+ only) */}
@@ -307,7 +307,7 @@ export default function NotepadDock() {
                 <button
                   type="button"
                   onClick={() => setView('active')}
-                  className="text-sm text-gray-400 hover:text-gray-200 px-2 py-1 rounded flex items-center gap-1"
+                  className="text-sm text-gray-400 hover:text-gray-200 px-2 py-1 rounded-sm flex items-center gap-1"
                   title={t('vermerke.backToActive')}
                 >
                   <ArrowLeft className="w-4 h-4" />
@@ -317,7 +317,7 @@ export default function NotepadDock() {
                 <button
                   type="button"
                   onClick={() => setView('archive')}
-                  className="text-sm text-gray-400 hover:text-gray-200 px-2 py-1 rounded flex items-center gap-1"
+                  className="text-sm text-gray-400 hover:text-gray-200 px-2 py-1 rounded-sm flex items-center gap-1"
                   title={t('vermerke.showArchive')}
                 >
                   <ArchiveIcon className="w-4 h-4" />
@@ -327,7 +327,7 @@ export default function NotepadDock() {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="text-gray-400 hover:text-gray-200 p-1 rounded"
+                className="text-gray-400 hover:text-gray-200 p-1 rounded-sm"
                 aria-label={t('vermerke.close')}
               >
                 <X className="w-5 h-5" />
@@ -367,7 +367,7 @@ export default function NotepadDock() {
                       onClick={() => {
                         void handleCreate();
                       }}
-                      className="bg-amber-700 hover:bg-amber-600 text-white text-sm px-3 py-1.5 rounded flex items-center gap-1.5"
+                      className="bg-amber-700 hover:bg-amber-600 text-white text-sm px-3 py-1.5 rounded-sm flex items-center gap-1.5"
                     >
                       <Plus className="w-4 h-4" />
                       {t('vermerke.newNote')}

@@ -80,9 +80,9 @@ export default function SshUploadModal({ connectionId, connectionLabel, onClose 
             {t('ssh.upload.createDirs')}
           </label>
           {progress !== null && (
-            <div className="h-2 w-full rounded bg-gray-700">
+            <div className="h-2 w-full rounded-sm bg-gray-700">
               <div
-                className="h-2 rounded bg-violet-500 transition-all"
+                className="h-2 rounded-sm bg-violet-500 transition-all"
                 style={{ width: `${Math.round(progress * 100)}%` }}
               />
             </div>

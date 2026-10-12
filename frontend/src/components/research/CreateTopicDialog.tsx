@@ -37,7 +37,7 @@ const PROVIDER_LABEL_KEY: Record<WebSearchProviderType, string> = {
 };
 
 const checkboxClass =
-  'rounded border-gray-600 bg-gray-800 text-violet-500 focus:ring-violet-500';
+  'rounded-sm border-gray-600 bg-gray-800 text-violet-500 focus:ring-violet-500';
 const radioClass = 'border-gray-600 bg-gray-800 text-violet-500 focus:ring-violet-500';
 
 interface CreateTopicDialogProps {
@@ -220,7 +220,7 @@ export default function CreateTopicDialog({
                       projects.map((p) => (
                         <label
                           key={p._id}
-                          className="flex items-center gap-2 px-2 py-1 hover:bg-gray-800 rounded cursor-pointer text-sm text-gray-200"
+                          className="flex items-center gap-2 px-2 py-1 hover:bg-gray-800 rounded-sm cursor-pointer text-sm text-gray-200"
                         >
                           <input
                             type="checkbox"
@@ -243,7 +243,7 @@ export default function CreateTopicDialog({
                       customers.map((c) => (
                         <label
                           key={c._id}
-                          className="flex items-center gap-2 px-2 py-1 hover:bg-gray-800 rounded cursor-pointer text-sm text-gray-200"
+                          className="flex items-center gap-2 px-2 py-1 hover:bg-gray-800 rounded-sm cursor-pointer text-sm text-gray-200"
                         >
                           <input
                             type="checkbox"
@@ -276,7 +276,7 @@ export default function CreateTopicDialog({
             <p className="text-xs font-medium text-gray-400 mb-2">{t('researchTopics.scheduleLabel')}</p>
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <FormSelect
-                fieldClassName="w-full sm:flex-1 sm:min-w-[9rem]"
+                fieldClassName="w-full sm:flex-1 sm:min-w-36"
                 label={t('recurringTasks.frequency')}
                 value={frequency}
                 onChange={(e) => setFrequency(optionOr(e.target.value, FREQUENCIES, frequency))}
@@ -288,7 +288,7 @@ export default function CreateTopicDialog({
 
               {showDayOfWeek && (
                 <FormSelect
-                  fieldClassName="w-full sm:flex-1 sm:min-w-[9rem]"
+                  fieldClassName="w-full sm:flex-1 sm:min-w-36"
                   label={t('recurringTasks.dayOfWeek')}
                   value={String(dayOfWeek)}
                   onChange={(e) => setDayOfWeek(Number(e.target.value))}
@@ -301,7 +301,7 @@ export default function CreateTopicDialog({
 
               {showDayOfMonth && (
                 <FormSelect
-                  fieldClassName="w-full sm:flex-1 sm:min-w-[9rem]"
+                  fieldClassName="w-full sm:flex-1 sm:min-w-36"
                   label={t('recurringTasks.dayOfMonth')}
                   value={String(dayOfMonth)}
                   onChange={(e) => setDayOfMonth(Number(e.target.value))}
@@ -313,7 +313,7 @@ export default function CreateTopicDialog({
               )}
 
               <FormSelect
-                fieldClassName="w-full sm:flex-1 sm:min-w-[9rem]"
+                fieldClassName="w-full sm:flex-1 sm:min-w-36"
                 label={t('recurringTasks.hour')}
                 value={String(hour)}
                 onChange={(e) => setHour(Number(e.target.value))}

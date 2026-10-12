@@ -158,13 +158,13 @@ export default function StackDetailPage() {
                 <button onClick={() => { void move(index, 1); }} disabled={index === stack.entries.length - 1} className="text-gray-500 hover:text-gray-200 disabled:opacity-30">↓</button>
               </div>
               <input
-                className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-100"
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-3 py-2 text-gray-100"
                 value={entry.title}
                 onChange={(e) => updateLocalEntry(entry._id, { title: e.target.value })}
               />
             </div>
             <textarea
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-100 font-mono text-sm"
+              className="w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-2 text-gray-100 font-mono text-sm"
               rows={8}
               value={entry.content}
               onChange={(e) => updateLocalEntry(entry._id, { content: e.target.value })}

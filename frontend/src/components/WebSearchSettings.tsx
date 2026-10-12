@@ -260,12 +260,12 @@ export default function WebSearchSettings() {
       <p className="text-gray-400">{t('settings.webSearch.description')}</p>
 
       {error && (
-        <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-2 rounded">
+        <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-2 rounded-sm">
           {error}
         </div>
       )}
       {success && (
-        <div className="bg-green-900/30 border border-green-700 text-green-300 px-4 py-2 rounded">
+        <div className="bg-green-900/30 border border-green-700 text-green-300 px-4 py-2 rounded-sm">
           {success}
         </div>
       )}
@@ -314,7 +314,7 @@ export default function WebSearchSettings() {
           value={values.searxngUrl}
           onChange={(e) => setValues({ ...values, searxngUrl: e.target.value })}
           placeholder="http://searxng:8080"
-          className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+          className="w-full bg-gray-900 border border-gray-700 rounded-sm px-3 py-2 text-gray-200 focus:outline-hidden focus:ring-1 focus:ring-cyan-500"
         />
       </div>
 
@@ -329,7 +329,7 @@ export default function WebSearchSettings() {
             onChange={(e) => setValues({ ...values, defaultLanguage: e.target.value })}
             placeholder="de"
             maxLength={5}
-            className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            className="w-full bg-gray-900 border border-gray-700 rounded-sm px-3 py-2 text-gray-200 focus:outline-hidden focus:ring-1 focus:ring-cyan-500"
           />
         </div>
         <div>
@@ -342,7 +342,7 @@ export default function WebSearchSettings() {
             max={20}
             value={values.maxResults}
             onChange={(e) => setValues({ ...values, maxResults: e.target.value })}
-            className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            className="w-full bg-gray-900 border border-gray-700 rounded-sm px-3 py-2 text-gray-200 focus:outline-hidden focus:ring-1 focus:ring-cyan-500"
           />
         </div>
         <div>
@@ -354,7 +354,7 @@ export default function WebSearchSettings() {
             min={1}
             value={values.cacheTtlHours}
             onChange={(e) => setValues({ ...values, cacheTtlHours: e.target.value })}
-            className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            className="w-full bg-gray-900 border border-gray-700 rounded-sm px-3 py-2 text-gray-200 focus:outline-hidden focus:ring-1 focus:ring-cyan-500"
           />
         </div>
         <div>
@@ -366,7 +366,7 @@ export default function WebSearchSettings() {
             min={1}
             value={values.contentCacheTtlDays}
             onChange={(e) => setValues({ ...values, contentCacheTtlDays: e.target.value })}
-            className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            className="w-full bg-gray-900 border border-gray-700 rounded-sm px-3 py-2 text-gray-200 focus:outline-hidden focus:ring-1 focus:ring-cyan-500"
           />
         </div>
       </div>
@@ -394,12 +394,12 @@ export default function WebSearchSettings() {
         ) : (
           <>
             {providerError && (
-              <div className="mb-4 rounded border border-red-700 bg-red-900/50 px-4 py-2 text-sm text-red-300">
+              <div className="mb-4 rounded-sm border border-red-700 bg-red-900/50 px-4 py-2 text-sm text-red-300">
                 {providerError}
               </div>
             )}
             {providerSuccess && (
-              <div className="mb-4 rounded border border-green-700 bg-green-900/40 px-4 py-2 text-sm text-green-300">
+              <div className="mb-4 rounded-sm border border-green-700 bg-green-900/40 px-4 py-2 text-sm text-green-300">
                 {providerSuccess}
               </div>
             )}

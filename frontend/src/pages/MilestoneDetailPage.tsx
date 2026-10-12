@@ -68,7 +68,7 @@ function TodoAccordionItem({ todo, projectId }: { todo: Todo; projectId: string 
           {todo.tags && todo.tags.length > 0 && (
             <div className="flex flex-wrap gap-1 mb-3">
               {todo.tags.map((tag) => (
-                <span key={tag} className="text-xs bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded">{tag}</span>
+                <span key={tag} className="text-xs bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded-sm">{tag}</span>
               ))}
             </div>
           )}

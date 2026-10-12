@@ -106,11 +106,11 @@ export default function TabBar({
               isActive
                 ? 'bg-gray-800 text-gray-100'
                 : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
-            } ${isDropTarget ? 'outline outline-1 outline-amber-500' : ''}`}
+            } ${isDropTarget ? 'outline-solid outline-1 outline-amber-500' : ''}`}
           >
             {note.isIdle && (
               <span
-                className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"
+                className="w-2 h-2 rounded-full bg-amber-500 shrink-0"
                 title={t('vermerke.idleTooltip')}
               />
             )}
@@ -122,7 +122,7 @@ export default function TabBar({
                 onBlur={commitRename}
                 onKeyDown={handleKeyDown}
                 onClick={(e) => e.stopPropagation()}
-                className="bg-gray-700 text-gray-100 text-sm px-1 py-0.5 rounded outline-none min-w-0 flex-1"
+                className="bg-gray-700 text-gray-100 text-sm px-1 py-0.5 rounded-sm outline-hidden min-w-0 flex-1"
               />
             ) : (
               <span
@@ -139,7 +139,7 @@ export default function TabBar({
             <button
               type="button"
               onClick={handleArchiveClick(note)}
-              className="opacity-0 group-hover:opacity-100 hover:bg-gray-700 rounded p-0.5 flex-shrink-0"
+              className="opacity-0 group-hover:opacity-100 hover:bg-gray-700 rounded-sm p-0.5 shrink-0"
               aria-label={t('vermerke.archiveTab')}
               title={t('vermerke.archiveTab')}
             >
@@ -151,7 +151,7 @@ export default function TabBar({
       <button
         type="button"
         onClick={onCreate}
-        className="px-3 py-2 text-gray-400 hover:text-amber-400 hover:bg-gray-800/50 flex items-center justify-center flex-shrink-0"
+        className="px-3 py-2 text-gray-400 hover:text-amber-400 hover:bg-gray-800/50 flex items-center justify-center shrink-0"
         aria-label={t('vermerke.newNote')}
         title={t('vermerke.newNote')}
       >

@@ -13,7 +13,7 @@ export function WorkflowValidationBanner({ issues, onJumpTo, onDismiss }: Props)
   if (issues.length === 0) return null;
 
   return (
-    <div className="sticky bottom-0 z-30 border-t border-amber-700 bg-gradient-to-r from-amber-900/40 to-red-900/30 shadow-lg">
+    <div className="sticky bottom-0 z-30 border-t border-amber-700 bg-linear-to-r from-amber-900/40 to-red-900/30 shadow-lg">
       <div className="flex items-center justify-between px-4 py-2">
         <button
           type="button"

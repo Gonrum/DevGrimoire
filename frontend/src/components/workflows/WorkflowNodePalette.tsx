@@ -32,14 +32,14 @@ export function WorkflowNodePalette({ catalog, workflowScope, onDragStart, onTap
   return (
     <div className="flex h-full flex-col border-r border-gray-800 bg-gray-950">
       <div className="border-b border-gray-800 p-2">
-        <div className="flex items-center gap-2 rounded border border-gray-700 bg-gray-900 px-2 py-1">
+        <div className="flex items-center gap-2 rounded-sm border border-gray-700 bg-gray-900 px-2 py-1">
           <Search size={14} className="text-gray-500" />
           <input
             type="text"
             placeholder="Suche in Name & Beschreibung…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 bg-transparent text-sm text-gray-200 focus:outline-none"
+            className="flex-1 bg-transparent text-sm text-gray-200 focus:outline-hidden"
           />
           {q && (
             <button
@@ -74,7 +74,7 @@ export function WorkflowNodePalette({ catalog, workflowScope, onDragStart, onTap
               <button
                 type="button"
                 onClick={() => setOpenCats((s) => ({ ...s, [cat]: !s[cat] }))}
-                className="flex w-full items-center justify-between rounded px-2 py-1 text-xs uppercase tracking-wide text-gray-400 hover:bg-gray-900"
+                className="flex w-full items-center justify-between rounded-sm px-2 py-1 text-xs uppercase tracking-wide text-gray-400 hover:bg-gray-900"
               >
                 <span className={style.pillText}>{nodeCategoryLabels[cat]}</span>
                 <span className="text-gray-600">({items.length})</span>
@@ -91,7 +91,7 @@ export function WorkflowNodePalette({ catalog, workflowScope, onDragStart, onTap
                         onDragStart={(e) => allowed && onDragStart(e, m.type)}
                         onClick={() => touchMode && allowed && onTapPlace(m.type)}
                         title={allowed ? m.description : `Nicht erlaubt für scope=${workflowScope}`}
-                        className={`flex items-center gap-2 rounded border ${allowed ? `${style.border} cursor-pointer hover:bg-gray-900` : 'border-gray-800 opacity-40 cursor-not-allowed'} bg-gray-900/40 px-2 py-2`}
+                        className={`flex items-center gap-2 rounded-sm border ${allowed ? `${style.border} cursor-pointer hover:bg-gray-900` : 'border-gray-800 opacity-40 cursor-not-allowed'} bg-gray-900/40 px-2 py-2`}
                       >
                         <Icon size={14} className="text-gray-300" />
                         <span className="text-sm text-gray-200">{m.label}</span>

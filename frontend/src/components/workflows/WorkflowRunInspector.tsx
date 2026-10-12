@@ -93,7 +93,7 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs" onClick={onClose}>
       <div className="mx-4 max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-xl border border-gray-700 bg-gray-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-800 px-5 py-4">
           <div>
@@ -103,12 +103,12 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
           <button onClick={onClose} className="text-2xl leading-none text-gray-500 hover:text-gray-300">×</button>
         </div>
 
-        {error && <div className="m-4 rounded bg-red-900/30 px-3 py-2 text-sm text-red-300">{error}</div>}
+        {error && <div className="m-4 rounded-sm bg-red-900/30 px-3 py-2 text-sm text-red-300">{error}</div>}
 
         {run && (
           <>
             <div className="border-b border-gray-800 px-5 py-3 text-xs">
-              <span className={`inline-block rounded px-2 py-0.5 ${badge(run.status)}`}>{run.status}</span>
+              <span className={`inline-block rounded-sm px-2 py-0.5 ${badge(run.status)}`}>{run.status}</span>
               <span className="ml-3 text-gray-500">started: {run.startedAt ?? '—'}</span>
               <span className="ml-3 text-gray-500">finished: {run.finishedAt ?? '—'}</span>
               <span className="ml-3 text-gray-500">trigger: {run.triggeredBy?.type ?? '—'}</span>
@@ -156,7 +156,7 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
                         >
                           <td className="px-3 py-1 font-mono text-gray-300">{nr.nodeId}</td>
                           <td className="px-3 py-1 text-gray-400">{nr.nodeType}</td>
-                          <td className="px-3 py-1"><span className={`rounded px-1.5 py-0.5 text-[10px] ${sty.dotBg}`}>{nr.status}</span></td>
+                          <td className="px-3 py-1"><span className={`rounded-sm px-1.5 py-0.5 text-[10px] ${sty.dotBg}`}>{nr.status}</span></td>
                           <td className="px-3 py-1 text-gray-400">{nr.attempt}</td>
                           <td className="px-3 py-1 text-gray-400">{nr.durationMs ? `${nr.durationMs}ms` : '—'}</td>
                         </tr>
@@ -186,13 +186,13 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
                     {selected.error && (
                       <>
                         <h4 className="mb-2 text-xs uppercase tracking-wide text-red-400">Fehler</h4>
-                        <pre className="mb-4 rounded bg-red-900/20 p-2 text-xs text-red-300">{JSON.stringify(selected.error, null, 2)}</pre>
+                        <pre className="mb-4 rounded-sm bg-red-900/20 p-2 text-xs text-red-300">{JSON.stringify(selected.error, null, 2)}</pre>
                       </>
                     )}
                     {Array.isArray(selected.logs) && selected.logs.length > 0 && (
                       <>
                         <h4 className="mb-2 text-xs uppercase tracking-wide text-gray-500">Logs ({selected.logs.length})</h4>
-                        <ul className="max-h-40 overflow-y-auto rounded bg-gray-950 p-2 text-xs font-mono text-gray-300">
+                        <ul className="max-h-40 overflow-y-auto rounded-sm bg-gray-950 p-2 text-xs font-mono text-gray-300">
                           {selected.logs.map((l, i) => <li key={i}>{JSON.stringify(l)}</li>)}
                         </ul>
                       </>
@@ -206,12 +206,12 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
 
             <div className="flex items-center justify-end gap-2 border-t border-gray-800 px-5 py-3">
               {!TERMINAL.includes(run.status) && (
-                <button onClick={() => { void onCancel(); }} className="rounded bg-amber-900/50 px-3 py-1 text-xs text-amber-200 hover:bg-amber-900">Cancel</button>
+                <button onClick={() => { void onCancel(); }} className="rounded-sm bg-amber-900/50 px-3 py-1 text-xs text-amber-200 hover:bg-amber-900">Cancel</button>
               )}
               {(run.status === 'failed' || run.status === 'cancelled') && (
-                <button onClick={() => { void onRetry(); }} className="rounded bg-cyan-900/50 px-3 py-1 text-xs text-cyan-200 hover:bg-cyan-900">Retry</button>
+                <button onClick={() => { void onRetry(); }} className="rounded-sm bg-cyan-900/50 px-3 py-1 text-xs text-cyan-200 hover:bg-cyan-900">Retry</button>
               )}
-              <button onClick={onClose} className="rounded bg-gray-800 px-3 py-1 text-xs text-gray-200 hover:bg-gray-700">Schließen</button>
+              <button onClick={onClose} className="rounded-sm bg-gray-800 px-3 py-1 text-xs text-gray-200 hover:bg-gray-700">Schließen</button>
             </div>
           </>
         )}
@@ -241,7 +241,7 @@ function SnapshotBlock({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`flex w-full items-center justify-between rounded px-1 py-1 text-xs uppercase tracking-wide hover:bg-gray-800 ${headerColor}`}
+        className={`flex w-full items-center justify-between rounded-sm px-1 py-1 text-xs uppercase tracking-wide hover:bg-gray-800 ${headerColor}`}
       >
         <span>{open ? '▾' : '▸'} {title}</span>
         {hasData && (
@@ -249,7 +249,7 @@ function SnapshotBlock({
         )}
       </button>
       {open && (
-        <pre className="mt-1 max-h-48 overflow-y-auto rounded bg-gray-950 p-2 text-xs text-gray-300">
+        <pre className="mt-1 max-h-48 overflow-y-auto rounded-sm bg-gray-950 p-2 text-xs text-gray-300">
           {hasData ? JSON.stringify(data, null, 2) : emptyText}
         </pre>
       )}

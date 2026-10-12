@@ -158,12 +158,12 @@ export default function ResearchOverview() {
           onKeyDown={(e) => {
             if (e.key === 'Enter') submitSearch();
           }}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 w-full sm:w-64"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500 w-full sm:w-64"
         />
         <select
           value={activeFilter}
           onChange={(e) => setActiveFilter(optionOr(e.target.value, ACTIVE_FILTERS, ''))}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
         >
           <option value="">{t('researchTopics.filterAll')}</option>
           <option value="active">{t('researchTopics.filterActive')}</option>
@@ -261,7 +261,7 @@ export default function ResearchOverview() {
                 disabled={deletingId === topic._id}
                 aria-label={t('researchTopics.delete')}
                 title={t('researchTopics.delete')}
-                className="absolute top-3 right-3 p-1.5 rounded text-gray-500 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-red-500/10 hover:text-red-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                className="absolute top-3 right-3 p-1.5 rounded-sm text-gray-500 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-red-500/10 hover:text-red-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Trash2 className="w-4 h-4" />
               </button>

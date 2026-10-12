@@ -8,7 +8,7 @@ import { FormSelect } from '../ui/FormField';
 
 function TodoLinkRow({ todo, projectId, trailing }: { todo: Todo; projectId?: string; trailing?: ReactNode }) {
   return (
-    <div className="flex min-h-8 items-center gap-2 rounded border border-gray-800 bg-gray-900/40 px-2.5 py-1.5 text-xs">
+    <div className="flex min-h-8 items-center gap-2 rounded-sm border border-gray-800 bg-gray-900/40 px-2.5 py-1.5 text-xs">
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${todo.status === 'done' ? 'bg-green-500' : todo.status === 'in_progress' ? 'bg-yellow-500' : 'bg-gray-600'}`} />
       <Link to={`/projects/${projectId}/todos/${todo._id}`} className="min-w-0 flex-1 text-gray-400 transition-colors hover:text-cyan-400">
         <span className={`block truncate ${todo.status === 'done' ? 'text-gray-600 line-through' : ''}`}>{todo.title}</span>
@@ -68,7 +68,7 @@ export default function TodoDependenciesSection({ todo, allTodos, projectId, onC
   return (
     <DetailSection title={t('todoDetail.dependencies')} className={className}>
       {hasBlockers && (
-        <div className="mb-3 flex items-center gap-1.5 rounded border border-red-900/50 bg-red-900/20 px-2.5 py-1.5 text-xs text-red-400">
+        <div className="mb-3 flex items-center gap-1.5 rounded-sm border border-red-900/50 bg-red-900/20 px-2.5 py-1.5 text-xs text-red-400">
           <span>{t('todoDetail.blocked')}</span>
         </div>
       )}

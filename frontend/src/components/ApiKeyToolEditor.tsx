@@ -224,7 +224,7 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2 mb-4">
-        <label className="flex items-center gap-2 cursor-pointer bg-gray-800/50 border border-gray-700 rounded p-3 flex-1">
+        <label className="flex items-center gap-2 cursor-pointer bg-gray-800/50 border border-gray-700 rounded-sm p-3 flex-1">
           <input
             type="radio"
             name="toolMode"
@@ -237,7 +237,7 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
             <div className="text-xs text-gray-500">{t('settings.apiKeyToolModeAllDesc')}</div>
           </div>
         </label>
-        <label className="flex items-center gap-2 cursor-pointer bg-gray-800/50 border border-gray-700 rounded p-3 flex-1">
+        <label className="flex items-center gap-2 cursor-pointer bg-gray-800/50 border border-gray-700 rounded-sm p-3 flex-1">
           <input
             type="radio"
             name="toolMode"
@@ -253,7 +253,7 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
       </div>
 
       {mode === 'all' && totalWriteCount > 0 && (
-        <div className="bg-red-900/20 border border-red-800/50 rounded px-3 py-2 mb-4 text-xs text-red-200">
+        <div className="bg-red-900/20 border border-red-800/50 rounded-sm px-3 py-2 mb-4 text-xs text-red-200">
           ⚠ {t('settings.apiKeyToolAllWriteWarning', { count: totalWriteCount })}
         </div>
       )}
@@ -261,13 +261,13 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
       {mode === 'scoped' && (
         <>
           {scopedEmpty && (
-            <div className="bg-amber-900/30 border border-amber-700 text-amber-300 rounded px-3 py-2 mb-4 text-xs">
+            <div className="bg-amber-900/30 border border-amber-700 text-amber-300 rounded-sm px-3 py-2 mb-4 text-xs">
               {t('settings.apiKeyToolScopingEmptyWarning')}
             </div>
           )}
 
           {catalogError && (
-            <div className="bg-red-900/50 border border-red-700 text-red-300 rounded px-3 py-2 mb-4 text-xs">
+            <div className="bg-red-900/50 border border-red-700 text-red-300 rounded-sm px-3 py-2 mb-4 text-xs">
               {catalogError}
             </div>
           )}
@@ -292,7 +292,7 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
                         onClick={() => applyPreset(preset)}
                         title={t(preset.descKey)}
                         className={
-                          'text-xs px-3 py-1.5 rounded border transition-colors ' +
+                          'text-xs px-3 py-1.5 rounded-sm border transition-colors ' +
                           (active
                             ? 'bg-violet-700 border-violet-500 text-white'
                             : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-violet-600 hover:text-violet-300')
@@ -312,7 +312,7 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={t('settings.apiKeyToolSearchPlaceholder')}
-                  className="flex-1 bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
+                  className="flex-1 bg-gray-800 border border-gray-600 text-gray-200 rounded-sm px-3 py-2 text-sm focus:outline-hidden focus:ring-1 focus:ring-violet-500"
                 />
                 <div className="flex gap-2">
                   <Button size="xs" variant="secondary" onClick={() => setAll(true)}>
@@ -332,7 +332,7 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
               </div>
 
               {activeWriteCount > 0 && (
-                <div className="bg-red-900/20 border border-red-800/50 rounded px-3 py-2 mb-3 text-xs text-red-200">
+                <div className="bg-red-900/20 border border-red-800/50 rounded-sm px-3 py-2 mb-3 text-xs text-red-200">
                   ⚠ {t('settings.apiKeyToolWriteBanner', { count: activeWriteCount })}
                 </div>
               )}
@@ -358,12 +358,12 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
                       ? 'bg-red-950/20 border-red-900/50'
                       : 'bg-gray-800/40 border-gray-800';
                     return (
-                      <div key={`${group}-${isWrite ? 'write' : 'read'}`} className={`border rounded p-2.5 ${boxCls}`}>
+                      <div key={`${group}-${isWrite ? 'write' : 'read'}`} className={`border rounded-sm p-2.5 ${boxCls}`}>
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-[11px] font-medium text-gray-300 flex items-center gap-2">
                             {isWrite ? t('settings.apiKeyToolWriteSection') : t('settings.apiKeyToolReadSection')}
                             {isWrite && (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] bg-red-900/60 text-red-200 border border-red-800 uppercase tracking-wide">
+                              <span className="px-1.5 py-0.5 rounded-sm text-[10px] bg-red-900/60 text-red-200 border border-red-800 uppercase tracking-wide">
                                 {t('settings.apiKeyToolWriteBadge')}
                               </span>
                             )}
@@ -392,7 +392,7 @@ export default function ApiKeyToolEditor({ apiKey, onSave, onClose }: Props) {
                                 type="checkbox"
                                 checked={selected.has(tool.name)}
                                 onChange={() => toggleTool(tool.name)}
-                                className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${isWrite ? 'accent-red-600' : 'accent-violet-600'}`}
+                                className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${isWrite ? 'accent-red-600' : 'accent-violet-600'}`}
                               />
                               <span className={`text-xs font-mono truncate ${isWrite ? 'text-red-200/90' : 'text-gray-300'}`}>
                                 {tool.name}

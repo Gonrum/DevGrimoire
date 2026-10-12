@@ -264,7 +264,7 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-3" style={{ minHeight: 600 }}>
         <aside className="lg:col-span-1 space-y-3 text-xs">
-          <div className="bg-gray-900 border border-gray-800 rounded p-2">
+          <div className="bg-gray-900 border border-gray-800 rounded-sm p-2">
             <div className="text-gray-500 uppercase tracking-wide text-[10px] mb-1">
               {t('knowledgeGraph.filter.entityTypes')}
             </div>
@@ -277,7 +277,7 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
                     key={type}
                     type="button"
                     onClick={() => toggleType(type)}
-                    className="px-1.5 py-0.5 rounded border text-[10px]"
+                    className="px-1.5 py-0.5 rounded-sm border text-[10px]"
                     style={{
                       background: active ? colors.bg : 'transparent',
                       borderColor: colors.border,
@@ -291,7 +291,7 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
             </div>
           </div>
 
-          <div className="bg-gray-900 border border-gray-800 rounded p-2">
+          <div className="bg-gray-900 border border-gray-800 rounded-sm p-2">
             <div className="text-gray-500 uppercase tracking-wide text-[10px] mb-1">
               {t('knowledgeGraph.filter.relations')}
             </div>
@@ -304,7 +304,7 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
                     key={rel}
                     type="button"
                     onClick={() => toggleRelation(rel)}
-                    className="px-1.5 py-0.5 rounded border text-[10px]"
+                    className="px-1.5 py-0.5 rounded-sm border text-[10px]"
                     style={{
                       background: active ? '#0f172a' : 'transparent',
                       borderColor: color,
@@ -319,7 +319,7 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
           </div>
 
           {focal && (
-            <div className="bg-gray-900 border border-gray-800 rounded p-2">
+            <div className="bg-gray-900 border border-gray-800 rounded-sm p-2">
               <div className="flex items-center justify-between mb-2">
                 <div>
                   <div className="text-gray-500 text-[10px] uppercase">{focal.type}</div>
@@ -368,10 +368,10 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
                   return (
                     <li
                       key={e._id}
-                      className="flex items-start gap-1 text-[11px] border border-gray-800 rounded px-1 py-0.5"
+                      className="flex items-start gap-1 text-[11px] border border-gray-800 rounded-sm px-1 py-0.5"
                     >
                       <span
-                        className="px-1 rounded text-[9px]"
+                        className="px-1 rounded-sm text-[9px]"
                         style={{ color: RELATION_COLORS[e.relation] }}
                       >
                         {isOutgoing ? '→' : '←'} {e.relation}
@@ -425,7 +425,7 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
         </aside>
 
         <div
-          className="lg:col-span-3 bg-gray-950 border border-gray-800 rounded"
+          className="lg:col-span-3 bg-gray-950 border border-gray-800 rounded-sm"
           style={{ minHeight: 600 }}
         >
           {loading ? (
@@ -453,11 +453,11 @@ export default function KnowledgeGraphView({ projectId, basePath }: Props) {
                   zoomOnScroll
                 >
                   <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#1f2937" />
-                  <Controls className="!bg-gray-900 !border-gray-700" />
+                  <Controls className="bg-gray-900! border-gray-700!" />
                   <MiniMap
                     pannable
                     zoomable
-                    className="!bg-gray-900"
+                    className="bg-gray-900!"
                     nodeColor={(n) => {
                       const data = n.data as { entityType?: KgEntityType };
                       return data?.entityType ? ENTITY_TYPE_COLORS[data.entityType].border : '#374151';

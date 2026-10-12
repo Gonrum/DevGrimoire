@@ -95,7 +95,7 @@ export default function ApiKeyScopeEditor({ apiKey, onSave, onClose }: Props) {
     selected: Set<string>,
     setter: (s: Set<string>) => void,
   ) => (
-    <div className="border border-gray-800 rounded p-3 space-y-3">
+    <div className="border border-gray-800 rounded-sm p-3 space-y-3">
       <div>
         <h4 className="text-sm font-semibold text-gray-200">{t(titleKey)}</h4>
         <p className="text-xs text-gray-500 mt-0.5">{t(descKey)}</p>
@@ -105,7 +105,7 @@ export default function ApiKeyScopeEditor({ apiKey, onSave, onClose }: Props) {
           <label
             key={m}
             className={
-              'flex items-center gap-2 cursor-pointer px-3 py-2 rounded text-xs border transition-colors ' +
+              'flex items-center gap-2 cursor-pointer px-3 py-2 rounded-sm text-xs border transition-colors ' +
               (mode === m
                 ? 'bg-violet-900/40 border-violet-600 text-violet-100'
                 : 'bg-gray-900/40 border-gray-700 text-gray-400 hover:border-violet-700')
@@ -129,7 +129,7 @@ export default function ApiKeyScopeEditor({ apiKey, onSave, onClose }: Props) {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-56 overflow-y-auto pr-1">
             {items.map((item) => (
-              <label key={item._id} className="flex items-center gap-2 text-xs text-gray-300 px-2 py-1.5 rounded hover:bg-gray-800/50 cursor-pointer">
+              <label key={item._id} className="flex items-center gap-2 text-xs text-gray-300 px-2 py-1.5 rounded-sm hover:bg-gray-800/50 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={selected.has(item._id)}
@@ -143,7 +143,7 @@ export default function ApiKeyScopeEditor({ apiKey, onSave, onClose }: Props) {
         )
       )}
       {mode === 'none' && (
-        <div className="text-xs text-amber-400 bg-amber-950/30 border border-amber-800/40 rounded px-3 py-2">
+        <div className="text-xs text-amber-400 bg-amber-950/30 border border-amber-800/40 rounded-sm px-3 py-2">
           {t('settings.apiKeyScopeModeNoneWarning')}
         </div>
       )}
@@ -167,7 +167,7 @@ export default function ApiKeyScopeEditor({ apiKey, onSave, onClose }: Props) {
       </div>
 
       {loadError && (
-        <div className="bg-red-900/40 border border-red-700 text-red-300 rounded px-3 py-2 mb-4 text-xs">
+        <div className="bg-red-900/40 border border-red-700 text-red-300 rounded-sm px-3 py-2 mb-4 text-xs">
           {loadError}
         </div>
       )}

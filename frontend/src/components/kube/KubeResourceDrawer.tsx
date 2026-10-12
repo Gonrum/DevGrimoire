@@ -139,11 +139,11 @@ export function KubeResourceDrawer({ cluster, kind, row, onClose }: Props) {
     : ['overview', 'yaml', 'events'];
 
   return (
-    <div className="mt-4 rounded border border-slate-700 bg-slate-900/60">
+    <div className="mt-4 rounded-sm border border-slate-700 bg-slate-900/60">
       <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-2">
         <span className="font-medium">{row.name}</span>
         {row.namespace && <span className="text-xs text-slate-400">{row.namespace}</span>}
-        <button type="button" className="ml-auto rounded bg-slate-700 px-2 py-1 text-xs" onClick={onClose}>
+        <button type="button" className="ml-auto rounded-sm bg-slate-700 px-2 py-1 text-xs" onClick={onClose}>
           {t('kube.drawer.close')}
         </button>
       </div>
@@ -191,7 +191,7 @@ export function KubeResourceDrawer({ cluster, kind, row, onClose }: Props) {
         {tab === 'yaml' && (
           yaml === null
             ? <p className="text-sm text-slate-400">{t('kube.view.loading')}</p>
-            : <pre className="max-h-96 overflow-auto rounded bg-slate-950 p-2 text-xs">{yaml}</pre>
+            : <pre className="max-h-96 overflow-auto rounded-sm bg-slate-950 p-2 text-xs">{yaml}</pre>
         )}
 
         {tab === 'events' && (
@@ -221,7 +221,7 @@ export function KubeResourceDrawer({ cluster, kind, row, onClose }: Props) {
             <div className="flex items-center gap-3">
               {containers.length > 1 && (
                 <select
-                  className="rounded border border-slate-700 bg-slate-900 p-1 text-xs"
+                  className="rounded-sm border border-slate-700 bg-slate-900 p-1 text-xs"
                   value={container ?? containers[0]}
                   onChange={(e) => setContainer(e.target.value)}
                 >
@@ -232,7 +232,7 @@ export function KubeResourceDrawer({ cluster, kind, row, onClose }: Props) {
                 <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
                 {t('kube.drawer.follow')}
               </label>
-              <button type="button" className="rounded bg-slate-700 px-2 py-1 text-xs" onClick={logs.clear}>
+              <button type="button" className="rounded-sm bg-slate-700 px-2 py-1 text-xs" onClick={logs.clear}>
                 {t('kube.drawer.clear')}
               </button>
               {logs.connected && <span className="text-xs text-emerald-300">{t('kube.drawer.streaming')}</span>}
@@ -249,7 +249,7 @@ export function KubeResourceDrawer({ cluster, kind, row, onClose }: Props) {
               )}
             </div>
             {logs.error !== null && (
-              <div className="rounded border border-red-700 bg-red-900/40 px-2 py-1 text-xs text-red-200">
+              <div className="rounded-sm border border-red-700 bg-red-900/40 px-2 py-1 text-xs text-red-200">
                 {t('kube.drawer.streamError', { message: logs.error })}
               </div>
             )}
@@ -259,7 +259,7 @@ export function KubeResourceDrawer({ cluster, kind, row, onClose }: Props) {
                 const el = e.currentTarget;
                 stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
               }}
-              className="max-h-96 overflow-auto rounded bg-slate-950 p-2 text-xs"
+              className="max-h-96 overflow-auto rounded-sm bg-slate-950 p-2 text-xs"
             >
               {logs.lines.join('\n')}
             </pre>

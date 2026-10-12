@@ -207,7 +207,7 @@ export default function QuestionsOverview() {
           <select
             value={directionFilter}
             onChange={(e) => { setDirectionFilter(optionOr(e.target.value, DIRECTION_OPTIONS, '')); setOffset(0); }}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+            className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
           >
             <option value="">{t('questions.filterDirectionAll')}</option>
             <option value="agent_to_user">{t('questions.filterDirectionAgentToUser')}</option>
@@ -222,7 +222,7 @@ export default function QuestionsOverview() {
           <select
             value={projectFilter}
             onChange={(e) => { setProjectFilter(e.target.value); setOffset(0); }}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+            className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
           >
             <option value="">{t('questionsPage.allProjects')}</option>
             {projects.map((p) => (
@@ -241,7 +241,7 @@ export default function QuestionsOverview() {
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submitSearch(); }}
             placeholder={t('questionsPage.searchPlaceholder')}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+            className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500"
           />
         </div>
       </div>
@@ -257,11 +257,11 @@ export default function QuestionsOverview() {
               <button
                 type="button"
                 onClick={() => setActive(entry)}
-                className="w-full text-left block rounded border border-gray-800 bg-gray-900 hover:border-violet-700 transition-colors p-3"
+                className="w-full text-left block rounded-sm border border-gray-800 bg-gray-900 hover:border-violet-700 transition-colors p-3"
               >
                 <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
                   <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                    <span className={`inline-flex items-center text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded border ${STATUS_COLORS[entry.status]}`}>
+                    <span className={`inline-flex items-center text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded-sm border ${STATUS_COLORS[entry.status]}`}>
                       {t(`questionsPage.status.${entry.status}`)}
                     </span>
                     <Badge
@@ -383,12 +383,12 @@ function QuestionDetailDialog({
     <Dialog title={t('questionsPage.detailTitle')} onClose={onClose}>
       <div className="px-5 py-4 space-y-4 max-h-[80vh] overflow-y-auto">
         <div className="flex flex-wrap gap-2">
-          <span className={`text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded border ${STATUS_COLORS[question.status]}`}>
+          <span className={`text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded-sm border ${STATUS_COLORS[question.status]}`}>
             {t(`questionsPage.status.${question.status}`)}
           </span>
           <QuestionAudienceBadge question={question} usersById={usersById} />
           {question.agentName && (
-            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-gray-800 text-gray-400">
+            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-sm border border-gray-800 text-gray-400">
               Agent: {question.agentName}
             </span>
           )}
@@ -441,7 +441,7 @@ function QuestionDetailDialog({
                     min={1}
                     value={snoozeHours}
                     onChange={(e) => setSnoozeHours(e.target.value)}
-                    className="w-16 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+                    className="w-16 bg-gray-950 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-200"
                   />
                   <span className="text-[11px] text-gray-500">h</span>
                   <Button
@@ -489,7 +489,7 @@ function QuestionDetailDialog({
               value={followupTitle}
               onChange={(e) => setFollowupTitle(e.target.value)}
               placeholder={t('questionsPage.followupTitlePlaceholder')}
-              className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200"
+              className="w-full bg-gray-950 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-200"
             />
             <Button
               type="button"
@@ -518,14 +518,14 @@ function QuestionDetailDialog({
               value={decisionText}
               onChange={(e) => setDecisionText(e.target.value)}
               placeholder={t('questionsPage.decisionPlaceholder')}
-              className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200"
+              className="w-full bg-gray-950 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-200"
             />
             <textarea
               value={decisionRationale}
               onChange={(e) => setDecisionRationale(e.target.value)}
               rows={2}
               placeholder={t('questionsPage.decisionRationalePlaceholder')}
-              className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200"
+              className="w-full bg-gray-950 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-200"
             />
             <Button
               type="button"

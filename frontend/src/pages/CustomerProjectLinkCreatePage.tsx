@@ -159,7 +159,7 @@ export default function CustomerProjectLinkCreatePage() {
             ) : (
               <div className="space-y-1.5">
                 {environments.map((env) => (
-                  <label key={env._id} className="flex items-center gap-2 p-2 bg-gray-900 border border-gray-800 rounded cursor-pointer hover:border-violet-700">
+                  <label key={env._id} className="flex items-center gap-2 p-2 bg-gray-900 border border-gray-800 rounded-sm cursor-pointer hover:border-violet-700">
                     <input
                       type="checkbox"
                       checked={selectedEnvironmentIds.includes(env._id)}

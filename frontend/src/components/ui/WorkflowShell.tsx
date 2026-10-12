@@ -30,7 +30,7 @@ interface WorkflowModalShellProps {
 
 export function WorkflowModalShell({ title, children, onClose, maxWidth = 'max-w-lg' }: WorkflowModalShellProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs" onClick={onClose}>
       <div className={`mx-4 max-h-[90vh] w-full ${maxWidth} overflow-y-auto rounded-xl border border-gray-700 bg-gray-900 shadow-2xl`} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-800 px-5 py-4">
           <h2 className="text-lg font-semibold text-gray-200">{title}</h2>

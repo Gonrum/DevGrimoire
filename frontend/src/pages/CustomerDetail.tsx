@@ -848,15 +848,15 @@ function ProjectsTab({
 function ProjectBadge({ project, projectId }: { project?: Project; projectId?: string }) {
   if (project) {
     return (
-      <Link to={`/projects/${project._id}`} className="text-xs px-1.5 py-0.5 rounded bg-violet-900/40 text-cyan-300 hover:bg-violet-900/70">
+      <Link to={`/projects/${project._id}`} className="text-xs px-1.5 py-0.5 rounded-sm bg-violet-900/40 text-cyan-300 hover:bg-violet-900/70">
         {project.name}
       </Link>
     );
   }
   if (!projectId) {
-    return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-300">customer</span>;
+    return <span className="text-xs px-1.5 py-0.5 rounded-sm bg-amber-900/30 text-amber-300">customer</span>;
   }
-  return <span className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-500">{projectId}</span>;
+  return <span className="text-xs px-1.5 py-0.5 rounded-sm bg-gray-800 text-gray-500">{projectId}</span>;
 }
 
 function CustomerQuestsTab({
@@ -1443,7 +1443,7 @@ function CustomerFilesTab({
                 href={api.attachments.downloadUrl(file._id)}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-cyan-300 rounded transition-colors"
+                className="text-xs px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-cyan-300 rounded-sm transition-colors"
               >
                 {t('customers.downloadFile')}
               </a>

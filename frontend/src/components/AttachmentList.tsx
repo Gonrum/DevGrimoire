@@ -108,7 +108,7 @@ export default function AttachmentList({
               key={att._id}
               className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2.5"
             >
-              <span className="text-lg flex-shrink-0" title={att.mimeType}>
+              <span className="text-lg shrink-0" title={att.mimeType}>
                 {fileIcon(att.mimeType)}
               </span>
               <div className="flex-1 min-w-0">
@@ -134,7 +134,7 @@ export default function AttachmentList({
                   )}
                 </p>
               </div>
-              <div className="flex gap-1.5 flex-shrink-0">
+              <div className="flex gap-1.5 shrink-0">
                 <Button
                   variant="ghost-blue"
                   size="xs"

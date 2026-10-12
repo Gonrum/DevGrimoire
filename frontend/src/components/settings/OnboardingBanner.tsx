@@ -72,7 +72,7 @@ export default function OnboardingBanner({ onJumpTo }: OnboardingBannerProps) {
                 <button
                   type="button"
                   onClick={() => onJumpTo(row.tab)}
-                  className="shrink-0 rounded bg-cyan-800/60 px-2 py-0.5 text-cyan-100 hover:bg-cyan-700"
+                  className="shrink-0 rounded-sm bg-cyan-800/60 px-2 py-0.5 text-cyan-100 hover:bg-cyan-700"
                 >
                   {t('settings.onboardingGoto')}
                 </button>

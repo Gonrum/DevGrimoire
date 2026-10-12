@@ -33,7 +33,7 @@ export default function SessionList({ sessions }: { sessions: Session[] }) {
                 {s.filesChanged.map((f) => (
                   <code
                     key={f}
-                    className="text-xs bg-gray-800 text-gray-300 px-1.5 py-0.5 rounded"
+                    className="text-xs bg-gray-800 text-gray-300 px-1.5 py-0.5 rounded-sm"
                   >
                     {f}
                   </code>

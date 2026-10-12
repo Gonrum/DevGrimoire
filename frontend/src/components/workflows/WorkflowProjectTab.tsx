@@ -57,7 +57,7 @@ export function WorkflowProjectTab({ scope, projectId, customerId }: Props) {
   return (
     <div>
       <div className="mb-4 flex justify-end">
-        <button onClick={() => setCreateOpen(true)} className="inline-flex items-center gap-1 rounded bg-cyan-600 px-3 py-2 text-sm text-white hover:bg-cyan-500">
+        <button onClick={() => setCreateOpen(true)} className="inline-flex items-center gap-1 rounded-sm bg-cyan-600 px-3 py-2 text-sm text-white hover:bg-cyan-500">
           <Plus size={14} /> Neuer Workflow
         </button>
       </div>

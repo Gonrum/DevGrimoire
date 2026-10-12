@@ -50,7 +50,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
         <select
           value={typeof value === 'string' ? value : ''}
           onChange={(e) => onChange(e.target.value || undefined)}
-          className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-none"
+          className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-hidden"
         >
           <option value="">— wählen —</option>
           {enumOptions.map((opt) => (
@@ -69,7 +69,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
           type="datetime-local"
           value={dtLocal}
           onChange={(e) => onChange(e.target.value ? new Date(e.target.value).toISOString() : undefined)}
-          className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200"
+          className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200"
         />
       </Labeled>
     );
@@ -86,14 +86,14 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
               value={v}
               onChange={(e) => onChange(e.target.value)}
               rows={3}
-              className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-none"
+              className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-hidden"
             />
           ) : (
             <input
               type="text"
               value={v}
               onChange={(e) => onChange(e.target.value)}
-              className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-none"
+              className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-hidden"
             />
           )}
           <TemplatePicker
@@ -118,7 +118,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
             const n = e.target.value === '' ? undefined : Number(e.target.value);
             onChange(Number.isFinite(n) ? n : undefined);
           }}
-          className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-none"
+          className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-hidden"
         />
       </Labeled>
     );
@@ -158,7 +158,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
       <Labeled label={labelText} required={required}>
         <div className="space-y-2">
           {arr.map((item, idx) => (
-            <div key={idx} className="rounded border border-gray-700 bg-gray-900/40 p-2">
+            <div key={idx} className="rounded-sm border border-gray-700 bg-gray-900/40 p-2">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-gray-500">#{idx + 1}</span>
                 <button
@@ -190,7 +190,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
           <button
             type="button"
             onClick={() => onChange([...arr, getEmpty(items)])}
-            className="inline-flex items-center gap-1 rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800"
+            className="inline-flex items-center gap-1 rounded-sm border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800"
           >
             <Plus size={12} /> hinzufügen
           </button>
@@ -205,7 +205,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
     const obj = isRecord(value) ? value : {};
     return (
       <Labeled label={labelText} required={subReq.length > 0}>
-        <fieldset className="rounded border border-gray-700 bg-gray-900/30 p-3 space-y-3">
+        <fieldset className="rounded-sm border border-gray-700 bg-gray-900/30 p-3 space-y-3">
           {Object.entries(props).map(([k, sub]) => (
             <SchemaField
               key={k}
@@ -245,7 +245,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
             <div className="text-xs text-gray-600 italic">(keine Einträge — „hinzufügen" klicken)</div>
           )}
           {entries.map(([k, v], idx) => (
-            <div key={idx} className="flex items-start gap-2 rounded border border-gray-700 bg-gray-900/40 p-2">
+            <div key={idx} className="flex items-start gap-2 rounded-sm border border-gray-700 bg-gray-900/40 p-2">
               <input
                 type="text"
                 value={k}
@@ -255,7 +255,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
                   next[idx] = [e.target.value, v];
                   setEntries(next);
                 }}
-                className="w-1/3 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-gray-200 focus:border-cyan-500 focus:outline-none"
+                className="w-1/3 rounded-sm border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-gray-200 focus:border-cyan-500 focus:outline-hidden"
               />
               <div className="flex-1">
                 <SchemaField
@@ -287,7 +287,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
           <button
             type="button"
             onClick={() => setEntries([...entries, ['', getEmpty(valueSchema)]])}
-            className="inline-flex items-center gap-1 rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800"
+            className="inline-flex items-center gap-1 rounded-sm border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800"
           >
             <Plus size={12} /> hinzufügen
           </button>
@@ -367,7 +367,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
           onChange(raw);
         }}
         placeholder="Wert (Text · Zahl · true/false · oder JSON)"
-        className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-none"
+        className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-hidden"
       />
     </Labeled>
   );
@@ -387,9 +387,9 @@ function Labeled({ label, required, children }: { label: string; required?: bool
 
 function TagInput({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }) {
   return (
-    <div className="flex flex-wrap items-center gap-1 rounded border border-gray-700 bg-gray-800 px-2 py-1">
+    <div className="flex flex-wrap items-center gap-1 rounded-sm border border-gray-700 bg-gray-800 px-2 py-1">
       {tags.map((t, i) => (
-        <span key={i} className="inline-flex items-center gap-1 rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-200">
+        <span key={i} className="inline-flex items-center gap-1 rounded-sm bg-gray-700 px-2 py-0.5 text-xs text-gray-200">
           {t}
           <button
             type="button"
@@ -410,7 +410,7 @@ function TagInput({ tags, onChange }: { tags: string[]; onChange: (tags: string[
             input.value = '';
           }
         }}
-        className="flex-1 bg-transparent text-sm text-gray-200 focus:outline-none"
+        className="flex-1 bg-transparent text-sm text-gray-200 focus:outline-hidden"
       />
     </div>
   );

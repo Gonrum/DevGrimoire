@@ -283,7 +283,7 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
   }, [note._id, onCancel, showError, t]);
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+    <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 p-4">
       <div className="bg-gray-900 border border-gray-800 rounded-lg shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800">
           <div className="flex items-center gap-2">
@@ -309,7 +309,7 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
               <span>{t('vermerke.promoteAnalyzing')}</span>
             </div>
             {streamingText && (
-              <pre className="text-xs text-gray-500 font-mono whitespace-pre-wrap max-h-40 overflow-y-auto bg-gray-950 p-2 rounded border border-gray-800">
+              <pre className="text-xs text-gray-500 font-mono whitespace-pre-wrap max-h-40 overflow-y-auto bg-gray-950 p-2 rounded-sm border border-gray-800">
                 {streamingText}
               </pre>
             )}
@@ -328,14 +328,14 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
               <button
                 type="button"
                 onClick={() => setPhase('review')}
-                className="bg-amber-700 hover:bg-amber-600 text-white text-sm px-4 py-2 rounded"
+                className="bg-amber-700 hover:bg-amber-600 text-white text-sm px-4 py-2 rounded-sm"
               >
                 {t('vermerke.promoteManualButton')}
               </button>
               <button
                 type="button"
                 onClick={onCancel}
-                className="text-gray-400 hover:text-gray-200 text-sm px-4 py-2 rounded"
+                className="text-gray-400 hover:text-gray-200 text-sm px-4 py-2 rounded-sm"
               >
                 {t('vermerke.cancel')}
               </button>
@@ -346,7 +346,7 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
         {(phase === 'review' || phase === 'saving') && (
           <div className="p-5 flex flex-col gap-3">
             {showFallback && (
-              <div className="bg-amber-950/30 border border-amber-900 rounded p-3">
+              <div className="bg-amber-950/30 border border-amber-900 rounded-sm p-3">
                 <p className="text-sm text-amber-300 mb-2">
                   {t('vermerke.promoteAmbiguous')}
                 </p>
@@ -361,7 +361,7 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
                   <button
                     type="button"
                     onClick={handleManual}
-                    className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-200 px-3 py-1.5 rounded"
+                    className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-200 px-3 py-1.5 rounded-sm"
                   >
                     {t('vermerke.promoteAssignManually')}
                   </button>
@@ -369,7 +369,7 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
                     <button
                       type="button"
                       onClick={handleGlobalKnowledge}
-                      className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-200 px-3 py-1.5 rounded"
+                      className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-200 px-3 py-1.5 rounded-sm"
                     >
                       {t('vermerke.promoteGlobal')}
                     </button>
@@ -379,7 +379,7 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
                     onClick={() => {
                       void handleSnooze();
                     }}
-                    className="text-xs text-gray-400 hover:text-gray-200 px-3 py-1.5 rounded"
+                    className="text-xs text-gray-400 hover:text-gray-200 px-3 py-1.5 rounded-sm"
                   >
                     {t('vermerke.promoteAskLater')}
                   </button>
@@ -396,7 +396,7 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
                 onChange={(e) =>
                   setEntityType(optionOr(e.target.value, ENTITY_TYPES, entityType))
                 }
-                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm px-3 py-1.5 rounded outline-none"
+                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm px-3 py-1.5 rounded-sm outline-hidden"
               >
                 {ENTITY_TYPES.map((tp) => (
                   <option key={tp} value={tp}>
@@ -413,7 +413,7 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
               <input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm px-3 py-1.5 rounded outline-none"
+                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm px-3 py-1.5 rounded-sm outline-hidden"
               />
             </div>
 
@@ -427,7 +427,7 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
                   setProjectId(e.target.value);
                   if (e.target.value) setCustomerId('');
                 }}
-                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm px-3 py-1.5 rounded outline-none"
+                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm px-3 py-1.5 rounded-sm outline-hidden"
               >
                 <option value="">{t('vermerke.promoteNone')}</option>
                 {projects.map((p) => (
@@ -448,7 +448,7 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
                   setCustomerId(e.target.value);
                   if (e.target.value) setProjectId('');
                 }}
-                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm px-3 py-1.5 rounded outline-none"
+                className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm px-3 py-1.5 rounded-sm outline-hidden"
               >
                 <option value="">{t('vermerke.promoteNone')}</option>
                 {customers.map((c) => (
@@ -470,7 +470,7 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
                   value={tagsText}
                   onChange={(e) => setTagsText(e.target.value)}
                   placeholder={t('vermerke.promoteTagsPlaceholder')}
-                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm px-3 py-1.5 rounded outline-none"
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-100 text-sm px-3 py-1.5 rounded-sm outline-hidden"
                 />
               </div>
             )}
@@ -488,7 +488,7 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
               <button
                 type="button"
                 onClick={onCancel}
-                className="text-sm text-gray-400 hover:text-gray-200 px-3 py-1.5 rounded"
+                className="text-sm text-gray-400 hover:text-gray-200 px-3 py-1.5 rounded-sm"
                 disabled={phase === 'saving'}
               >
                 {t('vermerke.cancel')}
@@ -499,7 +499,7 @@ export default function PromotionDialog({ note, onCancel, onDone }: Props) {
                   void handleSave();
                 }}
                 disabled={!canSubmit || phase === 'saving'}
-                className="bg-amber-700 hover:bg-amber-600 disabled:bg-gray-800 disabled:text-gray-600 text-white text-sm px-4 py-1.5 rounded flex items-center gap-2"
+                className="bg-amber-700 hover:bg-amber-600 disabled:bg-gray-800 disabled:text-gray-600 text-white text-sm px-4 py-1.5 rounded-sm flex items-center gap-2"
               >
                 {phase === 'saving' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 {t('vermerke.promoteSave')}

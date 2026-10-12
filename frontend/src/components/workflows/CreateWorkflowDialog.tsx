@@ -161,7 +161,7 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={close}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs" onClick={close}>
       <div className="mx-4 w-full max-w-md rounded-xl border border-gray-700 bg-gray-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="border-b border-gray-800 px-5 py-4">
           <h2 className="text-lg font-semibold text-gray-200">Neuer Workflow</h2>
@@ -184,7 +184,7 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
                   }
                   patch(changes);
                 }}
-                className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200"
+                className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200"
               >
                 <option value="">— Leerer Canvas —</option>
                 {templates.map((t) => (
@@ -204,10 +204,10 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
             </Labeled>
           )}
           <Labeled label="Name">
-            <input type="text" value={name} onChange={(e) => patch({ name: e.target.value })} className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200" />
+            <input type="text" value={name} onChange={(e) => patch({ name: e.target.value })} className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200" />
           </Labeled>
           <Labeled label="Scope">
-            <select value={scope} onChange={(e) => patch({ scope: optionOr(e.target.value, SCOPES, scope) })} className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200">
+            <select value={scope} onChange={(e) => patch({ scope: optionOr(e.target.value, SCOPES, scope) })} className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200">
               <option value="system">System</option>
               <option value="project">Project</option>
               <option value="customer">Customer</option>
@@ -219,7 +219,7 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
                 value={projectId}
                 onChange={(e) => patch({ projectId: e.target.value })}
                 disabled={loadingProjects}
-                className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 disabled:opacity-50"
+                className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 disabled:opacity-50"
               >
                 <option value="">{loadingProjects ? 'Lade Projekte…' : '— Projekt wählen —'}</option>
                 {projects.map((p) => (
@@ -234,7 +234,7 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
                 value={customerId}
                 onChange={(e) => patch({ customerId: e.target.value })}
                 disabled={loadingCustomers}
-                className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 disabled:opacity-50"
+                className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 disabled:opacity-50"
               >
                 <option value="">{loadingCustomers ? 'Lade Kunden…' : '— Kunde wählen —'}</option>
                 {customers.map((c) => (
@@ -248,7 +248,7 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
               value={triggerType}
               onChange={(e) => patch({ triggerType: optionOr(e.target.value, TRIGGER_TYPES, triggerType) })}
               disabled={!!templateId}
-              className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 disabled:opacity-50"
+              className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 disabled:opacity-50"
             >
               <option value="manual">Manual</option>
               <option value="schedule">Schedule</option>
@@ -259,8 +259,8 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
           </Labeled>
         </div>
         <div className="flex justify-end gap-2 border-t border-gray-800 px-5 py-3">
-          <button onClick={close} className="rounded bg-gray-800 px-3 py-1 text-sm text-gray-200 hover:bg-gray-700">Abbrechen</button>
-          <button onClick={() => { void handleCreate(); }} disabled={submitting || !canSubmit} className="rounded bg-cyan-600 px-3 py-1 text-sm text-white hover:bg-cyan-500 disabled:opacity-50">Erstellen</button>
+          <button onClick={close} className="rounded-sm bg-gray-800 px-3 py-1 text-sm text-gray-200 hover:bg-gray-700">Abbrechen</button>
+          <button onClick={() => { void handleCreate(); }} disabled={submitting || !canSubmit} className="rounded-sm bg-cyan-600 px-3 py-1 text-sm text-white hover:bg-cyan-500 disabled:opacity-50">Erstellen</button>
         </div>
       </div>
     </div>

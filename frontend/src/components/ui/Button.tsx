@@ -33,7 +33,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <button
         ref={ref}
-        className={`rounded transition-colors disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`}
+        className={`rounded-sm transition-colors disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`}
         {...props}
       />
     );

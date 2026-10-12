@@ -158,21 +158,21 @@ function MilestoneCard({ milestone, todos, projectId, onUpdate, showError }: { m
             placeholder={t('milestones.versionPlaceholder')}
             value={clVersion}
             onChange={(e) => setClVersion(e.target.value)}
-            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-none"
+            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded-sm text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-hidden"
           />
           <input
             type="text"
             placeholder={t('milestones.summaryPlaceholder')}
             value={clSummary}
             onChange={(e) => setClSummary(e.target.value)}
-            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-none"
+            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded-sm text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-hidden"
           />
           <textarea
             placeholder={t('milestones.changesPlaceholder')}
             value={clChanges}
             onChange={(e) => setClChanges(e.target.value)}
             rows={3}
-            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-none resize-none"
+            className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded-sm text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-hidden resize-none"
             required
           />
           <div className="flex gap-2">
@@ -252,7 +252,7 @@ export default function MilestoneList({ milestones, todos, projectId, onUpdate }
             setConfirmArchiveAll(false);
             void archiveAllDone();
           }}
-            className={`text-xs px-2 py-1 rounded transition-colors ${confirmArchiveAll ? 'bg-yellow-900/60 text-yellow-300' : 'text-gray-600 hover:text-gray-400'}`}>
+            className={`text-xs px-2 py-1 rounded-sm transition-colors ${confirmArchiveAll ? 'bg-yellow-900/60 text-yellow-300' : 'text-gray-600 hover:text-gray-400'}`}>
             {confirmArchiveAll ? t('milestones.archiveConfirm', { count: archivableDone.length }) : t('milestones.archiveCompleted', { count: archivableDone.length })}
           </button>
         )}

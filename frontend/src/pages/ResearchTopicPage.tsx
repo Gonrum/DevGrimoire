@@ -237,7 +237,7 @@ export default function ResearchTopicPage() {
                 if (e.key === 'Enter') void saveTitle();
                 if (e.key === 'Escape') setEditingTitle(false);
               }}
-              className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-lg font-semibold text-gray-200 focus:outline-none focus:border-violet-500"
+              className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-lg font-semibold text-gray-200 focus:outline-hidden focus:border-violet-500"
             />
           ) : (
             <h1

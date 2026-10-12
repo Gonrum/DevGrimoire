@@ -20,7 +20,7 @@ export function WorkflowCardGrid({ workflows, onRun }: Props) {
               <Workflow size={16} className="text-cyan-400" />
               <span className="font-medium text-gray-200">{wf.name}</span>
             </div>
-            <span className={`rounded px-2 py-0.5 text-[10px] uppercase ${statusBadge(wf.status)}`}>{wf.status}</span>
+            <span className={`rounded-sm px-2 py-0.5 text-[10px] uppercase ${statusBadge(wf.status)}`}>{wf.status}</span>
           </div>
           <div className="text-xs text-gray-500">
             <div>Scope: {wf.scope} · v{wf.version}</div>
@@ -31,7 +31,7 @@ export function WorkflowCardGrid({ workflows, onRun }: Props) {
             <button
               type="button"
               onClick={(e) => { e.preventDefault(); onRun(wf._id); }}
-              className="mt-3 inline-flex items-center gap-1 rounded bg-cyan-900/40 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-900"
+              className="mt-3 inline-flex items-center gap-1 rounded-sm bg-cyan-900/40 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-900"
             >
               <Play size={12} /> ausführen
             </button>

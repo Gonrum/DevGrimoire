@@ -182,7 +182,7 @@ export default function NoteEditor({ note, onLocalChange, onSaved, onPromote, on
         value={content}
         onChange={handleChange}
         spellCheck={false}
-        className="flex-1 w-full bg-gray-900 text-gray-100 font-mono text-sm p-4 resize-none outline-none border-0 placeholder-gray-600"
+        className="flex-1 w-full bg-gray-900 text-gray-100 font-mono text-sm p-4 resize-none outline-hidden border-0 placeholder-gray-600"
         placeholder={t('vermerke.editorPlaceholder')}
       />
       <div className="flex items-center justify-between px-3 py-1.5 border-t border-gray-800 bg-gray-950/50 text-xs gap-2">
@@ -202,7 +202,7 @@ export default function NoteEditor({ note, onLocalChange, onSaved, onPromote, on
           <button
             type="button"
             onClick={() => onPromote(note)}
-            className="flex items-center gap-1 text-amber-400 hover:text-amber-300 hover:bg-gray-800 px-2 py-1 rounded transition-colors"
+            className="flex items-center gap-1 text-amber-400 hover:text-amber-300 hover:bg-gray-800 px-2 py-1 rounded-sm transition-colors"
             title={t('vermerke.promoteActionTooltip')}
           >
             <Sparkles className="w-3.5 h-3.5" />
@@ -211,7 +211,7 @@ export default function NoteEditor({ note, onLocalChange, onSaved, onPromote, on
           <button
             type="button"
             onClick={() => onArchive(note._id)}
-            className="flex items-center gap-1 text-gray-400 hover:text-gray-200 hover:bg-gray-800 px-2 py-1 rounded transition-colors"
+            className="flex items-center gap-1 text-gray-400 hover:text-gray-200 hover:bg-gray-800 px-2 py-1 rounded-sm transition-colors"
             title={t('vermerke.archiveActionTooltip')}
           >
             <ArchiveIcon className="w-3.5 h-3.5" />

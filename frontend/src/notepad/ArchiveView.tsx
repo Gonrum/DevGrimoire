@@ -84,7 +84,7 @@ export default function ArchiveView({ onClose, onRestoreRequest }: Props) {
           {items.map((note) => (
             <li
               key={note._id}
-              className="bg-gray-800/50 border border-gray-800 rounded p-3 flex flex-col gap-2"
+              className="bg-gray-800/50 border border-gray-800 rounded-sm p-3 flex flex-col gap-2"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
@@ -104,7 +104,7 @@ export default function ArchiveView({ onClose, onRestoreRequest }: Props) {
                   onClick={() => {
                     void handleDelete(note);
                   }}
-                  className="text-gray-500 hover:text-red-400 p-1 rounded"
+                  className="text-gray-500 hover:text-red-400 p-1 rounded-sm"
                   aria-label={t('vermerke.delete')}
                   title={t('vermerke.delete')}
                 >
@@ -112,7 +112,7 @@ export default function ArchiveView({ onClose, onRestoreRequest }: Props) {
                 </button>
               </div>
               {note.content && (
-                <pre className="text-xs text-gray-400 font-mono whitespace-pre-wrap break-words max-h-20 overflow-hidden">
+                <pre className="text-xs text-gray-400 font-mono whitespace-pre-wrap wrap-break-word max-h-20 overflow-hidden">
                   {note.content.slice(0, 200)}
                   {note.content.length > 200 ? '…' : ''}
                 </pre>

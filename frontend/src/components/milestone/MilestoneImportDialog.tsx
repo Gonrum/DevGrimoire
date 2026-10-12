@@ -91,7 +91,7 @@ export default function MilestoneImportDialog({ open, projectId, onClose, onImpo
                   onChange={(e) => setMarkdown(e.target.value)}
                   rows={10}
                   placeholder="# Milestone Name&#10;&#10;## Description&#10;..."
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 resize-none font-mono"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500 resize-none font-mono"
                 />
                 <div className="flex items-center gap-2">
                   <button

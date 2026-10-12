@@ -87,7 +87,7 @@ function ChatAttachmentImage({ src, alt }: { src: string; alt: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-900/70 border border-gray-700 text-gray-400 font-mono">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs bg-gray-900/70 border border-gray-700 text-gray-400 font-mono">
         🖼 {alt}
       </span>
     );
@@ -97,7 +97,7 @@ function ChatAttachmentImage({ src, alt }: { src: string; alt: string }) {
       src={src}
       alt={alt}
       onError={() => setFailed(true)}
-      className="max-h-32 max-w-[180px] rounded border border-gray-700 object-cover"
+      className="max-h-32 max-w-[180px] rounded-sm border border-gray-700 object-cover"
     />
   );
 }
@@ -1085,7 +1085,7 @@ export default function ChatDock() {
           <h2 className="text-sm font-semibold text-gray-200 flex-1">{t('chat.title')}</h2>
           {userLlm?.mode === 'browser' && (
             <span
-              className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-900/40 text-cyan-300 border border-cyan-800/60"
+              className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-cyan-900/40 text-cyan-300 border border-cyan-800/60"
               title={t('chat.modeBadgeTitle', { mode: t('chat.modeBrowser') })}
             >
               {t('chat.modeBrowser')}
@@ -1124,7 +1124,7 @@ export default function ChatDock() {
                 <select
                   value={projectId ?? ''}
                   onChange={(e) => setProjectId(e.target.value || null)}
-                  className="flex-1 bg-gray-800 border border-gray-700 text-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500"
+                  className="flex-1 bg-gray-800 border border-gray-700 text-gray-200 rounded-sm px-2 py-1 text-xs focus:outline-hidden focus:ring-1 focus:ring-violet-500"
                 >
                   <option value="">{t('chat.selectProject')}</option>
                   {projects.map((p) => (
@@ -1138,7 +1138,7 @@ export default function ChatDock() {
                   value={session?._id ?? ''}
                   onChange={(e) => { if (e.target.value) { setBriefingMode(false); void loadSession(e.target.value); } }}
                   disabled={!projectId || loadingSessions}
-                  className="flex-1 bg-gray-800 border border-gray-700 text-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
+                  className="flex-1 bg-gray-800 border border-gray-700 text-gray-200 rounded-sm px-2 py-1 text-xs focus:outline-hidden focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
                 >
                   {sessions.length === 0 && <option value="">{t('chat.noSessions')}</option>}
                   {sessions.map((s) => (
@@ -1172,7 +1172,7 @@ export default function ChatDock() {
                     value={activeWorkspaceId ?? ''}
                     onChange={(e) => setActiveWorkspaceWithPersist(e.target.value || null)}
                     disabled={workspaces.length === 0}
-                    className="flex-1 bg-gray-800 border border-gray-700 text-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
+                    className="flex-1 bg-gray-800 border border-gray-700 text-gray-200 rounded-sm px-2 py-1 text-xs focus:outline-hidden focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
                     title={t('chat.workspaceHint')}
                   >
                     <option value="">{t('chat.workspaceNone')}</option>
@@ -1281,13 +1281,13 @@ export default function ChatDock() {
               }}
             >
               {dragActive && (
-                <div className="absolute inset-0 flex items-center justify-center rounded bg-violet-900/30 border-2 border-dashed border-violet-400 pointer-events-none z-10">
+                <div className="absolute inset-0 flex items-center justify-center rounded-sm bg-violet-900/30 border-2 border-dashed border-violet-400 pointer-events-none z-10">
                   <span className="text-violet-200 text-sm">📎 {t('chat.attachDropHere')}</span>
                 </div>
               )}
 
               {noVisionBanner && (
-                <div className="mb-2 px-2 py-1.5 rounded text-xs text-amber-200 bg-amber-900/20 border border-amber-800/40">
+                <div className="mb-2 px-2 py-1.5 rounded-sm text-xs text-amber-200 bg-amber-900/20 border border-amber-800/40">
                   ⚠ {t('chat.attachNoVisionEndpoint')}
                 </div>
               )}
@@ -1312,7 +1312,7 @@ export default function ChatDock() {
                           <img
                             src={p.objectUrl}
                             alt={p.file.name}
-                            className={`w-8 h-8 object-cover rounded ${p.status === 'uploading' ? 'opacity-50' : ''}`}
+                            className={`w-8 h-8 object-cover rounded-sm ${p.status === 'uploading' ? 'opacity-50' : ''}`}
                           />
                         ) : (
                           <>
@@ -1337,7 +1337,7 @@ export default function ChatDock() {
               )}
 
               {briefingMode && (
-                <div className="mb-2 px-3 py-2 text-xs bg-violet-900/20 border border-violet-800/40 rounded text-violet-300">
+                <div className="mb-2 px-3 py-2 text-xs bg-violet-900/20 border border-violet-800/40 rounded-sm text-violet-300">
                   {t('chat.briefingMode.banner')}
                 </div>
               )}
@@ -1357,7 +1357,7 @@ export default function ChatDock() {
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={!session || !!streaming}
-                  className="shrink-0 w-9 h-9 flex items-center justify-center rounded bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="shrink-0 w-9 h-9 flex items-center justify-center rounded-sm bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
                   title={t('chat.attachFile')}
                   aria-label={t('chat.attachFile')}
                 >
@@ -1388,7 +1388,7 @@ export default function ChatDock() {
                   placeholder={session ? t('chat.inputPlaceholder') : t('chat.selectOrCreateSession')}
                   disabled={!session || !!streaming}
                   rows={2}
-                  className="flex-1 bg-gray-800 border border-gray-700 text-gray-200 rounded px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
+                  className="flex-1 bg-gray-800 border border-gray-700 text-gray-200 rounded-sm px-3 py-2 text-sm resize-none focus:outline-hidden focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
                 />
                 <button
                   type="button"
@@ -1540,7 +1540,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
                 href={href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-900/70 border border-gray-700 text-gray-300 hover:text-gray-100 hover:border-gray-600 font-mono"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs bg-gray-900/70 border border-gray-700 text-gray-300 hover:text-gray-100 hover:border-gray-600 font-mono"
                 title={`${(att.size / 1024).toFixed(1)} KB${att.extractedLength ? ` · ${att.extractedLength} chars eingebunden` : ''}`}
               >
                 📎 {att.fileName}
@@ -1582,7 +1582,7 @@ function MetricsBadge({ metrics }: { metrics: ChatResponseMetrics }) {
         estimated: metrics.estimated ? t('chat.metricsEstimated') : t('chat.metricsExact'),
       })}
     >
-      <span className="px-1.5 py-0.5 rounded border border-violet-900/40 bg-violet-950/30 text-violet-300">
+      <span className="px-1.5 py-0.5 rounded-sm border border-violet-900/40 bg-violet-950/30 text-violet-300">
         {prefix}{tps} {t('chat.metricsTokensPerSec')}
       </span>
       <span className="text-gray-600">{totalSec.toFixed(1)} s</span>
@@ -1630,11 +1630,11 @@ function ToolCallRow({
       </button>
       {expanded && (
         <div className="mt-1 space-y-1">
-          <pre className="text-gray-400 font-mono text-[10px] bg-gray-900 rounded p-1.5 overflow-x-auto whitespace-pre-wrap break-all">
+          <pre className="text-gray-400 font-mono text-[10px] bg-gray-900 rounded-sm p-1.5 overflow-x-auto whitespace-pre-wrap break-all">
             {prettyArgs}
           </pre>
           {call.result && (
-            <pre className="text-gray-500 font-mono text-[10px] bg-gray-900 rounded p-1.5 overflow-x-auto whitespace-pre-wrap break-all max-h-40 overflow-y-auto">
+            <pre className="text-gray-500 font-mono text-[10px] bg-gray-900 rounded-sm p-1.5 overflow-x-auto whitespace-pre-wrap break-all max-h-40 overflow-y-auto">
               {call.result.length > 1000 ? call.result.slice(0, 1000) + '…' : call.result}
             </pre>
           )}

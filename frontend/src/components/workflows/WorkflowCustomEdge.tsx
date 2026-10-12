@@ -47,7 +47,7 @@ export function WorkflowCustomEdge(props: EdgeProps<WorkflowFlowEdge>) {
             <button
               type="button"
               onClick={() => data.onDelete?.(id)}
-              className="rounded-full bg-gray-900 p-1 text-red-400 shadow ring-1 ring-gray-700 hover:bg-red-900/30"
+              className="rounded-full bg-gray-900 p-1 text-red-400 shadow-sm ring-1 ring-gray-700 hover:bg-red-900/30"
               title="Edge löschen"
             >
               <X size={10} />
@@ -65,5 +65,5 @@ function pillClass(branch: string): string {
     failure: 'bg-red-900/60 text-red-300',
     custom: 'bg-violet-900/60 text-violet-300',
   };
-  return `rounded px-1.5 py-0.5 text-[10px] font-medium ${map[branch] ?? 'bg-gray-800 text-gray-300'} shadow ring-1 ring-gray-700`;
+  return `rounded-sm px-1.5 py-0.5 text-[10px] font-medium ${map[branch] ?? 'bg-gray-800 text-gray-300'} shadow-sm ring-1 ring-gray-700`;
 }

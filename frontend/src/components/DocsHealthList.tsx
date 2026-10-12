@@ -76,7 +76,7 @@ function ProposalCard({
   const isOpen = proposal.status === 'open';
   const convertedTodoId = proposal.metadata?.todoId;
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded p-3 space-y-2">
+    <div className="bg-gray-900 border border-gray-800 rounded-sm p-3 space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         <Badge color={STATUS_COLORS[proposal.status]} rounded="full">
           {t(`docsHealth.status.${proposal.status}`)}
@@ -91,7 +91,7 @@ function ProposalCard({
 
       <div>
         <div className="text-sm text-gray-200 font-medium">
-          {proposal.target.path ? <code className="bg-gray-950 px-1 py-0.5 rounded">{proposal.target.path}</code> : proposal.target.title}
+          {proposal.target.path ? <code className="bg-gray-950 px-1 py-0.5 rounded-sm">{proposal.target.path}</code> : proposal.target.title}
         </div>
         <div className="text-xs text-gray-500">
           {t('docsHealth.from')} {proposal.source.type} ·{' '}
@@ -109,13 +109,13 @@ function ProposalCard({
 
       <div className="text-xs">
         <div className="text-gray-500 mb-0.5">{t('docsHealth.suggested')}</div>
-        <pre className="text-gray-300 whitespace-pre-wrap break-words bg-gray-950 rounded p-2">
+        <pre className="text-gray-300 whitespace-pre-wrap wrap-break-word bg-gray-950 rounded-sm p-2">
           {proposal.suggestedChange.summary}
         </pre>
         {proposal.suggestedChange.instructions && (
           <details className="mt-1">
             <summary className="text-gray-500 cursor-pointer select-none">{t('docsHealth.instructions')}</summary>
-            <pre className="mt-1 text-gray-300 whitespace-pre-wrap break-words bg-gray-950 rounded p-2">
+            <pre className="mt-1 text-gray-300 whitespace-pre-wrap wrap-break-word bg-gray-950 rounded-sm p-2">
               {proposal.suggestedChange.instructions}
             </pre>
           </details>
@@ -233,7 +233,7 @@ export default function DocsHealthList({ projectId, basePath }: Props) {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(optionOr(e.target.value, STATUS_FILTERS, 'all'))}
-            className="bg-gray-900 border border-gray-800 rounded text-xs px-2 py-1 text-gray-300"
+            className="bg-gray-900 border border-gray-800 rounded-sm text-xs px-2 py-1 text-gray-300"
           >
             <option value="all">{t('docsHealth.filter.allStatus')}</option>
             <option value="open">{t('docsHealth.status.open')}</option>
@@ -244,7 +244,7 @@ export default function DocsHealthList({ projectId, basePath }: Props) {
           <select
             value={sourceFilter}
             onChange={(e) => setSourceFilter(optionOr(e.target.value, SOURCE_FILTERS, 'all'))}
-            className="bg-gray-900 border border-gray-800 rounded text-xs px-2 py-1 text-gray-300"
+            className="bg-gray-900 border border-gray-800 rounded-sm text-xs px-2 py-1 text-gray-300"
           >
             <option value="all">{t('docsHealth.filter.allSources')}</option>
             <option value="todo">todo</option>
@@ -256,7 +256,7 @@ export default function DocsHealthList({ projectId, basePath }: Props) {
           <select
             value={targetFilter}
             onChange={(e) => setTargetFilter(optionOr(e.target.value, TARGET_FILTERS, 'all'))}
-            className="bg-gray-900 border border-gray-800 rounded text-xs px-2 py-1 text-gray-300"
+            className="bg-gray-900 border border-gray-800 rounded-sm text-xs px-2 py-1 text-gray-300"
           >
             <option value="all">{t('docsHealth.filter.allTargets')}</option>
             <option value="knowledge">knowledge</option>

@@ -81,7 +81,7 @@ export default function ProjectSidebar({ groups, activeTab, onSelect, variant = 
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={t('sidebar.search')}
-                className="w-full bg-gray-800/60 text-sm text-gray-200 placeholder-gray-600 rounded-lg pl-7 pr-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                className="w-full bg-gray-800/60 text-sm text-gray-200 placeholder-gray-600 rounded-lg pl-7 pr-2 py-1.5 focus:outline-hidden focus:ring-1 focus:ring-cyan-500"
               />
             </div>
           )}

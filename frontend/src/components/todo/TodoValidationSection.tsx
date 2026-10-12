@@ -49,7 +49,7 @@ function ReportCard({
   const isFailure = report.status === 'failed' || report.status === 'error';
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded p-3 space-y-2">
+    <div className="bg-gray-900 border border-gray-800 rounded-sm p-3 space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         <Badge color={STATUS_COLORS[report.status]} rounded="full">
           {t(`validation.status.${report.status}`)}
@@ -76,14 +76,14 @@ function ReportCard({
       {report.command && (
         <div className="text-xs">
           <span className="text-gray-500">{t('validation.command')}: </span>
-          <code className="text-gray-300 bg-gray-950 px-1 py-0.5 rounded">{report.command}</code>
+          <code className="text-gray-300 bg-gray-950 px-1 py-0.5 rounded-sm">{report.command}</code>
         </div>
       )}
 
       {report.summary && (
         <div className="text-xs">
           <div className="text-gray-500 mb-0.5">{t('validation.summary')}</div>
-          <pre className="text-gray-300 whitespace-pre-wrap break-words bg-gray-950 rounded p-2 max-h-40 overflow-auto">
+          <pre className="text-gray-300 whitespace-pre-wrap wrap-break-word bg-gray-950 rounded-sm p-2 max-h-40 overflow-auto">
             {report.summary}
           </pre>
         </div>
@@ -94,7 +94,7 @@ function ReportCard({
           <summary className="text-gray-500 cursor-pointer select-none">
             {t('validation.logExcerpt')}
           </summary>
-          <pre className="mt-1 text-gray-400 whitespace-pre-wrap break-words bg-gray-950 rounded p-2 max-h-60 overflow-auto">
+          <pre className="mt-1 text-gray-400 whitespace-pre-wrap wrap-break-word bg-gray-950 rounded-sm p-2 max-h-60 overflow-auto">
             {report.outputSnippet}
           </pre>
         </details>

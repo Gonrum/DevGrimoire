@@ -152,14 +152,14 @@ export default function LogList({ projectId, projects }: LogListProps) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={de ? 'Logs durchsuchen...' : 'Search logs...'}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-violet-600"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-hidden focus:border-violet-600"
           />
         </form>
         {!globalMode && stats && stats.byService.length > 0 && (
           <select
             value={serviceFilter || ''}
             onChange={(e) => setServiceFilter(e.target.value || null)}
-            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-violet-600"
+            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-300 focus:outline-hidden focus:border-violet-600"
           >
             <option value="">{de ? 'Alle Services' : 'All services'}</option>
             {stats.byService.map((s) => (
@@ -175,7 +175,7 @@ export default function LogList({ projectId, projects }: LogListProps) {
             value={serviceFilter || ''}
             onChange={(e) => setServiceFilter(e.target.value || null)}
             placeholder={de ? 'Service-Name' : 'Service name'}
-            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-violet-600"
+            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-300 focus:outline-hidden focus:border-violet-600"
             style={{ width: '160px' }}
           />
         )}

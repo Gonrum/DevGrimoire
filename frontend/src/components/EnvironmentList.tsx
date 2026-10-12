@@ -56,7 +56,7 @@ function SecretRow({ secret, onDelete }: { secret: SecretListItem; onDelete: () 
         </div>
         {revealed && (
           <div className="mt-1 flex items-center gap-2">
-            <code className="text-xs bg-gray-800 text-green-400 px-2 py-0.5 rounded font-mono break-all">{revealed}</code>
+            <code className="text-xs bg-gray-800 text-green-400 px-2 py-0.5 rounded-sm font-mono break-all">{revealed}</code>
             <button type="button" onClick={handleCopy} className="text-xs text-gray-500 hover:text-gray-300" title={t('common.copy')}>
               {t('common.copy')}
             </button>
@@ -185,8 +185,8 @@ function EnvironmentCard({ env, owner, onUpdate }: { env: Environment; owner: { 
               <div className="space-y-1">
                 {vars.map((v, i) => (
                   <div key={i} className="flex gap-2 items-center">
-                    <input type="text" value={v.key} onChange={(e) => updateVar(i, 'key', e.target.value)} placeholder="KEY" className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:border-violet-500" />
-                    <input type="text" value={v.value} onChange={(e) => updateVar(i, 'value', e.target.value)} placeholder="Value" className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-violet-500" />
+                    <input type="text" value={v.key} onChange={(e) => updateVar(i, 'key', e.target.value)} placeholder="KEY" className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs font-mono text-gray-200 focus:outline-hidden focus:border-violet-500" />
+                    <input type="text" value={v.value} onChange={(e) => updateVar(i, 'value', e.target.value)} placeholder="Value" className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-200 focus:outline-hidden focus:border-violet-500" />
                     <button type="button" onClick={() => removeVar(i)} className="text-gray-600 hover:text-red-400 text-xs">X</button>
                   </div>
                 ))}

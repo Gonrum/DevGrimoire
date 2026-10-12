@@ -140,13 +140,13 @@ export default function SshTerminalModal({
               </div>
               <div className="flex justify-end gap-2">
                 <button
-                  className="px-3 py-1.5 text-xs rounded border border-gray-700 text-gray-300 hover:bg-gray-800"
+                  className="px-3 py-1.5 text-xs rounded-sm border border-gray-700 text-gray-300 hover:bg-gray-800"
                   onClick={() => setConfirmOpen(false)}
                 >
                   {t('common.cancel')}
                 </button>
                 <button
-                  className="px-3 py-1.5 text-xs rounded bg-red-600 text-white hover:bg-red-500"
+                  className="px-3 py-1.5 text-xs rounded-sm bg-red-600 text-white hover:bg-red-500"
                   onClick={() => {
                     setConfirmOpen(false);
                     onClose();

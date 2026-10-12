@@ -133,7 +133,7 @@ export default function ChatLogSettings() {
     };
     const m = map[outcome];
     return (
-      <span className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[11px] ${m.cls}`}>
+      <span className={`inline-flex items-center px-1.5 py-0.5 rounded-sm border text-[11px] ${m.cls}`}>
         {m.label}
       </span>
     );
@@ -173,7 +173,7 @@ export default function ChatLogSettings() {
         {stats && (stats.byProvider.length > 0 || stats.byTool.length > 0) && (
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
             {stats.byProvider.length > 0 && (
-              <div className="bg-gray-900/50 border border-gray-800 rounded p-3">
+              <div className="bg-gray-900/50 border border-gray-800 rounded-sm p-3">
                 <div className="text-xs text-gray-400 uppercase tracking-wider mb-2">{t('chatLog.byProvider')}</div>
                 <ul className="space-y-1 text-sm">
                   {stats.byProvider.map((p) => (
@@ -191,7 +191,7 @@ export default function ChatLogSettings() {
               </div>
             )}
             {stats.byTool.length > 0 && (
-              <div className="bg-gray-900/50 border border-gray-800 rounded p-3">
+              <div className="bg-gray-900/50 border border-gray-800 rounded-sm p-3">
                 <div className="text-xs text-gray-400 uppercase tracking-wider mb-2">{t('chatLog.byTool')}</div>
                 <ul className="space-y-1 text-sm">
                   {stats.byTool.slice(0, 12).map((tl) => (
@@ -217,7 +217,7 @@ export default function ChatLogSettings() {
           <select
             value={outcomeFilter}
             onChange={(e) => setOutcomeFilter(optionOr(e.target.value, OUTCOME_FILTERS, ''))}
-            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-violet-500"
+            className="bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-200 focus:outline-hidden focus:ring-1 focus:ring-violet-500"
           >
             <option value="">{t('chatLog.filterAll')}</option>
             <option value="completed">{t('chatLog.filterCompleted')}</option>
@@ -228,7 +228,7 @@ export default function ChatLogSettings() {
           <select
             value={projectFilter}
             onChange={(e) => setProjectFilter(e.target.value)}
-            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-violet-500"
+            className="bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-200 focus:outline-hidden focus:ring-1 focus:ring-violet-500"
           >
             <option value="">{t('chatLog.filterProject')}</option>
             {projects.map((p) => (
@@ -247,7 +247,7 @@ export default function ChatLogSettings() {
               placeholder={t('chatLog.filterSearch')}
               value={searchDraft}
               onChange={(e) => setSearchDraft(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-violet-500"
+              className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-200 focus:outline-hidden focus:ring-1 focus:ring-violet-500"
             />
           </form>
           <Button size="sm" onClick={() => void load(0)} disabled={loading}>
@@ -258,11 +258,11 @@ export default function ChatLogSettings() {
         {loading && items.length === 0 ? (
           <LoadingText text={t('chatLog.loading')} />
         ) : items.length === 0 ? (
-          <div className="text-center text-gray-500 text-sm py-8 border border-dashed border-gray-800 rounded">
+          <div className="text-center text-gray-500 text-sm py-8 border border-dashed border-gray-800 rounded-sm">
             {t('chatLog.noEntries')}
           </div>
         ) : (
-          <div className="overflow-x-auto border border-gray-800 rounded">
+          <div className="overflow-x-auto border border-gray-800 rounded-sm">
             <table className="w-full text-sm">
               <thead className="bg-gray-900/70 text-gray-400">
                 <tr>
@@ -381,7 +381,7 @@ export default function ChatLogSettings() {
                               {it.errorMessage && (
                                 <div className="col-span-full">
                                   <dt className="text-red-400 mb-1">{t('chatLog.tableError')}:</dt>
-                                  <dd className="text-red-300 font-mono text-xs whitespace-pre-wrap break-words bg-red-950/30 border border-red-900/40 rounded p-2">
+                                  <dd className="text-red-300 font-mono text-xs whitespace-pre-wrap wrap-break-word bg-red-950/30 border border-red-900/40 rounded-sm p-2">
                                     {it.errorMessage}
                                   </dd>
                                 </div>
@@ -413,7 +413,7 @@ export default function ChatLogSettings() {
 function StatCard({ label, value, tone }: { label: string; value: string | number; tone?: 'ok' | 'warn' }) {
   const valueClass = tone === 'warn' ? 'text-amber-300' : 'text-violet-200';
   return (
-    <div className="bg-gray-900/50 border border-gray-800 rounded p-3">
+    <div className="bg-gray-900/50 border border-gray-800 rounded-sm p-3">
       <div className="text-xs text-gray-500 uppercase tracking-wider">{label}</div>
       <div className={`text-2xl font-semibold mt-1 ${valueClass}`}>{value}</div>
     </div>

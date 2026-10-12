@@ -20,7 +20,7 @@ export default function TabToolbar({
   return (
     <div className={`flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center ${className}`}>
       {primaryAction && <div className="shrink-0">{primaryAction}</div>}
-      {search && <div className="min-w-0 flex-1 sm:min-w-[12rem]">{search}</div>}
+      {search && <div className="min-w-0 flex-1 sm:min-w-48">{search}</div>}
       {filters && <div className="flex flex-wrap items-center gap-2">{filters}</div>}
       <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
         {viewToggle}

@@ -126,7 +126,7 @@ export function KubeClusterForm({ scope, onCreated, onCancel }: KubeClusterFormP
             return (
               <label
                 key={ctx.contextName}
-                className="flex items-start gap-2 rounded border border-gray-700 p-2"
+                className="flex items-start gap-2 rounded-sm border border-gray-700 p-2"
               >
                 <input
                   type="radio"

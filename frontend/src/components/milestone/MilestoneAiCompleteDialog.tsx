@@ -214,7 +214,7 @@ export default function MilestoneAiCompleteDialog({ open, milestoneId, onClose, 
             /* Step 2: Suggestions table */
             <>
               {/* Info row */}
-              <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 bg-gray-800/30 rounded px-3 py-2">
+              <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 bg-gray-800/30 rounded-sm px-3 py-2">
                 {result.modelUsed && (
                   <span>Model: <span className="text-gray-300">{result.modelUsed}</span></span>
                 )}

@@ -343,14 +343,14 @@ claude mcp add --transport sse devgrimoire "http://[server]/sse?apiKey=cv_..."`}
           <Hint>
             {isDE ? (
               <>
-                <code className="bg-gray-800 px-1 rounded">--allow-http</code> ist n&ouml;tig, da{' '}
+                <code className="bg-gray-800 px-1 rounded-sm">--allow-http</code> ist n&ouml;tig, da{' '}
                 mcp-remote standardm&auml;&szlig;ig nur HTTPS erlaubt.
                 Config-Pfade: macOS <Mono>~/Library/Application Support/Claude/claude_desktop_config.json</Mono>,
                 Linux <Mono>~/.config/Claude/claude_desktop_config.json</Mono>
               </>
             ) : (
               <>
-                <code className="bg-gray-800 px-1 rounded">--allow-http</code> is required because{' '}
+                <code className="bg-gray-800 px-1 rounded-sm">--allow-http</code> is required because{' '}
                 mcp-remote only allows HTTPS by default.
                 Config paths: macOS <Mono>~/Library/Application Support/Claude/claude_desktop_config.json</Mono>,
                 Linux <Mono>~/.config/Claude/claude_desktop_config.json</Mono>
@@ -516,7 +516,7 @@ function AuthSection() {
         <div className="space-y-3">
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-900 text-purple-300">Admin</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-purple-900 text-purple-300">Admin</span>
               <span className="text-sm text-gray-300 font-medium">{isDE ? 'Administrator' : 'Administrator'}</span>
             </div>
             <ul className="text-sm text-gray-400 space-y-1 list-disc list-inside">
@@ -527,7 +527,7 @@ function AuthSection() {
           </div>
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">User</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-gray-800 text-gray-400">User</span>
               <span className="text-sm text-gray-300 font-medium">{isDE ? 'Benutzer' : 'User'}</span>
             </div>
             <ul className="text-sm text-gray-400 space-y-1 list-disc list-inside">
@@ -1862,7 +1862,7 @@ function ChatSection() {
             : 'Per-endpoint selectable in Settings → Chat. Multiple endpoints are tried in order (fallback on error).'}
         </p>
         <div className="text-sm">
-          <table className="w-full text-left border border-gray-800 rounded">
+          <table className="w-full text-left border border-gray-800 rounded-sm">
             <thead className="bg-gray-900 text-gray-300 text-xs">
               <tr>
                 <th className="px-3 py-2">Provider</th>
@@ -2013,7 +2013,7 @@ function ReplicationDocsSection() {
             ? 'Bei eingehender Änderung vergleicht der Empfänger die updatedAt-Timestamps. Älteres Incoming wird verworfen mit Log-Eintrag "LWW skipped". Bei simultanen Edits beider Seiten geht der frühere Edit verloren — bewusste Wahl gegen Komplexität von Vector Clocks oder CRDTs.'
             : 'On incoming change, the receiver compares updatedAt timestamps. Older incoming is discarded with log entry "LWW skipped". On simultaneous edits from both sides, the earlier edit is lost — deliberate choice against the complexity of vector clocks or CRDTs.'}
         </p>
-        <div className="bg-amber-900/20 border border-amber-800/40 rounded px-3 py-2 text-amber-200 text-xs">
+        <div className="bg-amber-900/20 border border-amber-800/40 rounded-sm px-3 py-2 text-amber-200 text-xs">
           {isDE
             ? '⚠ Beide Peer-Instanzen müssen NTP-synchron laufen, sonst wird LWW willkürlich (1 Sekunde Drift = Race Condition). Delete-Events bleiben unbedingt — kein LWW-Check.'
             : '⚠ Both peer instances must be NTP-synchronized, otherwise LWW becomes arbitrary (1 second drift = race condition). Delete events always apply — no LWW check.'}
@@ -2130,7 +2130,7 @@ function Code({ children }: { children: React.ReactNode }) {
 }
 
 function Mono({ children }: { children: React.ReactNode }) {
-  return <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded text-xs">{children}</code>;
+  return <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded-sm text-xs">{children}</code>;
 }
 
 function Hint({ children }: { children: React.ReactNode }) {

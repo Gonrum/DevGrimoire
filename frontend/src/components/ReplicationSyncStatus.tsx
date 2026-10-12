@@ -138,10 +138,10 @@ export default function ReplicationSyncStatus() {
   };
 
   const renderDirection = (label: string, h: ReplDirectionHealth, meta: string) => (
-    <div className="bg-gray-800/40 border border-gray-700/60 rounded px-3 py-2">
+    <div className="bg-gray-800/40 border border-gray-700/60 rounded-sm px-3 py-2">
       <div className="flex items-center justify-between mb-1">
         <span className="text-xs font-medium text-gray-300">{label}</span>
-        <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border ${HEALTH_COLORS[h.state] ?? HEALTH_COLORS.paused}`}>
+        <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-sm border ${HEALTH_COLORS[h.state] ?? HEALTH_COLORS.paused}`}>
           {t(`replication.health_${h.state}`)}
         </span>
       </div>
@@ -250,7 +250,7 @@ export default function ReplicationSyncStatus() {
         <div className="border-t border-gray-800 pt-3 space-y-1.5">
           <h3 className="text-xs font-medium text-gray-400">{t('replication.deadletterTitle')}</h3>
           {deadletters.map((d) => (
-            <div key={d._id} className="flex items-center gap-2 text-xs bg-gray-800/50 rounded px-2 py-1.5">
+            <div key={d._id} className="flex items-center gap-2 text-xs bg-gray-800/50 rounded-sm px-2 py-1.5">
               <span className={`uppercase tracking-wide text-[10px] px-1.5 py-0.5 rounded border ${
                 d.direction === 'inbound' ? 'text-cyan-300 border-cyan-800/40' : 'text-violet-300 border-violet-800/40'
               }`}>

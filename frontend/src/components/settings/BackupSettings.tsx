@@ -142,40 +142,40 @@ export default function BackupSettings() {
       <p className="text-gray-400">{t('settings.backups.description')}</p>
 
       {error && (
-        <div className="rounded border border-red-700 bg-red-900/50 px-4 py-2 text-red-300">
+        <div className="rounded-sm border border-red-700 bg-red-900/50 px-4 py-2 text-red-300">
           {error}
         </div>
       )}
       {success && (
-        <div className="rounded border border-green-700 bg-green-900/30 px-4 py-2 text-green-300">
+        <div className="rounded-sm border border-green-700 bg-green-900/30 px-4 py-2 text-green-300">
           {success}
         </div>
       )}
 
       <SettingsSection title={t('settings.backups.targetTitle')} description={t('settings.backups.targetDescription')}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded border border-gray-800 bg-gray-900/60 p-3">
+          <div className="rounded-sm border border-gray-800 bg-gray-900/60 p-3">
             <div className="text-xs text-gray-500">{t('settings.backups.minio')}</div>
             <div className={status?.minioEnabled ? 'text-green-300' : 'text-red-300'}>
               {status?.minioEnabled ? t('settings.backups.available') : t('settings.backups.notConfigured')}
             </div>
           </div>
-          <div className="rounded border border-gray-800 bg-gray-900/60 p-3">
+          <div className="rounded-sm border border-gray-800 bg-gray-900/60 p-3">
             <div className="text-xs text-gray-500">{t('settings.backups.bucket')}</div>
             <div className="break-all text-gray-200">{status?.bucket || '—'}</div>
           </div>
-          <div className="rounded border border-gray-800 bg-gray-900/60 p-3">
+          <div className="rounded-sm border border-gray-800 bg-gray-900/60 p-3">
             <div className="text-xs text-gray-500">{t('settings.backups.schedule')}</div>
             <div className="font-mono text-gray-200">{status?.enabled ? status.schedule : t('settings.backups.disabled')}</div>
           </div>
-          <div className="rounded border border-gray-800 bg-gray-900/60 p-3">
+          <div className="rounded-sm border border-gray-800 bg-gray-900/60 p-3">
             <div className="text-xs text-gray-500">{t('settings.backups.currentState')}</div>
             <div className={status?.running ? 'text-amber-300' : 'text-green-300'}>
               {status?.running ? t('settings.backups.running') : t('settings.backups.idle')}
             </div>
           </div>
         </div>
-        <div className="mt-3 rounded border border-gray-800 bg-gray-900/40 p-3 text-sm text-gray-300">
+        <div className="mt-3 rounded-sm border border-gray-800 bg-gray-900/40 p-3 text-sm text-gray-300">
           {t('settings.backups.retentionPolicy', {
             keepLast: status?.retention?.keepLast ?? 14,
             keepDays: status?.retention?.keepDays ?? 30,
@@ -219,15 +219,15 @@ export default function BackupSettings() {
       >
         {retentionPreview ? (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="rounded border border-gray-800 bg-gray-900/60 p-3">
+            <div className="rounded-sm border border-gray-800 bg-gray-900/60 p-3">
               <div className="text-xs text-gray-500">{t('settings.backups.deleteJobCount')}</div>
               <div className="text-gray-200">{retentionPreview.deleteJobCount}</div>
             </div>
-            <div className="rounded border border-gray-800 bg-gray-900/60 p-3">
+            <div className="rounded-sm border border-gray-800 bg-gray-900/60 p-3">
               <div className="text-xs text-gray-500">{t('settings.backups.deleteObjectCount')}</div>
               <div className="text-gray-200">{retentionPreview.deleteObjectCount}</div>
             </div>
-            <div className="rounded border border-gray-800 bg-gray-900/60 p-3">
+            <div className="rounded-sm border border-gray-800 bg-gray-900/60 p-3">
               <div className="text-xs text-gray-500">{t('settings.backups.dryRun')}</div>
               <div className="text-green-300">{retentionPreview.dryRun ? t('settings.backups.dryRunYes') : '—'}</div>
             </div>
@@ -264,7 +264,7 @@ export default function BackupSettings() {
                     className={`cursor-pointer border-b border-gray-900 hover:bg-gray-800/50 ${selectedJob?._id === job._id ? 'bg-violet-900/20' : ''}`}
                   >
                     <td className="px-3 py-2">
-                      <span className={`rounded border px-2 py-0.5 text-xs ${statusColor(job.status)}`}>
+                      <span className={`rounded-sm border px-2 py-0.5 text-xs ${statusColor(job.status)}`}>
                         {t(`settings.backups.status_${job.status}`)}
                       </span>
                     </td>
@@ -284,29 +284,29 @@ export default function BackupSettings() {
         <SettingsSection title={t('settings.backups.manifestTitle')} description={selectedJob.objectPrefix}>
           <div className="space-y-4">
             {selectedJob.error && (
-              <div className="rounded border border-red-800 bg-red-900/30 px-3 py-2 text-sm text-red-300">
+              <div className="rounded-sm border border-red-800 bg-red-900/30 px-3 py-2 text-sm text-red-300">
                 {selectedJob.error}
               </div>
             )}
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <div className="rounded bg-gray-900/70 p-3">
+              <div className="rounded-sm bg-gray-900/70 p-3">
                 <div className="text-xs text-gray-500">{t('settings.backups.finished')}</div>
                 <div className="text-gray-200">{formatDate(selectedJob.finishedAt)}</div>
               </div>
-              <div className="rounded bg-gray-900/70 p-3">
+              <div className="rounded-sm bg-gray-900/70 p-3">
                 <div className="text-xs text-gray-500">{t('settings.backups.includes')}</div>
                 <div className="text-gray-200">
                   {selectedJob.manifest?.includes?.database ? t('settings.backups.database') : '—'}
                   {selectedJob.manifest?.includes?.attachments ? `, ${t('settings.backups.attachments')}` : ''}
                 </div>
               </div>
-              <div className="rounded bg-gray-900/70 p-3">
+              <div className="rounded-sm bg-gray-900/70 p-3">
                 <div className="text-xs text-gray-500">{t('settings.backups.restorePreview')}</div>
                 <div className="text-gray-200">{selectedJob.manifest?.restore?.note ?? t('settings.backups.noRestoreNote')}</div>
               </div>
             </div>
 
-            <div className="rounded border border-gray-800 bg-gray-900/50 p-3">
+            <div className="rounded-sm border border-gray-800 bg-gray-900/50 p-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h4 className="text-sm font-medium text-gray-300">{t('settings.backups.restorePreviewCheckTitle')}</h4>
@@ -330,7 +330,7 @@ export default function BackupSettings() {
                   </div>
                   <div className="max-h-48 space-y-1 overflow-auto">
                     {restorePreview.checks.map((check) => (
-                      <div key={check.key} className="flex flex-wrap items-center gap-2 rounded bg-gray-950/60 px-2 py-1 text-xs">
+                      <div key={check.key} className="flex flex-wrap items-center gap-2 rounded-sm bg-gray-950/60 px-2 py-1 text-xs">
                         <span className={check.exists && check.sizeMatches && check.sha256Matches ? 'text-green-300' : 'text-red-300'}>
                           {check.exists && check.sizeMatches && check.sha256Matches ? '✓' : '!' }
                         </span>
@@ -346,7 +346,7 @@ export default function BackupSettings() {
               <h4 className="mb-2 text-sm font-medium text-gray-300">{t('settings.backups.artifacts')}</h4>
               <div className="space-y-2">
                 {(selectedJob.manifest?.artifacts ?? []).map((artifact) => (
-                  <div key={artifact.key} className="rounded border border-gray-800 bg-gray-900/50 p-3">
+                  <div key={artifact.key} className="rounded-sm border border-gray-800 bg-gray-900/50 p-3">
                     <div className="break-all font-mono text-xs text-cyan-300">{artifact.key}</div>
                     <div className="mt-1 flex flex-wrap gap-3 text-xs text-gray-500">
                       <span>{formatBytes(artifact.size)}</span>

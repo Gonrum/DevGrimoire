@@ -125,7 +125,7 @@ export default function GitRepoWidget({ projectId, gitRepositories, onNavigateTo
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   {repo.label && (
-                    <span className="text-xs font-medium text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded">
+                    <span className="text-xs font-medium text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded-sm">
                       {repo.label}
                     </span>
                   )}
@@ -157,7 +157,7 @@ export default function GitRepoWidget({ projectId, gitRepositories, onNavigateTo
 
               <div className="flex items-center gap-2">
                 {repo.syncEnabled === false && (
-                  <span className="text-[10px] text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded">
+                  <span className="text-[10px] text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded-sm">
                     {locale === 'de' ? 'Pausiert' : 'Paused'}
                   </span>
                 )}

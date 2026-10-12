@@ -189,7 +189,7 @@ export default function CustomersOverview() {
         <select
           value={status}
           onChange={(e) => setStatus(optionOr(e.target.value, STATUS_FILTERS, 'all'))}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500 w-full sm:w-44"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500 w-full sm:w-44"
         >
           <option value="all">{t('customers.status.all')}</option>
           <option value="lead">{t('customers.status.lead')}</option>
@@ -205,7 +205,7 @@ export default function CustomersOverview() {
           placeholder={t('customers.searchCustomers')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 w-full sm:w-64"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500 w-full sm:w-64"
         />
       </div>
       {customers.length === 0 ? (

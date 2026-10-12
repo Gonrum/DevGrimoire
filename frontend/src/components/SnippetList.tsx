@@ -330,7 +330,7 @@ export default function SnippetList({ entries, projectId, customerId, onUpdate }
                     </pre>
                     <button
                       onClick={(e) => { e.stopPropagation(); void handleCopy(snippet); }}
-                      className="absolute top-2 right-2 px-2 py-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded transition-colors"
+                      className="absolute top-2 right-2 px-2 py-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded-sm transition-colors"
                       title={t('snippets.copyCode')}
                     >
                       {copiedId === snippet._id ? t('snippets.copied') : t('snippets.copy')}

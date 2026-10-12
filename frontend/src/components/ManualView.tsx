@@ -67,14 +67,14 @@ function ManualForm({ projectId, customerId, manual, categories, onSaved, onCanc
       <div>
         <label className="block text-xs text-gray-500 mb-1">{t('manuals.titleLabel')}</label>
         <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
-          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500" autoFocus />
+          className="w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-1.5 text-sm text-gray-200 focus:outline-hidden focus:border-blue-500" autoFocus />
       </div>
       <div className="flex gap-3">
         <div className="flex-1">
           <label className="block text-xs text-gray-500 mb-1">{t('manuals.categoryLabel')}</label>
           <input type="text" value={category} onChange={(e) => setCategory(e.target.value)} placeholder={t('manuals.categoryPlaceholder')}
             list="manual-categories"
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500" />
+            className="w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-blue-500" />
           <datalist id="manual-categories">
             {categories.map((c) => <option key={c} value={c} />)}
           </datalist>
@@ -82,7 +82,7 @@ function ManualForm({ projectId, customerId, manual, categories, onSaved, onCanc
         <div className="w-24">
           <label className="block text-xs text-gray-500 mb-1">{t('manuals.sortOrder')}</label>
           <input type="number" value={sortOrder} onChange={(e) => setSortOrder(Number(e.target.value))}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500" />
+            className="w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-1.5 text-sm text-gray-200 focus:outline-hidden focus:border-blue-500" />
         </div>
       </div>
       <div>

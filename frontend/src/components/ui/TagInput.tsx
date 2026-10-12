@@ -138,7 +138,7 @@ export default function TagInput({
             blurTimer.current = setTimeout(() => setFocused(false), 120);
           }}
           placeholder={value.length === 0 ? placeholder : ''}
-          className="flex-1 min-w-[120px] bg-transparent text-sm text-gray-200 placeholder-gray-600 focus:outline-none"
+          className="flex-1 min-w-[120px] bg-transparent text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden"
         />
       </div>
       {focused && filteredSuggestions.length > 0 && (

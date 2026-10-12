@@ -37,13 +37,13 @@ export function QuestionAudienceBadge({
   }
 
   return (
-    <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded border bg-gray-800/60 text-gray-300 border-gray-700">
+    <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded-sm border bg-gray-800/60 text-gray-300 border-gray-700">
       <span aria-hidden="true">👥</span>
       <span>{label}</span>
       {escalationActive && (
         <span
           title={t('questions.escalationStepTitle', { step: question.escalationStep })}
-          className="ml-1 px-1 rounded bg-amber-900/40 text-amber-300 border border-amber-700/50"
+          className="ml-1 px-1 rounded-sm bg-amber-900/40 text-amber-300 border border-amber-700/50"
         >
           ↑{question.escalationStep}
         </span>
@@ -75,7 +75,7 @@ export function QuestionResponsesList({
       {responses.map((r, idx) => (
         <div
           key={`${r.userId ?? 'agent'}-${r.at}-${idx}`}
-          className="rounded border border-gray-800 bg-gray-950/40 px-2 py-1.5 text-xs"
+          className="rounded-sm border border-gray-800 bg-gray-950/40 px-2 py-1.5 text-xs"
         >
           <div className="flex items-center justify-between gap-2 text-[11px] text-gray-500 mb-0.5">
             <span>
@@ -91,7 +91,7 @@ export function QuestionResponsesList({
               })}
             </span>
           </div>
-          <p className="text-gray-200 whitespace-pre-wrap break-words">{r.answer}</p>
+          <p className="text-gray-200 whitespace-pre-wrap wrap-break-word">{r.answer}</p>
         </div>
       ))}
     </div>

@@ -119,7 +119,7 @@ export default function SoulView({ projectId, customerId, soul, onUpdate }: Prop
                     placeholder={t(`soul.${section.key}Placeholder`)}
                   />
                   {error && (
-                    <div className="mt-2 bg-red-900/20 border border-red-800 rounded px-3 py-2 text-sm text-red-400">
+                    <div className="mt-2 bg-red-900/20 border border-red-800 rounded-sm px-3 py-2 text-sm text-red-400">
                       {error}
                     </div>
                   )}

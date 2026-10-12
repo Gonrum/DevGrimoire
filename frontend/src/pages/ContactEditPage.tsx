@@ -125,7 +125,7 @@ export default function ContactEditPage() {
             type="number"
             value={sortOrder}
             onChange={(e) => setSortOrder(e.target.value)}
-            fieldClassName="sm:max-w-[10rem]"
+            fieldClassName="sm:max-w-40"
           />
         </div>
         <div className="flex gap-2 pt-2">

@@ -92,3 +92,22 @@ The same encryption service protects project secrets, chat endpoint API keys, an
 - Keep MongoDB bound to localhost unless you intentionally operate it behind a private network.
 - Put HTTP endpoints behind VPN, firewall, or a trusted reverse proxy.
 - Rotate `WORKSPACE_API_TOKEN`, `JWT_SECRET`, and `SECRETS_ENCRYPTION_KEY` deliberately; changing encryption keys can make existing encrypted values unreadable.
+
+## Bekannte, bewusst akzeptierte Audit-Funde
+
+Stand 2026-10-12. `npm audit --omit=dev` im Frontend: 0. Im Backend bleiben 4
+moderate Funde, alle transitiv über `minio@8.0.7` (aktuellste Version). npm
+schlägt als „Fix“ einen Downgrade auf `minio@7.1.3` vor — das ist kein Fix.
+
+| Paket | Advisory | Warum nicht erreichbar |
+|---|---|---|
+| `decode-uri-component` ≤0.4.2 (via `query-string@7`) | DoS beim **Decodieren** präparierter Percent-Escapes | minio ruft `query-string` ausschliesslich mit `stringify` auf (`internal/client.js`, `helpers.js`); decodiert wird nie. |
+| `stream-json` <3.6.0 | O(depth²)-Filter, JSONC-Rescan, Prototype Pollution im Assembler | Nur in `minio/dist/main/notification.js` (Bucket-Notification-Listener). Das Backend nutzt `listenBucketNotification` nicht. |
+| `query-string`, `minio` | Folgefunde der beiden obigen | — |
+
+Ein `overrides` ist keine Option: die gefixten Versionen beider Pakete sind
+ESM-only, minio lädt sie per `require()`. `query-string` erwartet von
+`require('decode-uri-component')` eine Funktion; `require(esm)` liefert ein
+Namespace-Objekt — der erste Upload bräche zur Laufzeit. Neu bewerten, sobald
+minio auf die ESM-Versionen umstellt oder das Backend `listenBucketNotification`
+verwenden will.

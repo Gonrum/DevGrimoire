@@ -259,7 +259,7 @@ export default function NotificationsSettings() {
                       value={quietFrom}
                       onChange={(e) => { void saveQuietHours({ from: e.target.value }); }}
                       disabled={quietSaving}
-                      className="mt-1 block w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+                      className="mt-1 block w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
                     />
                   </label>
                   <label className="text-xs text-gray-500">
@@ -269,7 +269,7 @@ export default function NotificationsSettings() {
                       value={quietTo}
                       onChange={(e) => { void saveQuietHours({ to: e.target.value }); }}
                       disabled={quietSaving}
-                      className="mt-1 block w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+                      className="mt-1 block w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
                     />
                   </label>
                 </div>

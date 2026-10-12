@@ -124,7 +124,7 @@ export default function QuestionDialog() {
   const seconds = remaining % 60;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs">
       <div className="bg-gray-900 border border-violet-500/50 rounded-xl shadow-2xl shadow-violet-500/10 max-w-lg w-full mx-4 overflow-hidden">
         {/* Header */}
         <div className="bg-violet-500/10 border-b border-violet-500/30 px-5 py-3 flex items-center justify-between">
@@ -190,7 +190,7 @@ export default function QuestionDialog() {
                   }
                 }}
                 placeholder={t('question.placeholder', 'Antwort eingeben...')}
-                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-violet-500"
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-hidden focus:border-violet-500"
                 autoFocus
               />
               <button

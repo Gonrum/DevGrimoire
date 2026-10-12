@@ -83,7 +83,7 @@ function SuggestionCard({
   const visibleEntities = suggestion.affectedEntities.slice(0, 6);
   const hiddenCount = Math.max(0, suggestion.affectedEntities.length - visibleEntities.length);
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded p-3 space-y-2">
+    <div className="bg-gray-900 border border-gray-800 rounded-sm p-3 space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         <Badge color={SEVERITY_COLORS[suggestion.severity]} rounded="full">
           {t(`oracle.severity.${suggestion.severity}`)}
@@ -99,7 +99,7 @@ function SuggestionCard({
         </span>
       </div>
       <div className="text-sm text-gray-100 font-medium leading-snug">{suggestion.title}</div>
-      <pre className="text-xs text-gray-400 whitespace-pre-wrap break-words leading-relaxed">
+      <pre className="text-xs text-gray-400 whitespace-pre-wrap wrap-break-word leading-relaxed">
         {suggestion.reason}
       </pre>
       {suggestion.recommendedAction && (
@@ -107,7 +107,7 @@ function SuggestionCard({
           <div className="text-gray-500 uppercase tracking-wide text-[10px] mb-0.5">
             {t('oracle.recommendedAction')}
           </div>
-          <pre className="text-gray-300 whitespace-pre-wrap break-words bg-gray-950 rounded p-2 text-xs leading-relaxed">
+          <pre className="text-gray-300 whitespace-pre-wrap wrap-break-word bg-gray-950 rounded-sm p-2 text-xs leading-relaxed">
             {suggestion.recommendedAction}
           </pre>
         </div>
@@ -315,7 +315,7 @@ export default function OracleView({ projectId, basePath }: Props) {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(optionOr(e.target.value, ORACLE_STATUS_FILTERS, 'all'))}
-          className="bg-gray-900 border border-gray-800 rounded text-xs px-2 py-1 text-gray-300"
+          className="bg-gray-900 border border-gray-800 rounded-sm text-xs px-2 py-1 text-gray-300"
         >
           <option value="all">{t('oracle.filter.allStatus')}</option>
           <option value="open">{t('oracle.status.open')}</option>

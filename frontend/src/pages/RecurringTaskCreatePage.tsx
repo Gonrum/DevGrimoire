@@ -123,7 +123,7 @@ export default function RecurringTaskCreatePage() {
     <WorkflowPageShell backTo={backLink} backLabel={backLabel} title={t('recurringTasks.createTitle')}>
       <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
         {error && (
-          <div className="rounded border border-red-800 bg-red-900/30 px-3 py-2 text-sm text-red-200">{error}</div>
+          <div className="rounded-sm border border-red-800 bg-red-900/30 px-3 py-2 text-sm text-red-200">{error}</div>
         )}
 
         <FormInput fieldClassName="w-full" label={t('common.title')} required type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('common.title')} autoFocus />
@@ -230,7 +230,7 @@ export default function RecurringTaskCreatePage() {
                   onChange={(e) => setChatPrompt(e.target.value)}
                   rows={4}
                   required={action === 'chat'}
-                  className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-none"
+                  className="w-full rounded-sm border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-hidden"
                   placeholder={t('recurringTasks.chatPromptPlaceholder')}
                 />
                 <p className="mt-1 text-xs text-gray-600">{t('recurringTasks.chatPromptHint')}</p>
@@ -242,7 +242,7 @@ export default function RecurringTaskCreatePage() {
                   value={chatSystemPrompt}
                   onChange={(e) => setChatSystemPrompt(e.target.value)}
                   rows={2}
-                  className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-none"
+                  className="w-full rounded-sm border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-hidden"
                   placeholder={t('recurringTasks.chatSystemPromptPlaceholder')}
                 />
               </div>

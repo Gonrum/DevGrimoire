@@ -46,7 +46,7 @@ export default function TodoDocProposalsBanner({ todoId, todoStatus, basePath }:
   if (proposals.length === 0) return null;
 
   return (
-    <div className="bg-amber-900/15 border border-amber-800/40 rounded p-3 mb-5">
+    <div className="bg-amber-900/15 border border-amber-800/40 rounded-sm p-3 mb-5">
       <div className="flex flex-wrap items-center gap-2 mb-2">
         <span className="text-sm font-medium text-amber-300">
           {t('docsHealth.banner.title', { count: proposals.length })}

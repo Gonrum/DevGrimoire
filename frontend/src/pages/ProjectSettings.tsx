@@ -247,10 +247,10 @@ export default function ProjectSettings() {
           <h2 className="text-lg font-semibold text-cyan-400">{t('projectSettings.numbering')}</h2>
           <p className="text-gray-500 text-sm mt-1">
             {t('projectSettings.numberingHelp')}{' '}
-            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{n}'}</code> {t('projectSettings.numberVar')},{' '}
-            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{type}'}</code> {t('projectSettings.typeVar')},{' '}
-            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{prefix}'}</code> {t('projectSettings.prefixVar')},{' '}
-            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded text-xs">{'{date}'}</code> {t('projectSettings.dateVar')}
+            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded-sm text-xs">{'{n}'}</code> {t('projectSettings.numberVar')},{' '}
+            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded-sm text-xs">{'{type}'}</code> {t('projectSettings.typeVar')},{' '}
+            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded-sm text-xs">{'{prefix}'}</code> {t('projectSettings.prefixVar')},{' '}
+            <code className="text-gray-400 bg-gray-800 px-1 py-0.5 rounded-sm text-xs">{'{date}'}</code> {t('projectSettings.dateVar')}
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -300,7 +300,7 @@ export default function ProjectSettings() {
           onChange={(e) => setInstructions(e.target.value)}
           rows={16}
           placeholder={t('projectSettings.instructionsPlaceholder')}
-          className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 resize-y font-mono leading-relaxed"
+          className="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500 resize-y font-mono leading-relaxed"
         />
 
         {!instructions.trim() && (
@@ -316,7 +316,7 @@ export default function ProjectSettings() {
       )}
 
       {showSaveBar && tab !== 'git' && (
-        <div className="sticky bottom-0 z-10 -mx-4 mb-8 flex items-center gap-3 border-t border-gray-800 bg-gray-950/95 px-4 py-3 backdrop-blur md:-mx-0 md:rounded-lg md:border md:bg-gray-900/80">
+        <div className="sticky bottom-0 z-10 -mx-4 mb-8 flex items-center gap-3 border-t border-gray-800 bg-gray-950/95 px-4 py-3 backdrop-blur-sm md:mx-0 md:rounded-lg md:border md:bg-gray-900/80">
           <Button type="button" variant="primary" size="lg" onClick={() => { void handleSave(); }} disabled={saving || !name.trim()}>
             {saving ? t('common.saving') : t('projectSettings.saveAll')}
           </Button>
@@ -338,7 +338,7 @@ export default function ProjectSettings() {
             type="checkbox"
             checked={includeSecrets}
             onChange={(e) => setIncludeSecrets(e.target.checked)}
-            className="mt-0.5 rounded border-gray-600 bg-gray-800 text-violet-500 focus:ring-violet-500"
+            className="mt-0.5 rounded-sm border-gray-600 bg-gray-800 text-violet-500 focus:ring-violet-500"
           />
           <span>{t('projectSettings.includeSecrets')}</span>
         </label>

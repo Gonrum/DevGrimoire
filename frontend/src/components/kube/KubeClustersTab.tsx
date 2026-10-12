@@ -90,7 +90,7 @@ export function KubeClustersTab({ scope }: KubeClustersTabProps) {
       {loading && <LoadingText />}
 
       {error !== null && !loading && (
-        <div className="rounded border border-red-700 bg-red-900/40 px-3 py-2 text-xs text-red-200">
+        <div className="rounded-sm border border-red-700 bg-red-900/40 px-3 py-2 text-xs text-red-200">
           {t('common.errorLoading', { error })}
         </div>
       )}
@@ -105,7 +105,7 @@ export function KubeClustersTab({ scope }: KubeClustersTabProps) {
             const status = kubeStatusOf(cluster);
             const result = results[cluster._id];
             return (
-              <li key={cluster._id} className="rounded border border-gray-800 bg-gray-900/50 p-3">
+              <li key={cluster._id} className="rounded-sm border border-gray-800 bg-gray-900/50 p-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium text-gray-200">{cluster.label}</span>
                   <Badge color={kubeStatusClasses(status)}>{t(STATUS_KEY[status])}</Badge>

@@ -437,28 +437,28 @@ function EditorInner() {
           <Link to="/workflows" className="text-gray-400 hover:text-gray-200"><ArrowLeft size={16} /></Link>
           <span className="truncate text-sm font-semibold text-gray-200">{workflow.name}</span>
           <StatusPill status={workflow.status} />
-          <span className="rounded bg-gray-800 px-2 py-0.5 text-[10px] text-gray-400">v{workflow.version}</span>
+          <span className="rounded-sm bg-gray-800 px-2 py-0.5 text-[10px] text-gray-400">v{workflow.version}</span>
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={() => { void handleSave(); }} disabled={saving} className="inline-flex items-center gap-1 rounded bg-gray-800 px-3 py-1 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-50">
+          <button onClick={() => { void handleSave(); }} disabled={saving} className="inline-flex items-center gap-1 rounded-sm bg-gray-800 px-3 py-1 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-50">
             <Save size={12} /> Speichern
           </button>
           {workflow.status !== 'active' && (
-            <button onClick={() => { void handleActivate(); }} className="inline-flex items-center gap-1 rounded bg-cyan-600 px-3 py-1 text-xs text-white hover:bg-cyan-500">
+            <button onClick={() => { void handleActivate(); }} className="inline-flex items-center gap-1 rounded-sm bg-cyan-600 px-3 py-1 text-xs text-white hover:bg-cyan-500">
               <CheckCircle size={12} /> Aktivieren
             </button>
           )}
           {workflow.status === 'active' && (
             <>
-              <button onClick={() => { void handleRun(); }} className="inline-flex items-center gap-1 rounded bg-green-600 px-3 py-1 text-xs text-white hover:bg-green-500">
+              <button onClick={() => { void handleRun(); }} className="inline-flex items-center gap-1 rounded-sm bg-green-600 px-3 py-1 text-xs text-white hover:bg-green-500">
                 <Play size={12} /> Run
               </button>
-              <button onClick={() => { void handleStatusChange('paused'); }} className="inline-flex items-center gap-1 rounded bg-amber-700 px-3 py-1 text-xs text-white hover:bg-amber-600">
+              <button onClick={() => { void handleStatusChange('paused'); }} className="inline-flex items-center gap-1 rounded-sm bg-amber-700 px-3 py-1 text-xs text-white hover:bg-amber-600">
                 <Pause size={12} /> Pause
               </button>
             </>
           )}
-          <button onClick={() => { void handleDelete(); }} className="inline-flex items-center gap-1 rounded bg-red-900/60 px-3 py-1 text-xs text-red-200 hover:bg-red-900">
+          <button onClick={() => { void handleDelete(); }} className="inline-flex items-center gap-1 rounded-sm bg-red-900/60 px-3 py-1 text-xs text-red-200 hover:bg-red-900">
             <Trash2 size={12} />
           </button>
         </div>
@@ -481,7 +481,7 @@ function EditorInner() {
           </button>
         )}
         {bp === 'tablet' && paletteOpen && (
-          <button onClick={() => setPaletteOpen(false)} className="absolute left-[252px] top-2 z-30 rounded bg-gray-800 p-1 text-gray-300"><X size={14} /></button>
+          <button onClick={() => setPaletteOpen(false)} className="absolute left-[252px] top-2 z-30 rounded-sm bg-gray-800 p-1 text-gray-300"><X size={14} /></button>
         )}
 
         <main className="flex-1">
@@ -573,7 +573,7 @@ function EditorInner() {
           </button>
         )}
         {bp === 'tablet' && inspectorOpen && (
-          <button onClick={() => setInspectorOpen(false)} className="absolute right-[312px] top-2 z-30 rounded bg-gray-800 p-1 text-gray-300"><X size={14} /></button>
+          <button onClick={() => setInspectorOpen(false)} className="absolute right-[312px] top-2 z-30 rounded-sm bg-gray-800 p-1 text-gray-300"><X size={14} /></button>
         )}
       </div>
 
@@ -635,5 +635,5 @@ function StatusPill({ status }: { status: WorkflowStatus }) {
     paused: 'bg-amber-900/60 text-amber-200',
     archived: 'bg-gray-800 text-gray-500',
   };
-  return <span className={`rounded px-2 py-0.5 text-[10px] uppercase ${map[status]}`}>{status}</span>;
+  return <span className={`rounded-sm px-2 py-0.5 text-[10px] uppercase ${map[status]}`}>{status}</span>;
 }

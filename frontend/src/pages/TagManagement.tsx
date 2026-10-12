@@ -173,21 +173,21 @@ export default function TagManagement() {
                           <button
                             type="button"
                             onClick={() => setDialog({ kind: 'rename', tag: tag.name })}
-                            className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300"
+                            className="text-xs px-2 py-1 rounded-sm bg-gray-800 hover:bg-gray-700 text-gray-300"
                           >
                             {t('tagManagement.action.rename')}
                           </button>
                           <button
                             type="button"
                             onClick={() => setDialog({ kind: 'merge', tag: tag.name })}
-                            className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300"
+                            className="text-xs px-2 py-1 rounded-sm bg-gray-800 hover:bg-gray-700 text-gray-300"
                           >
                             {t('tagManagement.action.merge')}
                           </button>
                           <button
                             type="button"
                             onClick={() => setDialog({ kind: 'delete', tag: tag.name })}
-                            className="text-xs px-2 py-1 rounded bg-red-900/40 hover:bg-red-900/70 text-red-300"
+                            className="text-xs px-2 py-1 rounded-sm bg-red-900/40 hover:bg-red-900/70 text-red-300"
                           >
                             {t('tagManagement.action.delete')}
                           </button>
@@ -272,7 +272,7 @@ function TagDialog({ dialog, tags, projectsCount, onCancel, onRename, onMerge, o
               value={value}
               onChange={(e) => setValue(e.target.value)}
               placeholder={t('tagManagement.dialog.newName')}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
               autoFocus
             />
             {isImpliedMerge && (
@@ -287,7 +287,7 @@ function TagDialog({ dialog, tags, projectsCount, onCancel, onRename, onMerge, o
           <select
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
             autoFocus
           >
             <option value="">{t('tagManagement.dialog.chooseTarget')}</option>

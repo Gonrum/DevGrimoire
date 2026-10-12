@@ -158,7 +158,7 @@ export default function AuditLog() {
         <select
           value={filters.action || ''}
           onChange={(e) => updateFilter({ action: e.target.value || undefined })}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500 min-w-[200px]"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500 min-w-[200px]"
         >
           <option value="">{t('auditLog.allActions')}</option>
           {actions.map((a) => (
@@ -168,7 +168,7 @@ export default function AuditLog() {
         <select
           value={filters.actionPrefix || ''}
           onChange={(e) => updateFilter({ actionPrefix: e.target.value || undefined })}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
           disabled={!!filters.action}
           title={filters.action ? t('auditLog.prefixDisabled') : undefined}
         >
@@ -180,7 +180,7 @@ export default function AuditLog() {
         <select
           value={filters.actorType || ''}
           onChange={(e) => updateFilter({ actorType: matchOption(e.target.value, ACTOR_TYPES) })}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
         >
           <option value="">{t('auditLog.allActors')}</option>
           <option value="user">{t('auditLog.actorUser')}</option>
@@ -191,14 +191,14 @@ export default function AuditLog() {
           type="datetime-local"
           value={filters.since ? filters.since.slice(0, 16) : ''}
           onChange={(e) => updateFilter({ since: e.target.value ? new Date(e.target.value).toISOString() : undefined })}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
           title={t('auditLog.since')}
         />
         <input
           type="datetime-local"
           value={filters.until ? filters.until.slice(0, 16) : ''}
           onChange={(e) => updateFilter({ until: e.target.value ? new Date(e.target.value).toISOString() : undefined })}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
           title={t('auditLog.until')}
         />
         {(filters.action || filters.actionPrefix || filters.actorType || filters.since || filters.until) && (
@@ -260,7 +260,7 @@ export default function AuditLog() {
                   )}
                 </div>
                 {isOpen && entry.meta && (
-                  <pre className="mt-2 text-[11px] bg-gray-950 border border-gray-800 rounded p-2 overflow-x-auto text-gray-300">
+                  <pre className="mt-2 text-[11px] bg-gray-950 border border-gray-800 rounded-sm p-2 overflow-x-auto text-gray-300">
                     {JSON.stringify(entry.meta, null, 2)}
                   </pre>
                 )}

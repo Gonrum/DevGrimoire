@@ -124,7 +124,7 @@ export default function ApiKeysSettings() {
       <SettingsTabHeader description={t('settings.apiKeysDescription')} />
 
       {apiKeyError && (
-        <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-2 rounded mb-4">
+        <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-2 rounded-sm mb-4">
           {apiKeyError}
         </div>
       )}
@@ -139,7 +139,7 @@ export default function ApiKeysSettings() {
             {t('settings.apiKeyRevealedWarning')}
           </p>
           <div className="flex items-center gap-2">
-            <code className="flex-1 break-all rounded bg-gray-950 px-3 py-2 font-mono text-sm text-green-400">
+            <code className="flex-1 break-all rounded-sm bg-gray-950 px-3 py-2 font-mono text-sm text-green-400">
               {revealedKey}
             </code>
             <Button variant="primary" size="sm" onClick={() => void copyToClipboard(revealedKey)}>
@@ -328,7 +328,7 @@ export default function ApiKeysSettings() {
       </SettingsSection>
 
       <SettingsSection title={t('settings.apiKeyUsageTitle')} description={t('settings.apiKeyUsageText')}>
-        <div className="space-y-2 rounded bg-gray-950/60 p-3 font-mono text-xs text-gray-400">
+        <div className="space-y-2 rounded-sm bg-gray-950/60 p-3 font-mono text-xs text-gray-400">
           <div><span className="text-gray-500"># Header</span></div>
           <div>Authorization: Bearer cv_...</div>
           <div className="mt-2"><span className="text-gray-500"># Query Parameter</span></div>

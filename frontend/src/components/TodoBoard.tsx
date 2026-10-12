@@ -108,18 +108,18 @@ function TodoEditForm({ todo, onSaved, onCancel, showError }: { todo: Todo; onSa
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-2">
       <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-violet-500" autoFocus />
+        className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500" autoFocus />
       <MarkdownEditor value={description} onChange={setDescription} rows={2} placeholder={t('todos.descriptionPlaceholder')} />
       <div className="flex gap-2 items-center">
         <select value={priority} onChange={(e) => setPriority(optionOr(e.target.value, PRIORITIES, priority))}
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-violet-500">
+          className="bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-200 focus:outline-hidden focus:border-violet-500">
           <option value="low">{t('todoPriority.low')}</option>
           <option value="medium">{t('todoPriority.medium')}</option>
           <option value="high">{t('todoPriority.high')}</option>
           <option value="critical">{t('todoPriority.critical')}</option>
         </select>
         <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('common.tags')}
-          className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+          className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500" />
       </div>
       <div className="flex gap-2">
         <Button type="submit" variant="primary" size="xs" disabled={saving || !title.trim()}>
@@ -168,7 +168,7 @@ function TodoComments({ todo, onUpdate, showError }: { todo: Todo; onUpdate: () 
       {expanded && (
         <div className="mt-2 space-y-2">
           {comments.map((c, i) => (
-            <div key={i} className="text-xs bg-gray-800/50 rounded p-2">
+            <div key={i} className="text-xs bg-gray-800/50 rounded-sm p-2">
               <div className="flex justify-between text-gray-500 mb-0.5">
                 <span className={c.author === 'claude' ? 'text-cyan-400' : 'text-gray-400'}>{c.author}</span>
                 <span>{new Date(c.createdAt).toLocaleDateString(dateLocale, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
@@ -180,7 +180,7 @@ function TodoComments({ todo, onUpdate, showError }: { todo: Todo; onUpdate: () 
             <input type="text" value={text} onChange={(e) => setText(e.target.value)}
               placeholder={t('todos.commentPlaceholder')} onKeyDown={(e) => { if (e.key === 'Enter') void handleAdd(); }}
               aria-label={t('todos.commentPlaceholder')}
-              className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+              className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500" />
             <Button type="button" size="xs" onClick={() => { void handleAdd(); }} disabled={saving || !text.trim()}>
               {saving ? '...' : t('common.send')}
             </Button>
@@ -204,7 +204,7 @@ function AcceptanceProgressBadge({ todo }: { todo: Todo }) {
       : 'bg-gray-800 text-gray-400';
   return (
     <span
-      className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] ${colorClass}`}
+      className={`inline-flex items-center gap-0.5 rounded-sm px-1.5 py-0.5 text-[10px] ${colorClass}`}
       title={t('todos.acceptanceProgress', { done, total })}
     >
       <span aria-hidden="true">☑</span>
@@ -321,7 +321,7 @@ function TodoCard({ todo, allTodos, basePath, onUpdate, onDragStart, showError, 
       {todo.tags.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-2">
           {todo.tags.map((tag) => (
-            <span key={tag} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">{tag}</span>
+            <span key={tag} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded-sm">{tag}</span>
           ))}
         </div>
       )}
@@ -403,7 +403,7 @@ function TodoListRow({ todo, basePath, onUpdate, showError, questionSummary }: {
       <td className="py-2.5 px-3 hidden sm:table-cell">
         <div className="flex flex-wrap gap-1">
           {todo.tags.map((tag) => (
-            <span key={tag} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">{tag}</span>
+            <span key={tag} className="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded-sm">{tag}</span>
           ))}
         </div>
       </td>
@@ -538,7 +538,7 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
     }
   };
 
-  const selectClass = 'bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-violet-500';
+  const selectClass = 'bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-300 focus:outline-hidden focus:border-violet-500';
 
   return (
     <div>
@@ -553,7 +553,7 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
           <input type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Escape') setSearchQuery(''); }}
             placeholder={t('todos.searchPlaceholder')} aria-label={t('todos.searchPlaceholder')}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500" />
+            className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500" />
         )}
         filters={(
           <>
@@ -607,7 +607,7 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
               <option value="title">{t('todos.sortTitle')}</option>
             </select>
             <button type="button" onClick={() => setSortDir((d) => d === 'asc' ? 'desc' : 'asc')}
-              className="text-xs px-2 py-1 bg-gray-800 border border-gray-700 rounded text-gray-400 hover:text-gray-200 transition-colors"
+              className="text-xs px-2 py-1 bg-gray-800 border border-gray-700 rounded-sm text-gray-400 hover:text-gray-200 transition-colors"
               title={sortDir === 'asc' ? t('todos.ascending') : t('todos.descending')}>
               {sortDir === 'asc' ? '↑' : '↓'}
             </button>
@@ -617,13 +617,13 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
           <>
             {archivableDone.length > 0 && (
               <button type="button" onBlur={() => setConfirmArchiveAll(false)} onClick={() => { void archiveAllDone(); }}
-                className={`text-xs px-2 py-1 rounded transition-colors ${confirmArchiveAll ? 'bg-yellow-900/60 text-yellow-300' : 'text-gray-600 hover:text-gray-400'}`}>
+                className={`text-xs px-2 py-1 rounded-sm transition-colors ${confirmArchiveAll ? 'bg-yellow-900/60 text-yellow-300' : 'text-gray-600 hover:text-gray-400'}`}>
                 {confirmArchiveAll ? t('todos.archiveConfirm', { count: archivableDone.length }) : t('todos.archiveCompleted', { count: archivableDone.length })}
               </button>
             )}
             {archivedCount > 0 && (
               <button type="button" onClick={() => setShowArchived(!showArchived)}
-                className={`text-xs px-2 py-1 rounded transition-colors ${showArchived ? 'bg-gray-700 text-gray-300' : 'text-gray-600 hover:text-gray-400'}`}>
+                className={`text-xs px-2 py-1 rounded-sm transition-colors ${showArchived ? 'bg-gray-700 text-gray-300' : 'text-gray-600 hover:text-gray-400'}`}>
                 {showArchived ? t('todos.hideArchive', { count: archivedCount }) : t('todos.showArchive', { count: archivedCount })}
               </button>
             )}
@@ -671,7 +671,7 @@ export default function TodoBoard({ todos, milestones, projectId, customerId, on
                   {col.label()}{' '}
                   <span className="text-gray-600">({items.length})</span>
                 </h3>
-                <div className="space-y-2 min-h-[2rem]" role="list" aria-label={col.label()}>
+                <div className="space-y-2 min-h-8" role="list" aria-label={col.label()}>
                   {items.map((todo) => (
                     <TodoCard key={todo._id} todo={todo} allTodos={todos} basePath={basePath} onUpdate={onUpdate}
                       onDragStart={(id) => setDragTodoId(id || null)} showError={showError}

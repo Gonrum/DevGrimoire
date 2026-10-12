@@ -387,7 +387,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     {repo.label && (
-                      <span className="text-xs font-medium text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded">
+                      <span className="text-xs font-medium text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded-sm">
                         {repo.label}
                       </span>
                     )}
@@ -407,7 +407,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                           onChange={(e) => { void handleUpdateBranch(i, e.target.value); }}
                           onBlur={() => { setEditingBranch(null); setBranchOptions([]); }}
                           autoFocus
-                          className="bg-gray-800 border border-violet-500 rounded px-1.5 py-0.5 text-xs text-gray-200 focus:outline-none"
+                          className="bg-gray-800 border border-violet-500 rounded-sm px-1.5 py-0.5 text-xs text-gray-200 focus:outline-hidden"
                         >
                           {!branchOptions.some((b) => b.name === (repo.defaultBranch || 'main')) && (
                             <option value={repo.defaultBranch || 'main'}>{repo.defaultBranch || 'main'}</option>

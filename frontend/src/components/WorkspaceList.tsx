@@ -191,7 +191,7 @@ export default function WorkspaceList({ projectId }: Props) {
           <select
             value={filter}
             onChange={(e) => setFilter(optionOr(e.target.value, FILTER_OPTIONS, 'all'))}
-            className="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded px-2 py-1.5"
+            className="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded-sm px-2 py-1.5"
           >
             <option value="active">{t('workspaces.filterActive')}</option>
             <option value="archived">{t('workspaces.filterArchived')}</option>
@@ -394,7 +394,7 @@ function CreateWorkspaceForm({
           <select
             value={form.gitRepoId}
             onChange={(e) => update({ gitRepoId: e.target.value })}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+            className="w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
           >
             <option value="">{t('workspaces.formGitRepoDefault')}</option>
             {gitRepos.map((r) => (

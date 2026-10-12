@@ -232,7 +232,7 @@ export default function HarnessView({ owner, resolveProjectId }: Props) {
       </div>
 
       {error && (
-        <div className="mb-4 bg-red-900/20 border border-red-800 rounded px-3 py-2 text-sm text-red-400">
+        <div className="mb-4 bg-red-900/20 border border-red-800 rounded-sm px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
@@ -342,7 +342,7 @@ function SectionEditor({
             <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-sm font-medium text-gray-200 break-words">
+                  <h3 className="text-sm font-medium text-gray-200 wrap-break-word">
                     {section.title || section.key}
                   </h3>
                   <span
@@ -353,7 +353,7 @@ function SectionEditor({
                     {section.kind}
                   </span>
                   {!section.enabled && (
-                    <span className="px-1.5 py-0.5 rounded border border-gray-700 bg-gray-800 text-[11px] text-gray-400">
+                    <span className="px-1.5 py-0.5 rounded-sm border border-gray-700 bg-gray-800 text-[11px] text-gray-400">
                       {t('harness.tombstone')}
                     </span>
                   )}
@@ -519,7 +519,7 @@ function OriginTrail({ origin }: { origin: ResolvedSectionOrigin[] }) {
       {origin.map((step, i) => (
         <span key={`${step.scope}-${step.customerId ?? ''}-${i}`} className="flex items-center gap-1">
           {i > 0 && <span className="text-gray-600 text-xs">→</span>}
-          <span className={`px-1.5 py-0.5 rounded border text-[11px] ${SCOPE_BADGE[step.scope]}`}>
+          <span className={`px-1.5 py-0.5 rounded-sm border text-[11px] ${SCOPE_BADGE[step.scope]}`}>
             {t(`harness.scope.${step.scope}`)}
             {i > 0 && <span className="ml-1 opacity-75">{t(`harness.merge.${step.mergeStrategy}Short`)}</span>}
           </span>
@@ -553,7 +553,7 @@ function ResolvedPreview({
             {resolved.resolvedFrom.map((level, i) => (
               <span key={`${level.scope}-${level.customerId ?? level.projectId ?? ''}-${i}`} className="flex items-center gap-1">
                 {i > 0 && <span className="text-gray-600 text-xs">→</span>}
-                <span className={`px-1.5 py-0.5 rounded border text-[11px] ${SCOPE_BADGE[level.scope]}`}>
+                <span className={`px-1.5 py-0.5 rounded-sm border text-[11px] ${SCOPE_BADGE[level.scope]}`}>
                   {t(`harness.scope.${level.scope}`)}
                 </span>
               </span>
@@ -574,7 +574,7 @@ function ResolvedPreview({
             {resolved.suppressed.map((s) => (
               <span
                 key={s.key}
-                className="px-2 py-0.5 rounded border border-gray-700 bg-gray-800 text-xs text-gray-400 line-through"
+                className="px-2 py-0.5 rounded-sm border border-gray-700 bg-gray-800 text-xs text-gray-400 line-through"
               >
                 {s.key}
               </span>
@@ -592,7 +592,7 @@ function ResolvedPreview({
           <div key={section.key} className="bg-gray-900 border border-gray-800 rounded-lg p-4">
             <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
               <div className="min-w-0">
-                <h3 className="text-sm font-medium text-gray-200 break-words">
+                <h3 className="text-sm font-medium text-gray-200 wrap-break-word">
                   {section.title || section.key}
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5 font-mono break-all">{section.key}</p>

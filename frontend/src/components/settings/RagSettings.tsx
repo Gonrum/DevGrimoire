@@ -28,11 +28,11 @@ export default function RagSettings() {
     <>
       <SettingsTabHeader description={t('settings.ragDescription')} />
 
-      {error && <div className="mb-4 rounded border border-red-700 bg-red-900/50 px-4 py-2 text-red-300">{error}</div>}
-      {success && <div className="mb-4 rounded border border-green-700 bg-green-900/40 px-4 py-2 text-green-300">{success}</div>}
+      {error && <div className="mb-4 rounded-sm border border-red-700 bg-red-900/50 px-4 py-2 text-red-300">{error}</div>}
+      {success && <div className="mb-4 rounded-sm border border-green-700 bg-green-900/40 px-4 py-2 text-green-300">{success}</div>}
 
       <SettingsSection title={t('settings.ragOptionsTitle')} description={t('settings.ragOptionsDescription')}>
-        <div className="mb-4 rounded border border-amber-700/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">
+        <div className="mb-4 rounded-sm border border-amber-700/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">
           {t('settings.ragReindexWarning')}
         </div>
 

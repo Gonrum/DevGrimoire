@@ -42,7 +42,7 @@ export default function Login() {
 
         <form onSubmit={(e) => { void handleSubmit(e); }} className="bg-gray-900 border border-gray-800 rounded-lg p-6 space-y-4">
           {error && (
-            <div className="bg-red-900/20 border border-red-800 rounded px-3 py-2 text-sm text-red-400">
+            <div className="bg-red-900/20 border border-red-800 rounded-sm px-3 py-2 text-sm text-red-400">
               {error}
             </div>
           )}
@@ -54,7 +54,7 @@ export default function Login() {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+              className="w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500"
               autoFocus
               autoComplete="username"
             />
@@ -67,7 +67,7 @@ export default function Login() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+              className="w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500"
               autoComplete="current-password"
             />
           </div>

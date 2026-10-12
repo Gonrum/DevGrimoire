@@ -262,12 +262,12 @@ export default function CustomerTemplatesSettings() {
       <SettingsTabHeader description={t('customerTemplates.tabDescription')} />
 
       {error && (
-        <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-2 rounded mb-4">
+        <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-2 rounded-sm mb-4">
           {error}
         </div>
       )}
       {success && (
-        <div className="bg-green-900/50 border border-green-700 text-green-300 px-4 py-2 rounded mb-4">
+        <div className="bg-green-900/50 border border-green-700 text-green-300 px-4 py-2 rounded-sm mb-4">
           {success}
         </div>
       )}
@@ -286,7 +286,7 @@ export default function CustomerTemplatesSettings() {
           {templates.map((tpl) => (
             <div
               key={tpl._id}
-              className="border border-gray-700 rounded p-4 bg-gray-900/40"
+              className="border border-gray-700 rounded-sm p-4 bg-gray-900/40"
             >
               <div className="flex justify-between items-start gap-4">
                 <div>
@@ -303,7 +303,7 @@ export default function CustomerTemplatesSettings() {
                     <p className="text-sm text-gray-300 mt-2">{tpl.description}</p>
                   )}
                 </div>
-                <div className="flex gap-2 flex-shrink-0">
+                <div className="flex gap-2 shrink-0">
                   <Button variant="secondary" onClick={() => openApply(tpl)} disabled={!tpl.active}>
                     {t('customerTemplates.apply')}
                   </Button>

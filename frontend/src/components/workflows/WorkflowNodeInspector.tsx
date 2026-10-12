@@ -103,8 +103,8 @@ function NodeInspector(p: Props) {
         <div className="flex items-center justify-between">
           <span className="font-mono text-xs text-gray-300">id: {node.id}</span>
           <div className="flex gap-1">
-            <button onClick={p.onDuplicateNode} title="Duplizieren" className="rounded p-1 text-gray-300 hover:bg-gray-800"><Copy size={14} /></button>
-            <button onClick={p.onDeleteNode} title="Löschen" className="rounded p-1 text-gray-300 hover:bg-gray-800 hover:text-red-400"><Trash2 size={14} /></button>
+            <button onClick={p.onDuplicateNode} title="Duplizieren" className="rounded-sm p-1 text-gray-300 hover:bg-gray-800"><Copy size={14} /></button>
+            <button onClick={p.onDeleteNode} title="Löschen" className="rounded-sm p-1 text-gray-300 hover:bg-gray-800 hover:text-red-400"><Trash2 size={14} /></button>
           </div>
         </div>
         <div className="mt-1 text-sm text-gray-200">{meta?.label ?? node.type}</div>
@@ -177,7 +177,7 @@ function NodeInspector(p: Props) {
                     <button
                       type="button"
                       onClick={() => p.onSelectEdge(edge.id)}
-                      className="flex w-full items-center justify-between gap-2 rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-left text-xs hover:border-cyan-700 hover:bg-gray-800"
+                      className="flex w-full items-center justify-between gap-2 rounded-sm border border-gray-800 bg-gray-900 px-2 py-1.5 text-left text-xs hover:border-cyan-700 hover:bg-gray-800"
                     >
                       <span className="flex items-center gap-1 text-gray-300">
                         <ArrowRight size={12} className="text-gray-500" />
@@ -253,7 +253,7 @@ function EdgeInspector({ edge, sourceOutputs, onChangeBranch, onChangePayloadMap
         <label className="mb-1 block text-xs uppercase tracking-wide text-gray-500">Branch</label>
         <div className="flex flex-wrap gap-1">
           {branches.map((b) => (
-            <button key={b} onClick={() => onChangeBranch(b)} className={`rounded px-2 py-1 text-xs ${current === b ? 'bg-cyan-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>{b}</button>
+            <button key={b} onClick={() => onChangeBranch(b)} className={`rounded-sm px-2 py-1 text-xs ${current === b ? 'bg-cyan-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>{b}</button>
           ))}
         </div>
       </div>
@@ -264,14 +264,14 @@ function EdgeInspector({ edge, sourceOutputs, onChangeBranch, onChangePayloadMap
           <button
             type="button"
             onClick={() => onChangePayloadMapping(undefined)}
-            className={`flex-1 rounded px-2 py-1 text-xs ${!isMapped ? 'bg-cyan-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+            className={`flex-1 rounded-sm px-2 py-1 text-xs ${!isMapped ? 'bg-cyan-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
           >
             Pass-through
           </button>
           <button
             type="button"
             onClick={() => { if (!isMapped) addRow(); }}
-            className={`flex-1 rounded px-2 py-1 text-xs ${isMapped ? 'bg-cyan-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+            className={`flex-1 rounded-sm px-2 py-1 text-xs ${isMapped ? 'bg-cyan-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
           >
             Felder mappen
           </button>
@@ -293,7 +293,7 @@ function EdgeInspector({ edge, sourceOutputs, onChangeBranch, onChangePayloadMap
                     value={targetKey}
                     onChange={(e) => updateMappingKey(targetKey, e.target.value)}
                     placeholder="target-key"
-                    className="w-1/2 rounded bg-gray-900 border border-gray-800 px-2 py-1 font-mono text-xs text-gray-200 focus:border-cyan-700 focus:outline-none"
+                    className="w-1/2 rounded-sm bg-gray-900 border border-gray-800 px-2 py-1 font-mono text-xs text-gray-200 focus:border-cyan-700 focus:outline-hidden"
                   />
                   <span className="text-gray-600">←</span>
                   <input
@@ -302,12 +302,12 @@ function EdgeInspector({ edge, sourceOutputs, onChangeBranch, onChangePayloadMap
                     onChange={(e) => updateMappingValue(targetKey, e.target.value)}
                     placeholder="source-path"
                     list={`src-out-${edge.id}`}
-                    className="w-1/2 rounded bg-gray-900 border border-gray-800 px-2 py-1 font-mono text-xs text-gray-200 focus:border-cyan-700 focus:outline-none"
+                    className="w-1/2 rounded-sm bg-gray-900 border border-gray-800 px-2 py-1 font-mono text-xs text-gray-200 focus:border-cyan-700 focus:outline-hidden"
                   />
                   <button
                     type="button"
                     onClick={() => removeRow(targetKey)}
-                    className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-red-400"
+                    className="rounded-sm p-1 text-gray-500 hover:bg-gray-800 hover:text-red-400"
                     title="Zeile entfernen"
                   >
                     <X size={12} />
@@ -322,7 +322,7 @@ function EdgeInspector({ edge, sourceOutputs, onChangeBranch, onChangePayloadMap
               <button
                 type="button"
                 onClick={addRow}
-                className="mt-1 flex items-center gap-1 rounded bg-gray-800 px-2 py-1 text-xs text-gray-300 hover:bg-gray-700"
+                className="mt-1 flex items-center gap-1 rounded-sm bg-gray-800 px-2 py-1 text-xs text-gray-300 hover:bg-gray-700"
               >
                 <Plus size={12} /> Zeile
               </button>
@@ -331,7 +331,7 @@ function EdgeInspector({ edge, sourceOutputs, onChangeBranch, onChangePayloadMap
         )}
       </div>
 
-      <button onClick={onDelete} className="self-start rounded bg-red-900/50 px-3 py-1 text-xs text-red-200 hover:bg-red-900">Edge löschen</button>
+      <button onClick={onDelete} className="self-start rounded-sm bg-red-900/50 px-3 py-1 text-xs text-red-200 hover:bg-red-900">Edge löschen</button>
     </div>
   );
 }

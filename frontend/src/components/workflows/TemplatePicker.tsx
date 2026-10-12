@@ -33,7 +33,7 @@ export function TemplatePicker({ options, onPick }: Props) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center justify-center w-8 h-8 rounded text-gray-400 hover:bg-gray-800 hover:text-cyan-300"
+        className="inline-flex items-center justify-center w-8 h-8 rounded-sm text-gray-400 hover:bg-gray-800 hover:text-cyan-300"
         title="Template-Pfad einfügen"
       >
         <Braces size={16} />

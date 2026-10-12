@@ -241,7 +241,7 @@ function SchemaForm({
           </div>
           <div className="space-y-2">
             {form.fields.map((field, i) => (
-              <div key={i} className="flex flex-col sm:flex-row items-start gap-2 bg-gray-800/50 rounded p-2">
+              <div key={i} className="flex flex-col sm:flex-row items-start gap-2 bg-gray-800/50 rounded-sm p-2">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 w-full">
                   <FormInput
                     placeholder={t('schemas.fieldName')}
@@ -270,7 +270,7 @@ function SchemaForm({
                       type="checkbox"
                       checked={field.nullable !== false}
                       onChange={(e) => updateField(i, { nullable: e.target.checked })}
-                      className="rounded bg-gray-700 border-gray-600"
+                      className="rounded-sm bg-gray-700 border-gray-600"
                     />
                     NULL
                   </label>
@@ -279,7 +279,7 @@ function SchemaForm({
                       type="checkbox"
                       checked={!!field.isPrimaryKey}
                       onChange={(e) => updateField(i, { isPrimaryKey: e.target.checked })}
-                      className="rounded bg-gray-700 border-gray-600"
+                      className="rounded-sm bg-gray-700 border-gray-600"
                     />
                     PK
                   </label>
@@ -288,7 +288,7 @@ function SchemaForm({
                       type="checkbox"
                       checked={!!field.isIndexed}
                       onChange={(e) => updateField(i, { isIndexed: e.target.checked })}
-                      className="rounded bg-gray-700 border-gray-600"
+                      className="rounded-sm bg-gray-700 border-gray-600"
                     />
                     IDX
                   </label>
@@ -323,7 +323,7 @@ function SchemaForm({
           ) : (
             <div className="space-y-2">
               {form.indexes.map((idx, i) => (
-                <div key={i} className="flex items-start gap-2 bg-gray-800/50 rounded p-2">
+                <div key={i} className="flex items-start gap-2 bg-gray-800/50 rounded-sm p-2">
                   <div className="flex-1 space-y-2">
                     <div className="flex gap-2">
                       <FormInput
@@ -342,7 +342,7 @@ function SchemaForm({
                       {idx.fields.map((f, fi) => (
                         <div key={fi} className="flex items-center gap-1">
                           <input
-                            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 w-28 focus:outline-none focus:border-violet-500"
+                            className="bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-200 w-28 focus:outline-hidden focus:border-violet-500"
                             placeholder={t('schemas.fieldNamePlaceholder')}
                             value={f}
                             onChange={(e) => updateIndexField(i, fi, e.target.value)}
@@ -373,7 +373,7 @@ function SchemaForm({
                         type="checkbox"
                         checked={!!idx.unique}
                         onChange={(e) => updateIndex(i, { unique: e.target.checked })}
-                        className="rounded bg-gray-700 border-gray-600"
+                        className="rounded-sm bg-gray-700 border-gray-600"
                       />
                       Unique
                     </label>

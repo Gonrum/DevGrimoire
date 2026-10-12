@@ -407,7 +407,7 @@ export default function SshConnectionForm({
         >
           <div className="p-5 space-y-3 max-h-[80vh] overflow-y-auto">
             {inlineError && (
-              <div className="rounded border border-red-700 bg-red-900/40 px-3 py-2 text-xs text-red-200">
+              <div className="rounded-sm border border-red-700 bg-red-900/40 px-3 py-2 text-xs text-red-200">
                 {inlineError}
               </div>
             )}
@@ -510,7 +510,7 @@ export default function SshConnectionForm({
               </div>
 
               {isEdit && !credentialsUnlocked ? (
-                <div className="rounded border border-gray-800 bg-gray-900/50 px-3 py-3 text-sm text-gray-400">
+                <div className="rounded-sm border border-gray-800 bg-gray-900/50 px-3 py-3 text-sm text-gray-400">
                   <div className="mb-2">{t('ssh.form.credentialsLocked')}</div>
                   <ConfirmButton
                     label={t('ssh.form.changeCredentials')}

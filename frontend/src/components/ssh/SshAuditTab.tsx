@@ -172,7 +172,7 @@ export default function SshAuditTab({ open, onClose, connection }: SshAuditTabPr
             <select
               value={sourceContext}
               onChange={(e) => setSourceContext(optionOr(e.target.value, SOURCE_FILTER_VALUES, ''))}
-              className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-500"
+              className="bg-gray-800 border border-gray-700 rounded-sm px-3 py-1.5 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
             >
               {sourceOptions.map((opt) => (
                 <option key={opt.value || 'all'} value={opt.value}>
@@ -193,7 +193,7 @@ export default function SshAuditTab({ open, onClose, connection }: SshAuditTabPr
           {loading && <LoadingText />}
 
           {error && !loading && (
-            <div className="rounded border border-red-700 bg-red-900/40 px-3 py-2 text-xs text-red-200 flex items-center justify-between gap-2">
+            <div className="rounded-sm border border-red-700 bg-red-900/40 px-3 py-2 text-xs text-red-200 flex items-center justify-between gap-2">
               <span>{t('common.errorLoading', { error })}</span>
               {/* `reload()` surfaces its own failure via the `error` state that
                   renders this very banner → `void` is enough. */}

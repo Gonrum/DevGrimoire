@@ -46,7 +46,7 @@ export function SchemaObjectAccordion({ schema, value, onChange, templateOptions
   }));
 
   if (propsWithMeta.length === 0) {
-    return <div className="rounded border border-gray-800 bg-gray-900/30 p-3 text-xs text-gray-500">Kein konfigurierbares Feld.</div>;
+    return <div className="rounded-sm border border-gray-800 bg-gray-900/30 p-3 text-xs text-gray-500">Kein konfigurierbares Feld.</div>;
   }
 
   return (
@@ -80,7 +80,7 @@ function AccordionSection({ fieldKey, schema, required, value, onChange, templat
   const summary = describeValue(value, schema);
 
   return (
-    <div className={`rounded border ${required ? 'border-gray-700' : 'border-gray-800'} bg-gray-900/40`}>
+    <div className={`rounded-sm border ${required ? 'border-gray-700' : 'border-gray-800'} bg-gray-900/40`}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

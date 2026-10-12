@@ -229,7 +229,7 @@ export default function GlobalSearch() {
               if (query.trim()) setOpen(true);
             }}
             onKeyDown={handleKeyDown}
-            className="w-48 sm:w-64 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500 transition-colors"
+            className="w-48 sm:w-64 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500 transition-colors"
           />
           {loading && (
             <div className="absolute right-2 top-1/2 -translate-y-1/2">
@@ -254,7 +254,7 @@ export default function GlobalSearch() {
       </div>
 
       {open && query.trim() && (
-        <div className="absolute top-full mt-1 right-0 w-[calc(100vw-2rem)] sm:w-96 md:w-[28rem] max-h-[24rem] overflow-y-auto bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50">
+        <div className="absolute top-full mt-1 right-0 w-[calc(100vw-2rem)] sm:w-96 md:w-md max-h-96 overflow-y-auto bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50">
           {ordered.length === 0 && !loading && (
             <div className="px-4 py-6 text-center text-gray-500 text-sm">
               {t('common.noResults', { query })}
@@ -286,7 +286,7 @@ export default function GlobalSearch() {
                     }`}
                   >
                     <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded mt-0.5 shrink-0 ${TYPE_COLORS[result.type]}`}
+                      className={`text-[10px] px-1.5 py-0.5 rounded-sm mt-0.5 shrink-0 ${TYPE_COLORS[result.type]}`}
                     >
                       {TYPE_LABELS[result.type]()}
                     </span>

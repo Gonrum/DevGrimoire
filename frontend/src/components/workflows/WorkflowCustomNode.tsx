@@ -34,18 +34,18 @@ function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
   return (
     <>
       <NodeToolbar isVisible={props.selected} position={Position.Top} offset={8}>
-        <div className="flex gap-1 rounded border border-gray-700 bg-gray-900 p-1 shadow-lg">
+        <div className="flex gap-1 rounded-sm border border-gray-700 bg-gray-900 p-1 shadow-lg">
           <button
             type="button"
             title="Duplizieren"
             onClick={() => data.onDuplicate?.(props.id)}
-            className="rounded p-1 text-gray-300 hover:bg-gray-800 hover:text-cyan-300"
+            className="rounded-sm p-1 text-gray-300 hover:bg-gray-800 hover:text-cyan-300"
           ><Copy size={14} /></button>
           <button
             type="button"
             title="Löschen"
             onClick={() => data.onDelete?.(props.id)}
-            className="rounded p-1 text-gray-300 hover:bg-gray-800 hover:text-red-400"
+            className="rounded-sm p-1 text-gray-300 hover:bg-gray-800 hover:text-red-400"
           ><Trash2 size={14} /></button>
         </div>
       </NodeToolbar>
@@ -53,7 +53,7 @@ function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
       <div
         className={`min-w-[220px] rounded-lg border-2 bg-gray-900 shadow-md ${style.border} ${status.ring} ${props.selected ? 'ring-offset-2 ring-offset-gray-950' : ''}`}
       >
-        {!isTrigger && <Handle type="target" position={Position.Left} className="!h-2 !w-2 !bg-gray-500" />}
+        {!isTrigger && <Handle type="target" position={Position.Left} className="h-2! w-2! bg-gray-500!" />}
 
         <div className={`flex items-center justify-between rounded-t px-3 py-2 ${style.headerBg}`}>
           <div className="flex items-center gap-2">
@@ -87,7 +87,7 @@ function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
                 type="source"
                 position={Position.Right}
                 id={branch}
-                className="!h-2 !w-2 !bg-gray-500"
+                className="h-2! w-2! bg-gray-500!"
               />
             </div>
           ))}
@@ -98,10 +98,10 @@ function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
 }
 
 function branchPillClass(branch: string): string {
-  if (branch === 'success') return 'rounded px-1.5 py-0.5 text-[10px] font-medium bg-green-900/40 text-green-300';
-  if (branch === 'failure') return 'rounded px-1.5 py-0.5 text-[10px] font-medium bg-red-900/40 text-red-300';
-  if (branch === 'custom') return 'rounded px-1.5 py-0.5 text-[10px] font-medium bg-violet-900/40 text-violet-300';
-  return 'rounded px-1.5 py-0.5 text-[10px] font-medium bg-gray-800 text-gray-400';
+  if (branch === 'success') return 'rounded-sm px-1.5 py-0.5 text-[10px] font-medium bg-green-900/40 text-green-300';
+  if (branch === 'failure') return 'rounded-sm px-1.5 py-0.5 text-[10px] font-medium bg-red-900/40 text-red-300';
+  if (branch === 'custom') return 'rounded-sm px-1.5 py-0.5 text-[10px] font-medium bg-violet-900/40 text-violet-300';
+  return 'rounded-sm px-1.5 py-0.5 text-[10px] font-medium bg-gray-800 text-gray-400';
 }
 
 export const WorkflowCustomNode = memo(WorkflowCustomNodeImpl);

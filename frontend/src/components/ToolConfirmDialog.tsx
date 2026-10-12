@@ -59,11 +59,11 @@ export default function ToolConfirmDialog({ toolName, args, onConfirm, onCancel 
               <div className="space-y-3">
                 <div className="bg-gray-950 border border-gray-800 rounded-lg p-3">
                   <p className="text-xs text-gray-500">{t('chat.toolConfirm.milestone')}</p>
-                  <p className="text-gray-200 font-medium break-words">
+                  <p className="text-gray-200 font-medium wrap-break-word">
                     {previewText(args.name) ?? t('chat.toolConfirm.noName')}
                   </p>
                   {previewText(args.description) && (
-                    <p className="text-sm text-gray-400 mt-1 whitespace-pre-wrap break-words">
+                    <p className="text-sm text-gray-400 mt-1 whitespace-pre-wrap wrap-break-word">
                       {previewText(args.description)}
                     </p>
                   )}
@@ -80,7 +80,7 @@ export default function ToolConfirmDialog({ toolName, args, onConfirm, onCancel 
                       className="w-full text-left p-3 flex flex-wrap items-start justify-between gap-2"
                       onClick={() => setExpanded(expanded === i ? null : i)}
                     >
-                      <span className="min-w-0 break-words text-sm text-gray-200">
+                      <span className="min-w-0 wrap-break-word text-sm text-gray-200">
                         {todo.title || (
                           <em className="text-red-400">{t('chat.toolConfirm.noTitle')}</em>
                         )}
@@ -98,7 +98,7 @@ export default function ToolConfirmDialog({ toolName, args, onConfirm, onCancel 
                         {todo.tags.map((tag) => (
                           <span
                             key={tag}
-                            className="px-1.5 py-0.5 rounded border border-gray-700 bg-gray-800 text-[11px] text-gray-400"
+                            className="px-1.5 py-0.5 rounded-sm border border-gray-700 bg-gray-800 text-[11px] text-gray-400"
                           >
                             {tag}
                           </span>
@@ -118,7 +118,7 @@ export default function ToolConfirmDialog({ toolName, args, onConfirm, onCancel 
                             </p>
                             <ul className="list-disc list-inside text-gray-300">
                               {todo.acceptanceCriteria.map((c, ci) => (
-                                <li key={ci} className="break-words">
+                                <li key={ci} className="wrap-break-word">
                                   {c}
                                 </li>
                               ))}
@@ -145,7 +145,7 @@ export default function ToolConfirmDialog({ toolName, args, onConfirm, onCancel 
                * Schutz für JEDES schreibende Tool gilt und nicht nur für das
                * eine, das den Anlass gab.
                */
-              <pre className="bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap break-words">
+              <pre className="bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap wrap-break-word">
                 {JSON.stringify(args, null, 2)}
               </pre>
             )}
@@ -170,7 +170,7 @@ function Field({ label, value }: { label: string; value?: string }) {
   return (
     <div>
       <p className="text-xs text-gray-500">{label}</p>
-      <p className="text-gray-300 whitespace-pre-wrap break-words">{value}</p>
+      <p className="text-gray-300 whitespace-pre-wrap wrap-break-word">{value}</p>
     </div>
   );
 }

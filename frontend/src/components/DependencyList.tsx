@@ -186,7 +186,7 @@ function DependencyForm({
             type="checkbox"
             checked={form.devDependency}
             onChange={(e) => update({ devDependency: e.target.checked })}
-            className="rounded bg-gray-700 border-gray-600"
+            className="rounded-sm bg-gray-700 border-gray-600"
           />
           {t('dependencies.devDependency')}
         </label>

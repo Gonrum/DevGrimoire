@@ -349,12 +349,12 @@ export default function ReplicationSettings() {
       <p className="text-gray-400">{t('replication.description')}</p>
 
       {error && (
-        <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-2 rounded">
+        <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-2 rounded-sm">
           {error}
         </div>
       )}
       {success && (
-        <div className="bg-green-900/30 border border-green-700 text-green-300 px-4 py-2 rounded">
+        <div className="bg-green-900/30 border border-green-700 text-green-300 px-4 py-2 rounded-sm">
           {success}
         </div>
       )}
@@ -365,7 +365,7 @@ export default function ReplicationSettings() {
         <select
           value={role}
           onChange={(e) => setRole(optionOr(e.target.value, REPLICATION_ROLES, role))}
-          className="bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
+          className="bg-gray-800 border border-gray-600 text-gray-200 rounded-sm px-3 py-2 text-sm focus:outline-hidden focus:ring-1 focus:ring-violet-500"
         >
           <option value="standalone">Standalone</option>
           <option value="master">Master</option>
@@ -384,7 +384,7 @@ export default function ReplicationSettings() {
           <select
             value={engine}
             onChange={(e) => { void changeEngine(optionOr(e.target.value, REPLICATION_ENGINES, engine)); }}
-            className="bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
+            className="bg-gray-800 border border-gray-600 text-gray-200 rounded-sm px-3 py-2 text-sm focus:outline-hidden focus:ring-1 focus:ring-violet-500"
           >
             <option value="legacy">{t('replication.engineLegacy')}</option>
             <option value="log">{t('replication.engineLog')}</option>
@@ -404,7 +404,7 @@ export default function ReplicationSettings() {
               value={slaveUrl}
               onChange={(e) => setSlaveUrl(e.target.value)}
               placeholder="https://backup.example.com"
-              className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
+              className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded-sm px-3 py-2 text-sm focus:outline-hidden focus:ring-1 focus:ring-violet-500"
             />
           </div>
           <div>
@@ -414,7 +414,7 @@ export default function ReplicationSettings() {
               value={slaveApiKey}
               onChange={(e) => setSlaveApiKey(e.target.value)}
               placeholder={config?.slaveApiKey ? '***' : 'cv_...'}
-              className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
+              className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded-sm px-3 py-2 text-sm focus:outline-hidden focus:ring-1 focus:ring-violet-500"
             />
           </div>
           <div>
@@ -424,7 +424,7 @@ export default function ReplicationSettings() {
                 type="text"
                 value={fullSyncCron}
                 onChange={(e) => setFullSyncCron(e.target.value)}
-                className="flex-1 bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-violet-500"
+                className="flex-1 bg-gray-800 border border-gray-600 text-gray-200 rounded-sm px-3 py-2 text-sm font-mono focus:outline-hidden focus:ring-1 focus:ring-violet-500"
               />
               <Button variant="secondary" size="sm" onClick={() => setFullSyncCron('0 3 * * *')}>
                 3:00
@@ -449,7 +449,7 @@ export default function ReplicationSettings() {
               value={peerUrl}
               onChange={(e) => setPeerUrl(e.target.value)}
               placeholder="https://office.example.com"
-              className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
+              className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded-sm px-3 py-2 text-sm focus:outline-hidden focus:ring-1 focus:ring-violet-500"
             />
           </div>
           <div>
@@ -459,7 +459,7 @@ export default function ReplicationSettings() {
               value={peerApiKey}
               onChange={(e) => setPeerApiKey(e.target.value)}
               placeholder={config?.peerApiKey ? '***' : 'cv_...'}
-              className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500"
+              className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded-sm px-3 py-2 text-sm focus:outline-hidden focus:ring-1 focus:ring-violet-500"
             />
           </div>
           <div>
@@ -469,7 +469,7 @@ export default function ReplicationSettings() {
                 type="text"
                 value={fullSyncCron}
                 onChange={(e) => setFullSyncCron(e.target.value)}
-                className="flex-1 bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-violet-500"
+                className="flex-1 bg-gray-800 border border-gray-600 text-gray-200 rounded-sm px-3 py-2 text-sm font-mono focus:outline-hidden focus:ring-1 focus:ring-violet-500"
               />
               <Button variant="secondary" size="sm" onClick={() => setFullSyncCron('0 3 * * *')}>
                 3:00
@@ -488,7 +488,7 @@ export default function ReplicationSettings() {
       {/* Slave Info */}
       {role === 'slave' && (
         <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 space-y-4">
-          <div className="bg-amber-900/30 border border-amber-700 text-amber-300 px-4 py-2 rounded text-sm">
+          <div className="bg-amber-900/30 border border-amber-700 text-amber-300 px-4 py-2 rounded-sm text-sm">
             {t('replication.readonlyWarning')}
           </div>
           {config?.masterUrl && (
@@ -593,7 +593,7 @@ export default function ReplicationSettings() {
                 return (
                   <div
                     key={p._id}
-                    className="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-gray-800"
+                    className="flex items-center gap-3 px-2 py-1.5 rounded-sm hover:bg-gray-800"
                   >
                     <input
                       type="checkbox"
@@ -607,12 +607,12 @@ export default function ReplicationSettings() {
                     </label>
                     {p.favorite && <span className="text-xs text-amber-400">★</span>}
                     {p.replicationEnabled && !isSyncing && (
-                      <span className="text-[10px] uppercase tracking-wide text-emerald-400 bg-emerald-900/20 border border-emerald-800/40 rounded px-1.5 py-0.5">
+                      <span className="text-[10px] uppercase tracking-wide text-emerald-400 bg-emerald-900/20 border border-emerald-800/40 rounded-sm px-1.5 py-0.5">
                         {t('replication.projectSyncOn')}
                       </span>
                     )}
                     {isSyncing && (
-                      <span className="text-[10px] uppercase tracking-wide text-cyan-300 bg-cyan-900/20 border border-cyan-800/40 rounded px-1.5 py-0.5 inline-flex items-center gap-1">
+                      <span className="text-[10px] uppercase tracking-wide text-cyan-300 bg-cyan-900/20 border border-cyan-800/40 rounded-sm px-1.5 py-0.5 inline-flex items-center gap-1">
                         <span className="animate-spin">⟳</span> {t('replication.projectSyncing')}
                       </span>
                     )}
@@ -665,18 +665,18 @@ export default function ReplicationSettings() {
                 return (
                   <div
                     key={rp._id}
-                    className="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-gray-800"
+                    className="flex items-center gap-3 px-2 py-1.5 rounded-sm hover:bg-gray-800"
                   >
                     <span className="text-sm text-gray-200 flex-1 truncate">
                       {rp.name}
                     </span>
                     {rp.favorite && <span className="text-xs text-amber-400">★</span>}
                     {fullyMirrored ? (
-                      <span className="text-[10px] uppercase tracking-wide text-emerald-400 bg-emerald-900/20 border border-emerald-800/40 rounded px-1.5 py-0.5">
+                      <span className="text-[10px] uppercase tracking-wide text-emerald-400 bg-emerald-900/20 border border-emerald-800/40 rounded-sm px-1.5 py-0.5">
                         {t('replication.remoteProjectSynced')}
                       </span>
                     ) : rp.existsLocally ? (
-                      <span className="text-[10px] uppercase tracking-wide text-gray-400 bg-gray-800/60 border border-gray-700 rounded px-1.5 py-0.5">
+                      <span className="text-[10px] uppercase tracking-wide text-gray-400 bg-gray-800/60 border border-gray-700 rounded-sm px-1.5 py-0.5">
                         {t('replication.remoteProjectLocal')}
                       </span>
                     ) : null}

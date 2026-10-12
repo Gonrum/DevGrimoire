@@ -1,6 +1,6 @@
 import { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes, useState } from 'react';
 
-const inputBase = 'w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500';
+const inputBase = 'w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500';
 const inputError = 'border-red-700 focus:border-red-500';
 
 function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
@@ -93,7 +93,7 @@ export function SecretInput({
           type="button"
           onClick={() => setVisible((v) => !v)}
           aria-label={toggleAriaLabel}
-          className="rounded border border-gray-700 bg-gray-800 px-3 text-xs text-gray-400 transition-colors hover:bg-gray-700 hover:text-gray-200"
+          className="rounded-sm border border-gray-700 bg-gray-800 px-3 text-xs text-gray-400 transition-colors hover:bg-gray-700 hover:text-gray-200"
         >
           {visible ? '🙈' : '👁'}
         </button>

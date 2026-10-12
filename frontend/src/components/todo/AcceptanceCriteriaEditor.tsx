@@ -73,7 +73,7 @@ export default function AcceptanceCriteriaEditor({ value, onChange }: Props) {
             value={criterion.text}
             onChange={(e) => updateText(index, e.target.value)}
             placeholder={t('todoDetail.criterionPlaceholder')}
-            className={`flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500 transition-colors ${
+            className={`flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm focus:outline-hidden focus:border-violet-500 transition-colors ${
               criterion.done ? 'text-gray-500 line-through' : 'text-gray-200'
             }`}
           />

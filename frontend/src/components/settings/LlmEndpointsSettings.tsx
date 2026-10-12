@@ -448,7 +448,7 @@ export default function LlmEndpointsSettings() {
           </div>
         </div>
 
-        {error && <div className="rounded border border-red-700 bg-red-900/50 px-3 py-2 text-xs text-red-300">{error}</div>}
+        {error && <div className="rounded-sm border border-red-700 bg-red-900/50 px-3 py-2 text-xs text-red-300">{error}</div>}
 
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -478,8 +478,8 @@ export default function LlmEndpointsSettings() {
                     onClick={() => updateForm({ model: m })}
                     className={
                       form.model === m
-                        ? 'rounded border border-violet-400 bg-violet-600/30 px-2 py-0.5 text-xs text-violet-100'
-                        : 'rounded border border-gray-700 bg-gray-800 px-2 py-0.5 text-xs text-gray-300 hover:border-violet-500 hover:text-violet-200'
+                        ? 'rounded-sm border border-violet-400 bg-violet-600/30 px-2 py-0.5 text-xs text-violet-100'
+                        : 'rounded-sm border border-gray-700 bg-gray-800 px-2 py-0.5 text-xs text-gray-300 hover:border-violet-500 hover:text-violet-200'
                     }
                   >
                     {m}
@@ -505,10 +505,10 @@ export default function LlmEndpointsSettings() {
       <SettingsTabHeader description={t('settings.llmEndpointsPageDescription')} />
 
       {error && editingId === null && (
-        <div className="mb-4 rounded border border-red-700 bg-red-900/50 px-4 py-2 text-red-300">{error}</div>
+        <div className="mb-4 rounded-sm border border-red-700 bg-red-900/50 px-4 py-2 text-red-300">{error}</div>
       )}
       {success && (
-        <div className="mb-4 rounded border border-green-700 bg-green-900/40 px-4 py-2 text-green-300">{success}</div>
+        <div className="mb-4 rounded-sm border border-green-700 bg-green-900/40 px-4 py-2 text-green-300">{success}</div>
       )}
 
       <div className="space-y-6">
@@ -649,7 +649,7 @@ export default function LlmEndpointsSettings() {
                 <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">{t('settings.llmMonitorPool')}</div>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {balancer.pools.map((pool) => (
-                    <div key={pool.purpose} className="rounded border border-gray-800 bg-gray-950/40 p-2.5 text-xs">
+                    <div key={pool.purpose} className="rounded-sm border border-gray-800 bg-gray-950/40 p-2.5 text-xs">
                       <span className={`inline-flex items-center rounded-full border px-2 py-0.5 font-medium ${purposeBadgeClass(pool.purpose)}`}>
                         {purposeLabel(pool.purpose)}
                       </span>
@@ -677,7 +677,7 @@ export default function LlmEndpointsSettings() {
                 <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">{t('settings.llmMonitorEndpoint')}</div>
                 <div className="space-y-1.5">
                   {balancer.endpoints.map((endpoint) => (
-                    <div key={endpoint.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-gray-800 bg-gray-950/40 px-2.5 py-1.5 text-xs">
+                    <div key={endpoint.id} className="flex flex-wrap items-center justify-between gap-2 rounded-sm border border-gray-800 bg-gray-950/40 px-2.5 py-1.5 text-xs">
                       <span className="truncate text-gray-200">{endpoint.label}</span>
                       <div className="flex shrink-0 items-center gap-2">
                         <span className="text-gray-500">{t('settings.llmMonitorInFlight')}: {endpoint.inFlight}/{endpoint.concurrency}</span>
@@ -698,23 +698,23 @@ export default function LlmEndpointsSettings() {
               <div>
                 <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">{t('settings.llmMonitorQueue')}</div>
                 <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
-                  <div className="rounded border border-gray-800 bg-gray-950/40 p-2">
+                  <div className="rounded-sm border border-gray-800 bg-gray-950/40 p-2">
                     <div className="text-gray-600">{t('settings.llmMonitorQueueWaiting')}</div>
                     <div className="text-gray-200">{balancer.queue.waiting}</div>
                   </div>
-                  <div className="rounded border border-gray-800 bg-gray-950/40 p-2">
+                  <div className="rounded-sm border border-gray-800 bg-gray-950/40 p-2">
                     <div className="text-gray-600">{t('settings.llmMonitorQueueActive')}</div>
                     <div className="text-gray-200">{balancer.queue.active}</div>
                   </div>
-                  <div className="rounded border border-gray-800 bg-gray-950/40 p-2">
+                  <div className="rounded-sm border border-gray-800 bg-gray-950/40 p-2">
                     <div className="text-gray-600">{t('settings.llmMonitorQueueDelayed')}</div>
                     <div className="text-gray-200">{balancer.queue.delayed}</div>
                   </div>
-                  <div className="rounded border border-gray-800 bg-gray-950/40 p-2">
+                  <div className="rounded-sm border border-gray-800 bg-gray-950/40 p-2">
                     <div className="text-gray-600">{t('settings.llmMonitorQueueCompleted')}</div>
                     <div className="text-gray-200">{balancer.queue.completed}</div>
                   </div>
-                  <div className="rounded border border-gray-800 bg-gray-950/40 p-2">
+                  <div className="rounded-sm border border-gray-800 bg-gray-950/40 p-2">
                     <div className="text-gray-600">{t('settings.llmMonitorQueueFailed')}</div>
                     <div className="text-gray-200">{balancer.queue.failed}</div>
                   </div>

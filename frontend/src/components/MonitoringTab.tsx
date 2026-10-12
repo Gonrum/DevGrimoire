@@ -228,7 +228,7 @@ export default function MonitoringTab({
             return (
               <div
                 key={c._id}
-                className="border border-gray-800 rounded bg-gray-900/50 overflow-hidden"
+                className="border border-gray-800 rounded-sm bg-gray-900/50 overflow-hidden"
               >
                 <div className="p-3 flex flex-wrap items-start gap-3">
                   <div className="flex-1 min-w-0">
@@ -551,13 +551,13 @@ function HealthcheckForm({
           {headers.map((h, i) => (
             <div key={i} className="flex gap-2 mb-1">
               <input
-                className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-200"
                 placeholder="Header"
                 value={h.name}
                 onChange={(e) => updateHeader(i, { name: e.target.value })}
               />
               <input
-                className="flex-[2] bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+                className="flex-2 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-200"
                 placeholder="Value"
                 value={h.value}
                 onChange={(e) => updateHeader(i, { value: e.target.value })}
@@ -590,13 +590,13 @@ function HealthcheckForm({
           {secretHeaders.map((h, i) => (
             <div key={i} className="flex gap-2 mb-1">
               <input
-                className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-200"
                 placeholder="Header (e.g. Authorization)"
                 value={h.name}
                 onChange={(e) => updateSecretHeader(i, { name: e.target.value })}
               />
               <select
-                className="flex-[2] bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+                className="flex-2 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs text-gray-200"
                 value={h.secretId}
                 onChange={(e) => updateSecretHeader(i, { secretId: e.target.value })}
               >

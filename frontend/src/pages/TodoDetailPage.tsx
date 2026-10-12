@@ -414,7 +414,7 @@ export default function TodoDetailPage() {
                 <div className="space-y-2 mb-3">
                   {comments.length === 0 && <p className="text-xs text-gray-700 italic">{t('todoDetail.noComments')}</p>}
                   {comments.map((c, i) => (
-                    <div key={i} className="text-xs bg-gray-900 border border-gray-800 rounded p-2.5">
+                    <div key={i} className="text-xs bg-gray-900 border border-gray-800 rounded-sm p-2.5">
                       <div className="flex justify-between text-gray-500 mb-1">
                         <span className={c.author === 'claude' ? 'text-cyan-400' : 'text-gray-400'}>{c.author}</span>
                         <span>{new Date(c.createdAt).toLocaleString(i18n.language === 'de' ? 'de-DE' : 'en-US', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>

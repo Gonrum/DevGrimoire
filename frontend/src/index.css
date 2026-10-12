@@ -1,6 +1,42 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+@plugin '@tailwindcss/typography';
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
+
+/*
+  Zwei weitere v3-Defaults, die das Upgrade-Tool nicht nachbildet: Buttons
+  hatten `cursor: pointer` (v4: `default`), und Platzhalter waren gray-400
+  (v4: currentColor mit 50 % Deckkraft). Ohne diese Regeln sähen alle
+  Buttons ohne eigene cursor-Klasse und alle Inputs ohne placeholder-Klasse
+  anders aus als vor der Migration.
+*/
+@layer base {
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-gray-400);
+  }
+}
 
 /* Self-hosted Cinzel — no external CDN dependency, CSP stays strict, works
  * offline. Variable font: same WOFF2 covers all weights (400/600/700). */

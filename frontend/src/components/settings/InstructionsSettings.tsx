@@ -87,7 +87,7 @@ export default function InstructionsSettings() {
       <SettingsTabHeader description={t('settings.instructionsDescription', { tool: 'system_instructions_get' })} />
 
       {error && (
-        <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-2 rounded mb-4">
+        <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-2 rounded-sm mb-4">
           {error}
         </div>
       )}
@@ -108,7 +108,7 @@ export default function InstructionsSettings() {
             <textarea
               value={instructions}
               onChange={(e) => { setInstructions(e.target.value); setSaved(false); }}
-              className="w-full h-[300px] sm:h-[500px] bg-gray-900 text-gray-200 px-4 py-3 font-mono text-sm resize-y focus:outline-none focus:ring-1 focus:ring-violet-500"
+              className="w-full h-[300px] sm:h-[500px] bg-gray-900 text-gray-200 px-4 py-3 font-mono text-sm resize-y focus:outline-hidden focus:ring-1 focus:ring-violet-500"
               spellCheck={false}
             />
           </div>

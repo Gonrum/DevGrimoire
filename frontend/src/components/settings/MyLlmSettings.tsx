@@ -123,7 +123,7 @@ export default function MyLlmSettings() {
       <SettingsTabHeader description={t('settings.myLlmDescription')} className="mb-0" />
 
       {typeof window !== 'undefined' && window.location.protocol === 'https:' && (
-        <div className="bg-amber-900/30 border border-amber-700/60 text-amber-200 text-sm px-3 py-2 rounded">
+        <div className="bg-amber-900/30 border border-amber-700/60 text-amber-200 text-sm px-3 py-2 rounded-sm">
           {t('settings.myLlmMixedContentWarning')}
         </div>
       )}

@@ -74,19 +74,19 @@ export default function WorkflowsListPage() {
     <div className="container mx-auto px-4 py-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-bold text-gray-200">Workflows</h1>
-        <button onClick={() => setCreateOpen(true)} className="inline-flex items-center gap-1 rounded bg-cyan-600 px-3 py-2 text-sm text-white hover:bg-cyan-500">
+        <button onClick={() => setCreateOpen(true)} className="inline-flex items-center gap-1 rounded-sm bg-cyan-600 px-3 py-2 text-sm text-white hover:bg-cyan-500">
           <Plus size={14} /> Neuer Workflow
         </button>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
-        <select value={scope} onChange={(e) => setScope(optionOr(e.target.value, SCOPE_OPTIONS, 'all'))} className="rounded border border-gray-700 bg-gray-900 px-3 py-1 text-sm text-gray-200">
+        <select value={scope} onChange={(e) => setScope(optionOr(e.target.value, SCOPE_OPTIONS, 'all'))} className="rounded-sm border border-gray-700 bg-gray-900 px-3 py-1 text-sm text-gray-200">
           <option value="all">Alle Scopes</option>
           <option value="system">System</option>
           <option value="project">Project</option>
           <option value="customer">Customer</option>
         </select>
-        <select value={status} onChange={(e) => setStatus(optionOr(e.target.value, STATUS_OPTIONS, 'all'))} className="rounded border border-gray-700 bg-gray-900 px-3 py-1 text-sm text-gray-200">
+        <select value={status} onChange={(e) => setStatus(optionOr(e.target.value, STATUS_OPTIONS, 'all'))} className="rounded-sm border border-gray-700 bg-gray-900 px-3 py-1 text-sm text-gray-200">
           <option value="all">Alle Status</option>
           <option value="draft">Draft</option>
           <option value="active">Active</option>
@@ -96,7 +96,7 @@ export default function WorkflowsListPage() {
       </div>
 
       {loading && <div className="text-sm text-gray-500">Lädt…</div>}
-      {error && <div className="rounded bg-red-900/30 p-3 text-sm text-red-200">{error}</div>}
+      {error && <div className="rounded-sm bg-red-900/30 p-3 text-sm text-red-200">{error}</div>}
       {!loading && !error && <WorkflowCardGrid workflows={workflows} onRun={(id) => { void onRun(id); }} />}
 
       <CreateWorkflowDialog open={createOpen} onClose={() => { setCreateOpen(false); setReloadNonce((n) => n + 1); }} />

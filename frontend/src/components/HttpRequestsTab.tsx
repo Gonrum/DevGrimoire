@@ -234,7 +234,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
     <div className="w-64 shrink-0 border-r border-gray-700 pr-3 space-y-4 overflow-y-auto">
       <button
         onClick={() => { addCollection().catch((e: unknown) => setError(errorMessage(e))); }}
-        className="w-full text-xs px-2 py-1.5 rounded border border-gray-600 text-gray-200 hover:bg-gray-800 hover:border-indigo-500"
+        className="w-full text-xs px-2 py-1.5 rounded-sm border border-gray-600 text-gray-200 hover:bg-gray-800 hover:border-indigo-500"
       >
         + Neue Collection
       </button>
@@ -245,7 +245,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
             <button
               onClick={() => { void addRequest(col._id); }}
               title="Request hinzufügen"
-              className="shrink-0 text-[11px] px-1.5 py-0.5 rounded border border-gray-600 text-gray-300 hover:bg-gray-800 hover:border-indigo-500 hover:text-indigo-300"
+              className="shrink-0 text-[11px] px-1.5 py-0.5 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800 hover:border-indigo-500 hover:text-indigo-300"
             >
               + Request
             </button>
@@ -255,7 +255,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
               <li key={r._id}>
                 <button
                   onClick={() => { selectRequest(r._id).catch((e: unknown) => setError(errorMessage(e))); }}
-                  className={`w-full text-left px-2 py-1 rounded text-sm flex items-center gap-2 hover:bg-gray-800 ${draft?._id === r._id ? 'bg-gray-800' : ''}`}
+                  className={`w-full text-left px-2 py-1 rounded-sm text-sm flex items-center gap-2 hover:bg-gray-800 ${draft?._id === r._id ? 'bg-gray-800' : ''}`}
                 >
                   <span className={`font-mono text-[10px] ${methodColor(r.method)}`}>{r.method}</span>
                   <span className="truncate text-gray-200">{r.name}</span>
@@ -273,7 +273,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
       {sidebar}
 
       <div className="flex-1 min-w-0">
-        {error && <div className="mb-3 text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-3 py-2">{error}</div>}
+        {error && <div className="mb-3 text-sm text-red-400 bg-red-900/20 border border-red-800 rounded-sm px-3 py-2">{error}</div>}
         {!draft ? (
           <p className="text-gray-500 text-sm">Wähle links einen Request oder lege einen neuen an.</p>
         ) : (
@@ -283,31 +283,31 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
               <input
                 value={draft.name}
                 onChange={(e) => patch({ name: e.target.value })}
-                className="bg-transparent text-lg font-semibold text-gray-100 outline-none flex-1"
+                className="bg-transparent text-lg font-semibold text-gray-100 outline-hidden flex-1"
               />
-              <button onClick={() => setShowCurl(true)} className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">curl importieren</button>
-              <button onClick={() => { void saveDraft(); }} className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">Speichern</button>
-              {draft._id && <button onClick={() => { void streamDownload(); }} title="Antwort ohne Größenlimit auf die Platte streamen" className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">Als Datei streamen</button>}
-              {draft._id && <button onClick={() => { loadHistory().catch((e: unknown) => setError(errorMessage(e))); }} className="text-xs px-2 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">History</button>}
-              {draft._id && <button onClick={() => { deleteRequest(draft._id).catch((e: unknown) => setError(errorMessage(e))); }} className="text-xs px-2 py-1 rounded border border-red-800 text-red-400 hover:bg-red-900/30">Löschen</button>}
+              <button onClick={() => setShowCurl(true)} className="text-xs px-2 py-1 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">curl importieren</button>
+              <button onClick={() => { void saveDraft(); }} className="text-xs px-2 py-1 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">Speichern</button>
+              {draft._id && <button onClick={() => { void streamDownload(); }} title="Antwort ohne Größenlimit auf die Platte streamen" className="text-xs px-2 py-1 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">Als Datei streamen</button>}
+              {draft._id && <button onClick={() => { loadHistory().catch((e: unknown) => setError(errorMessage(e))); }} className="text-xs px-2 py-1 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">History</button>}
+              {draft._id && <button onClick={() => { deleteRequest(draft._id).catch((e: unknown) => setError(errorMessage(e))); }} className="text-xs px-2 py-1 rounded-sm border border-red-800 text-red-400 hover:bg-red-900/30">Löschen</button>}
             </div>
 
             {/* URL-Leiste */}
             <div className="flex gap-2">
               <select value={draft.method} onChange={(e) => patch({ method: optionOr(e.target.value, METHODS, draft.method) })}
-                className={`bg-gray-800 border border-gray-700 rounded px-2 py-2 font-mono text-sm ${methodColor(draft.method)}`}>
+                className={`bg-gray-800 border border-gray-700 rounded-sm px-2 py-2 font-mono text-sm ${methodColor(draft.method)}`}>
                 {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
               <input value={draft.url} onChange={(e) => patch({ url: e.target.value })}
                 placeholder="https://api.example.com/{{path}}"
-                className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-100" />
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-3 py-2 text-sm font-mono text-gray-100" />
               <select value={envId} onChange={(e) => setEnvId(e.target.value)}
-                className="bg-gray-800 border border-gray-700 rounded px-2 py-2 text-sm text-gray-200">
+                className="bg-gray-800 border border-gray-700 rounded-sm px-2 py-2 text-sm text-gray-200">
                 <option value="">(kein Environment)</option>
                 {environments.map((e) => <option key={e._id} value={e._id}>{e.name}</option>)}
               </select>
               <button onClick={() => { void send(); }} disabled={sending}
-                className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium">
+                className="px-4 py-2 rounded-sm bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium">
                 {sending ? '…' : 'Senden'}
               </button>
             </div>
@@ -317,11 +317,11 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
             </p>
 
             {/* Editor-Untertabs */}
-            <div className="border border-gray-700 rounded">
+            <div className="border border-gray-700 rounded-sm">
               <div className="flex gap-1 border-b border-gray-700 px-2 py-1">
                 {(['params', 'headers', 'auth', 'body'] as const).map((t) => (
                   <button key={t} onClick={() => setEditorTab(t)}
-                    className={`text-xs px-2 py-1 rounded ${editorTab === t ? 'bg-gray-700 text-gray-100' : 'text-gray-400 hover:text-gray-200'}`}>
+                    className={`text-xs px-2 py-1 rounded-sm ${editorTab === t ? 'bg-gray-700 text-gray-100' : 'text-gray-400 hover:text-gray-200'}`}>
                     {t === 'params' ? 'Params' : t === 'headers' ? 'Headers' : t === 'auth' ? 'Auth' : 'Body'}
                   </button>
                 ))}
@@ -344,7 +344,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
 
             {/* Response */}
             {response && (
-              <div className="border border-gray-700 rounded">
+              <div className="border border-gray-700 rounded-sm">
                 <div className="flex items-center gap-3 border-b border-gray-700 px-3 py-2 text-sm">
                   <span className={response.ok ? 'text-emerald-400' : 'text-red-400'}>
                     {response.error ? 'Fehler' : `${response.status} ${response.statusText ?? ''}`}
@@ -354,17 +354,17 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
                   {response.unresolvedVariables.length > 0 && (
                     <span className="text-amber-400">⚠ unaufgelöst: {response.unresolvedVariables.join(', ')}</span>
                   )}
-                  <button onClick={blobDownload} className="ml-auto text-xs px-2 py-0.5 rounded border border-gray-600 text-gray-300 hover:bg-gray-800">Herunterladen</button>
+                  <button onClick={blobDownload} className="ml-auto text-xs px-2 py-0.5 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">Herunterladen</button>
                 </div>
                 <div className="flex gap-1 px-2 py-1 border-b border-gray-700">
                   {(['body', 'headers'] as const).map((t) => (
                     <button key={t} onClick={() => setRespTab(t)}
-                      className={`text-xs px-2 py-1 rounded ${respTab === t ? 'bg-gray-700 text-gray-100' : 'text-gray-400'}`}>
+                      className={`text-xs px-2 py-1 rounded-sm ${respTab === t ? 'bg-gray-700 text-gray-100' : 'text-gray-400'}`}>
                       {t === 'body' ? 'Body' : 'Headers'}
                     </button>
                   ))}
                 </div>
-                <pre className="p-3 text-xs text-gray-200 overflow-auto max-h-96 whitespace-pre-wrap break-words">
+                <pre className="p-3 text-xs text-gray-200 overflow-auto max-h-96 whitespace-pre-wrap wrap-break-word">
                   {response.error
                     ? response.error
                     : respTab === 'body'
@@ -376,7 +376,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
 
             {/* History */}
             {showHistory && (
-              <div className="border border-gray-700 rounded p-3">
+              <div className="border border-gray-700 rounded-sm p-3">
                 <div className="flex justify-between mb-2">
                   <span className="text-sm font-semibold text-gray-300">History (Secrets maskiert)</span>
                   <button onClick={() => setShowHistory(false)} className="text-xs text-gray-500">schließen</button>
@@ -406,10 +406,10 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
             <h3 className="text-sm font-semibold text-gray-200 mb-2">curl importieren</h3>
             <textarea value={curlText} onChange={(e) => setCurlText(e.target.value)} rows={8}
               placeholder="curl -X POST https://… -H '…' -d '…'"
-              className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs font-mono text-gray-100" />
+              className="w-full bg-gray-800 border border-gray-700 rounded-sm p-2 text-xs font-mono text-gray-100" />
             <div className="flex justify-end gap-2 mt-3">
-              <button onClick={() => setShowCurl(false)} className="text-xs px-3 py-1 rounded border border-gray-600 text-gray-300">Abbrechen</button>
-              <button onClick={() => { void importCurl(); }} className="text-xs px-3 py-1 rounded bg-indigo-600 text-white">In Editor übernehmen</button>
+              <button onClick={() => setShowCurl(false)} className="text-xs px-3 py-1 rounded-sm border border-gray-600 text-gray-300">Abbrechen</button>
+              <button onClick={() => { void importCurl(); }} className="text-xs px-3 py-1 rounded-sm bg-indigo-600 text-white">In Editor übernehmen</button>
             </div>
           </div>
         </div>
@@ -432,9 +432,9 @@ function KvEditor({ rows, onChange, keyLabel }: { rows: WkKeyValue[]; onChange: 
         <div key={i} className="flex gap-2 items-center">
           <input type="checkbox" checked={r.enabled !== false} onChange={(e) => set(i, { enabled: e.target.checked })} />
           <input value={r.key} onChange={(e) => set(i, { key: e.target.value })} placeholder={keyLabel}
-            className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs" />
+            className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs" />
           <input value={r.value} onChange={(e) => set(i, { value: e.target.value })} placeholder="Value"
-            className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs font-mono" />
+            className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs font-mono" />
           <button onClick={() => onChange(rows.filter((_, idx) => idx !== i))} className="text-red-400 text-xs">✕</button>
         </div>
       ))}
@@ -451,9 +451,9 @@ function HeaderEditor({ rows, onChange }: { rows: WkHeader[]; onChange: (r: WkHe
         <div key={i} className="flex gap-2 items-center">
           <input type="checkbox" checked={r.enabled !== false} onChange={(e) => set(i, { enabled: e.target.checked })} />
           <input value={r.name} onChange={(e) => set(i, { name: e.target.value })} placeholder="Header"
-            className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs" />
+            className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs" />
           <input value={r.value} onChange={(e) => set(i, { value: e.target.value })} placeholder="Value (z.B. {{TOKEN}})"
-            className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs font-mono" />
+            className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs font-mono" />
           <button onClick={() => onChange(rows.filter((_, idx) => idx !== i))} className="text-red-400 text-xs">✕</button>
         </div>
       ))}
@@ -466,7 +466,7 @@ function AuthEditor({ value, onChange }: { value: SavedRequest['auth']; onChange
   return (
     <div className="space-y-2 text-xs">
       <select value={value.type} onChange={(e) => onChange({ ...value, type: optionOr(e.target.value, AUTH_TYPES, value.type) })}
-        className="bg-gray-800 border border-gray-700 rounded px-2 py-1">
+        className="bg-gray-800 border border-gray-700 rounded-sm px-2 py-1">
         <option value="none">Keine</option>
         <option value="basic">Basic</option>
         <option value="bearer">Bearer</option>
@@ -474,14 +474,14 @@ function AuthEditor({ value, onChange }: { value: SavedRequest['auth']; onChange
       {value.type === 'basic' && (
         <div className="flex gap-2">
           <input value={value.username ?? ''} onChange={(e) => onChange({ ...value, username: e.target.value })} placeholder="Username"
-            className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1" />
+            className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1" />
           <input value={value.password ?? ''} onChange={(e) => onChange({ ...value, password: e.target.value })} placeholder="Password / {{SECRET}}"
-            className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 font-mono" />
+            className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 font-mono" />
         </div>
       )}
       {value.type === 'bearer' && (
         <input value={value.token ?? ''} onChange={(e) => onChange({ ...value, token: e.target.value })} placeholder="Token / {{SECRET}}"
-          className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 font-mono" />
+          className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 font-mono" />
       )}
     </div>
   );
@@ -491,7 +491,7 @@ function BodyEditor({ value, onChange }: { value: SavedRequest['body']; onChange
   return (
     <div className="space-y-2 text-xs">
       <select value={value.mode} onChange={(e) => onChange({ ...value, mode: optionOr(e.target.value, BODY_MODES, value.mode) })}
-        className="bg-gray-800 border border-gray-700 rounded px-2 py-1">
+        className="bg-gray-800 border border-gray-700 rounded-sm px-2 py-1">
         <option value="none">Kein Body</option>
         <option value="raw">Raw</option>
         <option value="form-urlencoded">form-urlencoded</option>
@@ -501,9 +501,9 @@ function BodyEditor({ value, onChange }: { value: SavedRequest['body']; onChange
         <>
           <input value={value.contentType ?? ''} onChange={(e) => onChange({ ...value, contentType: e.target.value })}
             placeholder="Content-Type (z.B. application/json)"
-            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1" />
+            className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1" />
           <textarea value={value.raw ?? ''} onChange={(e) => onChange({ ...value, raw: e.target.value })} rows={8}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 font-mono" />
+            className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 font-mono" />
         </>
       )}
       {(value.mode === 'form-urlencoded' || value.mode === 'multipart') && (

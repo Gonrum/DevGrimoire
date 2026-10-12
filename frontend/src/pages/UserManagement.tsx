@@ -63,7 +63,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
         placeholder={t('users.usernamePlaceholder')}
         value={username}
         onChange={(e) => setUsername(e.target.value)}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+        className="w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-blue-500"
         autoFocus
       />
       <input
@@ -71,20 +71,20 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
         placeholder={t('users.emailPlaceholder')}
         value={email}
         onChange={(e) => setEmail(e.target.value)}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+        className="w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-blue-500"
       />
       <input
         type="password"
         placeholder={t('users.passwordPlaceholder')}
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
+        className="w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-blue-500"
         autoComplete="new-password"
       />
       <select
         value={role}
         onChange={(e) => setRole(optionOr(e.target.value, USER_ROLES, 'user'))}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+        className="w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-1.5 text-sm text-gray-200 focus:outline-hidden focus:border-blue-500"
       >
         <option value="user">{t('users.roleUser')}</option>
         <option value="admin">{t('users.roleAdmin')}</option>
@@ -208,20 +208,20 @@ export default function UserManagement() {
                   type="text"
                   value={editData.username || ''}
                   onChange={(e) => setEditData({ ...editData, username: e.target.value })}
-                  className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+                  className="bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-200 focus:outline-hidden focus:border-blue-500"
                   placeholder="Username"
                 />
                 <input
                   type="email"
                   value={editData.email || ''}
                   onChange={(e) => setEditData({ ...editData, email: e.target.value })}
-                  className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+                  className="bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-200 focus:outline-hidden focus:border-blue-500"
                   placeholder="E-Mail"
                 />
                 <select
                   value={editData.role || 'user'}
                   onChange={(e) => setEditData({ ...editData, role: optionOr(e.target.value, USER_ROLES, 'user') })}
-                  className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+                  className="bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-sm text-gray-200 focus:outline-hidden focus:border-blue-500"
                 >
                   <option value="user">{t('users.roleUser')}</option>
                   <option value="admin">Admin</option>

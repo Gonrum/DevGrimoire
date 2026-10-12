@@ -22,7 +22,7 @@ export const Dialog: React.FC<DialogProps> = ({ title, onClose, children }) => {
 
 export const Portal: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs">
       {children}
     </div>
   );

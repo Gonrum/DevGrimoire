@@ -230,7 +230,7 @@ export default function ArtifactViewer({ topicId, slug, onDeleted, onSaved }: Ar
                   value={source}
                   onChange={(e) => updateSource(i, e.target.value)}
                   placeholder={t('research.sourcePlaceholder')}
-                  className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500"
+                  className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-hidden focus:border-violet-500"
                 />
                 <Button type="button" size="sm" variant="secondary" onClick={() => removeSource(i)} disabled={form.sources.length === 1 && !source}>
                   −
@@ -334,7 +334,7 @@ export default function ArtifactViewer({ topicId, slug, onDeleted, onSaved }: Ar
               .slice()
               .sort((a, b) => b.version - a.version)
               .map((v) => (
-                <div key={v._id} className="bg-gray-950 border border-gray-800 rounded p-2.5">
+                <div key={v._id} className="bg-gray-950 border border-gray-800 rounded-sm p-2.5">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <span className="text-xs text-gray-400">
                       {t('researchTopics.artifactVersionEntry', { version: v.version })} · {new Date(v.createdAt).toLocaleString(locale)}

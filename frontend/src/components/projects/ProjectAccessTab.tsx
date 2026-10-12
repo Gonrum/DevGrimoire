@@ -39,14 +39,14 @@ export default function ProjectAccessTab({ projectId }: Props) {
   if (loading) return <LoadingText />;
   if (forbidden) {
     return (
-      <div className="rounded border border-gray-800 bg-gray-900 p-4 text-sm text-gray-400">
+      <div className="rounded-sm border border-gray-800 bg-gray-900 p-4 text-sm text-gray-400">
         {t('projectAccess.adminOnly')}
       </div>
     );
   }
   if (error) {
     return (
-      <div className="rounded border border-red-800 bg-red-950/30 p-4 text-sm text-red-300">
+      <div className="rounded-sm border border-red-800 bg-red-950/30 p-4 text-sm text-red-300">
         {error}
       </div>
     );

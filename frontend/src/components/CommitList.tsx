@@ -116,7 +116,7 @@ export default function CommitList({ projectId, gitRepositories }: CommitListPro
           placeholder={locale === 'de' ? 'Commits durchsuchen...' : 'Search commits...'}
           value={search}
           onChange={(e) => { setSearch(e.target.value); setOffset(0); }}
-          className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-violet-500 focus:outline-none"
+          className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-violet-500 focus:outline-hidden"
         />
         <Button
           variant="secondary"
@@ -222,7 +222,7 @@ export default function CommitList({ projectId, gitRepositories }: CommitListPro
                         </span>
                       )}
                       {commit.repoLabel && repoLabels.length > 1 && !activeRepoLabel && (
-                        <span className="text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                        <span className="text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded-sm text-[10px] font-medium">
                           {commit.repoLabel}
                         </span>
                       )}

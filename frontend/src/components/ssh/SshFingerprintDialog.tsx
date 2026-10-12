@@ -57,7 +57,7 @@ export default function SshFingerprintDialog({
       <Dialog title={t('ssh.fingerprint.title')} onClose={onCancel}>
         <div className="p-5 space-y-3">
           {mismatch && (
-            <div className="rounded border border-red-700 bg-red-900/40 px-3 py-2 text-sm text-red-200">
+            <div className="rounded-sm border border-red-700 bg-red-900/40 px-3 py-2 text-sm text-red-200">
               <div className="font-semibold mb-1">{t('ssh.fingerprint.mismatchTitle')}</div>
               <div className="text-xs text-red-200/90">
                 {t('ssh.fingerprint.mismatchBody')}
@@ -72,13 +72,13 @@ export default function SshFingerprintDialog({
           </div>
           <div>
             <div className="text-xs text-gray-500 mb-1">{t('ssh.fingerprint.sha256')}</div>
-            <pre className="whitespace-pre-wrap break-all rounded bg-gray-950 border border-gray-800 px-3 py-2 font-mono text-xs text-violet-300">
+            <pre className="whitespace-pre-wrap break-all rounded-sm bg-gray-950 border border-gray-800 px-3 py-2 font-mono text-xs text-violet-300">
               {fingerprint}
             </pre>
           </div>
           <p className="text-xs text-gray-500">{t('ssh.fingerprint.hint')}</p>
           {acceptError && (
-            <div className="rounded border border-red-700 bg-red-900/40 px-3 py-2 text-xs text-red-200">
+            <div className="rounded-sm border border-red-700 bg-red-900/40 px-3 py-2 text-xs text-red-200">
               {acceptError}
             </div>
           )}
