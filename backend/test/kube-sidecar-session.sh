@@ -126,6 +126,20 @@ if echo "$OUT" | grep -qE 'uid=[0-9]+\(' ; then
 fi
 pass "Semikolon im Argument bleibt Text, keine Kommando-Injektion"
 
+# --- 6e. /kube/exec: Argument-Injection wird abgelehnt (C-2) ----------------
+# execFile stoppt nur Shell-Injection. --kubeconfig/--server/--as und
+# schreibende Verben muss die Allowlist in kube-args.js abweisen — mit 400,
+# BEVOR kubectl startet.
+for ARGS in '["get","pods","--kubeconfig=/run/kube-sessions/x.yaml"]' \
+            '["get","pods","--server=https://attacker.invalid"]' \
+            '["delete","pods","--all"]'; do
+  CODE=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' -X POST "${BASE}/kube/exec" \
+    -d "{\"kubeSessionId\":\"$SID\",\"args\":$ARGS}")
+  [ "$CODE" = "400" ] || fail "Argument-Injection $ARGS nicht abgelehnt (HTTP $CODE)"
+done
+pass "Argument-Injection (--kubeconfig, --server, delete) -> 400"
+
 # --- 7. Löschen ist idempotent -------------------------------------------
 curl -sS -o /dev/null "${AUTH[@]}" -X DELETE "${BASE}/kube/session/${SID}"
 CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X DELETE "${BASE}/kube/session/${SID}")

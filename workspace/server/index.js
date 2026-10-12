@@ -9,6 +9,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const pty = require('node-pty');
+const { validateKubectlArgs } = require('./kube-args');
 
 const PORT = parseInt(process.env.PORT || '9000', 10);
 const ROOT = process.env.WORKSPACE_ROOT || '/workspaces';
@@ -965,7 +966,7 @@ const KUBE_EXEC_MAX_OUTPUT = 200_000;
  * bei /kube/session) lässt kubectl unabhängig von den hier übergebenen args
  * ein beliebiges Binary starten. Genau deshalb kein `exec`, sondern
  * `execFile` — aber das ist eine von zwei Verteidigungslinien, nicht die
- * einzige.
+ * einzige. Die zweite ist die Argument-Allowlist aus `kube-args.js`.
  */
 app.post('/kube/exec', async (req, res) => {
   if (!requireKubeSessionTmpfs(res)) return;
@@ -982,6 +983,14 @@ app.post('/kube/exec', async (req, res) => {
   }
   if (!args.every((a) => typeof a === 'string')) {
     return res.status(400).json({ error: 'args must contain only strings' });
+  }
+  // Zweite Verteidigungslinie (C-2): execFile verhindert nur Shell-Injection,
+  // nicht Argument-Injection wie --kubeconfig/--server/--as oder schreibende
+  // Verben. Details und Begründung der Allowlist in kube-args.js.
+  const argsError = validateKubectlArgs(args);
+  if (argsError) {
+    console.log(JSON.stringify({ type: 'kube-exec-rejected', id, reason: argsError }));
+    return res.status(400).json({ error: argsError });
   }
   // Muss eine positive Ganzzahl sein, bevor sie an execFile geht: `Number(-1)`
   // ist truthy, also überlebt ein negativer oder gebrochener Wert `Math.min`
