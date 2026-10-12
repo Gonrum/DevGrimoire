@@ -1,4 +1,7 @@
-FROM node:20-slim
+# H-27: node:22-slim wie Backend und Frontend. Node 20 ist seit 2026-04-30
+# EOL — ausgerechnet der Container, der PTYs, kubectl und Nutzerkommandos
+# ausführt, lief auf einer ungepatchten Runtime.
+FROM node:22-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
@@ -62,8 +65,11 @@ RUN useradd --create-home --uid 10001 --shell /bin/bash workspace \
     && chown workspace:workspace /workspaces
 
 WORKDIR /app
-COPY --chown=workspace:workspace server/package.json server/package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
+COPY --chown=workspace:workspace server/package.json server/package-lock.json ./
+# Reproduzierbar (H-27): package-lock.json ist versioniert, `npm ci` ohne
+# Fallback auf `npm install` — ein fehlendes Lockfile soll den Build brechen,
+# nicht still ein anderes Image erzeugen.
+RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --chown=workspace:workspace server/ ./
 
