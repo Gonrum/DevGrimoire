@@ -25,8 +25,9 @@ export default tseslint.config(
   reactRefresh.configs.vite,
   {
     /*
-     * Dateien ausserhalb der tsconfig: `vite.config.ts`, `postcss.config.js`,
-     * `tailwind.config.js`, der Service Worker `public/sw.js` und die
+     * Dateien ausserhalb der tsconfig: `vite.config.ts`, `postcss.config.js`
+     * (seit Tailwind 4 gibt es keine tailwind.config.js mehr),
+     * der Service Worker `public/sw.js` und die
      * `.cjs`-Checks unter `scripts/` (T-415).
      *
      * Ohne eigenen Block scheitert das typed linting an ihnen mit
