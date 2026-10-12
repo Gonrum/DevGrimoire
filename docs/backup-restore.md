@@ -4,7 +4,7 @@ DevGrimoire schreibt Backups in einen MinIO/S3-Bucket. Die Backup-UI deckt das A
 
 ## Was wird gesichert
 
-`backend/src/backups/backups.service.ts` schreibt pro Backup-Job folgende Artefakte in den Bucket (`BACKUP_BUCKET` env, default = `MINIO_BUCKET` + `-backups`) unter einem Zeitstempel-Prefix:
+`backend/src/backups/backups.service.ts` schreibt pro Backup-Job folgende Artefakte in den Bucket (`BACKUP_MINIO_BUCKET` env, default = `MINIO_BUCKET` + `-backups`) unter einem Zeitstempel-Prefix:
 
 | Artefakt | Pfad | Inhalt |
 |---|---|---|
@@ -47,21 +47,39 @@ Voraussetzungen:
    ```bash
    mc cp myminio/devgrimoire-backups/<prefix>/mongodb.json.gz /tmp/mongodb.json.gz
    gunzip /tmp/mongodb.json.gz
-   # /tmp/mongodb.json hat die Form { format, exportedAt, collections: { <name>: [docs...] } }
+   # /tmp/mongodb.json hat die Form { format, encoding, exportedAt, collections: { <name>: [docs...] } }
+   jq -r '.format' /tmp/mongodb.json   # erwartet: devgrimoire.system-backup.database.v2
    ```
+
+   > **Formatversion beachten.** Ab v2 (Oktober 2026) liegen die Dokumente als
+   > MongoDB Extended JSON vor (`{"$oid": …}`, `{"$date": …}`) und lassen sich
+   > typtreu importieren. **v1-Dumps** (ältere Backups) wurden per
+   > `JSON.stringify` geschrieben: ObjectIds und Datumswerte sind darin blosse
+   > Strings. Ein v1-Dump lässt sich mit dem Verfahren unten zwar einspielen,
+   > ergibt aber String-Ids, mit denen die Anwendung nichts findet — für einen
+   > echten Restore ein v2-Backup verwenden.
 
 4. **In Mongo restoren** — Single-Node Replica Set vorausgesetzt. Für jede Collection im Dump:
 
    ```bash
-   jq -c '.collections | to_entries[] | .key as $c | .value[] | { collection: $c, doc: . }' /tmp/mongodb.json |
-   while IFS= read -r line; do
-     coll=$(echo "$line" | jq -r '.collection')
-     doc=$(echo "$line" | jq -c '.doc')
-     echo "$doc" | mongoimport --uri "$MONGODB_URI" --collection "$coll" --upsertFields _id --upsert
+   # Ein mongoimport-Lauf PRO COLLECTION (nicht pro Dokument — die frühere
+   # Fassung startete für jedes Dokument einen eigenen Prozess und brauchte
+   # bei zehntausenden Dokumenten Tage). jq gibt ein Dokument pro Zeile aus,
+   # mongoimport liest Extended JSON nativ.
+   for coll in $(jq -r '.collections | keys[]' /tmp/mongodb.json); do
+     jq -c --arg c "$coll" '.collections[$c][]' /tmp/mongodb.json \
+       | mongoimport --uri "$MONGODB_URI" --collection "$coll" --mode upsert
    done
    ```
 
-   Schneller (parallel pro Collection): die Dump-Datei aufsplitten und `mongoimport` per Collection laufen lassen. Achtung: Index-Definitionen werden vom Dump **nicht** mitgeführt — sie entstehen beim ersten Backend-Boot automatisch via Mongoose-Schemata.
+   `jq` und `mongoimport` sind im `mongo:7`-Image enthalten — der Restore kann
+   also direkt im MongoDB-Container laufen (`docker cp` der Dump-Datei hinein,
+   dann `docker exec`). Geprüft am 2026-10-12: nach dem Import sind `_id`,
+   Referenzen (`projectId` …) wieder ObjectIds und Zeitstempel wieder Dates.
+
+   Index-Definitionen werden vom Dump **nicht** mitgeführt — sie entstehen beim
+   ersten Backend-Boot automatisch via Mongoose-Schemata. `refreshtokens` sind
+   bewusst nicht im Dump: nach einem Restore melden sich alle neu an.
 
 5. **Attachments wiederherstellen** (nur bei `full-system`-Backup):
 
@@ -80,7 +98,7 @@ Voraussetzungen:
 Bevor du im Ernstfall den Worst-Case-Restore auf der Prod-Instanz fährst, einmal in einer wegwerfbaren DevGrimoire-Instanz proben:
 
 1. Frische Docker-Compose-Instanz aufsetzen (`docker compose up -d` in einem leeren Workdir, eigener Mongo-Volume, eigener MinIO).
-2. `SECRETS_ENCRYPTION_KEY` und `BACKUP_BUCKET`-Env auf die Werte der Prod-Instanz setzen.
+2. `SECRETS_ENCRYPTION_KEY` und `BACKUP_MINIO_BUCKET`-Env auf die Werte der Prod-Instanz setzen. Ohne denselben `SECRETS_ENCRYPTION_KEY` sind Secrets, LLM-/Embedding-Keys und die Replikations-API-Keys im Dump nicht entschlüsselbar (siehe `credentialMaterial` im Manifest).
 3. MinIO-Backup-Bucket aus Prod in den Test-MinIO spiegeln (`mc mirror`).
 4. Schritte 1-7 oben durchlaufen.
 5. Resultat sichten: Projekte, Todos, Workspaces, Anhänge da? Secrets entschlüsselbar?
@@ -126,7 +144,7 @@ Wenn drei Backups in Folge failen:
 
 1. `/api/backups?limit=10` öffnen, `error`-Felder lesen
 2. MinIO-Erreichbarkeit prüfen: `mc ls myminio/<backup-bucket>` (oft Permissions oder Disk-Voll)
-3. Bei Disk-Voll auf MinIO: Retention auslösen — `POST /api/backups/retention/apply` mit `confirm: "yes"`. Default-Policy steht in `BackupRetentionPolicy`-Settings.
+3. Bei Disk-Voll auf MinIO: Retention auslösen — erst `GET /api/backups/retention/preview`, dann `POST /api/backups/retention/apply` mit `{"confirm": "DELETE_EXPIRED_BACKUPS"}` (jeder andere Wert wird abgelehnt). Die Policy kommt aus `BACKUP_RETENTION_KEEP_LAST` (Default 14) und `BACKUP_RETENTION_KEEP_DAYS` (Default 30) in `.env`.
 4. Wenn weiterhin failed: System-Logs `docker compose logs backend | grep -i backup` für den Stacktrace.
 
 Wenn die Live-MinIO selbst tot ist, sind die hier dokumentierten Restore-Schritte natürlich nicht ausführbar — daher: Backup-Bucket **getrennt** vom Anhangs-Bucket halten, idealerweise auf einem anderen Storage-System (separater MinIO, AWS S3, etc.).

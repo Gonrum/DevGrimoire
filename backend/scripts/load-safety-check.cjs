@@ -78,10 +78,12 @@ async function check(label, fn) {
     assert.equal(out.bytesRead, bytes.length);
   });
 
-  await check('H-36: Backup-Stream ist JSON-gleich zum alten JSON.stringify-Format', async () => {
+  await check('H-36: Backup-Stream ist gültiges Extended JSON und typtreu (ObjectId, Date)', async () => {
+    const { mongo } = require(path.resolve(__dirname, '..', 'node_modules', 'mongoose'));
+    const id = new mongo.ObjectId();
     const date = new Date('2026-10-12T10:00:00Z');
     const data = {
-      todos: [{ _id: 'a', title: 'x "quoted"', at: date }, { _id: 'b', n: 1 }],
+      todos: [{ _id: id, title: 'x "quoted"', at: date, projectId: new mongo.ObjectId() }, { _id: 'b', n: 1 }],
       empty: [],
       refreshtokens: [{ token: 'h' }],
       'system.views': [{}],
@@ -95,9 +97,16 @@ async function check(label, fn) {
     const svc = new BackupsService({}, connection, {}, {});
     let json = '';
     for await (const chunk of svc.exportDatabaseStream()) json += chunk;
-    const parsed = JSON.parse(json);
-    assert.equal(parsed.format, 'devgrimoire.system-backup.database.v1');
-    assert.deepEqual(parsed.collections, JSON.parse(JSON.stringify({ todos: data.todos, empty: [] })));
+    const raw = JSON.parse(json);
+    assert.equal(raw.format, 'devgrimoire.system-backup.database.v2');
+    assert.deepEqual(Object.keys(raw.collections), ['todos', 'empty']);
+    // Typen überleben den Roundtrip — mit JSON.stringify (v1) waren es Strings.
+    const parsed = mongo.BSON.EJSON.parse(JSON.stringify(raw.collections.todos[0]), { relaxed: true });
+    assert.ok(parsed._id instanceof mongo.ObjectId, '_id ist keine ObjectId mehr');
+    assert.equal(parsed._id.toHexString(), id.toHexString());
+    assert.ok(parsed.at instanceof Date, 'Datum ist kein Date mehr');
+    assert.equal(parsed.at.getTime(), date.getTime());
+    assert.equal(parsed.title, 'x "quoted"');
   });
 
   await check('M-45: ein hängender Check blockiert die anderen nicht', async () => {

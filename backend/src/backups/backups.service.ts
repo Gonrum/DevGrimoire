@@ -1,8 +1,8 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { errorMessage, isRecord, isUnknownArray, streamToBuffer } from '../common/narrow';
 import { Cron } from '@nestjs/schedule';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Connection, Model } from 'mongoose';
+import { Connection, Model, mongo } from 'mongoose';
 import { createHash } from 'crypto';
 import { createGzip, gunzipSync } from 'zlib';
 import { PassThrough, Readable, Transform } from 'node:stream';
@@ -65,9 +65,39 @@ const CREDENTIAL_MATERIAL_ITEMS: string[] = [
 ];
 
 @Injectable()
-export class BackupsService {
+export class BackupsService implements OnModuleInit {
   private readonly logger = new Logger(BackupsService.name);
   private running = false;
+
+  /**
+   * Jobs, die beim Start noch auf `running` stehen, gehören zu einem Prozess,
+   * der nicht mehr lebt (`this.running` ist ein In-Memory-Flag). Ohne diesen
+   * Aufräumschritt blieben sie für immer `running` — live am 2026-10-12: vier
+   * Jobs vom Juli, das Bild eines Absturzes mitten im (damals noch
+   * vollständig gepufferten) Dump (H-36). Läuft genau einmal pro Prozessstart,
+   * bevor ein neuer Job entstehen kann.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      const res = await this.backupJobModel
+        .updateMany(
+          { status: BackupStatus.RUNNING },
+          {
+            $set: {
+              status: BackupStatus.FAILED,
+              error: 'interrupted: Backend wurde während des Backups beendet',
+              finishedAt: new Date(),
+            },
+          },
+        )
+        .exec();
+      if (res.modifiedCount > 0) {
+        this.logger.warn(`${res.modifiedCount} unterbrochene Backup-Job(s) als failed markiert`);
+      }
+    } catch (err: unknown) {
+      this.logger.error(`Aufräumen unterbrochener Backup-Jobs fehlgeschlagen: ${errorMessage(err)}`);
+    }
+  }
 
   constructor(
     @InjectModel(BackupJob.name) private backupJobModel: Model<BackupJobDocument>,
@@ -274,17 +304,22 @@ export class BackupsService {
   }
 
   /**
-   * Der Datenbank-Dump als JSON-Stream (unkomprimiert). Format und Inhalt
-   * identisch zu vorher (`JSON.stringify(payload)`, kompakt), nur dass immer
-   * ein Dokument nach dem anderen aus dem Cursor kommt statt der ganzen
-   * Collection per `toArray()`.
+   * Der Datenbank-Dump als JSON-Stream (unkomprimiert), ein Dokument nach dem
+   * anderen aus dem Cursor statt der ganzen Collection per `toArray()`.
+   *
+   * Format v2: Dokumente als MongoDB Extended JSON (relaxed). v1 schrieb
+   * `JSON.stringify(doc)` — ObjectId und Date wurden zu blossen Strings. Ein
+   * Restore per `mongoimport` legte `_id`, `projectId` & Co. dann als Strings
+   * an, und die Anwendung (die nach ObjectId sucht) fand nichts mehr: das
+   * Backup sah vollständig aus und war nicht wiederherstellbar. EJSON
+   * (`{"$oid": …}`, `{"$date": …}`) versteht mongoimport nativ.
    */
   exportDatabaseStream(): Readable {
     const maybeDb = this.connection.db;
     if (!maybeDb) throw new Error('MongoDB connection is not ready');
     const db = maybeDb;
     async function* documents(): AsyncGenerator<string> {
-      yield `{"format":"devgrimoire.system-backup.database.v1","exportedAt":${JSON.stringify(new Date().toISOString())},"collections":{`;
+      yield `{"format":"devgrimoire.system-backup.database.v2","encoding":"mongodb-extended-json-relaxed","exportedAt":${JSON.stringify(new Date().toISOString())},"collections":{`;
       const collections = await db.listCollections().toArray();
       let firstCollection = true;
       for (const collectionInfo of collections) {
@@ -295,7 +330,7 @@ export class BackupsService {
         firstCollection = false;
         let firstDoc = true;
         for await (const doc of db.collection(name).find({})) {
-          yield `${firstDoc ? '' : ','}${JSON.stringify(doc)}`;
+          yield `${firstDoc ? '' : ','}${mongo.BSON.EJSON.stringify(doc, { relaxed: true })}`;
           firstDoc = false;
         }
         yield ']';
