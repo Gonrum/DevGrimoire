@@ -79,6 +79,8 @@ import { JwtService } from '@nestjs/jwt';
 import WebSocket, { WebSocketServer } from 'ws';
 import { errorMessage, isRecord } from './common/narrow';
 import { RequestContext, RequestUser } from './common/request-context';
+import { actorFromApiKey, actorFromUser } from './common/actor-scope';
+import { actorCanAccessProject } from './common/permissions';
 import { resolveTrustProxy } from './common/trust-proxy';
 import { EventsBusService, QuestionEvent } from './events/events-bus.service';
 import { ProjectChangeEvent } from './events/project-event';
@@ -486,11 +488,24 @@ async function bootstrap() {
       });
       return;
     }
-    req.user = {
-      userId: validated.userId.toString(),
-      username: owner.username,
-      role: owner.role,
-    } satisfies RequestUser;
+    // Derselbe Actor-Aufbau wie in JwtAuthGuard — über die gemeinsame Funktion
+    // statt einer zweiten Abschrift. Vorher standen hier nur drei Felder:
+    //
+    //     req.user = { userId, username, role }
+    //
+    // mit dem Kommentar „Mirror JwtAuthGuard pattern so RequestContext +
+    // per-user scoped tools work". Gespiegelt war damit aber nur die Hälfte,
+    // und die fehlende Hälfte war die sicherheitsrelevante:
+    // `actorCanAccessProject()` macht `actor.projectScopeMode ?? 'all'`, ein
+    // Actor ohne das Feld ist also uneingeschränkt. Ein API-Key, der bewusst
+    // auf 'allowlist' oder 'none' verengt wurde, war über /mcp, /sse und
+    // /messages vollständig offen — inklusive secret_get, das Klartextwerte
+    // liefert. Da MCP-Tools prompt-gesteuert sind, war das zugleich der Weg,
+    // auf dem ein injizierter Agent an Credentials anderer Projekte kam.
+    //
+    // /messages erbt den korrigierten Actor automatisch: der Pfad stellt
+    // `cached.user` aus der /sse-Authentifizierung wieder her.
+    req.user = actorFromApiKey(validated, owner);
     req.apiKey = validated;
 
     next();
@@ -757,11 +772,32 @@ async function bootstrap() {
     }
     if (!userId) return reject(401, 'Unauthorized');
 
+    // Der Upgrade läuft vollständig ausserhalb der Nest-Pipeline: JwtAuthGuard
+    // greift hier nie, und RequestContext ist leer. `jwt.verify` oben prüft nur
+    // die Signatur — das Token trägt sub/username/role, aber KEINEN Scope, der
+    // steht in der Datenbank.
+    //
+    // Ohne den vollen Actor war die 24-Hex-Workspace-Id die einzige Hürde: jeder
+    // Inhaber eines gültigen Access-Tokens bekam eine interaktive PTY-Session
+    // in jedem Workspace-Container der Instanz. Zusätzlich lief alles darunter
+    // ohne RequestContext, also hätten selbst vorhandene Scope-Prüfungen in den
+    // Services nichts gesehen (`if (actor && …)` mit actor === undefined).
+    //
+    // `active` wird hier mitgeprüft: jwt.verify tut das nicht, ein deaktiviertes
+    // Konto behielt damit bis zum Ablauf des Access-Tokens (15 min) Zugang.
+    const fullUser = await authService.findUserById(userId);
+    if (!fullUser || !fullUser.active) return reject(401, 'Unauthorized');
+    const actor = actorFromUser(fullUser);
+
     const workspaceId = match[1];
+    let workspace: Awaited<ReturnType<typeof workspacesService.findById>>;
     try {
-      await workspacesService.findById(workspaceId);
+      workspace = await workspacesService.findById(workspaceId);
     } catch {
       return reject(404, 'Not Found');
+    }
+    if (!actorCanAccessProject(actor, workspace.projectId?.toString())) {
+      return reject(403, 'Forbidden');
     }
 
     const sessionId = url.searchParams.get('sessionId') || '';
@@ -774,7 +810,10 @@ async function bootstrap() {
     });
 
     upstream.on('open', () => {
-      proxyWss.handleUpgrade(req, socket, head, (clientWs) => {
+      // RequestContext um den Callback: die hier registrierten Listener erben
+      // den Kontext über die AsyncLocalStorage, und jeder künftige Service-
+      // Aufruf in diesem Pfad sieht denselben Actor wie die Prüfung oben.
+      proxyWss.handleUpgrade(req, socket, head, (clientWs) => RequestContext.run(actor, undefined, () => {
         const close = (code = 1000, reason = '') => {
           try { clientWs.close(code, reason); } catch { /* noop */ }
           try { upstream.close(code, reason); } catch { /* noop */ }
@@ -793,7 +832,7 @@ async function bootstrap() {
         upstream.on('close', (code) => close(code));
         clientWs.on('error', () => close(1011, 'client error'));
         upstream.on('error', () => close(1011, 'upstream error'));
-      });
+      }));
     });
 
     upstream.on('error', () => reject(502, 'Bad Gateway'));
@@ -849,7 +888,7 @@ async function bootstrap() {
   const sshTerminalWss = new WebSocketServer({ noServer: true });
   const SSH_TERMINAL_ROUTE = /^\/api\/ssh\/([a-f0-9]{24})\/terminal\/?$/i;
 
-  httpServer.on('upgrade', (req: import('http').IncomingMessage, socket: import('net').Socket, head: Buffer) => {
+  httpServer.on('upgrade', onUpgradeAsync(async (req: import('http').IncomingMessage, socket: import('net').Socket, head: Buffer) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     const match = SSH_TERMINAL_ROUTE.exec(url.pathname);
     if (!match) return;
@@ -871,6 +910,20 @@ async function bootstrap() {
     }
     if (!userId) return rejectUpgrade(401, 'Unauthorized');
 
+    // Wie beim Workspace-Terminal oben: `jwt.verify` prüft nur die Signatur,
+    // das Token trägt keinen Scope. Der Nutzer wird nachgeladen, `active`
+    // mitgeprüft (ein deaktiviertes Konto behielt sonst bis zum Ablauf des
+    // Access-Tokens eine interaktive Shell), und der volle Actor wandert in den
+    // RequestContext — damit die Scope-Prüfung, die das SSH-Modul noch braucht,
+    // einen Actor vorfindet. Ohne RequestContext wäre `RequestContext.getUser()`
+    // hier undefined und jede `if (actor && …)`-Prüfung darunter wirkungslos.
+    //
+    // Der Handler ist dafür async geworden (onUpgradeAsync): die Ablehnung muss
+    // VOR dem Upgrade als HTTP-Status raus, nicht als Close-Frame danach.
+    const sshUser = await authService.findUserById(userId);
+    if (!sshUser || !sshUser.active) return rejectUpgrade(401, 'Unauthorized');
+    const actor = actorFromUser(sshUser);
+
     const connectionId = match[1];
 
     // Parse optional initial PTY size from query string for the very first
@@ -883,6 +936,7 @@ async function bootstrap() {
     // ssh2 client setup happens AFTER the WS upgrade so we can surface
     // ssh errors as close-frames (with a reason the UI can render),
     // rather than as raw HTTP rejects with cryptic codes.
+    RequestContext.run(actor, undefined, () => {
     sshTerminalWss.handleUpgrade(req, socket, head, voidAsync(async (clientWs: WebSocket) => {
       const startedAt = Date.now();
       let sshClient: import('ssh2').Client | null = null;
@@ -1019,7 +1073,8 @@ async function bootstrap() {
       sshClient.on('close', () => closeAll());
       sshClient.on('error', (err) => closeAll(1011, err.message || 'ssh_error'));
     }));
-  });
+    });
+  }));
 
   // ─── WebSocket multiplex bus for live events ─────────────────────────
   // Replaces the long-lived /api/events SSE stream that, multiplied by 3
@@ -1053,7 +1108,7 @@ async function bootstrap() {
     projectId?: string;
   }
 
-  httpServer.on('upgrade', (req: import('http').IncomingMessage, socket: import('net').Socket, head: Buffer) => {
+  httpServer.on('upgrade', onUpgradeAsync(async (req: import('http').IncomingMessage, socket: import('net').Socket, head: Buffer) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     if (!EVENTS_ROUTE.test(url.pathname)) return;
 
@@ -1063,6 +1118,7 @@ async function bootstrap() {
     };
 
     let userId: string | undefined;
+    let actor: RequestUser | undefined;
     if (authService.isAuthEnabled()) {
       const token = url.searchParams.get('token');
       if (!token) return reject(401, 'Unauthorized');
@@ -1073,6 +1129,11 @@ async function bootstrap() {
         return reject(401, 'Unauthorized');
       }
       if (!userId) return reject(401, 'Unauthorized');
+      // Voller Actor aus der DB: das JWT trägt nur sub/username/role, der Scope
+      // steht nicht drin. Wird unten in matchProjectEvent() gebraucht.
+      const wsUser = await authService.findUserById(userId);
+      if (!wsUser || !wsUser.active) return reject(401, 'Unauthorized');
+      actor = actorFromUser(wsUser);
     }
 
     eventsWss.handleUpgrade(req, socket, head, (ws) => {
@@ -1087,6 +1148,21 @@ async function bootstrap() {
       const matchProjectEvent = (event: ProjectChangeEvent): string[] => {
         // Privacy filter first — userId-scoped events never leak across users.
         if (event.userId && event.userId !== userId) return [];
+        // Projekt-Scope (Review-Fund H-13, WebSocket-Variante). `projectId`
+        // kommt bei einer Projekt-Subscription aus der Client-Nachricht, und
+        // eine Global-Subscription bekam per Design ALLE nicht-privaten Events
+        // („global-scope subscription receives all non-private events"). Beides
+        // zusammen war ein dauerhafter Abhörkanal: Entitätsnamen, Ids und
+        // Zusammenfassungen aus jedem Projekt der Instanz, an den
+        // Scope-Filtern der Lese-Endpunkte vorbei.
+        //
+        // Die Prüfung sitzt hier und nicht beim `subscribe`, weil sie sonst nur
+        // den Projekt-Fall abdecken würde — die Global-Subscription ist der
+        // breitere Weg. `actor === undefined` nur bei deaktivierter Auth; dann
+        // ist die Instanz ohnehin offen.
+        if (actor && event.projectId !== null && !actorCanAccessProject(actor, String(event.projectId))) {
+          return [];
+        }
         const hits: string[] = [];
         for (const sub of subs.values()) {
           // Notifications and global (projectId === null) events broadcast to
@@ -1162,7 +1238,7 @@ async function bootstrap() {
 
       send({ type: 'hello', userId: userId ?? null });
     });
-  });
+  }));
 
   const port = process.env.PORT || 3000;
   await app.listen(port);

@@ -6,7 +6,7 @@ import { firstValueFrom, isObservable } from 'rxjs';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { AuthService } from '../auth.service';
 import { ApiKeysService } from '../../api-keys/api-keys.service';
-import type { ScopeMode } from '../../common/permissions';
+import { actorFromApiKey, scopeFromUser } from '../../common/actor-scope';
 import type { AuthRequest, RequestUser } from '../../common/request-context';
 
 /**
@@ -19,34 +19,6 @@ import type { AuthRequest, RequestUser } from '../../common/request-context';
  * details (`headers`, `query`).
  */
 type GuardRequest = Request & AuthRequest;
-
-/** Effective scope after intersecting an api-key scope with its owner's. */
-interface NarrowedScope {
-  mode: ScopeMode;
-  ids: string[];
-}
-
-const intersect = (a: string[], b: string[]): string[] => a.filter((id) => b.includes(id));
-
-/**
- * Combines an api-key scope with the owning user's scope. A key can only ever
- * narrow, never widen: `mode` falls back to `'all'` for legacy documents that
- * predate the scope fields, and any `'none'` on either side wins.
- */
-const narrow = (
-  keyMode: ScopeMode | undefined,
-  keyIds: string[],
-  ownerMode: ScopeMode | undefined,
-  ownerIds: string[],
-): NarrowedScope => {
-  const km = keyMode || 'all';
-  const om = ownerMode || 'all';
-  if (km === 'none' || om === 'none') return { mode: 'none', ids: [] };
-  if (km === 'all' && om === 'all') return { mode: 'all', ids: [] };
-  if (km === 'all') return { mode: 'allowlist', ids: ownerIds };
-  if (om === 'all') return { mode: 'allowlist', ids: keyIds };
-  return { mode: 'allowlist', ids: intersect(keyIds, ownerIds) };
-};
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
@@ -102,41 +74,11 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       // Concretely: if the user has projectScopeMode='allowlist' with 5 ids,
       // and the key has projectScopeMode='all', the effective access is still
       // the user's 5 ids. See knowledge entry T-210 for the rationale.
-      const keyAllowedProjectIds = (validated.allowedProjectIds || []).map((id) => id.toString());
-      const keyAllowedCustomerIds = (validated.allowedCustomerIds || []).map((id) => id.toString());
-      const ownerAllowedProjectIds = (owner.allowedProjectIds || []).map((id) => id.toString());
-      const ownerAllowedCustomerIds = (owner.allowedCustomerIds || []).map((id) => id.toString());
-
-      const proj = narrow(
-        validated.projectScopeMode,
-        keyAllowedProjectIds,
-        owner.projectScopeMode,
-        ownerAllowedProjectIds,
-      );
-      const cust = narrow(
-        validated.customerScopeMode,
-        keyAllowedCustomerIds,
-        owner.customerScopeMode,
-        ownerAllowedCustomerIds,
-      );
-      const ownerPerms: string[] = owner.permissions || [];
-      const keyPerms: string[] = validated.permissions || [];
-      // Permissions: admin role bypasses the list. For non-admin owners, the
-      // effective permission set is the intersection of key + owner perms; an
-      // empty key.permissions falls through to the owner's set (legacy keys).
-      const effectivePerms = keyPerms.length === 0 ? ownerPerms : intersect(keyPerms, ownerPerms);
-
-      request.user = {
-        userId: validated.userId.toString(),
-        username: owner.username,
-        role: owner.role,
-        apiKeyId: validated._id.toString(),
-        permissions: effectivePerms,
-        projectScopeMode: proj.mode,
-        allowedProjectIds: proj.ids,
-        customerScopeMode: cust.mode,
-        allowedCustomerIds: cust.ids,
-      };
+      //
+      // Dieselbe Funktion baut auch den Actor der MCP-Middleware in main.ts —
+      // die hatte dieselben Zeilen einmal abgeschrieben und dabei die Scope-
+      // und Permission-Felder weggelassen (siehe common/actor-scope.ts).
+      request.user = actorFromApiKey(validated, owner);
       request.apiKey = validated;
       return true;
     }
@@ -173,14 +115,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       // login take effect on the next request, not after token refresh.
       const fullUser = await this.authService.findUserById(jwtUser.userId);
       if (fullUser) {
-        request.user = {
-          ...jwtUser,
-          permissions: fullUser.permissions || [],
-          projectScopeMode: fullUser.projectScopeMode || 'all',
-          allowedProjectIds: (fullUser.allowedProjectIds || []).map((id) => id.toString()),
-          customerScopeMode: fullUser.customerScopeMode || 'all',
-          allowedCustomerIds: (fullUser.allowedCustomerIds || []).map((id) => id.toString()),
-        };
+        request.user = { ...jwtUser, ...scopeFromUser(fullUser) };
       }
     }
     return passportResult;

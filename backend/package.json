@@ -37,6 +37,7 @@
     "check:replication-gc": "node scripts/replication-gc-units-check.cjs",
     "check:replication-engine": "node scripts/replication-engine-units-check.cjs",
     "check:route-gates": "node scripts/route-gates-check.cjs",
+    "check:actor-scope": "node scripts/actor-scope-check.cjs",
     "check:auth-seed": "node scripts/auth-seed-check.cjs",
     "check:trust-proxy": "node scripts/trust-proxy-check.cjs",
     "check:http-requests-template": "node scripts/http-requests-template-check.cjs",
