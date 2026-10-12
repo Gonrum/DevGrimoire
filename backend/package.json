@@ -104,7 +104,7 @@
     "@mozilla/readability": "^0.6.0",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/bullmq": "^11.0.4",
-    "@nestjs/common": "^11.0.0",
+    "@nestjs/common": "^11.2.7",
     "@nestjs/core": "^11.0.0",
     "@nestjs/event-emitter": "^3.0.1",
     "@nestjs/jwt": "^11.0.2",
