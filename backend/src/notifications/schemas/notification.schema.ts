@@ -50,6 +50,14 @@ export class AppNotification {
   @Prop({ type: [String], default: [] })
   dismissedBy: string[];
 
+  /**
+   * Läuft ab (TTL-Index unten), wenn gesetzt — für die Tool-Protokoll-
+   * Meldungen der MCP-Aufrufe (`mcp_*`, M-48). Echte Alarme haben keins und
+   * bleiben, bis jemand sie löscht.
+   */
+  @Prop({ type: Date })
+  expiresAt?: Date;
+
   // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
   // nicht am Typ — Leser brauchten dafür `as unknown as { createdAt?: Date }`.
   createdAt?: Date;
@@ -58,3 +66,5 @@ export class AppNotification {
 
 export const NotificationSchema = SchemaFactory.createForClass(AppNotification);
 NotificationSchema.index({ read: 1, createdAt: -1 });
+// M-48: vorher hatte die Collection keine TTL und wuchs mit jedem Tool-Call.
+NotificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });

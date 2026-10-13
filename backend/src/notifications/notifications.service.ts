@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { errorMessage } from '../common/narrow';
 import { Types } from 'mongoose';
 import type { FilterQuery } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
@@ -76,8 +77,17 @@ export const DEFAULT_QUIET_HOURS_OVERRIDES = [
   'replication_failed',
 ].join(',');
 
+/** So lange bleiben die Tool-Protokoll-Meldungen der MCP-Aufrufe liegen (M-48). */
+export const MCP_NOTIFICATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function expiresAtFor(category: string | undefined, from = new Date()): Date | undefined {
+  return category?.startsWith('mcp_') ? new Date(from.getTime() + MCP_NOTIFICATION_TTL_MS) : undefined;
+}
+
 @Injectable()
-export class NotificationsService {
+export class NotificationsService implements OnModuleInit {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(
     @InjectModel(AppNotification.name)
     private notificationModel: Model<NotificationDocument>,
@@ -85,6 +95,24 @@ export class NotificationsService {
     private pushService: PushService,
     private settingsService: SettingsService,
   ) {}
+
+  /**
+   * Altbestand der `mcp_*`-Meldungen bekommt nachträglich ein Ablaufdatum
+   * (Erstellung + 7 Tage), damit der TTL-Index ihn abräumt (M-48). Idempotent.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      const res = await this.notificationModel.updateMany(
+        { category: { $regex: '^mcp_' }, expiresAt: { $exists: false } },
+        [{ $set: { expiresAt: { $add: [{ $ifNull: ['$createdAt', '$$NOW'] }, MCP_NOTIFICATION_TTL_MS] } } }],
+      ).exec();
+      if (res.modifiedCount > 0) {
+        this.logger.log(`${res.modifiedCount} MCP-Tool-Meldung(en) mit Ablaufdatum versehen`);
+      }
+    } catch (err) {
+      this.logger.warn(`MCP-Meldungen nicht migriert: ${errorMessage(err)}`);
+    }
+  }
 
   async create(
     title: string,
@@ -97,6 +125,7 @@ export class NotificationsService {
       title, body, url, category,
       userId: target.userId ?? null,
       projectId: target.projectId ?? null,
+      expiresAt: expiresAtFor(category),
     });
     this.eventEmitter.emit(NOTIFICATION_CREATED, {
       id: notification._id.toString(),

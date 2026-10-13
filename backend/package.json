@@ -106,6 +106,7 @@
     "check:rag-index-consistency": "node scripts/rag-index-consistency-check.cjs",
     "check:event-entities": "node scripts/event-entities-check.cjs",
     "check:source-text": "node scripts/source-text-check.cjs",
+    "check:mcp-hygiene": "node scripts/mcp-hygiene-check.cjs",
     "check:dg-kube-scope": "node scripts/dg-kube-scope-check.cjs",
     "check:kube-access": "node scripts/kube-access-check.cjs",
     "checks": "node scripts/run-checks.cjs"

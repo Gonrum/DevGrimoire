@@ -1,4 +1,5 @@
 import { StringDecoder } from 'node:string_decoder';
+import { HttpException, Logger } from '@nestjs/common';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
@@ -94,6 +95,7 @@ import { KubeClusterDocument } from './kube/schemas/kube-cluster.schema';
 import { isKubeKind, KUBE_KIND_SPECS, KubeKind } from './kube/kube-kinds';
 import { kubeTop, KUBE_TOP_SCOPES } from './kube/kube-top';
 import { kubeApiExceptionMessage } from './kube/kube-errors';
+import { mcpErrorMessage } from './mcp-errors';
 import {
   assertSha256Matches,
   decodeBase64Strict,
@@ -244,6 +246,8 @@ async function backendHttpPostJson(path: string, body: unknown): Promise<unknown
  * nennt `ssh_exec` ausdrücklich als Vorbild, also auch dieselbe Zahl.
  */
 const KUBE_RESULT_MAX_BYTES = 256 * 1024;
+
+const mcpToolLogger = new Logger('McpTools');
 
 /**
  * Kappt einen Tool-Ergebnistext auf ein Byte-Budget und macht die Kürzung
@@ -8277,7 +8281,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
 
       // Send in-app notification for tool usage (fire-and-forget)
       // notify_user already creates its own notification in the switch case
-      if (name !== 'notify_user' && name !== 'ask_user' && name !== 'todo_ask_question') {
+      // M-48: nur noch für schreibende (und sensibel lesende) Tools. Vorher
+      // entstand für JEDEN Aufruf ein Dokument — ein Agent, der während eines
+      // Deploys ssh_exec_status pollt, erzeugte hunderte, und die echten
+      // Alarme gingen in der Glocke unter. Diese laufen nach 7 Tagen ab.
+      if (isWriteTool(name) && name !== 'notify_user' && name !== 'ask_user' && name !== 'todo_ask_question') {
         const toolPrefix = name.split('_')[0];
         const derivedUrl = deriveNotificationUrl(name, a, result);
         // Empfänger = Aufrufer, Projekt = Tool-Argument (H-12). Titel und Text
@@ -8304,9 +8312,13 @@ export function registerMcpTools(server: Server, services: McpServices): void {
     } catch (error) {
       // M-19: Kube-Fehler tragen den ApiException-Debug-String mit Body und
       // Headern — hier gilt dieselbe Aufbereitung wie am REST-Controller.
+      // M-49: aufbereitet statt roh — Details nur ins Server-Log.
       const message = name.startsWith('kube_')
         ? kubeApiExceptionMessage(error)
-        : error instanceof Error ? error.message : String(error);
+        : mcpErrorMessage(error);
+      if (!(error instanceof HttpException)) {
+        mcpToolLogger.warn(`${name} fehlgeschlagen: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+      }
       return errorResult(`Error: ${message}`);
     }
   });
