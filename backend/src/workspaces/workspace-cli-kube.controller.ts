@@ -3,9 +3,11 @@ import {
   Body,
   Controller,
   ForbiddenException,
+  HttpException,
   NotFoundException,
   Post,
   Req,
+  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -25,9 +27,31 @@ import { KubeClusterDocument } from '../kube/schemas/kube-cluster.schema';
 import { KUBE_KINDS, KubeKind } from '../kube/kube-kinds';
 import { kubeTop, KUBE_TOP_SCOPES, KubeTopScope } from '../kube/kube-top';
 import { WorkspaceCliClaim } from './workspace-cli-token.service';
+import { kubeApiExceptionCode, kubeApiExceptionMessage } from '../kube/kube-errors';
+
+/**
+ * Cluster-Fehler wie am REST-Controller abbilden: 4xx vom Cluster bleibt 4xx
+ * mit lesbarer Meldung („pods \"x\" not found"), alles andere aus dem
+ * Cluster-Zugriff wird 503. Ohne das kam bei `dg` jeder Cluster-Fehler als
+ * nichtssagender 500 an.
+ */
+async function clusterCall<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof HttpException) throw err;
+    const code = kubeApiExceptionCode(err);
+    if (code !== undefined && code >= 400 && code < 500) {
+      throw new HttpException(kubeApiExceptionMessage(err), code);
+    }
+    throw new ServiceUnavailableException(kubeApiExceptionMessage(err));
+  }
+}
 
 /** Wie `kube_logs` über MCP: harte Obergrenze unabhängig von tailLines/since. */
 const LOG_LINES_HARD_CAP = 5000;
+/** …und ein Byte-Budget, das schon beim Einsammeln greift (M-18). */
+const LOG_BYTES_CAP = 1024 * 1024;
 
 /** Slug oder 24-Hex-Id. Beides passt auf dasselbe Muster, unterschieden wird am Format. */
 const CLUSTER_REF = /^[a-z0-9][a-z0-9-]{0,62}$/i;
@@ -159,11 +183,11 @@ export class WorkspaceCliKubeController {
     const cluster = await this.resolveCluster(claim, dto.cluster);
     const clusterId = cluster._id.toString();
     const startedAt = Date.now();
-    const result = dto.name
-      ? await this.resources.get(clusterId, dto.kind, dto.name, dto.namespace)
-      : await this.resources.list(clusterId, dto.kind, {
+    const result = await clusterCall(() => (dto.name
+      ? this.resources.get(clusterId, dto.kind, dto.name, dto.namespace)
+      : this.resources.list(clusterId, dto.kind, {
         namespace: dto.namespace, labelSelector: dto.labelSelector, limit: dto.limit,
-      });
+      })));
     await this.record(claim, clusterId, dto.name ? 'get' : 'list', startedAt, {
       resource: dto.kind, namespace: dto.namespace, name: dto.name,
     });
@@ -176,7 +200,7 @@ export class WorkspaceCliKubeController {
     const cluster = await this.resolveCluster(claim, dto.cluster);
     const clusterId = cluster._id.toString();
     const startedAt = Date.now();
-    const result = await this.resources.describe(clusterId, dto.kind, dto.name, dto.namespace);
+    const result = await clusterCall(() => this.resources.describe(clusterId, dto.kind, dto.name, dto.namespace));
     await this.record(claim, clusterId, 'get', startedAt, {
       resource: dto.kind, namespace: dto.namespace, name: dto.name,
     });
@@ -189,12 +213,12 @@ export class WorkspaceCliKubeController {
     const cluster = await this.resolveCluster(claim, dto.cluster);
     const clusterId = cluster._id.toString();
     const startedAt = Date.now();
-    const result = await this.resources.events(clusterId, {
+    const result = await clusterCall(() => this.resources.events(clusterId, {
       namespace: dto.namespace,
       involvedName: dto.involvedName,
       involvedKind: dto.involvedKind,
       limit: dto.limit,
-    });
+    }));
     await this.record(claim, clusterId, 'list', startedAt, {
       resource: 'Event', namespace: dto.namespace, name: dto.involvedName,
     });
@@ -208,20 +232,22 @@ export class WorkspaceCliKubeController {
     const cluster = await this.resolveCluster(claim, dto.cluster);
     const clusterId = cluster._id.toString();
     const startedAt = Date.now();
-    const session = await this.logs.open(clusterId, dto.namespace, dto.pod, {
+    const session = await clusterCall(() => this.logs.open(clusterId, dto.namespace, dto.pod, {
       container: dto.container,
       tailLines: dto.tailLines ?? 200,
       previous: dto.previous,
       sinceSeconds: dto.sinceSeconds,
       follow: false,
-    });
+    }));
     const lines: string[] = [];
     let status: 'complete' | 'truncated' | 'dropped' = 'complete';
     let error: string | undefined;
+    let bytes = 0;
     try {
       for await (const line of session.lines) {
         lines.push(line);
-        if (lines.length >= LOG_LINES_HARD_CAP) { status = 'truncated'; break; }
+        bytes += Buffer.byteLength(line, 'utf8') + 8;
+        if (lines.length >= LOG_LINES_HARD_CAP || bytes >= LOG_BYTES_CAP) { status = 'truncated'; break; }
       }
       // session.error() ist erst nach vollständigem Durchlauf aussagekräftig.
       if (status === 'complete') {
@@ -243,7 +269,7 @@ export class WorkspaceCliKubeController {
     const cluster = await this.resolveCluster(claim, dto.cluster);
     const scope = dto.scope ?? 'pods';
     const startedAt = Date.now();
-    const result = await kubeTop(this.kubeClient, cluster, scope, dto.namespace);
+    const result = await clusterCall(() => kubeTop(this.kubeClient, cluster, scope, dto.namespace));
     await this.record(claim, cluster._id.toString(), 'metrics_query', startedAt, {
       resource: scope === 'nodes' ? 'Node' : 'Pod', namespace: dto.namespace,
     });

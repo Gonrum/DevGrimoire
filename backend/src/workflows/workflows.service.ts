@@ -19,6 +19,9 @@ import {
   WorkflowNodeRunStatus,
 } from './schemas/workflow-node-run.schema';
 import {
+  OPEN_NODE_RUN_STATUSES, TERMINAL_RUN_STATUSES, WORKFLOW_RUN_CANCELLED,
+} from './engine/run-status';
+import {
   CancelWorkflowRunDto,
   CreateWorkflowDefinitionDto,
   ListWorkflowDefinitionsDto,
@@ -450,17 +453,35 @@ export class WorkflowsService {
 
   async cancelRun(id: string, dto: CancelWorkflowRunDto = {}): Promise<WorkflowRunDocument> {
     const run = await this.getRun(id);
-    if (
-      run.status === WorkflowRunStatus.SUCCEEDED ||
-      run.status === WorkflowRunStatus.FAILED ||
-      run.status === WorkflowRunStatus.CANCELLED
-    ) {
-      throw new BadRequestException(`Run already in terminal status ${run.status}`);
+    const message = dto.reason ?? 'Cancelled by user';
+    const now = new Date();
+    // M-20: atomar statt Lesen-Prüfen-Speichern. Vorher konnte ein Node, der
+    // zwischen getRun() und save() fertig wurde, den Run auf succeeded/failed
+    // setzen — und save() überschrieb das wieder mit cancelled (oder
+    // umgekehrt, je nach Reihenfolge).
+    const saved = await this.runModel.findOneAndUpdate(
+      { _id: run._id, status: { $nin: TERMINAL_RUN_STATUSES } },
+      { $set: { status: WorkflowRunStatus.CANCELLED, finishedAt: now, error: { code: 'cancelled', message } } },
+      { new: true },
+    ).exec();
+    if (!saved) {
+      const current = await this.runModel.findById(run._id).select('status').exec();
+      throw new BadRequestException(`Run already in terminal status ${current?.status ?? run.status}`);
     }
-    run.status = WorkflowRunStatus.CANCELLED;
-    run.finishedAt = new Date();
-    run.error = { code: 'cancelled', message: dto.reason ?? 'Cancelled by user' };
-    const saved = await run.save();
+    // Offene NodeRuns abschliessen — vorher blieben sie für immer queued/
+    // running/waiting, und `inspectRun` zeigte für einen beendeten Run
+    // dauerhaft laufende Knoten. `interrupted` statt eines neuen Status: das
+    // Frontend kennt ihn, und genau das ist passiert.
+    await this.nodeRunModel.updateMany(
+      { runId: run._id, status: { $in: OPEN_NODE_RUN_STATUSES } },
+      { $set: { status: WorkflowNodeRunStatus.INTERRUPTED, finishedAt: now, error: { code: 'run_cancelled', message } } },
+    ).exec();
+    // Die Engine entfernt wartende Jobs aus der Queue und bricht laufende
+    // Executoren ab (WorkflowEngineService.onRunCancelled).
+    this.eventEmitter.emit(WORKFLOW_RUN_CANCELLED, { runId: saved._id.toString() });
+    // Wie failRun/maybeFinishRun — der Run-Inspector hört darauf, auch bei
+    // System-Runs ohne Projekt, für die emitRun nichts sendet.
+    this.eventEmitter.emit('workflow.run.finished', { runId: saved._id.toString(), status: saved.status });
     this.emitRun('updated', saved, `Workflow-Run abgebrochen (${dto.reason ?? 'kein Grund'})`);
     await this.audit('workflow.run.cancelled', undefined, saved, { reason: dto.reason });
     return saved;

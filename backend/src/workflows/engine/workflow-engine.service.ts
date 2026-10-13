@@ -31,6 +31,7 @@ import { NodeRegistry } from './node-registry';
 import { NodeExecutionContext, NodeJob, NodeResult, RetryConfig } from './types';
 import { findTriggerNodes, nextNodes } from './graph-walker';
 import { readGraph } from './snapshot';
+import { OPEN_NODE_RUN_STATUSES, TERMINAL_RUN_STATUSES, WORKFLOW_RUN_CANCELLED } from './run-status';
 import { NodeBranch } from './node-metadata';
 import { QuestionsService, QUESTION_ANSWERED } from '../../questions/questions.service';
 import { TestWorkflowNodeDto, workflowNodeFromDto } from '../dto/workflow.dto';
@@ -103,6 +104,8 @@ export function contextUpdatePipeline(
 @Injectable()
 export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstrap {
   private readonly logger = new Logger(WorkflowEngineService.name);
+  /** runId -> AbortController der gerade laufenden Knoten (M-20). */
+  private readonly inFlight = new Map<string, Set<AbortController>>();
 
   constructor(
     @InjectModel(WorkflowDefinition.name)
@@ -206,7 +209,14 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     const run = await this.runModel.findById(job.runId).exec();
     const nodeRun = await this.nodeRunModel.findById(job.nodeRunId).exec();
     if (!run || !nodeRun) return;
-    if (run.status !== WorkflowRunStatus.RUNNING) return;
+    if (run.status !== WorkflowRunStatus.RUNNING) {
+      // Ein Job für einen beendeten Run (abgebrochen, während er in der
+      // Queue lag) — vorher blieb sein NodeRun für immer `queued`.
+      if (TERMINAL_RUN_STATUSES.includes(run.status) && OPEN_NODE_RUN_STATUSES.includes(nodeRun.status)) {
+        await this.interruptNodeRun(nodeRun, run.status);
+      }
+      return;
+    }
 
     const node = readGraph(run.definitionSnapshot).nodes.find((n) => n.id === job.nodeId);
     if (!node) {
@@ -303,6 +313,11 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
 
     const timeoutMs = Number(((node.config ?? {})).timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const abort = new AbortController();
+    const runKey = run._id.toString();
+    // M-20: ein Abbruch des Runs bricht auch die laufenden Executoren ab.
+    let inFlight = this.inFlight.get(runKey);
+    if (!inFlight) { inFlight = new Set(); this.inFlight.set(runKey, inFlight); }
+    inFlight.add(abort);
     const ctx = this.buildContext(run, nodeRun, node, abort.signal);
     let result: NodeResult;
     try {
@@ -315,6 +330,9 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
           message: errorMessage(err),
         },
       };
+    } finally {
+      inFlight.delete(abort);
+      if (inFlight.size === 0) this.inFlight.delete(runKey);
     }
 
     await this.applyResult(run, nodeRun, node, result);
@@ -543,6 +561,17 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     node: WorkflowNode,
     result: NodeResult,
   ): Promise<void> {
+    // M-20: Der Run kann während der Ausführung abgebrochen (oder von einem
+    // parallelen Zweig fehlgeschlagen) sein. Dann wird nur noch dieser Knoten
+    // abgeschlossen — keine Nachfolger, kein Retry, kein Statuswechsel am Run.
+    const live = await this.runModel.findById(run._id).select('status').exec();
+    if (live && TERMINAL_RUN_STATUSES.includes(live.status)) {
+      // Das Ergebnis wird verworfen (kein Kontext, keine Nachfolger) — also
+      // `interrupted`, nicht `succeeded`, auch wenn der Executor durchkam.
+      await this.interruptNodeRun(nodeRun, live.status);
+      return;
+    }
+
     if (result.status === 'success') {
       await this.completeNodeRun(nodeRun, result);
       // Persist redacted output to run.context so downstream nodes can read
@@ -574,6 +603,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
         .findByIdAndUpdate(run._id, contextUpdatePipeline(node.id, redactedOutput, edgeValues), { new: true })
         .exec();
       const current = fresh ?? run;
+      if (current.status !== WorkflowRunStatus.RUNNING) return;
 
       const succs = nextNodes(node.id, result.branch ?? 'success', graph);
       for (const succ of succs) await this.enqueueNode(current, succ, 1);
@@ -586,8 +616,19 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       nodeRun.waitingFor = result.waitingFor;
       await nodeRun.save();
       const isTimer = result.waitingFor?.type === 'delay';
-      run.status = isTimer ? WorkflowRunStatus.WAITING_FOR_TIMER : WorkflowRunStatus.WAITING_FOR_USER;
-      await run.save();
+      const waitingStatus = isTimer ? WorkflowRunStatus.WAITING_FOR_TIMER : WorkflowRunStatus.WAITING_FOR_USER;
+      // Bedingt: ein zwischenzeitlicher Abbruch darf nicht zurück auf
+      // „wartet" gesetzt werden.
+      const moved = await this.runModel.findOneAndUpdate(
+        { _id: run._id, status: { $nin: TERMINAL_RUN_STATUSES } },
+        { $set: { status: waitingStatus } },
+        { new: true },
+      ).exec();
+      if (!moved) {
+        await this.interruptNodeRun(nodeRun, WorkflowRunStatus.CANCELLED);
+        return;
+      }
+      run.status = waitingStatus;
       this.eventEmitter.emit(WORKFLOW_RUN_PROGRESS, { runId: run._id.toString() });
       return;
     }
@@ -655,9 +696,17 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     if (openCount > 0) return;
     if (run.status === WorkflowRunStatus.WAITING_FOR_USER) return;
     if (run.status === WorkflowRunStatus.WAITING_FOR_TIMER) return;
+    // M-20: nur ein laufender Run wird erfolgreich — vorher überschrieb das
+    // hier einen inzwischen abgebrochenen Run mit `succeeded`.
+    const finishedAt = new Date();
+    const finished = await this.runModel.findOneAndUpdate(
+      { _id: run._id, status: WorkflowRunStatus.RUNNING },
+      { $set: { status: WorkflowRunStatus.SUCCEEDED, finishedAt } },
+      { new: true },
+    ).exec();
+    if (!finished) return;
     run.status = WorkflowRunStatus.SUCCEEDED;
-    run.finishedAt = new Date();
-    await run.save();
+    run.finishedAt = finishedAt;
     this.eventEmitter.emit('workflow.run.finished', { runId: run._id.toString(), status: run.status });
     this.audit('workflow.run.succeeded', {
       runId: run._id.toString(),
@@ -670,12 +719,45 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     });
   }
 
+  /**
+   * M-20: Aufräumen nach `WorkflowsService.cancelRun`. Wartende Jobs fliegen
+   * aus der Queue (vorher nur in failRun), laufende Executoren bekommen ihr
+   * Abort-Signal statt bis zum Timeout weiterzulaufen.
+   */
+  @OnEvent(WORKFLOW_RUN_CANCELLED)
+  onRunCancelled(payload: { runId?: string }): void {
+    if (!payload?.runId) return;
+    const removed = this.queue.removeRun(payload.runId);
+    const running = this.inFlight.get(payload.runId);
+    for (const abort of running ?? []) abort.abort(new Error('workflow run cancelled'));
+    this.logger.log(
+      `Run ${payload.runId} abgebrochen: ${removed} Job(s) aus der Queue, ${running?.size ?? 0} laufende(r) Knoten abgebrochen`,
+    );
+  }
+
+  /** NodeRun eines beendeten Runs abschliessen, ohne Ergebnis. */
+  private async interruptNodeRun(nodeRun: WorkflowNodeRunDocument, runStatus: WorkflowRunStatus): Promise<void> {
+    nodeRun.status = WorkflowNodeRunStatus.INTERRUPTED;
+    nodeRun.finishedAt = new Date();
+    nodeRun.error = { code: 'run_terminated', message: `Run ist bereits ${runStatus}` };
+    await nodeRun.save();
+  }
+
   private async failRun(run: WorkflowRunDocument, error: { code: string; message: string }): Promise<void> {
     this.queue.removeRun(run._id.toString());
+    // M-20: bedingt — ein abgebrochener oder schon beendeter Run bleibt, wie
+    // er ist, und bekommt keine zweite Fehlermeldung.
+    const finishedAt = new Date();
+    const redactedError = redactRecord(error);
+    const failed = await this.runModel.findOneAndUpdate(
+      { _id: run._id, status: { $nin: TERMINAL_RUN_STATUSES } },
+      { $set: { status: WorkflowRunStatus.FAILED, error: redactedError, finishedAt } },
+      { new: true },
+    ).exec();
+    if (!failed) return;
     run.status = WorkflowRunStatus.FAILED;
-    run.error = redactRecord(error);
-    run.finishedAt = new Date();
-    await run.save();
+    run.error = redactedError;
+    run.finishedAt = finishedAt;
     this.eventEmitter.emit('workflow.run.finished', { runId: run._id.toString(), status: run.status });
     this.audit('workflow.run.failed', {
       runId: run._id.toString(),

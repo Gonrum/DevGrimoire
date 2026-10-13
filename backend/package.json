@@ -102,6 +102,8 @@
     "check:auth-token-hygiene": "node scripts/auth-token-hygiene-check.cjs",
     "check:settings-write": "node scripts/settings-write-check.cjs",
     "check:chat-persist-safety": "node scripts/chat-persist-safety-check.cjs",
+    "check:workflow-cancel": "node scripts/workflow-cancel-check.cjs",
+    "check:rag-index-consistency": "node scripts/rag-index-consistency-check.cjs",
     "check:dg-kube-scope": "node scripts/dg-kube-scope-check.cjs",
     "check:kube-access": "node scripts/kube-access-check.cjs",
     "checks": "node scripts/run-checks.cjs"

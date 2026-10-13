@@ -13,6 +13,26 @@ import { ALL_SENSITIVITY_LEVELS, isExcludedFromRag, SensitivityLevel } from '../
 import { BalancerGateway } from '../balancer/balancer-gateway.service';
 
 const SETTING_RAG_ENDPOINTS_V1 = 'rag_embedding_endpoints_v1';
+/** Womit der Index gebaut wurde (M-16) — JSON `IndexMeta`. */
+const SETTING_RAG_INDEX_META = 'rag_index_meta';
+
+export interface IndexMeta {
+  provider: string;
+  model: string;
+  dimensions: number;
+  indexedAt: string;
+}
+
+function parseIndexMeta(raw: string | null): IndexMeta | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { return null; }
+  if (!isRecord(parsed)) return null;
+  const { provider, model, dimensions, indexedAt } = parsed;
+  if (typeof provider !== 'string' || typeof model !== 'string'
+    || typeof dimensions !== 'number' || typeof indexedAt !== 'string') return null;
+  return { provider, model, dimensions, indexedAt };
+}
 
 interface StoredEndpoint {
   provider: string;
@@ -295,6 +315,21 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   private endpoints: EmbeddingEndpoint[] = [];
   private ready = false;
   private initPromise: Promise<void> | null = null;
+  /**
+   * Serialisiert jeden Schreibzugriff auf die Tabelle (M-15). Ein Voll-Reindex
+   * droppt und ersetzt `this.table`; inkrementelle Upserts liefen vorher
+   * parallel dazu, schrieben in die alte oder halb neue Tabelle und
+   * hinterliessen Duplikate (`add` ist kein Upsert).
+   */
+  private writeChain: Promise<unknown> = Promise.resolve();
+  /**
+   * Gesetzt, wenn die vorhandene Tabelle nicht zum aktiven Modell passt
+   * (M-16). Dann wird weder geschrieben noch gesucht, bis ein voller Reindex
+   * gelaufen ist — vorher schlug jeder Sync still fehl und der Index veraltete.
+   */
+  private indexMismatch: string | null = null;
+  /** Modell, mit dem der Index gebaut wurde — nur zur Anzeige (M-16). */
+  private indexedWith: IndexMeta | null = null;
 
   constructor(
     @InjectConnection() private readonly connection: Connection,
@@ -572,9 +607,73 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       // Remove the dummy record
       await this.table.delete('id = "__init__"');
     }
+    await this.checkIndexCompatibility();
 
     this.ready = true;
     this.logger.log(`RAG ready. LanceDB at ${dbPath}`);
+  }
+
+  private withIndexLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.writeChain.then(fn, fn);
+    this.writeChain = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Dimension der Vektorspalte der offenen Tabelle, oder null wenn unlesbar. */
+  private async tableDimensions(): Promise<number | null> {
+    if (!this.table) return null;
+    try {
+      const schema = await this.table.schema();
+      const field = schema.fields.find((f) => f.name === 'vector');
+      const listSize: unknown = field && isRecord(field.type) ? field.type.listSize : undefined;
+      return typeof listSize === 'number' ? listSize : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async writeIndexMeta(): Promise<void> {
+    const meta: IndexMeta = {
+      provider: this.embeddingProvider,
+      model: this.embeddingModel,
+      dimensions: this.dimensions,
+      indexedAt: new Date().toISOString(),
+    };
+    await this.settings.set(SETTING_RAG_INDEX_META, JSON.stringify(meta));
+    this.indexedWith = meta;
+  }
+
+  /**
+   * M-16: passt die vorhandene Tabelle zum aktiven Modell?
+   *
+   * Hart gesperrt wird nur bei abweichender Dimension — das ist sicher falsch,
+   * jeder Schreibversuch scheitert und jede Suche vergleicht Unvergleichbares.
+   * Ein anderer Modell-NAME bei gleicher Dimension ist dagegen der Normalfall
+   * des dokumentierten Fallbacks (LM Studio `text-embedding-nomic-…` und
+   * Ollama `nomic-…` sind dasselbe Modell); der wird nur gemeldet.
+   */
+  private async checkIndexCompatibility(): Promise<void> {
+    const stored = parseIndexMeta(await this.settings.get(SETTING_RAG_INDEX_META));
+    const tableDims = await this.tableDimensions();
+    this.indexMismatch = null;
+    if (tableDims !== null && tableDims !== this.dimensions) {
+      this.indexMismatch =
+        `Index hat ${tableDims} Dimensionen, das aktive Embedding-Modell ${this.embeddingModel} liefert ${this.dimensions} — voller rag_reindex nötig`;
+      this.logger.error(`RAG: ${this.indexMismatch}. Inkrementeller Sync und Suche sind bis dahin aus.`);
+    }
+    if (!stored) {
+      // Altbestand ohne Metadaten: passt die Dimension, gilt das aktive Modell
+      // als das indizierte — genauer lässt es sich nachträglich nicht sagen.
+      if (!this.indexMismatch) await this.writeIndexMeta();
+      return;
+    }
+    this.indexedWith = stored;
+    if (!this.indexMismatch && stored.model !== this.embeddingModel) {
+      this.logger.warn(
+        `RAG: Index wurde mit ${stored.provider}/${stored.model} gebaut, aktiv ist ${this.embeddingProvider}/${this.embeddingModel} `
+        + '(gleiche Dimension). Ist es nicht dasselbe Modell unter anderem Namen, ist ein rag_reindex nötig.',
+      );
+    }
   }
 
   private async ensureReady(): Promise<boolean> {
@@ -881,13 +980,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     const customerId = asText(doc.customerId);
     const combinedText = `${extracted.title}\n${extracted.content}`.trim();
 
-    // Delete all existing chunks for this document
-    try {
-      await this.table.delete(`id = "${docId}" OR id LIKE "${docId}__chunk_%"`);
-    } catch {
-      // Records might not exist yet
-    }
-
+    // Embeddings ZUERST, dann unter dem Lock löschen und schreiben (M-15):
+    // scheitert das Embedding, bleibt die alte Fassung im Index statt dass
+    // das Dokument zwischen delete und add verloren geht.
     const chunks = this.chunkText(combinedText);
     const records: RagDocument[] = [];
 
@@ -907,19 +1002,26 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       });
     }
 
-    if (records.length > 0) {
-      await this.table.add(records);
-    }
+    await this.withIndexLock(async () => {
+      // Erst unter dem Lock lesen: ein Voll-Reindex kann die Tabelle
+      // inzwischen ersetzt haben.
+      const table = this.table;
+      if (!table || this.indexMismatch) return;
+      await table.delete(`id = "${docId}" OR id LIKE "${docId}__chunk_%"`);
+      if (records.length > 0) await table.add(records);
+    });
   }
 
   /** Remove a document (and all its chunks) from the vector store */
   private async removeDocument(entityId: string): Promise<void> {
-    if (!this.table) return;
-    try {
-      await this.table.delete(`id = "${entityId}" OR id LIKE "${entityId}__chunk_%"`);
-    } catch {
-      // Ignore if not found
-    }
+    await this.withIndexLock(async () => {
+      if (!this.table) return;
+      try {
+        await this.table.delete(`id = "${entityId}" OR id LIKE "${entityId}__chunk_%"`);
+      } catch {
+        // Ignore if not found
+      }
+    });
   }
 
   /** React to Change Stream / EventEmitter events for incremental sync */
@@ -928,6 +1030,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     // Skip in stdio MCP mode — only the HTTP backend should do background indexing
     if (process.env.MCP_STDIO === 'true') return;
     if (!(await this.ensureReady())) return;
+    if (this.indexMismatch) return;
     if (!isIndexableEntity(event.entity)) return;
     if (!event.entityId) return;
 
@@ -986,6 +1089,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     if (!(await this.ensureReady())) {
       throw new Error('RAG not available. Is the embedding server running?');
     }
+    if (this.indexMismatch) throw new Error(`RAG-Index unbrauchbar: ${this.indexMismatch}`);
 
     const vector = await this.getEmbedding(query);
 
@@ -1104,6 +1208,15 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     if (!(await this.ensureReady())) {
       throw new Error('RAG not available. Is the embedding server running?');
     }
+    // Ein Teil-Reindex schriebe Vektoren der neuen Dimension in die alte
+    // Tabelle — das scheitert; nur ein voller Reindex baut sie neu (M-16).
+    if (this.indexMismatch && (projectId !== undefined || customerId !== undefined)) {
+      throw new BadRequestException(`${this.indexMismatch}; ein Teil-Reindex reicht nicht`);
+    }
+    return this.withIndexLock(() => this.reindexLocked(projectId, customerId));
+  }
+
+  private async reindexLocked(projectId?: string, customerId?: string): Promise<{ indexed: number; entities: Record<string, number> }> {
 
     const db = this.connection.db;
     if (!db) throw new Error('MongoDB not available');
@@ -1138,6 +1251,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         { id: '__init__', sourceId: '__init__', chunkIndex: 0, projectId: '__init__', customerId: '', entity: '__init__', title: '__init__', content: '__init__', vector: zeroVector },
       ]);
       await this.table.delete('id = "__init__"');
+      // Die neue Tabelle passt per Konstruktion zum aktiven Modell.
+      this.indexMismatch = null;
+      await this.writeIndexMeta();
     }
 
     let totalIndexed = 0;
@@ -1243,6 +1359,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     // `as any` im Controller fiel.
     endpoints: EmbeddingEndpointPublic[];
     dimensions: number;
+    /** M-16: womit der Index gebaut wurde, und ob er vor der Nutzung neu gebaut werden muss. */
+    index: { indexedWith: IndexMeta | null; reindexRequired: string | null };
     documentCount: number;
     chunkCount: number;
     entities: Record<string, number>;
@@ -1255,13 +1373,15 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         activeEndpoint: { provider: this.embeddingProvider, model: this.embeddingModel, url: this.embeddingUrl },
         endpoints: toPublicEndpoints(this.endpoints),
         dimensions: 0,
+        index: { indexedWith: this.indexedWith, reindexRequired: this.indexMismatch },
         documentCount: 0,
         chunkCount: 0,
         entities: {},
       };
     }
 
-    const zeroVector = new Array<number>(this.dimensions).fill(0);
+    const tableDims = (await this.tableDimensions()) ?? this.dimensions;
+    const zeroVector = new Array<number>(tableDims).fill(0);
     const allRows = await this.queryRows(this.table.search(zeroVector).limit(100000));
     const validRows = allRows.filter((row) => asText(row.id) !== '__init__');
 
@@ -1282,6 +1402,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       activeEndpoint: { provider: this.embeddingProvider, model: this.embeddingModel, url: this.embeddingUrl },
       endpoints: toPublicEndpoints(this.endpoints),
       dimensions: this.dimensions,
+      index: { indexedWith: this.indexedWith, reindexRequired: this.indexMismatch },
       documentCount: uniqueSources.size,
       chunkCount: validRows.length,
       entities,

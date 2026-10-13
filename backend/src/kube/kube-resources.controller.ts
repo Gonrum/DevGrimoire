@@ -9,7 +9,8 @@ import { KubeClustersService } from './kube-clusters.service';
 import { EventsQueryDto, ListResourcesDto, ResourceParamsDto } from './dto/list-resources.dto';
 import { LogsQueryDto } from './dto/logs-query.dto';
 import { KubeAuditSourceContext } from './schemas/kube-audit.schema';
-import { errorMessageWithCause, isRecord } from '../common/narrow';
+import { isRecord } from '../common/narrow';
+import { kubeApiExceptionCode, kubeApiExceptionMessage } from './kube-errors';
 
 /**
  * `req.user` setzt der global registrierte JwtAuthGuard.
@@ -26,32 +27,31 @@ interface AuthRequest {
 /** Nur für die SSE-Route: Request-Close-Erkennung braucht die Express-Form. */
 type StreamRequest = Request & AuthRequest;
 
-/**
- * `@kubernetes/client-node`s `ApiException` (gen/apis/exception.js) trägt den
- * echten HTTP-Status der Cluster-API in `.code` — kein Nest-`HttpException`,
- * also unsichtbar für `err instanceof HttpException`. Ohne diese Erkennung
- * landete jedes Cluster-4xx (Pod nicht gefunden, RBAC verweigert, Token
- * abgelaufen) hinter einem 503 "cluster unavailable" — genau während des
- * Incidents, in dem diese Unterscheidung zählt (Review-Fund, Important 3).
- *
- * Kein Cast: `isRecord` verengt zur Laufzeit, keine Behauptung nötig.
- */
-function kubeApiExceptionCode(err: unknown): number | undefined {
-  return isRecord(err) && typeof err.code === 'number' ? err.code : undefined;
-}
+
+/** So lange darf ein SSE-Client beim Log-Stream nichts abnehmen (M-17). */
+const LOG_STREAM_DRAIN_TIMEOUT_MS = 30_000;
 
 /**
- * `ApiException.message` ist der mehrzeilige Debug-String aus ihrem
- * Konstruktor ("HTTP-Code: 500\nMessage: …\nBody: …\nHeaders: …") — nicht
- * das, was ein Caller lesen soll. `.body` trägt bei einem echten
- * Cluster-Fehler die Kubernetes-`Status`, deren `.message` lesbar ist
- * ("pods \"foo\" not found"); die wird bevorzugt, wenn vorhanden.
+ * true, sobald `res` wieder Platz hat; false bei Verbindungsende oder wenn
+ * nach `timeoutMs` noch immer nichts abgeflossen ist.
  */
-function kubeApiExceptionMessage(err: unknown): string {
-  if (isRecord(err) && isRecord(err.body) && typeof err.body.message === 'string') {
-    return err.body.message;
-  }
-  return errorMessageWithCause(err);
+export function waitForDrain(
+  res: Pick<Response, 'once' | 'off'>,
+  timeoutMs: number,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const done = (ok: boolean) => {
+      clearTimeout(timer);
+      res.off('drain', onDrain);
+      res.off('close', onClose);
+      resolve(ok);
+    };
+    const onDrain = () => done(true);
+    const onClose = () => done(false);
+    const timer = setTimeout(() => done(false), timeoutMs);
+    res.once('drain', onDrain);
+    res.once('close', onClose);
+  });
 }
 
 const TRANSPORT_CAUSE_CODES = new Set([
@@ -429,6 +429,7 @@ export class KubeResourcesController {
         }
 
         try {
+          let stalled = false;
           for await (const line of session.lines) {
             // `close()` beendet `lines` nicht sofort (bereits gepufferte
             // Zeilen fliessen noch ab), und `res.writableEnded` wird nur durch
@@ -436,7 +437,23 @@ export class KubeResourcesController {
             // setzt es nicht (Fix 4/Critical 2). `clientGone` ist deshalb Teil
             // der Abbruchbedingung, nicht nur `writableEnded`.
             if (clientGone || res.writableEnded) break;
-            send({ type: 'line', line });
+            // M-17: Backpressure. Vorher wurde der Rückgabewert von write()
+            // ignoriert — ein stehengebliebener (nicht getrennter) Client bei
+            // `follow` liess Node unbegrenzt puffern, während der Pod mit
+            // voller Geschwindigkeit weiterlieferte. Jetzt wartet die Schleife
+            // auf `drain`; solange sie nicht weiterzieht, staut sich auch der
+            // Log-Stream zum Cluster. Liest der Client zu lange gar nicht,
+            // wird abgebrochen.
+            if (!res.write(`data: ${JSON.stringify({ type: 'line', line })}\n\n`)) {
+              if (!await waitForDrain(res, LOG_STREAM_DRAIN_TIMEOUT_MS)) {
+                stalled = true;
+                break;
+              }
+            }
+          }
+          if (stalled) {
+            auditError = `Client liest nicht mehr (kein drain nach ${LOG_STREAM_DRAIN_TIMEOUT_MS / 1000} s)`;
+            return;
           }
           // `lines` endet nach einem Verbindungsabbruch genauso sauber wie
           // nach einem regulären Ende (siehe JSDoc oben) — `session.error()`

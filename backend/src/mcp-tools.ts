@@ -93,6 +93,7 @@ import { KubeAuditAction } from './kube/schemas/kube-audit.schema';
 import { KubeClusterDocument } from './kube/schemas/kube-cluster.schema';
 import { isKubeKind, KUBE_KIND_SPECS, KubeKind } from './kube/kube-kinds';
 import { kubeTop, KUBE_TOP_SCOPES } from './kube/kube-top';
+import { kubeApiExceptionMessage } from './kube/kube-errors';
 import {
   assertSha256Matches,
   decodeBase64Strict,
@@ -7200,9 +7201,14 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           try {
             const lines: string[] = [];
             let truncated = false;
+            // M-18: Byte-Budget schon beim Einsammeln. Vorher griff es erst
+            // in textResult — nach 5000 × 8 KB Zeilen, Pretty-JSON und einer
+            // Buffer-Kopie (~200 MB transient), um am Ende 256 KB zu liefern.
+            let bytes = 0;
             for await (const line of session.lines) {
               lines.push(line);
-              if (lines.length >= KUBE_LOG_LINES_HARD_CAP) {
+              bytes += Buffer.byteLength(line, 'utf8') + 8;
+              if (lines.length >= KUBE_LOG_LINES_HARD_CAP || bytes >= KUBE_RESULT_MAX_BYTES) {
                 truncated = true;
                 break;
               }
@@ -8296,7 +8302,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         ? textResult(result, KUBE_RESULT_MAX_BYTES)
         : textResult(result);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      // M-19: Kube-Fehler tragen den ApiException-Debug-String mit Body und
+      // Headern — hier gilt dieselbe Aufbereitung wie am REST-Controller.
+      const message = name.startsWith('kube_')
+        ? kubeApiExceptionMessage(error)
+        : error instanceof Error ? error.message : String(error);
       return errorResult(`Error: ${message}`);
     }
   });
