@@ -3,7 +3,7 @@ import globals from 'globals';
 
 /**
  * Lint für den Workspace-Sidecar (M-30). `index.js` ist sicherheitskritischer
- * Code — Shell-Ausführung, PTY, Kube-Sessions — und wurde bisher von keinem
+ * Code — Shell-Ausführung, PTY — und wurde bisher von keinem
  * Linter erfasst. Kein TypeScript, also kein typed linting: der empfohlene
  * Regelsatz deckt unerreichbaren Code, ungenutzte Variablen, doppelte Keys und
  * versehentliche Globals ab.

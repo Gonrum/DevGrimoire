@@ -94,7 +94,7 @@ jobs:
           cache-dependency-path: workspace/server/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - run: node --check index.js && node --check kube-args.js
+      - run: node --check index.js
       - name: Prod-Audit (nur high/critical brechen)
         run: npm audit --omit=dev --audit-level=high
 

@@ -51,7 +51,6 @@
     "check:i18n-keys": "node scripts/i18n-keys-check.cjs",
     "check:credential-at-rest": "node scripts/credential-at-rest-check.cjs",
     "check:replication-lww": "node scripts/replication-lww-check.cjs",
-    "check:kube-exec-args": "node scripts/kube-exec-args-check.cjs",
     "check:workspace-research-scope": "node scripts/workspace-research-scope-check.cjs",
     "check:auth-seed": "node scripts/auth-seed-check.cjs",
     "check:trust-proxy": "node scripts/trust-proxy-check.cjs",
@@ -100,6 +99,7 @@
     "check:kube-logs": "node scripts/kube-logs-check.cjs",
     "check:kube-resources-rest": "node scripts/kube-resources-rest-units-check.cjs",
     "check:kube-mcp": "node scripts/kube-mcp-check.cjs",
+    "check:dg-kube-scope": "node scripts/dg-kube-scope-check.cjs",
     "check:kube-access": "node scripts/kube-access-check.cjs",
     "checks": "node scripts/run-checks.cjs"
   },

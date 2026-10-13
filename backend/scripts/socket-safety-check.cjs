@@ -11,6 +11,8 @@
  *     darin nicht stehen.
  *   - H-5  ein werfendes await in einer Route ergibt 500, der Prozess lebt.
  *   - M-23 ungültige und doppelte sessionIds werden beim Upgrade abgewiesen.
+ *   - C-3  die Kube-Session-Routen sind weg; das Terminal bekommt die
+ *          DG_*-Variablen aus X-Dg-Env, aber nur für den eigenen Workspace.
  *   - M-24 ein unsinniger Zahlenwert in der Umgebung bricht den Start ab.
  *   - M-25 SIGTERM beendet den Prozess sauber.
  * Dazu Backend-Teile: M-52 (Download-Wächter) und M-44 (SFTP-Watchdog gibt
@@ -44,7 +46,7 @@ const WebSocket = require(path.resolve(__dirname, '..', 'node_modules', 'ws'));
 const SIDECAR = path.resolve(__dirname, '..', '..', 'workspace', 'server', 'index.js');
 const TOKEN = 'socket-safety-check-token-0123456789';
 
-const EXPECTED_CHECKS = 9;
+const EXPECTED_CHECKS = 10;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -87,9 +89,9 @@ async function startSidecar(extraEnv = {}) {
   return { child, root, port, base, post, exited, log: () => log };
 }
 
-function wsStatus(port, query) {
+function wsStatus(port, query, extraHeaders = {}) {
   return new Promise((resolve) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/term?${query}`, { headers: { Authorization: `Bearer ${TOKEN}` } });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/term?${query}`, { headers: { Authorization: `Bearer ${TOKEN}`, ...extraHeaders } });
     ws.on('open', () => resolve({ open: true, ws }));
     ws.on('unexpected-response', (_req, res) => resolve({ open: false, status: res.statusCode }));
     ws.on('error', () => resolve({ open: false, status: 0 }));
@@ -137,12 +139,43 @@ function wsStatus(port, query) {
       first.ws.close();
     });
 
-    await check('C-3: Kube-Sessions sind ohne KUBE_SESSIONS_ENABLED gesperrt (HTTP und Terminal)', async () => {
+    await check('C-3: keine Kube-Sessions mehr im Sidecar (HTTP 404, Terminal 400)', async () => {
       const res = await sc.post('/kube/session', { kubeconfig: 'apiVersion: v1' });
-      assert.equal(res.status, 503);
-      assert.match((await res.json()).error, /disabled/);
+      assert.equal(res.status, 404);
+      const exec = await sc.post('/kube/exec', { kubeSessionId: 'a'.repeat(32), args: ['get', 'pods'] });
+      assert.equal(exec.status, 404);
       const term = await wsStatus(sc.port, 'kubeSessionId=' + 'a'.repeat(32));
-      assert.equal(term.status, 503);
+      assert.equal(term.status, 400);
+    });
+
+    await check('dg im Terminal: X-Dg-Env landet in der Shell, nur für den passenden Workspace', async () => {
+      const id = 'd'.repeat(24);
+      const env = (wsId) => Buffer.from(JSON.stringify({
+        DG_API_URL: 'http://backend:3000/api/internal/dg',
+        DG_API_TOKEN: 'tok-' + wsId.slice(0, 4),
+        DG_WORKSPACE_ID: wsId,
+        DG_PROJECT_ID: 'e'.repeat(24),
+      })).toString('base64');
+      const shellSays = async (sessionId, header) => {
+        const t = await wsStatus(sc.port, `workspaceId=${id}&sessionId=${sessionId}`, { 'X-Dg-Env': header });
+        assert.ok(t.open, `Terminal nicht geöffnet (${t.status})`);
+        let out = '';
+        t.ws.on('message', (d) => { out += d.toString(); });
+        // Das Echo der Eingabe selbst enthält `[${…}]` — das `$` schliesst es
+        // vom Muster aus, gezählt wird nur die ausgewertete Ausgabe.
+        const pattern = /TOKEN=\[([^\]$]*)\]/;
+        // Erst senden, wenn die Shell ihren Prompt zeigt: bash -i verwirft beim
+        // Einrichten des Terminals Eingaben, die vorher ankommen.
+        for (let i = 0; i < 100 && !out.includes('$ '); i++) await new Promise((r) => setTimeout(r, 50));
+        t.ws.send('echo "TOKEN=[${DG_API_TOKEN:-none}]"\r');
+        for (let i = 0; i < 60 && !pattern.test(out); i++) await new Promise((r) => setTimeout(r, 50));
+        t.ws.close();
+        const m = out.match(pattern);
+        return m ? m[1] : `(keine Ausgabe: ${JSON.stringify(out.slice(-200))})`;
+      };
+      assert.equal(await shellSays('dg1', env(id)), 'tok-dddd');
+      assert.equal(await shellSays('dg2', env('f'.repeat(24))), 'none', 'Token eines anderen Workspace');
+      assert.equal(await shellSays('dg3', 'kein-base64-json'), 'none');
     });
 
     await check('M-25: SIGTERM beendet den Sidecar sauber', async () => {

@@ -3,6 +3,12 @@ import { JwtService } from '@nestjs/jwt';
 import { errorMessage } from '../common/narrow';
 
 const TOKEN_TTL = '1h';
+/**
+ * Terminal-Sessions bekommen ihr Token einmal beim Öffnen — es lässt sich in
+ * der laufenden Shell nicht erneuern. 8 h deckt einen Arbeitstag; danach
+ * meldet `dg` ein abgelaufenes Token und das Terminal muss neu geöffnet werden.
+ */
+export const TERMINAL_TOKEN_TTL = '8h';
 const TOKEN_SUBJECT = 'workspace-cli';
 
 export interface WorkspaceCliClaim {
@@ -24,10 +30,10 @@ export class WorkspaceCliTokenService {
 
   constructor(private readonly jwt: JwtService) {}
 
-  mint(workspaceId: string, projectId: string): string {
+  mint(workspaceId: string, projectId: string, ttl: '1h' | '8h' = TOKEN_TTL): string {
     return this.jwt.sign(
       { workspaceId, projectId },
-      { subject: TOKEN_SUBJECT, expiresIn: TOKEN_TTL },
+      { subject: TOKEN_SUBJECT, expiresIn: ttl },
     );
   }
 
@@ -36,9 +42,13 @@ export class WorkspaceCliTokenService {
    * object if JWT_SECRET is unset (then the secret is a per-process random
    * value, see common/jwt-secret.ts, and tokens would not survive a restart).
    */
-  buildEnvFor(workspaceId: string, projectId: string): Record<string, string> {
+  buildEnvFor(
+    workspaceId: string,
+    projectId: string,
+    ttl: '1h' | '8h' = TOKEN_TTL,
+  ): Record<string, string> {
     if (!process.env.JWT_SECRET) return {};
-    const token = this.mint(workspaceId, projectId);
+    const token = this.mint(workspaceId, projectId, ttl);
     return {
       DG_API_URL: process.env.DG_INTERNAL_API_URL || 'http://backend:3000/api/internal/dg',
       DG_API_TOKEN: token,

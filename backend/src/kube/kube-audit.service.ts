@@ -10,7 +10,10 @@ export interface KubeAuditEntry {
   clusterId: string;
   action: KubeAuditAction;
   sourceContext: KubeAuditSourceContext;
-  userId: string;
+  /** Pflicht ausser bei sourceContext 'dg' (siehe Schema). */
+  userId?: string;
+  /** Nur bei sourceContext 'dg'. */
+  workspaceId?: string;
   verb?: string;
   resource?: string;
   namespace?: string;
@@ -39,7 +42,8 @@ export class KubeAuditService {
         at: new Date(),
         action: entry.action,
         sourceContext: entry.sourceContext,
-        userId: new Types.ObjectId(entry.userId),
+        userId: entry.userId ? new Types.ObjectId(entry.userId) : undefined,
+        workspaceId: entry.workspaceId ? new Types.ObjectId(entry.workspaceId) : undefined,
         verb: entry.verb,
         resource: entry.resource,
         namespace: entry.namespace,

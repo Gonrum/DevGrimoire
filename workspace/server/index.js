@@ -2,14 +2,13 @@
 
 const express = require('express');
 const http = require('http');
-const { spawn, execFile } = require('child_process');
+const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const pty = require('node-pty');
-const { validateKubectlArgs } = require('./kube-args');
 
 /**
  * Positive Ganzzahl aus der Umgebung, sonst Abbruch (M-24). Vorher
@@ -70,8 +69,8 @@ if (!TOKEN || TOKEN.length < 16) {
 
 // H-5: Ohne diese Handler beendete JEDER einzelne unbehandelte Fehler den
 // Prozess — ein ENOSPC beim Cleanup, ein ECONNRESET auf einem Terminal-Socket,
-// ein fehlendes `rg` — und mit ihm alle PTYs, laufenden Builds und
-// Kube-Sessions. Geloggt wird laut; weitergelaufen wird bewusst: ein
+// ein fehlendes `rg` — und mit ihm alle PTYs und laufenden Builds.
+// Geloggt wird laut; weitergelaufen wird bewusst: ein
 // Sidecar-Neustart trifft jeden Nutzer, ein einzelner fehlgeschlagener
 // Request nur einen.
 process.on('unhandledRejection', (reason) => {
@@ -764,7 +763,7 @@ app.post('/exec', async (req, res) => {
     // M-26: kein Klartext-Ausschnitt mehr. `curl -H "Authorization: …"`,
     // `export DB_PASS=…`, `git clone https://user:pass@…` landeten sonst in
     // docker logs und jedem Log-Driver. Der Hash erlaubt Korrelation, ohne
-    // den Inhalt preiszugeben — dieselbe Entscheidung wie beim Kubeconfig.
+    // den Inhalt preiszugeben.
     cmdSha256: crypto.createHash('sha256').update(command).digest('hex').slice(0, 16),
   }));
   res.json(result);
@@ -870,281 +869,10 @@ app.post('/size', async (req, res) => {
   res.json({ sizeBytes: Number.isFinite(sizeBytes) ? sizeBytes : 0 });
 });
 
-// ---------------------------------------------------------------------------
-// Kube-Session (K3) — session-bound kubeconfig on tmpfs plus a free kubectl
-// exec endpoint. The sidecar has no notion of DevGrimoire actors; it only
-// authenticates with the shared bearer token, same as every other route
-// here. Access control lives in the backend (Task 3).
-// ---------------------------------------------------------------------------
-
-const KUBE_SESSION_DIR = '/run/kube-sessions';
-const KUBE_SESSION_TTL_DEFAULT_MS = 60 * 60 * 1000;   // 1 h
-const KUBE_SESSION_TTL_MAX_MS = 8 * 60 * 60 * 1000;   // 8 h
-// 100 KB, deutlich unter dem globalen express.json-Limit von 256 KB
-// (Zeile ~240). Ein Kubeconfig, das als JSON-String-Wert kodiert wird, kann
-// im Worst Case (viele Escapes) auf etwa das Doppelte anschwellen — bei
-// 100 KB Rohinhalt bleibt selbst dann Luft unter den 256 KB, sodass diese
-// Prüfung tatsächlich feuert und nicht body-parser mit einem undifferenzierten
-// 500 zuvorkommt. 100 KB ist für reale Kubeconfigs immer noch grosszügig.
-const KUBE_CONFIG_MAX_BYTES = 100 * 1024;
-// 12 Sessions × 100 KB (KUBE_CONFIG_MAX_BYTES) = 1,2 MB — mit reichlich Luft
-// unter den 8 MB des tmpfs-Mounts (docker-compose.yml, size=8m). Der Cap
-// existiert nicht wegen der Bytes, sondern gegen unbegrenztes Anwachsen der
-// In-Memory-Session-Map bei vielen kleinen Sessions.
-const KUBE_SESSION_MAX_COUNT = 12;
-const KUBE_SESSION_ID_PATTERN = /^[a-f0-9]{32}$/;
-
-/** id -> { expiresAt } — der Reaper-Index; Ablauf wird bei jedem Zugriff live geprüft. */
-const kubeSessions = new Map();
-
-function kubeSessionPath(id) {
-  return path.join(KUBE_SESSION_DIR, `${id}.yaml`);
-}
-
-/**
- * `kubeSessions.has(id)` allein ist NICHT verlässlich: der periodische
- * Reaper räumt abgelaufene Einträge erst bis zu 60s später weg, in der
- * Zwischenzeit stünde eine bereits abgelaufene Session weiter zur
- * Verfügung. Diese Funktion vergleicht `expiresAt` bei jedem Aufruf live
- * und räumt einen gefundenen abgelaufenen Eintrag sofort weg, statt auf
- * den nächsten Reaper-Lauf zu warten.
- */
-function kubeSessionActive(id) {
-  const entry = kubeSessions.get(id);
-  if (!entry) return false;
-  if (entry.expiresAt > Date.now()) return true;
-  kubeSessions.delete(id);
-  fsp.rm(kubeSessionPath(id), { force: true }).catch(() => { /* best effort */ });
-  return false;
-}
-
-/** Räumt abgelaufene Sessions weg, auch wenn niemand darauf zugreift oder DELETE ruft. */
-function pruneExpiredKubeSessions() {
-  const now = Date.now();
-  for (const [id, entry] of kubeSessions) {
-    if (entry.expiresAt > now) continue;
-    kubeSessions.delete(id);
-    fsp.rm(kubeSessionPath(id), { force: true }).catch(() => { /* best effort */ });
-  }
-}
-setInterval(pruneExpiredKubeSessions, 60_000).unref();
-
-// Linux TMPFS_MAGIC (statfs(2), <linux/magic.h>). Verglichen mit dem `type`,
-// den fs.statfsSync liefert — kein Text-Parsing von /proc/mounts nötig.
-const TMPFS_MAGIC_LINUX = 0x01021994;
-
-/**
- * Einmal beim Start geprüft, nicht pro Request — der Mount ändert sich zur
- * Laufzeit nicht. Der Grund, das überhaupt zu prüfen: `fsp.mkdir(...,
- * {recursive:true})` unten würde anstandslos ein Verzeichnis auf der
- * beschreibbaren Container-Schicht anlegen, wenn `/run/kube-sessions` aus
- * irgendeinem Grund kein tmpfs ist (z.B. weil eine andere docker-compose.yml
- * — etwa auf der Firmen-Instanz, die dieses Repo nicht überschreibt — diesen
- * Service ohne die tmpfs-Zeile startet). Dann läge jede Kubeconfig dauerhaft
- * auf Platte statt im flüchtigen Speicher — exakt das, was der tmpfs-Mount
- * ausschliessen soll. Lieber alle /kube/*-Routen mit 503 verweigern, als das
- * Sicherheitsversprechen still zu brechen.
- */
-function checkKubeSessionDirIsTmpfs() {
-  try {
-    return fs.statfsSync(KUBE_SESSION_DIR).type === TMPFS_MAGIC_LINUX;
-  } catch {
-    return false;
-  }
-}
-const KUBE_SESSION_DIR_IS_TMPFS = checkKubeSessionDirIsTmpfs();
-if (!KUBE_SESSION_DIR_IS_TMPFS) {
-  console.error(JSON.stringify({
-    type: 'kube-session-dir-not-tmpfs',
-    dir: KUBE_SESSION_DIR,
-    message: 'refusing all /kube/* routes and kube terminals until this is mounted as tmpfs',
-  }));
-}
-
-/**
- * Kube-Sessions sind per Default AUS (C-3).
- *
- * Die Session-Kubeconfigs liegen in diesem Container unter derselben UID
- * (10001), unter der jede Workspace-Shell und jedes /exec läuft. 0600/0700
- * schützen dann gegen niemanden: `cat /run/kube-sessions/*.yaml` aus einem
- * beliebigen Workspace liefert die Cluster-Credentials ALLER aktiven Sessions,
- * projektübergreifend. Auch ein Injektions-Proxy mit Token im Env hilft nicht —
- * /proc/<pid>/environ ist für dieselbe UID ebenso lesbar.
- *
- * Heute ruft das Backend diese Routen noch nicht auf (K3 Task 3 fehlt), der
- * Befund ist latent. Damit er nicht unbemerkt scharf wird, wenn Task 3 landet,
- * bleiben die Routen gesperrt, bis die Isolation steht (eigener Container
- * bzw. eigene UID pro Session) und jemand bewusst KUBE_SESSIONS_ENABLED=true
- * setzt. Für die E2E-Tests (test/kube-sidecar-session.sh) ebenso.
- */
-const KUBE_SESSIONS_ENABLED = process.env.KUBE_SESSIONS_ENABLED === 'true';
-
-function requireKubeSessionTmpfs(res) {
-  if (!KUBE_SESSIONS_ENABLED) {
-    res.status(503).json({ error: 'kube sessions disabled: not isolated from workspace shells (set KUBE_SESSIONS_ENABLED=true only once they are)' });
-    return false;
-  }
-  if (KUBE_SESSION_DIR_IS_TMPFS) return true;
-  res.status(503).json({ error: 'kube sessions unavailable: session directory is not a tmpfs mount' });
-  return false;
-}
-
-app.post('/kube/session', async (req, res) => {
-  if (!requireKubeSessionTmpfs(res)) return;
-  const kubeconfig = req.body?.kubeconfig;
-  if (typeof kubeconfig !== 'string' || kubeconfig.trim().length === 0) {
-    return res.status(400).json({ error: 'kubeconfig must be a non-empty string' });
-  }
-  if (Buffer.byteLength(kubeconfig, 'utf8') > KUBE_CONFIG_MAX_BYTES) {
-    return res.status(400).json({ error: 'kubeconfig too large' });
-  }
-  // TODO(K3, bekannte Lücke): eine Kubeconfig mit einem exec-Credential-Block
-  // (users[].user.exec.command) lässt kubectl bei jedem Request ein
-  // beliebiges Binary im Sidecar ausführen — das hebelt das execFile-ohne-
-  // Shell-Ruling von /kube/exec komplett aus, denn nicht die Argumente sind
-  // dann der Angriffsweg, sondern der Inhalt der Kubeconfig selbst. Eine
-  // korrekte Prüfung braucht einen echten YAML-Parser (ein String-Match auf
-  // "exec:" ist zu leicht zu umgehen und zu leicht falsch-positiv); der
-  // Sidecar hat aktuell kein YAML-Paket in package.json. Bewusst nicht
-  // improvisiert — Entscheidung (Paket aufnehmen vs. Prüfung ins Backend
-  // verlagern) steht noch aus, siehe Fix-Runde-1-Bericht zu Task 2.
-  pruneExpiredKubeSessions();
-  if (kubeSessions.size >= KUBE_SESSION_MAX_COUNT) {
-    return res.status(429).json({ error: 'too many active kube sessions' });
-  }
-  let ttl = Number(req.body?.ttlSeconds) * 1000;
-  if (!Number.isFinite(ttl) || ttl <= 0) ttl = KUBE_SESSION_TTL_DEFAULT_MS;
-  if (ttl > KUBE_SESSION_TTL_MAX_MS) ttl = KUBE_SESSION_TTL_MAX_MS;
-
-  const id = crypto.randomBytes(16).toString('hex');
-  try {
-    await fsp.mkdir(KUBE_SESSION_DIR, { recursive: true, mode: 0o700 });
-    // mode im open(), nicht per chmod danach — sonst existiert die Datei
-    // kurzzeitig mit dem umask-Default.
-    await fsp.writeFile(kubeSessionPath(id), kubeconfig, { mode: 0o600, flag: 'wx' });
-  } catch (err) {
-    // Fehlertext bleibt im Server-Log — an den Client nur ein generischer
-    // Text, sonst könnten Pfade oder sogar Teile des Inhalts zurückgespiegelt
-    // werden.
-    console.error(JSON.stringify({
-      type: 'kube-session-create-failed', id, error: String(err && err.message ? err.message : err),
-    }));
-    return res.status(500).json({ error: 'failed to persist kube session' });
-  }
-
-  const expiresAt = Date.now() + ttl;
-  kubeSessions.set(id, { expiresAt });
-  // Bewusst KEIN Logging des Inhalts, auch nicht gekürzt.
-  console.log(JSON.stringify({ type: 'kube-session-create', id, ttlMs: ttl }));
-  res.status(201).json({ kubeSessionId: id, expiresAt: new Date(expiresAt).toISOString() });
-});
-
-app.delete('/kube/session/:id', async (req, res) => {
-  if (!requireKubeSessionTmpfs(res)) return;
-  const id = req.params.id;
-  if (!KUBE_SESSION_ID_PATTERN.test(id)) return res.status(400).json({ error: 'bad session id' });
-  kubeSessions.delete(id);
-  try {
-    await fsp.rm(kubeSessionPath(id), { force: true });
-  } catch (err) {
-    console.error(JSON.stringify({
-      type: 'kube-session-delete-failed', id, error: String(err && err.message ? err.message : err),
-    }));
-    return res.status(500).json({ error: 'failed to delete kube session' });
-  }
-  console.log(JSON.stringify({ type: 'kube-session-delete', id }));
-  res.status(204).end();
-});
-
-const KUBE_EXEC_MAX_ARGS = 64;
-const KUBE_EXEC_MAX_OUTPUT = 200_000;
-
-/**
- * Freies kubectl gegen eine Kube-Session.
- *
- * `args` ist ein ARRAY, kein String, und wird ohne Shell an kubectl übergeben.
- * Das schützt gegen Shell-Metazeichen (`;`, `$(...)`, `|`, …) INNERHALB der
- * Argumente — ein Aufrufer kann kubectl nicht durch geschicktes Quoting eine
- * zweite Shell-Kommandozeile unterschieben. Es schützt NICHT gegen alles, was
- * die Kubeconfig selbst hergibt: ein exec-Credential-Block darin (siehe TODO
- * bei /kube/session) lässt kubectl unabhängig von den hier übergebenen args
- * ein beliebiges Binary starten. Genau deshalb kein `exec`, sondern
- * `execFile` — aber das ist eine von zwei Verteidigungslinien, nicht die
- * einzige. Die zweite ist die Argument-Allowlist aus `kube-args.js`.
- */
-app.post('/kube/exec', async (req, res) => {
-  if (!requireKubeSessionTmpfs(res)) return;
-  const id = req.body?.kubeSessionId;
-  if (typeof id !== 'string' || !KUBE_SESSION_ID_PATTERN.test(id)) {
-    return res.status(400).json({ error: 'invalid kubeSessionId' });
-  }
-  if (!kubeSessionActive(id)) {
-    return res.status(404).json({ error: 'unknown or expired kube session' });
-  }
-  const args = req.body?.args;
-  if (!Array.isArray(args) || args.length === 0 || args.length > KUBE_EXEC_MAX_ARGS) {
-    return res.status(400).json({ error: 'args must be a non-empty string array' });
-  }
-  if (!args.every((a) => typeof a === 'string')) {
-    return res.status(400).json({ error: 'args must contain only strings' });
-  }
-  // Zweite Verteidigungslinie (C-2): execFile verhindert nur Shell-Injection,
-  // nicht Argument-Injection wie --kubeconfig/--server/--as oder schreibende
-  // Verben. Details und Begründung der Allowlist in kube-args.js.
-  const argsError = validateKubectlArgs(args);
-  if (argsError) {
-    console.log(JSON.stringify({ type: 'kube-exec-rejected', id, reason: argsError }));
-    return res.status(400).json({ error: argsError });
-  }
-  // Muss eine positive Ganzzahl sein, bevor sie an execFile geht: `Number(-1)`
-  // ist truthy, also überlebt ein negativer oder gebrochener Wert `Math.min`
-  // klaglos und execFile wirft dann SYNCHRON (ERR_OUT_OF_RANGE) — innerhalb
-  // eines async-Handlers wird daraus eine unhandled rejection, die den
-  // gesamten Prozess und damit jedes laufende Workspace-Terminal mitnimmt.
-  const rawTimeout = Number(req.body?.timeout);
-  const timeout = Number.isInteger(rawTimeout) && rawTimeout > 0
-    ? Math.min(rawTimeout, 120_000)
-    : 30_000;
-
-  const started = Date.now();
-  try {
-    execFile(
-      'kubectl',
-      args,
-      {
-        cwd: '/tmp',
-        env: { ...buildExecEnv({}), KUBECONFIG: kubeSessionPath(id) },
-        timeout,
-        maxBuffer: KUBE_EXEC_MAX_OUTPUT,
-        killSignal: 'SIGKILL',
-      },
-      (err, stdout, stderr) => {
-        // maxBuffer-Überlauf und ein echter Timeout sehen beide wie ein
-        // SIGKILL aus, wenn killSignal auf SIGKILL steht — deshalb zuerst
-        // den Overflow-Fall über seinen eigenen err.code identifizieren und
-        // ausdrücklich aus timedOut ausschliessen, sonst meldet ein
-        // abgeschnittenes Kommando fälschlich beides gleichzeitig.
-        const overflow = Boolean(err && err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER');
-        const timedOut = Boolean(err && err.killed && err.signal === 'SIGKILL' && !overflow);
-        res.json({
-          exitCode: err && typeof err.code === 'number' ? err.code : (err ? 1 : 0),
-          // Bei maxBuffer-Überlauf behält Node den bereits eingesammelten,
-          // abgeschnittenen Anfang in stdout/stderr — nichts wird verworfen.
-          stdout: String(stdout || '').slice(0, KUBE_EXEC_MAX_OUTPUT),
-          stderr: String(stderr || '').slice(0, KUBE_EXEC_MAX_OUTPUT),
-          truncated: overflow,
-          timedOut,
-          durationMs: Date.now() - started,
-        });
-      },
-    );
-  } catch (err) {
-    console.error(JSON.stringify({
-      type: 'kube-exec-failed', id, error: String(err && err.message ? err.message : err),
-    }));
-    if (!res.headersSent) res.status(500).json({ error: 'failed to run kubectl' });
-  }
-});
+// Kube-Sessions (K3) gibt es hier nicht mehr (C-3): ihre Kubeconfigs lagen
+// unter derselben UID wie jede Workspace-Shell und waren damit für jede Shell
+// lesbar. Cluster-Zugriff aus der Shell läuft über `dg kube` → Backend; die
+// Credentials verlassen das Backend nicht.
 
 app.use((err, _req, res, _next) => {
   console.error(JSON.stringify({ type: 'route-error', error: String(err && err.stack ? err.stack : err) }));
@@ -1164,7 +892,7 @@ app.use((err, _req, res, _next) => {
 // ---------------------------------------------------------------------------
 
 /**
- * Active PTYs keyed by `ws:<workspaceId>:<sessionId>` bzw. `kube:<id>:<sessionId>`. We keep a reference so an
+ * Active PTYs keyed by `ws:<workspaceId>:<sessionId>`. We keep a reference so an
  * accidental WS close (browser tab refresh, transient network drop) gives the
  * user a few seconds to reconnect before we kill bash.
  */
@@ -1212,6 +940,36 @@ const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
  */
 const TERMINAL_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
+const DG_ENV_KEYS = ['DG_API_URL', 'DG_API_TOKEN', 'DG_WORKSPACE_ID', 'DG_PROJECT_ID'];
+
+/**
+ * DG_*-Variablen für das interaktive Terminal, vom Backend-Proxy als
+ * `X-Dg-Env` (Base64-JSON) mitgegeben — damit `dg` (insbesondere `dg kube`)
+ * auch im Terminal funktioniert, nicht nur bei /exec. Nur die vier bekannten
+ * Schlüssel, nur Strings, und DG_WORKSPACE_ID muss zum Terminal passen: ein
+ * Token eines anderen Workspace landet nicht in dieser Shell. Alles andere
+ * wird still verworfen — das Terminal geht dann ohne `dg` auf, wie bisher.
+ * Der Header ist nur hinter der Bearer-Prüfung erreichbar.
+ */
+function parseDgEnvHeader(raw, workspaceId) {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 8192) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
+  } catch {
+    return {};
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const env = {};
+  for (const key of DG_ENV_KEYS) {
+    const v = parsed[key];
+    if (typeof v !== 'string' || v.length === 0 || v.length > EXEC_ENV_VALUE_MAX_LEN) return {};
+    env[key] = v;
+  }
+  if (env.DG_WORKSPACE_ID !== workspaceId) return {};
+  return env;
+}
+
 const server = http.createServer(app);
 
 server.on('upgrade', (req, socket, head) => {
@@ -1237,12 +995,7 @@ server.on('upgrade', (req, socket, head) => {
   }
 
   const workspaceId = url.searchParams.get('workspaceId');
-  const kubeSessionId = url.searchParams.get('kubeSessionId');
-
-  // Genau eines von beiden. Beide gesetzt hiesse: welcher Modus gilt? Diese
-  // Frage darf gar nicht erst entstehen — sonst entscheidet die Reihenfolge
-  // der if-Zweige darüber, in welchem Kontext eine Shell aufgeht.
-  if ((workspaceId && kubeSessionId) || (!workspaceId && !kubeSessionId)) {
+  if (!workspaceId || !WORKSPACE_ID_PATTERN.test(workspaceId)) {
     socket.write('HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n');
     socket.destroy();
     return;
@@ -1254,63 +1007,22 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
-  const terminalKey = kubeSessionId
-    ? `kube:${kubeSessionId}:${sessionId}`
-    : `ws:${workspaceId}:${sessionId}`;
-  if (activeTerminals.has(terminalKey)) {
+  if (activeTerminals.has(`ws:${workspaceId}:${sessionId}`)) {
     socket.write('HTTP/1.1 409 Conflict\r\nContent-Length: 0\r\n\r\n');
     socket.destroy();
     return;
   }
+  const dgEnv = parseDgEnvHeader(req.headers['x-dg-env'], workspaceId);
 
-  if (kubeSessionId) {
-    if (!KUBE_SESSIONS_ENABLED || !KUBE_SESSION_DIR_IS_TMPFS) {
-      socket.write('HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-    if (!KUBE_SESSION_ID_PATTERN.test(kubeSessionId)) {
-      socket.write('HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-    // kubeSessionActive vergleicht expiresAt live statt sich auf den
-    // periodischen Reaper zu verlassen — der räumt erst bis zu 60s nach
-    // Ablauf auf, ein Terminal auf eine bereits abgelaufene Session wäre
-    // sonst für bis zu einer Minute möglich.
-    if (!kubeSessionActive(kubeSessionId)) {
-      socket.write('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-    if (countTerminalsFor(`kube:${kubeSessionId}`) >= TERMINAL_MAX_PER_KUBE_SESSION) {
-      socket.write('HTTP/1.1 429 Too Many Terminals\r\nContent-Length: 0\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      handleKubeTerminalConnection(ws, kubeSessionId, sessionId).catch((err) => {
-        console.error('kube terminal connection failed', err);
-        try { ws.close(1011, 'internal error'); } catch { /* noop */ }
-      });
-    });
-    return;
-  }
-
-  if (!WORKSPACE_ID_PATTERN.test(workspaceId)) {
-    socket.write('HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n');
-    socket.destroy();
-    return;
-  }
-  // Eigener Key-Präfix `ws:` (M-23): WORKSPACE_ID_PATTERN erlaubt den Slug
-  // `kube`, dessen Terminals sonst mit den Kube-Session-Keys kollidierten.
+  // Key-Präfix `ws:` (M-23) — stammt aus der Zeit der Kube-Terminals, bleibt
+  // als Namensraum für die Bookkeeping-Keys erhalten.
   if (countTerminalsFor(`ws:${workspaceId}`) >= TERMINAL_MAX_PER_WORKSPACE) {
     socket.write('HTTP/1.1 429 Too Many Terminals\r\nContent-Length: 0\r\n\r\n');
     socket.destroy();
     return;
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
-    handleTerminalConnection(ws, workspaceId, sessionId).catch((err) => {
+    handleTerminalConnection(ws, workspaceId, sessionId, dgEnv).catch((err) => {
       console.error('terminal connection failed', err);
       try { ws.close(1011, 'internal error'); } catch { /* noop */ }
     });
@@ -1320,10 +1032,8 @@ server.on('upgrade', (req, socket, head) => {
 /**
  * Wires a spawned PTY to its WebSocket: forwards PTY output to the socket,
  * routes socket input to keystrokes (or a resize control message), and
- * tears both down together on exit/close. Shared verbatim by the workspace
- * terminal and the kube-cluster terminal — `key` is whatever activeTerminals
- * key the caller used (`ws:<workspaceId>:<sessionId>` or
- * `kube:<kubeSessionId>:<sessionId>`); this function treats it as an opaque
+ * tears both down together on exit/close. `key` is the activeTerminals key
+ * (`ws:<workspaceId>:<sessionId>`); this function treats it as an opaque
  * bookkeeping/log id, never branches on its shape.
  */
 function wireTerminal(ws, term, state, key) {
@@ -1419,7 +1129,7 @@ function wireTerminal(ws, term, state, key) {
   });
 }
 
-async function handleTerminalConnection(ws, workspaceId, sessionId) {
+async function handleTerminalConnection(ws, workspaceId, sessionId, dgEnv = {}) {
   await ensureWorkspaceDir(workspaceId);
   await ensureCwdStateDir();
   const startCwd = (await readCwdState(workspaceId)) || workspaceRoot(workspaceId);
@@ -1431,6 +1141,7 @@ async function handleTerminalConnection(ws, workspaceId, sessionId) {
     cwd: startCwd,
     env: {
       ...buildExecEnv({}),
+      ...dgEnv,
       // PTY-only niceties — make the prompt obvious and history work.
       TERM: 'xterm-256color',
       PS1: '\\[\\033[36m\\]\\w\\[\\033[0m\\] $ ',
@@ -1452,47 +1163,6 @@ async function handleTerminalConnection(ws, workspaceId, sessionId) {
 
   // Greeting line so the browser sees something even if bash takes a beat.
   ws.send(`\x1b[2m# devgrimoire workspace ${workspaceId} — bash session\x1b[0m\r\n`);
-}
-
-const TERMINAL_MAX_PER_KUBE_SESSION = 4;
-
-/**
- * PTY für ein Cluster-Terminal. Bewusst NICHT `handleTerminalConnection`
- * wiederverwendet: die dortige Vorbereitung (`ensureWorkspaceDir`,
- * `readCwdState`, `HISTFILE` unter `ROOT/<workspaceId>`) ist Workspace-Logik
- * und würde hier auf ein Verzeichnis zeigen, das es nicht gibt. Der Rest —
- * onData, onExit, resize, Idle-Reaper — teilt sich beides über `activeTerminals`.
- */
-async function handleKubeTerminalConnection(ws, kubeSessionId, sessionId) {
-  const kubeconfigPath = kubeSessionPath(kubeSessionId);
-  const term = pty.spawn('/bin/bash', ['-i'], {
-    name: 'xterm-256color',
-    cols: 80,
-    rows: 24,
-    // Kein Workspace-Verzeichnis: /tmp ist der einzige Ort, den es hier
-    // garantiert gibt und an dem der Nutzer schreiben darf.
-    cwd: '/tmp',
-    env: {
-      ...buildExecEnv({}),
-      KUBECONFIG: kubeconfigPath,
-      TERM: 'xterm-256color',
-      PS1: '\\[\\033[35m\\]kube\\[\\033[0m\\]:\\w $ ',
-      // Kein HISTFILE: die History läge im tmpfs und stürbe mit der Session.
-      // Sie hier wegzulassen ist ehrlicher als ein Pfad, der ins Leere zeigt.
-      HISTSIZE: '500',
-      HISTCONTROL: 'ignoredups:erasedups',
-    },
-  });
-
-  const key = `kube:${kubeSessionId}:${sessionId}`;
-  const state = { pty: term, ws, lastActivity: Date.now() };
-  activeTerminals.set(key, state);
-
-  console.log(JSON.stringify({
-    type: 'pty-open', mode: 'kube', kubeSessionId, sessionId, pid: term.pid,
-  }));
-
-  wireTerminal(ws, term, state, key);
 }
 
 // M-25: SIGTERM sauber behandeln (docker stop). Vorher gab es keinen Handler;

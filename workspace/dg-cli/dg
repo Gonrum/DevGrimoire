@@ -18,12 +18,13 @@
 #   dg note <topic> <content>         (or:  dg note <topic> -f <file>)
 #   dg todo <title> [--description=...] [--priority=low|medium|high|critical]
 #                   [--tags=a,b] [--milestone=<id>]
+#   dg kube clusters|get|describe|logs|events|top   (read-only, see dg kube --help)
 #   dg whoami
 #   dg --help | dg --version
 
 set -euo pipefail
 
-DG_VERSION="0.1.0"
+DG_VERSION="0.2.0"
 
 usage() {
     cat <<'EOF'
@@ -36,16 +37,18 @@ dg — DevGrimoire workspace CLI
   dg note <topic> -f <file>
   dg todo <title> [--description=X] [--priority=low|medium|high|critical]
                   [--tags=a,b] [--milestone=<id>]
+  dg kube …                         (read-only cluster access, see: dg kube --help)
   dg whoami
   dg --help | dg --version
 
-Configured via DG_* env vars (auto-injected per workspace_exec call).
+Configured via DG_* env vars (auto-injected per workspace_exec call and
+into interactive terminals).
 EOF
 }
 
 require_env() {
     if [[ -z "${DG_API_URL:-}" || -z "${DG_API_TOKEN:-}" ]]; then
-        echo "error: DG_API_URL / DG_API_TOKEN missing — dg only works inside a workspace exec call (auto-injected)." >&2
+        echo "error: DG_API_URL / DG_API_TOKEN missing — dg only works inside a workspace exec call or terminal (auto-injected)." >&2
         exit 2
     fi
 }
@@ -228,6 +231,166 @@ cmd_todo() {
     api_post todo "$payload"
 }
 
+kube_usage() {
+    cat <<'EOF'
+dg kube — read-only access to this project's Kubernetes clusters.
+The cluster credentials stay in the DevGrimoire backend; there is no
+kubeconfig in this workspace.
+
+  dg kube clusters
+  dg kube get <kind> [name] [-n ns | -A] [-l selector] [--limit N]
+  dg kube describe <kind> <name> [-n ns]
+  dg kube logs <pod> -n ns [-c container] [--tail N] [--since SECONDS] [--previous]
+  dg kube events [-n ns] [--for name] [--kind kind] [--limit N]
+  dg kube top [pods|nodes] [-n ns]
+
+Every command takes --cluster <slug|id>; it may be omitted when the project
+has exactly one cluster. Output is JSON (logs: plain lines).
+EOF
+}
+
+# Parses the shared flags into the K_* globals; positional args land in KPOS.
+kube_parse() {
+    K_CLUSTER="" K_NS="" K_SEL="" K_LIMIT="" K_CONTAINER="" K_TAIL="" K_SINCE="" K_PREV="" K_FOR="" K_KIND=""
+    KPOS=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --cluster=*)    K_CLUSTER="${1#*=}" ;;
+            --cluster)      K_CLUSTER="${2:-}"; shift ;;
+            -n|--namespace) K_NS="${2:-}"; shift ;;
+            -A|--all-namespaces) K_NS="" ;;   # kubectl habit; no -n already means all
+            --namespace=*)  K_NS="${1#*=}" ;;
+            -l|--selector)  K_SEL="${2:-}"; shift ;;
+            --selector=*)   K_SEL="${1#*=}" ;;
+            --limit=*)      K_LIMIT="${1#*=}" ;;
+            --limit)        K_LIMIT="${2:-}"; shift ;;
+            -c|--container) K_CONTAINER="${2:-}"; shift ;;
+            --container=*)  K_CONTAINER="${1#*=}" ;;
+            --tail=*)       K_TAIL="${1#*=}" ;;
+            --tail)         K_TAIL="${2:-}"; shift ;;
+            --since=*)      K_SINCE="${1#*=}" ;;
+            --since)        K_SINCE="${2:-}"; shift ;;
+            -p|--previous)  K_PREV=1 ;;
+            --for=*)        K_FOR="${1#*=}" ;;
+            --for)          K_FOR="${2:-}"; shift ;;
+            --kind=*)       K_KIND="${1#*=}" ;;
+            --kind)         K_KIND="${2:-}"; shift ;;
+            -*) echo "unknown flag: $1" >&2; exit 2 ;;
+            *) KPOS+=("$1") ;;
+        esac
+        shift
+    done
+}
+
+# Integer flag value → JSON number, or exit with a usage error.
+json_int() {
+    if [[ ! "$2" =~ ^[0-9]+$ ]]; then
+        echo "error: $1 must be a positive integer" >&2; exit 2
+    fi
+    echo "$2"
+}
+
+# Builds the request body from key/JSON-value pairs plus --cluster.
+kube_payload() {
+    local payload="{" sep=""
+    if [[ -n "$K_CLUSTER" ]]; then payload+="\"cluster\":$(json_encode "$K_CLUSTER")"; sep=","; fi
+    while [[ $# -gt 1 ]]; do
+        payload+="${sep}\"$1\":$2"; sep=","
+        shift 2
+    done
+    echo "${payload}}"
+}
+
+pretty_json() {
+    python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), indent=2, ensure_ascii=False))'
+}
+
+print_log_lines() {
+    python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+for line in d.get("lines", []):
+    print(line)
+if d.get("status") != "complete":
+    err = d.get("error")
+    print("# status: %s%s" % (d.get("status"), (" - " + err) if err else ""), file=sys.stderr)'
+}
+
+# kubectl-style names (pods, po, deploy, svc …) → the backend's kind names.
+# Unknown values pass through unchanged; the backend rejects them with a list.
+kube_kind() {
+    case "${1,,}" in
+        ns|namespace|namespaces)                     echo Namespace ;;
+        no|node|nodes)                               echo Node ;;
+        po|pod|pods)                                 echo Pod ;;
+        svc|service|services)                        echo Service ;;
+        cm|configmap|configmaps)                     echo ConfigMap ;;
+        secret|secrets)                              echo Secret ;;
+        pvc|persistentvolumeclaim|persistentvolumeclaims) echo PersistentVolumeClaim ;;
+        ev|event|events)                             echo Event ;;
+        deploy|deployment|deployments)               echo Deployment ;;
+        sts|statefulset|statefulsets)                echo StatefulSet ;;
+        ds|daemonset|daemonsets)                     echo DaemonSet ;;
+        job|jobs)                                    echo Job ;;
+        cj|cronjob|cronjobs)                         echo CronJob ;;
+        ing|ingress|ingresses)                       echo Ingress ;;
+        *)                                           echo "$1" ;;
+    esac
+}
+
+cmd_kube() {
+    local sub="${1:-}"
+    [[ $# -gt 0 ]] && shift
+    case "$sub" in
+        -h|--help|help|"") kube_usage; return 0 ;;
+    esac
+    kube_parse "$@"
+    require_env
+    local extra=()
+    [[ -n "$K_NS" ]] && extra+=(namespace "$(json_encode "$K_NS")")
+    local body
+    case "$sub" in
+        clusters)
+            body=$(api_post kube/clusters "$(kube_payload)")
+            pretty_json <<<"$body" ;;
+        get)
+            if [[ ${#KPOS[@]} -lt 1 ]]; then echo "usage: dg kube get <kind> [name] [-n ns] [-l selector]" >&2; exit 2; fi
+            extra+=(kind "$(json_encode "$(kube_kind "${KPOS[0]}")")")
+            [[ ${#KPOS[@]} -ge 2 ]] && extra+=(name "$(json_encode "${KPOS[1]}")")
+            [[ -n "$K_SEL" ]] && extra+=(labelSelector "$(json_encode "$K_SEL")")
+            [[ -n "$K_LIMIT" ]] && extra+=(limit "$(json_int --limit "$K_LIMIT")")
+            body=$(api_post kube/get "$(kube_payload "${extra[@]}")")
+            pretty_json <<<"$body" ;;
+        describe)
+            if [[ ${#KPOS[@]} -lt 2 ]]; then echo "usage: dg kube describe <kind> <name> [-n ns]" >&2; exit 2; fi
+            extra+=(kind "$(json_encode "$(kube_kind "${KPOS[0]}")")" name "$(json_encode "${KPOS[1]}")")
+            body=$(api_post kube/describe "$(kube_payload "${extra[@]}")")
+            pretty_json <<<"$body" ;;
+        logs)
+            if [[ ${#KPOS[@]} -lt 1 || -z "$K_NS" ]]; then
+                echo "usage: dg kube logs <pod> -n ns [-c container] [--tail N] [--since SECONDS] [--previous]" >&2; exit 2
+            fi
+            extra+=(pod "$(json_encode "${KPOS[0]}")")
+            [[ -n "$K_CONTAINER" ]] && extra+=(container "$(json_encode "$K_CONTAINER")")
+            [[ -n "$K_TAIL" ]] && extra+=(tailLines "$(json_int --tail "$K_TAIL")")
+            [[ -n "$K_SINCE" ]] && extra+=(sinceSeconds "$(json_int --since "$K_SINCE")")
+            [[ -n "$K_PREV" ]] && extra+=(previous true)
+            body=$(api_post kube/logs "$(kube_payload "${extra[@]}")")
+            print_log_lines <<<"$body" ;;
+        events)
+            [[ -n "$K_FOR" ]] && extra+=(involvedName "$(json_encode "$K_FOR")")
+            [[ -n "$K_KIND" ]] && extra+=(involvedKind "$(json_encode "$(kube_kind "$K_KIND")")")
+            [[ -n "$K_LIMIT" ]] && extra+=(limit "$(json_int --limit "$K_LIMIT")")
+            body=$(api_post kube/events "$(kube_payload "${extra[@]}")")
+            pretty_json <<<"$body" ;;
+        top)
+            [[ ${#KPOS[@]} -ge 1 ]] && extra+=(scope "$(json_encode "${KPOS[0]}")")
+            body=$(api_post kube/top "$(kube_payload "${extra[@]}")")
+            pretty_json <<<"$body" ;;
+        *) echo "unknown kube subcommand: $sub" >&2; kube_usage >&2; exit 2 ;;
+    esac
+}
+
 cmd_whoami() {
     require_env
     api_post whoami "{}"
@@ -238,6 +401,7 @@ case "${1:-}" in
     log)         shift; cmd_log "$@" ;;
     note)        shift; cmd_note "$@" ;;
     todo)        shift; cmd_todo "$@" ;;
+    kube)        shift; cmd_kube "$@" ;;
     whoami)      shift; cmd_whoami ;;
     -h|--help|help|"") usage ;;
     -v|--version) echo "dg ${DG_VERSION}" ;;

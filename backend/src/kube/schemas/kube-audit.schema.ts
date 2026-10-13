@@ -5,7 +5,7 @@ export type KubeAuditAction =
   | 'connect' | 'list' | 'get' | 'logs' | 'metrics_query'
   | 'write' | 'exec' | 'terminal_open' | 'terminal_close';
 
-export type KubeAuditSourceContext = 'ui' | 'mcp' | 'rest' | 'terminal';
+export type KubeAuditSourceContext = 'ui' | 'mcp' | 'rest' | 'terminal' | 'dg';
 
 export type KubeAuditDocument = HydratedDocument<KubeAudit>;
 
@@ -24,11 +24,26 @@ export class KubeAudit {
   })
   action: KubeAuditAction;
 
-  @Prop({ required: true, type: String, enum: ['ui', 'mcp', 'rest', 'terminal'] })
+  @Prop({ required: true, type: String, enum: ['ui', 'mcp', 'rest', 'terminal', 'dg'] })
   sourceContext: KubeAuditSourceContext;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
-  userId: Types.ObjectId;
+  /**
+   * Pflicht ausser bei `dg`: die Workspace-CLI hat keinen Nutzer, nur ein
+   * projektgebundenes Token. Dort hält `workspaceId` fest, woher der Aufruf kam.
+   */
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'User',
+    required(this: KubeAudit) { return this.sourceContext !== 'dg'; },
+  })
+  userId?: Types.ObjectId;
+
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'Workspace',
+    required(this: KubeAudit) { return this.sourceContext === 'dg'; },
+  })
+  workspaceId?: Types.ObjectId;
 
   @Prop({ type: Types.ObjectId, ref: 'AgentRole' })
   agentRoleId?: Types.ObjectId;

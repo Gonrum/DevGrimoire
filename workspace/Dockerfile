@@ -1,5 +1,5 @@
 # H-27: node:22-slim wie Backend und Frontend. Node 20 ist seit 2026-04-30
-# EOL — ausgerechnet der Container, der PTYs, kubectl und Nutzerkommandos
+# EOL — ausgerechnet der Container, der PTYs und Nutzerkommandos
 # ausführt, lief auf einer ungepatchten Runtime.
 FROM node:22-slim
 
@@ -43,20 +43,8 @@ RUN ARCH=$(dpkg --print-architecture) \
     && rm -rf /tmp/glab.tar.gz /tmp/bin /tmp/LICENSE /tmp/README.md \
     && gh --version && glab --version
 
-# kubectl für das Cluster-Terminal (K3). Version gepinnt und gegen die
-# offizielle Prüfsumme verifiziert — ein Binary, das im Terminal jedes Verb
-# ausführen darf, wird nicht ungeprüft heruntergeladen. v1.35.8 deckt Server
-# 1.34–1.36 ab (kubectl unterstützt ±1 Minor); vor `COPY server/ ./`, damit
-# eine Änderung an index.js nicht jedes Mal einen ~50-MB-Download auslöst.
-ARG KUBECTL_VERSION=v1.35.8
-RUN ARCH=$(dpkg --print-architecture) \
-    && case "$ARCH" in amd64|arm64) : ;; *) echo "unsupported arch: $ARCH" && exit 1 ;; esac \
-    && curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" \
-    && curl -fsSL -o /tmp/kubectl.sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl.sha256" \
-    && echo "$(cat /tmp/kubectl.sha256)  /tmp/kubectl" | sha256sum -c - \
-    && install -m 0755 /tmp/kubectl /usr/local/bin/kubectl \
-    && rm -f /tmp/kubectl /tmp/kubectl.sha256 \
-    && kubectl version --client
+# Kein kubectl (C-3): Cluster-Zugriff aus der Shell läuft über `dg kube`,
+# die Credentials bleiben im Backend.
 
 # Non-root user for all workspace operations. UID 10001 keeps the volume
 # files clearly outside common host UIDs.

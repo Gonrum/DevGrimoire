@@ -55,9 +55,9 @@ import { ChatContextService } from './chat/chat-context.service';
 import { WebSearchService } from './web-search/services/web-search.service';
 import { ReadabilityService } from './web-search/services/readability.service';
 import { WorkspacesService } from './workspaces/workspaces.service';
+import { TERMINAL_TOKEN_TTL, WorkspaceCliTokenService } from './workspaces/workspace-cli-token.service';
 import { WorkspaceClient } from './workspaces/workspace-client.service';
 import { WorkspaceGitTokensService } from './workspaces/workspace-git-tokens.service';
-import { WorkspaceCliTokenService } from './workspaces/workspace-cli-token.service';
 import { SshService } from './ssh/ssh.service';
 import { SshSessionService } from './ssh/ssh-session.service';
 import { StacksService } from './stacks/stacks.service';
@@ -745,6 +745,7 @@ async function bootstrap() {
   // calls — this WS is for the interactive PTY only.
   const jwt = app.get(JwtService);
   const workspacesService = app.get(WorkspacesService);
+  const workspaceCliToken = app.get(WorkspaceCliTokenService);
   const SIDECAR_URL = (process.env.WORKSPACE_API_URL || 'http://workspace:9000').replace(/\/$/, '');
   const SIDECAR_TOKEN = process.env.WORKSPACE_API_TOKEN || '';
   const SIDECAR_WS_URL = SIDECAR_URL.replace(/^http/i, 'ws') + '/term';
@@ -810,12 +811,24 @@ async function bootstrap() {
     upstreamUrl.searchParams.set('workspaceId', workspaceId);
     if (sessionId) upstreamUrl.searchParams.set('sessionId', sessionId);
 
+    // dg-CLI im interaktiven Terminal: bisher bekam nur /exec die DG_*-Variablen,
+    // im Terminal lief `dg` ins Leere. Seit `dg kube` (C-3) der einzige Weg zum
+    // Cluster aus der Shell ist, braucht auch das Terminal sie. Als Header statt
+    // Query-Parameter, damit das Token in keinem Access-Log landet.
+    const dgEnv = workspace.projectId
+      ? workspaceCliToken.buildEnvFor(workspaceId, workspace.projectId.toString(), TERMINAL_TOKEN_TTL)
+      : {};
+    const upstreamHeaders: Record<string, string> = { Authorization: `Bearer ${SIDECAR_TOKEN}` };
+    if (Object.keys(dgEnv).length > 0) {
+      upstreamHeaders['X-Dg-Env'] = Buffer.from(JSON.stringify(dgEnv)).toString('base64');
+    }
+
     // M-53: `ws` hat per Default KEIN Handshake-Timeout. Hing der Sidecar
     // (SYN-Blackhole, DROP statt REJECT, halbtoter Container), kam weder
     // `open` noch `error`, und der Browser-Socket blieb unbeantwortet offen —
     // pro Versuch ein FD-Paar, das nichts mehr aufräumte.
     const upstream = new WebSocket(upstreamUrl.toString(), {
-      headers: { Authorization: `Bearer ${SIDECAR_TOKEN}` },
+      headers: upstreamHeaders,
       handshakeTimeout: 10_000,
     });
     // Bricht der Browser ab, bevor der Sidecar antwortet, den Upstream nicht

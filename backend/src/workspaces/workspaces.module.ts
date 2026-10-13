@@ -6,6 +6,7 @@ import { Workspace, WorkspaceSchema } from './schemas/workspace.schema';
 import { WorkspacesService } from './workspaces.service';
 import { WorkspacesController } from './workspaces.controller';
 import { WorkspaceCliController } from './workspace-cli.controller';
+import { WorkspaceCliKubeController } from './workspace-cli-kube.controller';
 import { WorkspaceClient } from './workspace-client.service';
 import { WorkspaceTtlScheduler } from './workspace-ttl.scheduler';
 import { WorkspaceGitTokensService } from './workspace-git-tokens.service';
@@ -18,6 +19,7 @@ import { SecretsModule } from '../secrets/secrets.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { TodosModule } from '../todos/todos.module';
+import { KubeModule } from '../kube/kube.module';
 import { resolveJwtSecret } from '../common/jwt-secret';
 
 @Module({
@@ -37,8 +39,10 @@ import { resolveJwtSecret } from '../common/jwt-secret';
     AttachmentsModule,
     KnowledgeModule,
     TodosModule,
+    // `dg kube` (C-3): Cluster-Zugriff aus der Shell läuft über das Backend.
+    KubeModule,
   ],
-  controllers: [WorkspacesController, WorkspaceCliController],
+  controllers: [WorkspacesController, WorkspaceCliController, WorkspaceCliKubeController],
   providers: [
     WorkspacesService,
     WorkspaceClient,
