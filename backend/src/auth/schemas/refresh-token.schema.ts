@@ -25,6 +25,20 @@ export class RefreshToken {
   @Prop()
   userAgent: string;
 
+  /**
+   * Alle Tokens einer Login-Session teilen eine Familie (M-8). Wird ein
+   * bereits rotiertes Token erneut vorgelegt, ist die Familie kompromittiert:
+   * Angreifer und Nutzer halten verschiedene Zweige derselben Kette — dann
+   * wird die ganze Familie widerrufen. Altbestand ohne Familie bleibt gültig
+   * und bekommt bei der nächsten Rotation eine.
+   */
+  @Prop()
+  familyId?: string;
+
+  /** Gesetzt statt Löschen bei der Rotation — nur so ist ein Replay erkennbar. */
+  @Prop()
+  rotatedAt?: Date;
+
   // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
   // nicht am Typ — Leser brauchten dafür `as unknown as { createdAt?: Date }`.
   createdAt?: Date;
@@ -34,3 +48,4 @@ export class RefreshToken {
 export const RefreshTokenSchema = SchemaFactory.createForClass(RefreshToken);
 RefreshTokenSchema.index({ token: 1 }, { unique: true });
 RefreshTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+RefreshTokenSchema.index({ familyId: 1 });

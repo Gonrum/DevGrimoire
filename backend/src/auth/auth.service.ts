@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -20,6 +20,11 @@ const ENCRYPTED_PATTERN = /^[0-9a-f]+:[0-9a-f]+:[0-9a-f]+$/i;
 const AUTH_ENABLED = !!(process.env.AUTH_USERNAME && process.env.AUTH_PASSWORD);
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY_DAYS = 7;
+/**
+ * Ein rotiertes Refresh-Token, das so kurz nach der Rotation erneut kommt,
+ * stammt vom selben Client (zwei Tabs refreshen gleichzeitig) — kein Diebstahl.
+ */
+const REFRESH_REUSE_GRACE_MS = 10_000;
 const BCRYPT_ROUNDS = 10;
 
 export interface ActiveUserSummary {
@@ -208,9 +213,17 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string, clientInfo?: { ip?: string; userAgent?: string }): Promise<{ accessToken: string; refreshToken: string }> {
-    const stored = await this.refreshTokenModel.findOne({ token: hashRefreshToken(refreshToken) }).exec();
-    if (!stored || stored.expiresAt < new Date()) {
-      if (stored) await stored.deleteOne();
+    const tokenHash = hashRefreshToken(refreshToken);
+    const now = new Date();
+    // Atomarer Claim (M-8): genau ein Aufrufer rotiert ein Token. Vorher
+    // fanden zwei parallele Refreshes dasselbe Dokument und rotierten beide.
+    const stored = await this.refreshTokenModel.findOneAndUpdate(
+      { token: tokenHash, rotatedAt: { $exists: false }, expiresAt: { $gt: now } },
+      { $set: { rotatedAt: now } },
+      { new: true },
+    ).exec();
+    if (!stored) {
+      await this.handleUnusableRefreshToken(tokenHash, now);
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
@@ -219,22 +232,64 @@ export class AuthService {
       this.logger.warn(`Refresh token used from different IP: stored=${stored.ip}, current=${clientInfo.ip}, userId=${stored.userId}`);
     }
 
-    // Rotate: delete old, create new
-    await stored.deleteOne();
-
     const user = await this.userModel.findById(stored.userId).exec();
     if (!user || !user.active) {
       throw new UnauthorizedException('User not found or inactive');
     }
 
     const accessToken = this.generateAccessToken(user);
-    const newRefreshToken = await this.generateRefreshToken(user._id.toString(), clientInfo);
+    const familyId = stored.familyId ?? randomBytes(16).toString('hex');
+    if (!stored.familyId) {
+      // Altbestand ohne Familie: das rotierte Token in die neue Familie
+      // aufnehmen, sonst bliebe ein Replay genau dieses Tokens unerkannt.
+      await this.refreshTokenModel.updateOne({ _id: stored._id }, { $set: { familyId } }).exec();
+    }
+    const newRefreshToken = await this.generateRefreshToken(user._id.toString(), clientInfo, familyId);
 
     return { accessToken, refreshToken: newRefreshToken };
   }
 
+  /**
+   * Ein Refresh-Token ist unbekannt, abgelaufen oder schon rotiert. Nur der
+   * letzte Fall ist interessant: ein rotiertes Token taucht nur wieder auf,
+   * wenn es jemand kopiert hat (M-8). Dann wird die ganze Familie widerrufen
+   * — der Angreifer verliert seinen Zweig, der Nutzer muss sich neu anmelden
+   * und sieht das. Ausnahme: innerhalb von REFRESH_REUSE_GRACE_MS nach der
+   * Rotation gilt es als paralleler Refresh desselben Clients (zwei Tabs).
+   */
+  private async handleUnusableRefreshToken(tokenHash: string, now: Date): Promise<void> {
+    const prior = await this.refreshTokenModel.findOne({ token: tokenHash }).exec();
+    if (!prior) return;
+    if (prior.expiresAt <= now) {
+      await prior.deleteOne();
+      return;
+    }
+    if (!prior.rotatedAt) return;
+    if (now.getTime() - prior.rotatedAt.getTime() < REFRESH_REUSE_GRACE_MS) return;
+
+    const revoked = prior.familyId
+      ? await this.refreshTokenModel.deleteMany({ familyId: prior.familyId }).exec()
+      : await this.refreshTokenModel.deleteMany({ _id: prior._id }).exec();
+    this.logger.warn(
+      `Refresh token reuse detected for user ${prior.userId} — revoked ${revoked.deletedCount} token(s) of the family`,
+    );
+    await this.auditLog.record({
+      action: 'auth.refresh_token_reuse',
+      entityType: 'user',
+      entityId: prior.userId,
+      meta: { familyId: prior.familyId, revokedTokens: revoked.deletedCount, rotatedAt: prior.rotatedAt },
+    });
+  }
+
+  /** Beendet die ganze Login-Session, nicht nur das vorgelegte Glied der Kette. */
   async logout(refreshToken: string): Promise<void> {
-    await this.refreshTokenModel.deleteOne({ token: hashRefreshToken(refreshToken) }).exec();
+    const stored = await this.refreshTokenModel.findOne({ token: hashRefreshToken(refreshToken) }).exec();
+    if (!stored) return;
+    if (stored.familyId) {
+      await this.refreshTokenModel.deleteMany({ familyId: stored.familyId }).exec();
+    } else {
+      await stored.deleteOne();
+    }
   }
 
   /**
@@ -511,7 +566,9 @@ export class AuthService {
       });
     }
 
-    return result;
+    // M-7: wie alle anderen Leser — vorher kam hier das Chiffrat (oder ohne
+    // SECRETS_ENCRYPTION_KEY der Klartext) von llmConfig.apiKey zurück.
+    return result ? this.maskUserSecrets(result) : null;
   }
 
   async deleteUser(id: string): Promise<boolean> {
@@ -565,10 +622,11 @@ export class AuthService {
         } else if (this.encryptionService.isEnabled()) {
           nextApiKey = this.encryptionService.encrypt(trimmed);
         } else {
-          this.logger.warn(
-            `Storing plaintext llmConfig.apiKey for user ${userId} — set SECRETS_ENCRYPTION_KEY to encrypt at rest.`,
+          // M-7: wie SecretsService.create — ohne Schlüssel kein Klartext in
+          // der Datenbank. Vorher nur logger.warn, und der Key lag lesbar da.
+          throw new BadRequestException(
+            'API-Key kann nicht gespeichert werden: SECRETS_ENCRYPTION_KEY ist nicht gesetzt',
           );
-          nextApiKey = trimmed;
         }
       }
 
@@ -595,7 +653,11 @@ export class AuthService {
     );
   }
 
-  private async generateRefreshToken(userId: string, clientInfo?: { ip?: string; userAgent?: string }): Promise<string> {
+  private async generateRefreshToken(
+    userId: string,
+    clientInfo?: { ip?: string; userAgent?: string },
+    familyId: string = randomBytes(16).toString('hex'),
+  ): Promise<string> {
     const token = randomBytes(48).toString('hex');
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRY_DAYS);
@@ -606,6 +668,7 @@ export class AuthService {
       expiresAt,
       ip: clientInfo?.ip,
       userAgent: clientInfo?.userAgent,
+      familyId,
     });
 
     return token;

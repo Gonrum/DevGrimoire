@@ -217,6 +217,32 @@ export class NoVisionCapabilityError extends Error {
   }
 }
 
+/**
+ * Erste gültige Zahl aus Setting, dann Env, sonst Default (M-10).
+ *
+ * Vorher `parseInt(stored)` ohne Prüfung: ein Setting `"abc"` (oder ein Env-
+ * Tippfehler) ergab `NaN`, `toolsMaxIterations = NaN` liess die Tool-Schleife
+ * nie laufen — kein `done`, kein `error`, keine gespeicherte Antwort, der
+ * Nutzer sah eine dauerhaft leere Nachricht. Grenzen wie im SetOptions-DTO;
+ * ausserhalb davon gilt der Wert als ungültig, nicht als geklemmt — ein
+ * unsinniger Wert soll nicht still zu einem anderen werden.
+ */
+export function numericOption(
+  sources: (string | null | undefined)[],
+  fallback: number,
+  bounds: { min: number; max: number; integer?: boolean },
+): number {
+  for (const raw of sources) {
+    if (raw == null || raw.trim() === '') continue;
+    const n = Number(raw.trim());
+    if (!Number.isFinite(n)) continue;
+    if (bounds.integer && !Number.isInteger(n)) continue;
+    if (n < bounds.min || n > bounds.max) continue;
+    return n;
+  }
+  return fallback;
+}
+
 @Injectable()
 export class ChatLlmService {
   private readonly logger = new Logger(ChatLlmService.name);
@@ -481,17 +507,17 @@ export class ChatLlmService {
     ]);
     return {
       enabled: enabledStr != null ? enabledStr !== 'false' : process.env.CHAT_ENABLED !== 'false',
-      temperature: tempStr != null ? parseFloat(tempStr) : parseFloat(process.env.CHAT_LLM_TEMPERATURE || '0.7'),
-      maxTokens: maxStr != null ? parseInt(maxStr, 10) : parseInt(process.env.CHAT_LLM_MAX_TOKENS || '2048', 10),
-      topK: topKStr != null ? parseInt(topKStr, 10) : parseInt(process.env.CHAT_LLM_TOP_K || '6', 10),
-      historyLimit: histStr != null ? parseInt(histStr, 10) : parseInt(process.env.CHAT_LLM_HISTORY_LIMIT || '10', 10),
+      temperature: numericOption([tempStr, process.env.CHAT_LLM_TEMPERATURE], 0.7, { min: 0, max: 2 }),
+      maxTokens: numericOption([maxStr, process.env.CHAT_LLM_MAX_TOKENS], 2048, { min: 1, max: 32768, integer: true }),
+      topK: numericOption([topKStr, process.env.CHAT_LLM_TOP_K], 6, { min: 1, max: 20, integer: true }),
+      historyLimit: numericOption([histStr, process.env.CHAT_LLM_HISTORY_LIMIT], 10, { min: 1, max: 50, integer: true }),
       toolsEnabled: toolsEn != null ? toolsEn === 'true' : process.env.CHAT_LLM_TOOLS_ENABLED === 'true',
       toolsAllowlist: toolsAllow != null
         ? toolsAllow.split(',').map((s) => s.trim()).filter(Boolean)
         : (process.env.CHAT_LLM_TOOLS_ALLOWLIST?.split(',').map((s) => s.trim()).filter(Boolean) ?? DEFAULT_TOOLS_ALLOWLIST),
-      toolsMaxIterations: toolsMaxIter != null
-        ? parseInt(toolsMaxIter, 10)
-        : parseInt(process.env.CHAT_LLM_TOOLS_MAX_ITERATIONS || '5', 10),
+      toolsMaxIterations: numericOption(
+        [toolsMaxIter, process.env.CHAT_LLM_TOOLS_MAX_ITERATIONS], 5, { min: 1, max: 10, integer: true },
+      ),
     };
   }
 

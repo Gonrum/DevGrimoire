@@ -99,6 +99,9 @@
     "check:kube-logs": "node scripts/kube-logs-check.cjs",
     "check:kube-resources-rest": "node scripts/kube-resources-rest-units-check.cjs",
     "check:kube-mcp": "node scripts/kube-mcp-check.cjs",
+    "check:auth-token-hygiene": "node scripts/auth-token-hygiene-check.cjs",
+    "check:settings-write": "node scripts/settings-write-check.cjs",
+    "check:chat-persist-safety": "node scripts/chat-persist-safety-check.cjs",
     "check:dg-kube-scope": "node scripts/dg-kube-scope-check.cjs",
     "check:kube-access": "node scripts/kube-access-check.cjs",
     "checks": "node scripts/run-checks.cjs"

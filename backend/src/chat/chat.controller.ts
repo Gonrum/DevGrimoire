@@ -31,6 +31,7 @@ import { ResumeChatToolDto } from './dto/resume-chat-tool.dto';
 import { ChatActivityService } from './chat-activity.service';
 import { AgentRolesService } from '../agent-roles/agent-roles.service';
 import { ChatAttachmentRef, ChatResponseMetrics, ChatToolCallRecord } from './schemas/chat-session.schema';
+import { redactToolRecord } from './chat-redaction';
 import { ChatActivityToolUse } from './schemas/chat-activity.schema';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
@@ -682,7 +683,7 @@ export class ChatController {
         role: 'assistant',
         content: dto.assistantContent,
         contextUsed: dto.contextRefs,
-        toolCalls: dto.toolCalls?.map((tc) => ({
+        toolCalls: dto.toolCalls?.map((tc) => redactToolRecord({
           id: tc.id,
           name: tc.name,
           arguments: tc.arguments,
@@ -705,7 +706,7 @@ export class ChatController {
     const result = await this.chatService.appendMessages(id, inputs, userId);
 
     // Browser-mode chat-activity log. Server mode logs in sendMessage.
-    const toolRecords: ChatToolCallRecord[] | undefined = dto.toolCalls?.map((tc) => ({
+    const toolRecords: ChatToolCallRecord[] | undefined = dto.toolCalls?.map((tc) => redactToolRecord({
       id: tc.id,
       name: tc.name,
       arguments: tc.arguments,
@@ -1134,13 +1135,13 @@ export class ChatController {
           name: pending.call.name,
           content: JSON.stringify({ error: rejection }),
         });
-        pending.persisted.push({
+        pending.persisted.push(redactToolRecord({
           id: pending.call.id,
           name: pending.call.name,
           arguments: pending.call.arguments,
           success: false,
           error: rejection,
-        });
+        }));
       }
 
       const loop = await this.runToolLoop({
@@ -1417,7 +1418,7 @@ export class ChatController {
         name: tc.name,
         content: JSON.stringify({ error }),
       });
-      p.persisted.push({ id: tc.id, name: tc.name, arguments: tc.arguments, success: false, error });
+      p.persisted.push(redactToolRecord({ id: tc.id, name: tc.name, arguments: tc.arguments, success: false, error }));
       return;
     }
 
@@ -1440,14 +1441,16 @@ export class ChatController {
       content: truncated,
     });
 
-    p.persisted.push({
+    // M-9: gespeichert wird die geschwärzte Fassung; das LLM oben bekommt
+    // weiter den Originalwert.
+    p.persisted.push(redactToolRecord({
       id: tc.id,
       name: tc.name,
       arguments: tc.arguments,
       result: truncated,
       success: result.success,
       error: result.error,
-    });
+    }));
   }
 
   /** Short human-readable summary of a tool result for SSE/UI display */

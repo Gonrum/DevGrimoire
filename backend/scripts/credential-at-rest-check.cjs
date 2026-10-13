@@ -97,8 +97,10 @@ function settingsModel(initial = {}) {
     const svc = new SettingsService(model, enc);
     const ctrl = new SettingsController(svc);
     const admin = { userId: 'a', username: 'a', role: 'admin' };
-    const put = await RequestContext.run(admin, undefined, () => ctrl.set(PEER_KEY, { value: 'cv_x' }));
-    assert.equal(put.value, '***');
+    // Schreiben geht seit M-6 nur über den Replikations-Endpoint; die
+    // generische Route lehnt den Key ab.
+    await assert.rejects(() => RequestContext.run(admin, undefined, () => ctrl.set(PEER_KEY, { value: 'cv_x' })), /nicht schreibbar/);
+    await svc.set(PEER_KEY, 'cv_x');
     const got = await RequestContext.run(admin, undefined, () => ctrl.get(PEER_KEY));
     assert.equal(got.value, '***');
   });
@@ -110,6 +112,12 @@ function settingsModel(initial = {}) {
     auth.refreshTokenModel = {
       create: async (d) => { rows.push({ ...d, async deleteOne() {} }); },
       findOne: (f) => ({ exec: async () => rows.find((r) => r.token === f.token) ?? null }),
+      findOneAndUpdate: (f, u) => ({ exec: async () => {
+        const r = rows.find((x) => x.token === f.token && !x.rotatedAt);
+        if (r) Object.assign(r, u.$set);
+        return r ?? null;
+      } }),
+      updateOne: () => ({ exec: async () => ({}) }),
     };
     auth.userModel = { findById: () => ({ exec: async () => ({ _id: 'u1', username: 'u', role: 'user', active: true }) }) };
     auth.jwtService = { sign: () => 'access' };
@@ -125,7 +133,10 @@ function settingsModel(initial = {}) {
     const rows = [{ token: hashRefreshToken('x'.repeat(96)), userId: 'u1', expiresAt: new Date(Date.now() + 1e6) }];
     const auth = Object.create(AuthService.prototype);
     auth.logger = { warn() {}, log() {}, error() {} };
-    auth.refreshTokenModel = { findOne: (f) => ({ exec: async () => rows.find((r) => r.token === f.token) ?? null }) };
+    auth.refreshTokenModel = {
+      findOne: (f) => ({ exec: async () => rows.find((r) => r.token === f.token) ?? null }),
+      findOneAndUpdate: (f) => ({ exec: async () => rows.find((r) => r.token === f.token) ?? null }),
+    };
     await assert.rejects(() => auth.refresh(rows[0].token), /Invalid or expired/);
   });
 
