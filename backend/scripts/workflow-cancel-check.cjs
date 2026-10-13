@@ -8,6 +8,11 @@
  * den abgebrochenen Run auf succeeded/failed zurück oder reihte Nachfolger
  * ein.
  *
+ * M-31 im selben Aufbau: `timeoutSeconds` einer Rückfrage wurde nie
+ * weitergereicht (jede Frage lief nach 5 min ab), und ein Ablauf erreichte
+ * den wartenden Run nie. Dazu: ein Wecken (Antwort, Delay) setzte einen
+ * inzwischen abgebrochenen Run per `run.status = RUNNING` zurück.
+ *
  * Gegen eine echte MongoDB (MONGODB_TEST_URI, Wegwerf-Datenbank; der Check
  * legt eigene Collections an und löscht sie): die Engine arbeitet mit
  * Update-Pipelines und bedingten findOneAndUpdate, die eine Attrappe nicht
@@ -32,13 +37,14 @@ const { WorkflowEngineService } = loadCompiled('workflows/engine/workflow-engine
 const { WorkflowsService } = loadCompiled('workflows/workflows.service.js');
 const { WorkflowQueueService } = loadCompiled('workflows/engine/workflow-queue.service.js');
 const { WORKFLOW_RUN_CANCELLED } = loadCompiled('workflows/engine/run-status.js');
+const { ActionUserQuestionExecutor } = loadCompiled('workflows/nodes/action-user-question.executor.js');
 const { WorkflowRunSchema } = loadCompiled('workflows/schemas/workflow-run.schema.js');
 const { WorkflowNodeRunSchema } = loadCompiled('workflows/schemas/workflow-node-run.schema.js');
 const { WorkflowDefinitionSchema } = loadCompiled('workflows/schemas/workflow-definition.schema.js');
 const mongoose = require(path.resolve(__dirname, '..', 'node_modules', 'mongoose'));
 const { EventEmitter2 } = require(path.resolve(__dirname, '..', 'node_modules', '@nestjs/event-emitter'));
 
-const EXPECTED_CHECKS = 5;
+const EXPECTED_CHECKS = 8;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -69,7 +75,9 @@ async function until(fn, label, ms = 3000) {
   const emitter = new EventEmitter2();
   const queue = new WorkflowQueueService();
   const noop = { record: async () => {}, create: async () => {} };
-  const engine = new WorkflowEngineService(Def, Run, NodeRun, queue, {}, registry, emitter, {}, {}, noop, noop);
+  const askedQuestions = [];
+  const questions = { create: async (dto) => { const q = { _id: new mongoose.Types.ObjectId(), ...dto }; askedQuestions.push(q); return q; } };
+  const engine = new WorkflowEngineService(Def, Run, NodeRun, queue, {}, registry, emitter, questions, {}, noop, noop);
   const workflows = new WorkflowsService(Def, Run, NodeRun, emitter, registry, noop);
   // @OnEvent wird ausserhalb von Nest nicht verdrahtet — von Hand.
   emitter.on(WORKFLOW_RUN_CANCELLED, (p) => engine.onRunCancelled(p));
@@ -153,6 +161,45 @@ async function until(fn, label, ms = 3000) {
       release();
       await running;
       assert.equal((await Run.findById(run._id)).status, 'cancelled');
+    });
+
+    const questionNode = (cfg) => ({ id: 'q', type: 'action.user-question', config: { question: 'Freigeben?', ...cfg }, position: { x: 0, y: 0 } });
+    const realQuestion = new ActionUserQuestionExecutor();
+    async function runQuestionNode(cfg) {
+      const run = await newRun([questionNode(cfg)]);
+      executorImpl = (ctx) => realQuestion.execute(ctx);
+      const job = await enqueueAndTake(run, questionNode(cfg));
+      await engine.runJob(job);
+      return { run, nodeRunId: job.nodeRunId, question: askedQuestions.at(-1) };
+    }
+
+    await check('M-31: timeoutSeconds erreicht die Frage; ohne Angabe 24 h statt 5 min', async () => {
+      const a = await runQuestionNode({ timeoutSeconds: 3600 });
+      assert.equal(a.question.timeoutSeconds, 3600);
+      assert.equal((await Run.findById(a.run._id)).status, 'waiting_for_user');
+      const b = await runQuestionNode({});
+      assert.equal(b.question.timeoutSeconds, 24 * 3600);
+    });
+
+    await check('M-31: abgelaufene Frage -> Knoten scheitert mit question_timeout, Run failed', async () => {
+      const { run, nodeRunId, question } = await runQuestionNode({ timeoutSeconds: 60 });
+      await engine.handleQuestionExpired({ questionId: String(question._id) });
+      const nr = await NodeRun.findById(nodeRunId);
+      assert.equal(nr.status, 'failed');
+      assert.equal(nr.error.code, 'question_timeout');
+      assert.equal((await Run.findById(run._id)).status, 'failed');
+      // Eine nachträgliche Antwort bleibt folgenlos.
+      await engine.handleQuestionAnswered({ questionId: String(question._id), answer: 'ja' });
+      assert.equal((await Run.findById(run._id)).status, 'failed');
+    });
+
+    await check('M-20: Antwort auf einen inzwischen abgebrochenen Run setzt ihn nicht zurück auf running', async () => {
+      const { run, nodeRunId, question } = await runQuestionNode({});
+      // Abbruch, der den wartenden NodeRun noch nicht erfasst hat (Race).
+      await Run.updateOne({ _id: run._id }, { $set: { status: 'cancelled' } });
+      await engine.handleQuestionAnswered({ questionId: String(question._id), answer: 'ja' });
+      assert.equal((await Run.findById(run._id)).status, 'cancelled');
+      assert.equal((await NodeRun.findById(nodeRunId)).status, 'interrupted');
     });
 
     await check('zweiter Abbruch -> 400, Status bleibt', async () => {

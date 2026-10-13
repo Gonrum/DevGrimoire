@@ -50,7 +50,11 @@ export interface NodeExecutionContext {
   logger: NodeLogger;
   /** Creates a question record and returns its id. Caller must subsequently
    *  return `{ status: 'waiting', waitingFor: { type: 'question', refId } }`. */
-  askUser(question: string, options?: string[]): Promise<{ refId: Types.ObjectId }>;
+  askUser(
+    question: string,
+    options?: string[],
+    opts?: { timeoutSeconds?: number },
+  ): Promise<{ refId: Types.ObjectId }>;
   /**
    * Wird ausgelöst, wenn die Engine den Node aufgibt (Timeout). Executoren mit
    * langlaufender I/O sollen es durchreichen (M-13): vorher lief der Executor

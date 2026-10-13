@@ -30,6 +30,8 @@ import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 
 export const QUESTION_CREATED = 'question.created';
 export const QUESTION_ANSWERED = 'question.answered';
+/** Payload `{ questionId: string }` — eine Frage ist ohne Antwort abgelaufen (M-31). */
+export const QUESTION_EXPIRED = 'question.expired';
 
 export interface QuestionsByTodoSummary {
   todoId: string;
@@ -595,6 +597,7 @@ export class QuestionsService implements OnModuleInit {
     await this.questionModel
       .findByIdAndUpdate(id, { status: 'expired' })
       .exec();
+    this.eventEmitter.emit(QUESTION_EXPIRED, { questionId: id });
     return { answered: false, questionId: id };
   }
 
@@ -935,6 +938,9 @@ export class QuestionsService implements OnModuleInit {
         await entry.save();
         expired += 1;
         this.auditQuestion('question.expired', entry);
+        // M-31: ein wartender Workflow-Knoten erfährt davon (vorher wartete
+        // der Run unbegrenzt weiter, während die Frage längst abgelaufen war).
+        this.eventEmitter.emit(QUESTION_EXPIRED, { questionId: entry._id.toString() });
         continue;
       }
 

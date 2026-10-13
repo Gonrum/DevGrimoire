@@ -153,6 +153,8 @@ await this.applyResult(run, nodeRun, node, {
 
 config: `{ question: string, options?: string[], branchMap?: Record<string,Branch>, timeoutSeconds?: number }`
 
+`timeoutSeconds` (Default 24 h) wird als Ablaufzeit der Question gesetzt. Läuft sie ohne Antwort ab, scheitert der Knoten mit `error.code: 'question_timeout'` — Retry-Konfiguration und Fehlerpfad greifen wie bei jedem anderen Fehler. Eine nachträgliche Antwort auf die abgelaufene Question setzt den Run nicht mehr fort.
+
 ## Control-Flow-Executors
 
 ### `control.delay`

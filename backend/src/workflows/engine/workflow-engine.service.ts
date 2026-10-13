@@ -33,7 +33,7 @@ import { findTriggerNodes, nextNodes } from './graph-walker';
 import { readGraph } from './snapshot';
 import { OPEN_NODE_RUN_STATUSES, TERMINAL_RUN_STATUSES, WORKFLOW_RUN_CANCELLED } from './run-status';
 import { NodeBranch } from './node-metadata';
-import { QuestionsService, QUESTION_ANSWERED } from '../../questions/questions.service';
+import { QuestionsService, QUESTION_ANSWERED, QUESTION_EXPIRED } from '../../questions/questions.service';
 import { TestWorkflowNodeDto, workflowNodeFromDto } from '../dto/workflow.dto';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { AuditLogService } from '../../audit-log/audit-log.service';
@@ -521,7 +521,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
         warn: (m: string, d?: Record<string, unknown>) => append('warn', m, d),
         error: (m: string, d?: Record<string, unknown>) => append('error', m, d),
       },
-      askUser: async (q: string, options?: string[]) => {
+      askUser: async (q: string, options?: string[], opts?: { timeoutSeconds?: number }) => {
         const projectId =
           run.projectId instanceof Types.ObjectId ? run.projectId.toString() : undefined;
         const question = await this.questionsService.create({
@@ -531,6 +531,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
           direction: 'agent_to_user',
           agentName: 'workflow',
           agentRunId: run._id.toString(),
+          timeoutSeconds: opts?.timeoutSeconds,
         });
         return { refId: question._id };
       },
@@ -802,13 +803,11 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       .exec();
     if (!nodeRun) return;
 
-    const run = await this.runModel.findById(nodeRun.runId).exec();
+    const run = await this.resumeRun(nodeRun);
     if (!run) return;
     const node = readGraph(run.definitionSnapshot).nodes.find((n) => n.id === nodeRun.nodeId);
     if (!node) return;
 
-    run.status = WorkflowRunStatus.RUNNING;
-    await run.save();
     const branchMap = isRecord(node.config.branchMap) ? node.config.branchMap : undefined;
     const branch = NODE_BRANCHES.find((candidate) => candidate === branchMap?.[payload.answer]);
     const options = asStringArray(node.config.options);
@@ -818,6 +817,55 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       output: { answer: payload.answer, optionIndex: optionIndex >= 0 ? optionIndex : null },
       branch,
     });
+  }
+
+  /**
+   * M-31: Eine Workflow-Frage ist ohne Antwort abgelaufen. Der Knoten
+   * scheitert mit `question_timeout` — Retry und Fehlerpfad greifen wie bei
+   * jedem anderen Fehler. Eine spätere (nachträgliche) Antwort findet den
+   * Knoten nicht mehr wartend und bleibt folgenlos.
+   */
+  @OnEvent(QUESTION_EXPIRED)
+  async handleQuestionExpired(payload: { questionId: string }): Promise<void> {
+    if (!Types.ObjectId.isValid(payload.questionId)) return;
+    const nodeRun = await this.nodeRunModel
+      .findOneAndUpdate(
+        {
+          'waitingFor.type': 'question',
+          'waitingFor.refId': new Types.ObjectId(payload.questionId),
+          status: WorkflowNodeRunStatus.WAITING,
+        },
+        { $set: { status: WorkflowNodeRunStatus.RUNNING }, $unset: { waitingFor: 1 } },
+        { new: true },
+      )
+      .exec();
+    if (!nodeRun) return;
+    const run = await this.resumeRun(nodeRun);
+    if (!run) return;
+    const node = readGraph(run.definitionSnapshot).nodes.find((n) => n.id === nodeRun.nodeId);
+    if (!node) return;
+    await this.applyResult(run, nodeRun, node, {
+      status: 'failed',
+      error: { code: 'question_timeout', message: 'Rückfrage wurde nicht rechtzeitig beantwortet' },
+    });
+  }
+
+  /**
+   * Setzt den Run eines geweckten Knotens wieder auf RUNNING — bedingt
+   * (M-20): ein inzwischen abgebrochener Run bleibt abgebrochen, der Knoten
+   * wird `interrupted`. Vorher setzte `run.status = RUNNING; save()` einen
+   * cancelled Run stillschweigend zurück auf running.
+   */
+  private async resumeRun(nodeRun: WorkflowNodeRunDocument): Promise<WorkflowRunDocument | null> {
+    const run = await this.runModel.findOneAndUpdate(
+      { _id: nodeRun.runId, status: { $nin: TERMINAL_RUN_STATUSES } },
+      { $set: { status: WorkflowRunStatus.RUNNING } },
+      { new: true },
+    ).exec();
+    if (run) return run;
+    const current = await this.runModel.findById(nodeRun.runId).select('status').exec();
+    await this.interruptNodeRun(nodeRun, current?.status ?? WorkflowRunStatus.CANCELLED);
+    return null;
   }
 
   async resumeDelayedNode(nodeRunId: string | Types.ObjectId): Promise<void> {
@@ -833,7 +881,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       .exec();
     if (!nodeRun) return;
 
-    const run = await this.runModel.findById(nodeRun.runId).exec();
+    const run = await this.resumeRun(nodeRun);
     if (!run) return;
     const node = readGraph(run.definitionSnapshot).nodes.find((n) => n.id === nodeRun.nodeId);
     if (!node) return;
@@ -842,8 +890,6 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       ? Date.now() - nodeRun.startedAt.getTime()
       : 0;
 
-    run.status = WorkflowRunStatus.RUNNING;
-    await run.save();
     await this.applyResult(run, nodeRun, node, {
       status: 'success',
       output: { resumedAt: new Date().toISOString(), waitedMs },
