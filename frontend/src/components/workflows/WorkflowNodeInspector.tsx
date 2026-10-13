@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Trash2, Copy, ArrowRight, Plus, X } from 'lucide-react';
 import { WorkflowNodeMetadata, WorkflowEdge as WfEdge } from '../../api/workflows';
 import { isRecord } from '../../lib/narrow';
@@ -41,12 +42,13 @@ interface Props {
 }
 
 export function WorkflowNodeInspector(props: Props) {
+  const { t } = useTranslation();
   const { selectedNode, selectedEdge } = props;
 
   if (!selectedNode && !selectedEdge) {
     return (
       <div className="flex h-full items-center justify-center border-l border-gray-800 bg-gray-950 p-6 text-sm text-gray-500">
-        Wähle einen Node oder eine Edge aus, oder ziehe einen Eintrag aus der Palette.
+        {t('workflows.inspector.empty')}
       </div>
     );
   }
@@ -71,6 +73,7 @@ export function WorkflowNodeInspector(props: Props) {
 }
 
 function NodeInspector(p: Props) {
+  const { t } = useTranslation();
   const { selectedNode, catalog, upstreamNodes, outgoingEdgeCountByBranch, localIssues } = p;
   const node = selectedNode!;
   const meta = catalog.find((c) => c.type === node.type);
@@ -103,8 +106,8 @@ function NodeInspector(p: Props) {
         <div className="flex items-center justify-between">
           <span className="font-mono text-xs text-gray-300">id: {node.id}</span>
           <div className="flex gap-1">
-            <button onClick={p.onDuplicateNode} title="Duplizieren" className="rounded-sm p-1 text-gray-300 hover:bg-gray-800"><Copy size={14} /></button>
-            <button onClick={p.onDeleteNode} title="Löschen" className="rounded-sm p-1 text-gray-300 hover:bg-gray-800 hover:text-red-400"><Trash2 size={14} /></button>
+            <button onClick={p.onDuplicateNode} title={t('workflows.node.duplicate')} className="rounded-sm p-1 text-gray-300 hover:bg-gray-800"><Copy size={14} /></button>
+            <button onClick={p.onDeleteNode} title={t('common.delete')} className="rounded-sm p-1 text-gray-300 hover:bg-gray-800 hover:text-red-400"><Trash2 size={14} /></button>
           </div>
         </div>
         <div className="mt-1 text-sm text-gray-200">{meta?.label ?? node.type}</div>
@@ -113,7 +116,7 @@ function NodeInspector(p: Props) {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         <section>
-          <h3 className="mb-2 text-xs uppercase tracking-wide text-gray-500">Konfiguration</h3>
+          <h3 className="mb-2 text-xs uppercase tracking-wide text-gray-500">{t('workflows.inspector.configuration')}</h3>
           {meta ? (
             meta.configJsonSchema.type === 'object' ? (
               <SchemaObjectAccordion
@@ -138,16 +141,16 @@ function NodeInspector(p: Props) {
               />
             )
           ) : (
-            <div className="text-xs text-amber-400">Unbekannter Node-Type — kein Schema verfügbar.</div>
+            <div className="text-xs text-amber-400">{t('workflows.inspector.unknownType')}</div>
           )}
         </section>
 
         {meta && Object.keys(meta.outputs).length > 0 && (
           <section>
-            <h3 className="mb-2 text-xs uppercase tracking-wide text-gray-500">Outputs</h3>
+            <h3 className="mb-2 text-xs uppercase tracking-wide text-gray-500">{t('workflows.inspector.outputs')}</h3>
             <ul className="text-xs">
-              {Object.entries(meta.outputs).map(([k, t]) => (
-                <li key={k} className="font-mono text-gray-400">• {k}: <span className="text-gray-500">{t}</span></li>
+              {Object.entries(meta.outputs).map(([k, outType]) => (
+                <li key={k} className="font-mono text-gray-400">• {k}: <span className="text-gray-500">{outType}</span></li>
               ))}
             </ul>
           </section>
@@ -155,10 +158,10 @@ function NodeInspector(p: Props) {
 
         {meta && meta.branches.length > 0 && (
           <section>
-            <h3 className="mb-2 text-xs uppercase tracking-wide text-gray-500">Branches</h3>
+            <h3 className="mb-2 text-xs uppercase tracking-wide text-gray-500">{t('workflows.inspector.branches')}</h3>
             <ul className="text-xs">
               {meta.branches.map((b) => (
-                <li key={b} className="text-gray-400">○ {b} → {outgoingEdgeCountByBranch[b] ?? 0} outgoing</li>
+                <li key={b} className="text-gray-400">○ {t('workflows.inspector.branchOutgoing', { branch: b, count: outgoingEdgeCountByBranch[b] ?? 0 })}</li>
               ))}
             </ul>
           </section>
@@ -166,7 +169,7 @@ function NodeInspector(p: Props) {
 
         {p.outgoingEdges.length > 0 && (
           <section>
-            <h3 className="mb-2 text-xs uppercase tracking-wide text-gray-500">Ausgabe an nächste Nodes</h3>
+            <h3 className="mb-2 text-xs uppercase tracking-wide text-gray-500">{t('workflows.inspector.downstream')}</h3>
             <ul className="space-y-1">
               {p.outgoingEdges.map((edge) => {
                 const target = p.nodesById[edge.target];
@@ -184,7 +187,7 @@ function NodeInspector(p: Props) {
                         <span className="font-mono">{targetLabel}</span>
                       </span>
                       <span className={mappingKeys.length > 0 ? 'text-cyan-300' : 'text-gray-500'}>
-                        {mappingKeys.length > 0 ? `${mappingKeys.length} gemappt` : 'pass-through'}
+                        {mappingKeys.length > 0 ? t('workflows.inspector.mappedCount', { count: mappingKeys.length }) : t('workflows.inspector.passThroughShort')}
                       </span>
                     </button>
                   </li>
@@ -196,7 +199,7 @@ function NodeInspector(p: Props) {
 
         {localIssues.length > 0 && (
           <section>
-            <h3 className="mb-2 text-xs uppercase tracking-wide text-amber-400">⚠ Validierung</h3>
+            <h3 className="mb-2 text-xs uppercase tracking-wide text-amber-400">⚠ {t('workflows.inspector.validation')}</h3>
             <ul className="text-xs text-amber-300">
               {localIssues.map((iss, i) => <li key={i}>{iss}</li>)}
             </ul>
@@ -217,6 +220,7 @@ interface EdgeInspectorProps {
 }
 
 function EdgeInspector({ edge, sourceOutputs, onChangeBranch, onChangePayloadMapping, onDelete }: EdgeInspectorProps) {
+  const { t } = useTranslation();
   const branches: Array<'success' | 'failure' | 'custom' | 'always'> = ['success', 'failure', 'custom', 'always'];
   const current = edge.branch ?? 'always';
   const mapping = edge.payloadMapping ?? {};
@@ -247,10 +251,10 @@ function EdgeInspector({ edge, sourceOutputs, onChangeBranch, onChangePayloadMap
 
   return (
     <div className="flex h-full flex-col border-l border-gray-800 bg-gray-950 p-4 overflow-y-auto">
-      <h3 className="mb-2 text-xs uppercase tracking-wide text-gray-500">Edge</h3>
+      <h3 className="mb-2 text-xs uppercase tracking-wide text-gray-500">{t('workflows.inspector.edge')}</h3>
       <div className="mb-3 text-xs text-gray-400 font-mono">{edge.source} → {edge.target}</div>
       <div className="mb-4">
-        <label className="mb-1 block text-xs uppercase tracking-wide text-gray-500">Branch</label>
+        <label className="mb-1 block text-xs uppercase tracking-wide text-gray-500">{t('workflows.inspector.branch')}</label>
         <div className="flex flex-wrap gap-1">
           {branches.map((b) => (
             <button key={b} onClick={() => onChangeBranch(b)} className={`rounded-sm px-2 py-1 text-xs ${current === b ? 'bg-cyan-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>{b}</button>
@@ -259,31 +263,31 @@ function EdgeInspector({ edge, sourceOutputs, onChangeBranch, onChangePayloadMap
       </div>
 
       <div className="mb-4">
-        <label className="mb-1 block text-xs uppercase tracking-wide text-gray-500">Payload-Mapping</label>
+        <label className="mb-1 block text-xs uppercase tracking-wide text-gray-500">{t('workflows.inspector.payloadMapping')}</label>
         <div className="mb-2 flex gap-1">
           <button
             type="button"
             onClick={() => onChangePayloadMapping(undefined)}
             className={`flex-1 rounded-sm px-2 py-1 text-xs ${!isMapped ? 'bg-cyan-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
           >
-            Pass-through
+            {t('workflows.inspector.passThrough')}
           </button>
           <button
             type="button"
             onClick={() => { if (!isMapped) addRow(); }}
             className={`flex-1 rounded-sm px-2 py-1 text-xs ${isMapped ? 'bg-cyan-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
           >
-            Felder mappen
+            {t('workflows.inspector.mapFields')}
           </button>
         </div>
         {!isMapped ? (
           <p className="text-xs text-gray-500">
-            Target sieht das vollständige Source-Output unter <code className="text-gray-400">nodes.{edge.source}.*</code>.
+            {t('workflows.inspector.passThroughHint')} <code className="text-gray-400">nodes.{edge.source}.*</code>.
           </p>
         ) : (
           <>
             <p className="mb-2 text-xs text-gray-500">
-              Target sieht ausschließlich die gemappten Felder unter <code className="text-gray-400">incoming.*</code>.
+              {t('workflows.inspector.mappedHint')} <code className="text-gray-400">incoming.*</code>.
             </p>
             <div className="space-y-1.5">
               {Object.entries(mapping).map(([targetKey, sourcePath]) => (
@@ -308,7 +312,7 @@ function EdgeInspector({ edge, sourceOutputs, onChangeBranch, onChangePayloadMap
                     type="button"
                     onClick={() => removeRow(targetKey)}
                     className="rounded-sm p-1 text-gray-500 hover:bg-gray-800 hover:text-red-400"
-                    title="Zeile entfernen"
+                    title={t('workflows.inspector.removeRow')}
                   >
                     <X size={12} />
                   </button>
@@ -324,14 +328,14 @@ function EdgeInspector({ edge, sourceOutputs, onChangeBranch, onChangePayloadMap
                 onClick={addRow}
                 className="mt-1 flex items-center gap-1 rounded-sm bg-gray-800 px-2 py-1 text-xs text-gray-300 hover:bg-gray-700"
               >
-                <Plus size={12} /> Zeile
+                <Plus size={12} /> {t('workflows.inspector.addRow')}
               </button>
             </div>
           </>
         )}
       </div>
 
-      <button onClick={onDelete} className="self-start rounded-sm bg-red-900/50 px-3 py-1 text-xs text-red-200 hover:bg-red-900">Edge löschen</button>
+      <button onClick={onDelete} className="self-start rounded-sm bg-red-900/50 px-3 py-1 text-xs text-red-200 hover:bg-red-900">{t('workflows.edge.delete')}</button>
     </div>
   );
 }

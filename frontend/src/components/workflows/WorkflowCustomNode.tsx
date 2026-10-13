@@ -1,4 +1,5 @@
 import { createElement, memo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Handle, Position, NodeToolbar, type Node, type NodeProps } from '@xyflow/react';
 import { AlertTriangle, Copy, Trash2 } from 'lucide-react';
 import { WorkflowNodeMetadata, WorkflowNodeRunStatus } from '../../api/workflows';
@@ -22,6 +23,7 @@ export interface WorkflowNodeData {
 type WorkflowFlowNode = Node<WorkflowNodeData, 'workflowNode'>;
 
 function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
+  const { t } = useTranslation();
   const data = props.data;
   const meta = data.metadata;
   const category = meta?.category ?? 'action';
@@ -37,13 +39,13 @@ function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
         <div className="flex gap-1 rounded-sm border border-gray-700 bg-gray-900 p-1 shadow-lg">
           <button
             type="button"
-            title="Duplizieren"
+            title={t('workflows.node.duplicate')}
             onClick={() => data.onDuplicate?.(props.id)}
             className="rounded-sm p-1 text-gray-300 hover:bg-gray-800 hover:text-cyan-300"
           ><Copy size={14} /></button>
           <button
             type="button"
-            title="Löschen"
+            title={t('common.delete')}
             onClick={() => data.onDelete?.(props.id)}
             className="rounded-sm p-1 text-gray-300 hover:bg-gray-800 hover:text-red-400"
           ><Trash2 size={14} /></button>
@@ -65,7 +67,7 @@ function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
             <span className="font-mono text-xs text-gray-300">{data.type}</span>
           </div>
           {issueCount > 0 && (
-            <span title={`${issueCount} Konfigurations-Issues`} className="text-amber-400">
+            <span title={t('workflows.node.issues', { count: issueCount })} className="text-amber-400">
               <AlertTriangle size={14} />
             </span>
           )}
@@ -77,7 +79,7 @@ function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
         </div>
 
         <div className="border-t border-gray-800 px-3 py-1 text-[10px] uppercase tracking-wide text-gray-500">
-          branches
+          {t('workflows.node.branches')}
         </div>
         <div className="flex flex-col px-3 pb-2">
           {branches.map((branch) => (

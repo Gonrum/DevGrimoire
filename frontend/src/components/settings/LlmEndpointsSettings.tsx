@@ -170,8 +170,20 @@ export default function LlmEndpointsSettings() {
 
   useEffect(() => {
     void loadBalancer();
-    const interval = setInterval(() => { void loadBalancer(); }, 5000);
-    return () => clearInterval(interval);
+    // M-40: nur pollen, solange der Tab sichtbar ist — ein vergessener
+    // Hintergrund-Tab fragte sonst alle 5 s den Balancer ab. Beim Zurückkehren
+    // sofort aktualisieren statt bis zum nächsten Tick veraltet anzuzeigen.
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') void loadBalancer();
+    }, 5000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void loadBalancer();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [loadBalancer]);
 
   const startCreate = () => {

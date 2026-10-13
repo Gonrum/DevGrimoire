@@ -18,39 +18,30 @@ import { parseJsonText } from './http-boundary';
 
 export type WsConnectionState = 'connecting' | 'open' | 'reconnecting' | 'closed';
 
+/**
+ * Spiegel von `PROJECT_EVENT_ENTITIES` in backend/src/events/project-event.ts
+ * (M-32). `check:event-entities` hält beide gleich — vorher fehlten hier 15
+ * Werte, die das Backend emittiert, und niemand merkte es, weil die
+ * Refetch-Tabellen untypisiert waren.
+ */
+export const PROJECT_EVENT_ENTITIES = [
+  'project', 'todo', 'session', 'knowledge', 'changelog', 'milestone', 'manual',
+  'research', 'research_artifact', 'notification', 'environment', 'secret', 'schema',
+  'dependency', 'feature', 'soul', 'harness', 'commit', 'recurring-task', 'snippet',
+  'attachment', 'release', 'chat', 'workspace', 'customer-project', 'contact', 'customer',
+  'customer-template-apply', 'healthcheck', 'doc-update-proposal', 'knowledge-graph',
+  'oracle', 'ssh-connection', 'ssh-audit', 'question', 'replication-status',
+  'workflow-definition', 'workflow-run', 'validation-report',
+] as const;
+
+export type ProjectEventEntity = typeof PROJECT_EVENT_ENTITIES[number];
+
 export interface ProjectChangeEvent {
   /** Null when the entity is customer-scoped only (e.g. SSH-connections owned by a customer). */
   projectId: string | null;
   /** Set when the entity owner is a customer. Mutually exclusive with projectId for owned entities. */
   customerId?: string | null;
-  entity:
-    | 'project'
-    | 'todo'
-    | 'session'
-    | 'knowledge'
-    | 'changelog'
-    | 'milestone'
-    | 'manual'
-    | 'research'
-    | 'notification'
-    | 'environment'
-    | 'secret'
-    | 'schema'
-    | 'dependency'
-    | 'feature'
-    | 'soul'
-    | 'commit'
-    | 'recurring-task'
-    | 'snippet'
-    | 'doc-update-proposal'
-    | 'knowledge-graph'
-    | 'oracle'
-    | 'ssh-connection'
-    | 'ssh-audit'
-    | 'healthcheck'
-    | 'replication-status'
-    | 'workflow-definition'
-    | 'workflow-run';
+  entity: ProjectEventEntity;
   action: 'created' | 'updated' | 'deleted';
   entityId?: string;
 }

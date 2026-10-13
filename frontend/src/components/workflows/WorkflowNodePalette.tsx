@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search } from 'lucide-react';
 import { WorkflowNodeMetadata, WorkflowScope } from '../../api/workflows';
-import { nodeCategoryStyles, nodeCategoryLabels, NodeCategory } from './nodeCategoryStyles';
+import { nodeCategoryStyles, NodeCategory } from './nodeCategoryStyles';
 import { getNodeIcon } from './nodeTypeIconMap';
 
 interface Props {
@@ -15,6 +16,7 @@ interface Props {
 const CATEGORIES: NodeCategory[] = ['trigger', 'action', 'control', 'agent'];
 
 export function WorkflowNodePalette({ catalog, workflowScope, onDragStart, onTapPlace, touchMode }: Props) {
+  const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const [openCats, setOpenCats] = useState<Record<NodeCategory, boolean>>({
     trigger: true, action: true, control: true, agent: true,
@@ -29,6 +31,13 @@ export function WorkflowNodePalette({ catalog, workflowScope, onDragStart, onTap
 
   const totalMatches = q ? catalog.filter(matches).length : catalog.length;
 
+  const categoryLabels: Record<NodeCategory, string> = {
+    trigger: t('workflows.category.trigger'),
+    action: t('workflows.category.action'),
+    control: t('workflows.category.control'),
+    agent: t('workflows.category.agent'),
+  };
+
   return (
     <div className="flex h-full flex-col border-r border-gray-800 bg-gray-950">
       <div className="border-b border-gray-800 p-2">
@@ -36,7 +45,7 @@ export function WorkflowNodePalette({ catalog, workflowScope, onDragStart, onTap
           <Search size={14} className="text-gray-500" />
           <input
             type="text"
-            placeholder="Suche in Name & Beschreibung…"
+            placeholder={t('workflows.palette.search')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 bg-transparent text-sm text-gray-200 focus:outline-hidden"
@@ -46,7 +55,7 @@ export function WorkflowNodePalette({ catalog, workflowScope, onDragStart, onTap
               type="button"
               onClick={() => setSearch('')}
               className="text-xs text-gray-500 hover:text-gray-300"
-              title="Suche leeren"
+              title={t('workflows.palette.clearSearch')}
             >
               ×
             </button>
@@ -54,14 +63,14 @@ export function WorkflowNodePalette({ catalog, workflowScope, onDragStart, onTap
         </div>
         {q && (
           <p className="mt-1 px-1 text-xs text-gray-500">
-            {totalMatches} Treffer
+            {t('workflows.palette.matches', { count: totalMatches })}
           </p>
         )}
       </div>
       <div className="flex-1 overflow-y-auto p-2">
         {q && totalMatches === 0 && (
           <div className="px-3 py-6 text-center text-sm text-gray-500">
-            Kein Node mit „{search}" gefunden.
+            {t('workflows.palette.noMatch', { query: search })}
           </div>
         )}
         {CATEGORIES.map((cat) => {
@@ -76,7 +85,7 @@ export function WorkflowNodePalette({ catalog, workflowScope, onDragStart, onTap
                 onClick={() => setOpenCats((s) => ({ ...s, [cat]: !s[cat] }))}
                 className="flex w-full items-center justify-between rounded-sm px-2 py-1 text-xs uppercase tracking-wide text-gray-400 hover:bg-gray-900"
               >
-                <span className={style.pillText}>{nodeCategoryLabels[cat]}</span>
+                <span className={style.pillText}>{categoryLabels[cat]}</span>
                 <span className="text-gray-600">({items.length})</span>
               </button>
               {isOpen && (
@@ -90,7 +99,7 @@ export function WorkflowNodePalette({ catalog, workflowScope, onDragStart, onTap
                         draggable={!touchMode && allowed}
                         onDragStart={(e) => allowed && onDragStart(e, m.type)}
                         onClick={() => touchMode && allowed && onTapPlace(m.type)}
-                        title={allowed ? m.description : `Nicht erlaubt für scope=${workflowScope}`}
+                        title={allowed ? m.description : t('workflows.palette.notAllowed', { scope: workflowScope })}
                         className={`flex items-center gap-2 rounded-sm border ${allowed ? `${style.border} cursor-pointer hover:bg-gray-900` : 'border-gray-800 opacity-40 cursor-not-allowed'} bg-gray-900/40 px-2 py-2`}
                       >
                         <Icon size={14} className="text-gray-300" />

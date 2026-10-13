@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Braces } from 'lucide-react';
 
 export interface TemplateOption {
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export function TemplatePicker({ options, onPick }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -34,7 +36,7 @@ export function TemplatePicker({ options, onPick }: Props) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="inline-flex items-center justify-center w-8 h-8 rounded-sm text-gray-400 hover:bg-gray-800 hover:text-cyan-300"
-        title="Template-Pfad einfügen"
+        title={t('workflows.templatePicker.insert')}
       >
         <Braces size={16} />
       </button>
@@ -61,7 +63,7 @@ export function TemplatePicker({ options, onPick }: Props) {
       )}
       {open && options.length === 0 && (
         <div className="absolute right-0 z-50 mt-1 w-72 rounded-lg border border-gray-700 bg-gray-900 p-3 text-xs text-gray-400 shadow-xl">
-          Keine vorgelagerten Nodes verfügbar.
+          {t('workflows.templatePicker.noUpstream')}
         </div>
       )}
     </div>

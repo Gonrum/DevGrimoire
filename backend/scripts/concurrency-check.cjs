@@ -97,6 +97,7 @@ const exec = (v) => ({ exec: async () => v });
     const eng = Object.create(WorkflowEngineService.prototype);
     const matches = (d, f) => Object.entries(f).every(([k, v]) => {
       if (v && typeof v === 'object' && v.$in) return v.$in.map(String).includes(String(d[k]));
+      if (v && typeof v === 'object' && v.$nin) return !v.$nin.map(String).includes(String(d[k]));
       if (k === '_id') return String(d._id) === String(v);
       if (k.includes('.')) { const [a, b] = k.split('.'); return d[a] && String(d[a][b]) === String(v); }
       return String(d[k]) === String(v);
@@ -116,6 +117,14 @@ const exec = (v) => ({ exec: async () => v });
     eng.runModel = {
       find: (f) => exec(runs.filter((d) => matches(d, { status: f.status }))),
       findById: (id) => exec(runs.find((d) => String(d._id) === String(id)) ?? null),
+      // Bedingtes Fortsetzen (M-20): resumeRun setzt den Run nur, wenn er
+      // nicht schon beendet ist.
+      findOneAndUpdate: (f, u) => {
+        const d = runs.find((x) => matches(x, f));
+        if (!d) return exec(null);
+        Object.assign(d, u.$set);
+        return exec(d);
+      },
     };
     eng.logger = { warn() {}, log() {}, error() {} };
     eng.eventEmitter = { emit() {} };

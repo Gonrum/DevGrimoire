@@ -30,6 +30,8 @@ export function usePushNotifications() {
   );
   const [subscribed, setSubscribed] = useState(false);
   const [loading, setLoading] = useState(false);
+  /** Letzter Fehler beim (Ab-)Bestellen — vorher nur console.error, die UI blieb stumm. */
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supported) return;
@@ -57,6 +59,7 @@ export function usePushNotifications() {
   const subscribe = useCallback(async () => {
     if (!supported) return;
     setLoading(true);
+    setError(null);
     try {
       const reg = await navigator.serviceWorker.ready;
       const { publicKey } = await api.push.getVapidKey();
@@ -68,7 +71,8 @@ export function usePushNotifications() {
       setSubscribed(true);
       setPermission(Notification.permission);
     } catch (err) {
-      console.error('Push subscription failed:', err);
+      setError(err instanceof Error ? err.message : String(err));
+      if ('Notification' in window) setPermission(Notification.permission);
     } finally {
       setLoading(false);
     }
@@ -77,6 +81,7 @@ export function usePushNotifications() {
   const unsubscribe = useCallback(async () => {
     if (!supported) return;
     setLoading(true);
+    setError(null);
     try {
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.getSubscription();
@@ -85,10 +90,12 @@ export function usePushNotifications() {
         await sub.unsubscribe();
       }
       setSubscribed(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
   }, [supported]);
 
-  return { supported, permission, subscribed, loading, subscribe, unsubscribe };
+  return { supported, permission, subscribed, loading, error, subscribe, unsubscribe };
 }

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Plus, Trash2 } from 'lucide-react';
 import { isRecord, isUnknownArray } from '../../lib/narrow';
 import { TemplatePicker, TemplateOption } from './TemplatePicker';
@@ -40,6 +41,7 @@ const TEXTAREA_KEYS = new Set([
 ]);
 
 export function SchemaField({ schema, path, value, onChange, required, fieldKey, templateOptions = [], hideLabel = false }: Props) {
+  const { t } = useTranslation();
   const label = fieldKey ?? path[path.length - 1] ?? '';
   const labelText = hideLabel ? '' : String(label);
 
@@ -52,7 +54,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
           onChange={(e) => onChange(e.target.value || undefined)}
           className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-hidden"
         >
-          <option value="">— wählen —</option>
+          <option value="">{t('workflows.schema.select')}</option>
           {enumOptions.map((opt) => (
             <option key={opt} value={opt}>{opt}</option>
           ))}
@@ -169,7 +171,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
                     onChange(next);
                   }}
                   className="text-red-400 hover:text-red-300"
-                  title="Eintrag löschen"
+                  title={t('workflows.schema.deleteEntry')}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -192,7 +194,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
             onClick={() => onChange([...arr, getEmpty(items)])}
             className="inline-flex items-center gap-1 rounded-sm border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800"
           >
-            <Plus size={12} /> hinzufügen
+            <Plus size={12} /> {t('workflows.schema.add')}
           </button>
         </div>
       </Labeled>
@@ -242,14 +244,14 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
       <Labeled label={labelText} required={required}>
         <div className="space-y-2">
           {entries.length === 0 && (
-            <div className="text-xs text-gray-600 italic">(keine Einträge — „hinzufügen" klicken)</div>
+            <div className="text-xs text-gray-600 italic">{t('workflows.schema.noEntries')}</div>
           )}
           {entries.map(([k, v], idx) => (
             <div key={idx} className="flex items-start gap-2 rounded-sm border border-gray-700 bg-gray-900/40 p-2">
               <input
                 type="text"
                 value={k}
-                placeholder="Schlüssel"
+                placeholder={t('workflows.schema.key')}
                 onChange={(e) => {
                   const next = [...entries];
                   next[idx] = [e.target.value, v];
@@ -278,7 +280,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
                   setEntries(next);
                 }}
                 className="text-red-400 hover:text-red-300 mt-1"
-                title="Eintrag entfernen"
+                title={t('workflows.schema.removeEntry')}
               >
                 <Trash2 size={14} />
               </button>
@@ -289,7 +291,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
             onClick={() => setEntries([...entries, ['', getEmpty(valueSchema)]])}
             className="inline-flex items-center gap-1 rounded-sm border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800"
           >
-            <Plus size={12} /> hinzufügen
+            <Plus size={12} /> {t('workflows.schema.add')}
           </button>
         </div>
       </Labeled>
@@ -366,7 +368,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
           }
           onChange(raw);
         }}
-        placeholder="Wert (Text · Zahl · true/false · oder JSON)"
+        placeholder={t('workflows.schema.valuePlaceholder')}
         className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-hidden"
       />
     </Labeled>
@@ -386,11 +388,12 @@ function Labeled({ label, required, children }: { label: string; required?: bool
 }
 
 function TagInput({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-1 rounded-sm border border-gray-700 bg-gray-800 px-2 py-1">
-      {tags.map((t, i) => (
+      {tags.map((tag, i) => (
         <span key={i} className="inline-flex items-center gap-1 rounded-sm bg-gray-700 px-2 py-0.5 text-xs text-gray-200">
-          {t}
+          {tag}
           <button
             type="button"
             onClick={() => onChange(tags.filter((_, j) => j !== i))}
@@ -400,7 +403,7 @@ function TagInput({ tags, onChange }: { tags: string[]; onChange: (tags: string[
       ))}
       <input
         type="text"
-        placeholder="+ Tag (Enter)"
+        placeholder={t('workflows.schema.tagPlaceholder')}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ',') {
             e.preventDefault();

@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Workflow, Play } from 'lucide-react';
 import { WorkflowDefinition } from '../../api/workflows';
 
@@ -8,8 +9,9 @@ interface Props {
 }
 
 export function WorkflowCardGrid({ workflows, onRun }: Props) {
+  const { t } = useTranslation();
   if (workflows.length === 0) {
-    return <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-6 text-center text-sm text-gray-500">Keine Workflows.</div>;
+    return <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-6 text-center text-sm text-gray-500">{t('workflows.empty')}</div>;
   }
   return (
     <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
@@ -23,9 +25,9 @@ export function WorkflowCardGrid({ workflows, onRun }: Props) {
             <span className={`rounded-sm px-2 py-0.5 text-[10px] uppercase ${statusBadge(wf.status)}`}>{wf.status}</span>
           </div>
           <div className="text-xs text-gray-500">
-            <div>Scope: {wf.scope} · v{wf.version}</div>
-            <div>Trigger: {(wf.trigger as { type?: string })?.type ?? '—'}</div>
-            {wf.lastRunAt && <div>Letzter Run: {new Date(wf.lastRunAt).toLocaleString()}</div>}
+            <div>{t('workflows.card.scope', { scope: wf.scope, version: wf.version })}</div>
+            <div>{t('workflows.card.trigger', { trigger: (wf.trigger as { type?: string })?.type ?? '—' })}</div>
+            {wf.lastRunAt && <div>{t('workflows.card.lastRun', { date: new Date(wf.lastRunAt).toLocaleString() })}</div>}
           </div>
           {onRun && wf.status === 'active' && (
             <button
@@ -33,7 +35,7 @@ export function WorkflowCardGrid({ workflows, onRun }: Props) {
               onClick={(e) => { e.preventDefault(); onRun(wf._id); }}
               className="mt-3 inline-flex items-center gap-1 rounded-sm bg-cyan-900/40 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-900"
             >
-              <Play size={12} /> ausführen
+              <Play size={12} /> {t('workflows.card.run')}
             </button>
           )}
         </Link>

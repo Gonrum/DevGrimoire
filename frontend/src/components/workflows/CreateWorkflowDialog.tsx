@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { workflowsApi, WorkflowScope } from '../../api/workflows';
 import { api } from '../../api/client';
 import { errorMessage, optionOr } from '../../lib/narrow';
@@ -52,6 +53,7 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [templates, setTemplates] = useState<TemplateOption[]>([]);
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -82,7 +84,7 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
       .catch(() => setTemplates([]));
   }, [open]);
 
-  const selectedTemplate = templates.find((t) => t.id === templateId);
+  const selectedTemplate = templates.find((tpl) => tpl.id === templateId);
 
   // Fetch projects when scope=project and no defaultProjectId is pre-filled
   useEffect(() => {
@@ -150,11 +152,11 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
             ],
             edges: [],
           });
-      toast.showSuccess(templateId ? 'Workflow aus Template erstellt' : 'Workflow erstellt');
+      toast.showSuccess(templateId ? t('workflows.create.createdFromTemplate') : t('workflows.create.created'));
       close();
       void navigate(`/workflows/${wf._id}`);
     } catch (err) {
-      toast.showError(`Erstellen fehlgeschlagen: ${errorMessage(err, 'Unbekannter Fehler')}`);
+      toast.showError(t('workflows.create.createFailed', { error: errorMessage(err, t('workflows.unknownError')) }));
     } finally {
       setSubmitting(false);
     }
@@ -164,16 +166,16 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs" onClick={close}>
       <div className="mx-4 w-full max-w-md rounded-xl border border-gray-700 bg-gray-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="border-b border-gray-800 px-5 py-4">
-          <h2 className="text-lg font-semibold text-gray-200">Neuer Workflow</h2>
+          <h2 className="text-lg font-semibold text-gray-200">{t('workflows.new')}</h2>
         </div>
         <div className="max-h-[80vh] overflow-y-auto px-5 py-4 space-y-3">
           {templates.length > 0 && (
-            <Labeled label="Template (optional)">
+            <Labeled label={t('workflows.create.template')}>
               <select
                 value={templateId}
                 onChange={(e) => {
                   const changes: Partial<Draft> = { templateId: e.target.value };
-                  const tpl = templates.find((t) => t.id === e.target.value);
+                  const tpl = templates.find((option) => option.id === e.target.value);
                   if (tpl) {
                     changes.triggerType = tpl.triggerType;
                     // Force scope to a supported one if the current isn't.
@@ -186,42 +188,42 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
                 }}
                 className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200"
               >
-                <option value="">— Leerer Canvas —</option>
-                {templates.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
+                <option value="">{t('workflows.create.emptyCanvas')}</option>
+                {templates.map((tpl) => (
+                  <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
                 ))}
               </select>
               {selectedTemplate && (
                 <p className="mt-1 text-xs text-gray-500">
-                  {selectedTemplate.description} ({selectedTemplate.nodeCount} Nodes, Trigger: {selectedTemplate.triggerType})
+                  {t('workflows.create.templateInfo', { description: selectedTemplate.description, count: selectedTemplate.nodeCount, trigger: selectedTemplate.triggerType })}
                 </p>
               )}
               {selectedTemplate && !scopeAllowedByTemplate && (
                 <p className="mt-1 text-xs text-red-300">
-                  Template unterstützt nur: {selectedTemplate.supportedScopes.join(', ')}
+                  {t('workflows.create.templateScopesOnly', { scopes: selectedTemplate.supportedScopes.join(', ') })}
                 </p>
               )}
             </Labeled>
           )}
-          <Labeled label="Name">
+          <Labeled label={t('common.name')}>
             <input type="text" value={name} onChange={(e) => patch({ name: e.target.value })} className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200" />
           </Labeled>
-          <Labeled label="Scope">
+          <Labeled label={t('workflows.create.scope')}>
             <select value={scope} onChange={(e) => patch({ scope: optionOr(e.target.value, SCOPES, scope) })} className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200">
-              <option value="system">System</option>
-              <option value="project">Project</option>
-              <option value="customer">Customer</option>
+              <option value="system">{t('workflows.scope.system')}</option>
+              <option value="project">{t('workflows.scope.project')}</option>
+              <option value="customer">{t('workflows.scope.customer')}</option>
             </select>
           </Labeled>
           {scope === 'project' && (
-            <Labeled label="Projekt">
+            <Labeled label={t('workflows.create.project')}>
               <select
                 value={projectId}
                 onChange={(e) => patch({ projectId: e.target.value })}
                 disabled={loadingProjects}
                 className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 disabled:opacity-50"
               >
-                <option value="">{loadingProjects ? 'Lade Projekte…' : '— Projekt wählen —'}</option>
+                <option value="">{loadingProjects ? t('workflows.create.loadingProjects') : t('workflows.create.selectProject')}</option>
                 {projects.map((p) => (
                   <option key={p._id} value={p._id}>{p.name}</option>
                 ))}
@@ -229,38 +231,38 @@ export function CreateWorkflowDialog({ open, defaultScope, defaultProjectId, def
             </Labeled>
           )}
           {scope === 'customer' && (
-            <Labeled label="Kunde">
+            <Labeled label={t('workflows.create.customer')}>
               <select
                 value={customerId}
                 onChange={(e) => patch({ customerId: e.target.value })}
                 disabled={loadingCustomers}
                 className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 disabled:opacity-50"
               >
-                <option value="">{loadingCustomers ? 'Lade Kunden…' : '— Kunde wählen —'}</option>
+                <option value="">{loadingCustomers ? t('workflows.create.loadingCustomers') : t('workflows.create.selectCustomer')}</option>
                 {customers.map((c) => (
                   <option key={c._id} value={c._id}>{c.name}</option>
                 ))}
               </select>
             </Labeled>
           )}
-          <Labeled label="Trigger">
+          <Labeled label={t('workflows.create.trigger')}>
             <select
               value={triggerType}
               onChange={(e) => patch({ triggerType: optionOr(e.target.value, TRIGGER_TYPES, triggerType) })}
               disabled={!!templateId}
               className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 disabled:opacity-50"
             >
-              <option value="manual">Manual</option>
-              <option value="schedule">Schedule</option>
+              <option value="manual">{t('workflows.trigger.manual')}</option>
+              <option value="schedule">{t('workflows.trigger.schedule')}</option>
             </select>
             {templateId && (
-              <p className="mt-1 text-xs text-gray-500">Vom Template vorgegeben — im Editor anpassbar.</p>
+              <p className="mt-1 text-xs text-gray-500">{t('workflows.create.triggerFromTemplate')}</p>
             )}
           </Labeled>
         </div>
         <div className="flex justify-end gap-2 border-t border-gray-800 px-5 py-3">
-          <button onClick={close} className="rounded-sm bg-gray-800 px-3 py-1 text-sm text-gray-200 hover:bg-gray-700">Abbrechen</button>
-          <button onClick={() => { void handleCreate(); }} disabled={submitting || !canSubmit} className="rounded-sm bg-cyan-600 px-3 py-1 text-sm text-white hover:bg-cyan-500 disabled:opacity-50">Erstellen</button>
+          <button onClick={close} className="rounded-sm bg-gray-800 px-3 py-1 text-sm text-gray-200 hover:bg-gray-700">{t('common.cancel')}</button>
+          <button onClick={() => { void handleCreate(); }} disabled={submitting || !canSubmit} className="rounded-sm bg-cyan-600 px-3 py-1 text-sm text-white hover:bg-cyan-500 disabled:opacity-50">{t('common.create')}</button>
         </div>
       </div>
     </div>

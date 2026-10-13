@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { api, ProjectAccess } from '../../api/client';
+import { api, ApiError, ProjectAccess } from '../../api/client';
 import Badge from '../ui/Badge';
 import { LoadingText } from '../ui/LoadingSpinner';
 
@@ -24,12 +24,13 @@ export default function ProjectAccessTab({ projectId }: Props) {
     let cancelled = false;
     api.projects.access(projectId)
       .then((res) => { if (!cancelled) setData(res); })
-      .catch((err: Error) => {
+      .catch((err: unknown) => {
         if (cancelled) return;
-        if (err.message.toLowerCase().includes('forbid') || err.message.includes('401') || err.message.includes('403')) {
+        // Status statt geratener Meldungstext (M-34).
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
           setForbidden(true);
         } else {
-          setError(err.message);
+          setError(err instanceof Error ? err.message : String(err));
         }
       })
       .finally(() => { if (!cancelled) setLoading(false); });

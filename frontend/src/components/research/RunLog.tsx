@@ -23,12 +23,29 @@ type LiveStatus = 'idle' | 'connecting' | 'running' | 'done' | 'error';
 interface LiveState {
   runId: string | null;
   status: LiveStatus;
+  /** Die letzten MAX_LIVE_STEPS Schritte. */
   steps: RunStep[];
+  /** Wie viele ältere Schritte dafür verworfen wurden. */
+  droppedSteps: number;
+  /** Beim Eintreffen gesammelt — überlebt das Verwerfen alter Schritte. */
+  artifactChanges: ArtifactChange[];
   summary?: string;
   error?: string;
 }
 
-const IDLE_LIVE: LiveState = { runId: null, status: 'idle', steps: [] };
+/**
+ * Obergrenze für die Live-Schritte (M-41). Vorher wuchs die Liste mit jedem
+ * Schritt eines langen Runs unbegrenzt, und jeder Render parste sie komplett
+ * — O(n²) über die Laufzeit, während das Panel auch im verdeckten Tab
+ * gemountet bleibt. Wie MAX_LINES im Kube-Log-Stream.
+ */
+const MAX_LIVE_STEPS = 500;
+
+function freshLive(runId: string | null, status: LiveStatus): LiveState {
+  return { runId, status, steps: [], droppedSteps: 0, artifactChanges: [] };
+}
+
+const IDLE_LIVE: LiveState = freshLive(null, 'idle');
 
 /**
  * Ein SSE-Frame, so wie er über die Leitung kommt: ein Objekt mit unbekannten
@@ -145,34 +162,43 @@ interface ArtifactChange {
  * tool, whose `resultSummary` is `JSON.stringify({slug,version,action})`
  * (possibly truncated to `STEP_SUMMARY_CHARS`, hence the guarded parse).
  */
-function parseArtifactWrites(steps: RunStep[]): ArtifactChange[] {
-  const out: ArtifactChange[] = [];
-  for (const s of steps) {
-    if (s.type !== 'tool_result' || s.tool !== 'artifact_write' || !s.resultSummary) continue;
-    let parsed: unknown;
-    try {
-      parsed = parseJsonText<unknown>(s.resultSummary);
-    } catch {
-      // truncated/non-JSON summary — skip this one, not fatal
-      continue;
-    }
-    if (!isRecord(parsed)) continue;
-    const slug = parsed.slug;
-    const version = parsed.version;
-    const action = parsed.action;
-    if (typeof slug === 'string' && slug.length > 0 && typeof version === 'number' && (action === 'created' || action === 'updated')) {
-      out.push({ slug, version, action });
-    }
+function parseArtifactWrite(s: RunStep): ArtifactChange | null {
+  if (s.type !== 'tool_result' || s.tool !== 'artifact_write' || !s.resultSummary) return null;
+  let parsed: unknown;
+  try {
+    parsed = parseJsonText<unknown>(s.resultSummary);
+  } catch {
+    // truncated/non-JSON summary — skip this one, not fatal
+    return null;
   }
-  return out;
+  if (!isRecord(parsed)) return null;
+  const slug = parsed.slug;
+  const version = parsed.version;
+  const action = parsed.action;
+  if (typeof slug === 'string' && slug.length > 0 && typeof version === 'number' && (action === 'created' || action === 'updated')) {
+    return { slug, version, action };
+  }
+  return null;
 }
 
-function StepList({ steps }: { steps: RunStep[] }) {
+/** Hängt einen Schritt an, verwirft bei Bedarf den ältesten (M-41). */
+function appendStep(s: LiveState, step: RunStep): LiveState {
+  const overflow = s.steps.length >= MAX_LIVE_STEPS;
+  const change = parseArtifactWrite(step);
+  return {
+    ...s,
+    steps: overflow ? [...s.steps.slice(s.steps.length - MAX_LIVE_STEPS + 1), step] : [...s.steps, step],
+    droppedSteps: s.droppedSteps + (overflow ? 1 : 0),
+    artifactChanges: change ? [...s.artifactChanges, change] : s.artifactChanges,
+  };
+}
+
+function StepList({ steps, offset = 0 }: { steps: RunStep[]; offset?: number }) {
   if (steps.length === 0) return null;
   return (
     <ul className="space-y-1 max-h-64 overflow-y-auto font-mono text-xs">
       {steps.map((s, i) => (
-        <li key={i} className="text-gray-500 break-all">
+        <li key={offset + i} className="text-gray-500 break-all">
           <span className="text-gray-700 mr-1">{s.type === 'tool_call' ? '→' : s.type === 'tool_result' ? '←' : '•'}</span>
           {s.tool && <span className="text-violet-300 mr-1">{s.tool}</span>}
           <span>{s.type === 'tool_call' ? s.argsSummary : s.resultSummary}</span>
@@ -300,17 +326,17 @@ const RunLog = forwardRef<RunLogHandle, RunLogProps>(function RunLog({ topicId, 
           const runId = readString(evt, 'runId');
           if (!runId) return;
           runIdRef.current = runId;
-          setLive({ runId, status: 'running', steps: [] });
+          setLive(freshLive(runId, 'running'));
           break;
         }
         case 'step': {
           const step = readRunStep(evt.step);
           if (!step) return;
-          setLive((s) => ({ ...s, steps: [...s.steps, step] }));
+          setLive((s) => appendStep(s, step));
           break;
         }
         case 'artifact':
-          // Reserved event type — see `parseArtifactWrites` doc: not emitted
+          // Reserved event type — see `parseArtifactWrite` doc: not emitted
           // by the backend today, handled here only for forward-compat.
           break;
         case 'done':
@@ -337,7 +363,7 @@ const RunLog = forwardRef<RunLogHandle, RunLogProps>(function RunLog({ topicId, 
     const controller = new AbortController();
     abortRef.current = controller;
     runIdRef.current = runId;
-    setLive({ runId, status: 'running', steps: [] });
+    setLive(freshLive(runId, 'running'));
     try {
       const res = await fetch(`/api/research-runs/${runId}/stream`, {
         method: 'GET',
@@ -371,7 +397,7 @@ const RunLog = forwardRef<RunLogHandle, RunLogProps>(function RunLog({ topicId, 
     const controller = new AbortController();
     abortRef.current = controller;
     runIdRef.current = null;
-    setLive({ runId: null, status: 'connecting', steps: [] });
+    setLive(freshLive(null, 'connecting'));
     try {
       const res = await fetch(`/api/research-topics/${topicId}/runs`, {
         method: 'POST',
@@ -452,7 +478,7 @@ const RunLog = forwardRef<RunLogHandle, RunLogProps>(function RunLog({ topicId, 
     };
   }, [topicId]);
 
-  const liveArtifactChanges = parseArtifactWrites(live.steps);
+  const liveArtifactChanges = live.artifactChanges;
   const runBusy = live.status === 'connecting' || live.status === 'running';
 
   return (
@@ -473,7 +499,10 @@ const RunLog = forwardRef<RunLogHandle, RunLogProps>(function RunLog({ topicId, 
             {live.status === 'done' && <Badge color="bg-green-900/40 text-green-300" rounded="full">{t('researchTopics.runStatus_done')}</Badge>}
             {live.status === 'error' && <Badge color="bg-red-900/40 text-red-400" rounded="full">{t('researchTopics.runStatus_error')}</Badge>}
           </div>
-          <StepList steps={live.steps} />
+          {live.droppedSteps > 0 && (
+            <div className="text-xs text-gray-600">{t('researchTopics.liveStepsDropped', { count: live.droppedSteps })}</div>
+          )}
+          <StepList steps={live.steps} offset={live.droppedSteps} />
           {liveArtifactChanges.length > 0 && (
             <div className="flex flex-wrap gap-1.5 pt-2 border-t border-gray-800">
               {liveArtifactChanges.map((c, i) => (

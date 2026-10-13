@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus } from 'lucide-react';
 import { workflowsApi, WorkflowDefinition, WorkflowScope } from '../../api/workflows';
 import { WorkflowCardGrid } from './WorkflowCardGrid';
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export function WorkflowProjectTab({ scope, projectId, customerId }: Props) {
+  const { t } = useTranslation();
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -36,21 +38,21 @@ export function WorkflowProjectTab({ scope, projectId, customerId }: Props) {
         const list = await workflowsApi.list({ scope, projectId, customerId });
         if (!cancelled) setWorkflows(list);
       } catch (err) {
-        if (!cancelled) showError(errorMessage(err, 'Workflows konnten nicht geladen werden'));
+        if (!cancelled) showError(errorMessage(err, t('workflows.loadFailed')));
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [scope, projectId, customerId, reloadToken, showError]);
+  }, [scope, projectId, customerId, reloadToken, showError, t]);
 
   const onRun = async (id: string) => {
     try {
       const run = await workflowsApi.start(id);
-      showSuccess(`Run gestartet: ${run._id}`);
+      showSuccess(t('workflows.runStartedWithId', { id: run._id }));
       setRunId(run._id);
     } catch (err) {
-      showError(`Run fehlgeschlagen: ${errorMessage(err, 'Unbekannter Fehler')}`);
+      showError(t('workflows.runFailed', { error: errorMessage(err, t('workflows.unknownError')) }));
     }
   };
 
@@ -58,10 +60,10 @@ export function WorkflowProjectTab({ scope, projectId, customerId }: Props) {
     <div>
       <div className="mb-4 flex justify-end">
         <button onClick={() => setCreateOpen(true)} className="inline-flex items-center gap-1 rounded-sm bg-cyan-600 px-3 py-2 text-sm text-white hover:bg-cyan-500">
-          <Plus size={14} /> Neuer Workflow
+          <Plus size={14} /> {t('workflows.new')}
         </button>
       </div>
-      {loading ? <div className="text-sm text-gray-500">Lädt…</div> : <WorkflowCardGrid workflows={workflows} onRun={(id) => { void onRun(id); }} />}
+      {loading ? <div className="text-sm text-gray-500">{t('common.loading')}</div> : <WorkflowCardGrid workflows={workflows} onRun={(id) => { void onRun(id); }} />}
       <CreateWorkflowDialog
         open={createOpen}
         defaultScope={scope}

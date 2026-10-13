@@ -10,13 +10,49 @@ const BASE_URL = '/api';
 
 let getAccessToken: (() => string | null) | null = null;
 let onUnauthorized: (() => Promise<boolean>) | null = null;
+let onSessionExpired: (() => void) | null = null;
+/** Für welches Token die Abmeldung schon ausgelöst wurde — einmal pro Session, nicht pro Request. */
+let expiredForToken: string | null | undefined;
 
 export function configureAuth(
   tokenGetter: () => string | null,
   refreshHandler: () => Promise<boolean>,
+  sessionExpiredHandler?: () => void,
 ) {
   getAccessToken = tokenGetter;
   onUnauthorized = refreshHandler;
+  onSessionExpired = sessionExpiredHandler ?? null;
+}
+
+/**
+ * Fehler aus einer API-Antwort, mit HTTP-Status (M-34).
+ *
+ * Vorher warf `request<T>` ein nacktes `Error` nur mit der Meldung; wer den
+ * Status brauchte, riet über `err.message.includes('401')` — NestJS liefert
+ * aber `{message: 'Unauthorized'}`, der Zweig traf nie.
+ */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+async function apiError(res: Response): Promise<ApiError> {
+  return new ApiError(await readErrorMessage(res), res.status);
+}
+
+/**
+ * Bleibt es nach dem Refresh-Versuch bei 401, ist die Session vorbei (M-34):
+ * Refresh-Token abgelaufen oder widerrufen (M-8). Vorher blieb der Nutzer auf
+ * einer Seite, in der jede Aktion nur noch einen Fehler warf.
+ */
+function noteUnauthorized(res: Response): void {
+  if (res.status !== 401 || !onSessionExpired) return;
+  const token = getAccessToken?.() ?? null;
+  if (expiredForToken === token) return;
+  expiredForToken = token;
+  onSessionExpired();
 }
 
 /**
@@ -48,10 +84,11 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
         headers: mergeHeaders(headers, options?.headers),
       });
     }
+    noteUnauthorized(res);
   }
 
   if (!res.ok) {
-    throw new Error(await readErrorMessage(res));
+    throw await apiError(res);
   }
   // 204 hat keinen Body. Der Aufrufer deklariert dort typischerweise `void`;
   // die Grenze liegt in http-boundary.ts, nicht hier.
@@ -81,10 +118,11 @@ export async function requestMarkdown(path: string): Promise<{ text: string; fil
     if (refreshed) {
       res = await fetch(`${BASE_URL}${path}`, { headers: buildHeaders() });
     }
+    noteUnauthorized(res);
   }
 
   if (!res.ok) {
-    throw new Error(await readErrorMessage(res));
+    throw await apiError(res);
   }
 
   const disposition = res.headers.get('Content-Disposition') || '';
@@ -1992,7 +2030,7 @@ async function postChatStream(
  */
 async function consumeChatStream(res: Response, handlers: ChatStreamHandlers): Promise<void> {
   if (!res.ok || !res.body) {
-    throw new Error(await readErrorMessage(res));
+    throw await apiError(res);
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -2363,7 +2401,7 @@ export const api = {
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`${BASE_URL}/milestones/${id}/export.md`, { headers });
       if (!res.ok) {
-        throw new Error(await readErrorMessage(res));
+        throw await apiError(res);
       }
       const blob = await res.blob();
       const disposition = res.headers.get('Content-Disposition') || '';
@@ -2958,7 +2996,7 @@ export const api = {
         signal,
       });
       if (!res.ok || !res.body) {
-        throw new Error(await readErrorMessage(res));
+        throw await apiError(res);
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -3116,7 +3154,7 @@ export const api = {
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`${BASE_URL}/project-transfer/${id}/export${params}`, { headers });
       if (!res.ok) {
-        throw new Error(await readErrorMessage(res));
+        throw await apiError(res);
       }
       const blob = await res.blob();
       const disposition = res.headers.get('Content-Disposition') || '';
@@ -3142,7 +3180,7 @@ export const api = {
         body: formData,
       });
       if (!res.ok) {
-        throw new Error(await readErrorMessage(res));
+        throw await apiError(res);
       }
       return parseJsonResponse<{ projectId: string; projectName: string; stats: Record<string, number> }>(res);
     },
@@ -3176,7 +3214,7 @@ export const api = {
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`${BASE_URL}/customer-transfer/${customerId}/export${params}`, { headers });
       if (!res.ok) {
-        throw new Error(await readErrorMessage(res));
+        throw await apiError(res);
       }
       const blob = await res.blob();
       const disposition = res.headers.get('Content-Disposition') || '';
@@ -3202,7 +3240,7 @@ export const api = {
         body: formData,
       });
       if (!res.ok) {
-        throw new Error(await readErrorMessage(res));
+        throw await apiError(res);
       }
       return parseJsonResponse<{
         customerId: string;
@@ -3249,7 +3287,7 @@ export const api = {
         body: formData,
       });
       if (!res.ok) {
-        throw new Error(await readErrorMessage(res));
+        throw await apiError(res);
       }
       return parseJsonResponse<Attachment>(res);
     },
@@ -3430,7 +3468,7 @@ export const api = {
         body: form,
       });
       if (!res.ok) {
-        throw new Error(await readErrorMessage(res));
+        throw await apiError(res);
       }
       return parseJsonResponse(res);
     },

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   useNodesState, useEdgesState, addEdge, Connection, Edge, Node,
   useReactFlow, ReactFlowProvider,
@@ -21,6 +22,7 @@ import { parseValidationIssues, RemoteIssue } from '../components/workflows/pars
 import { getDefaultsFromJsonSchema } from '../components/workflows/schemaDefaults';
 import { generateNodeId } from '../components/workflows/generateNodeId';
 import { useToast } from '../components/Toast';
+import i18n from '../i18n';
 
 export default function WorkflowEditorPage() {
   return (
@@ -100,6 +102,7 @@ function panelOpen(override: PanelOverride, bp: ViewportBreakpoint): boolean {
 }
 
 function EditorInner() {
+  const { t } = useTranslation();
   const { id = '' } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const toast = useToast();
@@ -141,7 +144,7 @@ function EditorInner() {
       setNodes(wf.nodes.map((n) => toReactFlowNode(n, byType)));
       setEdges(wf.edges.map(toReactFlowEdge));
     }).catch((err: unknown) => {
-      toastRef.current.showError(`Workflow nicht ladbar: ${errorMessage(err)}`);
+      toastRef.current.showError(i18n.t('workflows.editor.loadFailed', { error: errorMessage(err) }));
     });
     return () => { cancelled = true; };
   }, [id, byType, setNodes, setEdges]);
@@ -241,7 +244,7 @@ function EditorInner() {
   const handlePaletteTap = (type: string) => {
     // Tablet/touch path: place at center of viewport for simplicity.
     addNodeOfType(type, { x: 200, y: 200 });
-    toast.showSuccess(`${type} platziert`);
+    toast.showSuccess(t('workflows.editor.placed', { type }));
   };
 
   type UpdateDto = {
@@ -279,19 +282,19 @@ function EditorInner() {
       setWorkflow(updated);
       setRemoteIssues([]);
       setDirty(false);
-      if (!silent) toast.showSuccess('Workflow gespeichert');
+      if (!silent) toast.showSuccess(t('workflows.editor.saved'));
       return true;
     } catch (err) {
       const msg = errorMessage(err);
       if (msg.toLowerCase().includes('cannot') || msg.includes('400')) {
         setRemoteIssues(parseValidationIssues(msg));
       }
-      toast.showError(`Speichern fehlgeschlagen: ${msg}`);
+      toast.showError(t('workflows.editor.saveFailed', { error: msg }));
       return false;
     } finally {
       setSaving(false);
     }
-  }, [workflow, nodes, edges, id, toast]);
+  }, [workflow, nodes, edges, id, toast, t]);
 
   // Auto-save: when dirty is set (typically from drag/drop/connect),
   // wait 800ms of idle and then silently persist the current state.
@@ -309,17 +312,17 @@ function EditorInner() {
 
   const handleActivate = async () => {
     const saved = await handleSave({ status: 'active' });
-    if (saved) toast.showSuccess('Workflow aktiviert');
+    if (saved) toast.showSuccess(t('workflows.editor.activated'));
   };
 
   const handleRun = async () => {
     if (!workflow) return;
     try {
       const run = await workflowsApi.start(id);
-      toast.showSuccess(`Run gestartet`);
+      toast.showSuccess(t('workflows.runStarted'));
       setRunId(run._id);
     } catch (err) {
-      toast.showError(`Run fehlgeschlagen: ${errorMessage(err)}`);
+      toast.showError(t('workflows.runFailed', { error: errorMessage(err) }));
     }
   };
 
@@ -327,20 +330,20 @@ function EditorInner() {
     try {
       const updated = await workflowsApi.update(id, { status });
       setWorkflow(updated);
-      toast.showSuccess(`Status: ${status}`);
+      toast.showSuccess(t('workflows.editor.statusChanged', { status }));
     } catch (err) {
-      toast.showError(errorMessage(err, 'Status nicht änderbar'));
+      toast.showError(errorMessage(err, t('workflows.editor.statusChangeFailed')));
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm('Workflow wirklich löschen?')) return;
+    if (!confirm(t('workflows.editor.confirmDelete'))) return;
     try {
       await workflowsApi.delete(id);
-      toast.showSuccess('Workflow gelöscht');
+      toast.showSuccess(t('workflows.editor.deleted'));
       void navigate('/workflows');
     } catch (err) {
-      toast.showError(errorMessage(err, 'Löschen fehlgeschlagen'));
+      toast.showError(errorMessage(err, t('workflows.editor.deleteFailed')));
     }
   };
 
@@ -405,19 +408,19 @@ function EditorInner() {
   const localIssues = useMemo(() => {
     if (!selectedNode) return [];
     const meta = byType[selectedNodeData.type];
-    if (!meta) return ['Unbekannter Type — Schema nicht geladen.'];
+    if (!meta) return [t('workflows.editor.unknownType')];
     const issues: string[] = [];
     const required = readStringArray(meta.configJsonSchema.required) ?? [];
     const cfg = selectedNodeData.config;
     for (const r of required) {
       const v = cfg[r];
-      if (v === undefined || v === null || v === '') issues.push(`config.${r}: required`);
+      if (v === undefined || v === null || v === '') issues.push(t('workflows.editor.fieldRequired', { field: `config.${r}` }));
     }
     return issues;
-  }, [selectedNode, selectedNodeData, byType]);
+  }, [selectedNode, selectedNodeData, byType, t]);
 
   if (!workflow) {
-    return <div className="container mx-auto p-6 text-sm text-gray-500">Lädt…</div>;
+    return <div className="container mx-auto p-6 text-sm text-gray-500">{t('common.loading')}</div>;
   }
 
   if (bp === 'phone') {
@@ -441,20 +444,20 @@ function EditorInner() {
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => { void handleSave(); }} disabled={saving} className="inline-flex items-center gap-1 rounded-sm bg-gray-800 px-3 py-1 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-50">
-            <Save size={12} /> Speichern
+            <Save size={12} /> {t('common.save')}
           </button>
           {workflow.status !== 'active' && (
             <button onClick={() => { void handleActivate(); }} className="inline-flex items-center gap-1 rounded-sm bg-cyan-600 px-3 py-1 text-xs text-white hover:bg-cyan-500">
-              <CheckCircle size={12} /> Aktivieren
+              <CheckCircle size={12} /> {t('workflows.editor.activate')}
             </button>
           )}
           {workflow.status === 'active' && (
             <>
               <button onClick={() => { void handleRun(); }} className="inline-flex items-center gap-1 rounded-sm bg-green-600 px-3 py-1 text-xs text-white hover:bg-green-500">
-                <Play size={12} /> Run
+                <Play size={12} /> {t('workflows.editor.run')}
               </button>
               <button onClick={() => { void handleStatusChange('paused'); }} className="inline-flex items-center gap-1 rounded-sm bg-amber-700 px-3 py-1 text-xs text-white hover:bg-amber-600">
-                <Pause size={12} /> Pause
+                <Pause size={12} /> {t('workflows.editor.pause')}
               </button>
             </>
           )}

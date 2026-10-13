@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { RemoteIssue } from './parseValidationIssues';
 
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export function WorkflowValidationBanner({ issues, onJumpTo, onDismiss }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   if (issues.length === 0) return null;
 
@@ -21,14 +23,14 @@ export function WorkflowValidationBanner({ issues, onJumpTo, onDismiss }: Props)
           className="flex items-center gap-2 text-sm text-amber-200 hover:text-amber-100"
         >
           <AlertTriangle size={14} />
-          <span>{issues.length} Validierungsfehler</span>
+          <span>{t('workflows.validation.count', { count: issues.length })}</span>
           {open ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
         </button>
         <button
           type="button"
           onClick={onDismiss}
           className="text-xs text-gray-400 hover:text-gray-200"
-        >Schließen</button>
+        >{t('common.close')}</button>
       </div>
       {open && (
         <ul className="max-h-48 overflow-y-auto border-t border-amber-800 px-4 py-2 text-xs">

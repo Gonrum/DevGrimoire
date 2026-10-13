@@ -70,7 +70,9 @@
     "chars": "chars",
     "uploadFile": "Upload file",
     "add": "Add",
-    "errorCreating": "Error creating"
+    "errorCreating": "Error creating",
+    "loadFailed": "Failed to load",
+    "pageNotFound": "Page not found."
   },
   "globalLogs": {
     "title": "Cross-project logs",
@@ -175,7 +177,9 @@
     "runFinishedAt": "Finished",
     "notifyOnCompleteLabel": "Notify on completion",
     "settingsSaved": "Settings saved",
-    "settingsSaveFailed": "Could not save settings"
+    "settingsSaveFailed": "Could not save settings",
+    "liveStepsDropped_one": "{{count}} older step hidden",
+    "liveStepsDropped_other": "{{count}} older steps hidden"
   },
   "nav": {
     "dashboard": "Grimoire",
@@ -505,7 +509,10 @@
     "changeBranch": "Change branch",
     "lastSync": "Last sync",
     "statusActive": "Active",
-    "statusPaused": "Paused"
+    "statusPaused": "Paused",
+    "allowPrivateHost": "Allow private/internal address (disables SSRF protection for this repo)",
+    "allowPrivateHostConfirm": "This option completely disables SSRF protection for THIS repository. A baseUrl pointing to 127.0.0.1, 169.254.169.254 (cloud metadata) or comparable internal endpoints will then be allowed. Anyone with settings write access could use this to steal cloud credentials.\n\nReally enable?",
+    "giteaBaseUrlRequired": "Gitea has no default — the base URL is required."
   },
   "projectSettings": {
     "title": "Settings",
@@ -590,7 +597,9 @@
     "tableUpdated": "Updated",
     "tableActions": "Actions",
     "acceptanceProgress": "{{done}} of {{total}} met",
-    "questDefined": "Structured quest definition available"
+    "questDefined": "Structured quest definition available",
+    "attachmentsFailed_one": "Todo created, but {{count}} attachment is missing ({{files}}): {{error}}",
+    "attachmentsFailed_other": "Todo created, but {{count}} attachments are missing ({{files}}): {{error}}"
   },
   "todoStatus": {
     "open": "Open",
@@ -1224,7 +1233,10 @@
     "running": "running …",
     "run": "Run",
     "cancel": "Cancel",
-    "ptyHint": "Real bash terminal — cd, env vars, vim/htop all work. Ctrl+C aborts the foreground process; close the modal when done."
+    "ptyHint": "Real bash terminal — cd, env vars, vim/htop all work. Ctrl+C aborts the foreground process; close the modal when done.",
+    "bashExited": "bash exited (code {{code}})",
+    "connectionError": "connection error — close and reopen the terminal to reconnect",
+    "connectionClosed": "connection closed ({{detail}})"
   },
   "snippets": {
     "newSnippet": "+ New Snippet",
@@ -1827,7 +1839,11 @@
     "dictationEnabled": "Speech input",
     "dictationEnabledDesc": "Shows the dictation button in input fields. Audio is sent to your browser's STT provider.",
     "dictationResetConsent": "Reset consent",
-    "dictationConsentReset": "Speech input consent reset. You will be asked again on the next dictation."
+    "dictationConsentReset": "Speech input consent reset. You will be asked again on the next dictation.",
+    "pushDeviceTitle": "Push notifications on this device",
+    "pushDeviceDesc": "Without a subscription on this device, the categories below will not reach it. Applies per browser.",
+    "pushDeviceUnsupported": "This browser does not support push notifications (or the page is not served over HTTPS).",
+    "pushDeviceDenied": "Blocked by the browser — allow it in the site settings, then switch it on here."
   },
   "chat": {
     "open": "Open chat",
@@ -2353,8 +2369,171 @@
   "workflows": {
     "title": "Workflows",
     "new": "New workflow",
-    "empty": "No workflows yet",
-    "mobileFallback": "Editor requires at least 768px width. Read-only mode active."
+    "empty": "No workflows.",
+    "mobileFallback": "The workflow editor requires at least 768px width. Read-only mode active — changes only on desktop or tablet.",
+    "loadFailed": "Could not load workflows",
+    "unknownError": "Unknown error",
+    "runStarted": "Run started",
+    "runStartedWithId": "Run started: {{id}}",
+    "runFailed": "Run failed: {{error}}",
+    "scope": {
+      "system": "System",
+      "project": "Project",
+      "customer": "Customer"
+    },
+    "status": {
+      "draft": "Draft",
+      "active": "Active",
+      "paused": "Paused",
+      "archived": "Archived"
+    },
+    "trigger": {
+      "manual": "Manual",
+      "schedule": "Schedule"
+    },
+    "category": {
+      "trigger": "Trigger",
+      "action": "Action",
+      "control": "Control",
+      "agent": "Agent"
+    },
+    "filter": {
+      "allScopes": "All scopes",
+      "allStatus": "All statuses"
+    },
+    "card": {
+      "scope": "Scope: {{scope}} · v{{version}}",
+      "trigger": "Trigger: {{trigger}}",
+      "lastRun": "Last run: {{date}}",
+      "run": "run"
+    },
+    "create": {
+      "template": "Template (optional)",
+      "emptyCanvas": "— Empty canvas —",
+      "templateInfo": "{{description}} ({{count}} nodes, trigger: {{trigger}})",
+      "templateScopesOnly": "Template only supports: {{scopes}}",
+      "scope": "Scope",
+      "project": "Project",
+      "customer": "Customer",
+      "loadingProjects": "Loading projects…",
+      "selectProject": "— Select project —",
+      "loadingCustomers": "Loading customers…",
+      "selectCustomer": "— Select customer —",
+      "trigger": "Trigger",
+      "triggerFromTemplate": "Set by the template — adjustable in the editor.",
+      "created": "Workflow created",
+      "createdFromTemplate": "Workflow created from template",
+      "createFailed": "Create failed: {{error}}"
+    },
+    "mobile": {
+      "statusScopeVersion": "Status / Scope / Version",
+      "definition": "Definition (JSON)",
+      "startRun": "Start run"
+    },
+    "editor": {
+      "loadFailed": "Could not load workflow: {{error}}",
+      "placed": "{{type}} placed",
+      "saved": "Workflow saved",
+      "saveFailed": "Save failed: {{error}}",
+      "activated": "Workflow activated",
+      "statusChanged": "Status: {{status}}",
+      "statusChangeFailed": "Could not change status",
+      "confirmDelete": "Really delete this workflow?",
+      "deleted": "Workflow deleted",
+      "deleteFailed": "Delete failed",
+      "unknownType": "Unknown type — schema not loaded.",
+      "fieldRequired": "{{field}}: required",
+      "activate": "Activate",
+      "run": "Run",
+      "pause": "Pause"
+    },
+    "validation": {
+      "count_one": "{{count}} validation error",
+      "count_other": "{{count}} validation errors"
+    },
+    "palette": {
+      "search": "Search name & description…",
+      "clearSearch": "Clear search",
+      "matches_one": "{{count}} match",
+      "matches_other": "{{count}} matches",
+      "noMatch": "No node matching \"{{query}}\".",
+      "notAllowed": "Not allowed for scope={{scope}}"
+    },
+    "node": {
+      "duplicate": "Duplicate",
+      "branches": "branches",
+      "issues_one": "{{count}} configuration issue",
+      "issues_other": "{{count}} configuration issues"
+    },
+    "edge": {
+      "delete": "Delete edge"
+    },
+    "templatePicker": {
+      "insert": "Insert template path",
+      "noUpstream": "No upstream nodes available."
+    },
+    "schema": {
+      "select": "— select —",
+      "deleteEntry": "Delete entry",
+      "removeEntry": "Remove entry",
+      "add": "add",
+      "noEntries": "(no entries — click \"add\")",
+      "key": "Key",
+      "valuePlaceholder": "Value (text · number · true/false · or JSON)",
+      "tagPlaceholder": "+ Tag (Enter)",
+      "noFields": "No configurable field.",
+      "entryCount_one": "{{count}} entry",
+      "entryCount_other": "{{count}} entries",
+      "fieldCount_one": "{{count}} field",
+      "fieldCount_other": "{{count}} fields"
+    },
+    "inspector": {
+      "empty": "Select a node or an edge, or drag an entry from the palette.",
+      "configuration": "Configuration",
+      "unknownType": "Unknown node type — no schema available.",
+      "outputs": "Outputs",
+      "branches": "Branches",
+      "branchOutgoing_one": "{{branch}} → {{count}} outgoing",
+      "branchOutgoing_other": "{{branch}} → {{count}} outgoing",
+      "downstream": "Output to next nodes",
+      "mappedCount_one": "{{count}} mapped",
+      "mappedCount_other": "{{count}} mapped",
+      "passThroughShort": "pass-through",
+      "validation": "Validation",
+      "edge": "Edge",
+      "branch": "Branch",
+      "payloadMapping": "Payload mapping",
+      "passThrough": "Pass-through",
+      "mapFields": "Map fields",
+      "passThroughHint": "Target sees the full source output under",
+      "mappedHint": "Target sees only the mapped fields under",
+      "removeRow": "Remove row",
+      "addRow": "Row"
+    },
+    "run": {
+      "title": "Run history",
+      "loadFailed": "Could not load run",
+      "cancelFailed": "Cancel failed",
+      "retryFailed": "Retry failed",
+      "started": "started: {{value}}",
+      "finished": "finished: {{value}}",
+      "trigger": "trigger: {{value}}",
+      "retryOf": "Retry of",
+      "fromNode": "from node",
+      "error": "Error: {{code}} — {{message}}",
+      "colNodeId": "Node ID",
+      "colType": "Type",
+      "colStatus": "Status",
+      "colAttempt": "Attempt",
+      "colDuration": "Duration",
+      "inputTitle": "Input (what went into the node)",
+      "inputEmpty": "(no inputSnapshot recorded)",
+      "outputTitle": "Output (what was passed to the next nodes)",
+      "outputEmpty": "(no outputSnapshot — e.g. because the node failed or writes no output)",
+      "logs": "Logs ({{count}})",
+      "selectNodeRun": "Select a node run.",
+      "retry": "Retry"
+    }
   },
   "vermerke": {
     "openButton": "Open notes",
@@ -2735,5 +2914,48 @@
       "prependHint": "Puts this text before the inherited one — the higher level stays."
     },
     "emptyLevelHintNoPreview": "Add a section. It is inherited by every level below and can be extended or overridden there."
+  },
+  "httpRequests": {
+    "newRequestName": "New request",
+    "collectionNamePrompt": "Collection name?",
+    "confirmDelete": "Delete request?",
+    "selectFirst": "Select a collection / create a request first.",
+    "importWarnings": "Import notes: {{warnings}}",
+    "curlImportFailed": "curl import failed: {{error}}",
+    "downloadFailed": "Download failed: {{error}}",
+    "newCollection": "+ New collection",
+    "addRequest": "Add request",
+    "addRequestButton": "+ Request",
+    "emptyState": "Select a request on the left or create a new one.",
+    "importCurl": "Import curl",
+    "streamTitle": "Stream the response to disk without a size limit",
+    "streamButton": "Stream as file",
+    "history": "History",
+    "noEnvironment": "(no environment)",
+    "resolveHint": "Resolves project secrets & environment variables on the server.",
+    "available": "Available:",
+    "tabParams": "Params",
+    "tabHeaders": "Headers",
+    "tabAuth": "Auth",
+    "tabBody": "Body",
+    "truncated": "(truncated)",
+    "unresolved": "unresolved: {{vars}}",
+    "download": "Download",
+    "historyTitle": "History (secrets masked)",
+    "noCalls": "No calls yet.",
+    "applyToEditor": "Apply to editor",
+    "key": "Key",
+    "value": "Value",
+    "field": "Field",
+    "header": "Header",
+    "headerValuePlaceholder": "Value (e.g. {{example}})",
+    "addRow": "+ Row",
+    "addHeader": "+ Header",
+    "authNone": "None",
+    "username": "Username",
+    "passwordPlaceholder": "Password / {{example}}",
+    "tokenPlaceholder": "Token / {{example}}",
+    "bodyNone": "No body",
+    "contentTypePlaceholder": "Content-Type (e.g. application/json)"
   }
 }

@@ -166,9 +166,9 @@ function wsStatus(port, query, extraHeaders = {}) {
         const pattern = /TOKEN=\[([^\]$]*)\]/;
         // Erst senden, wenn die Shell ihren Prompt zeigt: bash -i verwirft beim
         // Einrichten des Terminals Eingaben, die vorher ankommen.
-        for (let i = 0; i < 100 && !out.includes('$ '); i++) await new Promise((r) => setTimeout(r, 50));
+        for (let i = 0; i < 200 && !out.includes('$ '); i++) await new Promise((r) => setTimeout(r, 50));
         t.ws.send('echo "TOKEN=[${DG_API_TOKEN:-none}]"\r');
-        for (let i = 0; i < 60 && !pattern.test(out); i++) await new Promise((r) => setTimeout(r, 50));
+        for (let i = 0; i < 120 && !pattern.test(out); i++) await new Promise((r) => setTimeout(r, 50));
         t.ws.close();
         const m = out.match(pattern);
         return m ? m[1] : `(keine Ausgabe: ${JSON.stringify(out.slice(-200))})`;

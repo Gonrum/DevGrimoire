@@ -57,7 +57,7 @@ function NotFound() {
   return (
     <div className="text-center py-20">
       <h1 className="text-4xl font-bold text-gray-500 mb-4">404</h1>
-      <p className="text-gray-400 mb-6">Seite nicht gefunden.</p>
+      <p className="text-gray-400 mb-6">{t('common.pageNotFound')}</p>
       <Link to="/" className="text-cyan-400 hover:text-blue-300">
         {t('nav.dashboard')}
       </Link>
@@ -96,7 +96,7 @@ function UserMenu() {
 }
 
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, authEnabled, loading, getAccessToken, applyAccessToken } = useAuth();
+  const { isAuthenticated, authEnabled, loading, getAccessToken, applyAccessToken, logout } = useAuth();
 
   useEffect(() => {
     const REFRESH_TOKEN_KEY = 'devgrimoire_refresh_token';
@@ -133,8 +133,11 @@ function AuthGate({ children }: { children: React.ReactNode }) {
           return false;
         }
       },
+      // M-34: Refresh gescheitert -> abmelden, statt den Nutzer mit lauter
+      // 401-Fehlern auf der Seite stehen zu lassen. Die Login-Seite übernimmt.
+      () => { void logout(); },
     );
-  }, [getAccessToken, applyAccessToken]);
+  }, [getAccessToken, applyAccessToken, logout]);
 
   useEffect(() => {
     if (authEnabled === null) return;

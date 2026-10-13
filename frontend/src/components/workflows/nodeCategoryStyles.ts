@@ -38,10 +38,3 @@ export const nodeCategoryStyles: Record<NodeCategory, CategoryStyle> = {
     pillText: 'text-pink-300',
   },
 };
-
-export const nodeCategoryLabels: Record<NodeCategory, string> = {
-  trigger: 'Trigger',
-  action: 'Action',
-  control: 'Control',
-  agent: 'Agent',
-};

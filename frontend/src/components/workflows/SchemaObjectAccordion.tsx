@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { isRecord, isUnknownArray } from '../../lib/narrow';
 import { SchemaField } from './SchemaField';
@@ -27,6 +29,7 @@ interface Props {
  * to check schema.type first — this component assumes object).
  */
 export function SchemaObjectAccordion({ schema, value, onChange, templateOptions = [] }: Props) {
+  const { t } = useTranslation();
   const properties = isRecord(schema.properties) ? schema.properties : {};
   const required = isUnknownArray(schema.required)
     ? schema.required.filter((entry): entry is string => typeof entry === 'string')
@@ -46,7 +49,7 @@ export function SchemaObjectAccordion({ schema, value, onChange, templateOptions
   }));
 
   if (propsWithMeta.length === 0) {
-    return <div className="rounded-sm border border-gray-800 bg-gray-900/30 p-3 text-xs text-gray-500">Kein konfigurierbares Feld.</div>;
+    return <div className="rounded-sm border border-gray-800 bg-gray-900/30 p-3 text-xs text-gray-500">{t('workflows.schema.noFields')}</div>;
   }
 
   return (
@@ -76,8 +79,9 @@ interface SectionProps {
 }
 
 function AccordionSection({ fieldKey, schema, required, value, onChange, templateOptions }: SectionProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(required);
-  const summary = describeValue(value, schema);
+  const summary = describeValue(value, schema, t);
 
   return (
     <div className={`rounded-sm border ${required ? 'border-gray-700' : 'border-gray-800'} bg-gray-900/40`}>
@@ -112,7 +116,7 @@ function AccordionSection({ fieldKey, schema, required, value, onChange, templat
 }
 
 /** Generates a compact one-line preview of the current value for the collapsed header. */
-function describeValue(value: unknown, schema: JsonSchema): string {
+function describeValue(value: unknown, schema: JsonSchema, t: TFunction): string {
   if (value === undefined || value === null) return '';
   if (typeof value === 'string') {
     if (!value) return '';
@@ -122,11 +126,11 @@ function describeValue(value: unknown, schema: JsonSchema): string {
   if (Array.isArray(value)) {
     if (value.length === 0) return '[]';
     if (isRecord(schema.items) && schema.items.type === 'string') return `[${value.length}: ${value.slice(0, 3).join(', ')}${value.length > 3 ? '…' : ''}]`;
-    return `[${value.length} Einträge]`;
+    return `[${t('workflows.schema.entryCount', { count: value.length })}]`;
   }
   if (typeof value === 'object') {
     const keys = Object.keys(value);
-    return keys.length === 0 ? '{}' : `{${keys.length} Felder}`;
+    return keys.length === 0 ? '{}' : `{${t('workflows.schema.fieldCount', { count: keys.length })}}`;
   }
   return '';
 }

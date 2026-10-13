@@ -70,7 +70,9 @@
     "chars": "Zeichen",
     "uploadFile": "Datei hochladen",
     "add": "Hinzufügen",
-    "errorCreating": "Fehler beim Erstellen"
+    "errorCreating": "Fehler beim Erstellen",
+    "loadFailed": "Fehler beim Laden",
+    "pageNotFound": "Seite nicht gefunden."
   },
   "nav": {
     "dashboard": "Grimoire",
@@ -212,7 +214,9 @@
     "runFinishedAt": "Beendet",
     "notifyOnCompleteLabel": "Bei Abschluss benachrichtigen",
     "settingsSaved": "Einstellungen gespeichert",
-    "settingsSaveFailed": "Einstellungen konnten nicht gespeichert werden"
+    "settingsSaveFailed": "Einstellungen konnten nicht gespeichert werden",
+    "liveStepsDropped_one": "{{count}} älterer Schritt ausgeblendet",
+    "liveStepsDropped_other": "{{count}} ältere Schritte ausgeblendet"
   },
   "auth": {
     "loginTitle": "DevGrimoire",
@@ -505,7 +509,10 @@
     "changeBranch": "Branch ändern",
     "lastSync": "Letzter Sync",
     "statusActive": "Aktiv",
-    "statusPaused": "Pausiert"
+    "statusPaused": "Pausiert",
+    "allowPrivateHost": "Private/interne Adresse erlauben (deaktiviert SSRF-Schutz für dieses Repo)",
+    "allowPrivateHostConfirm": "Mit dieser Option wird der SSRF-Schutz für DIESES Repository vollständig deaktiviert. Eine baseUrl, die auf 127.0.0.1, 169.254.169.254 (Cloud-Metadata) oder vergleichbare interne Endpoints zeigt, wird dann zugelassen. Settings-Schreiber könnten so Cloud-Credentials abgreifen.\n\nWirklich aktivieren?",
+    "giteaBaseUrlRequired": "Gitea hat keinen Default — Base-URL ist Pflicht."
   },
   "projectSettings": {
     "title": "Einstellungen",
@@ -590,7 +597,9 @@
     "tableUpdated": "Aktualisiert",
     "tableActions": "Aktionen",
     "acceptanceProgress": "{{done}} von {{total}} erfüllt",
-    "questDefined": "Strukturierte Quest-Definition vorhanden"
+    "questDefined": "Strukturierte Quest-Definition vorhanden",
+    "attachmentsFailed_one": "Todo angelegt, aber {{count}} Anhang fehlt ({{files}}): {{error}}",
+    "attachmentsFailed_other": "Todo angelegt, aber {{count}} Anhänge fehlen ({{files}}): {{error}}"
   },
   "todoStatus": {
     "open": "Offen",
@@ -1224,7 +1233,10 @@
     "running": "läuft …",
     "run": "Ausführen",
     "cancel": "Abbrechen",
-    "ptyHint": "Echtes Bash-Terminal — cd, env vars, vim/htop, alles wie gewohnt. Strg+C bricht den Vordergrund-Prozess ab; Tab zum Schließen reicht."
+    "ptyHint": "Echtes Bash-Terminal — cd, env vars, vim/htop, alles wie gewohnt. Strg+C bricht den Vordergrund-Prozess ab; Tab zum Schließen reicht.",
+    "bashExited": "bash beendet (Code {{code}})",
+    "connectionError": "Verbindungsfehler — Terminal schließen und neu öffnen, um neu zu verbinden",
+    "connectionClosed": "Verbindung geschlossen ({{detail}})"
   },
   "snippets": {
     "newSnippet": "+ Neues Snippet",
@@ -1827,7 +1839,11 @@
     "dictationEnabled": "Spracheingabe",
     "dictationEnabledDesc": "Zeigt den Diktier-Button in Eingabefeldern. Audio geht an den STT-Provider deines Browsers.",
     "dictationResetConsent": "Zustimmung zurücksetzen",
-    "dictationConsentReset": "Zustimmung zur Spracheingabe zurückgesetzt. Beim nächsten Diktat wirst du erneut gefragt."
+    "dictationConsentReset": "Zustimmung zur Spracheingabe zurückgesetzt. Beim nächsten Diktat wirst du erneut gefragt.",
+    "pushDeviceTitle": "Push-Benachrichtigungen auf diesem Gerät",
+    "pushDeviceDesc": "Ohne Abo auf diesem Gerät kommen die Kategorien unten hier nicht an. Gilt pro Browser.",
+    "pushDeviceUnsupported": "Dieser Browser unterstützt keine Push-Benachrichtigungen (oder die Seite läuft nicht über HTTPS).",
+    "pushDeviceDenied": "Im Browser blockiert — in den Website-Einstellungen erlauben und dann hier einschalten."
   },
   "chat": {
     "open": "Chat öffnen",
@@ -2353,8 +2369,171 @@
   "workflows": {
     "title": "Workflows",
     "new": "Neuer Workflow",
-    "empty": "Noch keine Workflows",
-    "mobileFallback": "Editor benötigt mindestens 768px Breite. Lesemodus aktiv."
+    "empty": "Keine Workflows.",
+    "mobileFallback": "Der Workflow-Editor benötigt mindestens 768px Breite. Lesemodus aktiv — Änderungen nur am Desktop oder Tablet.",
+    "loadFailed": "Workflows konnten nicht geladen werden",
+    "unknownError": "Unbekannter Fehler",
+    "runStarted": "Run gestartet",
+    "runStartedWithId": "Run gestartet: {{id}}",
+    "runFailed": "Run fehlgeschlagen: {{error}}",
+    "scope": {
+      "system": "System",
+      "project": "Projekt",
+      "customer": "Kunde"
+    },
+    "status": {
+      "draft": "Entwurf",
+      "active": "Aktiv",
+      "paused": "Pausiert",
+      "archived": "Archiviert"
+    },
+    "trigger": {
+      "manual": "Manuell",
+      "schedule": "Zeitplan"
+    },
+    "category": {
+      "trigger": "Trigger",
+      "action": "Aktion",
+      "control": "Steuerung",
+      "agent": "Agent"
+    },
+    "filter": {
+      "allScopes": "Alle Scopes",
+      "allStatus": "Alle Status"
+    },
+    "card": {
+      "scope": "Scope: {{scope}} · v{{version}}",
+      "trigger": "Trigger: {{trigger}}",
+      "lastRun": "Letzter Run: {{date}}",
+      "run": "ausführen"
+    },
+    "create": {
+      "template": "Template (optional)",
+      "emptyCanvas": "— Leerer Canvas —",
+      "templateInfo": "{{description}} ({{count}} Nodes, Trigger: {{trigger}})",
+      "templateScopesOnly": "Template unterstützt nur: {{scopes}}",
+      "scope": "Scope",
+      "project": "Projekt",
+      "customer": "Kunde",
+      "loadingProjects": "Lade Projekte…",
+      "selectProject": "— Projekt wählen —",
+      "loadingCustomers": "Lade Kunden…",
+      "selectCustomer": "— Kunde wählen —",
+      "trigger": "Trigger",
+      "triggerFromTemplate": "Vom Template vorgegeben — im Editor anpassbar.",
+      "created": "Workflow erstellt",
+      "createdFromTemplate": "Workflow aus Template erstellt",
+      "createFailed": "Erstellen fehlgeschlagen: {{error}}"
+    },
+    "mobile": {
+      "statusScopeVersion": "Status / Scope / Version",
+      "definition": "Definition (JSON)",
+      "startRun": "Run starten"
+    },
+    "editor": {
+      "loadFailed": "Workflow nicht ladbar: {{error}}",
+      "placed": "{{type}} platziert",
+      "saved": "Workflow gespeichert",
+      "saveFailed": "Speichern fehlgeschlagen: {{error}}",
+      "activated": "Workflow aktiviert",
+      "statusChanged": "Status: {{status}}",
+      "statusChangeFailed": "Status nicht änderbar",
+      "confirmDelete": "Workflow wirklich löschen?",
+      "deleted": "Workflow gelöscht",
+      "deleteFailed": "Löschen fehlgeschlagen",
+      "unknownType": "Unbekannter Type — Schema nicht geladen.",
+      "fieldRequired": "{{field}}: Pflichtfeld",
+      "activate": "Aktivieren",
+      "run": "Run",
+      "pause": "Pause"
+    },
+    "validation": {
+      "count_one": "{{count}} Validierungsfehler",
+      "count_other": "{{count}} Validierungsfehler"
+    },
+    "palette": {
+      "search": "Suche in Name & Beschreibung…",
+      "clearSearch": "Suche leeren",
+      "matches_one": "{{count}} Treffer",
+      "matches_other": "{{count}} Treffer",
+      "noMatch": "Kein Node mit „{{query}}\" gefunden.",
+      "notAllowed": "Nicht erlaubt für scope={{scope}}"
+    },
+    "node": {
+      "duplicate": "Duplizieren",
+      "branches": "branches",
+      "issues_one": "{{count}} Konfigurations-Issue",
+      "issues_other": "{{count}} Konfigurations-Issues"
+    },
+    "edge": {
+      "delete": "Edge löschen"
+    },
+    "templatePicker": {
+      "insert": "Template-Pfad einfügen",
+      "noUpstream": "Keine vorgelagerten Nodes verfügbar."
+    },
+    "schema": {
+      "select": "— wählen —",
+      "deleteEntry": "Eintrag löschen",
+      "removeEntry": "Eintrag entfernen",
+      "add": "hinzufügen",
+      "noEntries": "(keine Einträge — „hinzufügen\" klicken)",
+      "key": "Schlüssel",
+      "valuePlaceholder": "Wert (Text · Zahl · true/false · oder JSON)",
+      "tagPlaceholder": "+ Tag (Enter)",
+      "noFields": "Kein konfigurierbares Feld.",
+      "entryCount_one": "{{count}} Eintrag",
+      "entryCount_other": "{{count}} Einträge",
+      "fieldCount_one": "{{count}} Feld",
+      "fieldCount_other": "{{count}} Felder"
+    },
+    "inspector": {
+      "empty": "Wähle einen Node oder eine Edge aus, oder ziehe einen Eintrag aus der Palette.",
+      "configuration": "Konfiguration",
+      "unknownType": "Unbekannter Node-Type — kein Schema verfügbar.",
+      "outputs": "Outputs",
+      "branches": "Branches",
+      "branchOutgoing_one": "{{branch}} → {{count}} ausgehend",
+      "branchOutgoing_other": "{{branch}} → {{count}} ausgehend",
+      "downstream": "Ausgabe an nächste Nodes",
+      "mappedCount_one": "{{count}} gemappt",
+      "mappedCount_other": "{{count}} gemappt",
+      "passThroughShort": "pass-through",
+      "validation": "Validierung",
+      "edge": "Edge",
+      "branch": "Branch",
+      "payloadMapping": "Payload-Mapping",
+      "passThrough": "Pass-through",
+      "mapFields": "Felder mappen",
+      "passThroughHint": "Target sieht das vollständige Source-Output unter",
+      "mappedHint": "Target sieht ausschließlich die gemappten Felder unter",
+      "removeRow": "Zeile entfernen",
+      "addRow": "Zeile"
+    },
+    "run": {
+      "title": "Run-Verlauf",
+      "loadFailed": "Run konnte nicht geladen werden",
+      "cancelFailed": "Abbrechen fehlgeschlagen",
+      "retryFailed": "Retry fehlgeschlagen",
+      "started": "gestartet: {{value}}",
+      "finished": "beendet: {{value}}",
+      "trigger": "Trigger: {{value}}",
+      "retryOf": "Retry von",
+      "fromNode": "ab Node",
+      "error": "Fehler: {{code}} — {{message}}",
+      "colNodeId": "Node-ID",
+      "colType": "Typ",
+      "colStatus": "Status",
+      "colAttempt": "Versuch",
+      "colDuration": "Dauer",
+      "inputTitle": "Input (was in den Node ging)",
+      "inputEmpty": "(kein inputSnapshot erfasst)",
+      "outputTitle": "Output (was an nächste Nodes weitergegeben wurde)",
+      "outputEmpty": "(kein outputSnapshot — z.B. weil der Node fehlschlug oder kein Output schreibt)",
+      "logs": "Logs ({{count}})",
+      "selectNodeRun": "Wähle einen Node-Run aus.",
+      "retry": "Retry"
+    }
   },
   "vermerke": {
     "openButton": "Vermerke öffnen",
@@ -2734,5 +2913,48 @@
       "prependHint": "Stellt diesen Text vor den geerbten — die höhere Ebene bleibt erhalten."
     },
     "emptyLevelHintNoPreview": "Lege einen Abschnitt an. Er wird an alle Ebenen darunter vererbt und kann dort ergänzt oder überschrieben werden."
+  },
+  "httpRequests": {
+    "newRequestName": "Neuer Request",
+    "collectionNamePrompt": "Name der Collection?",
+    "confirmDelete": "Request löschen?",
+    "selectFirst": "Erst eine Collection wählen / Request anlegen.",
+    "importWarnings": "Import-Hinweise: {{warnings}}",
+    "curlImportFailed": "curl-Import fehlgeschlagen: {{error}}",
+    "downloadFailed": "Download fehlgeschlagen: {{error}}",
+    "newCollection": "+ Neue Collection",
+    "addRequest": "Request hinzufügen",
+    "addRequestButton": "+ Request",
+    "emptyState": "Wähle links einen Request oder lege einen neuen an.",
+    "importCurl": "curl importieren",
+    "streamTitle": "Antwort ohne Größenlimit auf die Platte streamen",
+    "streamButton": "Als Datei streamen",
+    "history": "History",
+    "noEnvironment": "(kein Environment)",
+    "resolveHint": "Löst Projekt-Secrets & Environment-Variablen serverseitig auf.",
+    "available": "Verfügbar:",
+    "tabParams": "Params",
+    "tabHeaders": "Headers",
+    "tabAuth": "Auth",
+    "tabBody": "Body",
+    "truncated": "(gekürzt)",
+    "unresolved": "unaufgelöst: {{vars}}",
+    "download": "Herunterladen",
+    "historyTitle": "History (Secrets maskiert)",
+    "noCalls": "Noch keine Aufrufe.",
+    "applyToEditor": "In Editor übernehmen",
+    "key": "Key",
+    "value": "Value",
+    "field": "Feld",
+    "header": "Header",
+    "headerValuePlaceholder": "Value (z.B. {{example}})",
+    "addRow": "+ Zeile",
+    "addHeader": "+ Header",
+    "authNone": "Keine",
+    "username": "Benutzername",
+    "passwordPlaceholder": "Passwort / {{example}}",
+    "tokenPlaceholder": "Token / {{example}}",
+    "bodyNone": "Kein Body",
+    "contentTypePlaceholder": "Content-Type (z.B. application/json)"
   }
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { errorMessage } from '../lib/narrow';
+import i18n from '../i18n';
 
 interface UseFetchResult<T> {
   data: T;
@@ -52,7 +53,7 @@ export function useFetch<T>(fetcher: () => Promise<T>, initial: T, deps: unknown
       try {
         setData(await fetcherRef.current());
       } catch (err) {
-        setError(errorMessage(err, 'Fehler beim Laden'));
+        setError(errorMessage(err, i18n.t('common.loadFailed')));
       } finally {
         setLoading(false);
       }

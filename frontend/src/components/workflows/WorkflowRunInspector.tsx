@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { workflowsApi, WorkflowRun, WorkflowNodeRun, WorkflowRunStatus } from '../../api/workflows';
 import { wsEventBus, isProjectChangeEvent } from '../../api/wsEventBus';
 import { errorMessage } from '../../lib/narrow';
@@ -13,6 +15,7 @@ interface Props {
 const TERMINAL: WorkflowRunStatus[] = ['succeeded', 'failed', 'cancelled'];
 
 export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
+  const { t } = useTranslation();
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [nodeRuns, setNodeRuns] = useState<WorkflowNodeRun[]>([]);
   const [selected, setSelected] = useState<WorkflowNodeRun | null>(null);
@@ -37,7 +40,7 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
         setRun(r);
         setNodeRuns(nrs);
       } catch (err) {
-        if (!cancelled) setError(errorMessage(err, 'Run konnte nicht geladen werden'));
+        if (!cancelled) setError(errorMessage(err, i18n.t('workflows.run.loadFailed')));
       }
     };
 
@@ -78,7 +81,7 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
     try {
       await workflowsApi.cancelRun(runId);
     } catch (err) {
-      setError(errorMessage(err, 'Abbrechen fehlgeschlagen'));
+      setError(errorMessage(err, t('workflows.run.cancelFailed')));
     }
   };
   const onRetry = async () => {
@@ -88,7 +91,7 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
       // re-execution rather than the unchanged parent.
       if (onNavigate && result.runId) onNavigate(result.runId);
     } catch (err) {
-      setError(errorMessage(err, 'Retry fehlgeschlagen'));
+      setError(errorMessage(err, t('workflows.run.retryFailed')));
     }
   };
 
@@ -97,7 +100,7 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
       <div className="mx-4 max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-xl border border-gray-700 bg-gray-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-800 px-5 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-200">Run-Verlauf</h2>
+            <h2 className="text-lg font-semibold text-gray-200">{t('workflows.run.title')}</h2>
             <div className="font-mono text-xs text-gray-500">{runId}</div>
           </div>
           <button onClick={onClose} className="text-2xl leading-none text-gray-500 hover:text-gray-300">×</button>
@@ -109,12 +112,12 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
           <>
             <div className="border-b border-gray-800 px-5 py-3 text-xs">
               <span className={`inline-block rounded-sm px-2 py-0.5 ${badge(run.status)}`}>{run.status}</span>
-              <span className="ml-3 text-gray-500">started: {run.startedAt ?? '—'}</span>
-              <span className="ml-3 text-gray-500">finished: {run.finishedAt ?? '—'}</span>
-              <span className="ml-3 text-gray-500">trigger: {run.triggeredBy?.type ?? '—'}</span>
+              <span className="ml-3 text-gray-500">{t('workflows.run.started', { value: run.startedAt ?? '—' })}</span>
+              <span className="ml-3 text-gray-500">{t('workflows.run.finished', { value: run.finishedAt ?? '—' })}</span>
+              <span className="ml-3 text-gray-500">{t('workflows.run.trigger', { value: run.triggeredBy?.type ?? '—' })}</span>
               {run.parentRunId && (
                 <div className="mt-2 flex items-center gap-2 text-violet-300">
-                  <span>Retry von</span>
+                  <span>{t('workflows.run.retryOf')}</span>
                   {onNavigate ? (
                     <button
                       onClick={() => onNavigate(run.parentRunId!)}
@@ -126,11 +129,11 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
                     <span className="font-mono">{run.parentRunId.slice(-8)}</span>
                   )}
                   {run.retryFromNodeId && (
-                    <span className="text-gray-500">· ab Node <code className="text-cyan-300">{run.retryFromNodeId}</code></span>
+                    <span className="text-gray-500">· {t('workflows.run.fromNode')} <code className="text-cyan-300">{run.retryFromNodeId}</code></span>
                   )}
                 </div>
               )}
-              {run.error && <div className="mt-2 text-red-300">Fehler: {run.error.code} — {run.error.message}</div>}
+              {run.error && <div className="mt-2 text-red-300">{t('workflows.run.error', { code: run.error.code, message: run.error.message })}</div>}
             </div>
 
             <div className="flex h-[60vh]">
@@ -138,11 +141,11 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
                 <table className="w-full text-xs">
                   <thead className="bg-gray-950 text-gray-500">
                     <tr>
-                      <th className="px-3 py-2 text-left">nodeId</th>
-                      <th className="px-3 py-2 text-left">type</th>
-                      <th className="px-3 py-2 text-left">status</th>
-                      <th className="px-3 py-2 text-left">attempt</th>
-                      <th className="px-3 py-2 text-left">duration</th>
+                      <th className="px-3 py-2 text-left">{t('workflows.run.colNodeId')}</th>
+                      <th className="px-3 py-2 text-left">{t('workflows.run.colType')}</th>
+                      <th className="px-3 py-2 text-left">{t('workflows.run.colStatus')}</th>
+                      <th className="px-3 py-2 text-left">{t('workflows.run.colAttempt')}</th>
+                      <th className="px-3 py-2 text-left">{t('workflows.run.colDuration')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -170,28 +173,28 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
                 {selected ? (
                   <>
                     <SnapshotBlock
-                      title="Input (was in den Node ging)"
+                      title={t('workflows.run.inputTitle')}
                       data={selected.inputSnapshot}
                       tone="neutral"
                       defaultOpen={!!selected.error}
-                      emptyText="(kein inputSnapshot erfasst)"
+                      emptyText={t('workflows.run.inputEmpty')}
                     />
                     <SnapshotBlock
-                      title="Output (was an nächste Nodes weitergegeben wurde)"
+                      title={t('workflows.run.outputTitle')}
                       data={selected.outputSnapshot}
                       tone="success"
                       defaultOpen
-                      emptyText="(kein outputSnapshot — z.B. weil der Node fehlschlug oder kein Output schreibt)"
+                      emptyText={t('workflows.run.outputEmpty')}
                     />
                     {selected.error && (
                       <>
-                        <h4 className="mb-2 text-xs uppercase tracking-wide text-red-400">Fehler</h4>
+                        <h4 className="mb-2 text-xs uppercase tracking-wide text-red-400">{t('common.error')}</h4>
                         <pre className="mb-4 rounded-sm bg-red-900/20 p-2 text-xs text-red-300">{JSON.stringify(selected.error, null, 2)}</pre>
                       </>
                     )}
                     {Array.isArray(selected.logs) && selected.logs.length > 0 && (
                       <>
-                        <h4 className="mb-2 text-xs uppercase tracking-wide text-gray-500">Logs ({selected.logs.length})</h4>
+                        <h4 className="mb-2 text-xs uppercase tracking-wide text-gray-500">{t('workflows.run.logs', { count: selected.logs.length })}</h4>
                         <ul className="max-h-40 overflow-y-auto rounded-sm bg-gray-950 p-2 text-xs font-mono text-gray-300">
                           {selected.logs.map((l, i) => <li key={i}>{JSON.stringify(l)}</li>)}
                         </ul>
@@ -199,19 +202,19 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
                     )}
                   </>
                 ) : (
-                  <div className="text-xs text-gray-500">Wähle einen Node-Run aus.</div>
+                  <div className="text-xs text-gray-500">{t('workflows.run.selectNodeRun')}</div>
                 )}
               </div>
             </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-gray-800 px-5 py-3">
               {!TERMINAL.includes(run.status) && (
-                <button onClick={() => { void onCancel(); }} className="rounded-sm bg-amber-900/50 px-3 py-1 text-xs text-amber-200 hover:bg-amber-900">Cancel</button>
+                <button onClick={() => { void onCancel(); }} className="rounded-sm bg-amber-900/50 px-3 py-1 text-xs text-amber-200 hover:bg-amber-900">{t('common.cancel')}</button>
               )}
               {(run.status === 'failed' || run.status === 'cancelled') && (
-                <button onClick={() => { void onRetry(); }} className="rounded-sm bg-cyan-900/50 px-3 py-1 text-xs text-cyan-200 hover:bg-cyan-900">Retry</button>
+                <button onClick={() => { void onRetry(); }} className="rounded-sm bg-cyan-900/50 px-3 py-1 text-xs text-cyan-200 hover:bg-cyan-900">{t('workflows.run.retry')}</button>
               )}
-              <button onClick={onClose} className="rounded-sm bg-gray-800 px-3 py-1 text-xs text-gray-200 hover:bg-gray-700">Schließen</button>
+              <button onClick={onClose} className="rounded-sm bg-gray-800 px-3 py-1 text-xs text-gray-200 hover:bg-gray-700">{t('common.close')}</button>
             </div>
           </>
         )}
@@ -233,6 +236,7 @@ function SnapshotBlock({
   defaultOpen?: boolean;
   emptyText: string;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(defaultOpen);
   const hasData = data && Object.keys(data).length > 0;
   const headerColor = tone === 'success' ? 'text-cyan-300' : 'text-gray-400';
@@ -245,7 +249,7 @@ function SnapshotBlock({
       >
         <span>{open ? '▾' : '▸'} {title}</span>
         {hasData && (
-          <span className="text-gray-500 normal-case">{Object.keys(data).length} Felder</span>
+          <span className="text-gray-500 normal-case">{t('workflows.schema.fieldCount', { count: Object.keys(data).length })}</span>
         )}
       </button>
       {open && (

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, Project, Todo, Session, Knowledge, ChangelogEntry, Milestone, Activity, ResearchEntry, Environment, SecretListItem, SchemaObject, Dependency, Feature, Manual, RecurringTask, Snippet, Attachment, LogStats, Release, Workspace } from '../api/client';
@@ -28,6 +28,7 @@ import DocsHealthList from '../components/DocsHealthList';
 import KnowledgeGraphView from '../components/knowledge-graph/KnowledgeGraphView';
 import OracleView from '../components/OracleView';
 import { useProjectEvents, ProjectChangeEvent } from '../hooks/useProjectEvents';
+import type { ProjectEventEntity } from '../api/wsEventBus';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import ProjectTabShell from '../components/ui/ProjectTabShell';
 import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
@@ -105,7 +106,6 @@ export default function ProjectDetail() {
   const [logStats, setLogStats] = useState<LogStats | null>(null);
   const [openDocProposalsCount, setOpenDocProposalsCount] = useState(0);
   const [openOracleCount, setOpenOracleCount] = useState(0);
-  const [logsKey, setLogsKey] = useState(0);
   const [envKey, setEnvKey] = useState(0);
   const [commitsKey, setCommitsKey] = useState(0);
   const [secretsKey, setSecretsKey] = useState(0);
@@ -239,10 +239,24 @@ export default function ProjectDetail() {
     return () => controller.abort();
   }, [id]);
 
+  // Aktivitäten EINMAL pro Burst nachladen (M-32). useProjectEvents bündelt
+  // pro Entity — ein Burst über N Entities rief vorher N-mal
+  // activities.list(100) auf.
+  const activitiesTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const scheduleActivitiesRefresh = useCallback((projectId: string) => {
+    clearTimeout(activitiesTimer.current);
+    activitiesTimer.current = setTimeout(() => {
+      backgroundRefresh(api.activities.list(projectId, 100).then(setActivities));
+    }, 500);
+  }, []);
+  useEffect(() => () => clearTimeout(activitiesTimer.current), []);
+
   const handleSSEEvent = useCallback(
     (event: ProjectChangeEvent) => {
       if (!id) return;
-      const refetchers: Record<string, () => void> = {
+      // Getypt über die Entity-Union (M-32): ein Eintrag für ein Event, das
+      // es nicht gibt, ist ein Kompilierfehler — so fiel `log:` auf, das nie kam.
+      const refetchers: Partial<Record<ProjectEventEntity, () => void>> = {
         todo: () => backgroundRefresh(api.todos.list({ projectId: id }).then(setTodos)),
         session: () => backgroundRefresh(api.sessions.list(id, 20).then(setSessions)),
         knowledge: () => backgroundRefresh(api.knowledge.list(id).then(setKnowledge)),
@@ -261,7 +275,6 @@ export default function ProjectDetail() {
         snippet: () => backgroundRefresh(api.snippets.list(id).then(setSnippets)),
         attachment: () => backgroundRefresh(api.attachments.list(id).then(setAttachments)),
         release: () => backgroundRefresh(api.releases.list(id).then(setReleases)),
-        log: () => { backgroundRefresh(api.logs.stats(id).then(setLogStats)); setLogsKey((k) => k + 1); },
         commit: () => { backgroundRefresh(api.commits.count(id).then((c) => setCommitCount(c.count))); setCommitsKey((k) => k + 1); },
         workspace: () => backgroundRefresh(api.workspaces.list(id, 'active').then((wss) => setWorkspaceCount(wss.length))),
         'ssh-connection': () => backgroundRefresh(api.ssh.listForProject(id).then((c) => setSshCount(c.length))),
@@ -276,9 +289,9 @@ export default function ProjectDetail() {
       } else if (event.entity === 'milestone') {
         backgroundRefresh(api.todos.list({ projectId: id }).then(setTodos));
       }
-      backgroundRefresh(api.activities.list(id, 100).then(setActivities));
+      scheduleActivitiesRefresh(id);
     },
-    [id],
+    [id, scheduleActivitiesRefresh],
   );
 
   useProjectEvents(id, handleSSEEvent);
@@ -508,7 +521,7 @@ export default function ProjectDetail() {
             {tab === 'commits' && <CommitList key={commitsKey} projectId={id!} gitRepositories={project.gitRepositories} />}
             {tab === 'files' && <AttachmentList projectId={id!} showUpload />}
             {tab === 'releases' && <ReleaseList entries={releases} projectId={id!} />}
-            {tab === 'logs' && <LogList key={logsKey} projectId={id} />}
+            {tab === 'logs' && <LogList projectId={id} />}
             {tab === 'activity' && <ActivityList activities={activities} />}
             {tab === 'access' && isAdmin && <ProjectAccessTab projectId={id!} />}
           </ProjectTabShell>

@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 import Button from '../ui/Button';
 import { SettingsSection, SettingsTabHeader } from '../ui/SettingsShell';
 import { Switch } from '../ui/Switch';
+import { usePushNotifications } from '../../hooks/usePushNotifications';
 
 interface PushCategory {
   key: string;
@@ -45,6 +46,9 @@ const DEFAULT_QUIET_OVERRIDES = ['monitoring_unhealthy', 'workflow_failure', 'ba
 
 export default function NotificationsSettings() {
   const { t } = useTranslation();
+  // M-33: ohne Abo auf diesem Gerät kommt keine Push-Nachricht an — der
+  // Hook existierte, aber nichts im UI rief ihn auf.
+  const push = usePushNotifications();
   const [pushCategories, setPushCategories] = useState<Record<string, boolean>>({});
   // Startet auf `true`: der Mount-Effect lädt sofort. Mit `false` rendert der
   // erste Frame die Kategorien-Liste mit noch leerem `pushCategories`, also alle
@@ -232,6 +236,27 @@ export default function NotificationsSettings() {
                 {t('settings.dictationResetConsent')}
               </Button>
             </div>
+          </div>
+        </SettingsSection>
+
+        <SettingsSection>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium text-gray-200">{t('settings.pushDeviceTitle')}</div>
+              <div className="mt-0.5 text-xs text-gray-500">
+                {!push.supported
+                  ? t('settings.pushDeviceUnsupported')
+                  : push.permission === 'denied'
+                    ? t('settings.pushDeviceDenied')
+                    : t('settings.pushDeviceDesc')}
+              </div>
+              {push.error && <div className="mt-1 text-xs text-red-400">{push.error}</div>}
+            </div>
+            <Switch
+              checked={push.subscribed}
+              onChange={() => { void (push.subscribed ? push.unsubscribe() : push.subscribe()); }}
+              disabled={!push.supported || push.loading || (push.permission === 'denied' && !push.subscribed)}
+            />
           </div>
         </SettingsSection>
 

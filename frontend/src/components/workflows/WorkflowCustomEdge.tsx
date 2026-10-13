@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type Edge, type EdgeProps } from '@xyflow/react';
 import { X } from 'lucide-react';
 
@@ -17,6 +18,7 @@ export function WorkflowCustomEdge(props: EdgeProps<WorkflowFlowEdge>) {
   // Annotation statt Assertion: `{}` erfüllt `WorkflowEdgeData` (alle Felder
   // optional), das prüft der Compiler — `as` hätte es nur behauptet.
   const data: WorkflowEdgeData = props.data ?? {};
+  const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
 
   const [edgePath, labelX, labelY] = getBezierPath({
@@ -48,7 +50,7 @@ export function WorkflowCustomEdge(props: EdgeProps<WorkflowFlowEdge>) {
               type="button"
               onClick={() => data.onDelete?.(id)}
               className="rounded-full bg-gray-900 p-1 text-red-400 shadow-sm ring-1 ring-gray-700 hover:bg-red-900/30"
-              title="Edge löschen"
+              title={t('workflows.edge.delete')}
             >
               <X size={10} />
             </button>

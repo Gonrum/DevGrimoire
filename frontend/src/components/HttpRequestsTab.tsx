@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   api, RequestCollection, SavedRequest, SendResult, WerkbankHistoryEntry,
   WkKeyValue, WkHeader, WerkbankMethod, Environment,
@@ -31,9 +32,9 @@ function methodColor(m: string): string {
   }
 }
 
-function emptyDraft(collectionId: string): SavedRequest {
+function emptyDraft(collectionId: string, name: string): SavedRequest {
   return {
-    _id: '', projectId: '', collectionId, name: 'Neuer Request', order: 0,
+    _id: '', projectId: '', collectionId, name, order: 0,
     method: 'GET', url: '', queryParams: [], headers: [],
     auth: { type: 'none' }, body: { mode: 'none' }, timeoutMs: 30000, followRedirects: false,
     createdAt: '', updatedAt: '',
@@ -51,6 +52,7 @@ function toPayload(d: SavedRequest): Partial<SavedRequest> {
 }
 
 export default function HttpRequestsTab({ projectId }: { projectId: string }) {
+  const { t } = useTranslation();
   const [collections, setCollections] = useState<RequestCollection[]>([]);
   const [requests, setRequests] = useState<SavedRequest[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
@@ -105,7 +107,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
   const patch = (p: Partial<SavedRequest>) => setDraft((d) => (d ? { ...d, ...p } : d));
 
   async function addCollection() {
-    const name = prompt('Name der Collection?');
+    const name = prompt(t('httpRequests.collectionNamePrompt'));
     if (!name) return;
     await api.httpRequests.createCollection(projectId, { name });
     await reload();
@@ -114,7 +116,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
   async function addRequest(collectionId: string) {
     setError(null);
     try {
-      const created = await api.httpRequests.createRequest(collectionId, toPayload(emptyDraft(collectionId)));
+      const created = await api.httpRequests.createRequest(collectionId, toPayload(emptyDraft(collectionId, t('httpRequests.newRequestName'))));
       await reload();
       setDraft(created);
       setResponse(null);
@@ -169,7 +171,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
   }
 
   async function deleteRequest(id: string) {
-    if (!confirm('Request löschen?')) return;
+    if (!confirm(t('httpRequests.confirmDelete'))) return;
     await api.httpRequests.deleteRequest(id);
     if (draft?._id === id) setDraft(null);
     await reload();
@@ -182,7 +184,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
   }
 
   async function importCurl() {
-    if (!draft) { setError('Erst eine Collection wählen / Request anlegen.'); return; }
+    if (!draft) { setError(t('httpRequests.selectFirst')); return; }
     try {
       const parsed = await api.httpRequests.parseCurl(curlText);
       patch({
@@ -192,9 +194,9 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
       });
       setShowCurl(false);
       setCurlText('');
-      if (parsed.warnings.length) setError('Import-Hinweise: ' + parsed.warnings.join('; '));
+      if (parsed.warnings.length) setError(t('httpRequests.importWarnings', { warnings: parsed.warnings.join('; ') }));
     } catch (e) {
-      setError('curl-Import fehlgeschlagen: ' + errorMessage(e));
+      setError(t('httpRequests.curlImportFailed', { error: errorMessage(e) }));
     }
   }
 
@@ -212,7 +214,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
       a.click();
       a.remove();
     } catch (e) {
-      setError('Download fehlgeschlagen: ' + errorMessage(e));
+      setError(t('httpRequests.downloadFailed', { error: errorMessage(e) }));
     }
   }
 
@@ -236,7 +238,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
         onClick={() => { addCollection().catch((e: unknown) => setError(errorMessage(e))); }}
         className="w-full text-xs px-2 py-1.5 rounded-sm border border-gray-600 text-gray-200 hover:bg-gray-800 hover:border-indigo-500"
       >
-        + Neue Collection
+        {t('httpRequests.newCollection')}
       </button>
       {collections.map((col) => (
         <div key={col._id}>
@@ -244,10 +246,10 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 truncate">{col.name}</span>
             <button
               onClick={() => { void addRequest(col._id); }}
-              title="Request hinzufügen"
+              title={t('httpRequests.addRequest')}
               className="shrink-0 text-[11px] px-1.5 py-0.5 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800 hover:border-indigo-500 hover:text-indigo-300"
             >
-              + Request
+              {t('httpRequests.addRequestButton')}
             </button>
           </div>
           <ul className="mt-1 space-y-0.5">
@@ -275,7 +277,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
       <div className="flex-1 min-w-0">
         {error && <div className="mb-3 text-sm text-red-400 bg-red-900/20 border border-red-800 rounded-sm px-3 py-2">{error}</div>}
         {!draft ? (
-          <p className="text-gray-500 text-sm">Wähle links einen Request oder lege einen neuen an.</p>
+          <p className="text-gray-500 text-sm">{t('httpRequests.emptyState')}</p>
         ) : (
           <div className="space-y-3">
             {/* Kopfzeile: Name + Actions */}
@@ -285,11 +287,11 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
                 onChange={(e) => patch({ name: e.target.value })}
                 className="bg-transparent text-lg font-semibold text-gray-100 outline-hidden flex-1"
               />
-              <button onClick={() => setShowCurl(true)} className="text-xs px-2 py-1 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">curl importieren</button>
-              <button onClick={() => { void saveDraft(); }} className="text-xs px-2 py-1 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">Speichern</button>
-              {draft._id && <button onClick={() => { void streamDownload(); }} title="Antwort ohne Größenlimit auf die Platte streamen" className="text-xs px-2 py-1 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">Als Datei streamen</button>}
-              {draft._id && <button onClick={() => { loadHistory().catch((e: unknown) => setError(errorMessage(e))); }} className="text-xs px-2 py-1 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">History</button>}
-              {draft._id && <button onClick={() => { deleteRequest(draft._id).catch((e: unknown) => setError(errorMessage(e))); }} className="text-xs px-2 py-1 rounded-sm border border-red-800 text-red-400 hover:bg-red-900/30">Löschen</button>}
+              <button onClick={() => setShowCurl(true)} className="text-xs px-2 py-1 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">{t('httpRequests.importCurl')}</button>
+              <button onClick={() => { void saveDraft(); }} className="text-xs px-2 py-1 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">{t('common.save')}</button>
+              {draft._id && <button onClick={() => { void streamDownload(); }} title={t('httpRequests.streamTitle')} className="text-xs px-2 py-1 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">{t('httpRequests.streamButton')}</button>}
+              {draft._id && <button onClick={() => { loadHistory().catch((e: unknown) => setError(errorMessage(e))); }} className="text-xs px-2 py-1 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">{t('httpRequests.history')}</button>}
+              {draft._id && <button onClick={() => { deleteRequest(draft._id).catch((e: unknown) => setError(errorMessage(e))); }} className="text-xs px-2 py-1 rounded-sm border border-red-800 text-red-400 hover:bg-red-900/30">{t('common.delete')}</button>}
             </div>
 
             {/* URL-Leiste */}
@@ -303,32 +305,32 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
                 className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-3 py-2 text-sm font-mono text-gray-100" />
               <select value={envId} onChange={(e) => setEnvId(e.target.value)}
                 className="bg-gray-800 border border-gray-700 rounded-sm px-2 py-2 text-sm text-gray-200">
-                <option value="">(kein Environment)</option>
+                <option value="">{t('httpRequests.noEnvironment')}</option>
                 {environments.map((e) => <option key={e._id} value={e._id}>{e.name}</option>)}
               </select>
               <button onClick={() => { void send(); }} disabled={sending}
                 className="px-4 py-2 rounded-sm bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium">
-                {sending ? '…' : 'Senden'}
+                {sending ? '…' : t('common.send')}
               </button>
             </div>
             <p className="text-[11px] text-gray-500">
-              Löst Projekt-Secrets & Environment-Variablen serverseitig auf.
-              {availableKeys.length > 0 && <> Verfügbar: {availableKeys.map((k) => <code key={k} className="mx-1 text-gray-400">{'{{'}{k}{'}}'}</code>)}</>}
+              {t('httpRequests.resolveHint')}
+              {availableKeys.length > 0 && <> {t('httpRequests.available')} {availableKeys.map((k) => <code key={k} className="mx-1 text-gray-400">{'{{'}{k}{'}}'}</code>)}</>}
             </p>
 
             {/* Editor-Untertabs */}
             <div className="border border-gray-700 rounded-sm">
               <div className="flex gap-1 border-b border-gray-700 px-2 py-1">
-                {(['params', 'headers', 'auth', 'body'] as const).map((t) => (
-                  <button key={t} onClick={() => setEditorTab(t)}
-                    className={`text-xs px-2 py-1 rounded-sm ${editorTab === t ? 'bg-gray-700 text-gray-100' : 'text-gray-400 hover:text-gray-200'}`}>
-                    {t === 'params' ? 'Params' : t === 'headers' ? 'Headers' : t === 'auth' ? 'Auth' : 'Body'}
+                {(['params', 'headers', 'auth', 'body'] as const).map((tab) => (
+                  <button key={tab} onClick={() => setEditorTab(tab)}
+                    className={`text-xs px-2 py-1 rounded-sm ${editorTab === tab ? 'bg-gray-700 text-gray-100' : 'text-gray-400 hover:text-gray-200'}`}>
+                    {tab === 'params' ? t('httpRequests.tabParams') : tab === 'headers' ? t('httpRequests.tabHeaders') : tab === 'auth' ? t('httpRequests.tabAuth') : t('httpRequests.tabBody')}
                   </button>
                 ))}
               </div>
               <div className="p-3">
                 {editorTab === 'params' && (
-                  <KvEditor rows={draft.queryParams} onChange={(rows) => patch({ queryParams: rows })} keyLabel="Key" />
+                  <KvEditor rows={draft.queryParams} onChange={(rows) => patch({ queryParams: rows })} keyLabel={t('httpRequests.key')} />
                 )}
                 {editorTab === 'headers' && (
                   <HeaderEditor rows={draft.headers} onChange={(rows) => patch({ headers: rows })} />
@@ -347,20 +349,20 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
               <div className="border border-gray-700 rounded-sm">
                 <div className="flex items-center gap-3 border-b border-gray-700 px-3 py-2 text-sm">
                   <span className={response.ok ? 'text-emerald-400' : 'text-red-400'}>
-                    {response.error ? 'Fehler' : `${response.status} ${response.statusText ?? ''}`}
+                    {response.error ? t('common.error') : `${response.status} ${response.statusText ?? ''}`}
                   </span>
                   <span className="text-gray-500">{response.durationMs} ms</span>
-                  <span className="text-gray-500">{response.bodySize} B{response.truncated ? ' (gekürzt)' : ''}</span>
+                  <span className="text-gray-500">{response.bodySize} B{response.truncated ? ` ${t('httpRequests.truncated')}` : ''}</span>
                   {response.unresolvedVariables.length > 0 && (
-                    <span className="text-amber-400">⚠ unaufgelöst: {response.unresolvedVariables.join(', ')}</span>
+                    <span className="text-amber-400">⚠ {t('httpRequests.unresolved', { vars: response.unresolvedVariables.join(', ') })}</span>
                   )}
-                  <button onClick={blobDownload} className="ml-auto text-xs px-2 py-0.5 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">Herunterladen</button>
+                  <button onClick={blobDownload} className="ml-auto text-xs px-2 py-0.5 rounded-sm border border-gray-600 text-gray-300 hover:bg-gray-800">{t('httpRequests.download')}</button>
                 </div>
                 <div className="flex gap-1 px-2 py-1 border-b border-gray-700">
-                  {(['body', 'headers'] as const).map((t) => (
-                    <button key={t} onClick={() => setRespTab(t)}
-                      className={`text-xs px-2 py-1 rounded-sm ${respTab === t ? 'bg-gray-700 text-gray-100' : 'text-gray-400'}`}>
-                      {t === 'body' ? 'Body' : 'Headers'}
+                  {(['body', 'headers'] as const).map((tab) => (
+                    <button key={tab} onClick={() => setRespTab(tab)}
+                      className={`text-xs px-2 py-1 rounded-sm ${respTab === tab ? 'bg-gray-700 text-gray-100' : 'text-gray-400'}`}>
+                      {tab === 'body' ? t('httpRequests.tabBody') : t('httpRequests.tabHeaders')}
                     </button>
                   ))}
                 </div>
@@ -378,8 +380,8 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
             {showHistory && (
               <div className="border border-gray-700 rounded-sm p-3">
                 <div className="flex justify-between mb-2">
-                  <span className="text-sm font-semibold text-gray-300">History (Secrets maskiert)</span>
-                  <button onClick={() => setShowHistory(false)} className="text-xs text-gray-500">schließen</button>
+                  <span className="text-sm font-semibold text-gray-300">{t('httpRequests.historyTitle')}</span>
+                  <button onClick={() => setShowHistory(false)} className="text-xs text-gray-500">{t('common.close')}</button>
                 </div>
                 <ul className="space-y-1 text-xs">
                   {history.map((h) => (
@@ -391,7 +393,7 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
                       <span>{h.durationMs} ms</span>
                     </li>
                   ))}
-                  {history.length === 0 && <li className="text-gray-500">Noch keine Aufrufe.</li>}
+                  {history.length === 0 && <li className="text-gray-500">{t('httpRequests.noCalls')}</li>}
                 </ul>
               </div>
             )}
@@ -403,13 +405,13 @@ export default function HttpRequestsTab({ projectId }: { projectId: string }) {
       {showCurl && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowCurl(false)}>
           <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 w-[600px] max-w-[90vw]" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-sm font-semibold text-gray-200 mb-2">curl importieren</h3>
+            <h3 className="text-sm font-semibold text-gray-200 mb-2">{t('httpRequests.importCurl')}</h3>
             <textarea value={curlText} onChange={(e) => setCurlText(e.target.value)} rows={8}
               placeholder="curl -X POST https://… -H '…' -d '…'"
               className="w-full bg-gray-800 border border-gray-700 rounded-sm p-2 text-xs font-mono text-gray-100" />
             <div className="flex justify-end gap-2 mt-3">
-              <button onClick={() => setShowCurl(false)} className="text-xs px-3 py-1 rounded-sm border border-gray-600 text-gray-300">Abbrechen</button>
-              <button onClick={() => { void importCurl(); }} className="text-xs px-3 py-1 rounded-sm bg-indigo-600 text-white">In Editor übernehmen</button>
+              <button onClick={() => setShowCurl(false)} className="text-xs px-3 py-1 rounded-sm border border-gray-600 text-gray-300">{t('common.cancel')}</button>
+              <button onClick={() => { void importCurl(); }} className="text-xs px-3 py-1 rounded-sm bg-indigo-600 text-white">{t('httpRequests.applyToEditor')}</button>
             </div>
           </div>
         </div>
@@ -425,6 +427,7 @@ function prettyMaybeJson(text: string): string {
 }
 
 function KvEditor({ rows, onChange, keyLabel }: { rows: WkKeyValue[]; onChange: (r: WkKeyValue[]) => void; keyLabel: string }) {
+  const { t } = useTranslation();
   const set = (i: number, p: Partial<WkKeyValue>) => onChange(rows.map((r, idx) => idx === i ? { ...r, ...p } : r));
   return (
     <div className="space-y-1">
@@ -433,54 +436,56 @@ function KvEditor({ rows, onChange, keyLabel }: { rows: WkKeyValue[]; onChange: 
           <input type="checkbox" checked={r.enabled !== false} onChange={(e) => set(i, { enabled: e.target.checked })} />
           <input value={r.key} onChange={(e) => set(i, { key: e.target.value })} placeholder={keyLabel}
             className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs" />
-          <input value={r.value} onChange={(e) => set(i, { value: e.target.value })} placeholder="Value"
+          <input value={r.value} onChange={(e) => set(i, { value: e.target.value })} placeholder={t('httpRequests.value')}
             className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs font-mono" />
           <button onClick={() => onChange(rows.filter((_, idx) => idx !== i))} className="text-red-400 text-xs">✕</button>
         </div>
       ))}
-      <button onClick={() => onChange([...rows, { key: '', value: '', enabled: true }])} className="text-xs text-indigo-400">+ Zeile</button>
+      <button onClick={() => onChange([...rows, { key: '', value: '', enabled: true }])} className="text-xs text-indigo-400">{t('httpRequests.addRow')}</button>
     </div>
   );
 }
 
 function HeaderEditor({ rows, onChange }: { rows: WkHeader[]; onChange: (r: WkHeader[]) => void }) {
+  const { t } = useTranslation();
   const set = (i: number, p: Partial<WkHeader>) => onChange(rows.map((r, idx) => idx === i ? { ...r, ...p } : r));
   return (
     <div className="space-y-1">
       {rows.map((r, i) => (
         <div key={i} className="flex gap-2 items-center">
           <input type="checkbox" checked={r.enabled !== false} onChange={(e) => set(i, { enabled: e.target.checked })} />
-          <input value={r.name} onChange={(e) => set(i, { name: e.target.value })} placeholder="Header"
+          <input value={r.name} onChange={(e) => set(i, { name: e.target.value })} placeholder={t('httpRequests.header')}
             className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs" />
-          <input value={r.value} onChange={(e) => set(i, { value: e.target.value })} placeholder="Value (z.B. {{TOKEN}})"
+          <input value={r.value} onChange={(e) => set(i, { value: e.target.value })} placeholder={t('httpRequests.headerValuePlaceholder', { example: '{{TOKEN}}' })}
             className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 text-xs font-mono" />
           <button onClick={() => onChange(rows.filter((_, idx) => idx !== i))} className="text-red-400 text-xs">✕</button>
         </div>
       ))}
-      <button onClick={() => onChange([...rows, { name: '', value: '', enabled: true }])} className="text-xs text-indigo-400">+ Header</button>
+      <button onClick={() => onChange([...rows, { name: '', value: '', enabled: true }])} className="text-xs text-indigo-400">{t('httpRequests.addHeader')}</button>
     </div>
   );
 }
 
 function AuthEditor({ value, onChange }: { value: SavedRequest['auth']; onChange: (a: SavedRequest['auth']) => void }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2 text-xs">
       <select value={value.type} onChange={(e) => onChange({ ...value, type: optionOr(e.target.value, AUTH_TYPES, value.type) })}
         className="bg-gray-800 border border-gray-700 rounded-sm px-2 py-1">
-        <option value="none">Keine</option>
+        <option value="none">{t('httpRequests.authNone')}</option>
         <option value="basic">Basic</option>
         <option value="bearer">Bearer</option>
       </select>
       {value.type === 'basic' && (
         <div className="flex gap-2">
-          <input value={value.username ?? ''} onChange={(e) => onChange({ ...value, username: e.target.value })} placeholder="Username"
+          <input value={value.username ?? ''} onChange={(e) => onChange({ ...value, username: e.target.value })} placeholder={t('httpRequests.username')}
             className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1" />
-          <input value={value.password ?? ''} onChange={(e) => onChange({ ...value, password: e.target.value })} placeholder="Password / {{SECRET}}"
+          <input value={value.password ?? ''} onChange={(e) => onChange({ ...value, password: e.target.value })} placeholder={t('httpRequests.passwordPlaceholder', { example: '{{SECRET}}' })}
             className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 font-mono" />
         </div>
       )}
       {value.type === 'bearer' && (
-        <input value={value.token ?? ''} onChange={(e) => onChange({ ...value, token: e.target.value })} placeholder="Token / {{SECRET}}"
+        <input value={value.token ?? ''} onChange={(e) => onChange({ ...value, token: e.target.value })} placeholder={t('httpRequests.tokenPlaceholder', { example: '{{SECRET}}' })}
           className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 font-mono" />
       )}
     </div>
@@ -488,11 +493,12 @@ function AuthEditor({ value, onChange }: { value: SavedRequest['auth']; onChange
 }
 
 function BodyEditor({ value, onChange }: { value: SavedRequest['body']; onChange: (b: SavedRequest['body']) => void }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2 text-xs">
       <select value={value.mode} onChange={(e) => onChange({ ...value, mode: optionOr(e.target.value, BODY_MODES, value.mode) })}
         className="bg-gray-800 border border-gray-700 rounded-sm px-2 py-1">
-        <option value="none">Kein Body</option>
+        <option value="none">{t('httpRequests.bodyNone')}</option>
         <option value="raw">Raw</option>
         <option value="form-urlencoded">form-urlencoded</option>
         <option value="multipart">multipart</option>
@@ -500,14 +506,14 @@ function BodyEditor({ value, onChange }: { value: SavedRequest['body']; onChange
       {value.mode === 'raw' && (
         <>
           <input value={value.contentType ?? ''} onChange={(e) => onChange({ ...value, contentType: e.target.value })}
-            placeholder="Content-Type (z.B. application/json)"
+            placeholder={t('httpRequests.contentTypePlaceholder')}
             className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1" />
           <textarea value={value.raw ?? ''} onChange={(e) => onChange({ ...value, raw: e.target.value })} rows={8}
             className="w-full bg-gray-800 border border-gray-700 rounded-sm px-2 py-1 font-mono" />
         </>
       )}
       {(value.mode === 'form-urlencoded' || value.mode === 'multipart') && (
-        <KvEditor rows={value.formFields ?? []} onChange={(formFields) => onChange({ ...value, formFields })} keyLabel="Field" />
+        <KvEditor rows={value.formFields ?? []} onChange={(formFields) => onChange({ ...value, formFields })} keyLabel={t('httpRequests.field')} />
       )}
     </div>
   );

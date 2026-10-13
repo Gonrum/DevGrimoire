@@ -208,6 +208,8 @@ export default function ChatDock() {
 
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  /** Folgt die Ansicht dem Ende? Falsch, sobald der Nutzer hochscrollt (M-42). */
+  const stickToBottom = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -481,10 +483,19 @@ export default function ChatDock() {
     }
   }, [projectId, customerId, session?._id]);
 
-  // Auto-scroll on new content
+  // Auto-Scroll (M-42). Eine neue Nachricht holt die Ansicht immer ans Ende.
+  // Während des Streamings nur, solange der Nutzer nicht hochgescrollt hat —
+  // vorher startete jedes Token eine eigene smooth-Animation, und wer während
+  // einer Antwort nach oben las, wurde sofort zurückgezogen. Ohne Animation:
+  // pro Token stapelten sich sonst hunderte, und die Scroll-Events einer
+  // laufenden smooth-Animation hielte onScroll für ein Hochscrollen.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [session?.messages?.length, streaming?.content]);
+    stickToBottom.current = true;
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+  }, [session?.messages?.length]);
+  useEffect(() => {
+    if (stickToBottom.current) messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+  }, [streaming?.content]);
 
   // Keyboard: ESC closes
   useEffect(() => {
@@ -1185,7 +1196,13 @@ export default function ChatDock() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+            <div
+              className="flex-1 overflow-y-auto px-3 py-3 space-y-3"
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              }}
+            >
               {!session && !loadingSession && (
                 <div className="text-gray-600 text-xs text-center py-12">
                   {projectId ? t('chat.startPrompt') : t('chat.selectProjectFirst')}

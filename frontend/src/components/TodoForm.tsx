@@ -106,10 +106,27 @@ export default function TodoForm({
         milestoneId: milestoneId || undefined,
       });
 
+      // M-43: fehlgeschlagene Anhänge melden statt sie zu verschlucken. Das
+      // Todo existiert trotzdem — onCreated läuft weiter, aber der Nutzer
+      // erfährt, welche Dateien fehlen und warum.
+      const failedUploads: string[] = [];
+      let lastUploadError = '';
       if (projectId && pendingFiles.length > 0 && todo._id) {
         for (const file of pendingFiles) {
-          await api.attachments.upload({ projectId }, file, { entityType: 'todo', entityId: todo._id }).catch(() => {});
+          try {
+            await api.attachments.upload({ projectId }, file, { entityType: 'todo', entityId: todo._id });
+          } catch (err: unknown) {
+            failedUploads.push(file.name);
+            lastUploadError = errorMessage(err, t('common.errorSaving'));
+          }
         }
+      }
+      if (failedUploads.length > 0) {
+        showError(t('todos.attachmentsFailed', {
+          count: failedUploads.length,
+          files: failedUploads.join(', '),
+          error: lastUploadError,
+        }));
       }
 
       onCreated(todo);

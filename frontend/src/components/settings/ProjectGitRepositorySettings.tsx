@@ -323,7 +323,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                       placeholder={editRepoProvider === 'gitea' ? 'https://gitea.example.com' : 'https://gitlab.example.com'}
                     />
                     {editRepoProvider === 'gitea' && (
-                      <small className="text-amber-300">Gitea hat keinen Default — Base-URL ist Pflicht.</small>
+                      <small className="text-amber-300">{t('projectGit.giteaBaseUrlRequired')}</small>
                     )}
                     {editRepoBaseUrl && isPrivateLike(editRepoBaseUrl) && (
                       <label className="flex items-center gap-2 mt-2">
@@ -333,17 +333,14 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                           onChange={(e) => {
                             if (e.target.checked) {
                               const ok = window.confirm(
-                                'Mit dieser Option wird der SSRF-Schutz für DIESES Repository vollständig deaktiviert. '
-                                + 'Eine baseUrl, die auf 127.0.0.1, 169.254.169.254 (Cloud-Metadata) oder vergleichbare interne '
-                                + 'Endpoints zeigt, wird dann zugelassen. Settings-Schreiber könnten so Cloud-Credentials abgreifen.\n\n'
-                                + 'Wirklich aktivieren?',
+                                t('projectGit.allowPrivateHostConfirm'),
                               );
                               if (!ok) return;
                             }
                             setEditAllowPrivateHost(e.target.checked);
                           }}
                         />
-                        <span className="text-xs text-amber-300">Private/interne Adresse erlauben (deaktiviert SSRF-Schutz für dieses Repo)</span>
+                        <span className="text-xs text-amber-300">{t('projectGit.allowPrivateHost')}</span>
                       </label>
                     )}
                   </div>
@@ -485,7 +482,7 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                 placeholder={newRepoProvider === 'gitea' ? 'https://gitea.example.com' : 'https://gitlab.example.com'}
               />
               {newRepoProvider === 'gitea' && (
-                <small className="text-amber-300">Gitea hat keinen Default — Base-URL ist Pflicht.</small>
+                <small className="text-amber-300">{t('projectGit.giteaBaseUrlRequired')}</small>
               )}
               {newRepoBaseUrl && isPrivateLike(newRepoBaseUrl) && (
                 <label className="flex items-center gap-2 mt-2">
@@ -495,17 +492,14 @@ export default function ProjectGitRepositorySettings({ projectId, gitRepos, onCh
                     onChange={(e) => {
                       if (e.target.checked) {
                         const ok = window.confirm(
-                          'Mit dieser Option wird der SSRF-Schutz für DIESES Repository vollständig deaktiviert. '
-                          + 'Eine baseUrl, die auf 127.0.0.1, 169.254.169.254 (Cloud-Metadata) oder vergleichbare interne '
-                          + 'Endpoints zeigt, wird dann zugelassen. Settings-Schreiber könnten so Cloud-Credentials abgreifen.\n\n'
-                          + 'Wirklich aktivieren?',
+                          t('projectGit.allowPrivateHostConfirm'),
                         );
                         if (!ok) return;
                       }
                       setNewAllowPrivateHost(e.target.checked);
                     }}
                   />
-                  <span className="text-xs text-amber-300">Private/interne Adresse erlauben (deaktiviert SSRF-Schutz für dieses Repo)</span>
+                  <span className="text-xs text-amber-300">{t('projectGit.allowPrivateHost')}</span>
                 </label>
               )}
             </div>

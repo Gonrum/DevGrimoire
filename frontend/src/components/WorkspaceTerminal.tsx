@@ -8,6 +8,7 @@ import { parseJsonText } from '../api/http-boundary';
 import { isRecord, readApiBaseUrl } from '../lib/narrow';
 import { safeRandomUUID } from '../utils/randomId';
 import Button from './ui/Button';
+import i18n from '../i18n';
 
 interface Props {
   workspace: Workspace;
@@ -94,7 +95,7 @@ export default function WorkspaceTerminal({ workspace, onClose }: Props) {
           const msg = parseJsonText<unknown>(ev.data);
           if (isRecord(msg) && msg.type === 'exit') {
             const code = typeof msg.exitCode === 'number' ? String(msg.exitCode) : '?';
-            term.write(`\r\n\x1b[2m# bash exited (code ${code})\x1b[0m\r\n`);
+            term.write(`\r\n\x1b[2m# ${i18n.t('terminal.bashExited', { code })}\x1b[0m\r\n`);
             return;
           }
         } catch {
@@ -106,10 +107,10 @@ export default function WorkspaceTerminal({ workspace, onClose }: Props) {
       }
     };
     ws.onerror = () => {
-      term.write(`\r\n\x1b[31m# connection error — close and reopen the terminal to reconnect\x1b[0m\r\n`);
+      term.write(`\r\n\x1b[31m# ${i18n.t('terminal.connectionError')}\x1b[0m\r\n`);
     };
     ws.onclose = (ev) => {
-      term.write(`\r\n\x1b[2m# connection closed (${ev.code}${ev.reason ? ': ' + ev.reason : ''})\x1b[0m\r\n`);
+      term.write(`\r\n\x1b[2m# ${i18n.t('terminal.connectionClosed', { detail: `${ev.code}${ev.reason ? ': ' + ev.reason : ''}` })}\x1b[0m\r\n`);
     };
 
     const onData = term.onData((data) => {
