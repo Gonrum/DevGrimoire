@@ -69,6 +69,7 @@ export const DEFAULT_PUSH_CATEGORIES = [
   'replication_failed',
   'backup_failed',
   'ssh_auth_failure',
+  'research_done',
 ].join(',');
 // Sensible quiet-hours override defaults — failures and explicit pings always come through.
 export const DEFAULT_QUIET_HOURS_OVERRIDES = [

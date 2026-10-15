@@ -78,6 +78,7 @@
     "check:research-task-agent": "node scripts/research-task-agent-check.cjs",
     "check:research-lead-agent": "node scripts/research-lead-agent-check.cjs",
     "check:research-pipeline": "node scripts/research-pipeline-check.cjs",
+    "check:research-runner": "node scripts/research-runner-check.cjs",
     "check:research-access": "node scripts/research-access-check.cjs",
     "check:rag-research-scope": "node scripts/rag-research-scope-check.cjs",
     "check:research-due": "node scripts/research-due-check.cjs",
