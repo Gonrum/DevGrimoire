@@ -6,19 +6,14 @@ import { LlmClient, ChatToolCallOpts } from '../balancer/llm-client.service';
 import type { Slot } from '../balancer/balancer.types';
 import type { OpenAiToolDef, LlmMessageWithTools } from '../chat/chat-llm.service';
 import { ResearchLiveService } from './research-live.service';
+import { LIMITS, type LimitKind } from './research-config';
 
 export class Interrupted extends Error {
   override name = 'Interrupted';
 }
 
-export type LimitKind = 'short' | 'notes' | 'leadPlan' | 'leadReport';
-
-export const LIMITS: Record<LimitKind, { maxTokens: number; timeoutMs: number }> = {
-  short: { maxTokens: 4_000, timeoutMs: 10 * 60_000 },
-  notes: { maxTokens: 6_000, timeoutMs: 10 * 60_000 },
-  leadPlan: { maxTokens: 4_000, timeoutMs: 30 * 60_000 },
-  leadReport: { maxTokens: 16_000, timeoutMs: 45 * 60_000 },
-};
+export { LIMITS } from './research-config';
+export type { LimitKind } from './research-config';
 
 export interface ResearchLlmCall {
   researchId: string;
