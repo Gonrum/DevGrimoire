@@ -228,11 +228,15 @@ TEST_USER_ID=""
 
 # --- Schreibaktionen gegen einen read-only Cluster -------------------------
 for ACTION in scale restart delete; do
-  # Kind pro Aktion gültig wählen, sonst schlägt schon das DTO mit 400 an.
-  KIND=Deployment; [ "$ACTION" = "delete" ] && KIND=Pod
+  # Pro Aktion ein gültiger Body: das DTO lehnt fremde Felder (replicas bei
+  # restart/delete) und ungültige Kinds mit 400 ab, bevor der Service 403 sagt.
+  case "$ACTION" in
+    scale)   BODY='{"kind":"Deployment","name":"x","namespace":"default","replicas":1}' ;;
+    restart) BODY='{"kind":"Deployment","name":"x","namespace":"default"}' ;;
+    delete)  BODY='{"kind":"Pod","name":"x","namespace":"default"}' ;;
+  esac
   CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST \
-    "${API_URL}/api/kube-clusters/${CLUSTER_ID}/actions/${ACTION}" \
-    -d "{\"kind\":\"${KIND}\",\"name\":\"x\",\"namespace\":\"default\",\"replicas\":1}")
+    "${API_URL}/api/kube-clusters/${CLUSTER_ID}/actions/${ACTION}" -d "$BODY")
   [ "$CODE" = "403" ] || fail "${ACTION} auf read-only Cluster ergab HTTP $CODE statt 403"
 done
 pass "Schreibaktionen auf einem read-only Cluster ergeben 403"

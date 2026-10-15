@@ -23,6 +23,7 @@ function loadCompiled(rel) {
   }
 }
 const D = loadCompiled('kube/dto/write-actions.dto.js');
+const { RequestContext } = loadCompiled('common/request-context.js');
 const { KubeWritesController } = loadCompiled('kube/kube-writes.controller.js');
 
 const pipe = new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true });
@@ -80,9 +81,20 @@ async function check(label, fn) {
     assert.equal(calls.scale.clusterId, 'cid');
     assert.equal(calls.scale.replicas, 3);
     assert.equal(calls.scale.userId, 'u1');
+    assert.deepEqual([calls.restart.clusterId, calls.restart.kind, calls.restart.name, calls.restart.namespace, calls.restart.userId],
+      ['cid', 'Deployment', 'x', 'default', 'u1']);
     assert.equal(calls.remove.kind, 'Pod');
     assert.equal(calls.cordon.node, 'n');
     assert.equal(calls.apply.userId, 'system', 'ohne User -> system');
+  });
+
+  await check('Controller übergibt den authentifizierten Actor aus dem RequestContext', async () => {
+    let got;
+    const c = new KubeWritesController({ scale: async (a) => { got = a; return {}; } });
+    const user = { userId: 'u9', username: 'n', role: 'admin' };
+    await RequestContext.run(user, undefined, () => c.scale('cid', { kind: 'Deployment', ...base, replicas: 1 }, { user }));
+    assert.equal(got.actor, user);
+    assert.equal(got.userId, 'u9');
   });
 
   await check('Service-403 läuft unverändert durch', async () => {
