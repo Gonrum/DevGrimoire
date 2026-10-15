@@ -957,7 +957,7 @@ export class ProjectTransferService {
 
     // 8. Research
     for (const r of research) {
-      await this.researchService.create({ ...r.input, projectId });
+      await this.researchService.createForImport({ ...r.input, projectId });
     }
     stats.research = research.length;
 

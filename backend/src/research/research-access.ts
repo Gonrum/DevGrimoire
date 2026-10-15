@@ -26,8 +26,11 @@ export function canReadResearch(actor: RequestUser | undefined, doc: ResearchAcc
   if (!actor) return true;
   const projectId = idOf(doc.projectId);
   const customerId = idOf(doc.customerId);
-  if (projectId) return actorCanAccessProject(actor, projectId);
-  if (customerId) return actorCanAccessCustomer(actor, customerId);
+  // Beide Achsen gesetzt (Alt-/Replikationsbestand): Zugriff auf BEIDE nötig.
+  if (projectId || customerId) {
+    return (!projectId || actorCanAccessProject(actor, projectId))
+      && (!customerId || actorCanAccessCustomer(actor, customerId));
+  }
   if (actor.role === 'admin') return true;
   return idOf(doc.ownerUserId) === actor.userId;
 }
@@ -49,21 +52,29 @@ function bothForms(ids: readonly string[] | undefined): Array<string | Types.Obj
 export function visibleResearchFilter(actor: RequestUser | undefined): FilterQuery<Research> {
   if (!actor) return {};
   const unassigned = { projectId: null, customerId: null };
-  const personal: FilterQuery<Research> = actor.role === 'admin'
-    ? unassigned
-    : { ...unassigned, ownerUserId: Types.ObjectId.isValid(actor.userId) ? new Types.ObjectId(actor.userId) : null };
-  const parts: FilterQuery<Research>[] = [personal];
-  const pMode = actor.projectScopeMode ?? 'all';
-  if (pMode === 'all') parts.push({ projectId: { $ne: null } });
-  else if (pMode === 'allowlist') {
-    parts.push({ projectId: { $in: bothForms(actor.allowedProjectIds) } });
-  }
-  const cMode = actor.customerScopeMode ?? 'all';
-  if (cMode === 'all') parts.push({ customerId: { $ne: null } });
-  else if (cMode === 'allowlist') {
-    parts.push({ customerId: { $in: bothForms(actor.allowedCustomerIds) } });
-  }
-  return { $or: parts };
+  let personal: FilterQuery<Research>;
+  if (actor.role === 'admin') personal = unassigned;
+  else if (Types.ObjectId.isValid(actor.userId)) personal = { ...unassigned, ownerUserId: new Types.ObjectId(actor.userId) };
+  else personal = { _id: { $in: [] } }; // unbrauchbare userId trifft nichts
+  // Pro Achse: ungesetzt passt immer, gesetzt nur mit Zugriff. Beide Achsen
+  // müssen passen (Alt-/Replikationsdokumente können beide tragen).
+  const axis = (
+    field: 'projectId' | 'customerId',
+    mode: string,
+    ids: readonly string[] | undefined,
+  ): FilterQuery<Research> => {
+    if (mode === 'all') return {};
+    if (mode === 'allowlist') return { $or: [{ [field]: null }, { [field]: { $in: bothForms(ids) } }] };
+    return { [field]: null };
+  };
+  const assigned: FilterQuery<Research> = {
+    $and: [
+      { $or: [{ projectId: { $ne: null } }, { customerId: { $ne: null } }] },
+      axis('projectId', actor.projectScopeMode ?? 'all', actor.allowedProjectIds),
+      axis('customerId', actor.customerScopeMode ?? 'all', actor.allowedCustomerIds),
+    ],
+  };
+  return { $or: [personal, assigned] };
 }
 
 export function assertMoveTarget(actor: RequestUser | undefined, target: { projectId?: string; customerId?: string }): void {

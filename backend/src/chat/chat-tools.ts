@@ -1794,7 +1794,7 @@ export class ChatToolsService {
           };
         }
         case 'research_get': {
-          const r = await this.research.findById(requireString(args, 'id'));
+          const r = await this.research.findVisibleById(requireString(args, 'id'));
           return { success: true, result: r.toObject() };
         }
         case 'manual_list': {

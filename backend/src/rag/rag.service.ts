@@ -167,6 +167,15 @@ function asText(value: unknown): string {
 }
 
 /** `asText` for array fields — non-text elements are dropped, not stringified. */
+/**
+ * Persönliche Recherchen (weder Projekt noch Kunde) sind nur für ihren Besitzer
+ * sichtbar; der RAG-Scope kennt keinen Besitzer, ein Treffer mit leeren Ids
+ * gälte als global. Gemeinsame Regel für Sync (upsertDocument) und Reindex.
+ */
+export function isUnassignedResearch(entity: string, doc: Record<string, unknown>): boolean {
+  return entity === 'research' && asText(doc.projectId) === '' && asText(doc.customerId) === '';
+}
+
 function asTextList(value: unknown): string[] {
   if (!isUnknownArray(value)) return [];
   return value.map((item) => asText(item).trim()).filter((item) => item.length > 0);
@@ -972,10 +981,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // Persönliche Recherchen (weder Projekt noch Kunde) sind nur für ihren
-    // Besitzer sichtbar; der RAG-Scope kennt keinen Besitzer. Nicht indizieren
-    // und einen vorhandenen Eintrag entfernen (z.B. nach Verschieben/Ablösen).
-    if (entity === 'research' && asText(doc.projectId) === '' && asText(doc.customerId) === '') {
+    // Persönliche Recherchen: nicht indizieren, vorhandenen Eintrag entfernen
+    // (z.B. nach Ablösen von Projekt/Kunde). Siehe isUnassignedResearch.
+    if (isUnassignedResearch(entity, doc)) {
       await this.removeDocument(docId);
       return;
     }
@@ -1304,6 +1312,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         // full reindex must not quietly put them back in.
         const sensitivity = isSensitivityLevel(doc.sensitivity) ? doc.sensitivity : undefined;
         if (isExcludedFromRag(sensitivity)) continue;
+        // Gleiche Regel wie upsertDocument: persönliche Recherchen nie indizieren.
+        if (isUnassignedResearch(entity, doc)) continue;
 
         const extracted = this.extractText(entity, doc);
         if (!extracted || (!extracted.title && !extracted.content)) continue;

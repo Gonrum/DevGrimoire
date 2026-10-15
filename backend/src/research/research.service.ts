@@ -21,8 +21,22 @@ export class ResearchService {
   ) {}
 
   async create(dto: CreateResearchDto): Promise<ResearchDocument> {
+    assertMoveTarget(RequestContext.getUser(), dto);
+    return this.insert(dto);
+  }
+
+  /**
+   * Nur für den Projektimport: das Zielprojekt ist frisch angelegt und steht
+   * (noch) nicht in der Allowlist des Importierenden. Genau-ein-Ziel bleibt
+   * geprüft, der Scope nicht.
+   */
+  async createForImport(dto: CreateResearchDto): Promise<ResearchDocument> {
+    assertMoveTarget(undefined, dto);
+    return this.insert(dto);
+  }
+
+  private async insert(dto: CreateResearchDto): Promise<ResearchDocument> {
     const actor = RequestContext.getUser();
-    assertMoveTarget(actor, dto);
     const ownerUserId = actor && Types.ObjectId.isValid(actor.userId) ? new Types.ObjectId(actor.userId) : null;
     const entry = await this.researchModel.create({ ...dto, status: 'done', ownerUserId });
     this.eventEmitter.emit(PROJECT_CHANGED, {

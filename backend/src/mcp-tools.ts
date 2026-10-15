@@ -5912,7 +5912,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'research_get':
-          result = await researchService.findById(requireString(a, 'id'));
+          result = await researchService.findVisibleById(requireString(a, 'id'));
           break;
         case 'research_update':
           result = compactUpdateResult(await researchService.update(requireString(a, 'id'), {
