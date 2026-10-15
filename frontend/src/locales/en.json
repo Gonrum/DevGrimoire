@@ -2866,6 +2866,10 @@
       "cordon": "Cordon node",
       "cordonConfirm": "Cordon {{target}} so no new pods are scheduled?",
       "cordonOk": "{{target}} cordoned.",
+      "uncordon": "Uncordon node",
+      "uncordonConfirm": "Uncordon {{target}} so new pods can be scheduled again?",
+      "uncordonOk": "{{target}} uncordoned.",
+      "cordoned": "Cordoned",
       "failed": "Action failed"
     },
     "drawer": {

@@ -2865,6 +2865,10 @@
       "cordon": "Node sperren (cordon)",
       "cordonConfirm": "{{target}} für neue Pods sperren?",
       "cordonOk": "{{target}} gesperrt.",
+      "uncordon": "Sperre aufheben (uncordon)",
+      "uncordonConfirm": "{{target}} wieder für neue Pods freigeben?",
+      "uncordonOk": "{{target}} wieder freigegeben.",
+      "cordoned": "Gesperrt (cordoned)",
       "failed": "Aktion fehlgeschlagen"
     },
     "drawer": {

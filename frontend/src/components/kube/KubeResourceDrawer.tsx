@@ -10,6 +10,8 @@ interface Props {
   kind: string;
   row: KubeListRow;
   onClose: () => void;
+  /** Nach erfolgreichem Löschen der Ressource; ohne Angabe schliesst der Drawer per onClose. */
+  onDeleted?: () => void;
 }
 
 type Tab = 'overview' | 'yaml' | 'events' | 'logs';
@@ -39,7 +41,7 @@ function containersOf(object: unknown): string[] {
   return names;
 }
 
-export function KubeResourceDrawer({ cluster, kind, row, onClose }: Props) {
+export function KubeResourceDrawer({ cluster, kind, row, onClose, onDeleted }: Props) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>('overview');
   const [described, setDescribed] = useState<KubeDescribeResult | null>(null);
@@ -192,8 +194,9 @@ export function KubeResourceDrawer({ cluster, kind, row, onClose }: Props) {
         {tab === 'overview' && (
           <div className="mt-3">
             <KubeWriteActions
-              cluster={cluster} kind={kind} row={row}
+              cluster={cluster} kind={kind} row={row} object={described?.object}
               onDone={() => { void loadDescribe(); }}
+              onDeleted={onDeleted ?? onClose}
             />
           </div>
         )}

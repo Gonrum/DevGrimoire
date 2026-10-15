@@ -182,6 +182,7 @@ export function KubeClusterView({ cluster, onBack }: Props) {
             kind={kind}
             row={selected}
             onClose={() => setSelected(null)}
+            onDeleted={() => { setSelected(null); void reload(); }}
           />
         )}
       </section>
