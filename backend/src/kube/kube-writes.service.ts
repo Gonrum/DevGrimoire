@@ -7,6 +7,7 @@ import { KubeClientService } from './kube-client.service';
 import { KubeAuditService } from './kube-audit.service';
 import { canAccessCluster } from './kube-access.guard';
 import { KUBE_KIND_SPECS, KubeApiGroup, KubeKind, isKubeKind } from './kube-kinds';
+import { KubeAuditSourceContext } from './schemas/kube-audit.schema';
 import { ActorScope } from '../common/permissions';
 import { errorMessage, isRecord } from '../common/narrow';
 
@@ -38,6 +39,8 @@ interface Guarded {
   clusterId: string;
   actor: ActorScope | undefined;
   userId: string;
+  /** Herkunft für die Audit-Zeile; REST ist der Default. */
+  sourceContext?: KubeAuditSourceContext;
 }
 
 interface WriteMeta {
@@ -134,7 +137,7 @@ export class KubeWritesService {
 
   private async record(g: Guarded, meta: WriteMeta, started: number, errorMsg: string | undefined): Promise<void> {
     await this.audit.record({
-      clusterId: g.clusterId, action: 'write', sourceContext: 'rest',
+      clusterId: g.clusterId, action: 'write', sourceContext: g.sourceContext ?? 'rest',
       userId: g.userId, verb: meta.verb, resource: meta.resource,
       namespace: meta.namespace, name: meta.name,
       durationMs: Date.now() - started, errorMsg,

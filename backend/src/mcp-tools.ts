@@ -90,6 +90,9 @@ import { KubeResourcesService } from './kube/kube-resources.service';
 import { KubeLogsService } from './kube/kube-logs.service';
 import { KubeClientService } from './kube/kube-client.service';
 import { KubeAuditService } from './kube/kube-audit.service';
+import {
+  KubeWritesService, SCALABLE_KINDS, RESTARTABLE_KINDS, DELETABLE_KINDS,
+} from './kube/kube-writes.service';
 import { KubeAuditAction } from './kube/schemas/kube-audit.schema';
 import { KubeClusterDocument } from './kube/schemas/kube-cluster.schema';
 import { isKubeKind, KUBE_KIND_SPECS, KubeKind } from './kube/kube-kinds';
@@ -572,6 +575,27 @@ async function auditKubeRead(
   });
 }
 
+/**
+ * Schreibende Kube-Tools erben readOnly und Scope vom Service. Hier steht nur
+ * die zweite Stufe `allowMcpWrites` — VOR dem Service geprüft, damit die
+ * Ablehnung erklärt, wer was ändern muss, statt ein generisches 403 zu sein.
+ */
+async function requireKubeMcpWrites(clusters: KubeClustersService, clusterId: string): Promise<void> {
+  const cluster = await clusters.findById(clusterId);
+  if (cluster.readOnly) {
+    throw new Error(
+      'Dieser Cluster ist als read-only markiert (readOnly). Schreibende Tools sind dort abgeschaltet; '
+      + 'ein Mensch muss den Cluster in den Einstellungen erst auf schreibbar stellen und allowMcpWrites setzen.',
+    );
+  }
+  if (!cluster.allowMcpWrites) {
+    throw new Error(
+      'Für diesen Cluster ist allowMcpWrites nicht gesetzt. Lesen ist erlaubt, Schreiben nicht — '
+      + 'ein Mensch muss das Flag in den Cluster-Einstellungen setzen.',
+    );
+  }
+}
+
 /** Hard safety cap independent of the (already-capped) `tailLines` schema max — matters for `sinceSeconds`, which has no upper bound of its own. */
 const KUBE_LOG_LINES_HARD_CAP = 5000;
 
@@ -676,6 +700,7 @@ export interface McpServices {
   kubeLogsService: KubeLogsService;
   kubeClientService: KubeClientService;
   kubeAuditService: KubeAuditService;
+  kubeWritesService: KubeWritesService;
 }
 
 const tools = [
@@ -3391,6 +3416,62 @@ const tools = [
     },
   },
   {
+    name: 'kube_scale',
+    description: 'Setzt die Replica-Zahl eines Deployments oder StatefulSets. Voraussetzung: der Cluster muss `allowMcpWrites: true` tragen — ist das Flag aus (oder der Cluster read-only), antwortet dieses Tool ablehnend und ein Mensch muss es in den Cluster-Einstellungen setzen. Die Aktion wird auditiert.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        clusterId: { type: 'string', description: 'Cluster-ID aus kube_cluster_list' },
+        kind: { type: 'string', enum: [...SCALABLE_KINDS] },
+        name: { type: 'string' },
+        namespace: { type: 'string' },
+        replicas: { type: 'number', minimum: 0, maximum: 1000 },
+      },
+      required: ['clusterId', 'kind', 'name', 'namespace', 'replicas'],
+    },
+  },
+  {
+    name: 'kube_rollout_restart',
+    description: 'Startet den Rollout eines Deployments, StatefulSets oder DaemonSets neu — dasselbe wie `kubectl rollout restart`, über dieselbe Annotation. Voraussetzung: `allowMcpWrites: true` am Cluster. Die Aktion wird auditiert.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        clusterId: { type: 'string', description: 'Cluster-ID aus kube_cluster_list' },
+        kind: { type: 'string', enum: [...RESTARTABLE_KINDS] },
+        name: { type: 'string' },
+        namespace: { type: 'string' },
+      },
+      required: ['clusterId', 'kind', 'name', 'namespace'],
+    },
+  },
+  {
+    name: 'kube_delete',
+    description: 'Löscht einen Pod oder einen Job. Absichtlich nur diese beiden: ein Pod wird vom Controller neu erstellt, ein Job ist abgeschlossen. Ein Deployment oder ein Namespace zu löschen ist eine andere Grössenordnung und geht nicht über DevGrimoire. Voraussetzung: `allowMcpWrites: true` am Cluster. Die Aktion wird auditiert.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        clusterId: { type: 'string', description: 'Cluster-ID aus kube_cluster_list' },
+        kind: { type: 'string', enum: [...DELETABLE_KINDS] },
+        name: { type: 'string' },
+        namespace: { type: 'string' },
+      },
+      required: ['clusterId', 'kind', 'name', 'namespace'],
+    },
+  },
+  {
+    name: 'kube_apply',
+    description: 'Wendet ein oder mehrere YAML-Dokumente auf einen Namespace an. Jedes Dokument braucht apiVersion, kind und metadata.name; ein Dokument mit abweichendem Namespace wird abgelehnt. Kein Server-Side-Apply mit force — ein Konflikt ist ein Fehler, kein stiller Sieg. Voraussetzung: `allowMcpWrites: true` am Cluster. Die Aktion wird auditiert.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        clusterId: { type: 'string', description: 'Cluster-ID aus kube_cluster_list' },
+        yaml: { type: 'string' },
+        namespace: { type: 'string' },
+      },
+      required: ['clusterId', 'yaml', 'namespace'],
+    },
+  },
+  {
     name: 'recurring_task_create',
     description: 'Create a recurring task. With projectId: creates project todos. With customerId: creates customer-scoped quests. With neither: system-wide task that creates notifications.',
     inputSchema: {
@@ -4700,6 +4781,11 @@ const EXPLICIT_WRITE_TOOLS = new Set<string>([
   'milestone_create_with_todos',
   'request_import_curl',
   'stack_entry_remove',
+  // K3: schreibende Kube-Tools ohne passendes Namens-Suffix (kube_delete trifft es ohnehin)
+  'kube_scale',
+  'kube_rollout_restart',
+  'kube_delete',
+  'kube_apply',
 ]);
 
 export function isWriteTool(name: string): boolean {
@@ -4724,7 +4810,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, environmentsService, secretsService, manualsService, researchService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, harnessService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService, stackService, kubeClustersService, kubeResourcesService, kubeLogsService, kubeClientService, kubeAuditService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, environmentsService, secretsService, manualsService, researchService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, harnessService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService, stackService, kubeClustersService, kubeResourcesService, kubeLogsService, kubeClientService, kubeAuditService, kubeWritesService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -7250,6 +7336,47 @@ export function registerMcpTools(server: Server, services: McpServices): void {
             clusterId, action: 'metrics_query', userId, startedAt,
             resource: scope === 'nodes' ? 'Node' : 'Pod', namespace,
           });
+          break;
+        }
+        case 'kube_scale':
+        case 'kube_rollout_restart':
+        case 'kube_delete':
+        case 'kube_apply': {
+          const clusterId = requireString(a, 'clusterId');
+          // Zweite Stufe vor dem Service: allowMcpWrites. readOnly und Scope
+          // prüft der Service selbst; hier steht nur die erklärende Ablehnung.
+          await requireKubeMcpWrites(kubeClustersService, clusterId);
+          const ctx = {
+            clusterId,
+            actor: RequestContext.getUser(),
+            userId: requireUserId(),
+            sourceContext: 'mcp' as const,
+          };
+          const namespace = requireString(a, 'namespace');
+          if (name === 'kube_scale') {
+            result = await kubeWritesService.scale({
+              ...ctx, namespace,
+              kind: requireEnum(a, 'kind', SCALABLE_KINDS),
+              name: requireString(a, 'name'),
+              replicas: requireNumber(a, 'replicas'),
+            });
+          } else if (name === 'kube_rollout_restart') {
+            result = await kubeWritesService.restart({
+              ...ctx, namespace,
+              kind: requireEnum(a, 'kind', RESTARTABLE_KINDS),
+              name: requireString(a, 'name'),
+            });
+          } else if (name === 'kube_delete') {
+            result = await kubeWritesService.remove({
+              ...ctx, namespace,
+              kind: requireEnum(a, 'kind', DELETABLE_KINDS),
+              name: requireString(a, 'name'),
+            });
+          } else {
+            result = await kubeWritesService.apply({
+              ...ctx, namespace, yaml: requireString(a, 'yaml'),
+            });
+          }
           break;
         }
         case 'recurring_task_create': {

@@ -70,6 +70,7 @@ function makeFakeServer() {
 // no-op proxy so registerMcpTools() doesn't blow up on destructure.
 function buildServices({
   kubeClustersService, kubeResourcesService, kubeLogsService, kubeClientService, kubeAuditService,
+  kubeWritesService,
 }) {
   const noop = new Proxy(
     {},
@@ -103,6 +104,7 @@ function buildServices({
     // die noop-Proxy oben liefert zwar eine Funktion, aber `buildServices`
     // destrukturiert `kubeAuditService` namentlich.
     kubeAuditService: kubeAuditService || { record: async () => {} },
+    kubeWritesService: kubeWritesService || {},
   };
 }
 
@@ -174,11 +176,42 @@ process.env.MCP_STDIO_USER_ID = TEST_USER_ID;
     }
   });
 
-  await check('K2 registriert KEIN schreibendes Tool', () => {
+  const WRITE_TOOLS = ['kube_scale', 'kube_rollout_restart', 'kube_delete', 'kube_apply'];
+
+  await check('K2-Tools sind lesend; schreibend sind genau die vier K3-Tools', () => {
     const writing = kubeToolList.filter((t) =>
       /apply|delete|scale|restart|exec|patch|create/i.test(t.name));
-    assert.deepEqual(writing.map((t) => t.name), [],
-      'K2 ist lesend — schreibende Tools gehören in K3 hinter allowMcpWrites');
+    assert.deepEqual(writing.map((t) => t.name).sort(), [...WRITE_TOOLS].sort(),
+      'unerwartetes schreibendes kube_*-Tool (kube_exec existiert bewusst nicht)');
+  });
+
+  await check('die vier schreibenden Tools sind registriert, kube_exec nicht', () => {
+    for (const n of WRITE_TOOLS) assert.ok(byName.has(n), `${n} fehlt`);
+    assert.ok(!byName.has('kube_exec'), 'kube_exec darf nicht existieren');
+  });
+
+  await check('jede Beschreibung nennt allowMcpWrites und verweist nicht auf kube_exec/Terminal', () => {
+    for (const n of WRITE_TOOLS) {
+      const d = byName.get(n).description;
+      assert.ok(/allowMcpWrites/.test(d), `${n}: der Agent muss aus der Beschreibung erfahren, woran es liegt`);
+      assert.ok(!/kube_exec|terminal/i.test(d), `${n}: Beschreibung nennt einen nicht existierenden Weg`);
+    }
+  });
+
+  await check('isWriteTool() ist für alle vier schreibenden Tools wahr', () => {
+    for (const n of WRITE_TOOLS) assert.equal(mcpTools.isWriteTool(n), true, `${n} zählt nicht als schreibend`);
+    assert.equal(mcpTools.isWriteTool('kube_get'), false);
+  });
+
+  await check('kube_delete deklariert kind als Enum aus DELETABLE_KINDS', () => {
+    const kind = byName.get('kube_delete').inputSchema.properties.kind;
+    assert.deepEqual([...kind.enum].sort(), ['Job', 'Pod']);
+  });
+
+  await check('kube_scale deckelt replicas im Schema', () => {
+    const r = byName.get('kube_scale').inputSchema.properties.replicas;
+    assert.equal(typeof r.maximum, 'number');
+    assert.ok(r.maximum <= 1000);
   });
 
   await check('jedes Tool hat eine Beschreibung, die den Scope-Zwang nennt', () => {
@@ -685,6 +718,102 @@ process.env.MCP_STDIO_USER_ID = TEST_USER_ID;
     const res = await s.invoke('kube_get', { clusterId, kind: 'Pod' });
     assert.ok(res.isError, 'der Fehler hätte durchschlagen müssen');
     assert.equal(audit.rows.length, 0, 'ein fehlgeschlagener Read wurde als erfolgreich protokolliert');
+  });
+
+  // -------------------------------------------------------------------------
+  // Schreibende Tools — allowMcpWrites-Gate und Service-Weiterreichung
+  // -------------------------------------------------------------------------
+  const { KubeWritesService } = loadCompiled('kube/kube-writes.service.js');
+  const { RequestContext } = loadCompiled('common/request-context.js');
+  const ACTOR = {
+    userId: TEST_USER_ID, username: 't', role: 'admin',
+    projectScopeMode: 'all', customerScopeMode: 'all',
+  };
+  const CALL_ARGS = {
+    kube_scale: { kind: 'Deployment', name: 'a', namespace: 'n', replicas: 2 },
+    kube_rollout_restart: { kind: 'Deployment', name: 'a', namespace: 'n' },
+    kube_delete: { kind: 'Pod', name: 'a', namespace: 'n' },
+    kube_apply: { yaml: 'kind: Pod', namespace: 'n' },
+  };
+
+  function makeWriteEnv(clusterFlags) {
+    const state = { writeCalls: 0, built: 0, calls: [] };
+    const audit = makeAuditRecorder();
+    const cid = new Types.ObjectId();
+    const cluster = makeClusterDoc({ _id: cid, projectId: new Types.ObjectId(), ...clusterFlags });
+    const clusters = { findById: async () => cluster };
+    const client = {
+      buildConfig: async () => {
+        state.built += 1;
+        const api = new Proxy({}, { get: (_t, m) => async (p) => { state.writeCalls += 1; state.calls.push([m, p]); return { metadata: { resourceVersion: '1' }, spec: {} }; } });
+        return { kc: { makeApiClient: () => api }, release: () => {} };
+      },
+    };
+    const writes = new KubeWritesService(clusters, client, audit);
+    const server = makeServer({
+      kubeClustersService: clusters, kubeResourcesService: {}, kubeLogsService: {},
+      kubeClientService: client, kubeAuditService: audit, kubeWritesService: writes,
+    });
+    // Der Actor kommt wie im HTTP-Transport aus dem RequestContext.
+    const invoke = (tool, args) => RequestContext.run(ACTOR, undefined, () => server.invoke(tool, args));
+    return { server: { invoke }, state, audit, clusterId: cid.toString() };
+  }
+
+  await check('bei allowMcpWrites=false lehnt jedes schreibende Tool ab und nennt das Flag', async () => {
+    const env = makeWriteEnv({ readOnly: false, allowMcpWrites: false });
+    for (const [tool, extra] of Object.entries(CALL_ARGS)) {
+      const res = unwrap(await env.server.invoke(tool, { clusterId: env.clusterId, ...extra }));
+      assert.ok(res.error && /allowMcpWrites/.test(res.error), `${tool}: Grund fehlt: ${res.error}`);
+    }
+    assert.equal(env.state.built, 0, 'abgelehnte Tools bauten eine Verbindung auf');
+    assert.equal(env.state.writeCalls, 0);
+  });
+
+  await check('bei readOnly=true lehnen sie ebenfalls ab', async () => {
+    const env = makeWriteEnv({ readOnly: true, allowMcpWrites: false });
+    for (const [tool, extra] of Object.entries(CALL_ARGS)) {
+      const res = unwrap(await env.server.invoke(tool, { clusterId: env.clusterId, ...extra }));
+      assert.ok(res.error && /read-only/i.test(res.error), `${tool}: ${res.error}`);
+    }
+    assert.equal(env.state.writeCalls, 0);
+  });
+
+  await check('bei allowMcpWrites=true ruft kube_scale den Service und auditiert mit sourceContext mcp', async () => {
+    const env = makeWriteEnv({ readOnly: false, allowMcpWrites: true });
+    const res = unwrap(await env.server.invoke('kube_scale', { clusterId: env.clusterId, ...CALL_ARGS.kube_scale }));
+    assert.ok(!res.error, res.error);
+    assert.ok(env.state.writeCalls >= 1);
+    assert.equal(env.audit.rows.length, 1);
+    const row = env.audit.rows[0];
+    assert.equal(row.sourceContext, 'mcp');
+    assert.equal(row.action, 'write');
+    assert.equal(row.verb, 'scale');
+    assert.equal(row.userId, TEST_USER_ID);
+  });
+
+  await check('kube_rollout_restart und kube_delete laufen über den Service (verb im Audit)', async () => {
+    const env = makeWriteEnv({ readOnly: false, allowMcpWrites: true });
+    await env.server.invoke('kube_rollout_restart', { clusterId: env.clusterId, ...CALL_ARGS.kube_rollout_restart });
+    await env.server.invoke('kube_delete', { clusterId: env.clusterId, ...CALL_ARGS.kube_delete });
+    assert.deepEqual(env.audit.rows.map((r) => r.verb), ['restart', 'delete']);
+    assert.ok(env.audit.rows.every((r) => r.sourceContext === 'mcp'));
+  });
+
+  await check('kube_apply mit ungültigem YAML wird vom Service abgelehnt und mit mcp auditiert', async () => {
+    const env = makeWriteEnv({ readOnly: false, allowMcpWrites: true });
+    const res = unwrap(await env.server.invoke('kube_apply', { clusterId: env.clusterId, yaml: 'kind: Pod', namespace: 'n' }));
+    assert.ok(res.error, 'ein Dokument ohne apiVersion hätte abgelehnt werden müssen');
+    assert.equal(env.audit.rows.length, 1);
+    assert.equal(env.audit.rows[0].sourceContext, 'mcp');
+    assert.ok(env.audit.rows[0].errorMsg);
+    assert.equal(env.state.built, 0);
+  });
+
+  await check('kube_delete lehnt ein Deployment ab, bevor etwas geschrieben wird', async () => {
+    const env = makeWriteEnv({ readOnly: false, allowMcpWrites: true });
+    const res = unwrap(await env.server.invoke('kube_delete', { clusterId: env.clusterId, kind: 'Deployment', name: 'a', namespace: 'n' }));
+    assert.ok(res.error);
+    assert.equal(env.state.writeCalls, 0);
   });
 
   console.log('');
