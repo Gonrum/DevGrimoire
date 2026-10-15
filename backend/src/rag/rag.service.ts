@@ -972,6 +972,14 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    // Persönliche Recherchen (weder Projekt noch Kunde) sind nur für ihren
+    // Besitzer sichtbar; der RAG-Scope kennt keinen Besitzer. Nicht indizieren
+    // und einen vorhandenen Eintrag entfernen (z.B. nach Verschieben/Ablösen).
+    if (entity === 'research' && asText(doc.projectId) === '' && asText(doc.customerId) === '') {
+      await this.removeDocument(docId);
+      return;
+    }
+
     const extracted = this.extractText(entity, doc);
     if (!extracted || (!extracted.title && !extracted.content)) return;
 

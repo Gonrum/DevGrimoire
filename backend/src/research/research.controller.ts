@@ -42,9 +42,14 @@ export class ResearchController {
     return this.researchService.search(query, projectId, customerId);
   }
 
+  @Get('mine')
+  listMine() {
+    return this.researchService.listMine();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.researchService.findById(id);
+    return this.researchService.findVisibleById(id);
   }
 
   @Put(':id')
