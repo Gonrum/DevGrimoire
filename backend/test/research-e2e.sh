@@ -2,6 +2,7 @@
 # E2E: Webrecherche P1 — Warteschlange, Steuerung, Verschieben gegen den laufenden Stack.
 # Ein Fake-LLM-Endpunkt (workflow-Pool) sorgt dafür, dass der Lauf starten kann.
 # Der Lese-Inhalt wird NICHT geprüft (SSRF-Schutz sperrt den lokalen Fake-Webserver);
+# (der Fake-read_page trifft den SSRF-Schutz, der 127.0.0.1/private Adressen sperrt);
 # der volle Lauf mit echtem Modell ist der manuelle Test.
 set -euo pipefail
 
@@ -10,7 +11,7 @@ API_BASE="${API_BASE:-http://localhost:3200/api}"
 FAKE_PORT="${FAKE_PORT:-18080}"
 # Backend-Container erreicht den Host über host.docker.internal (extra_hosts: host-gateway).
 FAKE_URL="${FAKE_URL:-http://host.docker.internal:$FAKE_PORT}"
-KEY="$(grep -E '^DEVGRIMOIRE_API_KEY=' "$ROOT/.env" | cut -d= -f2- | tr -d "\"'")"
+KEY="$(grep -E '^DEVGRIMOIRE_API_KEY=' "$ROOT/.env" 2>/dev/null | cut -d= -f2- | tr -d "\"'" || true)"
 [ -n "$KEY" ] || { echo "DEVGRIMOIRE_API_KEY fehlt in .env"; exit 2; }
 command -v jq >/dev/null && command -v curl >/dev/null || { echo "jq/curl fehlen"; exit 2; }
 
@@ -26,8 +27,19 @@ cleanup() {
   for rid in "${IDS[@]:-}"; do [ -n "$rid" ] && code -X DELETE "$API_BASE/research/$rid" >/dev/null; done
   [ -n "$EP_ID" ] && api -X DELETE "$API_BASE/llm-endpoints/$EP_ID" >/dev/null
   [ -n "$FAKE_PID" ] && kill "$FAKE_PID" 2>/dev/null
+  # Verifikation (best-effort, bricht den Trap nie ab)
+  if [ -n "$EP_ID" ]; then
+    api "$API_BASE/llm-endpoints" | jq -e --arg id "$EP_ID" '[.[] | select((.id // ._id) == $id)] | length > 0' >/dev/null 2>&1 \
+      && echo "WARN: Fake-Endpunkt $EP_ID existiert noch"
+  fi
+  for rid in "${IDS[@]:-}"; do
+    [ -n "$rid" ] && [ "$(code "$API_BASE/research/$rid")" != 404 ] && echo "WARN: Recherche $rid existiert noch"
+  done
+  return 0
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 status_of() { api "$API_BASE/research/$1" | jq -r '.status // empty'; }
 wait_status() { # id, Regex, Sekunden
@@ -39,7 +51,14 @@ wait_status() { # id, Regex, Sekunden
 HOST=0.0.0.0 PORT="$FAKE_PORT" node "$ROOT/backend/test/research-fake-llm.cjs" >/dev/null 2>&1 &
 FAKE_PID=$!
 for _ in $(seq 1 20); do curl -s "http://127.0.0.1:$FAKE_PORT/seite" >/dev/null && break; sleep 0.25; done
-curl -s "http://127.0.0.1:$FAKE_PORT/seite" | grep -q Testseite && pass "Fake-LLM gestartet" || fail "Fake-LLM gestartet"
+if curl -s "http://127.0.0.1:$FAKE_PORT/seite" | grep -q Testseite; then pass "Fake-LLM gestartet"; else
+  fail "Fake-LLM gestartet"; echo "0/$TOTAL bestanden (Abbruch: Fake-Server nicht erreichbar)"; exit 1
+fi
+
+# Altlasten eines früheren abgebrochenen Laufs: nur Label UND baseUrl exakt gleich.
+for old in $(api "$API_BASE/llm-endpoints" | jq -r --arg u "$FAKE_URL" '.[] | select(.label=="e2e-fake" and .baseUrl==$u) | (.id // ._id)'); do
+  api -X DELETE "$API_BASE/llm-endpoints/$old" >/dev/null
+done
 
 EP_BODY="$(jq -nc --arg u "$FAKE_URL" '{label:"e2e-fake",provider:"openai-compatible",baseUrl:$u,model:"fake",purposes:["workflow"],concurrency:1,priority:1000}')"
 EP_RES="$(api -X POST "$API_BASE/llm-endpoints" -d "$EP_BODY")"
@@ -51,6 +70,7 @@ SC="$(echo "$START" | tail -n1)"; RID="$(echo "$START" | head -n1 | jq -r '.ids[
 [ -n "$RID" ] && IDS+=("$RID")
 [ "$SC" = 201 ] && [ -n "$RID" ] && pass "start -> 201, Id $RID" || fail "start -> 201 (war $SC)"
 
+# Nicht racy: /research/queue listet queued UND running, die Id ist direkt nach start also immer enthalten.
 api "$API_BASE/research/queue" | jq -e --arg id "$RID" '[.positions[].id] | index($id) != null' >/dev/null \
   && pass "queue enthält Id" || fail "queue enthält Id"
 
@@ -73,7 +93,12 @@ if [ -z "$PROJ" ]; then fail "Projekt für move ermittelt"; else
   [ "$MC" = 409 ] && pass "move (nicht done) -> 409" || fail "move -> 409 (war $MC)"
 fi
 
-BC="$(code -X POST "$API_BASE/research/start" -d '{"topics":["ab"]}')"
+BAD="$(curl -s -w '\n%{http_code}' -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -X POST "$API_BASE/research/start" -d '{"topics":["ab"]}')"
+BC="$(echo "$BAD" | tail -n1)"
+if [ "$BC" != 400 ]; then
+  # Regression: angelegte Läufe nicht verwaisen lassen
+  for bid in $(echo "$BAD" | head -n1 | jq -r '.ids[]? // empty' 2>/dev/null); do IDS+=("$bid"); done
+fi
 [ "$BC" = 400 ] && pass "start mit zu kurzem Thema -> 400" || fail "start 'ab' -> 400 (war $BC)"
 
 DC="$(code -X DELETE "$API_BASE/research/$RID")"
