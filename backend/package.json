@@ -80,6 +80,7 @@
     "check:research-pipeline": "node scripts/research-pipeline-check.cjs",
     "check:research-runner": "node scripts/research-runner-check.cjs",
     "check:research-access": "node scripts/research-access-check.cjs",
+    "check:research-control": "node scripts/research-control-check.cjs",
     "check:rag-research-scope": "node scripts/rag-research-scope-check.cjs",
     "check:research-due": "node scripts/research-due-check.cjs",
     "check:research-topic-scope-default": "node scripts/research-topic-scope-default-check.cjs",

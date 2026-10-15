@@ -21,6 +21,11 @@ import { ResearchOwnerLookup } from './research-owner';
 import { RESEARCH_QUEUE, ResearchQueueService } from './research-queue';
 import { ResearchRunnerService } from './research-runner.service';
 import { ResearchProcessor } from './research.processor';
+import { ResearchControlService } from './research-control.service';
+import { ResearchRunsController } from './research-runs.controller';
+import { ResearchCustomerLookup, ResearchProjectLookup } from './research-targets';
+import { Project, ProjectSchema } from '../projects/schemas/project.schema';
+import { Customer, CustomerSchema } from '../customers/schemas/customer.schema';
 
 @Module({
   imports: [
@@ -35,9 +40,13 @@ import { ResearchProcessor } from './research.processor';
       // Nur lesend: Besitzer eines Laufs (Scope). Direkt das Modell statt
       // AuthService, um keinen Modul-Zyklus zu bauen (Muster aus PushModule).
       { name: User.name, schema: UserSchema },
+      // Nur für die Existenzprüfung beim Verschieben (ProjectsModule importiert dieses Modul).
+      { name: Project.name, schema: ProjectSchema },
+      { name: Customer.name, schema: CustomerSchema },
     ]),
   ],
-  controllers: [ResearchController],
+  // Reihenfolge ist Pflicht: statische Routen (queue, start) vor dem Legacy-`GET :id`.
+  controllers: [ResearchRunsController, ResearchController],
   providers: [
     ResearchService,
     ResearchStepsService,
@@ -53,10 +62,13 @@ import { ResearchProcessor } from './research.processor';
     ResearchQueueService,
     ResearchRunnerService,
     ResearchProcessor,
+    ResearchProjectLookup,
+    ResearchCustomerLookup,
+    ResearchControlService,
   ],
   exports: [
     ResearchService, ResearchStepsService, ResearchLiveService, ResearchLlmService, ResearchWeb,
-    ResearchRunStore, ResearchQueueService, ResearchRunnerService,
+    ResearchRunStore, ResearchQueueService, ResearchRunnerService, ResearchControlService,
   ],
 })
 export class ResearchModule {}

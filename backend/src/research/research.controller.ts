@@ -1,12 +1,16 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, HttpCode, BadRequestException } from '@nestjs/common';
 import { ResearchService } from './research.service';
+import { ResearchControlService } from './research-control.service';
 import { CreateResearchDto } from './dto/create-research.dto';
 import { UpdateResearchDto } from './dto/update-research.dto';
 import { ValidateProjectIdPipe } from '../common/pipes/validate-project-id.pipe';
 
 @Controller('research')
 export class ResearchController {
-  constructor(private readonly researchService: ResearchService) {}
+  constructor(
+    private readonly researchService: ResearchService,
+    private readonly control: ResearchControlService,
+  ) {}
 
   @Post()
   @HttpCode(201)
@@ -60,6 +64,7 @@ export class ResearchController {
   @Delete(':id')
   @HttpCode(204)
   remove(@Param('id') id: string) {
-    return this.researchService.remove(id);
+    // Bricht einen laufenden Lauf ab, entfernt Schritte und Dokument.
+    return this.control.remove(id);
   }
 }

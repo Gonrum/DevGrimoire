@@ -95,6 +95,41 @@ export class ResearchRunStore {
     return d ? toRunDoc(d) : null;
   }
 
+  /** Neues wartendes Dokument; `ownerUserId` null = ohne Besitzer (Auth aus). */
+  async create(input: {
+    ownerUserId: string | null; title: string; focus?: string; depth: ResearchDepth;
+    files: RunFile[]; queuedAt: Date; moveTargetHint?: string;
+  }): Promise<string> {
+    if (input.ownerUserId !== null && !Types.ObjectId.isValid(input.ownerUserId)) throw new Error('ungültige Besitzer-Id');
+    const created = await this.model.create({
+      ownerUserId: input.ownerUserId === null ? null : oid(input.ownerUserId),
+      title: input.title,
+      ...(input.focus ? { focus: input.focus } : {}),
+      depth: input.depth,
+      files: input.files,
+      status: 'queued',
+      mode: 'research',
+      queuedAt: input.queuedAt,
+      ...(input.moveTargetHint ? { moveTargetHint: input.moveTargetHint } : {}),
+    });
+    return created._id.toString();
+  }
+
+  /** Wartende und laufende Dokumente eines Besitzers (null = ohne Besitzer). */
+  async listActive(ownerUserId: string | null): Promise<RunDoc[]> {
+    if (ownerUserId !== null && !Types.ObjectId.isValid(ownerUserId)) return [];
+    const rows = await this.model
+      .find({ ownerUserId: ownerUserId === null ? null : oid(ownerUserId), status: { $in: ['queued', 'running'] } })
+      .lean<LeanResearch[]>()
+      .exec();
+    return rows.map(toRunDoc);
+  }
+
+  async delete(id: string): Promise<void> {
+    if (!Types.ObjectId.isValid(id)) return;
+    await this.model.deleteOne({ _id: oid(id) }).exec();
+  }
+
   /** `undefined` → `$unset`, Id-Felder als ObjectId (oder null). */
   async patch(id: string, set: RunPatch): Promise<void> {
     const $set: Record<string, unknown> = {};
