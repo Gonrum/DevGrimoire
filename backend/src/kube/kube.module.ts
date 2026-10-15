@@ -9,6 +9,7 @@ import { KubeClientService } from './kube-client.service';
 import { KubeAuditService } from './kube-audit.service';
 import { KubeResourcesService } from './kube-resources.service';
 import { KubeLogsService } from './kube-logs.service';
+import { KubeWritesService } from './kube-writes.service';
 import { KubeController } from './kube.controller';
 import { KubeResourcesController } from './kube-resources.controller';
 import { SecretsModule } from '../secrets/secrets.module';
@@ -31,11 +32,11 @@ import { SshModule } from '../ssh/ssh.module';
   controllers: [KubeController, KubeResourcesController],
   providers: [
     KubeClustersService, KubeTransportService, KubeClientService, KubeAuditService,
-    KubeResourcesService, KubeLogsService,
+    KubeResourcesService, KubeLogsService, KubeWritesService,
   ],
   exports: [
     KubeClustersService, KubeClientService, KubeTransportService, KubeAuditService,
-    KubeResourcesService, KubeLogsService,
+    KubeResourcesService, KubeLogsService, KubeWritesService,
   ],
 })
 export class KubeModule {}
