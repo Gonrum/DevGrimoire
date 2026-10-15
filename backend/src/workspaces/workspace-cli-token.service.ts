@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { errorMessage } from '../common/narrow';
+import { DG_CLI_TOKEN_TYPE } from '../common/access-token';
 
 const TOKEN_TTL = '1h';
 /**
@@ -32,7 +33,7 @@ export class WorkspaceCliTokenService {
 
   mint(workspaceId: string, projectId: string, ttl: '1h' | '8h' = TOKEN_TTL): string {
     return this.jwt.sign(
-      { workspaceId, projectId },
+      { typ: DG_CLI_TOKEN_TYPE, workspaceId, projectId },
       { subject: TOKEN_SUBJECT, expiresIn: ttl },
     );
   }
@@ -61,10 +62,11 @@ export class WorkspaceCliTokenService {
     try {
       const payload = this.jwt.verify<{
         sub: string;
+        typ?: string;
         workspaceId: string;
         projectId: string;
       }>(token);
-      if (payload.sub !== TOKEN_SUBJECT) return null;
+      if (payload.sub !== TOKEN_SUBJECT || payload.typ !== DG_CLI_TOKEN_TYPE) return null;
       if (typeof payload.workspaceId !== 'string' || typeof payload.projectId !== 'string') {
         return null;
       }

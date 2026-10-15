@@ -11,6 +11,7 @@ import { LlmConfigDto } from './dto/update-profile.dto';
 import { EncryptionService } from '../common/encryption.service';
 import { errorMessage, isDuplicateKeyError } from '../common/narrow';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { ACCESS_TOKEN_TYPE } from '../common/access-token';
 
 const API_KEY_MASK = '***';
 // AES-GCM encrypted values use the format `<ivHex>:<tagHex>:<cipherHex>` —
@@ -648,7 +649,7 @@ export class AuthService {
 
   private generateAccessToken(user: UserDocument): string {
     return this.jwtService.sign(
-      { sub: user._id.toString(), username: user.username, role: user.role },
+      { typ: ACCESS_TOKEN_TYPE, sub: user._id.toString(), username: user.username, role: user.role },
       { expiresIn: ACCESS_TOKEN_EXPIRY },
     );
   }

@@ -13,6 +13,7 @@ import { User, UserSchema } from './schemas/user.schema';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { EncryptionService } from '../common/encryption.service';
 import { resolveJwtSecret } from '../common/jwt-secret';
+import { JWT_ALGORITHM } from '../common/access-token';
 
 @Global()
 @Module({
@@ -27,7 +28,8 @@ import { resolveJwtSecret } from '../common/jwt-secret';
         }
         return resolveJwtSecret();
       })(),
-      signOptions: { expiresIn: '15m' },
+      signOptions: { expiresIn: '15m', algorithm: JWT_ALGORITHM },
+      verifyOptions: { algorithms: [JWT_ALGORITHM] },
     }),
     MongooseModule.forFeature([
       { name: RefreshToken.name, schema: RefreshTokenSchema },

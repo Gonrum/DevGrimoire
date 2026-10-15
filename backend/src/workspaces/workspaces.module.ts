@@ -21,6 +21,7 @@ import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { TodosModule } from '../todos/todos.module';
 import { KubeModule } from '../kube/kube.module';
 import { resolveJwtSecret } from '../common/jwt-secret';
+import { JWT_ALGORITHM } from '../common/access-token';
 
 @Module({
   imports: [
@@ -31,6 +32,8 @@ import { resolveJwtSecret } from '../common/jwt-secret';
     // (T-168). Both instances share JWT_SECRET, so tokens are interchangeable.
     JwtModule.register({
       secret: resolveJwtSecret(),
+      signOptions: { algorithm: JWT_ALGORITHM },
+      verifyOptions: { algorithms: [JWT_ALGORITHM] },
     }),
     LogsModule,
     SettingsModule,

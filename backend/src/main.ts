@@ -87,6 +87,7 @@ import { EventsBusService, QuestionEvent } from './events/events-bus.service';
 import { ProjectChangeEvent } from './events/project-event';
 import { Subscription } from 'rxjs';
 import { ScalarQueryPipe } from './common/scalar-query.pipe';
+import { accessTokenUserId } from './common/access-token';
 
 function createMcpServer(services: McpServices): Server {
   const server = new Server(
@@ -151,12 +152,6 @@ function asResizeMessage(value: unknown): { cols: unknown; rows: unknown } | und
  */
 function singleValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-/** JWT-Payload, wie Auth ihn signiert: Standard-`sub`, auf manchen Pfaden zusätzlich `userId`. */
-interface TerminalTokenPayload {
-  sub?: string;
-  userId?: string;
 }
 
 /**
@@ -769,10 +764,9 @@ async function bootstrap() {
 
     let userId: string | undefined;
     try {
-      const payload = jwt.verify<TerminalTokenPayload>(token);
-      // Auth signs JWTs with the standard `sub` claim (user id) plus a
-      // legacy `userId` field on some paths — accept either.
-      userId = payload.sub || payload.userId;
+      // Nur Access-Tokens (typ + ObjectId-sub); ein dg-CLI-Token ist mit
+      // demselben Secret signiert und darf hier keine Shell öffnen.
+      userId = accessTokenUserId(jwt.verify<object>(token)) ?? undefined;
     } catch {
       return reject(401, 'Unauthorized');
     }
@@ -939,8 +933,7 @@ async function bootstrap() {
 
     let userId: string | undefined;
     try {
-      const payload = jwt.verify<TerminalTokenPayload>(token);
-      userId = payload.sub || payload.userId;
+      userId = accessTokenUserId(jwt.verify<object>(token)) ?? undefined;
     } catch {
       return rejectUpgrade(401, 'Unauthorized');
     }
@@ -1159,8 +1152,7 @@ async function bootstrap() {
       const token = url.searchParams.get('token');
       if (!token) return reject(401, 'Unauthorized');
       try {
-        const payload = jwt.verify<TerminalTokenPayload>(token);
-        userId = payload.sub || payload.userId;
+        userId = accessTokenUserId(jwt.verify<object>(token)) ?? undefined;
       } catch {
         return reject(401, 'Unauthorized');
       }

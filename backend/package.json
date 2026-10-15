@@ -108,6 +108,7 @@
     "check:source-text": "node scripts/source-text-check.cjs",
     "check:mcp-hygiene": "node scripts/mcp-hygiene-check.cjs",
     "check:outbound-guard": "node scripts/outbound-guard-check.cjs",
+    "check:jwt-token-types": "node scripts/jwt-token-types-check.cjs",
     "check:dg-kube-scope": "node scripts/dg-kube-scope-check.cjs",
     "check:kube-access": "node scripts/kube-access-check.cjs",
     "checks": "node scripts/run-checks.cjs"

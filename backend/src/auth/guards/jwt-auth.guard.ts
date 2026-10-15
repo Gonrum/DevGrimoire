@@ -69,6 +69,9 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       if (!owner) {
         throw new UnauthorizedException('API key owner no longer exists');
       }
+      if (owner.active === false) {
+        throw new UnauthorizedException('API key owner is deactivated');
+      }
       // Scope on the request.user combines the api-key scope with the owning
       // user's scope so an api-key can never widen access beyond its owner.
       // Concretely: if the user has projectScopeMode='allowlist' with 5 ids,
@@ -113,10 +116,18 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       // helpers (actorCanAccessProject etc.) work for human-user requests too.
       // The JWT itself only carries sub/username/role — scope changes after
       // login take effect on the next request, not after token refresh.
+      //
+      // Fehlt der Nutzer oder ist er deaktiviert, ist das ein 401. Vorher lief
+      // der Request dann mit dem Token-Inhalt allein weiter — ohne Scope-Felder,
+      // und fehlender Scope heisst in `actorCanAccessProject` „alle Projekte":
+      // ein gelöschter, eingeschränkter Nutzer hatte bis zum Token-Ablauf mehr
+      // Zugriff als vorher. Die Rolle kommt ebenfalls aus der DB, damit eine
+      // Herabstufung sofort greift.
       const fullUser = await this.authService.findUserById(jwtUser.userId);
-      if (fullUser) {
-        request.user = { ...jwtUser, ...scopeFromUser(fullUser) };
+      if (!fullUser || fullUser.active === false) {
+        throw new UnauthorizedException();
       }
+      request.user = { ...jwtUser, role: fullUser.role, ...scopeFromUser(fullUser) };
     }
     return passportResult;
   }
