@@ -1,7 +1,7 @@
 import type { LlmMessageWithTools, OpenAiToolDef } from '../chat/chat-llm.service';
 import { errorMessage, isRecord, isUnknownArray, requireString, type ToolArgs } from '../common/tool-args';
 import { INJECTION_GUARD } from './research-config';
-import { Interrupted } from './research-llm.service';
+import { budgetExhausted, Interrupted, TOKEN_BUDGET_EXHAUSTED } from './research-llm.service';
 import {
   filesBlock, followUpsBlock, relatedBlock, REPORT_RULES, resultsBlock, wrapUntrusted, type RoundResult,
 } from './research-prompts';
@@ -180,6 +180,7 @@ export async function runLeadAgent(d: LeadDeps): Promise<LeadOutcome> {
       onReroute: ctx.onReroute('main'),
     });
     ctx.models.add(res.model);
+    if (budgetExhausted(res)) ctx.step('error', TOKEN_BUDGET_EXHAUSTED, 'main');
     if (res.toolCalls.length === 0) {
       // Leere Assistenten-Nachrichten erzeugen bei Anthropic einen leeren Textblock (400).
       if (res.text.trim() !== '') messages.push({ role: 'assistant', content: res.text });

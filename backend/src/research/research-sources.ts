@@ -5,6 +5,8 @@ export interface SourceEntry {
   title: string;
   notes: string;
   relevant: boolean;
+  /** Teilauftrag, der die Seite gelesen hat (Fortsetzen gibt dessen nicht relevante Seiten frei). */
+  task?: number;
 }
 
 export function normalizeUrl(url: string): string {
@@ -97,10 +99,32 @@ export class SourceRegistry {
 
   release(url: string): void { this.read.delete(normalizeUrl(url)); }
 
-  addPage(url: string, title: string): SourceEntry {
-    const entry = { n: this.nextN++, url, title, notes: '', relevant: false };
+  /** Dieselbe (normalisierte) URL behält ihre Nummer — z. B. wenn ein fortgesetzter Teilauftrag sie erneut liest. */
+  addPage(url: string, title: string, task?: number): SourceEntry {
+    const key = normalizeUrl(url);
+    for (const e of this.entries.values()) {
+      if (e.url !== undefined && normalizeUrl(e.url) === key) {
+        if (title) e.title = title;
+        if (task !== undefined) e.task = task;
+        return e;
+      }
+    }
+    const entry: SourceEntry = { n: this.nextN++, url, title, notes: '', relevant: false, ...(task !== undefined ? { task } : {}) };
     this.entries.set(entry.n, entry);
     return entry;
+  }
+
+  /** Gibt die nicht relevanten Seiten dieser Teilaufträge wieder zum Lesen frei. */
+  releaseUnusedOf(tasks: Iterable<number>): number {
+    const wanted = new Set(tasks);
+    let n = 0;
+    for (const e of this.entries.values()) {
+      if (e.url !== undefined && !e.relevant && e.task !== undefined && wanted.has(e.task)) {
+        this.release(e.url);
+        n += 1;
+      }
+    }
+    return n;
   }
 
   addFile(name: string): SourceEntry {
@@ -118,6 +142,20 @@ export class SourceRegistry {
   all(): SourceEntry[] { return [...this.entries.values()].sort((a, b) => a.n - b.n); }
 }
 
+function oneLineText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/** Seitentitel als Markdown-Linktext: einzeilig, Klammern und Backslash maskiert. */
+export function linkText(text: string): string {
+  return oneLineText(text).replace(/[\\[\]]/g, (c) => `\\${c}`);
+}
+
+/** URL als Linkziel: Klammern und Leerraum prozentkodiert, damit der Link nicht vorzeitig endet. */
+function linkTarget(url: string): string {
+  return url.trim().replace(/[()\s<>]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
+}
+
 export function appendSourcesSection(report: string, sources: SourceEntry[]): { report: string; cited: SourceEntry[] } {
   const known = new Set(sources.map((s) => s.n));
   const body = dropUnknownCitations(stripTrailingSources(report), known).trimEnd();
@@ -128,7 +166,7 @@ export function appendSourcesSection(report: string, sources: SourceEntry[]): { 
   cited.sort((a, b) => a.n - b.n);
   if (cited.length === 0) return { report: body, cited };
   const lines = cited.map((s) => (s.file
-    ? `- [${s.n}] 📎 ${s.file} (eigene Datei)`
-    : `- [${s.n}] [${s.title || s.url}](${s.url})`));
+    ? `- [${s.n}] 📎 ${oneLineText(s.file)} (eigene Datei)`
+    : `- [${s.n}] [${linkText(s.title || s.url || '')}](${linkTarget(s.url ?? '')})`));
   return { report: `${body}\n\n## Quellen\n${lines.join('\n')}`, cited };
 }

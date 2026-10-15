@@ -3,9 +3,9 @@ import { errorMessage, isRecord, isUnknownArray, requireNumber, requireString, t
 import { INJECTION_GUARD, TASK_LIMITS } from './research-config';
 import { splitParts } from './research-files';
 import { wrapUntrusted } from './research-prompts';
-import { Interrupted } from './research-llm.service';
+import { budgetExhausted, Interrupted, TOKEN_BUDGET_EXHAUSTED } from './research-llm.service';
 import { throwIfAborted, type RunContext } from './research-run-context';
-import { citedSourcesOf } from './research-sources';
+import { citedSourcesOf, normalizeUrl } from './research-sources';
 
 export interface TaskInput { n: number; question: string; queries: string[] }
 export interface TaskOutcome { status: 'done' | 'failed'; summary: string; sources: number[] }
@@ -109,6 +109,7 @@ async function fallbackSummary(ctx: RunContext, task: TaskInput, read: Map<numbe
       onReroute: ctx.onReroute(lane),
     });
     ctx.models.add(res.model);
+    if (budgetExhausted(res)) ctx.step('error', TOKEN_BUDGET_EXHAUSTED, lane);
     const summary = res.text.trim();
     if (summary.length >= MIN_SUMMARY) {
       const sources = finish(ctx, read, read.keys());
@@ -124,6 +125,8 @@ export async function runTaskAgent(ctx: RunContext, task: TaskInput): Promise<Ta
   const read = new Map<number, string>();
   let searches = 0;
   let pageTries = 0;
+  /** Normalisierte URLs aus den eigenen Suchtreffern — nur die dürfen gelesen werden. */
+  const found = new Set<string>();
   const messages: LlmMessageWithTools[] = [
     { role: 'system', content: taskSystemPrompt(ctx, task) },
     { role: 'user', content: 'Start now.' },
@@ -144,6 +147,7 @@ export async function runTaskAgent(ctx: RunContext, task: TaskInput): Promise<Ta
           ctx.usedQueries.add(query.toLowerCase().trim());
           ctx.step('search', query, lane);
           const hits = await ctx.web.search(query, ctx.signal);
+          for (const h of hits) found.add(normalizeUrl(h.url));
           if (hits.length === 0) return { content: 'No results.' };
           return {
             content: hits
@@ -153,6 +157,8 @@ export async function runTaskAgent(ctx: RunContext, task: TaskInput): Promise<Ta
         }
         case 'read_page': {
           const url = requireString(args, 'url');
+          // Kein Lesen beliebiger URLs: ein eingeschleuster Text könnte sonst Daten an eine fremde Adresse senden.
+          if (!found.has(normalizeUrl(url))) return { content: 'Error: only pages from your search results can be read' };
           if (pageTries >= ctx.cfg.pages) return { content: 'Error: page budget used up, call submit_findings' };
           pageTries++;
           if (!ctx.registry.claim(url)) {
@@ -169,7 +175,7 @@ export async function runTaskAgent(ctx: RunContext, task: TaskInput): Promise<Ta
           }
           if (page.text.trim().length < TASK_LIMITS.minPageChars) return { content: 'Error: page not readable' };
           const text = page.text.slice(0, TASK_LIMITS.pageChars);
-          const entry = ctx.registry.addPage(url, page.title);
+          const entry = ctx.registry.addPage(url, page.title, task.n);
           read.set(entry.n, text);
           return { content: wrapUntrusted(`Source [${entry.n}] – ${oneLine(page.title)}`, 'PAGE', text) };
         }
@@ -217,6 +223,7 @@ export async function runTaskAgent(ctx: RunContext, task: TaskInput): Promise<Ta
       onReroute: ctx.onReroute(lane),
     });
     ctx.models.add(res.model);
+    if (budgetExhausted(res)) ctx.step('error', TOKEN_BUDGET_EXHAUSTED, lane);
     if (res.toolCalls.length === 0) {
       // Leere Assistenten-Nachrichten erzeugen bei Anthropic einen leeren Textblock (400).
       if (res.text.trim() !== '') messages.push({ role: 'assistant', content: res.text });

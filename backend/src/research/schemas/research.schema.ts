@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { ALL_SENSITIVITY_LEVELS, Sensitivity, SensitivityLevel } from '../../common/sensitivity';
-import type { ResearchDepth, ResearchMode, ResearchStatus, TaskStatus } from '../research-types';
+import type { ResearchDepth, ResearchMode, ResearchStatus, TaskStatus, TaskVia } from '../research-types';
 
 export type ResearchDocument = HydratedDocument<Research>;
 
@@ -13,6 +13,8 @@ export class ResearchSource {
   @Prop({ default: '' }) title: string;
   @Prop({ default: '' }) notes: string;
   @Prop({ default: false }) relevant: boolean;
+  /** Teilauftrag, der die Seite gelesen hat. */
+  @Prop() task?: number;
 }
 export const ResearchSourceSchema = SchemaFactory.createForClass(ResearchSource);
 
@@ -25,6 +27,8 @@ export class ResearchTask {
   @Prop({ type: String, enum: ['queued', 'running', 'done', 'failed'], default: 'queued' }) status: TaskStatus;
   @Prop() summary?: string;
   @Prop({ type: [Number], default: [] }) sources: number[];
+  /** Ausführung: Agent mit Werkzeugen oder fester Ablauf; Fortsetzen nimmt dieselbe. */
+  @Prop({ type: String, enum: ['agent', 'fixed'], default: 'agent' }) via?: TaskVia;
 }
 export const ResearchTaskSchema = SchemaFactory.createForClass(ResearchTask);
 

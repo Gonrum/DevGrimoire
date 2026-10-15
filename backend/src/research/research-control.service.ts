@@ -9,7 +9,8 @@ import { assertMoveTarget, canControlResearch, isAssigned } from './research-acc
 import { prepareFiles } from './research-files';
 import { ResearchLiveService } from './research-live.service';
 import { ResearchQueueService } from './research-queue';
-import { ResearchRunStore, type RunDoc } from './research-run-store';
+import { ResearchRunStore, type RunDoc, type RunPatch } from './research-run-store';
+import type { ResearchTask } from './schemas/research.schema';
 import { ResearchStepsService } from './research-steps.service';
 import { ResearchCustomerLookup, ResearchProjectLookup } from './research-targets';
 import { TOPIC_LIMITS } from './research-config';
@@ -106,13 +107,25 @@ export class ResearchControlService {
     this.live.abort(id);
   }
 
+  /**
+   * Abbruch eines nicht laufenden (wartenden oder pausierten) Dokuments: unterbrochene
+   * Teilaufträge gelten als gescheitert — sonst hielte ein späteres Vertiefen sie für
+   * „fortzusetzen" und arbeitete die alte Runde statt der neuen Frage ab. Mit Bericht
+   * zurück auf `done` im normalen Modus.
+   */
+  private cancelledPatch(doc: RunDoc): RunPatch {
+    const failed: ResearchTask['status'] = 'failed';
+    const tasks = doc.tasks.map((t) => (t.status === 'running' ? { ...t, status: failed } : t));
+    const flags = { cancelRequested: false, pauseRequested: false };
+    if (doc.content) return { ...flags, status: 'done', tasks, mode: 'research', modeQuestion: undefined };
+    return { ...flags, status: 'cancelled', tasks };
+  }
+
   async cancel(id: string): Promise<void> {
     const doc = await this.load(id);
     if (doc.status === 'queued') {
       // Statusgeschützt: hat ein Worker das Dokument inzwischen übernommen, ist es `running`.
-      const moved = await this.store.transitionFromQueued(id, {
-        status: doc.content ? 'done' : 'cancelled', cancelRequested: false, pauseRequested: false,
-      });
+      const moved = await this.store.transitionFromQueued(id, this.cancelledPatch(doc));
       if (!moved) return this.requestStop(id, 'cancelRequested');
       await this.queue.remove(id);
       this.live.end(id);
@@ -121,11 +134,7 @@ export class ResearchControlService {
     if (doc.status === 'running') return this.requestStop(id, 'cancelRequested');
     if (doc.status !== 'paused') throw this.conflict(doc);
     await this.queue.remove(id);
-    await this.store.patch(id, {
-      status: doc.content ? 'done' : 'cancelled',
-      cancelRequested: false,
-      pauseRequested: false,
-    });
+    await this.store.patch(id, this.cancelledPatch(doc));
     this.live.end(id);
   }
 

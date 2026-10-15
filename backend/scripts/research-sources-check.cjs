@@ -21,7 +21,7 @@ const { SourceRegistry, citedSourcesOf, appendSourcesSection } = loadCompiled('r
 const { prepareFiles, splitParts, extractUploadText } = loadCompiled('research/research-files.js');
 const { DEPTH, INJECTION_GUARD } = loadCompiled('research/research-config.js');
 
-const EXPECTED_CHECKS = 14;
+const EXPECTED_CHECKS = 17;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -110,6 +110,38 @@ async function check(label, fn) {
     assert.ok(!s1.includes('fake'));
     const s2 = appendSourcesSection('T [1]\n\n### Quellen:\n1. fake', src).report;
     assert.ok(!s2.includes('fake') && s2.endsWith('- [1] [A](https://a.de/)'));
+  });
+
+  await check('addPage: gleiche normalisierte URL behält ihre Nummer (Fortsetzen liest erneut)', () => {
+    const reg = new SourceRegistry([{ n: 1, url: 'https://a.de/x', title: 'Alt', notes: '', relevant: false, task: 1 }]);
+    const again = reg.addPage('https://A.de/x/#frag', 'Neu', 1);
+    assert.equal(again.n, 1);
+    assert.equal(reg.all().length, 1);
+    assert.equal(reg.get(1).title, 'Neu');
+    assert.equal(reg.addPage('https://b.de/', 'B', 2).n, 2);
+  });
+
+  await check('releaseUnusedOf: nur nicht relevante Seiten der genannten Teilaufträge werden frei', () => {
+    const reg = new SourceRegistry([
+      { n: 1, url: 'https://a.de/', title: 'A', notes: '', relevant: false, task: 1 },
+      { n: 2, url: 'https://b.de/', title: 'B', notes: 'x', relevant: true, task: 1 },
+      { n: 3, url: 'https://c.de/', title: 'C', notes: '', relevant: false, task: 2 },
+      { n: 4, file: 'f.txt', title: 'f.txt', notes: '', relevant: false },
+    ]);
+    assert.equal(reg.releaseUnusedOf([1]), 1);
+    assert.equal(reg.isRead('https://a.de/'), false);
+    assert.equal(reg.isRead('https://b.de/'), true, 'relevante Seite bleibt belegt');
+    assert.equal(reg.isRead('https://c.de/'), true, 'fremder Teilauftrag bleibt belegt');
+    assert.equal(reg.claim('https://a.de/'), true);
+  });
+
+  await check('appendSourcesSection: Seitentitel als Linktext maskiert (Klammern, Zeilenumbruch), Linkziel heil', () => {
+    const out = appendSourcesSection('Text [1].', [
+      { n: 1, url: 'https://a.de/x_(y)', title: 'Böse ] (https://evil.example) [\nZeile', notes: '', relevant: true },
+    ]);
+    const line = out.report.split('\n').find((l) => l.startsWith('- [1] '));
+    assert.equal(line, '- [1] [Böse \\] (https://evil.example) \\[ Zeile](https://a.de/x_%28y%29)');
+    assert.equal(out.report.split('\n').filter((l) => l.startsWith('- ')).length, 1, 'kein Zeilenumbruch im Eintrag');
   });
 
   await check('prepareFiles: Umbenennung kollidiert nicht, Dotfiles bleiben sauber', () => {

@@ -1,7 +1,7 @@
 import { errorMessage, isRecord, isUnknownArray } from '../common/tool-args';
 import { FILE_DIGEST, INJECTION_GUARD, PIPELINE, TASK_LIMITS, type LimitKind } from './research-config';
 import { splitParts } from './research-files';
-import { Interrupted } from './research-llm.service';
+import { budgetExhausted, Interrupted, TOKEN_BUDGET_EXHAUSTED } from './research-llm.service';
 import {
   REPORT_RULES, filesBlock, followUpsBlock, relatedBlock, resultsBlock, wrapUntrusted, type RoundResult,
 } from './research-prompts';
@@ -31,7 +31,8 @@ function focusLine(ctx: RunContext): string {
   return ctx.focus ? `\nFocus: ${ctx.focus}` : '';
 }
 
-async function ask(ctx: RunContext, lane: string, kind: LimitKind, prompt: string): Promise<string> {
+/** Antworttext; `exhausted` = Token-Budget ohne verwertbare Antwort aufgebraucht (als Schritt protokolliert). */
+async function askFull(ctx: RunContext, lane: string, kind: LimitKind, prompt: string): Promise<{ text: string; exhausted: boolean }> {
   throwIfAborted(ctx);
   const res = await ctx.llm.call({
     researchId: ctx.researchId,
@@ -43,7 +44,13 @@ async function ask(ctx: RunContext, lane: string, kind: LimitKind, prompt: strin
     onReroute: ctx.onReroute(lane),
   });
   ctx.models.add(res.model);
-  return res.text;
+  const exhausted = budgetExhausted(res);
+  if (exhausted) ctx.step('error', TOKEN_BUDGET_EXHAUSTED, lane);
+  return { text: res.text, exhausted };
+}
+
+async function ask(ctx: RunContext, lane: string, kind: LimitKind, prompt: string): Promise<string> {
+  return (await askFull(ctx, lane, kind, prompt)).text;
 }
 
 /** Wartet auf alle Zweige; `Interrupted` wird weitergeworfen, andere Fehler als Schritt protokolliert. */
@@ -218,7 +225,7 @@ export async function runFixedTask(ctx: RunContext, task: TaskInput): Promise<Ta
     }
     const text = page.text.trim();
     if (text.length < TASK_LIMITS.minPageChars) { ctx.step('skip', url, lane); return; }
-    const entry = ctx.registry.addPage(url, page.title);
+    const entry = ctx.registry.addPage(url, page.title, task.n);
     const prompt = `Topic: ${ctx.topic}${focusLine(ctx)}
 Sub-question: ${task.question}
 Below is the text of web page [${entry.n}] "${page.title.replace(/\s+/g, ' ').trim().slice(0, 200)}".
@@ -283,7 +290,8 @@ ${wrapUntrusted('', 'RESULTS', resultsBlock(results))}
 
 ${REPORT_RULES}
 ${INJECTION_GUARD}`;
-  const text = await ask(ctx, 'main', 'leadReport', prompt);
+  const { text, exhausted } = await askFull(ctx, 'main', 'leadReport', prompt);
+  if (exhausted) throw new Error(TOKEN_BUDGET_EXHAUSTED);
   if (text.trim().length < MIN_REPORT) throw new Error('Bericht zu kurz');
   return text;
 }

@@ -20,13 +20,13 @@ function loadCompiled(rel) {
   }
 }
 
-const { ResearchLlmService, Interrupted } = loadCompiled('research/research-llm.service.js');
+const { ResearchLlmService, Interrupted, splitThink, budgetExhausted, LIMITS } = loadCompiled('research/research-llm.service.js');
 const { ResearchLiveService } = loadCompiled('research/research-live.service.js');
 const { EndpointAllocator } = loadCompiled('balancer/endpoint-allocator.service.js');
 const { readOpenAiChoiceDelta } = loadCompiled('balancer/llm-responses.js');
 const { LlmClient } = loadCompiled('balancer/llm-client.service.js');
 
-const EXPECTED_CHECKS = 15;
+const EXPECTED_CHECKS = 19;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -170,6 +170,62 @@ const call = (env, extra = {}) => env.svc.call({ researchId: 'r1', lane: 't1', k
     await assert.rejects(call(env), /crypto/);
     assert.equal(env.health.failed || 0, 0);
     assert.deepEqual([env.counts.acquire, env.counts.release], [1, 1]);
+  });
+
+  await check('<think> im Inhalt: aus dem Text entfernt, live als reasoning (Tags über Chunk-Grenzen), JSON danach bleibt', async () => {
+    const chunks = ['<thi', 'nk>Plan: erst ', 'suchen</th', 'ink>\n{"enough":', 'true}'];
+    const env = makeEnv({ endpoints: [EP('a')], behaviour: () => ({ events: [...chunks.map((delta) => ({ type: 'content', delta })), { type: 'finish', reason: 'stop' }] }) });
+    env.live.begin('r1');
+    const res = await call(env);
+    assert.equal(res.text, '{"enough":true}');
+    const lane = env.live.snapshot('r1').lanes.t1;
+    assert.equal(lane.reasoning, 'Plan: erst suchen');
+    assert.equal(lane.text, '\n{"enough":true}');
+    assert.equal(res.finishReason, 'stop');
+  });
+
+  await check('splitThink: mehrere Blöcke, nie geschlossen, schließendes Tag ohne öffnendes, ohne Tags unverändert', () => {
+    assert.deepEqual(splitThink('<think>a</think>X<think>b</think> Y'), { text: 'X Y', reasoning: 'a\nb' });
+    assert.deepEqual(splitThink('<think>denkt und denkt'), { text: '', reasoning: 'denkt und denkt' });
+    assert.deepEqual(splitThink('Antwort <think>rest'), { text: 'Antwort', reasoning: 'rest' });
+    assert.deepEqual(splitThink('vorher gedacht</think>\n{"a":1}'), { text: '{"a":1}', reasoning: 'vorher gedacht' });
+    assert.deepEqual(splitThink('  normal  '), { text: '  normal  ', reasoning: '' });
+  });
+
+  await check('finish length wird durchgereicht; budgetExhausted nur bei (fast) leerem Text ohne Tool-Calls', async () => {
+    const env = makeEnv({ endpoints: [EP('a')], behaviour: () => ({ events: [{ type: 'content', delta: '<think>' + 'x'.repeat(50) }, { type: 'finish', reason: 'length' }] }) });
+    const res = await call(env);
+    assert.equal(res.finishReason, 'length');
+    assert.equal(res.text, '');
+    assert.equal(budgetExhausted(res), true);
+    assert.equal(budgetExhausted({ ...res, text: 'Ein ganz normaler, langer Satz.' }), false);
+    assert.equal(budgetExhausted({ ...res, toolCalls: [{ id: '1', name: 'x', arguments: '{}' }] }), false);
+    assert.equal(budgetExhausted({ ...res, finishReason: 'stop' }), false);
+  });
+
+  await check('Slot länger belegt als die Frist des Aufrufs: wartet trotzdem und gelingt; ohne Kandidat sofort Fehler', async () => {
+    const env = makeEnv({ endpoints: [EP('a')] });
+    env.svc.limits = { ...LIMITS, notes: { maxTokens: 100, timeoutMs: 50 } };
+    const held = await env.svc.allocator.acquire('workflow', {});
+    assert.ok(held, 'Slot der anderen Lane');
+    setTimeout(() => env.svc.allocator.release(held.id), 300);
+    const t0 = Date.now();
+    const res = await call(env);
+    assert.equal(res.text, 'hi');
+    assert.ok(Date.now() - t0 >= 250, 'hat gewartet');
+
+    const none = makeEnv({ endpoints: [EP('a')] });
+    none.health.ok.clear();
+    const t1 = Date.now();
+    await assert.rejects(call(none), /kein Endpunkt frei/);
+    assert.ok(Date.now() - t1 < 200, 'ohne Kandidat nicht gewartet');
+
+    // Abbruch beendet das Warten
+    const busy = makeEnv({ endpoints: [EP('a')] });
+    await busy.svc.allocator.acquire('workflow', {});
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 100);
+    await assert.rejects(call(busy, { signal: ac.signal }), (e) => e instanceof Interrupted);
   });
 
   await check('Interrupted trägt den Namen', async () => {

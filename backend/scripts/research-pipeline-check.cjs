@@ -18,7 +18,7 @@ function loadCompiled(rel) {
 const { digestFiles, planTasks, runFixedTask, orchestrate, writeReport, parseJsonObject } = loadCompiled('research/research-pipeline.js');
 const { SourceRegistry } = loadCompiled('research/research-sources.js');
 
-const EXPECTED_CHECKS = 10;
+const EXPECTED_CHECKS = 11;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -29,16 +29,18 @@ async function check(label, fn) {
 
 const LONG = 'Fakt mit Zahl 2024. '.repeat(30);
 
-function makeCtx({ answer, pages = {}, hits = [], files = [], registry = new SourceRegistry() }) {
+function makeCtx({ answer, pages = {}, hits = [], files = [], registry = new SourceRegistry(), finishReason }) {
   const seen = [];
+  const steps = [];
   return {
     seen,
+    steps,
     ctx: {
       researchId: 'r1', topic: 'Thema', cfg: { rounds: 2, tasks: 3, pages: 2 }, registry, files,
       signal: new AbortController().signal, usedQueries: new Set(), models: new Set(),
-      step() {}, onReroute: () => () => {},
+      step: (kind, text, lane) => steps.push(`${kind}:${text}:${lane}`), onReroute: () => () => {},
       web: { search: async () => hits, fetch: async (url) => { if (!(url in pages)) throw new Error('404'); return { url, title: url, text: pages[url] }; } },
-      llm: { call: async (c) => { seen.push(c); const last = c.messages.at(-1).content; return { model: 'm @ x', toolCalls: [], text: answer(last, c) }; } },
+      llm: { call: async (c) => { seen.push(c); const last = c.messages.at(-1).content; return { model: 'm @ x', toolCalls: [], text: answer(last, c), ...(finishReason ? { finishReason } : {}) }; } },
     },
   };
 }
@@ -114,6 +116,16 @@ await check('writeReport: ohne Werkzeuge, Regeln und Guard im Prompt, zu kurz wi
   const short = makeCtx({ answer: () => 'zu kurz' });
   await assert.rejects(writeReport(short.ctx, [], { related: [], followUps: [] }), /zu kurz/);
 });
+
+  await check('writeReport: Token-Budget erschöpft (length, leer) → Schritt-Fehler und Fehlertext statt „zu kurz"', async () => {
+    const { ctx, steps } = makeCtx({ answer: () => '', finishReason: 'length' });
+    await assert.rejects(writeReport(ctx, [], { related: [], followUps: [] }), /Token-Budget des Modells erschöpft/);
+    assert.deepEqual(steps, ['error:Token-Budget des Modells erschöpft:main']);
+    // Abgeschnitten, aber mit Text: kein Budget-Fehler
+    const cut = makeCtx({ answer: () => `## Kurzfassung\n${'Satz [1]. '.repeat(40)}`, finishReason: 'length' });
+    await writeReport(cut.ctx, [], { related: [], followUps: [] });
+    assert.deepEqual(cut.steps, []);
+  });
 
   await check('Interrupted aus einem Zweig propagiert (digestFiles, runFixedTask)', async () => {
     const { Interrupted } = loadCompiled('research/research-llm.service.js');

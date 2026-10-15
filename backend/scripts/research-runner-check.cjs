@@ -20,9 +20,11 @@ const { ResearchRunnerService } = loadCompiled('research/research-runner.service
 const { ResearchLiveService } = loadCompiled('research/research-live.service.js');
 const { Interrupted } = loadCompiled('research/research-llm.service.js');
 const { ResearchProcessor } = loadCompiled('research/research.processor.js');
+const { ResearchControlService } = loadCompiled('research/research-control.service.js');
+const { RequestContext } = loadCompiled('common/request-context.js');
 const { DelayedError } = require(path.resolve(__dirname, '..', 'node_modules', 'bullmq'));
 
-const EXPECTED_CHECKS = 14;
+const EXPECTED_CHECKS = 20;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -51,7 +53,7 @@ function memStore(doc) {
 }
 
 // llm: (call) => { text, toolCalls } — entscheidet nach lane/Inhalt
-function makeRunner({ doc, llm, pages = { 'https://a.de/': LONG }, capacity = 2, rag = async () => [] }) {
+function makeRunner({ doc, llm, pages = { 'https://a.de/': LONG }, capacity = 2, rag = async () => [], fetched = [] }) {
   const store = memStore(doc);
   const live = new ResearchLiveService();
   const notes = [];
@@ -61,7 +63,7 @@ function makeRunner({ doc, llm, pages = { 'https://a.de/': LONG }, capacity = 2,
   const runner = new ResearchRunnerService(
     store, live,
     { call: async (c) => { calls.push(c); return { model: 'm @ x', text: '', toolCalls: [], ...(await llm(c, { store, live })) }; } },
-    { search: async () => [{ title: 'A', url: 'https://a.de/', snippet: '' }], fetch: async (url) => { if (!(url in pages)) throw new Error('404'); return { url, title: 'A', text: pages[url] }; } },
+    { search: async () => [{ title: 'A', url: 'https://a.de/', snippet: '' }], fetch: async (url) => { fetched.push(url); if (!(url in pages)) throw new Error('404'); return { url, title: 'A', text: pages[url] }; } },
     { record: async (_id, s) => { steps.push(`${s.kind}:${s.text}`); } },
     { search: rag },
     { create: async (...a) => { notes.push(a); } },
@@ -86,7 +88,9 @@ const agentLlm = (opts = {}) => async (c, env) => {
     return { toolCalls: [tc('write_report', { report: REPORT })] };
   }
   if (opts.onTask) await opts.onTask(c, env);
-  if (lastContent(c) === 'Start now.' || c.messages.filter((m) => m.role === 'tool').length === 0) return { toolCalls: [tc('read_page', { url: 'https://a.de/' })] };
+  const taskTools = c.messages.filter((m) => m.role === 'tool').length;
+  if (lastContent(c) === 'Start now.' || taskTools === 0) return { toolCalls: [tc('web_search', { query: 'q' })] };
+  if (taskTools === 1) return { toolCalls: [tc('read_page', { url: 'https://a.de/' })] };
   return { toolCalls: [tc('submit_findings', { summary: `Fakt [1]. ${LONG.slice(0, 80)}`, used_sources: [1] })] };
 };
 
@@ -339,6 +343,145 @@ const textLlm = () => async (c) => {
     const d = store.docs.get('r1');
     assert.equal(d.status, 'done', d.error);
     assert.equal(d.error, null);
+  });
+
+  await check('Stopp zwischen Übernahme und begin(): cancel → cancelled, pause → paused, gelöscht → still; kein LLM-Aufruf', async () => {
+    const a = makeRunner({ doc: { id: 'r1', cancelRequested: true }, llm: agentLlm() });
+    await a.runner.run('r1');
+    assert.equal(a.store.docs.get('r1').status, 'cancelled');
+    assert.equal(a.calls.length, 0);
+    assert.equal(a.notes.length, 0);
+    assert.equal(a.live.controller('r1'), undefined, 'Controller nach dem Ende entfernt');
+
+    const b = makeRunner({ doc: { id: 'r1', pauseRequested: true }, llm: agentLlm() });
+    await b.runner.run('r1');
+    assert.equal(b.store.docs.get('r1').status, 'paused');
+    assert.equal(b.calls.length, 0);
+
+    // Zwischen dem Lesen in run() und begin() gelöscht
+    const c = makeRunner({ doc: { id: 'r1' }, llm: agentLlm() });
+    const origGet = c.store.get;
+    let reads = 0;
+    c.store.get = async (id) => { reads += 1; if (reads === 2) c.store.docs.delete(id); return origGet(id); };
+    await c.runner.run('r1');
+    assert.equal(c.store.docs.has('r1'), false);
+    assert.equal(c.calls.length, 0);
+    assert.equal(c.notes.length, 0);
+    assert.deepEqual(c.steps, [], 'keine verwaisten Schritte');
+  });
+
+  await check('Ohne Besitzer (ownerUserId null): läuft ohne Actor und ohne Besitzer-Lookup', async () => {
+    const actors = [];
+    const { runner, store, notes } = makeRunner({
+      doc: { id: 'r1', ownerUserId: null },
+      llm: async (c, env) => { actors.push(RequestContext.getUser()); return agentLlm()(c, env); },
+    });
+    runner.auth = { findUserById: async () => { throw new Error('darf nicht gefragt werden'); } };
+    await runner.run('r1');
+    const d = store.docs.get('r1');
+    assert.equal(d.status, 'done', d.error);
+    assert.ok(actors.length > 0 && actors.every((a) => a === undefined));
+    assert.equal(notes.length, 0, 'ohne Besitzer keine gerichtete Benachrichtigung');
+  });
+
+  await check('Besitzer fehlt/inaktiv: neue Recherche failed; Vertiefen mit Bericht bleibt done mit error', async () => {
+    const a = makeRunner({ doc: { id: 'r1' }, llm: agentLlm() });
+    a.runner.auth = { findUserById: async () => null };
+    await a.runner.run('r1');
+    assert.equal(a.store.docs.get('r1').status, 'failed');
+    assert.equal(a.store.docs.get('r1').error, 'Besitzer nicht gefunden');
+
+    const b = makeRunner({ doc: { id: 'r1', mode: 'deepen', content: 'ALT', modeQuestion: 'Und Y?' }, llm: agentLlm() });
+    b.runner.auth = { findUserById: async () => ({ _id: OWNER, active: false }) };
+    await b.runner.run('r1');
+    const d = b.store.docs.get('r1');
+    assert.equal(d.status, 'done');
+    assert.equal(d.content, 'ALT');
+    assert.equal(d.error, 'Besitzer nicht gefunden');
+    assert.equal(d.mode, 'research');
+    assert.equal(d.modeQuestion, undefined);
+    assert.equal(b.calls.length, 0);
+  });
+
+  await check('Letzter Versuch bei Vertiefen mit Bericht: done mit error statt failed', async () => {
+    const { runner, store } = makeRunner({ doc: { id: 'r1', mode: 'deepen', content: 'ALT', modeQuestion: 'Und Y?' }, llm: agentLlm() });
+    runner.auth = { findUserById: async () => { throw new Error('users weg'); } };
+    await runner.run('r1');
+    const d = store.docs.get('r1');
+    assert.equal(d.status, 'done');
+    assert.equal(d.content, 'ALT');
+    assert.equal(d.error, 'users weg');
+    assert.equal(d.mode, 'research');
+  });
+
+  await check('Pausiertes Vertiefen abbrechen, dann erneut vertiefen → neue Runde statt der alten Teilaufträge', async () => {
+    const { runner, store, calls, live } = makeRunner({
+      doc: {
+        id: '333333333333333333333333', status: 'paused', mode: 'deepen', modeQuestion: 'Und Y?', content: `${REPORT}\n## Quellen\n- [1] [A](https://a.de/)`, roundsDone: 1,
+        tasks: [{ n: 1, round: 2, question: 'Alt', queries: ['alt'], status: 'running', sources: [], via: 'agent' }],
+        sourceList: [{ n: 1, url: 'https://a.de/', title: 'A', notes: 'n', relevant: true }],
+      },
+      llm: agentLlm(),
+    });
+    const id = '333333333333333333333333';
+    const queue = { enqueue: async () => {}, remove: async () => {} };
+    const control = new ResearchControlService(store, queue, live, { removeFor: async () => {} }, {}, {}, {}, {}, { emit() {} });
+    const owner = { userId: OWNER, username: 'u', role: 'user' };
+    await RequestContext.run(owner, undefined, () => control.cancel(id));
+    let d = store.docs.get(id);
+    assert.equal(d.status, 'done');
+    assert.equal(d.mode, 'research');
+    assert.equal(d.modeQuestion, undefined);
+    assert.equal(d.tasks[0].status, 'failed');
+    await RequestContext.run(owner, undefined, () => control.deepen(id, 'Und Z?'));
+    store.docs.get(id).status = 'running'; // vom Worker übernommen
+    await runner.run(id);
+    d = store.docs.get(id);
+    assert.equal(d.status, 'done', d.error);
+    assert.ok(!calls.some((c) => c.lane === 't1'), 'alter Teilauftrag lief erneut');
+    assert.ok(calls.some((c) => c.lane === 't2'), 'neue Runde');
+    assert.equal(d.tasks[0].status, 'failed');
+    assert.equal(d.tasks[1].status, 'done');
+  });
+
+  await check('Fortsetzen: gelesene, nicht relevante Seiten des Teilauftrags werden neu gelesen (gleiche Nummer); fester Ablauf bleibt fest', async () => {
+    const fetched = [];
+    const a = makeRunner({
+      fetched,
+      doc: {
+        id: 'r1', mode: 'resume', roundsDone: 0,
+        tasks: [{ n: 1, round: 1, question: 'Q1', queries: ['q'], status: 'running', sources: [], via: 'agent' }],
+        sourceList: [{ n: 1, url: 'https://a.de/', title: 'A', notes: '', relevant: false, task: 1 }],
+      },
+      llm: agentLlm(),
+    });
+    await a.runner.run('r1');
+    let d = a.store.docs.get('r1');
+    assert.equal(d.status, 'done', d.error);
+    assert.deepEqual(fetched, ['https://a.de/'], 'Seite erneut gelesen');
+    assert.equal(d.sourceList.length, 1, 'keine neue Nummer');
+    assert.equal(d.sourceList[0].relevant, true);
+    assert.deepEqual(d.tasks[0].sources, [1]);
+
+    // via 'fixed': Fortsetzen mit dem festen Ablauf (keine Werkzeuge auf der Lane t1)
+    const fixedLlm = textLlm();
+    const b = makeRunner({
+      doc: {
+        id: 'r1', mode: 'resume', roundsDone: 0,
+        tasks: [{ n: 1, round: 1, question: 'Q1', queries: ['q'], status: 'running', sources: [], via: 'fixed' }],
+        sourceList: [{ n: 1, url: 'https://a.de/', title: 'A', notes: '', relevant: false, task: 1 }],
+      },
+      llm: async (c, env) => (c.lane === 't1' ? fixedLlm(c) : agentLlm()(c, env)),
+    });
+    await b.runner.run('r1');
+    d = b.store.docs.get('r1');
+    assert.equal(d.status, 'done', d.error);
+    const t1 = b.calls.filter((c) => c.lane === 't1');
+    assert.ok(t1.length > 0 && t1.every((c) => !hasTools(c)), 'fester Ablauf ohne Werkzeuge');
+    assert.equal(d.tasks[0].status, 'done');
+    assert.equal(d.tasks[0].via, 'fixed');
+    assert.equal(d.sourceList.length, 1);
+    assert.equal(d.sourceList[0].relevant, true);
   });
 
   console.log(`\n${total - failures}/${total} passed`);

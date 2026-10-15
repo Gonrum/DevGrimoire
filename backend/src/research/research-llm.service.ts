@@ -27,11 +27,100 @@ export interface ResearchLlmCall {
   onReroute?: (to: string) => void;
 }
 
+export type FinishReason = 'stop' | 'tool_calls' | 'length' | 'other';
+
 export interface ResearchLlmResult {
+  /** Antworttext ohne `<think>`-Blöcke. */
   text: string;
   toolCalls: Array<{ id: string; name: string; arguments: string }>;
   /** "Modell @ Endpunkt-Host" */
   model: string;
+  /** Warum der Strom endete; fehlt, wenn der Anbieter keinen Grund meldet. */
+  finishReason?: FinishReason;
+}
+
+export const TOKEN_BUDGET_EXHAUSTED = 'Token-Budget des Modells erschöpft';
+const NEAR_EMPTY = 20;
+
+/**
+ * Hat das Modell sein Token-Budget aufgebraucht, ohne verwertbare Antwort?
+ * Typisch für Reasoning-Modelle, die das ganze Budget in `<think>` verbrauchen.
+ */
+export function budgetExhausted(res: Pick<ResearchLlmResult, 'text' | 'toolCalls' | 'finishReason'>): boolean {
+  return res.finishReason === 'length' && res.toolCalls.length === 0 && res.text.trim().length < NEAR_EMPTY;
+}
+
+const THINK_OPEN = '<think>';
+const THINK_CLOSE = '</think>';
+
+/**
+ * Trennt Reasoning (`<think>…</think>`) vom Antworttext. Ein nie geschlossenes
+ * `<think>` macht den Rest zu Reasoning; ein `</think>` ohne Öffnung (Vorlagen,
+ * die das öffnende Tag selbst setzen) macht alles davor zu Reasoning.
+ */
+export function splitThink(raw: string): { text: string; reasoning: string } {
+  const reasoning: string[] = [];
+  let rest = raw;
+  const firstClose = rest.indexOf(THINK_CLOSE);
+  const firstOpen = rest.indexOf(THINK_OPEN);
+  if (firstClose >= 0 && (firstOpen < 0 || firstClose < firstOpen)) {
+    reasoning.push(rest.slice(0, firstClose));
+    rest = rest.slice(firstClose + THINK_CLOSE.length);
+  }
+  let text = '';
+  for (;;) {
+    const open = rest.indexOf(THINK_OPEN);
+    if (open < 0) { text += rest; break; }
+    text += rest.slice(0, open);
+    const close = rest.indexOf(THINK_CLOSE, open + THINK_OPEN.length);
+    if (close < 0) { reasoning.push(rest.slice(open + THINK_OPEN.length)); break; }
+    reasoning.push(rest.slice(open + THINK_OPEN.length, close));
+    rest = rest.slice(close + THINK_CLOSE.length);
+  }
+  if (reasoning.length === 0) return { text: raw, reasoning: '' };
+  return { text: text.trim(), reasoning: reasoning.join('\n') };
+}
+
+/** Längster Suffix von `s`, der ein echter Präfix von `tag` ist (Tag über Chunk-Grenzen). */
+function partialTagSuffix(s: string, tag: string): number {
+  for (let k = Math.min(tag.length - 1, s.length); k > 0; k--) {
+    if (tag.startsWith(s.slice(-k))) return k;
+  }
+  return 0;
+}
+
+/** Leitet Inhalts-Deltas live in `content` oder `reasoning`, je nachdem, ob gerade ein `<think>` offen ist. */
+class ThinkRouter {
+  private buf = '';
+  private inThink = false;
+  constructor(private readonly emit: (kind: 'content' | 'reasoning', text: string) => void) {}
+
+  feed(delta: string): void {
+    this.buf += delta;
+    for (;;) {
+      const tag = this.inThink ? THINK_CLOSE : THINK_OPEN;
+      const at = this.buf.indexOf(tag);
+      if (at >= 0) {
+        this.out(this.buf.slice(0, at));
+        this.buf = this.buf.slice(at + tag.length);
+        this.inThink = !this.inThink;
+        continue;
+      }
+      const hold = partialTagSuffix(this.buf, tag);
+      this.out(this.buf.slice(0, this.buf.length - hold));
+      this.buf = this.buf.slice(this.buf.length - hold);
+      return;
+    }
+  }
+
+  flush(): void {
+    this.out(this.buf);
+    this.buf = '';
+  }
+
+  private out(text: string): void {
+    if (text !== '') this.emit(this.inThink ? 'reasoning' : 'content', text);
+  }
 }
 
 /** `Modell @ Host`; fällt auf die rohe baseUrl zurück, wenn sie keinen Host hergibt. */
@@ -52,6 +141,9 @@ const WAIT_EVENT_MS = 5_000;
  */
 @Injectable()
 export class ResearchLlmService {
+  /** Grenzen je Aufrufart; als Feld, damit Checks kleine Fristen einsetzen können. */
+  limits: Record<LimitKind, { maxTokens: number; timeoutMs: number }> = LIMITS;
+
   constructor(
     private readonly allocator: EndpointAllocator,
     private readonly endpoints: LlmEndpointsService,
@@ -101,9 +193,14 @@ export class ResearchLlmService {
     }
   }
 
-  /** Wartet auf einen freien Slot; Abbruch → Interrupted, Frist → Error. */
+  /**
+   * Wartet auf einen freien Slot; Abbruch → Interrupted. Solange ein Endpunkt
+   * des Pools in Frage kommt, wird ohne Frist gewartet — auf einem einzelnen
+   * lokalen Endpunkt hält eine andere Lane den Slot oft länger als die Frist
+   * eines Aufrufs, und der wartende Teilauftrag scheiterte sonst grundlos. Die
+   * Frist gilt nur dem Strom. Ohne Kandidaten → sofort Error.
+   */
   private async lease(c: ResearchLlmCall, exclude: Set<string>): Promise<Slot> {
-    const deadline = Date.now() + LIMITS[c.kind].timeoutMs;
     let lastWait = 0;
     for (;;) {
       if (c.signal.aborted) throw new Interrupted('abgebrochen');
@@ -118,8 +215,9 @@ export class ResearchLlmService {
         }
         return slot;
       }
+      if (!(await this.allocator.hasCandidate('workflow', exclude))) throw new Error('kein Endpunkt frei');
+      if (c.signal.aborted) throw new Interrupted('abgebrochen');
       const now = Date.now();
-      if (now >= deadline) throw new Error('kein Endpunkt frei');
       if (now - lastWait >= WAIT_EVENT_MS) {
         lastWait = now;
         this.live.emit(c.researchId, { type: 'wait', lane: c.lane, busy: this.allocator.snapshot() });
@@ -141,7 +239,7 @@ export class ResearchLlmService {
     slot: Slot,
     apiKey: string | null,
   ): Promise<Omit<ResearchLlmResult, 'model'>> {
-    const limits = LIMITS[c.kind];
+    const limits = this.limits[c.kind];
     const opts: ChatToolCallOpts = {
       provider: slot.provider,
       baseUrl: slot.baseUrl,
@@ -158,18 +256,24 @@ export class ResearchLlmService {
       ? this.client.chatStreamAnthropicTools(opts)
       : this.client.chatStreamOpenAiTools(opts);
 
-    let text = '';
+    let raw = '';
+    let finishReason: FinishReason | undefined;
     const toolCalls: ResearchLlmResult['toolCalls'] = [];
+    const router = new ThinkRouter((kind, text) => this.live.emit(c.researchId, { type: 'delta', lane: c.lane, kind, text }));
     for await (const ev of iter) {
       if (ev.type === 'content') {
-        text += ev.delta;
-        this.live.emit(c.researchId, { type: 'delta', lane: c.lane, kind: 'content', text: ev.delta });
+        raw += ev.delta;
+        router.feed(ev.delta);
       } else if (ev.type === 'reasoning') {
         this.live.emit(c.researchId, { type: 'delta', lane: c.lane, kind: 'reasoning', text: ev.delta });
       } else if (ev.type === 'tool_call') {
         toolCalls.push({ id: ev.id, name: ev.name, arguments: ev.arguments });
+      } else if (ev.type === 'finish') {
+        finishReason = ev.reason;
       }
     }
-    return { text, toolCalls };
+    router.flush();
+    const { text } = splitThink(raw);
+    return { text, toolCalls, ...(finishReason ? { finishReason } : {}) };
   }
 }

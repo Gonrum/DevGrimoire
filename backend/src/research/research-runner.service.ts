@@ -15,12 +15,13 @@ import { ResearchOwnerLookup } from './research-owner';
 import { digestFiles, orchestrate, runFixedTask, writeReport } from './research-pipeline';
 import type { RoundResult } from './research-prompts';
 import type { RunContext, RunFile } from './research-run-context';
-import { ResearchRunStore, type RunDoc } from './research-run-store';
+import { ResearchRunStore, type RunDoc, type RunPatch } from './research-run-store';
 import { appendSourcesSection, SourceRegistry } from './research-sources';
 import { ResearchStepsService } from './research-steps.service';
 import { runTaskAgent, type TaskInput, type TaskOutcome } from './research-task-agent';
 import { ResearchWeb } from './research-web';
 import type { ResearchTask } from './schemas/research.schema';
+import type { TaskVia } from './research-types';
 
 export type MayStart = 'start' | 'wait' | 'drop';
 
@@ -111,10 +112,16 @@ export class ResearchRunnerService implements OnModuleInit, OnModuleDestroy {
     try {
       const doc = await this.store.get(id);
       if (!doc) { settled = true; return; } // gelöscht
-      const user = doc.ownerUserId ? await this.auth.findUserById(doc.ownerUserId) : null;
+      if (doc.ownerUserId === null) {
+        // Ohne Besitzer (Auth aus, Alt-Eintrag): ohne Actor laufen, wie die Instanz selbst.
+        await this.execute(doc);
+        settled = true;
+        return;
+      }
+      const user = await this.auth.findUserById(doc.ownerUserId);
       if (!user || user.active === false) {
         reason = 'Besitzer nicht gefunden';
-        await this.store.patch(id, { status: 'failed', error: reason, finishedAt: new Date() });
+        await this.store.patch(id, { ...this.failurePatch(doc, reason), finishedAt: new Date() });
         settled = true;
         return;
       }
@@ -130,11 +137,24 @@ export class ResearchRunnerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Fehlschlag eines Laufs: ein Vertiefen mit vorhandenem Bericht bleibt `done`
+   * (mit `error`) — der alte Bericht darf durch das Scheitern nicht verschwinden.
+   */
+  private failurePatch(doc: Pick<RunDoc, 'mode' | 'content'> | null, reason: string): RunPatch {
+    const error = reason.slice(0, MAX_ERROR);
+    const flags = { cancelRequested: false, pauseRequested: false };
+    if (doc && doc.mode === 'deepen' && doc.content) {
+      return { ...flags, status: 'done', error, mode: 'research', modeQuestion: undefined };
+    }
+    return { ...flags, status: 'failed', error };
+  }
+
   private async lastResort(id: string, reason: string): Promise<void> {
+    let doc: RunDoc | null = null;
+    try { doc = await this.store.get(id); } catch { /* Lesefehler: dann eben failed */ }
     try {
-      await this.store.patch(id, {
-        status: 'failed', error: reason.slice(0, MAX_ERROR), finishedAt: new Date(), cancelRequested: false, pauseRequested: false,
-      });
+      await this.store.patch(id, { ...this.failurePatch(doc, reason), finishedAt: new Date() });
       this.logger.warn(`Recherche ${id}: als failed markiert (letzter Versuch)`);
     } catch (err) {
       this.logger.error(`Recherche ${id}: letzter Versuch gescheitert: ${errorMessage(err)}`);
@@ -154,6 +174,13 @@ export class ResearchRunnerService implements OnModuleInit, OnModuleDestroy {
     let settled = false;
     let failure = 'Lauf ohne Abschluss beendet';
     try {
+      // Abbruch, Pause oder Löschen zwischen Übernahme und begin(): der Stopp ging
+      // an einen noch nicht vorhandenen Controller. Jetzt nachholen.
+      const fresh = await this.store.get(id);
+      if (!fresh || fresh.cancelRequested || fresh.pauseRequested) {
+        ac.abort();
+        throw new Interrupted('vor dem Start gestoppt');
+      }
       await this.store.patch(id, { startedAt, error: null });
       this.step(id, 'info', `Recherche gestartet (${doc.mode}, ${doc.depth})`);
       finished = await this.work(doc, ac.signal, startedAt);
@@ -237,9 +264,13 @@ export class ResearchRunnerService implements OnModuleInit, OnModuleDestroy {
     const roundBase = deepen ? doc.roundsDone : 0;
     let counter = deepen ? 0 : doc.roundsDone;
 
-    const execute = async (batch: ResearchTask[], exec: Executor): Promise<RoundResult[]> => {
+    const agentExecutor: Executor = (t) => runTaskAgent(ctx, t);
+    const fixedExecutor: Executor = (t) => runFixedTask(ctx, t);
+    const executorOf = (t: ResearchTask): Executor => (t.via === 'fixed' ? fixedExecutor : agentExecutor);
+
+    const execute = async (batch: ResearchTask[]): Promise<RoundResult[]> => {
       await this.store.patch(id, { tasks });
-      const settled = await Promise.allSettled(batch.map((t) => exec({ n: t.n, question: t.question, queries: t.queries })));
+      const settled = await Promise.allSettled(batch.map((t) => executorOf(t)({ n: t.n, question: t.question, queries: t.queries })));
       let interrupted: Interrupted | undefined;
       settled.forEach((res, i) => {
         const t = batch[i];
@@ -264,23 +295,23 @@ export class ResearchRunnerService implements OnModuleInit, OnModuleDestroy {
       return batch.map(toResult);
     };
 
-    const runRound = (input: Array<{ question: string; queries: string[] }>, exec: Executor): Promise<RoundResult[]> => {
+    const runRound = (input: Array<{ question: string; queries: string[] }>, via: TaskVia): Promise<RoundResult[]> => {
       let maxN = tasks.reduce((m, t) => Math.max(m, t.n), 0);
       const fresh: ResearchTask[] = input.map((t) => ({
-        n: ++maxN, round: roundBase + counter + 1, question: t.question, queries: [...t.queries], status: 'running', sources: [],
+        n: ++maxN, round: roundBase + counter + 1, question: t.question, queries: [...t.queries], status: 'running', sources: [], via,
       }));
       tasks.push(...fresh);
-      return execute(fresh, exec);
+      return execute(fresh);
     };
 
-    const agentExecutor: Executor = (t) => runTaskAgent(ctx, t);
-    const fixedExecutor: Executor = (t) => runFixedTask(ctx, t);
-
-    // 7. Fortsetzen: unterbrochene Teilaufträge zuerst, ohne neue Planung
+    // 7. Fortsetzen: unterbrochene Teilaufträge zuerst, ohne neue Planung, mit derselben Ausführung.
+    // Ihre schon gelesenen, (noch) nicht relevanten Seiten werden freigegeben: der neue
+    // Durchgang beginnt ohne Notizen und muss sie wieder lesen können (gleiche Nummer).
     const unfinished = tasks.filter((t) => t.status === 'running');
     if (unfinished.length > 0) {
+      registry.releaseUnusedOf(unfinished.map((t) => t.n));
       step('info', `Fortsetzen: ${unfinished.map((t) => `T${t.n}`).join(', ')}`);
-      await execute(unfinished, agentExecutor);
+      await execute(unfinished);
     }
 
     const done = (): RoundResult[] => tasks.filter((t) => t.status === 'done' || t.status === 'failed').map(toResult);
@@ -301,7 +332,7 @@ export class ResearchRunnerService implements OnModuleInit, OnModuleDestroy {
         previous,
         related,
         followUps: extras.followUps,
-        runRound: (t) => runRound(t, agentExecutor),
+        runRound: (t) => runRound(t, 'agent'),
       });
       report = outcome.report;
     } catch (err) {
@@ -317,7 +348,7 @@ export class ResearchRunnerService implements OnModuleInit, OnModuleDestroy {
         roundsTotal,
         get roundsDone() { return counter; },
         previous,
-        runRound: (t) => runRound(t, fixedExecutor),
+        runRound: (t) => runRound(t, 'fixed'),
       });
       report = await reportFrom(done());
     }

@@ -63,12 +63,14 @@ function toRunDoc(d: LeanResearch): RunDoc {
     tasks: (d.tasks ?? []).map((t) => ({
       n: t.n, round: t.round, question: t.question, queries: [...(t.queries ?? [])], status: t.status,
       ...(t.summary !== undefined ? { summary: t.summary } : {}), sources: [...(t.sources ?? [])],
+      via: t.via ?? 'agent',
     })),
     sourceList: (d.sourceList ?? []).map((s) => ({
       n: s.n,
       ...(s.url !== undefined ? { url: s.url } : {}),
       ...(s.file !== undefined ? { file: s.file } : {}),
       title: s.title ?? '', notes: s.notes ?? '', relevant: s.relevant === true,
+      ...(typeof s.task === 'number' ? { task: s.task } : {}),
     })),
     followUps: (d.followUps ?? []).map((f) => ({ question: f.question, at: f.at })),
     model: [...(d.model ?? [])],

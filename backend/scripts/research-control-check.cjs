@@ -24,7 +24,7 @@ const { ResearchModule } = loadCompiled('research/research.module.js');
 const { ResearchLiveService } = loadCompiled('research/research-live.service.js');
 const { RequestContext } = loadCompiled('common/request-context.js');
 
-const EXPECTED_CHECKS = 16;
+const EXPECTED_CHECKS = 17;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -142,6 +142,24 @@ const status = async (promise) => {
     assert.equal(t.docs.get('r1').cancelRequested, true);
     assert.ok(t.live.aborted.includes('r1'));
     assert.equal(t.docs.get('r1').status, 'running');
+  });
+
+  await check('cancel queued/paused: laufende Teilaufträge → failed; mit Bericht done im Modus research ohne Frage', async () => {
+    const t = setup();
+    const running = [{ n: 1, round: 1, question: 'Q', queries: [], status: 'running', sources: [] }, { n: 2, round: 1, question: 'R', queries: [], status: 'done', sources: [1] }];
+    t.put('q1', { status: 'queued', mode: 'deepen', modeQuestion: 'Und Y?', content: 'ALT', tasks: running });
+    t.put('p1', { status: 'paused', mode: 'deepen', modeQuestion: 'Und Y?', content: 'ALT', tasks: running });
+    t.put('p2', { status: 'paused', mode: 'resume', tasks: running });
+    await as(owner, async () => { await t.svc.cancel('q1'); await t.svc.cancel('p1'); await t.svc.cancel('p2'); });
+    for (const id of ['q1', 'p1']) {
+      const d = t.docs.get(id);
+      assert.equal(d.status, 'done', id);
+      assert.equal(d.mode, 'research', id);
+      assert.equal('modeQuestion' in d, false, id);
+      assert.deepEqual(d.tasks.map((x) => x.status), ['failed', 'done'], id);
+    }
+    assert.equal(t.docs.get('p2').status, 'cancelled');
+    assert.deepEqual(t.docs.get('p2').tasks.map((x) => x.status), ['failed', 'done']);
   });
 
   await check('pause/resume: running pausiert per Flag; Vertiefen bleibt deepen samt Frage', async () => {

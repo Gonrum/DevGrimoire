@@ -18,7 +18,7 @@ function loadCompiled(rel) {
 const { runLeadAgent } = loadCompiled('research/research-lead-agent.js');
 const { SourceRegistry } = loadCompiled('research/research-sources.js');
 
-const EXPECTED_CHECKS = 10;
+const EXPECTED_CHECKS = 11;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -139,6 +139,18 @@ function makeDeps({ script, roundsTotal = 2, roundsDone = 0, withSource = true }
     const { deps } = makeDeps({ script: [{ toolCalls: [tc('write_report', { report: `  ${REPORT}  ` })] }] });
     const out = await runLeadAgent(deps);
     assert.equal(out.report, REPORT.trim());
+  });
+
+  await check('Token-Budget erschöpft (length, leer) → Schritt-Fehler auf Lane main, Lauf geht weiter', async () => {
+    const { deps } = makeDeps({ script: [
+      { text: '', finishReason: 'length' },
+      { toolCalls: [tc('write_report', { report: REPORT })], finishReason: 'tool_calls' },
+    ] });
+    const steps = [];
+    deps.ctx.step = (kind, text, lane) => steps.push(`${kind}:${text}:${lane}`);
+    const out = await runLeadAgent(deps);
+    assert.equal(out.report, REPORT);
+    assert.deepEqual(steps, ['error:Token-Budget des Modells erschöpft:main']);
   });
 
   await check('runRound-Fehler propagiert', async () => {
