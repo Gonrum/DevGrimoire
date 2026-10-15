@@ -5,6 +5,7 @@ import { Model, Types } from 'mongoose';
 import { Client as Ssh2Client } from 'ssh2';
 import { SshService } from './ssh.service';
 import { errorMessage, isRecord } from '../common/narrow';
+import { OutboundBlockedException, outboundGuard } from '../common/outbound-guard';
 import { SecretsService } from '../secrets/secrets.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -19,6 +20,7 @@ export type SshTestErrorCode =
   | 'host_unreachable'
   | 'host_key_mismatch'
   | 'credential_missing'
+  | 'target_blocked'
   | 'timeout'
   | 'unknown';
 
@@ -71,6 +73,8 @@ const SSH2_READY_TIMEOUT_MS = CONNECT_TIMEOUT_MS - 500;
 @Injectable()
 export class SshTestService {
   private readonly logger = new Logger(SshTestService.name);
+  /** Ziel-Prüfung vor dem Verbinden (M-4); Checks ersetzen sie. */
+  outbound: Pick<typeof outboundGuard, 'resolve'> = outboundGuard;
 
   constructor(
     private readonly sshService: SshService,
@@ -276,65 +280,77 @@ export class SshTestService {
         });
       });
 
-      try {
-        client.connect({
-          host: connection.host,
-          port: connection.port,
-          username: connection.username,
-          readyTimeout: SSH2_READY_TIMEOUT_MS,
-          // Reject all but our explicit list. ssh2 also exposes hostHash so we
-          // can request a SHA-256 hash from the lib — we still compute our own
-          // canonical hex form below to keep the stored value in our control.
-          hostHash: 'sha256',
-          hostVerifier: (
-            hashOrKey: Buffer | string,
-            callback?: (accept: boolean) => void,
-          ) => {
-            // ssh2 calls this with either the hashed buffer (when hostHash is
-            // set) or the raw key. We accept both code paths.
-            const raw =
-              typeof hashOrKey === 'string'
-                ? Buffer.from(hashOrKey, 'binary')
-                : hashOrKey;
-            const fp = this.toCanonicalSha256(raw);
-            observedFingerprint = fp;
+      // Erst das Ziel prüfen (M-4), dann mit der geprüften Adresse statt dem
+      // Namen verbinden — sonst könnte DNS zwischen Prüfung und Connect auf
+      // eine gesperrte Adresse umschwenken.
+      this.outbound.resolve(connection.host).then((target) => {
+        try {
+          client.connect({
+            host: target.address,
+            port: connection.port,
+            username: connection.username,
+            readyTimeout: SSH2_READY_TIMEOUT_MS,
+            // Reject all but our explicit list. ssh2 also exposes hostHash so we
+            // can request a SHA-256 hash from the lib — we still compute our own
+            // canonical hex form below to keep the stored value in our control.
+            hostHash: 'sha256',
+            hostVerifier: (
+              hashOrKey: Buffer | string,
+              callback?: (accept: boolean) => void,
+            ) => {
+              // ssh2 calls this with either the hashed buffer (when hostHash is
+              // set) or the raw key. We accept both code paths.
+              const raw =
+                typeof hashOrKey === 'string'
+                  ? Buffer.from(hashOrKey, 'binary')
+                  : hashOrKey;
+              const fp = this.toCanonicalSha256(raw);
+              observedFingerprint = fp;
 
-            const known = connection.knownHostFingerprint;
-            let accept: boolean;
-            if (!known) {
-              // First-time: we DO NOT accept silently. Frontend gates on
-              // the explicit /accept-fingerprint call.
-              firstTimeFingerprint = true;
-              accept = false;
-            } else if (known === fp) {
-              fingerprintAccepted = true;
-              accept = true;
-            } else {
-              fingerprintMismatch = true;
-              accept = false;
-            }
-            if (callback) callback(accept);
-            return accept;
-          },
-          // Auth credentials — never re-emitted from this point on.
-          ...(connection.authMethod === 'key'
-            ? {
-                privateKey: creds.privateKey!,
-                ...(creds.passphrase ? { passphrase: creds.passphrase } : {}),
+              const known = connection.knownHostFingerprint;
+              let accept: boolean;
+              if (!known) {
+                // First-time: we DO NOT accept silently. Frontend gates on
+                // the explicit /accept-fingerprint call.
+                firstTimeFingerprint = true;
+                accept = false;
+              } else if (known === fp) {
+                fingerprintAccepted = true;
+                accept = true;
+              } else {
+                fingerprintMismatch = true;
+                accept = false;
               }
-            : {
-                password: creds.password!,
-              }),
-        });
-      } catch (err: unknown) {
-        // ssh2 throws synchronously on really broken inputs (bad key parse,
-        // unsupported algorithm, …) before any event fires.
+              if (callback) callback(accept);
+              return accept;
+            },
+            // Auth credentials — never re-emitted from this point on.
+            ...(connection.authMethod === 'key'
+              ? {
+                  privateKey: creds.privateKey!,
+                  ...(creds.passphrase ? { passphrase: creds.passphrase } : {}),
+                }
+              : {
+                  password: creds.password!,
+                }),
+          });
+        } catch (err: unknown) {
+          // ssh2 throws synchronously on really broken inputs (bad key parse,
+          // unsupported algorithm, …) before any event fires.
+          finalize({
+            ok: false,
+            fingerprint: observedFingerprint,
+            error: this.classifyConnectError(err),
+          });
+        }
+      }, (err: unknown) => {
         finalize({
           ok: false,
-          fingerprint: observedFingerprint,
-          error: this.classifyConnectError(err),
+          error: err instanceof OutboundBlockedException
+            ? { code: 'target_blocked', message: err.message }
+            : this.classifyConnectError(err),
         });
-      }
+      });
     });
   }
 

@@ -18,6 +18,8 @@
  * code, same pattern as the other ssh-* check scripts.
  */
 const path = require('node:path');
+// Testhosts ohne DNS: der Outbound-Guard (M-4) lässt freigegebene Namen unaufgelöst durch.
+process.env.OUTBOUND_ALLOW_HOSTS = 'host.example,prod,localhost';
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { createHash } = require('node:crypto');

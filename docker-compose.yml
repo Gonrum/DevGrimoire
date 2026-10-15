@@ -204,6 +204,7 @@ services:
       AUTH_PASSWORD: ${AUTH_PASSWORD:?AUTH_PASSWORD must be set — without it the instance runs WITHOUT authentication}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (openssl rand -hex 32)}
       SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-}
+      OUTBOUND_ALLOW_HOSTS: ${OUTBOUND_ALLOW_HOSTS:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}

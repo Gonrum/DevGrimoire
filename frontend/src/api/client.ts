@@ -1116,6 +1116,7 @@ export interface SshTestErrorPayload {
     | 'host_unreachable'
     | 'host_key_mismatch'
     | 'credential_missing'
+    | 'target_blocked'
     | 'timeout'
     | 'unknown';
   message: string;

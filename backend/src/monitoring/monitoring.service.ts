@@ -27,6 +27,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { errorMessage, isDuplicateKeyError, isRecord } from '../common/narrow';
 import { discardBody, readBodyCapped } from '../common/read-body-capped';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { guardedFetch } from '../common/guarded-fetch';
 
 /**
  * Wie viele Healthchecks gleichzeitig laufen (M-45). Über
@@ -374,7 +375,8 @@ export class MonitoringService {
       if (method !== HealthcheckMethod.GET && method !== HealthcheckMethod.HEAD && check.body) {
         init.body = check.body;
       }
-      const res = await fetch(check.url, init);
+      // Ziel prüfen (M-4); Redirects folgt der Check ohnehin nicht.
+      const res = await guardedFetch(check.url, init, { followRedirects: false });
       latencyMs = Date.now() - t0;
       statusCode = res.status;
       networkOk = true;

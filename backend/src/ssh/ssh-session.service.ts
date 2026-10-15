@@ -12,6 +12,7 @@ import {
 } from 'ssh2';
 import { SshService } from './ssh.service';
 import { errorMessage, errorWithCause } from '../common/narrow';
+import { outboundGuard } from '../common/outbound-guard';
 import { SecretsService } from '../secrets/secrets.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -329,6 +330,8 @@ export class SshSessionService {
   // restart drops in-flight jobs; the audit row written at finalize is the
   // durable record.
   private readonly execJobs = new Map<string, ExecJob>();
+  /** Ziel-Prüfung vor dem Verbinden (M-4); Checks ersetzen sie. */
+  outbound: Pick<typeof outboundGuard, 'resolve'> = outboundGuard;
 
   constructor(
     private readonly sshService: SshService,
@@ -1222,11 +1225,14 @@ export class SshSessionService {
         authPatch.password = creds.password!;
       }
 
-      try {
-        client.connect({ ...config, ...authPatch });
-      } catch (err: unknown) {
-        finishWithError(asError(err));
-      }
+      // Mit der geprüften Adresse verbinden, nicht mit dem Namen (M-4).
+      this.outbound.resolve(connection.host).then((target) => {
+        try {
+          client.connect({ ...config, ...authPatch, host: target.address });
+        } catch (err: unknown) {
+          finishWithError(asError(err));
+        }
+      }, (err: unknown) => finishWithError(asError(err)));
     });
   }
 

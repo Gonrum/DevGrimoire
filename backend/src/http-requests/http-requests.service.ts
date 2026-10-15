@@ -29,6 +29,7 @@ import { buildResolutionContext, resolveRequest, maskSecrets } from './template-
 import { readBodyCapped } from '../common/read-body-capped';
 import { Readable } from 'node:stream';
 import { guardStream } from '../common/stream-guard';
+import { guardedFetch } from '../common/guarded-fetch';
 
 const HISTORY_TTL_DAYS = 30;
 const MAX_RESPONSE_BODY = 1_000_000; // 1 MB, wie in der Spec
@@ -472,10 +473,10 @@ export class HttpRequestsService {
         method,
         headers,
         signal: controller.signal,
-        redirect: resolved.followRedirects ? 'follow' : 'manual',
       };
       if (bodyInit !== undefined) init.body = bodyInit;
-      const res = await fetch(target.toString(), init);
+      // Ziel und jeden Redirect-Sprung prüfen (M-4).
+      const res = await guardedFetch(target, init, { followRedirects: !!resolved.followRedirects });
       status = res.status;
       statusText = res.statusText;
       ok = res.ok;
@@ -572,13 +573,12 @@ export class HttpRequestsService {
     const init: RequestInit = {
       method: prep.method,
       headers: prep.headers,
-      redirect: prep.resolved.followRedirects ? 'follow' : 'manual',
       signal: controller.signal,
     };
     if (prep.bodyInit !== undefined) init.body = prep.bodyInit;
     let upstream: Response;
     try {
-      upstream = await fetch(prep.target.toString(), init);
+      upstream = await guardedFetch(prep.target, init, { followRedirects: !!prep.resolved.followRedirects });
     } finally {
       clearTimeout(headerTimer);
     }

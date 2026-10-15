@@ -17,6 +17,8 @@
  * the audit-userId ObjectId guard behaves exactly like production.
  */
 const path = require('node:path');
+// Testhosts ohne DNS: der Outbound-Guard (M-4) lässt freigegebene Namen unaufgelöst durch.
+process.env.OUTBOUND_ALLOW_HOSTS = 'host.example,prod,localhost';
 const assert = require('node:assert/strict');
 const net = require('node:net');
 const { EventEmitter } = require('node:events');

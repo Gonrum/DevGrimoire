@@ -1,5 +1,7 @@
 import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { SshSessionService } from '../ssh/ssh-session.service';
+import { outboundGuard } from '../common/outbound-guard';
+import { isIP } from 'node:net';
 import { KubeClusterDocument } from './schemas/kube-cluster.schema';
 
 export interface ResolvedEndpoint {
@@ -19,6 +21,19 @@ interface TunnelEntry {
 }
 
 const DEFAULT_IDLE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Setzt die geprüfte Adresse als Verbindungsziel ein (M-4). Die URL behält
+ * Port und Pfad; der Hostname geht als `servername` an TLS — dasselbe Prinzip
+ * wie beim Tunnel: verbunden wird mit der Adresse, geprüft wird das
+ * Zertifikat gegen den Namen. Kein trailing Slash, die Kube-Clients hängen
+ * `/api/…` direkt an.
+ */
+export function pinServerUrl(parsed: URL, address: string): string {
+  const host = isIP(address) === 6 ? `[${address}]` : address;
+  const port = parsed.port ? `:${parsed.port}` : '';
+  return `${parsed.protocol}//${host}${port}${parsed.pathname.replace(/\/+$/, '')}`;
+}
 
 /**
  * Schreibt die Cluster-URL auf den lokalen Tunnel-Port um und behält den
@@ -80,12 +95,14 @@ export function requireHttpsUrl(server: string): URL {
 export class KubeTransportService {
   private readonly tunnels = new Map<string, Promise<TunnelEntry>>();
   private readonly idleTtlMs: number;
+  private readonly outbound: Pick<typeof outboundGuard, 'resolve'>;
 
   constructor(
     private readonly sshSessionService: SshSessionService,
-    @Optional() opts?: { idleTtlMs?: number },
+    @Optional() opts?: { idleTtlMs?: number; outbound?: Pick<typeof outboundGuard, 'resolve'> },
   ) {
     this.idleTtlMs = opts?.idleTtlMs ?? DEFAULT_IDLE_TTL_MS;
+    this.outbound = opts?.outbound ?? outboundGuard;
   }
 
   async resolve(cluster: KubeClusterDocument): Promise<ResolvedEndpoint> {
@@ -95,7 +112,16 @@ export class KubeTransportService {
       // Anlegen ab; das hier ist die zweite Verteidigungslinie für
       // Bestandsdaten, die vor dieser Prüfung angelegt wurden.
       const parsed = requireHttpsUrl(cluster.clusterServer);
-      return { url: cluster.clusterServer, servername: parsed.hostname, release: () => {} };
+      // Ziel prüfen und mit der geprüften Adresse verbinden (M-4). Der
+      // Tunnel-Pfad unten braucht das nicht: dort löst die Bastion das Ziel
+      // auf, `127.0.0.1` ist dann deren Loopback (k3s/kind auf dem
+      // Bastion-Host) — die SSH-Verbindung selbst prüft `openTunnel`.
+      const target = await this.outbound.resolve(parsed.hostname);
+      return {
+        url: isIP(parsed.hostname.replace(/^\[|\]$/g, '')) ? cluster.clusterServer : pinServerUrl(parsed, target.address),
+        servername: parsed.hostname,
+        release: () => {},
+      };
     }
 
     if (!cluster.sshConnectionId) {

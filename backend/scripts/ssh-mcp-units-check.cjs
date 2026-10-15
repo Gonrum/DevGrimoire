@@ -22,6 +22,8 @@
  * of the units under test.
  */
 const path = require('node:path');
+// Testhosts ohne DNS: der Outbound-Guard (M-4) lässt freigegebene Namen unaufgelöst durch.
+process.env.OUTBOUND_ALLOW_HOSTS = 'host.example,prod,localhost';
 const assert = require('node:assert/strict');
 
 function loadCompiled(rel) {
