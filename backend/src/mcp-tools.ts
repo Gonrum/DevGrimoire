@@ -575,27 +575,6 @@ async function auditKubeRead(
   });
 }
 
-/**
- * Schreibende Kube-Tools erben readOnly und Scope vom Service. Hier steht nur
- * die zweite Stufe `allowMcpWrites` — VOR dem Service geprüft, damit die
- * Ablehnung erklärt, wer was ändern muss, statt ein generisches 403 zu sein.
- */
-async function requireKubeMcpWrites(clusters: KubeClustersService, clusterId: string): Promise<void> {
-  const cluster = await clusters.findById(clusterId);
-  if (cluster.readOnly) {
-    throw new Error(
-      'Dieser Cluster ist als read-only markiert (readOnly). Schreibende Tools sind dort abgeschaltet; '
-      + 'ein Mensch muss den Cluster in den Einstellungen erst auf schreibbar stellen und allowMcpWrites setzen.',
-    );
-  }
-  if (!cluster.allowMcpWrites) {
-    throw new Error(
-      'Für diesen Cluster ist allowMcpWrites nicht gesetzt. Lesen ist erlaubt, Schreiben nicht — '
-      + 'ein Mensch muss das Flag in den Cluster-Einstellungen setzen.',
-    );
-  }
-}
-
 /** Hard safety cap independent of the (already-capped) `tailLines` schema max — matters for `sinceSeconds`, which has no upper bound of its own. */
 const KUBE_LOG_LINES_HARD_CAP = 5000;
 
@@ -3465,7 +3444,7 @@ const tools = [
       type: 'object' as const,
       properties: {
         clusterId: { type: 'string', description: 'Cluster-ID aus kube_cluster_list' },
-        yaml: { type: 'string' },
+        yaml: { type: 'string', maxLength: 262144 },
         namespace: { type: 'string' },
       },
       required: ['clusterId', 'yaml', 'namespace'],
@@ -7343,9 +7322,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'kube_delete':
         case 'kube_apply': {
           const clusterId = requireString(a, 'clusterId');
-          // Zweite Stufe vor dem Service: allowMcpWrites. readOnly und Scope
-          // prüft der Service selbst; hier steht nur die erklärende Ablehnung.
-          await requireKubeMcpWrites(kubeClustersService, clusterId);
+          // readOnly, Scope und (für sourceContext 'mcp') allowMcpWrites prüft der
+          // Service im auditierten Pfad; auch eine Ablehnung hinterlässt eine Zeile.
           const ctx = {
             clusterId,
             actor: RequestContext.getUser(),

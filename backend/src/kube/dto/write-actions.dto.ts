@@ -1,6 +1,8 @@
 import { Type } from 'class-transformer';
 import { IsBoolean, IsIn, IsInt, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
-import { DELETABLE_KINDS, RESTARTABLE_KINDS, SCALABLE_KINDS } from '../kube-writes.service';
+import {
+  DELETABLE_KINDS, KUBE_APPLY_YAML_MAX, RESTARTABLE_KINDS, SCALABLE_KINDS,
+} from '../kube-writes.service';
 
 /**
  * Body der Schreibaktionen unter POST /api/kube-clusters/:id/actions/*.
@@ -32,6 +34,6 @@ export class CordonActionDto {
 }
 
 export class ApplyActionDto {
-  @IsString() @MinLength(1) @MaxLength(256 * 1024) yaml!: string;
+  @IsString() @MinLength(1) @MaxLength(KUBE_APPLY_YAML_MAX) yaml!: string;
   @IsString() @MinLength(1) @MaxLength(253) namespace!: string;
 }

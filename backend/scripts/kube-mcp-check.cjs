@@ -756,7 +756,7 @@ process.env.MCP_STDIO_USER_ID = TEST_USER_ID;
     });
     // Der Actor kommt wie im HTTP-Transport aus dem RequestContext.
     const invoke = (tool, args) => RequestContext.run(ACTOR, undefined, () => server.invoke(tool, args));
-    return { server: { invoke }, state, audit, clusterId: cid.toString() };
+    return { server: { invoke }, rawInvoke: (t, a) => server.invoke(t, a), state, audit, clusterId: cid.toString() };
   }
 
   await check('bei allowMcpWrites=false lehnt jedes schreibende Tool ab und nennt das Flag', async () => {
@@ -767,6 +767,8 @@ process.env.MCP_STDIO_USER_ID = TEST_USER_ID;
     }
     assert.equal(env.state.built, 0, 'abgelehnte Tools bauten eine Verbindung auf');
     assert.equal(env.state.writeCalls, 0);
+    assert.equal(env.audit.rows.length, 4, 'jede Ablehnung muss eine Audit-Zeile hinterlassen');
+    assert.ok(env.audit.rows.every((r) => r.sourceContext === 'mcp' && r.errorMsg && /allowMcpWrites/.test(r.errorMsg)));
   });
 
   await check('bei readOnly=true lehnen sie ebenfalls ab', async () => {
@@ -776,6 +778,38 @@ process.env.MCP_STDIO_USER_ID = TEST_USER_ID;
       assert.ok(res.error && /read-only/i.test(res.error), `${tool}: ${res.error}`);
     }
     assert.equal(env.state.writeCalls, 0);
+    assert.equal(env.state.built, 0);
+    assert.equal(env.audit.rows.length, 4);
+    assert.ok(env.audit.rows.every((r) => r.sourceContext === 'mcp' && r.errorMsg));
+  });
+
+  await check('ausserhalb des Scopes + allowMcpWrites=false: Scope-Meldung, nicht allowMcpWrites', async () => {
+    const env = makeWriteEnv({ readOnly: false, allowMcpWrites: false });
+    const outside = { ...ACTOR, projectScopeMode: 'restricted', allowedProjectIds: ['fremd'] };
+    const res = unwrap(await RequestContext.run(outside, undefined, () =>
+      env.rawInvoke('kube_scale', { clusterId: env.clusterId, ...CALL_ARGS.kube_scale })));
+    assert.ok(res.error && /Kein Zugriff/.test(res.error) && !/allowMcpWrites/.test(res.error), res.error);
+    assert.equal(env.state.built, 0);
+  });
+
+  await check('kube_apply: überlanges YAML -> 400 + Audit-Zeile, keine Verbindung', async () => {
+    const env = makeWriteEnv({ readOnly: false, allowMcpWrites: true });
+    const res = unwrap(await env.server.invoke('kube_apply',
+      { clusterId: env.clusterId, namespace: 'n', yaml: 'a'.repeat(256 * 1024 + 1) }));
+    assert.ok(res.error && /yaml/.test(res.error), res.error);
+    assert.equal(env.state.built, 0);
+    assert.equal(env.audit.rows.length, 1);
+    assert.ok(env.audit.rows[0].errorMsg);
+  });
+
+  await check('kube_apply Schema deckelt yaml; überlanger Name -> 400', async () => {
+    assert.ok(byName.get('kube_apply').inputSchema.properties.yaml.maxLength <= 256 * 1024);
+    const env = makeWriteEnv({ readOnly: false, allowMcpWrites: true });
+    const res = unwrap(await env.server.invoke('kube_delete',
+      { clusterId: env.clusterId, kind: 'Pod', namespace: 'n', name: 'x'.repeat(254) }));
+    assert.ok(res.error && /name/.test(res.error), res.error);
+    assert.equal(env.state.built, 0);
+    assert.equal(env.audit.rows.length, 1);
   });
 
   await check('bei allowMcpWrites=true ruft kube_scale den Service und auditiert mit sourceContext mcp', async () => {

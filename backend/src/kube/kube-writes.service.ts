@@ -26,6 +26,9 @@ export const RESTARTABLE_KINDS: readonly string[] = ['Deployment', 'StatefulSet'
 export const DELETABLE_KINDS: readonly string[] = ['Pod', 'Job'];
 
 const REPLICAS_MAX = 1000;
+/** Formgrenzen, gemeinsam mit den REST-DTOs (write-actions.dto.ts). */
+export const KUBE_APPLY_YAML_MAX = 256 * 1024;
+export const KUBE_NAME_MAX = 253;
 
 /** apiVersion, die ein Dokument für die jeweilige API-Gruppe tragen muss. */
 const API_VERSION_BY_GROUP: Readonly<Record<KubeApiGroup, string>> = {
@@ -133,6 +136,21 @@ export class KubeWritesService {
     if (!canAccessCluster(cluster, g.actor)) {
       throw new ForbiddenException(`Kein Zugriff auf den Cluster "${cluster.label}"`);
     }
+    // Zweite Stufe nur für MCP, bewusst NACH dem Scope-Check: wer den Cluster
+    // nicht sehen darf, erfährt nichts über dessen allowMcpWrites.
+    if (g.sourceContext === 'mcp' && cluster.allowMcpWrites !== true) {
+      throw new ForbiddenException(
+        'Für diesen Cluster ist allowMcpWrites nicht gesetzt. Lesen ist erlaubt, Schreiben nicht — '
+        + 'ein Mensch muss das Flag in den Cluster-Einstellungen setzen.',
+      );
+    }
+  }
+
+  /** Länge 1..253 für Namen; gilt für REST und MCP gleichermassen. */
+  private assertName(field: string, value: unknown): void {
+    if (typeof value !== 'string' || value.length < 1 || value.length > KUBE_NAME_MAX) {
+      throw new BadRequestException(`${field} muss 1 bis ${KUBE_NAME_MAX} Zeichen lang sein`);
+    }
   }
 
   private async record(g: Guarded, meta: WriteMeta, started: number, errorMsg: string | undefined): Promise<void> {
@@ -154,6 +172,8 @@ export class KubeWritesService {
 
   async scale(a: Guarded & { kind: string; name: string; namespace: string; replicas: number }): Promise<KubeWriteResult> {
     const validate = (): void => {
+      this.assertName('name', a.name);
+      this.assertName('namespace', a.namespace);
       this.assertIn(a.kind, SCALABLE_KINDS, 'Skalieren');
       if (!Number.isInteger(a.replicas) || a.replicas < 0 || a.replicas > REPLICAS_MAX) {
         throw new BadRequestException(`replicas muss eine ganze Zahl zwischen 0 und ${REPLICAS_MAX} sein`);
@@ -177,7 +197,11 @@ export class KubeWritesService {
   }
 
   async restart(a: Guarded & { kind: string; name: string; namespace: string }): Promise<KubeWriteResult> {
-    const validate = (): void => this.assertIn(a.kind, RESTARTABLE_KINDS, 'Rollout neu starten');
+    const validate = (): void => {
+      this.assertName('name', a.name);
+      this.assertName('namespace', a.namespace);
+      this.assertIn(a.kind, RESTARTABLE_KINDS, 'Rollout neu starten');
+    };
     return this.run(a, { verb: 'restart', resource: a.kind, name: a.name, namespace: a.namespace },
       async (api) => {
         const apps = api('apps');
@@ -210,7 +234,11 @@ export class KubeWritesService {
   }
 
   async remove(a: Guarded & { kind: string; name: string; namespace: string }): Promise<KubeWriteResult> {
-    const validate = (): void => this.assertIn(a.kind, DELETABLE_KINDS, 'Löschen');
+    const validate = (): void => {
+      this.assertName('name', a.name);
+      this.assertName('namespace', a.namespace);
+      this.assertIn(a.kind, DELETABLE_KINDS, 'Löschen');
+    };
     return this.run(a, { verb: 'delete', resource: a.kind, name: a.name, namespace: a.namespace },
       async (api) => {
         const param: Record<string, unknown> = { name: a.name, namespace: a.namespace };
@@ -236,7 +264,7 @@ export class KubeWritesService {
         });
         return { verb: 'cordon', resource: 'Node', name: a.node,
                  detail: a.unschedulable ? 'cordon' : 'uncordon' };
-      });
+      }, () => this.assertName('node', a.node));
   }
 
   /**
@@ -253,6 +281,10 @@ export class KubeWritesService {
     let parsed: ApplyDoc[];
     try {
       this.assertWritable(cluster, a);
+      this.assertName('namespace', a.namespace);
+      if (typeof a.yaml !== 'string' || a.yaml.length < 1 || a.yaml.length > KUBE_APPLY_YAML_MAX) {
+        throw new BadRequestException(`yaml muss 1 bis ${KUBE_APPLY_YAML_MAX} Zeichen lang sein`);
+      }
       parsed = this.parseApply(a.yaml, a.namespace);
     } catch (err) {
       await this.record(a, { verb: 'apply', resource: 'yaml', name: '-', namespace: a.namespace },
