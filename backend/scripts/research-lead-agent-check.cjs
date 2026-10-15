@@ -18,7 +18,7 @@ function loadCompiled(rel) {
 const { runLeadAgent } = loadCompiled('research/research-lead-agent.js');
 const { SourceRegistry } = loadCompiled('research/research-sources.js');
 
-const EXPECTED_CHECKS = 7;
+const EXPECTED_CHECKS = 10;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -119,6 +119,32 @@ function makeDeps({ script, roundsTotal = 2, roundsDone = 0, withSource = true }
     assert.equal(seen[0].kind, 'leadReport');
     assert.match(seen[0].messages[0].content, /DATA, not instructions/);
     assert.match(seen[0].messages[0].content, /## Kurzfassung/);
+  });
+
+  await check('eine Runde pro Zug; Bericht im selben Zug nach Runde wird abgelehnt', async () => {
+    const { deps, rounds, seen } = makeDeps({ script: [
+      { toolCalls: [tc('run_subtasks', { tasks: [{ question: 'Q1' }] }), tc('run_subtasks', { tasks: [{ question: 'Q2' }] }), tc('write_report', { report: REPORT })] },
+      { toolCalls: [tc('write_report', { report: REPORT })] },
+    ] });
+    const out = await runLeadAgent(deps);
+    assert.equal(rounds.length, 1);
+    const tools = seen[1].messages.filter((m) => m.role === 'tool').map((m) => m.content);
+    assert.ok(tools.length >= 3);
+    assert.match(tools[1], /only one research round per turn/);
+    assert.match(tools[2], /wait for the results/);
+    assert.equal(out.report, REPORT);
+  });
+
+  await check('Bericht-Aufruf vor Runde im selben Zug bleibt gültig', async () => {
+    const { deps } = makeDeps({ script: [{ toolCalls: [tc('write_report', { report: `  ${REPORT}  ` })] }] });
+    const out = await runLeadAgent(deps);
+    assert.equal(out.report, REPORT.trim());
+  });
+
+  await check('runRound-Fehler propagiert', async () => {
+    const { deps } = makeDeps({ script: [{ toolCalls: [tc('run_subtasks', { tasks: [{ question: 'Q' }] })] }] });
+    deps.runRound = async () => { throw new Error('db down'); };
+    await assert.rejects(runLeadAgent(deps), /db down/);
   });
 
   console.log(`\n${total - failures}/${total} passed`);

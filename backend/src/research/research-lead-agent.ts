@@ -24,6 +24,11 @@ export interface LeadOutcome { report: string | null; roundsDone: number; result
 
 const MIN_REPORT = 200;
 
+/** Hüllt Fehler aus runRound, damit sie nicht zu Werkzeug-Fehlertexten werden. */
+class RoundFailure extends Error {
+  constructor(readonly original: unknown) { super(errorMessage(original)); }
+}
+
 function leadSystemPrompt(d: LeadDeps): string {
   const { ctx } = d;
   const focusLine = ctx.focus ? `\nFocus: ${ctx.focus}` : '';
@@ -114,6 +119,7 @@ export async function runLeadAgent(d: LeadDeps): Promise<LeadOutcome> {
   const tools = leadTools();
   const maxSteps = Math.max(0, d.roundsTotal - d.roundsDone) + 4;
   let report: string | null = null;
+  let roundThisTurn = false;
 
   const runTool = async (name: string, rawArgs: string): Promise<string> => {
     let args: ToolArgs;
@@ -123,16 +129,24 @@ export async function runLeadAgent(d: LeadDeps): Promise<LeadOutcome> {
     try {
       switch (name) {
         case 'run_subtasks': {
+          if (roundThisTurn) return 'Error: only one research round per turn – wait for the results';
           if (d.roundsDone >= d.roundsTotal) return 'Error: no research rounds left – call write_report now';
           const tasks = parseTasks(args, ctx.cfg.tasks, ctx.usedQueries);
           if (!tasks) return 'Error: tasks must be a non-empty list';
-          const round = await d.runRound(tasks);
+          roundThisTurn = true;
+          let round: RoundResult[];
+          try {
+            round = await d.runRound(tasks);
+          } catch (err) {
+            throw new RoundFailure(err);
+          }
           results.push(...round);
           const left = Math.max(0, d.roundsTotal - d.roundsDone);
           return `${wrapUntrusted('', 'RESULTS', resultsBlock(round))}\n\nResearch rounds left: ${left}. Start another round for important gaps, or call write_report.`;
         }
         case 'write_report': {
-          const text = requireString(args, 'report');
+          if (roundThisTurn) return 'Error: wait for the results of run_subtasks before writing the report';
+          const text = requireString(args, 'report').trim();
           if (text.length < MIN_REPORT) return `Error: report too short (min ${MIN_REPORT} characters)`;
           if (!ctx.registry.all().some((s) => s.relevant)) return 'Error: no usable sources yet – run_subtasks first';
           report = text;
@@ -143,6 +157,7 @@ export async function runLeadAgent(d: LeadDeps): Promise<LeadOutcome> {
       }
     } catch (err) {
       if (err instanceof Interrupted) throw err;
+      if (err instanceof RoundFailure) throw err.original instanceof Error ? err.original : err;
       return `Error: ${errorMessage(err)}`;
     }
   };
@@ -176,6 +191,7 @@ export async function runLeadAgent(d: LeadDeps): Promise<LeadOutcome> {
       content: res.text,
       tool_calls: res.toolCalls.map((t) => ({ id: t.id, type: 'function', function: { name: t.name, arguments: t.arguments } })),
     });
+    roundThisTurn = false;
     for (const call of res.toolCalls) {
       throwIfAborted(ctx);
       const content = await runTool(call.name, call.arguments);
