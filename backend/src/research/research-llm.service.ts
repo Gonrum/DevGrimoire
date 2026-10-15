@@ -7,7 +7,9 @@ import type { Slot } from '../balancer/balancer.types';
 import type { OpenAiToolDef, LlmMessageWithTools } from '../chat/chat-llm.service';
 import { ResearchLiveService } from './research-live.service';
 
-export class Interrupted extends Error {}
+export class Interrupted extends Error {
+  override name = 'Interrupted';
+}
 
 export type LimitKind = 'short' | 'notes' | 'leadPlan' | 'leadReport';
 
@@ -26,7 +28,7 @@ export interface ResearchLlmCall {
   messages: LlmMessageWithTools[];
   tools?: OpenAiToolDef[];
   signal: AbortSignal;
-  /** Umleitung auf einen anderen Endpunkt (Label des ausgefallenen Endpunkts). */
+  /** Umleitung: wird NACH erfolgreicher Zuteilung des nächsten Slots mit dem Label des NEUEN Endpunkts aufgerufen. */
   onReroute?: (to: string) => void;
 }
 
@@ -35,6 +37,13 @@ export interface ResearchLlmResult {
   toolCalls: Array<{ id: string; name: string; arguments: string }>;
   /** "Modell @ Endpunkt-Host" */
   model: string;
+}
+
+/** `Modell @ Host`; fällt auf die rohe baseUrl zurück, wenn sie keinen Host hergibt. */
+function endpointLabel(slot: Slot): string {
+  let host: string;
+  try { host = new URL(slot.baseUrl).host; } catch { host = ''; }
+  return `${slot.model} @ ${host || slot.baseUrl}`;
 }
 
 const MAX_REROUTES = 2;
@@ -58,11 +67,24 @@ export class ResearchLlmService {
 
   async call(c: ResearchLlmCall): Promise<ResearchLlmResult> {
     const exclude = new Set<string>();
+    let rerouted = false;
     for (let attempt = 0; ; attempt++) {
       const slot = await this.lease(c, exclude);
-      const label = `${slot.model} @ ${new URL(slot.baseUrl).host}`;
+      const label = endpointLabel(slot);
+      // Ab hier gehört der Slot uns: alles Weitere in try/finally.
+      let keyFailed = false;
       try {
-        const apiKey = await this.endpoints.getDecryptedApiKey(slot.id);
+        if (rerouted) {
+          rerouted = false;
+          c.onReroute?.(label);
+        }
+        let apiKey: string | null;
+        try {
+          apiKey = await this.endpoints.getDecryptedApiKey(slot.id);
+        } catch (err) {
+          keyFailed = true; // lokaler Konfigurations-/Krypto-Fehler, nicht der Endpunkt
+          throw err;
+        }
         this.live.emit(c.researchId, { type: 'call', lane: c.lane, model: label });
         const out = await this.stream(c, slot, apiKey);
         this.health.recordSuccess(slot.id);
@@ -70,10 +92,13 @@ export class ResearchLlmService {
         return { ...out, model: label };
       } catch (err) {
         if (c.signal.aborted) throw new Interrupted('abgebrochen');
+        if (keyFailed) throw err;
         this.health.recordFailure(slot.id);
         exclude.add(slot.id);
         if (attempt >= MAX_REROUTES) throw err;
-        c.onReroute?.(label);
+        // Kein Ersatz-Endpunkt: sofort den ursprünglichen Fehler, nicht warten.
+        if (!(await this.allocator.hasCandidate('workflow', exclude))) throw err;
+        rerouted = true;
       } finally {
         this.allocator.release(slot.id);
         this.live.emit(c.researchId, { type: 'idle', lane: c.lane });

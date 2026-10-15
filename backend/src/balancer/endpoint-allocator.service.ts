@@ -31,6 +31,16 @@ export class EndpointAllocator {
     return null;
   }
 
+  /**
+   * Gibt es überhaupt einen Kandidaten (aktiviert, gesund, nicht ausgeschlossen),
+   * auch wenn er gerade ausgelastet ist? Unterscheidet „alles belegt" (warten)
+   * von „kein Ersatz vorhanden" (sofort scheitern).
+   */
+  async hasCandidate(purpose: LlmPurpose, exclude?: Set<string>): Promise<boolean> {
+    const pool = await this.endpoints.listForPool(purpose);
+    return pool.some((e) => !exclude?.has(e.id) && this.health.isHealthy(e.id));
+  }
+
   release(id: string): void {
     const used = this.inUse.get(id) ?? 0;
     if (used > 0) this.inUse.set(id, used - 1);

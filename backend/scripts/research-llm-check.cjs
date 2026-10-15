@@ -26,7 +26,7 @@ const { EndpointAllocator } = loadCompiled('balancer/endpoint-allocator.service.
 const { readOpenAiChoiceDelta } = loadCompiled('balancer/llm-responses.js');
 const { LlmClient } = loadCompiled('balancer/llm-client.service.js');
 
-const EXPECTED_CHECKS = 8;
+const EXPECTED_CHECKS = 15;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -79,7 +79,7 @@ const call = (env, extra = {}) => env.svc.call({ researchId: 'r1', lane: 't1', k
     assert.equal(res.text, 'ok');
     assert.deepEqual(env.counts.calls, ['http://a:1234', 'http://b:1234']);
     assert.deepEqual([env.counts.acquire, env.counts.release], [2, 2]);
-    assert.equal(reroutes.length, 1);
+    assert.deepEqual(reroutes, ['m @ b:1234']);
   });
 
   await check('Abbruch mitten im Strom: Interrupted, Slot frei, kein recordFailure', async () => {
@@ -138,6 +138,63 @@ const call = (env, extra = {}) => env.svc.call({ researchId: 'r1', lane: 't1', k
       assert.ok(!without.includes('reasoning'));
       assert.ok(withR.includes('reasoning'));
     } finally { globalThis.fetch = origFetch; }
+  });
+
+  await check('baseUrl ohne Schema (gpu-host): kein Slot-Leck, Label fällt auf baseUrl zurück', async () => {
+    const env = makeEnv({ endpoints: [{ ...EP('a'), baseUrl: 'gpu-host' }] });
+    const res = await call(env);
+    assert.equal(res.model, 'm @ gpu-host');
+    assert.deepEqual([env.counts.acquire, env.counts.release], [1, 1]);
+  });
+
+  await check('baseUrl mit leerem Host (localhost:1234): Label fällt auf baseUrl zurück', async () => {
+    const env = makeEnv({ endpoints: [{ ...EP('a'), baseUrl: 'localhost:1234' }] });
+    const res = await call(env);
+    assert.equal(res.model, 'm @ localhost:1234');
+    assert.deepEqual([env.counts.acquire, env.counts.release], [1, 1]);
+  });
+
+  await check('Einziger Endpunkt fehlerhaft: sofort der Originalfehler, ohne Umleitung', async () => {
+    const env = makeEnv({ endpoints: [EP('a')], behaviour: () => ({ throws: new Error('original') }) });
+    const reroutes = [];
+    const t0 = Date.now();
+    await assert.rejects(call(env, { onReroute: (to) => reroutes.push(to) }), /original/);
+    assert.ok(Date.now() - t0 < 1000);
+    assert.deepEqual([env.counts.acquire, env.counts.release], [1, 1]);
+    assert.equal(reroutes.length, 0);
+  });
+
+  await check('API-Key-Fehler: kein recordFailure, keine Umleitung, Slot frei', async () => {
+    const env = makeEnv();
+    env.svc.endpoints = { getDecryptedApiKey: async () => { throw new Error('crypto'); } };
+    await assert.rejects(call(env), /crypto/);
+    assert.equal(env.health.failed || 0, 0);
+    assert.deepEqual([env.counts.acquire, env.counts.release], [1, 1]);
+  });
+
+  await check('Interrupted trägt den Namen', async () => {
+    assert.equal(new Interrupted('x').name, 'Interrupted');
+  });
+
+  await check('Live: subscribe/unsubscribe auf unbekannter Id hinterlässt keinen Eintrag; emit ist No-op', async () => {
+    const live = new ResearchLiveService();
+    const off = live.subscribe('x', () => {});
+    off();
+    assert.equal(live.size(), 0);
+    live.emit('y', { type: 'idle', lane: 'l' });
+    assert.equal(live.size(), 0);
+  });
+
+  await check('Live: end() mit Zuhörer, danach unsubscribe → Eintrag weg; emit danach legt nichts an', async () => {
+    const live = new ResearchLiveService();
+    live.begin('r');
+    const off = live.subscribe('r', () => {});
+    live.end('r');
+    assert.equal(live.size(), 1);
+    off();
+    assert.equal(live.size(), 0);
+    live.emit('r', { type: 'idle', lane: 'l' });
+    assert.equal(live.size(), 0);
   });
 
   console.log(`\n${total - failures}/${total} passed`);

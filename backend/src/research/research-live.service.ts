@@ -30,6 +30,9 @@ interface Run {
 export class ResearchLiveService {
   private readonly runs = new Map<string, Run>();
 
+  /** Anzahl gehaltener Läufe (Testhaken für die Aufräum-Checks). */
+  size(): number { return this.runs.size; }
+
   private run(id: string): Run {
     let r = this.runs.get(id);
     if (!r) {
@@ -56,7 +59,8 @@ export class ResearchLiveService {
   setSticky(id: string, lane: string, endpointId: string): void { this.run(id).sticky.set(lane, endpointId); }
 
   emit(id: string, ev: LiveEvent): void {
-    const r = this.run(id);
+    const r = this.runs.get(id);
+    if (!r) return;
     if (ev.type === 'call') r.lanes.set(ev.lane, { text: '', reasoning: '', model: ev.model, active: true });
     if (ev.type === 'delta') {
       const lane = r.lanes.get(ev.lane) ?? { text: '', reasoning: '', active: true };
@@ -82,7 +86,14 @@ export class ResearchLiveService {
   subscribe(id: string, cb: (ev: LiveEvent) => void): () => void {
     const r = this.run(id);
     r.subs.add(cb);
-    return () => { r.subs.delete(cb); };
+    return () => {
+      r.subs.delete(cb);
+      // Kein aktiver Lauf und niemand hört mehr zu: Eintrag freigeben.
+      if (r.subs.size === 0 && !r.controller && this.runs.get(id) === r) {
+        if (r.cleanup) clearTimeout(r.cleanup);
+        this.runs.delete(id);
+      }
+    };
   }
 
   /** Lauf beendet: `end` senden, Controller entfernen, Puffer nach 60 s löschen. */
