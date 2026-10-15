@@ -8529,7 +8529,16 @@ function isObjectIdLike(v: string): boolean {
   return /^[0-9a-f]{24}$/i.test(v);
 }
 
-function formatToolBody(toolName: string, args: Record<string, unknown>, result: unknown): string {
+/**
+ * Argumente, deren Wert nie in eine Notification darf. `secret_set` schickt
+ * den Klartext als `value` — die ersten 80 Zeichen standen sonst 7 Tage in
+ * der Notification-Collection. Über den Namen statt über die Tool-Liste, damit
+ * ein neues Tool mit `password`/`token`/`apiKey` nicht erst eingetragen
+ * werden muss.
+ */
+const SENSITIVE_ARG_KEY = /^(value|yaml|content|body)$|pass|secret|token|key|credential|private|auth|cookie/i;
+
+export function formatToolBody(toolName: string, args: Record<string, unknown>, result: unknown): string {
   const r = isPlainRecord(result) ? result : undefined;
   const pieces: string[] = [];
 
@@ -8551,11 +8560,10 @@ function formatToolBody(toolName: string, args: Record<string, unknown>, result:
   }
 
   // From args, surface fields that aren't IDs and aren't already covered.
-  // `yaml` (kube_apply): ein Manifest kann Secret-Werte oder Tokens tragen —
-  // die ersten 80 Zeichen landeten sonst in der Notification-Collection.
-  const skipKeys = new Set(['projectId', 'customerId', 'milestoneId', 'todoId', 'id', '_id', 'yaml']);
+  // `yaml` (kube_apply) und `value` (secret_set) fallen unter SENSITIVE_ARG_KEY.
+  const skipKeys = new Set(['projectId', 'customerId', 'milestoneId', 'todoId', 'id', '_id']);
   for (const [key, value] of Object.entries(args)) {
-    if (skipKeys.has(key)) continue;
+    if (skipKeys.has(key) || SENSITIVE_ARG_KEY.test(key)) continue;
     if (value === undefined || value === null) continue;
     const str = typeof value === 'string' ? value : JSON.stringify(value);
     if (typeof value === 'string' && isObjectIdLike(value)) continue;
