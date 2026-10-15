@@ -32,14 +32,26 @@ export async function extractUploadText(file: UploadedFile): Promise<string> {
 export function prepareFiles(files: Array<{ name: string; text: string }>): Array<{ name: string; text: string }> {
   if (files.length > FILE_LIMITS.maxFiles) throw new BadRequestException(`Höchstens ${FILE_LIMITS.maxFiles} Dateien`);
   let sum = 0;
-  const seen = new Map<string, number>();
+  // Alle Originalnamen sind belegt, damit eine Umbenennung nie mit einem vorhandenen Namen kollidiert.
+  const used = new Set(files.map((f) => f.name));
+  const claimed = new Set<string>();
   return files.map((f) => {
     if (f.text.length > FILE_LIMITS.maxCharsPerFile) throw new BadRequestException(`${f.name}: mehr als ${FILE_LIMITS.maxCharsPerFile} Zeichen`);
     sum += f.text.length;
     if (sum > FILE_LIMITS.maxCharsTotal) throw new BadRequestException(`Dateien zusammen mehr als ${FILE_LIMITS.maxCharsTotal} Zeichen`);
-    const count = (seen.get(f.name) ?? 0) + 1;
-    seen.set(f.name, count);
-    const name = count === 1 ? f.name : f.name.replace(/(\.[^.]*)?$/, (ext) => ` (${count})${ext ?? ''}`);
+    let name = f.name;
+    if (claimed.has(name)) {
+      const dot = f.name.lastIndexOf('.');
+      const base = dot > 0 ? f.name.slice(0, dot) : f.name;
+      const ext = dot > 0 ? f.name.slice(dot) : '';
+      let k = 2;
+      do {
+        name = `${base} (${k})${ext}`;
+        k++;
+      } while (used.has(name) || claimed.has(name));
+    }
+    claimed.add(name);
+    used.add(name);
     return { name, text: f.text };
   });
 }

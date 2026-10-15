@@ -21,7 +21,7 @@ const { SourceRegistry, citedSourcesOf, appendSourcesSection } = loadCompiled('r
 const { prepareFiles, splitParts, extractUploadText } = loadCompiled('research/research-files.js');
 const { DEPTH, INJECTION_GUARD } = loadCompiled('research/research-config.js');
 
-const EXPECTED_CHECKS = 10;
+const EXPECTED_CHECKS = 14;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -71,7 +71,7 @@ async function check(label, fn) {
       { n: 3, url: 'https://b.de/', title: '', notes: '', relevant: true },
       { n: 4, url: 'https://c.de/', title: 'C', notes: '', relevant: false },
     ];
-    const { report, cited } = appendSourcesSection('Text [1] [3] [4]\n\n## Quellen\n- erfunden', sources);
+    const { report, cited } = appendSourcesSection('Text [1] [3] [9]\n\n## Quellen\n- erfunden', sources);
     assert.ok(!report.includes('erfunden'));
     assert.match(report, /## Quellen\n- \[1\] 📎 notiz\.pdf \(eigene Datei\)\n- \[3\] \[https:\/\/b\.de\/\]\(https:\/\/b\.de\/\)$/);
     assert.deepEqual(cited.map((s) => s.n), [1, 3]);
@@ -80,6 +80,42 @@ async function check(label, fn) {
   await check('appendSourcesSection: ohne Zitate alle relevanten', () => {
     const { cited } = appendSourcesSection('Kein Zitat', [{ n: 1, url: 'https://a.de/', title: 'A', notes: '', relevant: true }, { n: 2, url: 'https://b.de/', title: 'B', notes: '', relevant: false }]);
     assert.deepEqual(cited.map((s) => s.n), [1]);
+  });
+
+  await check('Zitate: Bereiche, Semikolon, ^n; a[1] und arr[0] zählen nicht; Link-Label zählt', () => {
+    assert.deepEqual(citedSourcesOf('A [1-3] B [5; 7] C [^9] D [4–5]'), [1, 2, 3, 4, 5, 7, 9]);
+    assert.deepEqual(citedSourcesOf('a[1] arr[0]'), []);
+    assert.deepEqual(citedSourcesOf('Siehe [3](https://a.de/)'), [3]);
+    assert.equal(citedSourcesOf('[1-500]').length, 20);
+  });
+
+  await check('appendSourcesSection: unbekanntes Zitat entfernt, gelesene nicht-relevante Quelle gelistet', () => {
+    const sources = [
+      { n: 1, url: 'https://a.de/', title: 'A', notes: '', relevant: false },
+      { n: 2, url: 'https://b.de/', title: 'B', notes: '', relevant: true },
+    ];
+    const { report, cited } = appendSourcesSection('Ein Satz [4]. Zwei [1, 4]. Drei [2-4].', sources);
+    assert.ok(!/\b4\b/.test(report.split('## Quellen')[0]), report);
+    assert.match(report, /Zwei \[1\]\./);
+    assert.deepEqual(cited.map((s) => s.n), [1, 2]);
+    assert.equal(sources[0].relevant, true);
+  });
+
+  await check('appendSourcesSection: nur abschließender Quellenabschnitt wird entfernt', () => {
+    const src = [{ n: 1, url: 'https://a.de/', title: 'A', notes: '', relevant: true }];
+    const keep = appendSourcesSection('T [1]\n\n## Quellen\n- y\n\n## Fazit\nwichtig', src).report;
+    assert.ok(keep.includes('## Fazit\nwichtig') && keep.includes('- y'));
+    assert.ok(appendSourcesSection('T [1]\n\n## Quellen und Methodik\nText', src).report.includes('## Quellen und Methodik'));
+    const s1 = appendSourcesSection('T [1]\n\n## Sources\n- fake\n* fake2', src).report;
+    assert.ok(!s1.includes('fake'));
+    const s2 = appendSourcesSection('T [1]\n\n### Quellen:\n1. fake', src).report;
+    assert.ok(!s2.includes('fake') && s2.endsWith('- [1] [A](https://a.de/)'));
+  });
+
+  await check('prepareFiles: Umbenennung kollidiert nicht, Dotfiles bleiben sauber', () => {
+    const t = (names) => prepareFiles(names.map((name) => ({ name, text: 'x' }))).map((f) => f.name);
+    assert.deepEqual(t(['a.txt', 'a.txt', 'a (2).txt']), ['a.txt', 'a (3).txt', 'a (2).txt']);
+    assert.deepEqual(t(['.env', '.env']), ['.env', '.env (2)']);
   });
 
   await check('prepareFiles: Grenzen und durchnummerierte Namen', () => {

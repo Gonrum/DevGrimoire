@@ -19,16 +19,57 @@ export function normalizeUrl(url: string): string {
   }
 }
 
-/** `[n]`, `[n, m]` und Ketten `[n][m]`; nur ganze Zahlen ≥ 1. */
-export function citedSourcesOf(text: string): number[] {
-  const out = new Set<number>();
-  for (const m of text.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g)) {
-    for (const part of m[1].split(',')) {
-      const n = Number(part.trim());
-      if (Number.isInteger(n) && n >= 1) out.add(n);
+const MAX_RANGE = 20;
+/** `[n]`, `[n, m]`, `[n; m]`, `[n-m]`, `[^n]`; `[` direkt nach einem Wortzeichen (`a[1]`) zählt nicht. */
+const CITE_RE = /([ \t]?)(?<!\w)\[(\^?)(\d+(?:\s*[-–]\s*\d+)?(?:\s*[,;]\s*\d+(?:\s*[-–]\s*\d+)?)*)\]/g;
+
+function numbersOfBracket(inner: string): number[] {
+  const out: number[] = [];
+  for (const part of inner.split(/[,;]/)) {
+    const range = /^\s*(\d+)\s*[-–]\s*(\d+)\s*$/.exec(part);
+    if (range) {
+      const from = Number(range[1]);
+      const to = Number(range[2]);
+      for (let k = from; k <= to && k - from < MAX_RANGE && out.length < MAX_RANGE; k++) out.push(k);
+    } else {
+      out.push(Number(part.trim()));
     }
   }
+  return out.filter((n) => Number.isInteger(n) && n >= 1);
+}
+
+export function citedSourcesOf(text: string): number[] {
+  const out = new Set<number>();
+  for (const m of text.matchAll(CITE_RE)) {
+    for (const n of numbersOfBracket(m[3])) out.add(n);
+  }
   return [...out].sort((a, b) => a - b);
+}
+
+/** Entfernt Zitate auf Nummern, die es nicht gibt (bei Mehrfach-Klammern nur diese Nummern). */
+function dropUnknownCitations(text: string, known: Set<number>): string {
+  return text.replace(CITE_RE, (whole: string, space: string, caret: string, inner: string) => {
+    const nums = numbersOfBracket(inner);
+    const keep = nums.filter((n) => known.has(n));
+    if (keep.length === nums.length) return whole;
+    if (keep.length === 0) return '';
+    return `${space}[${caret}${keep.join(', ')}]`;
+  });
+}
+
+const SOURCE_HEADING = /^#{2,3}\s+(?:quellen|quellenverzeichnis|literatur|sources|references):?\s*$/i;
+const SOURCE_TAIL_LINE = /^\s*$|^\s*(?:[-*]|\d+\.)\s|^\s*\[[^\]]+\]:\s|^\s*\[[^\]]+\]\([^)]*\)\s*$/;
+
+/** Entfernt nur einen ABSCHLIESSENDEN Quellenabschnitt (Überschrift + nur Listen-/Linkzeilen bis zum Ende). */
+function stripTrailingSources(report: string): string {
+  const lines = report.split('\n');
+  let idx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (SOURCE_HEADING.test(lines[i])) { idx = i; break; }
+  }
+  if (idx < 0) return report;
+  if (!lines.slice(idx + 1).every((l) => SOURCE_TAIL_LINE.test(l))) return report;
+  return lines.slice(0, idx).join('\n');
 }
 
 export class SourceRegistry {
@@ -78,11 +119,12 @@ export class SourceRegistry {
 }
 
 export function appendSourcesSection(report: string, sources: SourceEntry[]): { report: string; cited: SourceEntry[] } {
-  const body = report.replace(/\n*^##\s+Quellen\b[\s\S]*$/m, '').trimEnd();
+  const known = new Set(sources.map((s) => s.n));
+  const body = dropUnknownCitations(stripTrailingSources(report), known).trimEnd();
   const citedNs = new Set(citedSourcesOf(body));
-  const relevant = sources.filter((s) => s.relevant);
-  let cited = relevant.filter((s) => citedNs.has(s.n));
-  if (cited.length === 0) cited = relevant;
+  let cited = sources.filter((s) => citedNs.has(s.n));
+  for (const s of cited) s.relevant = true;
+  if (cited.length === 0) cited = sources.filter((s) => s.relevant);
   cited.sort((a, b) => a.n - b.n);
   if (cited.length === 0) return { report: body, cited };
   const lines = cited.map((s) => (s.file
