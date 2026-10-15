@@ -112,6 +112,7 @@
     "check:dg-kube-scope": "node scripts/dg-kube-scope-check.cjs",
     "check:kube-access": "node scripts/kube-access-check.cjs",
     "check:kube-writes": "node scripts/kube-writes-check.cjs",
+    "check:kube-writes-rest": "node scripts/kube-writes-rest-check.cjs",
     "checks": "node scripts/run-checks.cjs",
     "check:notification-prefs": "node scripts/notification-prefs-check.cjs"
   },

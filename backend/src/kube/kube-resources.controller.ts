@@ -94,6 +94,28 @@ function isTransportFailure(err: unknown): boolean {
   return causeCode !== undefined && TRANSPORT_CAUSE_CODES.has(causeCode);
 }
 
+/** Gemeinsamer Fehler-Mapper für lesende und schreibende Cluster-Routen (siehe guarded()). */
+export async function guardClusterErrors<T>(fn: () => Promise<T>, logger: Logger): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof HttpException) throw err;
+
+    const apiCode = kubeApiExceptionCode(err);
+    if (apiCode !== undefined && apiCode >= 400 && apiCode < 500) {
+      throw new HttpException(kubeApiExceptionMessage(err), apiCode);
+    }
+
+    if ((apiCode !== undefined && apiCode >= 500) || isTransportFailure(err)) {
+      const message = kubeApiExceptionMessage(err).slice(0, 500);
+      logger.warn(`Kube-Ressourcenzugriff fehlgeschlagen: ${message}`);
+      throw new ServiceUnavailableException(message);
+    }
+
+    throw err;
+  }
+}
+
 /**
  * Lesende Cluster-Inhalte. Alle Routen sind read-only — schreibende Verben
  * kommen erst mit K3 und hängen dort an `readOnly: false`.
@@ -159,25 +181,8 @@ export class KubeResourcesController {
    * Code hinter einem sauberen 503 verschwinden, ohne Stacktrace — genau die
    * eine Fehlerklasse, die ihn braucht (Review-Fund, Important 3).
    */
-  private async guarded<T>(fn: () => Promise<T>): Promise<T> {
-    try {
-      return await fn();
-    } catch (err) {
-      if (err instanceof HttpException) throw err;
-
-      const apiCode = kubeApiExceptionCode(err);
-      if (apiCode !== undefined && apiCode >= 400 && apiCode < 500) {
-        throw new HttpException(kubeApiExceptionMessage(err), apiCode);
-      }
-
-      if ((apiCode !== undefined && apiCode >= 500) || isTransportFailure(err)) {
-        const message = kubeApiExceptionMessage(err).slice(0, 500);
-        this.logger.warn(`Kube-Ressourcenzugriff fehlgeschlagen: ${message}`);
-        throw new ServiceUnavailableException(message);
-      }
-
-      throw err;
-    }
+  private guarded<T>(fn: () => Promise<T>): Promise<T> {
+    return guardClusterErrors(fn, this.logger);
   }
 
   @Get(':id/namespaces')

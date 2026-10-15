@@ -226,6 +226,38 @@ pass "logs/stream lehnt ein ungültiges ?token= mit 401 ab"
 curl -sS -o /dev/null "${AUTH[@]}" -X DELETE "${API_URL}/api/users/${TEST_USER_ID}"
 TEST_USER_ID=""
 
+# --- Schreibaktionen gegen einen read-only Cluster -------------------------
+for ACTION in scale restart delete; do
+  # Kind pro Aktion gültig wählen, sonst schlägt schon das DTO mit 400 an.
+  KIND=Deployment; [ "$ACTION" = "delete" ] && KIND=Pod
+  CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST \
+    "${API_URL}/api/kube-clusters/${CLUSTER_ID}/actions/${ACTION}" \
+    -d "{\"kind\":\"${KIND}\",\"name\":\"x\",\"namespace\":\"default\",\"replicas\":1}")
+  [ "$CODE" = "403" ] || fail "${ACTION} auf read-only Cluster ergab HTTP $CODE statt 403"
+done
+pass "Schreibaktionen auf einem read-only Cluster ergeben 403"
+
+CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST \
+  "${API_URL}/api/kube-clusters/${CLUSTER_ID}/actions/scale" \
+  -d '{"kind":"Deployment","name":"x","namespace":"default","replicas":-1}')
+[ "$CODE" = "400" ] || fail "negative Replica-Zahl ergab HTTP $CODE statt 400"
+pass "negative Replica-Zahl wird mit 400 abgelehnt (DTO, vor der readOnly-Prüfung)"
+
+CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST \
+  "${API_URL}/api/kube-clusters/000000000000000000000000/actions/restart" \
+  -d '{"kind":"Deployment","name":"x","namespace":"default"}')
+[ "$CODE" = "404" ] || fail "unbekannte Cluster-Id ergab HTTP $CODE statt 404"
+pass "unbekannte Cluster-Id ergibt 404"
+
+# Abgelehnte Aktionen werden auditiert (seit 490a0f8), aber jede dieser Zeilen
+# muss einen errorMsg tragen: ausgeführt wurde nichts, der Cluster ist read-only.
+AUDIT=$(curl -sS "${AUTH[@]}" "${API_URL}/api/kube-clusters/${CLUSTER_ID}/audit?limit=50")
+echo "$AUDIT" | jq -e '[.items[] | select(.action == "write")] | length >= 3' >/dev/null \
+  || fail "abgelehnte Schreibaktionen haben keine write-Audit-Zeile hinterlassen"
+echo "$AUDIT" | jq -e '[.items[] | select(.action == "write" and (.errorMsg // "") == "")] | length == 0' >/dev/null \
+  || fail "eine write-Audit-Zeile ohne errorMsg: eine Schreibaktion lief gegen den read-only Cluster"
+pass "abgelehnte Aktionen sind auditiert und tragen alle einen Fehler"
+
 # --- 10. Löschen räumt auf -------------------------------------------------
 curl -sS "${AUTH[@]}" -X DELETE "${API_URL}/api/kube-clusters/${CLUSTER_ID}" >/dev/null
 CODE=$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" "${API_URL}/api/kube-clusters/${CLUSTER_ID}")
