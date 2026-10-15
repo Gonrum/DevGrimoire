@@ -99,20 +99,45 @@ export class ResearchRunnerService implements OnModuleInit, OnModuleDestroy {
     return (await this.store.get(id))?.status === 'queued';
   }
 
-  /** Wirft nie. */
+  /**
+   * Wirft nie. Wird nur für ein bereits beanspruchtes (`running`) Dokument
+   * aufgerufen: Konnte kein End- oder fortsetzbarer Zustand gespeichert werden,
+   * setzt ein letzter Versuch `failed` — sonst zählte `countRunning` den Lauf
+   * für immer mit und die Kapazität schrumpfte bis zum Neustart.
+   */
   async run(id: string): Promise<void> {
+    let settled = false;
+    let reason = 'Lauf ohne Abschluss beendet';
     try {
       const doc = await this.store.get(id);
-      if (!doc) return;
+      if (!doc) { settled = true; return; } // gelöscht
       const user = doc.ownerUserId ? await this.auth.findUserById(doc.ownerUserId) : null;
       if (!user || user.active === false) {
-        await this.store.patch(id, { status: 'failed', error: 'Besitzer nicht gefunden', finishedAt: new Date() });
+        reason = 'Besitzer nicht gefunden';
+        await this.store.patch(id, { status: 'failed', error: reason, finishedAt: new Date() });
+        settled = true;
         return;
       }
       const owner = actorFromUser(user);
       await RequestContext.run(owner, undefined, () => this.execute(doc));
+      settled = true; // execute sichert seinen Abschluss selbst ab
     } catch (err) {
-      this.logger.error(`Recherche ${id}: ${errorMessage(err)}`);
+      reason = errorMessage(err);
+      this.logger.error(`Recherche ${id}: ${reason}`);
+    } finally {
+      // Beim Herunterfahren übernimmt die Neustart-Erholung.
+      if (!settled && !this.stopping) await this.lastResort(id, reason);
+    }
+  }
+
+  private async lastResort(id: string, reason: string): Promise<void> {
+    try {
+      await this.store.patch(id, {
+        status: 'failed', error: reason.slice(0, MAX_ERROR), finishedAt: new Date(), cancelRequested: false, pauseRequested: false,
+      });
+      this.logger.warn(`Recherche ${id}: als failed markiert (letzter Versuch)`);
+    } catch (err) {
+      this.logger.error(`Recherche ${id}: letzter Versuch gescheitert: ${errorMessage(err)}`);
     }
   }
 
@@ -120,27 +145,43 @@ export class ResearchRunnerService implements OnModuleInit, OnModuleDestroy {
     void this.steps.record(id, { kind, text, lane });
   }
 
+  /** Wirft nicht; ohne gespeicherten Abschluss greift der letzte Versuch. */
   private async execute(doc: RunDoc): Promise<void> {
     const id = doc.id;
     const ac = this.live.begin(id);
     const startedAt = new Date();
+    let finished: string | null = null;
+    let settled = false;
+    let failure = 'Lauf ohne Abschluss beendet';
     try {
       await this.store.patch(id, { startedAt, error: null });
       this.step(id, 'info', `Recherche gestartet (${doc.mode}, ${doc.depth})`);
-      await this.work(doc, ac.signal, startedAt);
+      finished = await this.work(doc, ac.signal, startedAt);
+      settled = true;
     } catch (err) {
+      failure = errorMessage(err);
       try {
         if (err instanceof Interrupted) await this.onInterrupted(doc, startedAt);
         else await this.onFailed(doc, startedAt, err);
+        settled = true;
       } catch (inner) {
         this.logger.error(`Recherche ${id}: Abschluss nicht gespeichert: ${errorMessage(inner)}`);
       }
     } finally {
       this.live.end(id);
     }
+    if (!settled && this.stopping) settled = true; // Neustart-Erholung übernimmt
+    if (!settled) await this.lastResort(id, failure);
+    // Nach dem done-Schreiben, ausserhalb der Fehlerzuordnung: ein Listener- oder
+    // Benachrichtigungsfehler darf aus done nie failed machen.
+    if (finished !== null) {
+      this.emitChanged(doc);
+      await this.notify(doc, `Recherche fertig: ${doc.title}`, firstSummaryLine(finished));
+    }
   }
 
-  private async work(doc: RunDoc, signal: AbortSignal, startedAt: Date): Promise<void> {
+  /** Liefert den gespeicherten Bericht. */
+  private async work(doc: RunDoc, signal: AbortSignal, startedAt: Date): Promise<string> {
     const id = doc.id;
     const deepen = doc.mode === 'deepen';
     const registry = new SourceRegistry(doc.sourceList);
@@ -300,8 +341,7 @@ export class ResearchRunnerService implements OnModuleInit, OnModuleDestroy {
       error: null,
     });
     step('info', 'Recherche fertig');
-    this.emitChanged(doc);
-    await this.notify(doc, `Recherche fertig: ${doc.title}`, firstSummaryLine(final.report));
+    return final.report;
   }
 
   private emitChanged(doc: RunDoc): void {
@@ -309,7 +349,11 @@ export class ResearchRunnerService implements OnModuleInit, OnModuleDestroy {
     const ev: ProjectChangeEvent = {
       entity: 'research', action: 'updated', entityId: doc.id, projectId: doc.projectId, customerId: doc.customerId,
     };
-    this.events.emit(PROJECT_CHANGED, ev);
+    try {
+      this.events.emit(PROJECT_CHANGED, ev);
+    } catch (err) {
+      this.logger.warn(`Ereignis nicht gesendet: ${errorMessage(err)}`);
+    }
   }
 
   private async notify(doc: RunDoc, title: string, body: string): Promise<void> {

@@ -19,8 +19,10 @@ function loadCompiled(rel) {
 const { ResearchRunnerService } = loadCompiled('research/research-runner.service.js');
 const { ResearchLiveService } = loadCompiled('research/research-live.service.js');
 const { Interrupted } = loadCompiled('research/research-llm.service.js');
+const { ResearchProcessor } = loadCompiled('research/research.processor.js');
+const { DelayedError } = require(path.resolve(__dirname, '..', 'node_modules', 'bullmq'));
 
-const EXPECTED_CHECKS = 10;
+const EXPECTED_CHECKS = 14;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -263,6 +265,80 @@ const textLlm = () => async (c) => {
     await b.runner.run('r1');
     assert.ok(b.steps.includes('info:Wissenssuche nicht verfügbar'));
     assert.equal(b.store.docs.get('r1').status, 'done');
+  });
+
+  await check('Boot: wartende Dokumente werden neu eingereiht (Fehler je Dokument toleriert), nicht im stdio-MCP', async () => {
+    const enqueued = [];
+    const store = { listQueuedIds: async () => ['a', 'b', 'c'] };
+    const queue = { enqueue: async (id) => { if (id === 'b') throw new Error('redis weg'); enqueued.push(id); } };
+    let started = 0;
+    const p = new ResearchProcessor({}, store, queue);
+    p._worker = { run: () => { started += 1; return new Promise(() => {}); } };
+    await p.onApplicationBootstrap();
+    assert.deepEqual(enqueued, ['a', 'c']);
+    assert.equal(started, 1);
+
+    enqueued.length = 0;
+    const q = new ResearchProcessor({}, store, queue);
+    q._worker = { run: () => { started += 1; return new Promise(() => {}); } };
+    process.env.MCP_STDIO = 'true';
+    try { await q.onApplicationBootstrap(); } finally { delete process.env.MCP_STDIO; }
+    assert.deepEqual(enqueued, []);
+    assert.equal(started, 1);
+  });
+
+  await check('Processor: mayStart wirft → verzögert statt Job-Fehler; nach dem Lauf wieder queued → verzögert', async () => {
+    const moved = [];
+    const job = { data: { id: 'r1' }, moveToDelayed: async (ts, token) => { moved.push([ts, token]); } };
+    let ran = 0;
+    const throwing = new ResearchProcessor({ mayStart: async () => { throw new Error('mongo weg'); }, run: async () => { ran += 1; } }, {}, {});
+    await assert.rejects(throwing.process(job, 'tok'), DelayedError);
+    assert.equal(moved.length, 1);
+    assert.equal(moved[0][1], 'tok');
+    assert.ok(moved[0][0] >= Date.now() + 9_000);
+    assert.equal(ran, 0);
+
+    const requeued = new ResearchProcessor({ mayStart: async () => 'start', run: async () => { ran += 1; }, isQueued: async () => true }, {}, {});
+    await assert.rejects(requeued.process(job, 'tok'), DelayedError);
+    assert.equal(ran, 1);
+    assert.equal(moved.length, 2);
+
+    const normal = new ResearchProcessor({ mayStart: async () => 'start', run: async () => { ran += 1; }, isQueued: async () => false }, {}, {});
+    await normal.process(job, 'tok');
+    assert.equal(ran, 2);
+    assert.equal(moved.length, 2);
+  });
+
+  await check('Kein Geister-running: done- und failed-Schreiben scheitern → letzter Versuch setzt failed, run wirft nicht', async () => {
+    const { runner, store } = makeRunner({ doc: { id: 'r1' }, llm: agentLlm() });
+    const orig = store.patch;
+    let doneFails = 1, failedFails = 1;
+    store.patch = async (id, set) => {
+      if (set.status === 'done' && doneFails > 0) { doneFails -= 1; throw new Error('schreiben done'); }
+      if (set.status === 'failed' && set.error === 'schreiben done' && failedFails > 0) { failedFails -= 1; throw new Error('schreiben failed'); }
+      return orig(id, set);
+    };
+    await runner.run('r1');
+    const d = store.docs.get('r1');
+    assert.equal(d.status, 'failed');
+    assert.equal(d.error, 'schreiben done');
+
+    // Besitzer-Lookup wirft → ebenfalls failed statt running
+    const b = makeRunner({ doc: { id: 'r1' }, llm: agentLlm() });
+    b.runner.auth = { findUserById: async () => { throw new Error('users weg'); } };
+    await b.runner.run('r1');
+    assert.equal(b.store.docs.get('r1').status, 'failed');
+    assert.equal(b.store.docs.get('r1').error, 'users weg');
+  });
+
+  await check('Ereignis- oder Benachrichtigungsfehler macht aus done kein failed', async () => {
+    const { runner, store } = makeRunner({ doc: { id: 'r1', projectId: '222222222222222222222222' }, llm: agentLlm() });
+    runner.events = { emit() { throw new Error('listener kaputt'); } };
+    runner.notifications = { create: async () => { throw new Error('push kaputt'); } };
+    await runner.run('r1');
+    const d = store.docs.get('r1');
+    assert.equal(d.status, 'done', d.error);
+    assert.equal(d.error, null);
   });
 
   console.log(`\n${total - failures}/${total} passed`);

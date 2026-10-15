@@ -141,6 +141,12 @@ export class ResearchRunStore {
     return found !== null;
   }
 
+  /** Ids aller wartenden Dokumente, älteste zuerst (Neu-Einreihung beim Start). */
+  async listQueuedIds(): Promise<string[]> {
+    const rows = await this.model.find({ status: 'queued' }).sort({ queuedAt: 1, _id: 1 }).select('_id').lean<Array<{ _id: Types.ObjectId }>>().exec();
+    return rows.map((r) => r._id.toString());
+  }
+
   /** Neustart-Erholung: alle laufenden pausieren. */
   async pauseAllRunning(note: string): Promise<number> {
     const res = await this.model.updateMany(
