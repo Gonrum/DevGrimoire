@@ -40,6 +40,13 @@ interface Guarded {
   userId: string;
 }
 
+interface WriteMeta {
+  verb: KubeWriteVerb;
+  resource: string;
+  name: string;
+  namespace?: string;
+}
+
 type ApiFor = (group: KubeApiGroup) => unknown;
 
 interface ApplyDoc {
@@ -82,10 +89,39 @@ export class KubeWritesService {
    */
   private async run<T>(
     g: Guarded,
-    meta: { verb: KubeWriteVerb; resource: string; name: string; namespace?: string },
+    meta: WriteMeta,
     fn: (api: ApiFor) => Promise<T>,
+    validate?: () => void,
   ): Promise<T> {
+    // Unbekannter Cluster (404) wirft ohne Audit-Zeile: es gibt keinen Cluster,
+    // dem sie zugeordnet werden könnte. Ab hier ist jeder Abbruch eine Zeile.
     const cluster = await this.clusters.findById(g.clusterId);
+    const started = Date.now();
+    let errorMsg: string | undefined;
+    try {
+      this.assertWritable(cluster, g);
+      validate?.();
+      // buildConfig steht im try: ein fehlgeschlagener Tunnel oder eine nicht
+      // entschlüsselbare Kubeconfig ist ein Versuch, den man später sucht.
+      // `release` existiert nur, wenn buildConfig gelungen ist.
+      const { kc, release } = await this.client.buildConfig(cluster);
+      try {
+        return await fn((group) => this.apiFor(kc, group));
+      } finally {
+        release();
+      }
+    } catch (err) {
+      errorMsg = errorMessage(err);
+      throw err;
+    } finally {
+      await this.record(g, meta, started, errorMsg);
+    }
+  }
+
+  private assertWritable(
+    cluster: Awaited<ReturnType<KubeClustersService['findById']>>,
+    g: Guarded,
+  ): void {
     if (cluster.readOnly) {
       throw new ForbiddenException(
         'Dieser Cluster ist als read-only markiert; Schreibaktionen sind dort abgeschaltet.',
@@ -94,24 +130,15 @@ export class KubeWritesService {
     if (!canAccessCluster(cluster, g.actor)) {
       throw new ForbiddenException(`Kein Zugriff auf den Cluster "${cluster.label}"`);
     }
+  }
 
-    const started = Date.now();
-    const { kc, release } = await this.client.buildConfig(cluster);
-    let errorMsg: string | undefined;
-    try {
-      return await fn((group) => this.apiFor(kc, group));
-    } catch (err) {
-      errorMsg = errorMessage(err);
-      throw err;
-    } finally {
-      release();
-      await this.audit.record({
-        clusterId: g.clusterId, action: 'write', sourceContext: 'rest',
-        userId: g.userId, verb: meta.verb, resource: meta.resource,
-        namespace: meta.namespace, name: meta.name,
-        durationMs: Date.now() - started, errorMsg,
-      });
-    }
+  private async record(g: Guarded, meta: WriteMeta, started: number, errorMsg: string | undefined): Promise<void> {
+    await this.audit.record({
+      clusterId: g.clusterId, action: 'write', sourceContext: 'rest',
+      userId: g.userId, verb: meta.verb, resource: meta.resource,
+      namespace: meta.namespace, name: meta.name,
+      durationMs: Date.now() - started, errorMsg,
+    });
   }
 
   private assertIn(kind: string, allowed: readonly string[], verb: string): void {
@@ -123,10 +150,12 @@ export class KubeWritesService {
   }
 
   async scale(a: Guarded & { kind: string; name: string; namespace: string; replicas: number }): Promise<KubeWriteResult> {
-    this.assertIn(a.kind, SCALABLE_KINDS, 'Skalieren');
-    if (!Number.isInteger(a.replicas) || a.replicas < 0 || a.replicas > REPLICAS_MAX) {
-      throw new BadRequestException(`replicas muss eine ganze Zahl zwischen 0 und ${REPLICAS_MAX} sein`);
-    }
+    const validate = (): void => {
+      this.assertIn(a.kind, SCALABLE_KINDS, 'Skalieren');
+      if (!Number.isInteger(a.replicas) || a.replicas < 0 || a.replicas > REPLICAS_MAX) {
+        throw new BadRequestException(`replicas muss eine ganze Zahl zwischen 0 und ${REPLICAS_MAX} sein`);
+      }
+    };
     return this.run(a, { verb: 'scale', resource: a.kind, name: a.name, namespace: a.namespace },
       async (api) => {
         const apps = api('apps');
@@ -141,11 +170,11 @@ export class KubeWritesService {
           { name: a.name, namespace: a.namespace, body });
         return { verb: 'scale', resource: a.kind, name: a.name, namespace: a.namespace,
                  detail: `replicas=${a.replicas}` };
-      });
+      }, validate);
   }
 
   async restart(a: Guarded & { kind: string; name: string; namespace: string }): Promise<KubeWriteResult> {
-    this.assertIn(a.kind, RESTARTABLE_KINDS, 'Rollout neu starten');
+    const validate = (): void => this.assertIn(a.kind, RESTARTABLE_KINDS, 'Rollout neu starten');
     return this.run(a, { verb: 'restart', resource: a.kind, name: a.name, namespace: a.namespace },
       async (api) => {
         const apps = api('apps');
@@ -174,11 +203,11 @@ export class KubeWritesService {
         await this.callApi(apps, `replaceNamespaced${a.kind}`,
           { name: a.name, namespace: a.namespace, body });
         return { verb: 'restart', resource: a.kind, name: a.name, namespace: a.namespace, detail: stamp };
-      });
+      }, validate);
   }
 
   async remove(a: Guarded & { kind: string; name: string; namespace: string }): Promise<KubeWriteResult> {
-    this.assertIn(a.kind, DELETABLE_KINDS, 'Löschen');
+    const validate = (): void => this.assertIn(a.kind, DELETABLE_KINDS, 'Löschen');
     return this.run(a, { verb: 'delete', resource: a.kind, name: a.name, namespace: a.namespace },
       async (api) => {
         const param: Record<string, unknown> = { name: a.name, namespace: a.namespace };
@@ -189,7 +218,7 @@ export class KubeWritesService {
           await this.callApi(api('core'), 'deleteNamespacedPod', param);
         }
         return { verb: 'delete', resource: a.kind, name: a.name, namespace: a.namespace };
-      });
+      }, validate);
   }
 
   async cordon(a: Guarded & { node: string; unschedulable: boolean }): Promise<KubeWriteResult> {
@@ -214,19 +243,19 @@ export class KubeWritesService {
    * (kein Server-Side-Apply, kein Force: ein Konflikt ist ein Fehler).
    */
   async apply(a: Guarded & { yaml: string; namespace: string }): Promise<KubeWriteResult[]> {
-    let raw: unknown[];
+    // Parse und Validierung laufen NACH dem Laden des Clusters und hinter
+    // readOnly/Scope, damit auch ein abgelehnter Apply eine Audit-Zeile hinterlässt.
+    const cluster = await this.clusters.findById(a.clusterId);
+    const started = Date.now();
+    let parsed: ApplyDoc[];
     try {
-      raw = loadAllYaml(a.yaml);
-    } catch {
-      // Die Parserfehlermeldung kann Teile des Inputs zitieren, und der Input
-      // ist hier fremdes YAML.
-      throw new BadRequestException('YAML konnte nicht geparst werden');
+      this.assertWritable(cluster, a);
+      parsed = this.parseApply(a.yaml, a.namespace);
+    } catch (err) {
+      await this.record(a, { verb: 'apply', resource: 'yaml', name: '-', namespace: a.namespace },
+        started, errorMessage(err));
+      throw err;
     }
-    // Leere Dokumente (z.B. ein abschliessendes `---`) liefert der Parser als null.
-    const docs = raw.filter((d) => d !== null && d !== undefined);
-    if (docs.length === 0) throw new BadRequestException('Kein Dokument im YAML');
-
-    const parsed = docs.map((doc) => this.validateApplyDoc(doc, a.namespace));
 
     // Ein `run` pro Dokument: eigener Transport und eigene Audit-Zeile je
     // Dokument. Bei einem Fehler bleiben bereits angewendete Dokumente bestehen.
@@ -240,6 +269,21 @@ export class KubeWritesService {
       results.push(one);
     }
     return results;
+  }
+
+  private parseApply(yaml: string, namespace: string): ApplyDoc[] {
+    let raw: unknown[];
+    try {
+      raw = loadAllYaml(yaml);
+    } catch {
+      // Die Parserfehlermeldung kann Teile des Inputs zitieren, und der Input
+      // ist hier fremdes YAML.
+      throw new BadRequestException('YAML konnte nicht geparst werden');
+    }
+    // Leere Dokumente (z.B. ein abschliessendes `---`) liefert der Parser als null.
+    const docs = raw.filter((d) => d !== null && d !== undefined);
+    if (docs.length === 0) throw new BadRequestException('Kein Dokument im YAML');
+    return docs.map((doc) => this.validateApplyDoc(doc, namespace));
   }
 
   private validateApplyDoc(doc: unknown, namespace: string): ApplyDoc {

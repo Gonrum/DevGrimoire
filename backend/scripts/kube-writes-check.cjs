@@ -22,7 +22,7 @@ function loadCompiled(rel) {
 
 const { KubeWritesService } = loadCompiled('kube/kube-writes.service.js');
 
-const EXPECTED_CHECKS = 23;  // 18 Einzelfälle + 5 Läufe der readOnly-Schleife
+const EXPECTED_CHECKS = 27;  // 22 Einzelfälle + 5 Läufe der readOnly-Schleife
 const CHECK_TIMEOUT_MS = 3000;
 let failures = 0, total = 0;
 function check(label, fn) {
@@ -46,12 +46,13 @@ function makeEnv(opts = {}) {
   };
   const client = {
     async buildConfig() {
+      if (opts.buildFails) throw new Error('tunnel weg');
       state.built += 1;
       return {
         kc: {
-          makeApiClient: () => new Proxy({}, {
+          makeApiClient: (cls) => new Proxy({}, {
             get: (_t, method) => async (param) => {
-              state.calls.push({ method: String(method), param });
+              state.calls.push({ method: String(method), param, api: cls && cls.name });
               if (opts.apiThrows) throw new Error('cluster weg');
               if (opts.notFoundOnRead && /^read/.test(String(method))) {
                 throw Object.assign(new Error('nicht gefunden'), { code: 404 });
@@ -250,6 +251,45 @@ const base = { clusterId: 'c1', actor: ADMIN, userId: 'u1' };
     const cr = env.state.calls.find((c) => c.method === 'createNamespacedConfigMap');
     assert.ok(cr, 'kein Create');
     assert.equal(cr.param.namespace, 'n');
+  });
+
+  await check('eine readOnly-Ablehnung schreibt eine Audit-Zeile mit errorMsg und baut keine Verbindung', async () => {
+    const env = makeEnv({ readOnly: true });
+    await env.svc.scale({ ...base, kind: 'Deployment', name: 'a', namespace: 'n', replicas: 1 }).then(() => null, () => {});
+    assert.equal(env.state.built, 0);
+    assert.equal(env.state.audits.length, 1);
+    assert.equal(env.state.audits[0].verb, 'scale');
+    assert.ok(env.state.audits[0].errorMsg, 'errorMsg fehlt');
+  });
+
+  await check('eine Scope-Ablehnung schreibt eine Audit-Zeile mit errorMsg und baut keine Verbindung', async () => {
+    const env = makeEnv();
+    await env.svc.cordon({
+      ...base, actor: { projectScopeMode: 'restricted', allowedProjectIds: ['fremd'] },
+      node: 'n1', unschedulable: true,
+    }).then(() => null, () => {});
+    assert.equal(env.state.built, 0);
+    assert.equal(env.state.audits.length, 1);
+    assert.ok(env.state.audits[0].errorMsg, 'errorMsg fehlt');
+  });
+
+  await check('ein fehlgeschlagenes buildConfig schreibt eine Audit-Zeile und ruft release nicht', async () => {
+    const env = makeEnv({ buildFails: true });
+    const err = await env.svc.restart({ ...base, kind: 'Deployment', name: 'a', namespace: 'n' })
+      .then(() => null, (e) => e);
+    assert.ok(err);
+    assert.equal(env.state.released, 0);
+    assert.equal(env.state.audits.length, 1);
+    assert.match(env.state.audits[0].errorMsg, /tunnel weg/);
+  });
+
+  await check('Job-Delete nutzt die Batch-Gruppe mit propagationPolicy Background', async () => {
+    const env = makeEnv();
+    await env.svc.remove({ ...base, kind: 'Job', name: 'j', namespace: 'n' });
+    const call = env.state.calls.find((c) => c.method === 'deleteNamespacedJob');
+    assert.ok(call);
+    assert.equal(call.param.propagationPolicy, 'Background');
+    assert.match(call.api, /BatchV1Api/);
   });
 
   console.log('');
