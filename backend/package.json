@@ -82,6 +82,7 @@
     "check:research-access": "node scripts/research-access-check.cjs",
     "check:research-control": "node scripts/research-control-check.cjs",
     "check:rag-research-scope": "node scripts/rag-research-scope-check.cjs",
+    "check:research-service": "node scripts/research-service-check.cjs",
     "check:research-due": "node scripts/research-due-check.cjs",
     "check:research-topic-scope-default": "node scripts/research-topic-scope-default-check.cjs",
     "check:stack-schema": "node scripts/stack-schema-check.cjs",

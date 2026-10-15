@@ -19,7 +19,7 @@ import { PushService } from './push/push.service';
 import { EnvironmentsService } from './environments/environments.service';
 import { SecretsService } from './secrets/secrets.service';
 import { ManualsService } from './manuals/manuals.service';
-import { ResearchService } from './research/research.service';
+import { ResearchService, researchDetailForTool } from './research/research.service';
 import { ResearchControlService } from './research/research-control.service';
 import { ResearchTopicService } from './research-agent/research-topic.service';
 import { ResearchRunService } from './research-agent/research-run.service';
@@ -5914,7 +5914,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'research_get':
-          result = await researchService.findVisibleById(requireString(a, 'id'));
+          // Dateitext gehört nicht in den Werkzeug-Kontext; Namen genügen.
+          result = researchDetailForTool(await researchService.findVisibleById(requireString(a, 'id')));
           break;
         case 'research_update':
           result = compactUpdateResult(await researchService.update(requireString(a, 'id'), {
