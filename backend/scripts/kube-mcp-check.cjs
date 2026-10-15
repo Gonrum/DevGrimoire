@@ -70,7 +70,7 @@ function makeFakeServer() {
 // no-op proxy so registerMcpTools() doesn't blow up on destructure.
 function buildServices({
   kubeClustersService, kubeResourcesService, kubeLogsService, kubeClientService, kubeAuditService,
-  kubeWritesService,
+  kubeWritesService, notificationsService,
 }) {
   const noop = new Proxy(
     {},
@@ -87,7 +87,7 @@ function buildServices({
     environmentsService: noop, secretsService: noop, manualsService: noop, researchService: noop,
     researchTopicService: noop, researchRunService: noop, researchArtifactService: noop,
     researchAgentService: noop, settingsService: noop,
-    notificationsService: { create: () => Promise.resolve() },
+    notificationsService: notificationsService || { create: () => Promise.resolve() },
     schemasService: noop, dependenciesService: noop, featuresService: noop, soulsService: noop,
     harnessService: noop, commitsService: noop, ragService: noop, recurringTasksService: noop,
     workflowsService: noop, workflowEngineService: noop, nodeRegistry: noop,
@@ -725,6 +725,7 @@ process.env.MCP_STDIO_USER_ID = TEST_USER_ID;
   // -------------------------------------------------------------------------
   const { KubeWritesService } = loadCompiled('kube/kube-writes.service.js');
   const { RequestContext } = loadCompiled('common/request-context.js');
+  const { assertClusterAccess } = loadCompiled('kube/kube-access.guard.js');
   const ACTOR = {
     userId: TEST_USER_ID, username: 't', role: 'admin',
     projectScopeMode: 'all', customerScopeMode: 'all',
@@ -741,7 +742,19 @@ process.env.MCP_STDIO_USER_ID = TEST_USER_ID;
     const audit = makeAuditRecorder();
     const cid = new Types.ObjectId();
     const cluster = makeClusterDoc({ _id: cid, projectId: new Types.ObjectId(), ...clusterFlags });
-    const clusters = { findById: async () => cluster };
+    // Wie KubeClustersService: findById() prüft den Scope gegen den Actor im
+    // RequestContext, findByIdUnscoped() nicht. Die frühere Attrappe prüfte
+    // gar nicht — so bestand der Scope-Fall, obwohl produktiv findById() schon
+    // VOR dem auditierten Pfad warf (finaler Review, I1).
+    const clusters = {
+      findById: async () => {
+        const actor = RequestContext.getUser();
+        if (actor) assertClusterAccess(cluster, actor);
+        return cluster;
+      },
+      findByIdUnscoped: async () => cluster,
+    };
+    const notifications = [];
     const client = {
       buildConfig: async () => {
         state.built += 1;
@@ -753,10 +766,11 @@ process.env.MCP_STDIO_USER_ID = TEST_USER_ID;
     const server = makeServer({
       kubeClustersService: clusters, kubeResourcesService: {}, kubeLogsService: {},
       kubeClientService: client, kubeAuditService: audit, kubeWritesService: writes,
+      notificationsService: { create: async (title, body) => { notifications.push({ title, body }); } },
     });
     // Der Actor kommt wie im HTTP-Transport aus dem RequestContext.
     const invoke = (tool, args) => RequestContext.run(ACTOR, undefined, () => server.invoke(tool, args));
-    return { server: { invoke }, rawInvoke: (t, a) => server.invoke(t, a), state, audit, clusterId: cid.toString() };
+    return { server: { invoke }, rawInvoke: (t, a) => server.invoke(t, a), state, audit, notifications, clusterId: cid.toString() };
   }
 
   await check('bei allowMcpWrites=false lehnt jedes schreibende Tool ab und nennt das Flag', async () => {
@@ -790,6 +804,10 @@ process.env.MCP_STDIO_USER_ID = TEST_USER_ID;
       env.rawInvoke('kube_scale', { clusterId: env.clusterId, ...CALL_ARGS.kube_scale })));
     assert.ok(res.error && /Kein Zugriff/.test(res.error) && !/allowMcpWrites/.test(res.error), res.error);
     assert.equal(env.state.built, 0);
+    // Finaler Review I1: auch die Scope-Ablehnung hinterlässt eine Zeile —
+    // mit der scope-prüfenden findById-Attrappe scheiterte das vorher.
+    assert.equal(env.audit.rows.length, 1, 'die Scope-Ablehnung blieb ohne Audit-Zeile');
+    assert.match(env.audit.rows[0].errorMsg, /Kein Zugriff/);
   });
 
   await check('kube_apply: überlanges YAML -> 400 + Audit-Zeile, keine Verbindung', async () => {
@@ -848,6 +866,37 @@ process.env.MCP_STDIO_USER_ID = TEST_USER_ID;
     const res = unwrap(await env.server.invoke('kube_delete', { clusterId: env.clusterId, kind: 'Deployment', name: 'a', namespace: 'n' }));
     assert.ok(res.error);
     assert.equal(env.state.writeCalls, 0);
+  });
+
+  await check('I2: kube_apply legt das YAML nicht in die Notification', async () => {
+    const env = makeWriteEnv({ readOnly: false, allowMcpWrites: true });
+    const marker = 'GEHEIMER-WERT-4711';
+    // Der Wert steht innerhalb der ersten 80 Zeichen — so weit kopierte
+    // formatToolBody vorher jedes Argument.
+    const yaml = `apiVersion: v1\nkind: ConfigMap\ndata: {token: ${marker}}\nmetadata: {name: a}`;
+    const res = unwrap(await env.server.invoke('kube_apply', { clusterId: env.clusterId, yaml, namespace: 'n' }));
+    assert.ok(!res.error, res.error);
+    assert.equal(env.notifications.length, 1, 'kube_apply ist ein schreibendes Tool und erzeugt eine Notification');
+    const n = env.notifications[0];
+    assert.ok(!`${n.title} ${n.body}`.includes(marker), `YAML in der Notification: ${n.body}`);
+    assert.ok(!/yaml:/.test(n.body), `yaml-Argument in der Notification: ${n.body}`);
+  });
+
+  await check('I5: kube_apply nennt Server-Side Apply und die erlaubten Kinds; Secret wird abgelehnt', async () => {
+    const d = byName.get('kube_apply').description;
+    assert.match(d, /Server-Side Apply/);
+    assert.match(d, /devgrimoire/);
+    for (const k of ['ConfigMap', 'Deployment', 'StatefulSet', 'DaemonSet', 'CronJob', 'Service', 'Ingress']) {
+      assert.ok(d.includes(k), `${k} fehlt in der Beschreibung`);
+    }
+    const env = makeWriteEnv({ readOnly: false, allowMcpWrites: true });
+    const res = unwrap(await env.server.invoke('kube_apply', {
+      clusterId: env.clusterId, namespace: 'n',
+      yaml: 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: s\nstringData: {k: v}',
+    }));
+    assert.ok(res.error && /Secret/.test(res.error), res.error);
+    assert.equal(env.state.built, 0);
+    assert.equal(env.audit.rows.length, 1);
   });
 
   console.log('');

@@ -91,7 +91,8 @@ import { KubeLogsService } from './kube/kube-logs.service';
 import { KubeClientService } from './kube/kube-client.service';
 import { KubeAuditService } from './kube/kube-audit.service';
 import {
-  KubeWritesService, SCALABLE_KINDS, RESTARTABLE_KINDS, DELETABLE_KINDS,
+  KubeWritesService, SCALABLE_KINDS, RESTARTABLE_KINDS, DELETABLE_KINDS, APPLYABLE_KINDS,
+  KUBE_APPLY_FIELD_MANAGER,
 } from './kube/kube-writes.service';
 import { KubeAuditAction } from './kube/schemas/kube-audit.schema';
 import { KubeClusterDocument } from './kube/schemas/kube-cluster.schema';
@@ -3439,7 +3440,7 @@ const tools = [
   },
   {
     name: 'kube_apply',
-    description: 'Wendet ein oder mehrere YAML-Dokumente auf einen Namespace an. Jedes Dokument braucht apiVersion, kind und metadata.name; ein Dokument mit abweichendem Namespace wird abgelehnt. Kein Server-Side-Apply mit force — ein Konflikt ist ein Fehler, kein stiller Sieg. Voraussetzung: `allowMcpWrites: true` am Cluster. Die Aktion wird auditiert.',
+    description: `Wendet ein oder mehrere YAML-Dokumente per Server-Side Apply auf einen Namespace an (Feldbesitzer \`${KUBE_APPLY_FIELD_MANAGER}\`, ohne force: ein Konflikt mit einem anderen Feldbesitzer ist ein Fehler, kein stiller Sieg; fehlt das Objekt, wird es angelegt). Erlaubte Kinds: ${APPLYABLE_KINDS.join(', ')} — alles andere (u.a. Secret, Pod) wird vor jedem Verbindungsaufbau abgelehnt. Jedes Dokument braucht apiVersion, kind und metadata.name; ein Dokument mit abweichendem Namespace wird abgelehnt. Bei mehreren Dokumenten bleiben die vor einem Fehler angewendeten bestehen; die Meldung nennt, wie viele. Voraussetzung: \`allowMcpWrites: true\` am Cluster. Die Aktion wird auditiert.`,
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -8550,7 +8551,9 @@ function formatToolBody(toolName: string, args: Record<string, unknown>, result:
   }
 
   // From args, surface fields that aren't IDs and aren't already covered.
-  const skipKeys = new Set(['projectId', 'customerId', 'milestoneId', 'todoId', 'id', '_id']);
+  // `yaml` (kube_apply): ein Manifest kann Secret-Werte oder Tokens tragen —
+  // die ersten 80 Zeichen landeten sonst in der Notification-Collection.
+  const skipKeys = new Set(['projectId', 'customerId', 'milestoneId', 'todoId', 'id', '_id', 'yaml']);
   for (const [key, value] of Object.entries(args)) {
     if (skipKeys.has(key)) continue;
     if (value === undefined || value === null) continue;

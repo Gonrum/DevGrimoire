@@ -123,10 +123,9 @@ export async function guardClusterErrors<T>(fn: () => Promise<T>, logger: Logger
  * T-477: Die Projekt-/Kunden-Scope-Prüfung läuft in
  * `KubeClustersService.findById()` bzw. `findBySlug()`. Jede Route hier löst
  * den Cluster darüber auf, bevor sie `resources.…` aufruft — bewusst nicht pro
- * Route, damit eine neue Route den Check nicht vergessen kann. Noch offen:
- * die HTTP-MCP-Achse (die MCP-Middleware hängt einen Actor ohne Scope-Felder
- * an, `projectScopeMode ?? 'all'` lässt einen verengten API-Key durch) und das
- * SSH-Modul, das gar keine Scope-Prüfung kennt.
+ * Route, damit eine neue Route den Check nicht vergessen kann. Die
+ * HTTP-MCP-Achse ist geschlossen: main.ts setzt den Actor dort über
+ * `actorFromApiKey` samt den Scope-Feldern des API-Keys.
  */
 @Controller('kube-clusters')
 export class KubeResourcesController {

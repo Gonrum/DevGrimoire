@@ -33,6 +33,12 @@ export class CordonActionDto {
   @IsBoolean() unschedulable!: boolean;
 }
 
+/**
+ * Server-Side Apply, Feldbesitzer `devgrimoire`, ohne force: ein Konflikt mit
+ * einem anderen Feldbesitzer ist ein Fehler. Erlaubte Kinds: `APPLYABLE_KINDS`
+ * (kube-writes.service.ts) — der Service prüft sie pro Dokument, das DTO nur
+ * die Form.
+ */
 export class ApplyActionDto {
   @IsString() @MinLength(1) @MaxLength(KUBE_APPLY_YAML_MAX) yaml!: string;
   @IsString() @MinLength(1) @MaxLength(253) namespace!: string;

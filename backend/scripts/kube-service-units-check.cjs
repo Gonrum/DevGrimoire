@@ -326,6 +326,20 @@ function makeSecretsService() {
     });
   });
 
+  await check('K3-I1: findByIdUnscoped lädt einen fremden Cluster ohne 403, findById verweigert ihn weiter', async () => {
+    const fx = await twoClusterFixture();
+    await asScopedActor([String(PROJECT)], async () => {
+      // Nur für KubeWritesService: der muss die Scope-Ablehnung selbst
+      // treffen, damit sie eine Audit-Zeile bekommt.
+      const doc = await fx.svc.findByIdUnscoped(String(fx.foreign._id));
+      assert.equal(doc.slug, 'foreign');
+      const err = await fx.svc.findById(String(fx.foreign._id)).then(() => null, (e) => e);
+      assert.ok(err && err.getStatus() === 403, 'findById muss weiterhin scope-prüfen');
+      const missing = await fx.svc.findByIdUnscoped(String(new Types.ObjectId())).then(() => null, (e) => e);
+      assert.ok(missing && missing.getStatus() === 404, 'unbekannte Id: 404');
+    });
+  });
+
   await check('T-477: findBySlug verweigert einen fremden Cluster', async () => {
     const fx = await twoClusterFixture();
     await asScopedActor([String(PROJECT)], async () => {

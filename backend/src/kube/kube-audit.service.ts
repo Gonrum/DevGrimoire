@@ -22,6 +22,24 @@ export interface KubeAuditEntry {
   errorMsg?: string;
 }
 
+/** Kappung für resource/namespace/name — die Kubernetes-Obergrenze für Namen. */
+export const KUBE_AUDIT_FIELD_MAX = 253;
+
+const OBJECT_ID_HEX = /^[0-9a-f]{24}$/i;
+
+/**
+ * userId für die Audit-Zeile. Eine echte Nutzer-Id wird zur ObjectId; alles
+ * andere — vor allem `'system'` auf Instanzen ohne Auth — wird `null` statt
+ * `new Types.ObjectId('system')`, das warf und die ganze Zeile verschluckte.
+ * `null` heisst „ohne Nutzer" (siehe Schema), `undefined` „nicht angegeben".
+ * Bewusst die Hex-Form statt `Types.ObjectId.isValid`: das nimmt auch jeden
+ * 12-Zeichen-String an.
+ */
+export function auditUserId(userId: string | undefined): Types.ObjectId | null | undefined {
+  if (userId === undefined || userId === '') return undefined;
+  return OBJECT_ID_HEX.test(userId) ? new Types.ObjectId(userId) : null;
+}
+
 @Injectable()
 export class KubeAuditService {
   private readonly logger = new Logger(KubeAuditService.name);
@@ -42,12 +60,12 @@ export class KubeAuditService {
         at: new Date(),
         action: entry.action,
         sourceContext: entry.sourceContext,
-        userId: entry.userId ? new Types.ObjectId(entry.userId) : undefined,
+        userId: auditUserId(entry.userId),
         workspaceId: entry.workspaceId ? new Types.ObjectId(entry.workspaceId) : undefined,
         verb: entry.verb,
-        resource: entry.resource,
-        namespace: entry.namespace,
-        name: entry.name,
+        resource: entry.resource?.slice(0, KUBE_AUDIT_FIELD_MAX),
+        namespace: entry.namespace?.slice(0, KUBE_AUDIT_FIELD_MAX),
+        name: entry.name?.slice(0, KUBE_AUDIT_FIELD_MAX),
         durationMs: entry.durationMs,
         errorMsg: entry.errorMsg?.slice(0, 500),
       });

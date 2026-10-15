@@ -211,8 +211,7 @@ export class KubeClustersService {
   }
 
   async findById(id: string): Promise<KubeClusterDocument> {
-    const doc = await this.clusterModel.findById(this.toObjectId(id, 'id')).exec();
-    if (!doc) throw new NotFoundException(`Kube-Cluster ${id} nicht gefunden`);
+    const doc = await this.findByIdUnscoped(id);
     // Scope-Prüfung (T-477). Sitzt bewusst HIER und nicht in den zwölf
     // Controller-Routen: jeder Lese-, Log-, Describe-, YAML-, Event-, Audit-,
     // Update-, Test- und Delete-Pfad läuft über findById() bzw. über die
@@ -228,13 +227,29 @@ export class KubeClustersService {
     // RequestContext.getUser())` würde canAccessCluster(undefined) === false
     // treffen und damit den stdio-MCP-Transport ausschalten.
     //
-    // Offen bleibt damit die HTTP-MCP-Achse: main.ts hängt dort zwar einen
-    // Actor an, aber ohne die Scope-Felder — projectScopeMode ?? 'all' lässt
-    // einen verengten API-Key über MCP unbeschränkt. Das ist ein eigener Fund
-    // (MCP-Middleware setzt projectScopeMode/allowedProjectIds nicht) und
-    // gehört an die Middleware, nicht hierher.
+    // Die HTTP-MCP-Achse ist geschlossen: main.ts hängt dort über
+    // `actorFromApiKey` einen Actor MIT den Scope-Feldern des API-Keys an,
+    // ein verengter Key bleibt also auch über MCP verengt.
     const actor = RequestContext.getUser();
     if (actor) assertClusterAccess(doc, actor);
+    return doc;
+  }
+
+  /**
+   * Cluster per Id OHNE Scope-Prüfung — nur für interne Aufrufer, die den
+   * Scope selbst prüfen und die Ablehnung protokollieren müssen.
+   *
+   * Einziger Nutzer ist `KubeWritesService`: jeder Schreibversuch, auch ein
+   * abgelehnter, braucht eine Audit-Zeile. `findById()` würfe für einen
+   * Actor ohne Zugriff schon VOR dem auditierten Pfad 403 — die Ablehnung
+   * bliebe ohne Spur. Der Write-Service lädt deshalb hierüber und entscheidet
+   * Scope, readOnly und allowMcpWrites selbst (`assertWritable`). Nie aus
+   * einem Controller oder MCP-Tool direkt aufrufen; dafür ist `findById()` da.
+   * Unbekannte Id: 404 wie bei `findById()`.
+   */
+  async findByIdUnscoped(id: string): Promise<KubeClusterDocument> {
+    const doc = await this.clusterModel.findById(this.toObjectId(id, 'id')).exec();
+    if (!doc) throw new NotFoundException(`Kube-Cluster ${id} nicht gefunden`);
     return doc;
   }
 

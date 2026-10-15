@@ -1,15 +1,19 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import {
-  AppsV1Api, BatchV1Api, CoreV1Api, KubeConfig, NetworkingV1Api, loadAllYaml,
+  BadRequestException, ForbiddenException, HttpException, Injectable, Logger, ServiceUnavailableException,
+} from '@nestjs/common';
+import {
+  AppsV1Api, BatchV1Api, CoreV1Api, KubeConfig, NetworkingV1Api, PatchStrategy, loadAllYaml,
+  setHeaderOptions,
 } from '@kubernetes/client-node';
 import { KubeClustersService } from './kube-clusters.service';
 import { KubeClientService } from './kube-client.service';
 import { KubeAuditService } from './kube-audit.service';
 import { canAccessCluster } from './kube-access.guard';
-import { KUBE_KIND_SPECS, KubeApiGroup, KubeKind, isKubeKind } from './kube-kinds';
+import { KUBE_KIND_SPECS, KubeApiGroup, KubeKind } from './kube-kinds';
+import { kubeApiExceptionCode, kubeApiExceptionMessage } from './kube-errors';
 import { KubeAuditSourceContext } from './schemas/kube-audit.schema';
 import { ActorScope } from '../common/permissions';
-import { errorMessage, isRecord } from '../common/narrow';
+import { isRecord } from '../common/narrow';
 
 export type KubeWriteVerb = 'scale' | 'restart' | 'delete' | 'cordon' | 'apply';
 
@@ -24,6 +28,22 @@ export interface KubeWriteResult {
 export const SCALABLE_KINDS: readonly string[] = ['Deployment', 'StatefulSet'];
 export const RESTARTABLE_KINDS: readonly string[] = ['Deployment', 'StatefulSet', 'DaemonSet'];
 export const DELETABLE_KINDS: readonly string[] = ['Pod', 'Job'];
+/**
+ * Was `apply` annimmt — bewusst eine eigene, kurze Liste statt der ganzen
+ * Lese-Registry (`KUBE_KIND_SPECS`): Secret (der Wert stünde im Klartext im
+ * Request und in jedem Werkzeug-Log davor), Pod (Workloads gehören an ihren
+ * Controller), Event, PVC und alles Cluster-weite sind ausgeschlossen und
+ * werden vor jedem Verbindungsaufbau mit 400 abgelehnt.
+ */
+export const APPLYABLE_KINDS: readonly KubeKind[] = [
+  'ConfigMap', 'Deployment', 'StatefulSet', 'DaemonSet', 'CronJob', 'Service', 'Ingress',
+];
+/** Feldbesitzer für Server-Side Apply — so steht DevGrimoire in managedFields. */
+export const KUBE_APPLY_FIELD_MANAGER = 'devgrimoire';
+
+function isApplyableKind(value: unknown): value is KubeKind {
+  return typeof value === 'string' && APPLYABLE_KINDS.some((k) => k === value);
+}
 
 const REPLICAS_MAX = 1000;
 /** Formgrenzen, gemeinsam mit den REST-DTOs (write-actions.dto.ts). */
@@ -61,12 +81,16 @@ interface ApplyDoc {
   body: Record<string, unknown>;
 }
 
-function isApiMethod(value: unknown): value is (param: Record<string, unknown>) => Promise<unknown> {
+function isApiMethod(
+  value: unknown,
+): value is (param: Record<string, unknown>, options?: unknown) => Promise<unknown> {
   return typeof value === 'function';
 }
 
 @Injectable()
 export class KubeWritesService {
+  private readonly logger = new Logger(KubeWritesService.name);
+
   constructor(
     private readonly clusters: KubeClustersService,
     private readonly client: KubeClientService,
@@ -89,9 +113,10 @@ export class KubeWritesService {
    * Reads keine Spur hinterlassen; bei einem Schreibversuch ist genau der
    * Versuch die Information, die man später sucht.
    *
-   * Reihenfolge ist Absicht: readOnly und Scope werden geprüft, bevor
-   * `buildConfig` überhaupt gerufen wird. Die Checks erzwingen das über
-   * `built === 0` — eine abgelehnte Aktion darf keinen Tunnel aufbauen.
+   * Reihenfolge ist Absicht: die Grenzprüfungen (`assertWritable`) und die
+   * Validierung laufen, bevor `buildConfig` überhaupt gerufen wird. Die
+   * Checks erzwingen das über `built === 0` — eine abgelehnte Aktion darf
+   * keinen Tunnel aufbauen.
    */
   private async run<T>(
     g: Guarded,
@@ -101,7 +126,10 @@ export class KubeWritesService {
   ): Promise<T> {
     // Unbekannter Cluster (404) wirft ohne Audit-Zeile: es gibt keinen Cluster,
     // dem sie zugeordnet werden könnte. Ab hier ist jeder Abbruch eine Zeile.
-    const cluster = await this.clusters.findById(g.clusterId);
+    // Bewusst OHNE Scope-Prüfung geladen: `findById()` würfe für einen Actor
+    // ohne Zugriff schon hier 403 — die Ablehnung bliebe ohne Audit-Zeile.
+    // Den Scope entscheidet `assertWritable` im try darunter.
+    const cluster = await this.clusters.findByIdUnscoped(g.clusterId);
     const started = Date.now();
     let errorMsg: string | undefined;
     try {
@@ -117,27 +145,39 @@ export class KubeWritesService {
         release();
       }
     } catch (err) {
-      errorMsg = errorMessage(err);
+      // Nicht `errorMessage(err)`: bei einer ApiException ist das der
+      // Debug-String samt `Body:`/`Headers:` (Audit-Ids, interne Hostnamen).
+      errorMsg = kubeApiExceptionMessage(err);
       throw err;
     } finally {
       await this.record(g, meta, started, errorMsg);
     }
   }
 
+  /**
+   * Die Grenze jeder Schreibaktion, in genau dieser Reihenfolge:
+   *
+   *   1. Scope    — darf der Actor den Cluster überhaupt sehen?
+   *   2. readOnly — ist Schreiben auf dem Cluster abgeschaltet?
+   *   3. allowMcpWrites — nur für sourceContext 'mcp', die zweite Stufe.
+   *
+   * Scope steht vorn, damit ein Aufrufer ohne Zugriff aus der Absage weder
+   * den readOnly- noch den allowMcpWrites-Zustand des Clusters erfährt.
+   * Ohne Actor (stdio-MCP ohne HTTP-Kontext) schlägt Schritt 1 fehl:
+   * Schreiben ist fail-closed, anders als das Lesen über `findById()`.
+   */
   private assertWritable(
-    cluster: Awaited<ReturnType<KubeClustersService['findById']>>,
+    cluster: Awaited<ReturnType<KubeClustersService['findByIdUnscoped']>>,
     g: Guarded,
   ): void {
+    if (!canAccessCluster(cluster, g.actor)) {
+      throw new ForbiddenException(`Kein Zugriff auf den Cluster "${cluster.label}"`);
+    }
     if (cluster.readOnly) {
       throw new ForbiddenException(
         'Dieser Cluster ist als read-only markiert; Schreibaktionen sind dort abgeschaltet.',
       );
     }
-    if (!canAccessCluster(cluster, g.actor)) {
-      throw new ForbiddenException(`Kein Zugriff auf den Cluster "${cluster.label}"`);
-    }
-    // Zweite Stufe nur für MCP, bewusst NACH dem Scope-Check: wer den Cluster
-    // nicht sehen darf, erfährt nichts über dessen allowMcpWrites.
     if (g.sourceContext === 'mcp' && cluster.allowMcpWrites !== true) {
       throw new ForbiddenException(
         'Für diesen Cluster ist allowMcpWrites nicht gesetzt. Lesen ist erlaubt, Schreiben nicht — '
@@ -268,15 +308,18 @@ export class KubeWritesService {
   }
 
   /**
-   * Apply deckt genau die namespaced Kinds aus `KUBE_KIND_SPECS` ab; alles
-   * andere wird vor dem Verbindungsaufbau mit 400 abgelehnt. Semantik:
-   * lesen, bei 404 anlegen, sonst mit dem gelesenen resourceVersion ersetzen
-   * (kein Server-Side-Apply, kein Force: ein Konflikt ist ein Fehler).
+   * Apply deckt genau `APPLYABLE_KINDS` ab; alles andere wird vor dem
+   * Verbindungsaufbau mit 400 abgelehnt. Semantik: Server-Side Apply mit dem
+   * Feldbesitzer `devgrimoire` und `force: false` — Felder anderer
+   * Feldbesitzer (HPA an `replicas`, kubectl, Argo) bleiben unangetastet, ein
+   * Konflikt um ein Feld ist ein Fehler statt eines stillen Siegs. Fehlt das
+   * Objekt, legt der API-Server es an.
    */
   async apply(a: Guarded & { yaml: string; namespace: string }): Promise<KubeWriteResult[]> {
     // Parse und Validierung laufen NACH dem Laden des Clusters und hinter
     // readOnly/Scope, damit auch ein abgelehnter Apply eine Audit-Zeile hinterlässt.
-    const cluster = await this.clusters.findById(a.clusterId);
+    // Ohne Scope-Prüfung geladen, aus demselben Grund wie in run().
+    const cluster = await this.clusters.findByIdUnscoped(a.clusterId);
     const started = Date.now();
     let parsed: ApplyDoc[];
     try {
@@ -288,22 +331,48 @@ export class KubeWritesService {
       parsed = this.parseApply(a.yaml, a.namespace);
     } catch (err) {
       await this.record(a, { verb: 'apply', resource: 'yaml', name: '-', namespace: a.namespace },
-        started, errorMessage(err));
+        started, kubeApiExceptionMessage(err));
       throw err;
     }
 
     // Ein `run` pro Dokument: eigener Transport und eigene Audit-Zeile je
     // Dokument. Bei einem Fehler bleiben bereits angewendete Dokumente bestehen.
     const results: KubeWriteResult[] = [];
-    for (const d of parsed) {
-      const one = await this.run(a, { verb: 'apply', resource: d.kind, name: d.name, namespace: a.namespace },
-        async (api) => {
-          const detail = await this.applyOne(api, d, a.namespace);
-          return { verb: 'apply' as const, resource: d.kind, name: d.name, namespace: a.namespace, detail };
-        });
-      results.push(one);
+    for (const [i, d] of parsed.entries()) {
+      try {
+        const one = await this.run(a, { verb: 'apply', resource: d.kind, name: d.name, namespace: a.namespace },
+          async (api) => {
+            const detail = await this.applyOne(api, d, a.namespace);
+            return { verb: 'apply' as const, resource: d.kind, name: d.name, namespace: a.namespace, detail };
+          });
+        results.push(one);
+      } catch (err) {
+        if (parsed.length === 1) throw err;
+        throw this.partialApplyError(err, i, parsed.length, d);
+      }
     }
     return results;
+  }
+
+  /**
+   * Bei mehreren Dokumenten muss die Meldung sagen, wie weit der Apply kam —
+   * die Dokumente davor sind angewendet und bleiben es. Der HTTP-Status des
+   * eigentlichen Fehlers bleibt erhalten (403/404/409/422 aus dem Cluster,
+   * 4xx aus der Validierung); alles andere wird zu 503 wie in
+   * `guardClusterErrors`, mit dem Original als `cause` und im Log.
+   */
+  private partialApplyError(err: unknown, index: number, total: number, d: ApplyDoc): HttpException {
+    const prefix = `Dokument ${index + 1} von ${total} (${d.kind} "${d.name}") fehlgeschlagen, `
+      + `${index} bereits angewendet: `;
+    if (err instanceof HttpException) {
+      return new HttpException(prefix + kubeApiExceptionMessage(err), err.getStatus(), { cause: err });
+    }
+    const code = kubeApiExceptionCode(err);
+    if (code !== undefined && code >= 400 && code < 500) {
+      return new HttpException(prefix + kubeApiExceptionMessage(err), code, { cause: err });
+    }
+    this.logger.warn(`Apply nach ${index} von ${total} Dokumenten abgebrochen: ${kubeApiExceptionMessage(err)}`);
+    return new ServiceUnavailableException(prefix + kubeApiExceptionMessage(err), { cause: err });
   }
 
   private parseApply(yaml: string, namespace: string): ApplyDoc[] {
@@ -334,9 +403,9 @@ export class KubeWritesService {
         `Dokument "${meta.name}" trägt Namespace "${meta.namespace}", angefragt war "${namespace}"`,
       );
     }
-    if (!isKubeKind(doc.kind) || !KUBE_KIND_SPECS[doc.kind].namespaced) {
+    if (!isApplyableKind(doc.kind)) {
       throw new BadRequestException(
-        `apply unterstützt "${doc.kind}" nicht (nur namespaced Kinds, die DevGrimoire kennt); ` +
+        `apply unterstützt "${doc.kind}" nicht (erlaubt: ${APPLYABLE_KINDS.join(', ')}); ` +
         'andere Ressourcen lassen sich aus DevGrimoire nicht anwenden',
       );
     }
@@ -349,37 +418,32 @@ export class KubeWritesService {
     return { kind: doc.kind, name: meta.name, body: doc };
   }
 
-  /** Read, bei 404 create, sonst replace mit dem gelesenen resourceVersion. */
+  /**
+   * Server-Side Apply: ein PATCH mit Content-Type `application/apply-patch+yaml`.
+   *
+   * client-node 2.0.0 wählt für `patchNamespaced*` von sich aus
+   * `application/json-patch+json`; `setHeaderOptions` hängt pro Aufruf eine
+   * Middleware an (Strategie `append`, die Auth-Middleware bleibt erhalten),
+   * die den Content-Type danach überschreibt. Der Body ist bereits als JSON
+   * serialisiert — gültiges YAML, das der API-Server für apply annimmt.
+   */
   private async applyOne(api: ApiFor, d: ApplyDoc, namespace: string): Promise<string> {
     const spec = KUBE_KIND_SPECS[d.kind];
     const client = api(spec.group);
-    const param = { name: d.name, namespace };
     const meta = isRecord(d.body.metadata) ? d.body.metadata : {};
-
-    let current: unknown;
-    try {
-      current = await this.callApi(client, spec.read, param);
-    } catch (err) {
-      if (!(isRecord(err) && err.code === 404)) throw err;
-      current = undefined;
-    }
-
-    if (current === undefined) {
-      const body = { ...d.body, metadata: { ...meta, namespace } };
-      await this.callApi(client, spec.read.replace(/^read/, 'create'), { namespace, body });
-      return 'created';
-    }
-    const currentMeta = isRecord(current) && isRecord(current.metadata) ? current.metadata : {};
-    const body = {
-      ...d.body,
-      metadata: { ...meta, namespace, resourceVersion: currentMeta.resourceVersion },
-    };
-    await this.callApi(client, spec.read.replace(/^read/, 'replace'), { ...param, body });
-    return 'replaced';
+    const body = { ...d.body, metadata: { ...meta, name: d.name, namespace } };
+    await this.callApi(client, spec.read.replace(/^read/, 'patch'), {
+      name: d.name, namespace, body,
+      fieldManager: KUBE_APPLY_FIELD_MANAGER,
+      force: false,
+    }, setHeaderOptions('Content-Type', PatchStrategy.ServerSideApply));
+    return 'applied';
   }
 
   /** Prüft die Methode am generierten Client, statt sie zu behaupten. */
-  private async callApi(client: unknown, method: string, param: Record<string, unknown>): Promise<unknown> {
+  private async callApi(
+    client: unknown, method: string, param: Record<string, unknown>, options?: unknown,
+  ): Promise<unknown> {
     if (!isRecord(client)) {
       throw new BadRequestException(`Cluster-API kennt "${method}" nicht`);
     }
@@ -387,6 +451,6 @@ export class KubeWritesService {
     if (!isApiMethod(fn)) {
       throw new BadRequestException(`Cluster-API kennt "${method}" nicht`);
     }
-    return fn.call(client, param);
+    return options === undefined ? fn.call(client, param) : fn.call(client, param, options);
   }
 }

@@ -20,9 +20,18 @@ function loadCompiled(rel) {
   }
 }
 
-const { KubeWritesService } = loadCompiled('kube/kube-writes.service.js');
+const { KubeWritesService, APPLYABLE_KINDS } = loadCompiled('kube/kube-writes.service.js');
+const { assertClusterAccess } = loadCompiled('kube/kube-access.guard.js');
+const { RequestContext } = loadCompiled('common/request-context.js');
+const { KubeAuditService, KUBE_AUDIT_FIELD_MAX } = loadCompiled('kube/kube-audit.service.js');
+const { KubeAuditSchema } = loadCompiled('kube/schemas/kube-audit.schema.js');
+const { NotFoundException } = require('@nestjs/common');
+const { ApiException } = require('@kubernetes/client-node');
+const mongoose = require('mongoose');
 
-const EXPECTED_CHECKS = 27;  // 22 Einzelfälle + 5 Läufe der readOnly-Schleife
+// 22 Einzelfälle (zwei davon im finalen Review durch SSA-Fälle ersetzt) + 5 Läufe der
+// readOnly-Schleife + 11 Fälle aus dem finalen Review (I1, I3, I4, I5, M3, M4, M5, T7)
+const EXPECTED_CHECKS = 38;
 const CHECK_TIMEOUT_MS = 3000;
 let failures = 0, total = 0;
 function check(label, fn) {
@@ -39,9 +48,21 @@ const ADMIN = { projectScopeMode: 'all' };
 
 function makeEnv(opts = {}) {
   const state = { built: 0, released: 0, audits: [], calls: [] };
+  const cluster = { _id: 'c1', projectId: 'p1', label: 'Prod', readOnly: opts.readOnly === true, contextName: 'x' };
+  // Die Attrappe verhält sich wie KubeClustersService: findById() prüft den
+  // Scope gegen den Actor im RequestContext (403 VOR dem auditierten Pfad),
+  // findByIdUnscoped() nicht. Bis zum finalen Review prüfte die Attrappe gar
+  // nicht — der Scope-Audit-Fall bestand, obwohl produktiv keine Zeile entstand.
   const clusters = {
-    async findById() {
-      return { _id: 'c1', projectId: 'p1', readOnly: opts.readOnly === true, contextName: 'x' };
+    async findById(id) {
+      if (id === 'missing') throw new NotFoundException(`Kube-Cluster ${id} nicht gefunden`);
+      const actor = RequestContext.getUser();
+      if (actor) assertClusterAccess(cluster, actor);
+      return cluster;
+    },
+    async findByIdUnscoped(id) {
+      if (id === 'missing') throw new NotFoundException(`Kube-Cluster ${id} nicht gefunden`);
+      return cluster;
     },
   };
   const client = {
@@ -51,9 +72,10 @@ function makeEnv(opts = {}) {
       return {
         kc: {
           makeApiClient: (cls) => new Proxy({}, {
-            get: (_t, method) => async (param) => {
-              state.calls.push({ method: String(method), param, api: cls && cls.name });
+            get: (_t, method) => async (param, options) => {
+              state.calls.push({ method: String(method), param, options, api: cls && cls.name });
               if (opts.apiThrows) throw new Error('cluster weg');
+              if (opts.throwFor && opts.throwFor(String(method), param)) throw opts.throwFor(String(method), param);
               if (opts.notFoundOnRead && /^read/.test(String(method))) {
                 throw Object.assign(new Error('nicht gefunden'), { code: 404 });
               }
@@ -234,23 +256,38 @@ const base = { clusterId: 'c1', actor: ADMIN, userId: 'u1' };
     assert.ok(err); assert.equal(err.status, 400); assert.equal(env.state.built, 0);
   });
 
-  await check('apply ersetzt ein vorhandenes Objekt mit dessen resourceVersion', async () => {
-    const env = makeEnv({ responses: { readNamespacedConfigMap: { metadata: { name: 'a', resourceVersion: '77' } } } });
+  // Ersetzt (finaler Review, I4): „apply ersetzt ein vorhandenes Objekt mit
+  // dessen resourceVersion" und „apply legt an, wenn das Objekt nicht
+  // existiert (404)" — beide pinnten die read/create/replace-Semantik, die
+  // Server-Side Apply abgelöst hat.
+  await check('apply schickt Server-Side Apply: PATCH mit apply-patch+yaml, fieldManager devgrimoire, force=false', async () => {
+    const env = makeEnv();
     const yaml = 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\ndata: {k: v}';
-    await env.svc.apply({ ...base, yaml, namespace: 'n' });
-    const rep = env.state.calls.find((c) => c.method === 'replaceNamespacedConfigMap');
-    assert.ok(rep, 'kein Replace');
-    assert.equal(rep.param.body.metadata.resourceVersion, '77');
-    assert.ok(!env.state.calls.some((c) => c.method === 'createNamespacedConfigMap'));
+    const res = await env.svc.apply({ ...base, yaml, namespace: 'n' });
+    assert.equal(env.state.calls.length, 1, `genau ein Aufruf erwartet; gesehen: ${env.state.calls.map((c) => c.method).join(', ')}`);
+    const call = env.state.calls[0];
+    assert.equal(call.method, 'patchNamespacedConfigMap');
+    assert.equal(call.param.fieldManager, 'devgrimoire');
+    assert.equal(call.param.force, false, 'force muss ausdrücklich false sein — ein Konflikt ist ein Fehler');
+    assert.equal(call.param.body.metadata.namespace, 'n');
+    assert.equal(call.param.body.kind, 'ConfigMap');
+    // Die per-Call-Middleware muss den Content-Type auf Server-Side Apply setzen.
+    assert.ok(call.options && Array.isArray(call.options.middleware), 'keine per-Call-Optionen');
+    assert.equal(call.options.middlewareMergeStrategy, 'append', 'die Auth-Middleware des Clients muss erhalten bleiben');
+    const headers = {};
+    const ctx = { setHeaderParam: (k, v) => { headers[k] = v; } };
+    for (const m of call.options.middleware) m.pre(ctx);
+    assert.equal(headers['Content-Type'], 'application/apply-patch+yaml');
+    assert.equal(res[0].detail, 'applied');
   });
 
-  await check('apply legt an, wenn das Objekt nicht existiert (404)', async () => {
+  await check('apply liest, erstellt und ersetzt nicht mehr (kein replace-Pfad)', async () => {
     const env = makeEnv({ notFoundOnRead: true });
-    const yaml = 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\ndata: {k: v}';
+    const yaml = 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\nspec: {}';
     await env.svc.apply({ ...base, yaml, namespace: 'n' });
-    const cr = env.state.calls.find((c) => c.method === 'createNamespacedConfigMap');
-    assert.ok(cr, 'kein Create');
-    assert.equal(cr.param.namespace, 'n');
+    assert.ok(!env.state.calls.some((c) => /^(read|create|replace)/.test(c.method)),
+      `unerwartete Aufrufe: ${env.state.calls.map((c) => c.method).join(', ')}`);
+    assert.equal(env.state.calls[0].method, 'patchNamespacedDeployment');
   });
 
   await check('eine readOnly-Ablehnung schreibt eine Audit-Zeile mit errorMsg und baut keine Verbindung', async () => {
@@ -290,6 +327,114 @@ const base = { clusterId: 'c1', actor: ADMIN, userId: 'u1' };
     assert.ok(call);
     assert.equal(call.param.propagationPolicy, 'Background');
     assert.match(call.api, /BatchV1Api/);
+  });
+
+  // ---- Finaler Review --------------------------------------------------
+  const OUTSIDE = { userId: 'u2', username: 'o', role: 'user', projectScopeMode: 'restricted', allowedProjectIds: ['fremd'] };
+
+  await check('I1: Scope-Ablehnung bei Actor im RequestContext schreibt eine Audit-Zeile (produktiver Pfad)', async () => {
+    for (const call of [
+      (s) => s.scale({ ...base, actor: OUTSIDE, kind: 'Deployment', name: 'a', namespace: 'n', replicas: 1 }),
+      (s) => s.apply({ ...base, actor: OUTSIDE, yaml: 'apiVersion: v1\nkind: ConfigMap\nmetadata: {name: a}', namespace: 'n' }),
+    ]) {
+      const env = makeEnv();
+      const err = await RequestContext.run(OUTSIDE, undefined, () => call(env.svc)).then(() => null, (e) => e);
+      assert.ok(err && err.status === 403, `403 erwartet, bekam ${err && err.status}`);
+      assert.equal(env.state.built, 0);
+      assert.equal(env.state.audits.length, 1, 'die Scope-Ablehnung blieb ohne Audit-Zeile');
+      assert.match(env.state.audits[0].errorMsg, /Kein Zugriff/);
+    }
+  });
+
+  await check('I1: unbekannte Cluster-Id -> 404 ohne Audit-Zeile', async () => {
+    const env = makeEnv();
+    const err = await env.svc.scale({ ...base, clusterId: 'missing', kind: 'Deployment', name: 'a', namespace: 'n', replicas: 1 })
+      .then(() => null, (e) => e);
+    assert.ok(err && err.status === 404);
+    assert.equal(env.state.audits.length, 0);
+  });
+
+  await check('M3: ausserhalb des Scopes UND readOnly -> Scope-Meldung, readOnly bleibt verborgen', async () => {
+    const env = makeEnv({ readOnly: true });
+    const err = await RequestContext.run(OUTSIDE, undefined, () =>
+      env.svc.restart({ ...base, actor: OUTSIDE, kind: 'Deployment', name: 'a', namespace: 'n' })).then(() => null, (e) => e);
+    assert.ok(err && err.status === 403);
+    assert.match(err.message, /Kein Zugriff/);
+    assert.ok(!/read-only/i.test(err.message), `readOnly-Zustand geleakt: ${err.message}`);
+  });
+
+  await check('I3: Audit-errorMsg einer ApiException enthält weder Body noch Headers', async () => {
+    const withStatus = makeEnv({ throwFor: (m) => /^replace/.test(m)
+      && new ApiException(409, 'Conflict', { message: 'deployments "api" conflict' }, { 'audit-id': 'geheim-123' }) });
+    await withStatus.svc.restart({ ...base, kind: 'Deployment', name: 'api', namespace: 'n' }).then(() => null, () => {});
+    assert.equal(withStatus.state.audits[0].errorMsg, 'deployments "api" conflict');
+    const raw = makeEnv({ throwFor: (m) => /^replace/.test(m)
+      && new ApiException(500, 'Internal', 'proxy banner intern.example', { 'audit-id': 'geheim-123' }) });
+    await raw.svc.restart({ ...base, kind: 'Deployment', name: 'api', namespace: 'n' }).then(() => null, () => {});
+    const msg = raw.state.audits[0].errorMsg;
+    assert.ok(msg && !/Body:|Headers:|geheim-123|intern\.example/.test(msg), `Debug-String im Audit: ${msg}`);
+    assert.match(msg, /HTTP-Code: 500/);
+  });
+
+  await check('I5: APPLYABLE_KINDS ist die explizite Liste', async () => {
+    assert.deepEqual([...APPLYABLE_KINDS].sort(),
+      ['ConfigMap', 'CronJob', 'DaemonSet', 'Deployment', 'Ingress', 'Service', 'StatefulSet']);
+  });
+
+  for (const [kind, apiVersion] of [['Secret', 'v1'], ['Pod', 'v1']]) {
+    await check(`I5: apply lehnt ${kind} ab (400, auditiert, keine Verbindung)`, async () => {
+      const env = makeEnv();
+      const yaml = `apiVersion: ${apiVersion}\nkind: ${kind}\nmetadata:\n  name: a\ndata: {k: djE=}`;
+      const err = await env.svc.apply({ ...base, yaml, namespace: 'n' }).then(() => null, (e) => e);
+      assert.ok(err && err.status === 400, `400 erwartet, bekam ${err && err.status}`);
+      assert.equal(env.state.built, 0);
+      assert.equal(env.state.audits.length, 1);
+      assert.ok(env.state.audits[0].errorMsg);
+    });
+  }
+
+  await check('M4: Mehrdokument-Fehler nennt Position und Zahl der bereits angewendeten, Status bleibt', async () => {
+    const env = makeEnv({ throwFor: (m, p) => p && p.name === 'b'
+      && new ApiException(409, 'Conflict', { message: 'Apply failed with 1 conflict' }, {}) });
+    const yaml = ['a', 'b', 'c'].map((n) => `apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: ${n}`).join('\n---\n');
+    const err = await env.svc.apply({ ...base, yaml, namespace: 'n' }).then(() => null, (e) => e);
+    assert.ok(err, 'hätte werfen müssen');
+    assert.equal(err.getStatus(), 409, 'der Cluster-Status muss erhalten bleiben');
+    assert.match(err.message, /Dokument 2 von 3 .*fehlgeschlagen, 1 bereits angewendet: Apply failed with 1 conflict/);
+    assert.deepEqual(env.state.calls.map((c) => c.param.name), ['a', 'b'], 'Dokument 3 darf nicht mehr laufen');
+    assert.equal(env.state.audits.length, 2);
+    assert.ok(!env.state.audits[0].errorMsg && env.state.audits[1].errorMsg);
+  });
+
+  await check('M5: KubeAuditService speichert userId "system" als null statt die Zeile zu verlieren', async () => {
+    const created = [];
+    const svc = new KubeAuditService({ create: async (doc) => { created.push(doc); } });
+    await svc.record({ clusterId: '0123456789abcdef01234567', action: 'write', sourceContext: 'rest', userId: 'system' });
+    assert.equal(created.length, 1);
+    assert.equal(created[0].userId, null);
+    await svc.record({ clusterId: '0123456789abcdef01234567', action: 'write', sourceContext: 'rest', userId: 'abcdefabcdefabcdefabcdef' });
+    assert.equal(String(created[1].userId), 'abcdefabcdefabcdefabcdef');
+  });
+
+  await check('M5: Schema nimmt userId null an, verlangt das Feld aber weiterhin', async () => {
+    const Model = mongoose.models.KubeAuditCheck || mongoose.model('KubeAuditCheck', KubeAuditSchema);
+    const base = { clusterId: new mongoose.Types.ObjectId(), action: 'write', sourceContext: 'rest' };
+    assert.equal(new Model({ ...base, userId: null }).validateSync(), undefined, 'null muss gültig sein');
+    const missing = new Model(base).validateSync();
+    assert.ok(missing && missing.errors.userId, 'fehlendes userId muss weiterhin abgelehnt werden');
+  });
+
+  await check('T7: name/namespace/resource werden auf 253 Zeichen gekappt', async () => {
+    const created = [];
+    const svc = new KubeAuditService({ create: async (doc) => { created.push(doc); } });
+    await svc.record({
+      clusterId: '0123456789abcdef01234567', action: 'write', sourceContext: 'rest', userId: 'system',
+      name: 'n'.repeat(1000), namespace: 's'.repeat(1000), resource: 'r'.repeat(1000),
+    });
+    assert.equal(KUBE_AUDIT_FIELD_MAX, 253);
+    assert.equal(created[0].name.length, 253);
+    assert.equal(created[0].namespace.length, 253);
+    assert.equal(created[0].resource.length, 253);
   });
 
   console.log('');

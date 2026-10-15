@@ -30,13 +30,17 @@ export class KubeAudit {
   /**
    * Pflicht ausser bei `dg`: die Workspace-CLI hat keinen Nutzer, nur ein
    * projektgebundenes Token. Dort hält `workspaceId` fest, woher der Aufruf kam.
+   *
+   * Ein ausdrückliches `null` ist erlaubt: so speichert KubeAuditService den
+   * Aufrufer `'system'` einer Instanz ohne Auth (keine ObjectId). Fehlt das
+   * Feld dagegen ganz (`undefined`), greift die Pflicht weiterhin.
    */
   @Prop({
     type: Types.ObjectId,
     ref: 'User',
-    required(this: KubeAudit) { return this.sourceContext !== 'dg'; },
+    required(this: KubeAudit) { return this.sourceContext !== 'dg' && this.userId !== null; },
   })
-  userId?: Types.ObjectId;
+  userId?: Types.ObjectId | null;
 
   @Prop({
     type: Types.ObjectId,

@@ -10,9 +10,11 @@ import {
  * Schreibaktionen auf einem Cluster. Jede Route setzt `readOnly: false`
  * voraus — das prüft der Service, damit MCP dieselbe Grenze erbt.
  *
- * T-477: Die Scope-Prüfung sitzt hier bereits im Service (`canAccessCluster`),
- * anders als bei den lesenden Routen aus K2. Wenn die globale Regel kommt,
- * ersetzt sie diese Stelle.
+ * Scope (T-477): anders als die lesenden Routen laden die Schreibpfade den
+ * Cluster OHNE Scope-Prüfung (`KubeClustersService.findByIdUnscoped`) und
+ * entscheiden Scope, readOnly und allowMcpWrites in
+ * `KubeWritesService.assertWritable` — im auditierten Pfad, damit auch eine
+ * Scope-Ablehnung eine Audit-Zeile hinterlässt.
  */
 @Controller('kube-clusters')
 export class KubeWritesController {
