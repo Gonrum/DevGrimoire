@@ -96,6 +96,8 @@ export interface OpenAiToolCallDelta {
 /** Normalisierter erster `choice` eines Streaming-Chunks im OpenAI-Protokoll. */
 export interface OpenAiChoiceDelta {
   content?: string;
+  /** `reasoning_content` (LM Studio, DeepSeek) oder `reasoning` (Ollama-OpenAI-Shim). */
+  reasoning?: string;
   toolCalls: OpenAiToolCallDelta[];
   finishReason?: string;
 }
@@ -111,6 +113,8 @@ export function readOpenAiChoiceDelta(json: unknown): OpenAiChoiceDelta | undefi
   const delta = isRecord(choice.delta) ? choice.delta : undefined;
   if (!delta) return out;
   if (typeof delta.content === 'string') out.content = delta.content;
+  if (typeof delta.reasoning_content === 'string') out.reasoning = delta.reasoning_content;
+  else if (typeof delta.reasoning === 'string') out.reasoning = delta.reasoning;
   if (!isUnknownArray(delta.tool_calls)) return out;
 
   for (const raw of delta.tool_calls) {
@@ -140,6 +144,7 @@ export interface AnthropicStreamEvent {
   blockName?: string;
   deltaType?: string;
   text?: string;
+  thinking?: string;
   partialJson?: string;
   stopReason?: string;
 }
@@ -161,6 +166,7 @@ export function readAnthropicStreamEvent(json: unknown): AnthropicStreamEvent {
   if (delta) {
     if (typeof delta.type === 'string') out.deltaType = delta.type;
     if (typeof delta.text === 'string') out.text = delta.text;
+    if (typeof delta.thinking === 'string') out.thinking = delta.thinking;
     if (typeof delta.partial_json === 'string') out.partialJson = delta.partial_json;
     if (typeof delta.stop_reason === 'string') out.stopReason = delta.stop_reason;
   }

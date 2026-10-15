@@ -12,9 +12,14 @@ export class EndpointAllocator {
     private readonly health: LlmHealthService,
   ) {}
 
-  async acquire(purpose: LlmPurpose, filter?: { requireVision?: boolean; exclude?: Set<string> }): Promise<Slot | null> {
+  async acquire(purpose: LlmPurpose, filter?: { requireVision?: boolean; exclude?: Set<string>; prefer?: string }): Promise<Slot | null> {
     const pool = await this.endpoints.listForPool(purpose, filter); // priority asc
-    for (const e of pool) {
+    // Wunsch-Endpunkt zuerst (Lane-Bindung der Recherche), sonst Priorität.
+    const prefer = filter?.prefer;
+    const ordered = prefer
+      ? [...pool.filter((e) => e.id === prefer), ...pool.filter((e) => e.id !== prefer)]
+      : pool;
+    for (const e of ordered) {
       if (filter?.exclude?.has(e.id)) continue;
       if (!this.health.isHealthy(e.id)) continue;
       const used = this.inUse.get(e.id) ?? 0;

@@ -73,6 +73,7 @@
     "check:research-run-bus": "node scripts/research-run-bus-check.cjs",
     "check:research-agent-tools": "node scripts/research-agent-tools-check.cjs",
     "check:research-agent-loop": "node scripts/research-agent-loop-check.cjs",
+    "check:research-llm": "node scripts/research-llm-check.cjs",
     "check:research-access": "node scripts/research-access-check.cjs",
     "check:rag-research-scope": "node scripts/rag-research-scope-check.cjs",
     "check:research-due": "node scripts/research-due-check.cjs",

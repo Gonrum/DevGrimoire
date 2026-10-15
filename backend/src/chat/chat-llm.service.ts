@@ -121,6 +121,7 @@ export interface LlmMessageWithTools {
 
 export type ChatStreamEvent =
   | { type: 'content'; delta: string }
+  | { type: 'reasoning'; delta: string }
   | { type: 'tool_call'; id: string; name: string; arguments: string }
   | { type: 'finish'; reason: 'stop' | 'tool_calls' | 'length' | 'other' };
 

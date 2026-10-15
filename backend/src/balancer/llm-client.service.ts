@@ -132,6 +132,8 @@ export interface ChatCallOpts {
 export type ChatToolCallOpts = Omit<ChatCallOpts, 'messages'> & {
   tools: OpenAiToolDef[];
   messages: LlmMessageWithTools[];
+  /** Reasoning-/Thinking-Deltas als `reasoning`-Events durchreichen (Recherche-Live-Lanes). */
+  includeReasoning?: boolean;
 };
 
 /**
@@ -242,8 +244,8 @@ export class LlmClient {
       body: JSON.stringify({
         model: o.model,
         messages: outgoingMessages,
-        tools: o.tools,
-        tool_choice: 'auto',
+        // Manche Server lehnen `tools: []` ab — dann beides weglassen.
+        ...(o.tools.length > 0 ? { tools: o.tools, tool_choice: 'auto' } : {}),
         temperature: o.temperature,
         max_tokens: o.maxTokens,
         stream: true,
@@ -278,6 +280,9 @@ export class LlmClient {
           // parsebarer Chunk und Chunk ohne `choices`.
           const choice = readOpenAiChoiceDelta(parseJsonRecord(data));
           if (!choice) continue;
+          if (o.includeReasoning && choice.reasoning) {
+            yield { type: 'reasoning', delta: choice.reasoning };
+          }
           if (choice.content) {
             yield { type: 'content', delta: choice.content };
           }
@@ -522,6 +527,8 @@ export class LlmClient {
             case 'content_block_delta': {
               if (ev.deltaType === 'text_delta' && ev.text) {
                 yield { type: 'content', delta: ev.text };
+              } else if (ev.deltaType === 'thinking_delta' && o.includeReasoning && ev.thinking) {
+                yield { type: 'reasoning', delta: ev.thinking };
               } else if (
                 ev.deltaType === 'input_json_delta' &&
                 typeof ev.index === 'number' &&
