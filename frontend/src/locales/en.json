@@ -2851,6 +2851,23 @@
       "cancel": "Cancel",
       "submitFailed": "Create failed"
     },
+    "actions": {
+      "replicas": "Replicas",
+      "scale": "Scale",
+      "scaleConfirm": "Scale {{target}} to {{replicas}} replicas?",
+      "scaleOk": "{{target}} scaled.",
+      "scaleInvalid": "Replicas must be a whole number from 0 to 1000.",
+      "restart": "Restart rollout",
+      "restartConfirm": "Restart rollout of {{target}}?",
+      "restartOk": "Rollout of {{target}} restarted.",
+      "delete": "Delete",
+      "deleteConfirm": "Really delete {{target}}?",
+      "deleteOk": "{{target}} deleted.",
+      "cordon": "Cordon node",
+      "cordonConfirm": "Cordon {{target}} so no new pods are scheduled?",
+      "cordonOk": "{{target}} cordoned.",
+      "failed": "Action failed"
+    },
     "drawer": {
       "close": "Close",
       "tab": {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, KubeCluster, KubeDescribeResult, KubeListRow } from '../../api/client';
 import { errorMessage, isRecord } from '../../lib/narrow';
+import { KubeWriteActions } from './KubeWriteActions';
 import { useKubeLogStream } from './hooks/useKubeLogStream';
 
 interface Props {
@@ -186,6 +187,15 @@ export function KubeResourceDrawer({ cluster, kind, row, onClose }: Props) {
                   ))}
                 </ul>
               )
+        )}
+
+        {tab === 'overview' && (
+          <div className="mt-3">
+            <KubeWriteActions
+              cluster={cluster} kind={kind} row={row}
+              onDone={() => { void loadDescribe(); }}
+            />
+          </div>
         )}
 
         {tab === 'yaml' && (

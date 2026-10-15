@@ -2511,6 +2511,18 @@ export const api = {
       `/kube-clusters/${clusterId}/resources/${encodeURIComponent(kind)}/${encodeURIComponent(name)}/yaml${q}`,
     );
   },
+  scaleKubeResource: (clusterId: string, body: { kind: string; name: string; namespace: string; replicas: number }) =>
+    request<{ verb: string; detail?: string }>(`/kube-clusters/${clusterId}/actions/scale`,
+      { method: 'POST', body: JSON.stringify(body) }),
+  restartKubeResource: (clusterId: string, body: { kind: string; name: string; namespace: string }) =>
+    request<{ verb: string; detail?: string }>(`/kube-clusters/${clusterId}/actions/restart`,
+      { method: 'POST', body: JSON.stringify(body) }),
+  deleteKubeResource: (clusterId: string, body: { kind: string; name: string; namespace: string }) =>
+    request<{ verb: string }>(`/kube-clusters/${clusterId}/actions/delete`,
+      { method: 'POST', body: JSON.stringify(body) }),
+  cordonKubeNode: (clusterId: string, body: { node: string; unschedulable: boolean }) =>
+    request<{ verb: string; detail?: string }>(`/kube-clusters/${clusterId}/actions/cordon`,
+      { method: 'POST', body: JSON.stringify(body) }),
   describeKubeResource: (clusterId: string, kind: string, name: string, namespace?: string) => {
     const q = namespace ? `?namespace=${encodeURIComponent(namespace)}` : '';
     return request<KubeDescribeResult>(

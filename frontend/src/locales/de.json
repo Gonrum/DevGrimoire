@@ -2850,6 +2850,23 @@
       "cancel": "Abbrechen",
       "submitFailed": "Anlegen fehlgeschlagen"
     },
+    "actions": {
+      "replicas": "Replicas",
+      "scale": "Skalieren",
+      "scaleConfirm": "{{target}} auf {{replicas}} Replicas skalieren?",
+      "scaleOk": "{{target}} skaliert.",
+      "scaleInvalid": "Replicas muss eine ganze Zahl von 0 bis 1000 sein.",
+      "restart": "Rollout neu starten",
+      "restartConfirm": "Rollout von {{target}} neu starten?",
+      "restartOk": "Rollout von {{target}} neu gestartet.",
+      "delete": "Löschen",
+      "deleteConfirm": "{{target}} wirklich löschen?",
+      "deleteOk": "{{target}} gelöscht.",
+      "cordon": "Node sperren (cordon)",
+      "cordonConfirm": "{{target}} für neue Pods sperren?",
+      "cordonOk": "{{target}} gesperrt.",
+      "failed": "Aktion fehlgeschlagen"
+    },
     "drawer": {
       "close": "Schließen",
       "tab": {
