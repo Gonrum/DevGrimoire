@@ -485,6 +485,15 @@ async function bootstrap() {
       });
       return;
     }
+    // Wie JwtAuthGuard: der Key eines deaktivierten Besitzers öffnet nichts mehr.
+    if (owner.active === false) {
+      res.status(401).json({
+        jsonrpc: '2.0',
+        error: { code: -32001, message: 'Unauthorized: API key owner is deactivated.' },
+        id: null,
+      });
+      return;
+    }
     // Derselbe Actor-Aufbau wie in JwtAuthGuard — über die gemeinsame Funktion
     // statt einer zweiten Abschrift. Vorher standen hier nur drei Felder:
     //
