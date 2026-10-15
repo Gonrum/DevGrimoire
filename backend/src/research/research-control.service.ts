@@ -100,32 +100,46 @@ export class ResearchControlService {
     return new ConflictException(`Recherche ist ${doc.status} – Aktion nicht möglich`);
   }
 
+  /** Laufenden Lauf zum Stopp auffordern (Flag, dann Abbruchsignal). */
+  private async requestStop(id: string, flag: 'cancelRequested' | 'pauseRequested'): Promise<void> {
+    await this.store.patch(id, { [flag]: true });
+    this.live.abort(id);
+  }
+
   async cancel(id: string): Promise<void> {
     const doc = await this.load(id);
-    if (doc.status === 'running') {
-      await this.store.patch(id, { cancelRequested: true });
-      this.live.abort(id);
+    if (doc.status === 'queued') {
+      // Statusgeschützt: hat ein Worker das Dokument inzwischen übernommen, ist es `running`.
+      const moved = await this.store.transitionFromQueued(id, {
+        status: doc.content ? 'done' : 'cancelled', cancelRequested: false, pauseRequested: false,
+      });
+      if (!moved) return this.requestStop(id, 'cancelRequested');
+      await this.queue.remove(id);
+      this.live.end(id);
       return;
     }
-    if (doc.status !== 'queued' && doc.status !== 'paused') throw this.conflict(doc);
+    if (doc.status === 'running') return this.requestStop(id, 'cancelRequested');
+    if (doc.status !== 'paused') throw this.conflict(doc);
     await this.queue.remove(id);
     await this.store.patch(id, {
       status: doc.content ? 'done' : 'cancelled',
       cancelRequested: false,
       pauseRequested: false,
     });
+    this.live.end(id);
   }
 
   async pause(id: string): Promise<void> {
     const doc = await this.load(id);
     if (doc.status === 'queued') {
+      const moved = await this.store.transitionFromQueued(id, { status: 'paused', pauseRequested: false });
+      if (!moved) return this.requestStop(id, 'pauseRequested');
       await this.queue.remove(id);
-      await this.store.patch(id, { status: 'paused', pauseRequested: false });
+      this.live.end(id);
       return;
     }
     if (doc.status !== 'running') throw this.conflict(doc);
-    await this.store.patch(id, { pauseRequested: true });
-    this.live.abort(id);
+    await this.requestStop(id, 'pauseRequested');
   }
 
   async resume(id: string): Promise<void> {
@@ -182,6 +196,8 @@ export class ResearchControlService {
       status: 'queued',
       queuedAt: new Date(),
       error: null,
+      cancelRequested: false,
+      pauseRequested: false,
     });
     await this.queue.enqueue(id);
   }
@@ -195,6 +211,17 @@ export class ResearchControlService {
     const projectId = target.projectId ?? null;
     const customerId = target.customerId ?? null;
     await this.store.patch(id, { projectId, customerId });
+    // Umzug von einem anderen Ziel: das alte verliert den Eintrag.
+    if (isAssigned(doc) && (doc.projectId !== projectId || doc.customerId !== customerId)) {
+      this.events.emit(PROJECT_CHANGED, {
+        projectId: doc.projectId,
+        customerId: doc.customerId,
+        entity: 'research',
+        action: 'deleted',
+        entityId: id,
+        summary: `Recherche "${doc.title}" verschoben`,
+      });
+    }
     this.events.emit(PROJECT_CHANGED, {
       projectId,
       customerId,
@@ -207,13 +234,16 @@ export class ResearchControlService {
 
   async remove(id: string): Promise<void> {
     const doc = await this.load(id);
-    if (doc.status === 'running') {
-      await this.store.patch(id, { cancelRequested: true });
-      this.live.abort(id);
+    let running = doc.status === 'running';
+    if (doc.status === 'queued') {
+      // Blockiert die Übernahme durch einen Worker; war er schneller, läuft das Dokument bereits.
+      running = !(await this.store.transitionFromQueued(id, { status: 'cancelled', cancelRequested: false, pauseRequested: false }));
     }
+    if (running) await this.requestStop(id, 'cancelRequested');
     await this.queue.remove(id);
     await this.steps.removeFor(id);
     await this.store.delete(id);
+    if (!running) this.live.end(id);
     if (isAssigned(doc)) {
       this.events.emit(PROJECT_CHANGED, {
         projectId: doc.projectId,

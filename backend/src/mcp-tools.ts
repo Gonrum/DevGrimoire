@@ -20,6 +20,7 @@ import { EnvironmentsService } from './environments/environments.service';
 import { SecretsService } from './secrets/secrets.service';
 import { ManualsService } from './manuals/manuals.service';
 import { ResearchService } from './research/research.service';
+import { ResearchControlService } from './research/research-control.service';
 import { ResearchTopicService } from './research-agent/research-topic.service';
 import { ResearchRunService } from './research-agent/research-run.service';
 import { ResearchArtifactService } from './research-agent/research-artifact.service';
@@ -631,6 +632,7 @@ export interface McpServices {
   secretsService: SecretsService;
   manualsService: ManualsService;
   researchService: ResearchService;
+  researchControlService: ResearchControlService;
   researchTopicService: ResearchTopicService;
   researchRunService: ResearchRunService;
   researchArtifactService: ResearchArtifactService;
@@ -4790,7 +4792,7 @@ export function getToolCatalog(): McpToolCatalogEntry[] {
 }
 
 export function registerMcpTools(server: Server, services: McpServices): void {
-  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, environmentsService, secretsService, manualsService, researchService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, harnessService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService, stackService, kubeClustersService, kubeResourcesService, kubeLogsService, kubeClientService, kubeAuditService, kubeWritesService } = services;
+  const { projectsService, todosService, sessionsService, knowledgeService, changelogService, milestonesService, activitiesService, environmentsService, secretsService, manualsService, researchService, researchControlService, researchTopicService, researchRunService, researchArtifactService, researchAgentService, settingsService, notificationsService, schemasService, dependenciesService, featuresService, soulsService, harnessService, commitsService, ragService, recurringTasksService, workflowsService, workflowEngineService, nodeRegistry, customerTemplatesService, validationReportsService, docUpdateProposalsService, knowledgeGraphService, oracleService, snippetsService, attachmentsService, questionsService, authService, customersService, contactsService, monitoringService, logsService, releasesService, chatService, chatLlmService, chatContextService, webSearchService, readabilityService, workspacesService, workspaceClient, workspaceGitTokens, workspaceCliToken, sshService, sshSessionService, httpRequestsService, stackService, kubeClustersService, kubeResourcesService, kubeLogsService, kubeClientService, kubeAuditService, kubeWritesService } = services;
 
   server.setRequestHandler(ListToolsRequestSchema, () => {
     const filteredTools = tools.filter((t) => isToolAllowed(t.name));
@@ -5923,7 +5925,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           }));
           break;
         case 'research_delete':
-          await researchService.remove(requireString(a, 'id'));
+          // Wie DELETE /research/:id: bricht einen laufenden Lauf ab, räumt Job und Schritte (404 bei fremdem Zugriff).
+          await researchControlService.remove(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
           break;
         case 'research_topic_create': {

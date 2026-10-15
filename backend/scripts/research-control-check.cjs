@@ -18,13 +18,13 @@ function loadCompiled(rel) {
 
 const { NotFoundException } = require(path.resolve(__dirname, '..', 'node_modules', '@nestjs', 'common'));
 const { ResearchControlService } = loadCompiled('research/research-control.service.js');
-const { ResearchRunsController } = loadCompiled('research/research-runs.controller.js');
+const { ResearchRunsController, RESEARCH_UPLOAD_OPTIONS } = loadCompiled('research/research-runs.controller.js');
 const { ResearchController } = loadCompiled('research/research.controller.js');
 const { ResearchModule } = loadCompiled('research/research.module.js');
 const { ResearchLiveService } = loadCompiled('research/research-live.service.js');
 const { RequestContext } = loadCompiled('common/request-context.js');
 
-const EXPECTED_CHECKS = 12;
+const EXPECTED_CHECKS = 16;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -63,11 +63,19 @@ function setup({ webEnabled = true, capacity = 2 } = {}) {
       docs.set(id, { ...base, id, ...structuredClone(input), status: 'queued', mode: 'research' });
       return id;
     },
+    transitionFromQueued: async (id, set) => {
+      if (store.beforeTransition) { const f = store.beforeTransition; store.beforeTransition = null; f(id); }
+      const d = docs.get(id);
+      if (!d || d.status !== 'queued') return false;
+      for (const [k, v] of Object.entries(structuredClone(set))) { if (v === undefined) delete d[k]; else d[k] = v; }
+      return true;
+    },
     delete: async (id) => { docs.delete(id); },
     listActive: async (o) => [...docs.values()].filter((d) => d.ownerUserId === o && (d.status === 'queued' || d.status === 'running')).map((d) => structuredClone(d)),
   };
   const queue = { enqueued: [], removed: [], enqueue: async (id) => { queue.enqueued.push(id); }, remove: async (id) => { queue.removed.push(id); } };
-  const live = { aborted: [], abort: (id) => { live.aborted.push(id); } };
+  const realLive = new ResearchLiveService();
+  const live = { aborted: [], ended: [], real: realLive, abort: (id) => { live.aborted.push(id); }, end: (id) => { live.ended.push(id); realLive.end(id); } };
   const stepsRemoved = [];
   const steps = { removeFor: async (id) => { stepsRemoved.push(id); }, list: async () => [] };
   const events = { emitted: [], emit: (name, payload) => { events.emitted.push({ name, payload }); } };
@@ -188,7 +196,7 @@ const status = async (promise) => {
   await check('deepen: ohne Inhalt 409, mit Inhalt followUps + deepen, zu kurze Frage 400', async () => {
     const t = setup();
     t.put('d0', { status: 'done', content: '' });
-    t.put('d1', { status: 'done', content: 'Bericht' });
+    t.put('d1', { status: 'done', content: 'Bericht', cancelRequested: true, pauseRequested: true });
     await as(owner, async () => {
       assert.equal(await status(t.svc.deepen('d0', 'Eine Frage')), 409);
       assert.equal(await status(t.svc.deepen('d1', 'ab')), 400);
@@ -198,6 +206,7 @@ const status = async (promise) => {
     assert.equal(d.followUps.length, 1);
     assert.equal(d.mode, 'deepen');
     assert.equal(d.modeQuestion, 'Eine Frage');
+    assert.deepEqual([d.cancelRequested, d.pauseRequested], [false, false]);
     assert.equal(d.status, 'queued');
     assert.deepEqual(t.queue.enqueued, ['d1']);
   });
@@ -276,6 +285,59 @@ const status = async (promise) => {
     const unsub = as(owner, () => controller.live('fremd', req, res));
     await unsub;
     assert.ok(calls.some((c) => c[0] === 'setHeader' && String(c[2]).startsWith('text/event-stream')));
+  });
+
+  await check('Upload: UTF-8-Dateiname (Übersicht.pdf) bleibt über multer erhalten', async () => {
+    const multer = require(path.resolve(__dirname, '..', 'node_modules', 'multer'));
+    const http = require('node:http');
+    const mw = multer(RESEARCH_UPLOAD_OPTIONS).array('files', 10);
+    const name = await new Promise((resolve, reject) => {
+      const server = http.createServer((req, res) => {
+        mw(req, res, (err) => { res.end('ok'); server.close(); if (err) reject(err); else resolve(req.files[0].originalname); });
+      });
+      server.listen(0, () => {
+        const boundary = 'XBOUNDARY';
+        const head = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="Übersicht.pdf"\r\nContent-Type: text/plain\r\n\r\n`, 'utf8');
+        const body = Buffer.concat([head, Buffer.from('inhalt'), Buffer.from(`\r\n--${boundary}--\r\n`)]);
+        const rq = http.request({ port: server.address().port, method: 'POST', headers: { 'content-type': `multipart/form-data; boundary=${boundary}`, 'content-length': body.length } });
+        rq.on('error', reject);
+        rq.end(body);
+      });
+    });
+    assert.equal(name, 'Übersicht.pdf');
+  });
+
+  await check('SSE endet, wenn eine wartende Recherche abgebrochen/pausiert/entfernt wird', async () => {
+    for (const action of ['cancel', 'pause', 'remove']) {
+      const t = setup();
+      t.put('q1', { status: 'queued' });
+      const got = [];
+      const unsub = t.live.real.subscribe('q1', (ev) => got.push(ev.type));
+      await as(owner, () => t.svc[action]('q1'));
+      assert.ok(got.includes('end'), `${action}: ${got}`);
+      unsub();
+    }
+  });
+
+  await check('Rennen cancel/pause/remove gegen claimQueued: Worker war schneller → Flag + abort, nicht cancelled', async () => {
+    for (const [action, flag] of [['cancel', 'cancelRequested'], ['pause', 'pauseRequested'], ['remove', 'cancelRequested']]) {
+      const t = setup();
+      t.put('q1', { status: 'queued' });
+      t.store.beforeTransition = (id) => { t.docs.get(id).status = 'running'; }; // Claim zwischen load und Update
+      await as(owner, () => t.svc[action]('q1'));
+      assert.ok(t.live.aborted.includes('q1'), action);
+      if (action !== 'remove') {
+        assert.equal(t.docs.get('q1').status, 'running');
+        assert.equal(t.docs.get('q1')[flag], true);
+      } else assert.equal(t.docs.has('q1'), false);
+    }
+  });
+
+  await check('move: Umzug eines zugeordneten Dokuments meldet deleted (alt) und created (neu)', async () => {
+    const t = setup();
+    t.put('d1', { status: 'done', content: 'x', projectId: P_MISSING });
+    await as(owner, () => t.svc.move('d1', { projectId: P_OK }));
+    assert.deepEqual(t.events.emitted.map((e) => [e.payload.action, e.payload.projectId]), [['deleted', P_MISSING], ['created', P_OK]]);
   });
 
   await new Promise((r) => setTimeout(r, 0));

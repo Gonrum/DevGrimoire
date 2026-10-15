@@ -149,6 +149,23 @@ export class ResearchRunStore {
     await this.model.updateOne({ _id: oid(id) }, update).exec();
   }
 
+  /** Nur wenn das Dokument noch `queued` ist (Gegenstück zu `claimQueued`); false = Worker war schneller. */
+  async transitionFromQueued(id: string, set: RunPatch): Promise<boolean> {
+    if (!Types.ObjectId.isValid(id)) return false;
+    const $set: Record<string, unknown> = {};
+    const $unset: Record<string, ''> = {};
+    for (const [key, value] of Object.entries(set)) {
+      if (value === undefined) $unset[key] = '';
+      else if (ID_FIELDS.has(key)) $set[key] = typeof value === 'string' ? oid(value) : null;
+      else $set[key] = value;
+    }
+    const update: Record<string, unknown> = {};
+    if (Object.keys($set).length > 0) update.$set = $set;
+    if (Object.keys($unset).length > 0) update.$unset = $unset;
+    const res = await this.model.updateOne({ _id: oid(id), status: 'queued' }, update).exec();
+    return res.modifiedCount === 1;
+  }
+
   /** Atomar `queued` → `running`; false, wenn das Dokument nicht mehr wartet. */
   async claimQueued(id: string): Promise<boolean> {
     if (!Types.ObjectId.isValid(id)) return false;

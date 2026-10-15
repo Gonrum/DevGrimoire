@@ -9,6 +9,8 @@ import { extractUploadText, type UploadedFile } from './research-files';
 import { DeepenDto, MoveDto, StartResearchDto } from './dto/research-run.dto';
 
 const UPLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
+/** `defParamCharset`: multer liest Dateinamen sonst als latin1 (Umlaute würden verfremdet). */
+export const RESEARCH_UPLOAD_OPTIONS = { defParamCharset: 'utf8', limits: { fileSize: UPLOAD_LIMIT_BYTES } };
 const HEARTBEAT_MS = 15_000;
 
 /**
@@ -23,7 +25,7 @@ export class ResearchRunsController {
   ) {}
 
   @Post('start')
-  @UseInterceptors(FilesInterceptor('files', 10, { limits: { fileSize: UPLOAD_LIMIT_BYTES } }))
+  @UseInterceptors(FilesInterceptor('files', 10, RESEARCH_UPLOAD_OPTIONS))
   async start(@Body() dto: StartResearchDto, @UploadedFiles() uploaded?: UploadedFile[]): Promise<{ ids: string[] }> {
     const files: Array<{ name: string; text: string }> = [];
     for (const f of uploaded ?? []) files.push({ name: f.originalname, text: await extractUploadText(f) });
@@ -103,9 +105,18 @@ export class ResearchRunsController {
       if (!res.writableEnded) res.write(': ping\n\n');
     }, HEARTBEAT_MS);
     req.on('close', close);
+    if (req.destroyed || res.writableEnded) { close(); return; }
     unsubscribe = this.liveRuns.subscribe(id, (ev) => {
       send(ev);
       if (ev.type === 'end') close();
     });
+    // Zwischen Vorprüfung und Anmeldung kann der Lauf geendet sein: erneut prüfen.
+    try {
+      const now = await this.control.statusOf(id);
+      if (now !== 'running' && now !== 'queued') { send({ type: 'end' }); close(); }
+    } catch {
+      send({ type: 'end' });
+      close();
+    }
   }
 }
