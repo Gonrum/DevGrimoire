@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import type { ScopeMode } from '../../common/permissions';
+import type { StoredNotificationPrefs } from '../../notifications/notification-prefs';
 
 export type UserDocument = HydratedDocument<User>;
 
@@ -71,6 +72,11 @@ export class User {
     _id: false,
   })
   llmConfig: UserLlmConfig;
+
+  // Persönliche Push-Kategorien und Ruhezeiten (notifications/notification-prefs.ts).
+  // Fehlt das Feld, gelten die instanzweiten Settings.
+  @Prop({ type: Object, default: undefined })
+  notificationPrefs?: StoredNotificationPrefs;
 
   // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
   // nicht am Typ — ohne Deklaration brauchten Leser dafür ein `as any`.

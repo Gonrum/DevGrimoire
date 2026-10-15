@@ -10,6 +10,8 @@ import { PushService } from '../push/push.service';
 import { SettingsService } from '../settings/settings.service';
 import { RequestContext } from '../common/request-context';
 import type { ActorScope } from '../common/permissions';
+import { User, UserDocument } from '../auth/schemas/user.schema';
+import { allowsPush, effectivePrefs, splitCsv, type NotificationPrefs } from './notification-prefs';
 
 /** Empfänger und Projektbezug einer Notification (H-12). */
 export interface NotificationTarget {
@@ -49,11 +51,10 @@ function projectScopeFilter(actor: ActorScope): FilterQuery<AppNotification> | n
 
 export const NOTIFICATION_CREATED = 'notification.created';
 export const NOTIFICATION_PUSH_CATEGORIES_KEY = 'notification_push_categories';
-// T-340: Quiet-Hours stored as instance-wide settings (matches the existing
-// per-category opt-in pattern — per-user infra doesn't exist yet, single-user
-// dev instance in practice). When `enabled`, pushes inside [from, to) are
-// suppressed UNLESS the category is in `overrides`. The notification doc is
-// still created so the in-app bell renders it.
+// T-340: Quiet-Hours. When `enabled`, pushes inside [from, to) are suppressed
+// UNLESS the category is in `overrides`. The notification doc is still created
+// so the in-app bell renders it. Diese instanzweiten Keys sind heute der
+// Default; die Einstellung pro Nutzer liegt am User (notification-prefs.ts).
 export const NOTIFICATION_QUIET_HOURS_ENABLED_KEY = 'notification_quiet_hours_enabled';
 export const NOTIFICATION_QUIET_HOURS_FROM_KEY = 'notification_quiet_hours_from';
 export const NOTIFICATION_QUIET_HOURS_TO_KEY = 'notification_quiet_hours_to';
@@ -94,6 +95,7 @@ export class NotificationsService implements OnModuleInit {
     private eventEmitter: EventEmitter2,
     private pushService: PushService,
     private settingsService: SettingsService,
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
   ) {}
 
   /**
@@ -132,69 +134,85 @@ export class NotificationsService implements OnModuleInit {
       title,
       body,
     });
-    // Check if push is enabled for this category
-    if (category) {
-      const enabled = await this.settingsService.getOrDefault(
-        NOTIFICATION_PUSH_CATEGORIES_KEY,
-        DEFAULT_PUSH_CATEGORIES,
-      );
-      const categories = enabled.split(',').map((c) => c.trim()).filter(Boolean);
-      if (categories.includes(category) && !(await this.isPushSuppressedByQuietHours(category))) {
-        this.pushService.sendNotification(title, body, url, target).catch(() => {});
-      }
-    } else if (!(await this.isPushSuppressedByQuietHours(undefined))) {
-      this.pushService.sendNotification(title, body, url, target).catch(() => {});
-    }
+    // Kategorie und Ruhezeit entscheidet die Einstellung des jeweiligen
+    // Abo-Besitzers; ohne eigene gilt die instanzweite.
+    const defaults = await this.instanceDefaults();
+    const now = new Date();
+    this.pushService
+      .sendNotification(title, body, url, target, (stored) =>
+        allowsPush(effectivePrefs(stored, defaults), category, now),
+      )
+      .catch(() => {});
     return notification;
   }
 
   /**
-   * T-340: returns true when the current server time falls inside the
-   * configured quiet-hours window AND the category is not on the override
-   * allowlist. Categories without an explicit category param are treated as
-   * non-override (still suppressed during quiet hours).
-   *
-   * Failure mode is fail-open: any parse error or missing setting → return
-   * false (notification gets pushed). Silently swallowing pushes is worse
-   * than letting one slip through during configuration mishaps.
+   * Instanzweite Einstellung (T-340) — Default für Nutzer ohne eigene und für
+   * besitzerlose Abos. Ein Lesefehler fällt auf die eingebauten Defaults
+   * zurück: lieber ein Push zu viel als ein verschluckter.
    */
-  private async isPushSuppressedByQuietHours(category: string | undefined): Promise<boolean> {
+  async instanceDefaults(): Promise<NotificationPrefs> {
     try {
-      const enabledStr = await this.settingsService.get(NOTIFICATION_QUIET_HOURS_ENABLED_KEY);
-      if (enabledStr !== 'true') return false;
-      const overrides = (
-        await this.settingsService.getOrDefault(NOTIFICATION_QUIET_HOURS_OVERRIDES_KEY, DEFAULT_QUIET_HOURS_OVERRIDES)
-      )
-        .split(',')
-        .map((c) => c.trim())
-        .filter(Boolean);
-      if (category && overrides.includes(category)) return false;
-
-      const from = await this.settingsService.get(NOTIFICATION_QUIET_HOURS_FROM_KEY);
-      const to = await this.settingsService.get(NOTIFICATION_QUIET_HOURS_TO_KEY);
-      if (!from || !to) return false;
-      const fromMin = this.parseHHMM(from);
-      const toMin = this.parseHHMM(to);
-      if (fromMin === null || toMin === null) return false;
-
-      const now = new Date();
-      const nowMin = now.getHours() * 60 + now.getMinutes();
-      // Window wraps midnight when from > to (e.g. 22:00 → 07:00).
-      return fromMin <= toMin
-        ? nowMin >= fromMin && nowMin < toMin
-        : nowMin >= fromMin || nowMin < toMin;
+      const [cats, enabled, from, to, overrides] = await Promise.all([
+        this.settingsService.getOrDefault(NOTIFICATION_PUSH_CATEGORIES_KEY, DEFAULT_PUSH_CATEGORIES),
+        this.settingsService.get(NOTIFICATION_QUIET_HOURS_ENABLED_KEY),
+        this.settingsService.get(NOTIFICATION_QUIET_HOURS_FROM_KEY),
+        this.settingsService.get(NOTIFICATION_QUIET_HOURS_TO_KEY),
+        this.settingsService.getOrDefault(NOTIFICATION_QUIET_HOURS_OVERRIDES_KEY, DEFAULT_QUIET_HOURS_OVERRIDES),
+      ]);
+      return {
+        pushCategories: splitCsv(cats),
+        quietHours: { enabled: enabled === 'true', from: from ?? '22:00', to: to ?? '07:00', overrides: splitCsv(overrides) },
+      };
     } catch {
-      return false;
+      return {
+        pushCategories: splitCsv(DEFAULT_PUSH_CATEGORIES),
+        quietHours: { enabled: false, from: '22:00', to: '07:00', overrides: splitCsv(DEFAULT_QUIET_HOURS_OVERRIDES) },
+      };
     }
   }
 
-  private parseHHMM(value: string): number | null {
-    const m = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
-    if (!m) return null;
-    const h = parseInt(m[1], 10);
-    const mm = parseInt(m[2], 10);
-    if (h < 0 || h > 23 || mm < 0 || mm > 59) return null;
-    return h * 60 + mm;
+  /** Wirksame Einstellung des aktuellen Nutzers; `custom` = eigene gespeichert. */
+  async getPreferences(): Promise<NotificationPrefs & { custom: boolean }> {
+    const defaults = await this.instanceDefaults();
+    const user = await this.prefsOwner();
+    const stored = user?.notificationPrefs;
+    return { ...effectivePrefs(stored, defaults), custom: !!stored };
+  }
+
+  /**
+   * Speichert die eigene Einstellung. Ohne Nutzer-Datensatz (Auth
+   * deaktiviert: Actor `system`) gibt es niemanden, an dem sie hängen könnte —
+   * dann wird die instanzweite geschrieben, wie vorher.
+   */
+  async setPreferences(prefs: NotificationPrefs): Promise<NotificationPrefs & { custom: boolean }> {
+    const actor = this.actor();
+    const userId = actor?.userId;
+    if (userId && Types.ObjectId.isValid(userId)) {
+      const res = await this.userModel
+        .updateOne({ _id: new Types.ObjectId(userId) }, { $set: { notificationPrefs: prefs } })
+        .exec();
+      if (res.matchedCount === 0) throw new NotFoundException('Nutzer nicht gefunden');
+    } else {
+      const q = prefs.quietHours;
+      await Promise.all([
+        this.settingsService.set(NOTIFICATION_PUSH_CATEGORIES_KEY, prefs.pushCategories.join(',')),
+        this.settingsService.set(NOTIFICATION_QUIET_HOURS_ENABLED_KEY, q.enabled ? 'true' : 'false'),
+        this.settingsService.set(NOTIFICATION_QUIET_HOURS_FROM_KEY, q.from),
+        this.settingsService.set(NOTIFICATION_QUIET_HOURS_TO_KEY, q.to),
+        this.settingsService.set(NOTIFICATION_QUIET_HOURS_OVERRIDES_KEY, q.overrides.join(',')),
+      ]);
+    }
+    return this.getPreferences();
+  }
+
+  private async prefsOwner(): Promise<{ notificationPrefs?: unknown } | null> {
+    const userId = this.actor()?.userId;
+    if (!userId || !Types.ObjectId.isValid(userId)) return null;
+    return this.userModel
+      .findById(userId, { notificationPrefs: 1 })
+      .lean<{ notificationPrefs?: unknown }>()
+      .exec();
   }
 
   // ---------------------------------------------------------------------------

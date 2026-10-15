@@ -24,7 +24,9 @@ import { SETTING_SEARXNG_URL } from '../web-search/services/searxng-url.util';
  * Keys, die die generische Route `PUT /api/settings/:key` schreiben darf (M-6).
  *
  * Genau die, die das Frontend über diese Route setzt (WebSearchSettings,
- * NotificationsSettings, InstructionsSettings). Alles andere hat einen eigenen,
+ * InstructionsSettings), dazu die instanzweiten Benachrichtigungs-Defaults —
+ * die Einstellungsseite schreibt seit den persönlichen Einstellungen
+ * `/notifications/preferences`, der Admin kann den Default weiter hier setzen. Alles andere hat einen eigenen,
  * validierenden Endpoint (Replikation, LLM-/Embedding-Endpoints, Chat, SSH,
  * Backups). Vorher nahm die Route jeden Key: ein Tippfehler legte eine Zeile
  * an, die nie jemand liest, und über sie liessen sich die verschlüsselten
@@ -69,7 +71,7 @@ class SetSettingDto {
  * nur für Admins.
  */
 const USER_READABLE_KEY_PREFIXES: readonly string[] = [
-  // NotificationsSettings.tsx: persönliche Quiet Hours und Push-Kategorien.
+  // Instanzweite Benachrichtigungs-Defaults (die persönlichen liegen am User).
   'notification_',
   // InstructionsSettings.tsx: Agenten-Instruktionen (Lesepfad).
   'agent_instructions',

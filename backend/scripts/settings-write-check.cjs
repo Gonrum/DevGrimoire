@@ -71,7 +71,8 @@ const ctrl = new SettingsController({ set: async (key, value) => { store.set(key
       }
     };
     walk(root);
-    assert.ok(found.size >= 10, `zu wenige Keys gefunden (${found.size}) — Parser kaputt?`);
+    // 7 seit den persönlichen Benachrichtigungs-Einstellungen (eigene Route).
+    assert.ok(found.size >= 6, `zu wenige Keys gefunden (${found.size}) — Parser kaputt?`);
     const missing = [...found].filter((k) => !GENERIC_WRITABLE_SETTING_KEYS.has(k));
     assert.deepEqual(missing, []);
   });

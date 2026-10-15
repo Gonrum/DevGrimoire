@@ -14,6 +14,9 @@ export interface PushTarget {
   projectId?: string | null;
 }
 
+/** Filter je Abo-Besitzer; bekommt dessen gespeicherte Benachrichtigungs-Einstellung. */
+export type PushAllow = (ownerPrefs: unknown) => boolean;
+
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT;
@@ -26,6 +29,7 @@ if (PUSH_ENABLED) {
 @Injectable()
 export class PushService {
   private readonly logger = new Logger(PushService.name);
+  private warnedDisabled = false;
 
   constructor(
     @InjectModel(PushSubscriptionEntry.name) private subModel: Model<PushSubscriptionDocument>,
@@ -68,21 +72,28 @@ export class PushService {
    * - mit Empfänger: nur dessen Abos
    * - mit Projekt: nur Besitzer mit Zugriff auf das Projekt (aktive Nutzer)
    * - Abos ohne Besitzer (Altbestand): nur reine Broadcasts ohne Projekt
+   * - mit `allow`: zusätzlich nach den Benachrichtigungs-Einstellungen des
+   *   Besitzers (`undefined` für Abos ohne Besitzer oder ohne eigene Einstellung)
    */
-  private async recipients(target: PushTarget) {
+  private async recipients(target: PushTarget, allow?: PushAllow) {
     const subs = await this.subModel
       .find(target.userId ? { userId: target.userId } : {})
       .lean()
       .exec();
-    if (!target.projectId) return subs;
+    if (!target.projectId && !allow) return subs;
     const ownerIds = [...new Set(subs.map((s) => s.userId).filter((id): id is string => !!id))];
-    const owners = await this.userModel.find({ _id: { $in: ownerIds } }).lean().exec();
-    const allowed = new Set(
-      owners
-        .filter((u) => u.active && actorCanAccessProject(actorFromUser(u), String(target.projectId)))
-        .map((u) => u._id.toString()),
+    const owners = new Map(
+      (await this.userModel.find({ _id: { $in: ownerIds } }).lean().exec()).map((u) => [u._id.toString(), u]),
     );
-    return subs.filter((s) => !!s.userId && allowed.has(s.userId));
+    return subs.filter((s) => {
+      const owner = s.userId ? owners.get(s.userId) : undefined;
+      if (target.projectId) {
+        if (!owner || !owner.active || !actorCanAccessProject(actorFromUser(owner), String(target.projectId))) {
+          return false;
+        }
+      }
+      return !allow || allow(owner?.notificationPrefs);
+    });
   }
 
   async sendNotification(
@@ -90,12 +101,18 @@ export class PushService {
     body: string,
     url?: string,
     target: PushTarget = {},
+    allow?: PushAllow,
   ): Promise<{ sent: number; failed: number }> {
     if (!PUSH_ENABLED) {
-      this.logger.warn('Push notifications disabled: VAPID keys not configured');
+      // Einmal reicht: seit dem Filter pro Besitzer kommt jede Notification
+      // hier an, auch die häufigen mcp_*-Meldungen.
+      if (!this.warnedDisabled) {
+        this.warnedDisabled = true;
+        this.logger.warn('Push notifications disabled: VAPID keys not configured');
+      }
       return { sent: 0, failed: 0 };
     }
-    const subs = await this.recipients(target);
+    const subs = await this.recipients(target, allow);
     const payload = JSON.stringify({ title, body, url });
 
     let sent = 0;

@@ -1316,6 +1316,17 @@ export interface Notification {
   createdAt: string;
 }
 
+/** Eigene Push-Kategorien und Ruhezeiten (`/notifications/preferences`). */
+export interface NotificationPreferences {
+  pushCategories: string[];
+  quietHours: { enabled: boolean; from: string; to: string; overrides: string[] };
+}
+
+/** `custom: false` = noch keine eigene Einstellung, es gilt die der Instanz. */
+export interface NotificationPreferencesView extends NotificationPreferences {
+  custom: boolean;
+}
+
 export type LlmMode = 'server' | 'browser';
 
 export interface UserLlmConfig {
@@ -2629,6 +2640,13 @@ export const api = {
       request<void>(`/notifications/${id}`, { method: 'DELETE' }),
     deleteAll: () =>
       request<{ deleted: number }>('/notifications/all', { method: 'DELETE' }),
+    getPreferences: () =>
+      request<NotificationPreferencesView>('/notifications/preferences'),
+    setPreferences: (prefs: NotificationPreferences) =>
+      request<NotificationPreferencesView>('/notifications/preferences', {
+        method: 'PUT',
+        body: JSON.stringify(prefs),
+      }),
   },
   questions: {
     pending: (direction?: QuestionDirection) => {

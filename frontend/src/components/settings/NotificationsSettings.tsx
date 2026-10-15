@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { api } from '../../api/client';
+import { api, type NotificationPreferences } from '../../api/client';
+import { useToast } from '../Toast';
 import Button from '../ui/Button';
 import { SettingsSection, SettingsTabHeader } from '../ui/SettingsShell';
 import { Switch } from '../ui/Switch';
@@ -41,112 +42,79 @@ const PUSH_CATEGORIES: PushCategory[] = [
   { key: 'mcp_system', default: false, group: 'mcp' },
 ];
 
-// T-340: quiet-hours defaults mirror backend DEFAULT_QUIET_HOURS_OVERRIDES.
-const DEFAULT_QUIET_OVERRIDES = ['monitoring_unhealthy', 'workflow_failure', 'backup_failed', 'replication_failed'];
-
 export default function NotificationsSettings() {
   const { t } = useTranslation();
+  const { showError } = useToast();
   // M-33: ohne Abo auf diesem Gerät kommt keine Push-Nachricht an — der
   // Hook existierte, aber nichts im UI rief ihn auf.
   const push = usePushNotifications();
-  const [pushCategories, setPushCategories] = useState<Record<string, boolean>>({});
-  // Startet auf `true`: der Mount-Effect lädt sofort. Mit `false` rendert der
-  // erste Frame die Kategorien-Liste mit noch leerem `pushCategories`, also alle
-  // Schalter auf "aus" — sichtbar falsch für jeden default-ON-Kanal.
-  const [pushLoading, setPushLoading] = useState(true);
-  const [pushSaving, setPushSaving] = useState(false);
+  // Persönliche Einstellung über /notifications/preferences. Vorher schrieb
+  // die Seite die instanzweiten Settings — nur für Admins erlaubt, und der
+  // 403 wurde verschluckt: für Nicht-Admins sprang der Schalter um, ohne dass
+  // etwas gespeichert wurde. `null` bis geladen.
+  const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
+  const [saving, setSaving] = useState(false);
   const [dictationEnabled, setDictationEnabled] = useState(
     () => localStorage.getItem('dg_dictation_enabled') !== 'false',
   );
-  // T-340: quiet-hours state
-  const [quietEnabled, setQuietEnabled] = useState(false);
-  const [quietFrom, setQuietFrom] = useState('22:00');
-  const [quietTo, setQuietTo] = useState('07:00');
-  const [quietOverrides, setQuietOverrides] = useState<string[]>(DEFAULT_QUIET_OVERRIDES);
-  const [quietSaving, setQuietSaving] = useState(false);
 
   useEffect(() => {
     void (async () => {
       try {
-        const res = await api.settings.get('notification_push_categories');
-        const enabled = (
-          res.value ?? PUSH_CATEGORIES.filter((c) => c.default).map((c) => c.key).join(',')
-        )
-          .split(',')
-          .map((c) => c.trim())
-          .filter(Boolean);
-        const state: Record<string, boolean> = {};
-        for (const cat of PUSH_CATEGORIES) {
-          state[cat.key] = enabled.includes(cat.key);
-        }
-        setPushCategories(state);
-      } catch { /* ignore */ }
-      setPushLoading(false);
+        const res = await api.notifications.getPreferences();
+        setPrefs({ pushCategories: res.pushCategories, quietHours: res.quietHours });
+      } catch (err) {
+        showError(err instanceof Error ? err.message : t('settings.notificationPrefsLoadFailed'));
+      }
     })();
-  }, []);
+  }, [showError, t]);
 
-  // T-340: load quiet-hours settings on mount
-  useEffect(() => {
-    void (async () => {
-      try {
-        const [enabled, from, to, overrides] = await Promise.all([
-          api.settings.get('notification_quiet_hours_enabled'),
-          api.settings.get('notification_quiet_hours_from'),
-          api.settings.get('notification_quiet_hours_to'),
-          api.settings.get('notification_quiet_hours_overrides'),
-        ]);
-        if (enabled.value === 'true') setQuietEnabled(true);
-        if (from.value) setQuietFrom(from.value);
-        if (to.value) setQuietTo(to.value);
-        if (overrides.value !== null && overrides.value !== undefined) {
-          setQuietOverrides(overrides.value.split(',').map((s) => s.trim()).filter(Boolean));
-        }
-      } catch { /* ignore */ }
-    })();
-  }, []);
-
-  const saveQuietHours = async (patch: Partial<{ enabled: boolean; from: string; to: string; overrides: string[] }>) => {
-    setQuietSaving(true);
+  /** Speichert immer die ganze Einstellung; bei einem Fehler zurück auf den alten Stand. */
+  const save = async (next: NotificationPreferences) => {
+    const before = prefs;
+    setPrefs(next);
+    setSaving(true);
     try {
-      if (patch.enabled !== undefined) {
-        setQuietEnabled(patch.enabled);
-        await api.settings.set('notification_quiet_hours_enabled', patch.enabled ? 'true' : 'false');
-      }
-      if (patch.from !== undefined) {
-        setQuietFrom(patch.from);
-        await api.settings.set('notification_quiet_hours_from', patch.from);
-      }
-      if (patch.to !== undefined) {
-        setQuietTo(patch.to);
-        await api.settings.set('notification_quiet_hours_to', patch.to);
-      }
-      if (patch.overrides !== undefined) {
-        setQuietOverrides(patch.overrides);
-        await api.settings.set('notification_quiet_hours_overrides', patch.overrides.join(','));
-      }
-    } catch { /* ignore */ }
-    setQuietSaving(false);
+      const res = await api.notifications.setPreferences(next);
+      setPrefs({ pushCategories: res.pushCategories, quietHours: res.quietHours });
+    } catch (err) {
+      setPrefs(before);
+      showError(err instanceof Error ? err.message : t('settings.notificationPrefsSaveFailed'));
+    }
+    setSaving(false);
+  };
+
+  const pushCategories: Record<string, boolean> = Object.fromEntries(
+    PUSH_CATEGORIES.map((c) => [c.key, prefs?.pushCategories.includes(c.key) ?? false]),
+  );
+  const quiet = prefs?.quietHours ?? { enabled: false, from: '22:00', to: '07:00', overrides: [] };
+  const pushLoading = prefs === null;
+  const pushSaving = saving;
+  const quietSaving = saving || prefs === null;
+
+  const saveQuietHours = (patch: Partial<NotificationPreferences['quietHours']>) => {
+    if (!prefs) return;
+    void save({ ...prefs, quietHours: { ...prefs.quietHours, ...patch } });
   };
 
   const toggleQuietOverride = (key: string) => {
-    const next = quietOverrides.includes(key)
-      ? quietOverrides.filter((k) => k !== key)
-      : [...quietOverrides, key];
-    void saveQuietHours({ overrides: next });
+    const next = quiet.overrides.includes(key)
+      ? quiet.overrides.filter((k) => k !== key)
+      : [...quiet.overrides, key];
+    saveQuietHours({ overrides: next });
   };
 
-  const savePushCategories = async (updated: Record<string, boolean>) => {
-    setPushCategories(updated);
-    setPushSaving(true);
-    try {
-      const value = Object.entries(updated).filter(([, v]) => v).map(([k]) => k).join(',');
-      await api.settings.set('notification_push_categories', value);
-    } catch { /* ignore */ }
-    setPushSaving(false);
+  const savePushCategories = (updated: Record<string, boolean>) => {
+    if (!prefs) return;
+    // Kategorien, die diese Seite nicht kennt, bleiben erhalten.
+    const known = new Set(PUSH_CATEGORIES.map((c) => c.key));
+    const kept = prefs.pushCategories.filter((k) => !known.has(k));
+    const enabled = Object.entries(updated).filter(([, v]) => v).map(([k]) => k);
+    void save({ ...prefs, pushCategories: [...kept, ...enabled] });
   };
 
   const togglePushCategory = (key: string) => {
-    void savePushCategories({ ...pushCategories, [key]: !pushCategories[key] });
+    savePushCategories({ ...pushCategories, [key]: !pushCategories[key] });
   };
 
   const toggleAllInGroup = (group: string) => {
@@ -154,7 +122,7 @@ export default function NotificationsSettings() {
     const allOn = keys.every((k) => pushCategories[k]);
     const updated = { ...pushCategories };
     for (const k of keys) updated[k] = !allOn;
-    void savePushCategories(updated);
+    savePushCategories(updated);
   };
 
   const toggleDictation = (next: boolean) => {
@@ -269,20 +237,20 @@ export default function NotificationsSettings() {
             <div className="flex items-center justify-between gap-4">
               <div className="text-sm text-gray-300">{t('settings.quietHoursEnabled')}</div>
               <Switch
-                checked={quietEnabled}
-                onChange={(next) => { void saveQuietHours({ enabled: next }); }}
+                checked={quiet.enabled}
+                onChange={(next) => saveQuietHours({ enabled: next })}
                 disabled={quietSaving}
               />
             </div>
-            {quietEnabled && (
+            {quiet.enabled && (
               <>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="text-xs text-gray-500">
                     {t('settings.quietHoursFrom')}
                     <input
                       type="time"
-                      value={quietFrom}
-                      onChange={(e) => { void saveQuietHours({ from: e.target.value }); }}
+                      value={quiet.from}
+                      onChange={(e) => { if (e.target.value) saveQuietHours({ from: e.target.value }); }}
                       disabled={quietSaving}
                       className="mt-1 block w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
                     />
@@ -291,8 +259,8 @@ export default function NotificationsSettings() {
                     {t('settings.quietHoursTo')}
                     <input
                       type="time"
-                      value={quietTo}
-                      onChange={(e) => { void saveQuietHours({ to: e.target.value }); }}
+                      value={quiet.to}
+                      onChange={(e) => { if (e.target.value) saveQuietHours({ to: e.target.value }); }}
                       disabled={quietSaving}
                       className="mt-1 block w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
                     />
@@ -302,7 +270,7 @@ export default function NotificationsSettings() {
                   <div className="mb-2 text-xs text-gray-500">{t('settings.quietHoursOverrideHint')}</div>
                   <div className="flex flex-wrap gap-1.5">
                     {PUSH_CATEGORIES.map((cat) => {
-                      const sel = quietOverrides.includes(cat.key);
+                      const sel = quiet.overrides.includes(cat.key);
                       return (
                         <button
                           key={cat.key}
