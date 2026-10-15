@@ -30,9 +30,11 @@ const { NotificationsService } = loadCompiled('notifications/notifications.servi
 const { PushService } = loadCompiled('push/push.service.js');
 const { PushController } = loadCompiled('push/push.controller.js');
 const { RequestContext } = loadCompiled('common/request-context.js');
+const { EventsBusService } = loadCompiled('events/events-bus.service.js');
+const { isProjectEventVisible } = loadCompiled('events/event-visibility.js');
 const { Types } = require(path.resolve(__dirname, '..', 'node_modules', 'mongoose'));
 
-const EXPECTED_CHECKS = 8;
+const EXPECTED_CHECKS = 9;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -156,6 +158,26 @@ async function seed(svc) {
     const { svc, pushed } = makeService();
     await svc.create('t', 'b', '/x', undefined, { userId: 'alice', projectId: OWN });
     assert.deepEqual(pushed[0][3], { userId: 'alice', projectId: OWN });
+  });
+
+  await check('Live-Ereignis: gerichtete Benachrichtigung (z. B. „Recherche fertig: <Titel>") nur für den Empfänger; Broadcast für alle', async () => {
+    // Echte Kette: NotificationsService.create → NOTIFICATION_CREATED → EventsBusService → Sichtbarkeitsregel des WS/SSE-Fan-outs.
+    const bus = new EventsBusService({});
+    const seen = [];
+    const sub = bus.events$.subscribe((e) => seen.push(e));
+    const emitter = { emit: (name, payload) => { if (name === 'notification.created') bus.handleNotificationCreated(payload); } };
+    const svc = new NotificationsService(makeModel([]), emitter, { sendNotification: async () => ({ sent: 0, failed: 0 }) }, { get: async () => null, getOrDefault: async (_k, d) => d });
+    await svc.create('Recherche fertig: Geheimes Thema', 'b', '/research/x', 'research_done', { userId: 'alice' });
+    await svc.create('Rundruf', 'b');
+    sub.unsubscribe();
+    assert.equal(seen.length, 2);
+    const [targeted, broadcast] = seen;
+    assert.equal(targeted.userId, 'alice');
+    assert.equal(isProjectEventVisible(targeted, 'bob', bob), false, 'Bob sieht Alices Recherchetitel');
+    assert.equal(isProjectEventVisible(targeted, undefined, undefined), false, 'anonyme Verbindung sieht gerichtete Meldung');
+    assert.equal(isProjectEventVisible(targeted, 'alice', { ...bob, userId: 'alice' }), true);
+    assert.equal(broadcast.userId, undefined);
+    assert.equal(isProjectEventVisible(broadcast, 'bob', bob), true);
   });
 
   // ---- PushService -----------------------------------------------------------

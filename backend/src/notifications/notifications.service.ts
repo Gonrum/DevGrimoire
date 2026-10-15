@@ -50,6 +50,15 @@ function projectScopeFilter(actor: ActorScope): FilterQuery<AppNotification> | n
 }
 
 export const NOTIFICATION_CREATED = 'notification.created';
+
+/** Nutzlast von `NOTIFICATION_CREATED`; `userId` gesetzt = nur für diesen Nutzer. */
+export interface NotificationCreatedEvent {
+  id: string;
+  title: string;
+  body: string;
+  userId?: string;
+  projectId?: string;
+}
 export const NOTIFICATION_PUSH_CATEGORIES_KEY = 'notification_push_categories';
 // T-340: Quiet-Hours. When `enabled`, pushes inside [from, to) are suppressed
 // UNLESS the category is in `overrides`. The notification doc is still created
@@ -130,11 +139,15 @@ export class NotificationsService implements OnModuleInit {
       projectId: target.projectId ?? null,
       expiresAt: expiresAtFor(category),
     });
-    this.eventEmitter.emit(NOTIFICATION_CREATED, {
+    const created: NotificationCreatedEvent = {
       id: notification._id.toString(),
       title,
       body,
-    });
+      // Gerichtet: der Bus leitet das Ereignis nur an diesen Nutzer (sonst Broadcast).
+      ...(target.userId ? { userId: target.userId } : {}),
+      ...(target.projectId ? { projectId: target.projectId } : {}),
+    };
+    this.eventEmitter.emit(NOTIFICATION_CREATED, created);
     // Kategorie und Ruhezeit entscheidet die Einstellung des jeweiligen
     // Abo-Besitzers; ohne eigene gilt die instanzweite.
     const defaults = await this.instanceDefaults();

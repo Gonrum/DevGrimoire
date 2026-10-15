@@ -4,7 +4,7 @@ import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, mongo } from 'mongoose';
 import { Observable, Subject } from 'rxjs';
 import { PROJECT_CHANGED, REPLICATION_STATUS_CHANGED, WORKFLOW_RUN_PROGRESS, ProjectChangeEvent } from './project-event';
-import { NOTIFICATION_CREATED } from '../notifications/notifications.service';
+import { NOTIFICATION_CREATED, type NotificationCreatedEvent } from '../notifications/notifications.service';
 import { QUESTION_CREATED, QUESTION_ANSWERED } from '../questions/questions.service';
 
 export interface QuestionEvent {
@@ -315,13 +315,15 @@ export class EventsBusService implements OnModuleInit, OnModuleDestroy {
   }
 
   @OnEvent(NOTIFICATION_CREATED)
-  handleNotificationCreated(event: { id: string; title: string; body: string }) {
+  handleNotificationCreated(event: NotificationCreatedEvent) {
     this.events$$.next({
       projectId: '__global__',
       entity: 'notification',
       action: 'created',
       entityId: event.id,
       summary: event.title,
+      // Gerichtete Benachrichtigungen (z. B. „Recherche fertig: <Titel>") nur an den Empfänger.
+      ...(event.userId ? { userId: event.userId } : {}),
     });
   }
 
