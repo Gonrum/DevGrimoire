@@ -5,7 +5,7 @@ import { idToString } from '../common/tool-args';
 const DEPTHS: readonly ResearchDepth[] = ['quick', 'normal', 'thorough'];
 
 /** Themen aus Tool-Argumenten: `topic` (String) und/oder `topics` (Array oder — von Modellen oft — ein String). */
-export function readTopics(args: Record<string, unknown>): string[] {
+export function readTopics(args: Readonly<Record<string, unknown>>): string[] {
   const raw: unknown[] = [];
   if (typeof args.topic === 'string') raw.push(args.topic);
   if (typeof args.topics === 'string') raw.push(args.topics);
@@ -16,7 +16,7 @@ export function readTopics(args: Record<string, unknown>): string[] {
     .filter((t) => t.length > 0);
 }
 
-export function readDepth(args: Record<string, unknown>): ResearchDepth {
+export function readDepth(args: Readonly<Record<string, unknown>>): ResearchDepth {
   const d = args.depth;
   if (d === undefined || d === null || d === '') return 'normal';
   const hit = DEPTHS.find((x) => x === d);

@@ -110,6 +110,7 @@
     "check:kube-resources-rest": "node scripts/kube-resources-rest-units-check.cjs",
     "check:kube-mcp": "node scripts/kube-mcp-check.cjs",
     "check:research-mcp": "node scripts/research-mcp-check.cjs",
+    "check:research-chat-tools": "node scripts/research-chat-tools-check.cjs",
     "check:auth-token-hygiene": "node scripts/auth-token-hygiene-check.cjs",
     "check:settings-write": "node scripts/settings-write-check.cjs",
     "check:chat-persist-safety": "node scripts/chat-persist-safety-check.cjs",

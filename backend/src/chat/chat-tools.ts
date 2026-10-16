@@ -3,7 +3,10 @@ import { TodosService } from '../todos/todos.service';
 import { MilestonesService, type ParsedMilestone, type ParsedTodo } from '../milestones/milestones.service';
 import { ChangelogService } from '../changelog/changelog.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
-import { ResearchService } from '../research/research.service';
+import { ResearchService, researchDetailForTool } from '../research/research.service';
+import { ResearchControlService } from '../research/research-control.service';
+import { readDepth, readTopics } from '../research/research-tool-input';
+import { errorMessage } from '../common/narrow';
 import { ManualsService } from '../manuals/manuals.service';
 import { SessionsService } from '../sessions/sessions.service';
 import { SchemasService } from '../schemas/schemas.service';
@@ -112,6 +115,7 @@ export const TOOL_GROUPS: Record<
   knowledge_write: [
     'knowledge_save', 'knowledge_update',
     'research_save',
+    'research_start',
     'manual_create', 'manual_update',
     'snippet_save', 'snippet_update',
   ],
@@ -411,6 +415,19 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
       type: 'object',
       properties: { id: { type: 'string' } },
       required: ['id'],
+    },
+  },
+  research_start: {
+    name: 'research_start',
+    description: 'Startet eine Webrecherche (Leitung + parallele Teilaufträge, Bericht mit Quellen). Landet im persönlichen Speicher des Nutzers, in einer Projekt-Session zum Verschieben ins Projekt vorgemerkt. Liefert die IDs; der Bericht entsteht im Hintergrund.',
+    parameters: {
+      type: 'object',
+      properties: {
+        topic: { type: 'string', description: 'Thema (3–300 Zeichen)' },
+        topics: { type: 'array', items: { type: 'string' }, description: 'Mehrere Themen, je eine Recherche' },
+        focus: { type: 'string', description: 'Optionaler Fokus, max. 500 Zeichen' },
+        depth: { type: 'string', enum: ['quick', 'normal', 'thorough'] },
+      },
     },
   },
   manual_list: {
@@ -1418,6 +1435,7 @@ export class ChatToolsService {
     private readonly contacts: ContactsService,
     private readonly questions: QuestionsService,
     private readonly stacksService: StacksService,
+    private readonly researchControl: ResearchControlService,
   ) {}
 
   /** Fire-and-forget audit log for a write-tool call. Never throws. */
@@ -1795,7 +1813,8 @@ export class ChatToolsService {
         }
         case 'research_get': {
           const r = await this.research.findVisibleById(requireString(args, 'id'));
-          return { success: true, result: r.toObject() };
+          // Dateitext gehört nicht in den Modell-Kontext; Namen genügen.
+          return { success: true, result: researchDetailForTool(r) };
         }
         case 'manual_list': {
           if (!projectId) return { success: false, error: 'projectId required' };
@@ -2069,6 +2088,25 @@ export class ChatToolsService {
             tags: optionalStringArray(args, 'tags'),
           });
           return { success: true, result: { id: entry._id.toString(), title: entry.title } };
+        }
+        case 'research_start': {
+          const topics = readTopics(args);
+          if (topics.length === 0) return { success: false, error: 'topic or topics required' };
+          let depth: ReturnType<typeof readDepth>;
+          try {
+            depth = readDepth(args);
+          } catch (err) {
+            return { success: false, error: errorMessage(err) };
+          }
+          const hint = projectId && /^[0-9a-f]{24}$/.test(projectId) ? `project:${projectId}` : undefined;
+          const ids = await this.researchControl.start({
+            topics,
+            focus: optionalString(args, 'focus'),
+            depth,
+            files: [],
+            ...(hint ? { moveTargetHint: hint } : {}),
+          });
+          return { success: true, result: { ids } };
         }
         case 'manual_create': {
           if (!projectId) return { success: false, error: 'projectId required' };
