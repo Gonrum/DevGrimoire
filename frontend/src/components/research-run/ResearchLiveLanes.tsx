@@ -5,8 +5,9 @@ import Card from '../ui/Card';
 
 function laneLabel(lane: string, tasks: ResearchTaskItem[], t: (k: string) => string): string {
   if (lane === 'main') return t('researchRun.detail.report');
-  const n = Number(lane.replace(/^[a-z]+/, ''));
-  const task = tasks.find((x) => x.n === n);
+  const m = /^t(\d+)$/.exec(lane);
+  if (!m) return lane;
+  const task = tasks.find((x) => x.n === Number(m[1]));
   return task ? `${lane} · ${task.question}` : lane;
 }
 

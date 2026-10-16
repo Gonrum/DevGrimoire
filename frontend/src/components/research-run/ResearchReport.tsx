@@ -9,10 +9,40 @@ import Markdown from '../Markdown';
  * `#src-n` ersetzt. Ohne `sourceList` (Alt-Einträge, research_save) bleibt der
  * Inhalt unverändert — es gibt dann keine Nummern, auf die man verlinken könnte.
  */
-export default function ResearchReport({ content, sourceList }: { content: string; sourceList: ResearchSourceItem[] }) {
+export default function ResearchReport({
+  content,
+  sourceList,
+  legacySources = [],
+}: {
+  content: string;
+  sourceList: ResearchSourceItem[];
+  legacySources?: string[];
+}) {
   const { t } = useTranslation();
   if (!content) return <p className="text-sm text-gray-500">{t('researchRun.detail.noReport')}</p>;
-  if (sourceList.length === 0) return <Markdown className="text-gray-300">{content}</Markdown>;
+  if (sourceList.length === 0) {
+    return (
+      <div className="space-y-6">
+        <Markdown className="text-gray-300">{content}</Markdown>
+        {legacySources.length > 0 && (
+          <section>
+            <h3 className="text-sm font-semibold mb-2">{t('researchRun.detail.sources')}</h3>
+            <ul className="space-y-1 text-xs">
+              {legacySources.map((src, i) => (
+                <li key={i}>
+                  {/^https?:\/\//i.test(src) ? (
+                    <a href={src} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline break-all">{src}</a>
+                  ) : (
+                    <span className="text-gray-300 break-all">{src}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+    );
+  }
 
   const { body } = splitReport(content);
   const cited = new Set(citedNumbers(body));

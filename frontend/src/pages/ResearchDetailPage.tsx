@@ -158,7 +158,7 @@ function ResearchDetail({ id }: { id: string }) {
 
       <Card>
         <h2 className="text-sm font-semibold mb-3">{t('researchRun.detail.report')}</h2>
-        <ResearchReport content={doc.content} sourceList={sourceList} />
+        <ResearchReport content={doc.content} sourceList={sourceList} legacySources={doc.sources ?? []} />
       </Card>
 
       {(doc.followUps?.length ?? 0) > 0 && (

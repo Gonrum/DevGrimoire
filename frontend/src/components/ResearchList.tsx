@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
 import { ResearchEntry, api } from '../api/client';
 import { errorMessage } from '../lib/narrow';
+import { splitReport } from '../lib/research';
 import ResearchStatusBadge from './research-run/ResearchStatusBadge';
 import Markdown from './Markdown';
 import MarkdownEditor from './MarkdownEditor';
@@ -247,7 +248,7 @@ export default function ResearchList({
                 </div>
               </div>
               <Markdown className="text-gray-400">{e.content}</Markdown>
-              {e.sources.length > 0 && (
+              {e.sources.length > 0 && !splitReport(e.content).hasSourcesSection && (
                 <div className="mt-3 pt-3 border-t border-gray-800">
                   <p className="text-xs text-gray-500 mb-1">{t('research.sources')}</p>
                   <ul className="space-y-0.5">

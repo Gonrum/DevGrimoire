@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Activity,
@@ -43,25 +43,32 @@ import { useToast } from '../components/Toast';
 import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
 import { errorMessage } from '../lib/narrow';
 
-type Tab =
-  | 'overview'
-  | 'projects'
-  | 'todos'
-  | 'knowledge'
-  | 'manual'
-  | 'workflows'
-  | 'environments'
-  | 'secrets'
-  | 'files'
-  | 'monitoring'
-  | 'ssh'
-  | 'kube'
-  | 'contacts'
-  | 'activity'
-  | 'soul'
-  | 'snippets'
-  | 'research'
-  | 'automation';
+/** Gültige Tab-Keys; `?tab=` ist beliebiger Text und wird dagegen geprüft. */
+const TABS = [
+  'overview',
+  'projects',
+  'todos',
+  'knowledge',
+  'manual',
+  'workflows',
+  'environments',
+  'secrets',
+  'files',
+  'monitoring',
+  'ssh',
+  'kube',
+  'contacts',
+  'activity',
+  'soul',
+  'snippets',
+  'research',
+  'automation',
+] as const;
+type Tab = (typeof TABS)[number];
+
+function isTab(value: string): value is Tab {
+  return TABS.some((t) => t === value);
+}
 
 const statusColors: Record<CustomerStatus, string> = {
   lead: 'bg-blue-900/50 text-blue-300',
@@ -115,7 +122,11 @@ export default function CustomerDetail() {
   const [customerSnippets, setCustomerSnippets] = useState<Snippet[]>([]);
   const [customerResearch, setCustomerResearch] = useState<ResearchEntry[]>([]);
   const [storageEnabled, setStorageEnabled] = useState<boolean>(false);
-  const [tab, setTab] = useState<Tab>('overview');
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => {
+    const param = searchParams.get('tab');
+    return param !== null && isTab(param) ? param : 'overview';
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [archiving, setArchiving] = useState(false);
 
