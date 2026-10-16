@@ -16,6 +16,7 @@ import ContactEditPage from './pages/ContactEditPage';
 import ProjectSettings from './pages/ProjectSettings';
 import TagManagement from './pages/TagManagement';
 import ResearchOverview from './pages/ResearchOverview';
+import ResearchDetailPage from './pages/ResearchDetailPage';
 import ResearchPage from './pages/ResearchPage';
 import ResearchTopicPage from './pages/ResearchTopicPage';
 import StacksOverview from './pages/StacksOverview';
@@ -440,6 +441,7 @@ function AppShell() {
           <Route path="/research" element={<ResearchPage />} />
           <Route path="/research/topics" element={<ResearchOverview />} />
           <Route path="/research/topics/:id" element={<ResearchTopicPage />} />
+          <Route path="/research/:id" element={<ResearchDetailPage />} />
           <Route path="/stacks" element={<StacksOverview />} />
           <Route path="/stacks/:id" element={<StackDetailPage />} />
           <Route path="/questions" element={<QuestionsOverview />} />
