@@ -22,6 +22,7 @@ const PUSH_CATEGORIES: PushCategory[] = [
   { key: 'replication_failed', default: true, group: 'system' },
   { key: 'backup_failed', default: true, group: 'system' },
   { key: 'ssh_auth_failure', default: true, group: 'system' },
+  { key: 'research_done', default: true, group: 'system' },
   { key: 'recurring', default: false, group: 'system' },
   // MCP-Mutationen (alle default OFF — sehr geschwätzig)
   { key: 'mcp_project', default: false, group: 'mcp' },

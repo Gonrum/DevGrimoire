@@ -954,6 +954,104 @@
     "updated": "Schriftrolle aktualisiert",
     "deleted": "Schriftrolle gelöscht"
   },
+  "researchRun": {
+    "pageTitle": "Recherche",
+    "pageDesc": "Deine Webrecherchen: eine Leitung zerlegt das Thema, parallele Teilaufträge suchen und lesen, am Ende steht ein Bericht mit Quellen.",
+    "new": "Neue Recherche",
+    "empty": "Noch keine Recherchen im persönlichen Speicher.",
+    "oldTopics": "Themen der alten Recherche",
+    "position": "Platz {{position}}",
+    "status": {
+      "queued": "Wartet",
+      "running": "Läuft",
+      "paused": "Pausiert",
+      "done": "Fertig",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen"
+    },
+    "depth": {
+      "label": "Tiefe",
+      "quick": "Schnell",
+      "normal": "Normal",
+      "thorough": "Gründlich"
+    },
+    "form": {
+      "topics": "Thema",
+      "topicsHelp": "Ein Thema pro Zeile; jede Zeile wird eine eigene Recherche (höchstens 20).",
+      "topicsPlaceholder": "z. B. Selbst gehostete Vektordatenbanken im Vergleich",
+      "focus": "Fokus (optional)",
+      "focusPlaceholder": "Worauf soll die Recherche besonders achten?",
+      "files": "Dateien (optional)",
+      "filesHelp": "Text oder PDF, höchstens 10 Dateien zu je 20 MB.",
+      "target": "Wird nach dem Fertigwerden zum Verschieben nach „{{name}}“ vorgeschlagen.",
+      "start": "Starten",
+      "starting": "Startet…",
+      "started_one": "Recherche gestartet",
+      "started_other": "{{count}} Recherchen gestartet"
+    },
+    "errors": {
+      "topicLength": "Jedes Thema braucht 3 bis 300 Zeichen.",
+      "topicCount": "1 bis 20 Themen angeben.",
+      "fileCount": "Höchstens 10 Dateien.",
+      "fileType": "Nur Text- oder PDF-Dateien.",
+      "fileSize": "Eine Datei ist größer als 20 MB.",
+      "action": "Aktion nicht möglich"
+    },
+    "actions": {
+      "cancel": "Abbrechen",
+      "pause": "Pausieren",
+      "resume": "Fortsetzen",
+      "retry": "Erneut starten",
+      "deepen": "Vertiefen",
+      "move": "Verschieben",
+      "delete": "Löschen",
+      "confirmDelete": "Wirklich löschen?",
+      "done": "Erledigt"
+    },
+    "detail": {
+      "back": "Zur Übersicht",
+      "notFound": "Recherche nicht gefunden.",
+      "report": "Bericht",
+      "noReport": "Noch kein Bericht.",
+      "sources": "Quellen",
+      "ownFile": "eigene Datei",
+      "tasks": "Teilaufträge",
+      "steps": "Protokoll",
+      "noSteps": "Noch keine Schritte.",
+      "live": "Live",
+      "waiting": "wartet auf einen LLM-Platz",
+      "reasoning": "Überlegungen",
+      "models": "Modelle",
+      "focus": "Fokus",
+      "followUps": "Nachfragen",
+      "related": "Bereits im Wissen",
+      "assignedProject": "Liegt im Projekt",
+      "assignedCustomer": "Liegt beim Kunden",
+      "personal": "Persönlicher Speicher",
+      "duration": "Dauer"
+    },
+    "deepen": {
+      "title": "Recherche vertiefen",
+      "question": "Nachfrage",
+      "placeholder": "Was soll zusätzlich geklärt werden?",
+      "submit": "Vertiefen"
+    },
+    "move": {
+      "title": "Recherche verschieben",
+      "kind": "Ziel",
+      "project": "Projekt",
+      "customer": "Kunde",
+      "choose": "Bitte wählen…",
+      "suggested": "vorgeschlagen",
+      "submit": "Verschieben",
+      "moved": "Recherche verschoben"
+    },
+    "tab": {
+      "open": "Öffnen",
+      "newRun": "Neue Recherche",
+      "manual": "Manuell ablegen"
+    }
+  },
   "schemas": {
     "newSchema": "+ Neues Schema",
     "editSchema": "Schema bearbeiten",
@@ -1832,6 +1930,8 @@
     "pushCategory_backup_failed_desc": "Bei einem fehlgeschlagenen Backup-Job (manuell oder geplant).",
     "pushCategory_ssh_auth_failure": "SSH-Auth fehlgeschlagen",
     "pushCategory_ssh_auth_failure_desc": "Wenn eine SSH-Verbindung mit aktiviertem \"Bei Auth-Failure benachrichtigen\" einen Authentifizierungsfehler meldet.",
+    "pushCategory_research_done": "Recherche fertig",
+    "pushCategory_research_done_desc": "Wenn eine deiner Webrecherchen fertig ist oder fehlschlägt.",
     "pushCategory_recurring": "Wiederkehrende Aufgaben",
     "pushCategory_recurring_desc": "Wenn eine Rite eine Notification-Action ausführt.",
     "tabSsh": "SSH",

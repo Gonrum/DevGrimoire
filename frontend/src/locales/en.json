@@ -954,6 +954,104 @@
     "updated": "Scroll updated",
     "deleted": "Scroll deleted"
   },
+  "researchRun": {
+    "pageTitle": "Research",
+    "pageDesc": "Your web research: a lead agent splits the topic, parallel sub-tasks search and read, and you get a report with sources.",
+    "new": "New research",
+    "empty": "No research in your personal store yet.",
+    "oldTopics": "Topics of the old research",
+    "position": "Position {{position}}",
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "paused": "Paused",
+      "done": "Done",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "depth": {
+      "label": "Depth",
+      "quick": "Quick",
+      "normal": "Normal",
+      "thorough": "Thorough"
+    },
+    "form": {
+      "topics": "Topic",
+      "topicsHelp": "One topic per line; each line becomes its own research (max 20).",
+      "topicsPlaceholder": "e.g. Self-hosted vector databases compared",
+      "focus": "Focus (optional)",
+      "focusPlaceholder": "What should the research pay special attention to?",
+      "files": "Files (optional)",
+      "filesHelp": "Text or PDF, at most 10 files of 20 MB each.",
+      "target": "Will be suggested for moving to “{{name}}” once done.",
+      "start": "Start",
+      "starting": "Starting…",
+      "started_one": "Research started",
+      "started_other": "{{count}} researches started"
+    },
+    "errors": {
+      "topicLength": "Each topic needs 3 to 300 characters.",
+      "topicCount": "Provide 1 to 20 topics.",
+      "fileCount": "At most 10 files.",
+      "fileType": "Text or PDF files only.",
+      "fileSize": "A file is larger than 20 MB.",
+      "action": "Action not possible"
+    },
+    "actions": {
+      "cancel": "Cancel",
+      "pause": "Pause",
+      "resume": "Resume",
+      "retry": "Start again",
+      "deepen": "Deepen",
+      "move": "Move",
+      "delete": "Delete",
+      "confirmDelete": "Really delete?",
+      "done": "Done"
+    },
+    "detail": {
+      "back": "Back to overview",
+      "notFound": "Research not found.",
+      "report": "Report",
+      "noReport": "No report yet.",
+      "sources": "Sources",
+      "ownFile": "own file",
+      "tasks": "Sub-tasks",
+      "steps": "Log",
+      "noSteps": "No steps yet.",
+      "live": "Live",
+      "waiting": "waiting for an LLM slot",
+      "reasoning": "Reasoning",
+      "models": "Models",
+      "focus": "Focus",
+      "followUps": "Follow-up questions",
+      "related": "Already in knowledge",
+      "assignedProject": "In project",
+      "assignedCustomer": "At customer",
+      "personal": "Personal store",
+      "duration": "Duration"
+    },
+    "deepen": {
+      "title": "Deepen research",
+      "question": "Follow-up question",
+      "placeholder": "What else should be clarified?",
+      "submit": "Deepen"
+    },
+    "move": {
+      "title": "Move research",
+      "kind": "Target",
+      "project": "Project",
+      "customer": "Customer",
+      "choose": "Please choose…",
+      "suggested": "suggested",
+      "submit": "Move",
+      "moved": "Research moved"
+    },
+    "tab": {
+      "open": "Open",
+      "newRun": "New research",
+      "manual": "Add manually"
+    }
+  },
   "schemas": {
     "newSchema": "+ New Schema",
     "editSchema": "Edit Schema",
@@ -1832,6 +1930,8 @@
     "pushCategory_backup_failed_desc": "A backup job failed (manual or scheduled).",
     "pushCategory_ssh_auth_failure": "SSH auth failure",
     "pushCategory_ssh_auth_failure_desc": "An SSH connection with \"Notify on auth failure\" enabled reported an authentication error.",
+    "pushCategory_research_done": "Research finished",
+    "pushCategory_research_done_desc": "When one of your web researches finishes or fails.",
     "pushCategory_recurring": "Recurring tasks",
     "pushCategory_recurring_desc": "When a recurring task fires a notification action.",
     "tabSsh": "SSH",
