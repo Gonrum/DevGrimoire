@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { api, type ResearchEntry, type ResearchStepItem } from '../api/client';
+import { api, ApiError, type ResearchEntry, type ResearchStepItem } from '../api/client';
 import { errorMessage } from '../lib/narrow';
 import { allowedActions, isActiveStatus, type ResearchAction } from '../lib/research';
 import Card from '../components/ui/Card';
@@ -47,8 +47,9 @@ function ResearchDetail({ id }: { id: string }) {
       setDoc(r.d);
       setSteps(r.steps);
       setPosition(r.position);
-    } catch {
-      setMissing(true);
+      setMissing(false);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) setMissing(true);
     }
   }, [fetchAll]);
 
@@ -59,7 +60,7 @@ function ResearchDetail({ id }: { id: string }) {
       setDoc(r.d);
       setSteps(r.steps);
       setPosition(r.position);
-    }).catch(() => { if (alive) setMissing(true); });
+    }).catch((err: unknown) => { if (alive && err instanceof ApiError && err.status === 404) setMissing(true); });
     return () => { alive = false; };
   }, [fetchAll]);
 
@@ -74,13 +75,16 @@ function ResearchDetail({ id }: { id: string }) {
 
   /** Alle Aktionen über einen Weg: 409 aus einem Wettlauf wird Meldung, danach frischer Stand. */
   const run = async (fn: () => Promise<void>, success?: string) => {
+    let ok = false;
     try {
       await fn();
+      ok = true;
       if (success) showSuccess(success);
     } catch (err) {
       showError(errorMessage(err, t('researchRun.errors.action')));
     }
     await reload();
+    return ok;
   };
 
   if (missing) {
@@ -161,7 +165,7 @@ function ResearchDetail({ id }: { id: string }) {
         <Card>
           <h2 className="text-sm font-semibold mb-2">{t('researchRun.detail.followUps')}</h2>
           <ul className="text-sm text-gray-400 list-disc pl-5">
-            {doc.followUps?.map((f) => <li key={f.at}>{f.question}</li>)}
+            {doc.followUps?.map((f, i) => <li key={`${f.at}-${i}`}>{f.question}</li>)}
           </ul>
         </Card>
       )}
@@ -198,14 +202,14 @@ function ResearchDetail({ id }: { id: string }) {
       {dialog === 'deepen' && (
         <DeepenDialog
           onClose={() => setDialog(null)}
-          onSubmit={(question) => run(() => api.research.deepen(id, question)).then(() => setDialog(null))}
+          onSubmit={(question) => run(() => api.research.deepen(id, question)).then((ok) => { if (ok) setDialog(null); })}
         />
       )}
       {dialog === 'move' && (
         <MoveResearchDialog
           hint={doc.moveTargetHint}
           onClose={() => setDialog(null)}
-          onSubmit={(target) => run(() => api.research.move(id, target), t('researchRun.move.moved')).then(() => setDialog(null))}
+          onSubmit={(target) => run(() => api.research.move(id, target), t('researchRun.move.moved')).then((ok) => { if (ok) setDialog(null); })}
         />
       )}
     </div>

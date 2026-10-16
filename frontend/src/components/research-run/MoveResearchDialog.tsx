@@ -37,6 +37,7 @@ export default function MoveResearchDialog({
   }, []);
 
   const options = kind === 'project' ? projects : customers;
+  const valid = options.some((o) => o.id === targetId);
 
   return (
     <Dialog title={t('researchRun.move.title')} onClose={onClose}>
@@ -44,7 +45,7 @@ export default function MoveResearchDialog({
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!targetId) return;
+          if (!valid) return;
           setBusy(true);
           const target = kind === 'project' ? { projectId: targetId } : { customerId: targetId };
           void onSubmit(target).finally(() => setBusy(false));
@@ -61,7 +62,7 @@ export default function MoveResearchDialog({
         <FormSelect
           label={kind === 'project' ? t('researchRun.move.project') : t('researchRun.move.customer')}
           required
-          value={targetId}
+          value={valid ? targetId : ''}
           onChange={(e) => setTargetId(e.target.value)}
         >
           <option value="">{t('researchRun.move.choose')}</option>
@@ -72,7 +73,7 @@ export default function MoveResearchDialog({
           ))}
         </FormSelect>
         <div className="flex gap-2">
-          <Button type="submit" variant="primary" size="md" disabled={busy || !targetId}>{t('researchRun.move.submit')}</Button>
+          <Button type="submit" variant="primary" size="md" disabled={busy || !valid}>{t('researchRun.move.submit')}</Button>
           <Button type="button" variant="secondary" size="md" onClick={onClose}>{t('common.cancel')}</Button>
         </div>
       </form>
