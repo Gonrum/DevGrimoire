@@ -372,9 +372,11 @@ const textLlm = () => async (c) => {
 
   await check('Ohne Besitzer (ownerUserId null): läuft ohne Actor und ohne Besitzer-Lookup', async () => {
     const actors = [];
+    let ragCalls = 0;
     const { runner, store, notes } = makeRunner({
       doc: { id: 'r1', ownerUserId: null },
       llm: async (c, env) => { actors.push(RequestContext.getUser()); return agentLlm()(c, env); },
+      rag: async () => { ragCalls++; return [{ id: 'k1', title: 'Fremd', score: 0.9 }]; },
     });
     runner.auth = { findUserById: async () => { throw new Error('darf nicht gefragt werden'); } };
     await runner.run('r1');
@@ -382,6 +384,8 @@ const textLlm = () => async (c) => {
     assert.equal(d.status, 'done', d.error);
     assert.ok(actors.length > 0 && actors.every((a) => a === undefined));
     assert.equal(notes.length, 0, 'ohne Besitzer keine gerichtete Benachrichtigung');
+    assert.equal(ragCalls, 0, 'ohne Actor keine ungescopte Wissenssuche');
+    assert.deepEqual(d.relatedKnowledge, []);
   });
 
   await check('Besitzer fehlt/inaktiv: neue Recherche failed; Vertiefen mit Bericht bleibt done mit error', async () => {

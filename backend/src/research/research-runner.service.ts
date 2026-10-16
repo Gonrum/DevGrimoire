@@ -238,9 +238,10 @@ export class ResearchRunnerService implements OnModuleInit, OnModuleDestroy {
       await this.store.patch(id, { files, sourceList: registry.all() });
     }
 
-    // 5. Bereits im Wissen
+    // 5. Bereits im Wissen — ohne Besitzer fehlt der Actor, die Suche liefe
+    // ungescoped und brächte Titel fremder Einträge in die Recherche.
     let related = doc.relatedKnowledge;
-    if (doc.mode === 'research' && doc.roundsDone === 0 && related.length === 0) {
+    if (doc.ownerUserId !== null && doc.mode === 'research' && doc.roundsDone === 0 && related.length === 0) {
       try {
         const hits = await this.rag.search(doc.title, undefined, 'knowledge', 5);
         const strong = hits
