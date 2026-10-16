@@ -21,6 +21,7 @@ import { SecretsService } from './secrets/secrets.service';
 import { ManualsService } from './manuals/manuals.service';
 import { ResearchService, researchDetailForTool } from './research/research.service';
 import { ResearchControlService } from './research/research-control.service';
+import { readDepth, readTopics, researchStatusForTool } from './research/research-tool-input';
 import { ResearchTopicService } from './research-agent/research-topic.service';
 import { ResearchRunService } from './research-agent/research-run.service';
 import { ResearchArtifactService } from './research-agent/research-artifact.service';
@@ -2012,7 +2013,7 @@ const tools = [
   },
   {
     name: 'research_list',
-    description: 'List research entries (compact: id, title, tags, sourceCount). Use research_get for full content.',
+    description: 'List research entries (compact: id, title, status, tags, sourceCount). With projectId or customerId: researches moved there. Without: the caller\'s personal research store (admins: all unassigned). Use research_get or research_status for details.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -2056,6 +2057,80 @@ const tools = [
       type: 'object' as const,
       properties: {
         id: { type: 'string', description: 'Research entry MongoDB ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'research_start',
+    description: 'Start a web research (lead agent + parallel sub-agents, cited report). Lands in the caller\'s personal research store; move it into a project or customer with research_move once done. Returns { ids } — one research per topic. Files can only be attached via the web UI.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        topic: { type: 'string', description: 'Research topic (3–300 chars)' },
+        topics: { type: 'array', items: { type: 'string' }, description: 'Several topics at once (max 20), one research each' },
+        focus: { type: 'string', description: 'Optional focus/angle, max 500 chars' },
+        depth: { type: 'string', enum: ['quick', 'normal', 'thorough'], description: 'Default normal' },
+      },
+    },
+  },
+  {
+    name: 'research_status',
+    description: 'Status of a research: status, queue position while waiting, sub-tasks, and the report plus cited sources once done.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string', description: 'Research MongoDB ID' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'research_cancel',
+    description: 'Cancel a queued, running or paused research. A research that already has a report stays done with the old report.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string', description: 'Research MongoDB ID' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'research_pause',
+    description: 'Pause a queued or running research; research_resume continues it.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string', description: 'Research MongoDB ID' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'research_resume',
+    description: 'Resume a paused research, or a failed one that has partial results.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string', description: 'Research MongoDB ID' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'research_deepen',
+    description: 'Deepen a finished research with a follow-up question: one more round, then the report is rewritten to answer all follow-ups.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Research MongoDB ID' },
+        question: { type: 'string', description: 'Follow-up question (3–500 chars)' },
+      },
+      required: ['id', 'question'],
+    },
+  },
+  {
+    name: 'research_move',
+    description: 'Move a finished research into exactly one project OR customer (needs access to the target). Afterwards everyone with access to the target sees it.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Research MongoDB ID' },
+        projectId: { type: 'string', description: 'Target project (mutually exclusive with customerId)' },
+        customerId: { type: 'string', description: 'Target customer (mutually exclusive with projectId)' },
       },
       required: ['id'],
     },
@@ -4752,6 +4827,13 @@ const EXPLICIT_WRITE_TOOLS = new Set<string>([
   'workspace_attachment_save',
   'monitor_run',
   'research_topic_run',
+  // Webrecherche: Steuer-Tools ohne passendes Namens-Suffix
+  'research_start',
+  'research_cancel',
+  'research_pause',
+  'research_resume',
+  'research_deepen',
+  'research_move',
   'workflow_run_start',
   'workflow_run_cancel',
   'workflow_run_retry',
@@ -5896,17 +5978,20 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'research_list': {
           const rProjectId = optionalString(a, 'projectId');
           const rCustomerId = optionalString(a, 'customerId');
-          if (!rProjectId && !rCustomerId) {
-            throw new Error('research_list requires projectId or customerId');
+          if (rProjectId && rCustomerId) {
+            throw new Error('research_list: projectId and customerId are mutually exclusive');
           }
           const rEntries = rProjectId
             ? await researchService.findByProject(rProjectId)
-            : await researchService.findByCustomer(rCustomerId!);
+            : rCustomerId
+              ? await researchService.findByCustomer(rCustomerId)
+              : await researchService.listMine();
           const compactResearch = rEntries.map((item) => {
             const obj = toPlainDoc(item);
             delete obj.content;
             obj.sourceCount = countArray(obj.sources);
             delete obj.sources;
+            delete obj.files;
             delete obj.__v;
             return obj;
           });
@@ -5930,6 +6015,51 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           await researchControlService.remove(requireString(a, 'id'));
           result = { deleted: true, id: a.id };
           break;
+        case 'research_start': {
+          const topics = readTopics(a);
+          if (topics.length === 0) throw new Error('research_start requires topic or topics');
+          const ids = await researchControlService.start({
+            topics,
+            focus: optionalString(a, 'focus'),
+            depth: readDepth(a),
+            files: [],
+          });
+          result = { ids };
+          break;
+        }
+        case 'research_status': {
+          const sId = requireString(a, 'id');
+          const doc = await researchService.findVisibleById(sId);
+          const positions = await researchControlService.queuePositions();
+          result = researchStatusForTool(toPlainDoc(doc), positions.find((p) => p.id === sId)?.position);
+          break;
+        }
+        case 'research_cancel':
+          await researchControlService.cancel(requireString(a, 'id'));
+          result = { ok: true, id: a.id };
+          break;
+        case 'research_pause':
+          await researchControlService.pause(requireString(a, 'id'));
+          result = { ok: true, id: a.id };
+          break;
+        case 'research_resume':
+          await researchControlService.resume(requireString(a, 'id'));
+          result = { ok: true, id: a.id };
+          break;
+        case 'research_deepen':
+          await researchControlService.deepen(requireString(a, 'id'), requireString(a, 'question'));
+          result = { ok: true, id: a.id };
+          break;
+        case 'research_move': {
+          const mProjectId = optionalString(a, 'projectId');
+          const mCustomerId = optionalString(a, 'customerId');
+          if (!mProjectId === !mCustomerId) {
+            throw new Error('research_move requires exactly one of projectId or customerId');
+          }
+          await researchControlService.move(requireString(a, 'id'), { projectId: mProjectId, customerId: mCustomerId });
+          result = { ok: true, id: a.id };
+          break;
+        }
         case 'research_topic_create': {
           const topic = await researchTopicService.create(
             {
