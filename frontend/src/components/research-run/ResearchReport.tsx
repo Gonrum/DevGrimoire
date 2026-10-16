@@ -1,0 +1,50 @@
+import { useTranslation } from 'react-i18next';
+import type { ResearchSourceItem } from '../../api/client';
+import { citedNumbers, linkCitations, splitReport } from '../../lib/research';
+import Markdown from '../Markdown';
+
+/**
+ * Bericht mit klickbaren `[n]`. Gibt es eine `sourceList` (neue Recherchen), wird der
+ * vom Backend angehängte `## Quellen`-Abschnitt durch eine eigene Liste mit Ankern
+ * `#src-n` ersetzt. Ohne `sourceList` (Alt-Einträge, research_save) bleibt der
+ * Inhalt unverändert — es gibt dann keine Nummern, auf die man verlinken könnte.
+ */
+export default function ResearchReport({ content, sourceList }: { content: string; sourceList: ResearchSourceItem[] }) {
+  const { t } = useTranslation();
+  if (!content) return <p className="text-sm text-gray-500">{t('researchRun.detail.noReport')}</p>;
+  if (sourceList.length === 0) return <Markdown className="text-gray-300">{content}</Markdown>;
+
+  const { body } = splitReport(content);
+  const cited = new Set(citedNumbers(body));
+  let shown = sourceList.filter((s) => cited.has(s.n));
+  if (shown.length === 0) shown = sourceList.filter((s) => s.relevant);
+  shown = [...shown].sort((a, b) => a.n - b.n);
+  const known = new Set(shown.map((s) => s.n));
+
+  return (
+    <div className="space-y-6">
+      <Markdown className="text-gray-300">{linkCitations(body, known)}</Markdown>
+      {shown.length > 0 && (
+        <section>
+          <h3 className="text-sm font-semibold mb-2">{t('researchRun.detail.sources')}</h3>
+          <ol className="space-y-1 text-xs">
+            {shown.map((s) => (
+              <li key={s.n} id={`src-${s.n}`} className="scroll-mt-24 target:bg-violet-900/30 rounded-sm px-1">
+                <span className="text-gray-500 mr-1">[{s.n}]</span>
+                {s.file ? (
+                  <span className="text-gray-300">📎 {s.file} ({t('researchRun.detail.ownFile')})</span>
+                ) : s.url ? (
+                  <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline break-all">
+                    {s.title || s.url}
+                  </a>
+                ) : (
+                  <span className="text-gray-300">{s.title}</span>
+                )}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+    </div>
+  );
+}
