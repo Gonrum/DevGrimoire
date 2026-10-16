@@ -180,7 +180,7 @@ export default function ResearchOverview() {
               key={topic._id}
               className="group relative bg-gray-900 border border-gray-800 rounded-lg hover:border-violet-500 transition-colors flex flex-col"
             >
-              <Link to={`/research/${topic._id}`} className="block p-5 pb-3">
+              <Link to={`/research/topics/${topic._id}`} className="block p-5 pb-3">
                 <div className="flex items-center justify-between mb-2 pr-7">
                   <span className="text-xs text-gray-500 font-mono">{topic.displayNumber}</span>
                   <div className="flex items-center gap-1.5 flex-wrap justify-end">
@@ -245,7 +245,7 @@ export default function ResearchOverview() {
                   type="button"
                   variant="accent"
                   size="xs"
-                  onClick={() => { void navigate(`/research/${topic._id}`); }}
+                  onClick={() => { void navigate(`/research/topics/${topic._id}`); }}
                 >
                   {t('researchTopics.runNow')}
                 </Button>
@@ -275,7 +275,7 @@ export default function ResearchOverview() {
           projects={projects}
           customers={customers}
           onCancel={() => setShowCreate(false)}
-          onCreated={(id) => { void navigate(`/research/${id}`); }}
+          onCreated={(id) => { void navigate(`/research/topics/${id}`); }}
         />
       )}
     </div>

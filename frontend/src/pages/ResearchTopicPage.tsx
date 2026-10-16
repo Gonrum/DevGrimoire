@@ -161,7 +161,7 @@ export default function ResearchTopicPage() {
   if (notFound || !topic) {
     return (
       <div>
-        <Link to="/research" className="text-sm text-gray-500 hover:text-gray-300 mb-4 inline-block">
+        <Link to="/research/topics" className="text-sm text-gray-500 hover:text-gray-300 mb-4 inline-block">
           &larr; {t('researchTopics.backToOverview')}
         </Link>
         <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
@@ -217,7 +217,7 @@ export default function ResearchTopicPage() {
   return (
     <div className="max-w-6xl mx-auto">
       <div className="mb-4">
-        <Link to="/research" className="text-sm text-gray-500 hover:text-gray-300">
+        <Link to="/research/topics" className="text-sm text-gray-500 hover:text-gray-300">
           &larr; {t('researchTopics.backToOverview')}
         </Link>
       </div>
