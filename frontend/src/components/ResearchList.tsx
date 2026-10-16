@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link, useNavigate } from 'react-router-dom';
 import { ResearchEntry, api } from '../api/client';
 import { errorMessage } from '../lib/narrow';
+import ResearchStatusBadge from './research-run/ResearchStatusBadge';
 import Markdown from './Markdown';
 import MarkdownEditor from './MarkdownEditor';
 import Card from './ui/Card';
@@ -177,6 +179,8 @@ export default function ResearchList({
   const [editing, setEditing] = useState<ResearchEntry | null>(null);
 
   const editable = !!((projectId || customerId) && onUpdate);
+  const navigate = useNavigate();
+  const target = projectId ? `project:${projectId}` : customerId ? `customer:${customerId}` : undefined;
 
   const handleDelete = async (entry: ResearchEntry) => {
     try {
@@ -204,14 +208,24 @@ export default function ResearchList({
   return (
     <div>
       {editable && (
-        <div className="mb-4">
+        <div className="mb-4 flex flex-wrap gap-2">
+          {target && (
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => { void navigate(`/research?new=1&target=${encodeURIComponent(target)}`); }}
+            >
+              {t('researchRun.tab.newRun')}
+            </Button>
+          )}
           <Button
             type="button"
-            variant="primary"
+            variant="secondary"
             size="sm"
             onClick={() => { setEditing(null); setShowForm(true); }}
           >
-            {t('research.new')}
+            {t('researchRun.tab.manual')}
           </Button>
         </div>
       )}
@@ -222,10 +236,15 @@ export default function ResearchList({
           {entries.map((e) => (
             <Card key={e._id}>
               <div className="flex items-center justify-between gap-2 mb-2">
-                <h3 className="text-sm font-semibold truncate min-w-0">{e.title}</h3>
-                <span className="text-xs text-gray-600 shrink-0">
-                  {new Date(e.updatedAt).toLocaleDateString(i18n.language === 'de' ? 'de-DE' : 'en-US')}
-                </span>
+                <Link to={`/research/${e._id}`} className="text-sm font-semibold truncate min-w-0 hover:text-cyan-300">
+                  {e.title}
+                </Link>
+                <div className="flex items-center gap-2 shrink-0">
+                  {e.status && e.status !== 'done' && <ResearchStatusBadge status={e.status} />}
+                  <span className="text-xs text-gray-600">
+                    {new Date(e.updatedAt).toLocaleDateString(i18n.language === 'de' ? 'de-DE' : 'en-US')}
+                  </span>
+                </div>
               </div>
               <Markdown className="text-gray-400">{e.content}</Markdown>
               {e.sources.length > 0 && (
@@ -255,6 +274,9 @@ export default function ResearchList({
               )}
               {editable && (
                 <div className="flex gap-2 mt-4 pt-3 border-t border-gray-800">
+                  <Link to={`/research/${e._id}`} className="text-xs px-2.5 py-1 sm:px-2 sm:py-0.5 rounded-sm bg-gray-800 hover:bg-gray-700 text-gray-300">
+                    {t('researchRun.tab.open')}
+                  </Link>
                   <Button
                     size="xs"
                     onClick={() => { setEditing(e); setShowForm(true); }}
