@@ -134,7 +134,7 @@ export function applyLiveEvent(state: LiveState, ev: unknown): LiveState {
           active: l.active === true,
         };
       }
-      return { ...state, lanes };
+      return { lanes, ended: false };
     }
     case 'call':
       if (!lane || typeof e.model !== 'string') return state;

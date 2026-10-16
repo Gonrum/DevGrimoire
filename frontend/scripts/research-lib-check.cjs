@@ -98,6 +98,13 @@ check('applyLiveEvent: snapshot, call, delta, wait, idle, end; Unbekanntes ignor
   for (const lane of Object.values(s.lanes)) assert.equal(lane.active, false);
 });
 
+check('applyLiveEvent: snapshot nach end setzt ended zurück (Wiederaufnahme)', () => {
+  let s = r.applyLiveEvent(r.emptyLive(), { type: 'end' });
+  assert.equal(s.ended, true);
+  s = r.applyLiveEvent(s, { type: 'snapshot', lanes: { main: { text: 'a', reasoning: '', active: true } } });
+  assert.equal(s.ended, false);
+});
+
 check('applyLiveEvent: Puffer pro Lane auf 30.000 Zeichen begrenzt', () => {
   let s = r.applyLiveEvent(r.emptyLive(), { type: 'call', lane: 'main', model: 'm' });
   s = r.applyLiveEvent(s, { type: 'delta', lane: 'main', kind: 'content', text: 'x'.repeat(29_999) });

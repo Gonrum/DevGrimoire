@@ -21,7 +21,7 @@ export default function ResearchSteps({ steps }: { steps: ResearchStepItem[] }) 
         <li key={s._id} className="flex gap-2">
           <span className="text-gray-600 shrink-0">{new Date(s.at).toLocaleTimeString(locale)}</span>
           {s.lane && <span className="text-gray-500 shrink-0">{s.lane}</span>}
-          <span className={`${KIND_COLORS[s.kind]} break-words min-w-0`}>{s.text}</span>
+          <span className={`${KIND_COLORS[s.kind] ?? 'text-gray-400'} break-words min-w-0`}>{s.text}</span>
         </li>
       ))}
     </ol>

@@ -33,12 +33,12 @@ export default function ResearchReport({ content, sourceList }: { content: strin
                 <span className="text-gray-500 mr-1">[{s.n}]</span>
                 {s.file ? (
                   <span className="text-gray-300">📎 {s.file} ({t('researchRun.detail.ownFile')})</span>
-                ) : s.url ? (
+                ) : s.url && /^https?:\/\//i.test(s.url) ? (
                   <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline break-all">
                     {s.title || s.url}
                   </a>
                 ) : (
-                  <span className="text-gray-300">{s.title}</span>
+                  <span className="text-gray-300 break-all">{s.title || s.url}</span>
                 )}
               </li>
             ))}
