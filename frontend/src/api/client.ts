@@ -6,6 +6,7 @@ import {
   readErrorMessage,
   readErrorMessageFromText,
 } from './http-boundary';
+import type { ResearchDepth, ResearchStatus } from '../lib/research';
 const BASE_URL = '/api';
 
 let getAccessToken: (() => string | null) | null = null;
@@ -818,16 +819,74 @@ export interface Manual {
   updatedAt: string;
 }
 
+export interface ResearchSourceItem {
+  n: number;
+  url?: string;
+  file?: string;
+  title: string;
+  notes: string;
+  relevant: boolean;
+}
+
+export interface ResearchTaskItem {
+  n: number;
+  round: number;
+  question: string;
+  queries: string[];
+  status: 'queued' | 'running' | 'done' | 'failed';
+  summary?: string;
+  sources: number[];
+}
+
+export interface ResearchStepItem {
+  _id: string;
+  kind: 'info' | 'plan' | 'search' | 'read' | 'skip' | 'write' | 'error';
+  text: string;
+  lane?: string;
+  at: string;
+}
+
+/**
+ * Recherche-Dokument. Listen (`/research/mine`, `?projectId=`) liefern es ohne
+ * `tasks`, `sourceList` und Dateitext — diese Felder sind deshalb optional.
+ */
 export interface ResearchEntry {
   _id: string;
-  projectId?: string;
-  customerId?: string;
+  ownerUserId?: string | null;
+  projectId?: string | null;
+  customerId?: string | null;
   title: string;
   content: string;
   sources: string[];
   tags: string[];
+  status?: ResearchStatus;
+  depth?: ResearchDepth;
+  focus?: string;
+  error?: string;
+  roundsDone?: number;
+  mode?: 'research' | 'deepen' | 'resume';
+  modeQuestion?: string;
+  queuedAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  totalMs?: number;
+  model?: string[];
+  files?: Array<{ n: number; name: string }>;
+  tasks?: ResearchTaskItem[];
+  sourceList?: ResearchSourceItem[];
+  followUps?: Array<{ question: string; at: string }>;
+  relatedKnowledge?: Array<{ id: string; title: string; score: number }>;
+  moveTargetHint?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface StartResearchInput {
+  topics: string[];
+  focus?: string;
+  depth: ResearchDepth;
+  files: File[];
+  moveTargetHint?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -2867,6 +2926,7 @@ export const api = {
       request<ResearchEntry[]>(`/research?projectId=${projectId}`),
     listForCustomer: (customerId: string) =>
       request<ResearchEntry[]>(`/research?customerId=${customerId}`),
+    listMine: () => request<ResearchEntry[]>('/research/mine'),
     get: (id: string) => request<ResearchEntry>(`/research/${id}`),
     create: (data: Partial<ResearchEntry>) =>
       request<ResearchEntry>('/research', { method: 'POST', body: JSON.stringify(data) }),
@@ -2874,6 +2934,37 @@ export const api = {
       request<ResearchEntry>(`/research/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/research/${id}`, { method: 'DELETE' }),
+    /** Multipart, weil Dateien mitgehen; `request()` setzt JSON-Header und taugt dafür nicht. */
+    start: async (input: StartResearchInput) => {
+      const form = new FormData();
+      form.append('topics', JSON.stringify(input.topics));
+      if (input.focus) form.append('focus', input.focus);
+      form.append('depth', input.depth);
+      if (input.moveTargetHint) form.append('moveTargetHint', input.moveTargetHint);
+      for (const f of input.files) form.append('files', f);
+      const headers: Record<string, string> = {};
+      const token = getAccessToken?.();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`${BASE_URL}/research/start`, { method: 'POST', headers, body: form });
+      if (!res.ok) throw await apiError(res);
+      return parseJsonResponse<{ ids: string[] }>(res);
+    },
+    cancel: (id: string) => request<void>(`/research/${id}/cancel`, { method: 'POST' }),
+    pause: (id: string) => request<void>(`/research/${id}/pause`, { method: 'POST' }),
+    resume: (id: string) => request<void>(`/research/${id}/resume`, { method: 'POST' }),
+    retry: (id: string) => request<void>(`/research/${id}/retry`, { method: 'POST' }),
+    deepen: (id: string, question: string) =>
+      request<void>(`/research/${id}/deepen`, { method: 'POST', body: JSON.stringify({ question }) }),
+    move: (id: string, target: { projectId: string } | { customerId: string }) =>
+      request<void>(`/research/${id}/move`, { method: 'POST', body: JSON.stringify(target) }),
+    steps: (id: string) => request<{ steps: ResearchStepItem[] }>(`/research/${id}/steps`),
+    queue: () => request<{ positions: Array<{ id: string; position: number }> }>('/research/queue'),
+    /** SSE-URL mit `?token=` — `EventSource` kann keinen Authorization-Header setzen. */
+    liveUrl: (id: string) => {
+      const token = getAccessToken?.();
+      const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+      return `${BASE_URL}/research/${id}/live${qs}`;
+    },
   },
   search: {
     query: (q: string, projectId?: string, limit?: number) => {

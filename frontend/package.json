@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "lint": "NODE_OPTIONS=--max-old-space-size=8192 eslint .",
     "lint:fix": "NODE_OPTIONS=--max-old-space-size=8192 eslint . --fix",
-    "check:tool-preview": "node scripts/tool-preview-check.cjs"
+    "check:tool-preview": "node scripts/tool-preview-check.cjs",
+    "check:research-lib": "node scripts/research-lib-check.cjs"
   },
   "dependencies": {
     "@xyflow/react": "^12.10.2",
