@@ -42,6 +42,15 @@ export function nextNodes(
   return out.filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)));
 }
 
+/**
+ * Hat der Node mindestens eine Edge, die ausdrücklich diesen Zweig trägt?
+ * `always`-Edges zählen bewusst nicht: sie folgen jedem Ergebnis und sind kein
+ * Hinweis, dass der Autor den Fehler behandeln wollte.
+ */
+export function hasBranchEdges(nodeId: string, branch: 'failure', def: GraphSnapshot): boolean {
+  return def.edges.some((e) => e.source === nodeId && e.branch === branch);
+}
+
 /** Nodes with no incoming edges (besides trigger nodes). Used by recovery. */
 export function findOrphanNodes(def: GraphSnapshot): WorkflowNode[] {
   const hasIncoming = new Set(def.edges.map((e) => e.target));

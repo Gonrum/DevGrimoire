@@ -30,7 +30,7 @@ import { WorkflowQueueService } from './workflow-queue.service';
 import { WorkflowWorkerPool } from './workflow-worker.pool';
 import { NodeRegistry } from './node-registry';
 import { NodeExecutionContext, NodeJob, NodeResult, RetryConfig } from './types';
-import { findTriggerNodes, nextNodes } from './graph-walker';
+import { findTriggerNodes, hasBranchEdges, nextNodes } from './graph-walker';
 import { readGraph } from './snapshot';
 import { OPEN_NODE_RUN_STATUSES, TERMINAL_RUN_STATUSES, WORKFLOW_RUN_CANCELLED } from './run-status';
 import { NodeBranch } from './node-metadata';
@@ -680,6 +680,40 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       const delay = retry.backoffMs * Math.pow(retry.backoffMultiplier ?? 1, nodeRun.attempt - 1);
       await this.completeNodeRun(nodeRun, { ...result, status: 'failed' });
       await this.enqueueNode(run, node, nodeRun.attempt + 1, delay);
+      return;
+    }
+
+    // Fehlerzweig: hängt am Node eine `failure`-Edge, ist der Fehler behandelt —
+    // der Lauf geht dort weiter, statt abgebrochen zu werden. maybeFinishRun
+    // zählt nur offene NodeRuns, ein `failed` NodeRun lässt den Run also
+    // `succeeded` enden.
+    const failGraph = readGraph(run.definitionSnapshot);
+    if (hasBranchEdges(node.id, 'failure', failGraph)) {
+      await this.completeNodeRun(nodeRun, result);
+      // Wie auf dem Erfolgspfad redigiert; der Fehler steht zusätzlich als
+      // `error` im Kontext, damit Folge-Nodes ihn auswerten können.
+      const redactedFailure = redactRecord({
+        ...(result.output ?? {}),
+        error: { code: result.error?.code ?? 'failed', message: result.error?.message ?? 'node failed' },
+      });
+      const failEdgeValues: Array<{ edgeId: string; mapped: Record<string, unknown> }> = [];
+      for (const edge of failGraph.edges) {
+        if (edge.source !== node.id) continue;
+        const mapping = edge.payloadMapping;
+        if (!mapping || Object.keys(mapping).length === 0) continue;
+        const mapped: Record<string, unknown> = {};
+        for (const [targetKey, sourcePath] of Object.entries(mapping)) {
+          mapped[targetKey] = lookupPath(sourcePath, redactedFailure);
+        }
+        failEdgeValues.push({ edgeId: edge.id, mapped });
+      }
+      const fresh = await this.runModel
+        .findByIdAndUpdate(run._id, contextUpdatePipeline(node.id, redactedFailure, failEdgeValues), { new: true })
+        .exec();
+      const current = fresh ?? run;
+      if (current.status !== WorkflowRunStatus.RUNNING) return;
+      for (const succ of nextNodes(node.id, 'failure', failGraph)) await this.enqueueNode(current, succ, 1);
+      await this.maybeFinishRun(current);
       return;
     }
     await this.completeNodeRun(nodeRun, result);
