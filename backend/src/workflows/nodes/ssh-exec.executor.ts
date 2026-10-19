@@ -9,6 +9,7 @@ import { WorkflowScopeGuard } from '../workflow-scope.guard';
 import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types';
 import { NodeMetadata } from '../engine/node-metadata';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
+import { WORKFLOW_RUNTIME_LIMITS } from '../workflow-security.runtime';
 import { errorMessage } from '../workflow-narrow';
 import { expandTemplate } from './template';
 import { expandShellCommand } from './shell-template';
@@ -37,6 +38,31 @@ const ABORT_CODES: Record<NonNullable<SshExecResult['aborted']>, AbortCode> = {
 interface RunOwner {
   projectId?: Types.ObjectId;
   customerId?: Types.ObjectId;
+}
+
+/** Vorsprung des SSH-Timeouts vor dem Engine-Timeout (= SIGKILL-Gnadenfrist im SSH-Stack). */
+const SSH_TIMEOUT_HEADROOM_MS = 5_000;
+const MIN_SSH_TIMEOUT_MS = 1_000;
+
+/**
+ * SSH- und Idle-Timeout aus der Node-Konfiguration.
+ *
+ * Die Engine nimmt `config.timeoutMs` (sonst ihren Default) als Node-Timeout.
+ * Bekäme SSH denselben Wert, feuerten beide gleichzeitig — die Engine gewänne
+ * meist, weil SSH nach SIGTERM noch bis zu 5 s auf `close` wartet, und das
+ * Ergebnis verlöre stdout/stderr. Deshalb läuft SSH 5 s früher ab und liefert
+ * selbst `timeout` samt Ausgabe; das Engine-Timeout bleibt nur Rückfallebene.
+ * Das Idle-Timeout darf nicht länger sein als das SSH-Timeout (0 = aus).
+ */
+export function sshTimeouts(config: { timeoutMs?: number; idleTimeoutMs?: number }): {
+  timeoutMs: number;
+  idleTimeoutMs: number | undefined;
+} {
+  const nodeTimeout = config.timeoutMs ?? WORKFLOW_RUNTIME_LIMITS.defaultNodeTimeoutMs;
+  const timeoutMs = Math.max(MIN_SSH_TIMEOUT_MS, nodeTimeout - SSH_TIMEOUT_HEADROOM_MS);
+  const idleTimeoutMs =
+    config.idleTimeoutMs === undefined ? undefined : Math.min(config.idleTimeoutMs, timeoutMs);
+  return { timeoutMs, idleTimeoutMs };
 }
 
 function cap(message: string): string {
@@ -153,9 +179,10 @@ export class SshExecExecutor implements NodeExecutor {
 
     let result: SshExecResult;
     try {
+      const timeouts = sshTimeouts(config);
       result = await this.session.exec(connectionId, expansion.command, {
-        timeoutMs: config.timeoutMs,
-        idleTimeoutMs: config.idleTimeoutMs,
+        timeoutMs: timeouts.timeoutMs,
+        idleTimeoutMs: timeouts.idleTimeoutMs,
         cwd: cwd?.value,
         userId: ctx.accountableUserId,
         sourceContext: 'workflow',

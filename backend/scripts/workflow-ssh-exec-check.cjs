@@ -9,7 +9,8 @@
 const assert = require('node:assert/strict');
 const { Types } = require('mongoose');
 const { WorkflowScopeGuard } = require('../dist/workflows/workflow-scope.guard');
-const { SshExecExecutor } = require('../dist/workflows/nodes/ssh-exec.executor');
+const { SshExecExecutor, sshTimeouts } = require('../dist/workflows/nodes/ssh-exec.executor');
+const { WORKFLOW_RUNTIME_LIMITS } = require('../dist/workflows/workflow-security.runtime');
 const { getWorkflowNodePolicy, requiresAccountableUser, workflowSecurityIssues } = require('../dist/workflows/workflow-security.policy');
 const { accountabilityRefusal } = require('../dist/workflows/engine/workflow-engine.service');
 const { hasBranchEdges } = require('../dist/workflows/engine/graph-walker');
@@ -212,9 +213,19 @@ async function check(name, fn) {
     assert.equal(opts.workflow.nodeId, 'n1');
     assert.equal(opts.workflow.definitionId, c.run.definitionId.toString());
     assert.equal(opts.cwd, '/srv/shop');
-    assert.equal(opts.timeoutMs, 5000);
+    // SSH läuft 5 s vor dem Engine-Timeout ab (R7), Untergrenze 1 s.
+    assert.equal(opts.timeoutMs, 1000);
     assert.equal(opts.idleTimeoutMs, 0);
     assert.equal(opts.signal, c.signal);
+  });
+
+  await check('SSH-Timeout 5 s vor dem Engine-Timeout, Idle geklemmt', async () => {
+    assert.equal(sshTimeouts({ timeoutMs: 60000 }).timeoutMs, 55000);
+    assert.equal(sshTimeouts({ timeoutMs: 3000 }).timeoutMs, 1000);
+    assert.equal(sshTimeouts({}).timeoutMs, WORKFLOW_RUNTIME_LIMITS.defaultNodeTimeoutMs - 5000);
+    assert.equal(sshTimeouts({ timeoutMs: 60000, idleTimeoutMs: 600000 }).idleTimeoutMs, 55000);
+    assert.equal(sshTimeouts({ timeoutMs: 60000, idleTimeoutMs: 0 }).idleTimeoutMs, 0);
+    assert.equal(sshTimeouts({ timeoutMs: 60000 }).idleTimeoutMs, undefined);
   });
 
   await check('aborted timeout/idle/cancelled → failed mit Code und output', async () => {
