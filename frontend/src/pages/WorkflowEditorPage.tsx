@@ -29,6 +29,7 @@ import { getDefaultsFromJsonSchema } from '../components/workflows/schemaDefault
 import { generateNodeId } from '../components/workflows/generateNodeId';
 import { useToast } from '../components/Toast';
 import i18n from '../i18n';
+import { needsSshReactivation } from '../lib/workflow-reactivation';
 
 export default function WorkflowEditorPage() {
   return (
@@ -232,8 +233,7 @@ function EditorInner() {
   const refOptions = useMemo<WorkflowRefOptions>(() => ({ sshConnections }), [sshConnections]);
 
   const hasSshExec = useMemo(() => nodes.some((n) => readNodeData(n.data).type === 'ssh.exec'), [nodes]);
-  const latestApproval = workflow?.approvals?.[workflow.approvals.length - 1];
-  const needsReactivation = workflow?.status === 'active' && hasSshExec && !!latestApproval && !latestApproval.approvedByUserId;
+  const needsReactivation = needsSshReactivation(workflow, hasSshExec);
 
   const canvasActions = useMemo<WorkflowCanvasActions>(() => ({
     onEditNode: handleEditNode,
