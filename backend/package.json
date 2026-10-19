@@ -20,6 +20,7 @@
     "check:workflow-nodes-units": "node scripts/workflow-nodes-units-check.cjs",
     "check:workflow-failure-branch": "node scripts/workflow-failure-branch-check.cjs",
     "check:workflow-scope-guard": "node scripts/workflow-scope-guard-check.cjs",
+    "check:workflow-schedule-overlap": "node scripts/workflow-schedule-overlap-check.cjs",
     "check:workflow-accountability": "node scripts/workflow-accountability-check.cjs",
     "check:workflow-engine": "node scripts/workflow-engine-check.cjs",
     "check:workflow-nodes-engine": "node scripts/workflow-nodes-engine-check.cjs",

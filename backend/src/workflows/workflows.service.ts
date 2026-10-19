@@ -365,6 +365,17 @@ export class WorkflowsService {
     return run;
   }
 
+  /**
+   * Gibt es für die Definition einen Lauf, der noch nicht abgeschlossen ist?
+   * Der Zeitplan nutzt das, damit sich Läufe (z. B. SSH-Wartung) nie überlappen.
+   */
+  async hasOpenRun(definitionId: Types.ObjectId): Promise<boolean> {
+    const open = await this.runModel
+      .exists({ definitionId, status: { $nin: TERMINAL_RUN_STATUSES } })
+      .exec();
+    return open !== null;
+  }
+
   async listRuns(query: ListWorkflowRunsDto): Promise<WorkflowRunDocument[]> {
     const filter: Record<string, unknown> = {};
     if (query.definitionId) filter.definitionId = new Types.ObjectId(query.definitionId);

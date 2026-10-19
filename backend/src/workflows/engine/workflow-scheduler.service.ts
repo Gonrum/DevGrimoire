@@ -11,6 +11,7 @@ import { WorkflowsService } from '../workflows.service';
 import { computeMissedSlots, computeNext } from './scheduler-helpers';
 import { ScheduleTriggerConfig } from './types';
 import { asNumber, errorMessage, isRecord, mongoErrorCode } from '../workflow-narrow';
+import { AuditLogService } from '../../audit-log/audit-log.service';
 import { asString } from '../../common/tool-args';
 
 @Injectable()
@@ -22,6 +23,7 @@ export class WorkflowSchedulerService {
     @InjectModel(WorkflowDefinition.name)
     private readonly definitionModel: Model<WorkflowDefinitionDocument>,
     private readonly workflowsService: WorkflowsService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -72,7 +74,7 @@ export class WorkflowSchedulerService {
     };
   }
 
-  private async processDefinition(def: WorkflowDefinitionDocument, now: Date): Promise<void> {
+  async processDefinition(def: WorkflowDefinitionDocument, now: Date): Promise<void> {
     const trigger = this.readScheduleTrigger(def.trigger);
     let slots: Date[];
     try {
@@ -83,6 +85,19 @@ export class WorkflowSchedulerService {
     }
 
     for (const slot of slots) {
+      // Kein Überlappen, kein Nachholen: läuft noch ein Lauf, entfällt der Slot.
+      // Das gilt auch innerhalb eines Ticks — nach dem ersten startRun ist der
+      // Lauf offen, die übrigen verpassten Slots werden übersprungen.
+      if (await this.workflowsService.hasOpenRun(def._id)) {
+        this.logger.debug(`Slot ${slot.toISOString()} für ${def.name} übersprungen: Lauf noch offen`);
+        await this.auditLog.record({
+          action: 'workflow.schedule.skipped_overlap',
+          entityType: 'workflow-definition',
+          entityId: def._id.toString(),
+          meta: { slot: slot.toISOString() },
+        });
+        continue;
+      }
       try {
         await this.workflowsService.startRun({
           definitionId: def._id.toString(),
