@@ -307,5 +307,20 @@ async function check(name, fn) {
     assert.equal(r.connection.error.code, 'auth_failed');
   });
 
+  await check('command mit Platzhalter in Anführungszeichen → template_unresolved mit Grund, kein exec', async () => {
+    const session = makeSession({});
+    const { exec } = executor(session);
+    const c = ctx({ connectionId: CONN_OWN, command: 'git commit -m "{{nodes.find.todo.title}}"' });
+    c.runContext = { nodes: { find: { todo: { title: '$(touch /tmp/pwn)' } } }, input: {} };
+    const r = await exec.execute(c);
+    assert.equal(r.status, 'failed');
+    assert.equal(r.error.code, 'template_unresolved');
+    assert.match(r.error.message, /Platzhalter in Anführungszeichen: nodes\.find\.todo\.title/);
+    assert.match(r.error.message, /ohne Anführungszeichen schreiben/);
+    assert.doesNotMatch(r.error.message, /nicht darstellbar/);
+    assert.deepEqual(r.error.details.quoted, ['nodes.find.todo.title']);
+    assert.equal(session.calls.length, 0);
+  });
+
   console.log(`${passed} passed`);
 })();

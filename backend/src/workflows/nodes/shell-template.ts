@@ -53,44 +53,90 @@ function renderValue(value: unknown): string | undefined {
 
 export type ShellExpansion =
   | { ok: true; command: string }
-  | { ok: false; missing: string[]; invalid: string[] };
+  | { ok: false; missing: string[]; invalid: string[]; quoted: string[] };
+
+const PLACEHOLDER = /\{\{\{\s*([^}]+?)\s*\}\}\}|\{\{\s*([^}]+?)\s*\}\}/y;
+
+type QuoteState = 'none' | 'single' | 'double';
 
 /**
  * Expandiert Platzhalter in einem Shell-Befehl. `{{ pfad }}` wird gequotet
  * (Werte stammen aus Todos/anderen Nutzern und dürfen keine Befehle einschleusen),
  * `{{{ pfad }}}` bleibt roh für bewusst vertrauenswürdige Fragmente.
  *
- * `{{…}}` muss **blank** stehen: Wer es selbst in Quotes setzt (`'{{t}}'`,
- * `"{{t}}"`), bricht das Quoting auf — das Ergebnis wäre `''x''` bzw. ein
- * Quote innerhalb von Double-Quotes und damit nicht mehr sicher.
+ * Platzhalter müssen **blank** stehen. In `"…{{t}}…"` entstünde ein
+ * Single-Quote innerhalb von Double-Quotes — `$(…)` und Backticks im Wert
+ * liefen wieder; in `'…{{t}}…'` hebt das eigene `'` des Quotings das äußere auf
+ * und der Wert stünde ungequotet. Deshalb wird der Quote-Zustand des
+ * **Templates** mitgeführt (Single-, Double-Quotes, Backslash-Escapes außerhalb
+ * von Single-Quotes) und jeder Platzhalter, der innerhalb von Quotes beginnt,
+ * abgelehnt: sein Pfad landet in `invalid` und zusätzlich in `quoted`, damit
+ * die Fehlermeldung den Grund nennen kann. Das gilt auch für `{{{…}}}` — wer
+ * roh einsetzt und dabei quotet, verlässt sich auf eine Sicherheit, die es
+ * nicht gibt.
  *
  * Ein einziger Durchlauf mit der Triple-Alternative zuerst: So wird `{{{x}}}`
  * nie als `{` + `{{x}}` + `}` gelesen, und ersetzte Werte werden nicht erneut
- * als Template ausgewertet. Nichts wird als Literal durchgereicht: unbekannte
- * Pfade landen in `missing`, nicht darstellbare Werte (NUL, Funktion, BigInt …)
- * in `invalid`; beide Listen dedupliziert, der Befehl wird dann nicht geliefert.
+ * als Template ausgewertet (sie gehen auch nicht in den Quote-Zustand ein).
+ * Nichts wird als Literal durchgereicht: unbekannte Pfade landen in `missing`,
+ * nicht darstellbare Werte (NUL, Funktion, BigInt …) in `invalid`; alle Listen
+ * dedupliziert, der Befehl wird dann nicht geliefert.
  */
 export function expandShellCommand(command: string, context: Record<string, unknown>): ShellExpansion {
   const missing: string[] = [];
   const invalid: string[] = [];
-  const expanded = command.replace(
-    /\{\{\{\s*([^}]+?)\s*\}\}\}|\{\{\s*([^}]+?)\s*\}\}/g,
-    (_match, rawPath: string | undefined, quotedPath: string | undefined) => {
-      const path = (rawPath ?? quotedPath ?? '').trim();
+  const quoted: string[] = [];
+  const add = (list: string[], path: string) => {
+    if (!list.includes(path)) list.push(path);
+  };
+  let out = '';
+  let state: QuoteState = 'none';
+  let i = 0;
+  while (i < command.length) {
+    PLACEHOLDER.lastIndex = i;
+    const m = PLACEHOLDER.exec(command);
+    if (m) {
+      i += m[0].length;
+      const rawPath: string | undefined = m[1];
+      const path = (rawPath ?? m[2] ?? '').trim();
+      if (state !== 'none') {
+        add(invalid, path);
+        add(quoted, path);
+        continue;
+      }
       const value = lookupOwnPath(path, context);
       if (value === undefined) {
-        if (!missing.includes(path)) missing.push(path);
-        return '';
+        add(missing, path);
+        continue;
       }
       const text = renderValue(value);
       if (text === undefined) {
-        if (!invalid.includes(path)) invalid.push(path);
-        return '';
+        add(invalid, path);
+        continue;
       }
-      return rawPath !== undefined ? text : shellQuote(text);
-    },
-  );
+      out += rawPath !== undefined ? text : shellQuote(text);
+      continue;
+    }
+    const ch = command[i];
+    // Backslash maskiert außerhalb von Single-Quotes das nächste Zeichen — ein
+    // `\"` öffnet also keinen Quote. Beide Zeichen werden unverändert übernommen.
+    if (ch === '\\' && state !== 'single' && i + 1 < command.length) {
+      out += command.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    if (state === 'none') {
+      if (ch === "'") state = 'single';
+      else if (ch === '"') state = 'double';
+    } else if (state === 'single') {
+      if (ch === "'") state = 'none';
+    } else if (ch === '"') {
+      state = 'none';
+    }
+    out += ch;
+    i += 1;
+  }
   return missing.length > 0 || invalid.length > 0
-    ? { ok: false, missing, invalid }
-    : { ok: true, command: expanded };
+    ? { ok: false, missing, invalid, quoted }
+    : { ok: true, command: out };
 }

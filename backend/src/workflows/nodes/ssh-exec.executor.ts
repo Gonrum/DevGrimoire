@@ -81,16 +81,25 @@ function expandField(value: string, context: Record<string, unknown>): { value: 
   return { value: expanded, missing };
 }
 
-function templateUnresolved(missing: string[], invalid: string[]): NodeResult {
+function templateUnresolved(missing: string[], invalid: string[], quoted: string[] = []): NodeResult {
   const parts: string[] = [];
   if (missing.length > 0) parts.push(`fehlend: ${missing.join(', ')}`);
-  if (invalid.length > 0) parts.push(`nicht darstellbar: ${invalid.join(', ')}`);
+  // Pfade in Quotes stehen auch in `invalid`; dort nur die übrigen nennen,
+  // damit der Grund nicht doppelt und missverständlich erscheint.
+  const unrenderable = invalid.filter((p) => !quoted.includes(p));
+  if (unrenderable.length > 0) parts.push(`nicht darstellbar: ${unrenderable.join(', ')}`);
+  if (quoted.length > 0) {
+    parts.push(
+      `Platzhalter in Anführungszeichen: ${quoted.join(', ')} — Platzhalter ohne Anführungszeichen schreiben, ` +
+        '{{…}} wird automatisch shell-sicher gequotet',
+    );
+  }
   return {
     status: 'failed',
     error: {
       code: 'template_unresolved',
       message: cap(`Platzhalter nicht auflösbar (${parts.join('; ')})`),
-      details: { missing, invalid },
+      details: { missing, invalid, quoted },
     },
   };
 }
@@ -173,7 +182,7 @@ export class SshExecExecutor implements NodeExecutor {
     }
 
     const expansion = expandShellCommand(config.command, ctx.runContext);
-    if (!expansion.ok) return templateUnresolved(expansion.missing, expansion.invalid);
+    if (!expansion.ok) return templateUnresolved(expansion.missing, expansion.invalid, expansion.quoted);
 
     if (ctx.signal.aborted) return this.cancelled();
 
