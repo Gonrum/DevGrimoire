@@ -211,10 +211,14 @@ async function engineChecks() {
   const NodeRun = conn.model('WorkflowNodeRun', WorkflowNodeRunSchema, `workflownoderuns${suffix}`);
 
   let seen = null;
+  const executions = [];
   const registry = {
     get: () => ({
       execute: async (ctx) => {
+        executions.push(ctx.node.id);
         seen = { accountableUserId: ctx.accountableUserId, contextUser: RequestContext.getUser()?.userId };
+        // `config.fail` lässt einen Node mit diesem Fehlercode scheitern.
+        if (ctx.config && ctx.config.fail) return { status: 'failed', error: { code: ctx.config.fail, message: 'x' } };
         return { status: 'success', output: {} };
       },
     }),
@@ -290,6 +294,28 @@ async function engineChecks() {
       assert.equal(after.context.nodes.ssh.error.code, 'no_accountable_user');
       assert.notEqual(after.status, 'failed');
       queue.take(next.seq);
+    });
+
+    await check('Engine: Fehlerpfad folgt nur failure-Edges, nicht unbeschrifteten (Final-Review I1)', async () => {
+      const step1 = { id: 'step1', type: 'action.log', config: { fail: 'nonzero_exit' }, position: { x: 0, y: 0 } };
+      const step2 = { id: 'step2', type: 'action.log', config: {}, position: { x: 0, y: 0 } };
+      const alarm = { id: 'alarm', type: 'action.log', config: {}, position: { x: 0, y: 0 } };
+      const run = await newRun({
+        triggeredBy: { type: 'manual', userId: USER_A },
+        definitionSnapshot: {
+          nodes: [step1, step2, alarm],
+          edges: [
+            { id: 'e1', source: 'step1', target: 'step2' },
+            { id: 'e2', source: 'step1', target: 'alarm', branch: 'failure' },
+          ],
+        },
+      });
+      for (let j = queue.peek(); j; j = queue.peek()) queue.take(j.seq);
+      await engine.enqueueNode(run, step1, 1);
+      await engine.runJob(queue.take(queue.peek().seq));
+      const queued = [];
+      for (let j = queue.peek(); j; j = queue.peek()) queued.push(queue.take(j.seq).nodeId);
+      assert.deepEqual(queued, ['alarm']);
     });
   } finally {
     await Promise.all([Def, Run, NodeRun].map((m) => m.collection.drop().catch(() => {})));

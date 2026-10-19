@@ -51,6 +51,29 @@ check('failureContextEntry: Output bleibt, Fehler wird uebernommen', () => {
   assert.deepEqual(e, { stdout: 'x', error: { code: 'c', message: 'm' } });
 });
 
+const n = (id) => ({ id, type: 'action.log', config: {} });
+check('failureSuccessors: nur ausdruecklich beschriftete failure-Edges (Final-Review I1)', () => {
+  // ssh step1 → step2 (unbeschriftet) + step1 -failure-> alarm: step2 darf nach
+  // einem Fehlschlag von step1 NICHT laufen.
+  const graph = {
+    nodes: [n('step1'), n('step2'), n('alarm'), n('ok'), n('always')],
+    edges: [
+      { id: 'e1', source: 'step1', target: 'step2' },
+      { id: 'e2', source: 'step1', target: 'alarm', branch: 'failure' },
+      { id: 'e3', source: 'step1', target: 'ok', branch: 'success' },
+      { id: 'e4', source: 'step1', target: 'always', branch: 'always' },
+      { id: 'e5', source: 'step1', target: 'alarm', branch: 'failure' },
+    ],
+  };
+  assert.deepEqual(walker.failureSuccessors('step1', graph).map((x) => x.id), ['alarm']);
+  // Zum Vergleich: nextNodes nimmt always-Edges mit — deshalb nicht auf dem Fehlerpfad.
+  assert.deepEqual(walker.nextNodes('step1', 'failure', graph).map((x) => x.id).sort(), ['alarm', 'always', 'step2']);
+});
+check('failureSuccessors: unbekanntes Ziel wird uebersprungen', () => {
+  const graph = { nodes: [n('a')], edges: [{ id: 'e', source: 'a', target: 'weg', branch: 'failure' }] };
+  assert.deepEqual(walker.failureSuccessors('a', graph), []);
+});
+
 if (failures) {
   console.error(`${failures} failed`);
   process.exit(1);

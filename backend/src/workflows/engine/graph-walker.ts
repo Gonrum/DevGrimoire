@@ -51,6 +51,29 @@ export function hasBranchEdges(nodeId: string, branch: 'failure', def: GraphSnap
   return def.edges.some((e) => e.source === nodeId && e.branch === branch);
 }
 
+/**
+ * Nachfolger auf dem Fehlerpfad eines gescheiterten Nodes: **nur** Edges mit
+ * ausdrücklichem `branch: 'failure'`.
+ *
+ * `nextNodes(id, 'failure')` nähme auch unbeschriftete (`always`) Edges mit —
+ * bei `ssh step1 → ssh step2` plus `step1 -failure-> todo.create` liefe step2
+ * nach einem Fehlschlag von step1 trotzdem auf dem Server. Ein gescheiterter
+ * Node darf nur dort weitergehen, wo der Autor den Fehler behandelt.
+ */
+export function failureSuccessors(nodeId: string, def: GraphSnapshot): WorkflowNode[] {
+  const byId = new Map(def.nodes.map((n) => [n.id, n]));
+  const out: WorkflowNode[] = [];
+  const seen = new Set<string>();
+  for (const edge of def.edges) {
+    if (edge.source !== nodeId || edge.branch !== 'failure') continue;
+    const target = byId.get(edge.target);
+    if (!target || seen.has(target.id)) continue;
+    seen.add(target.id);
+    out.push(target);
+  }
+  return out;
+}
+
 /** Nodes with no incoming edges (besides trigger nodes). Used by recovery. */
 export function findOrphanNodes(def: GraphSnapshot): WorkflowNode[] {
   const hasIncoming = new Set(def.edges.map((e) => e.target));

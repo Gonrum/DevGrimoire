@@ -30,7 +30,7 @@ import { WorkflowQueueService } from './workflow-queue.service';
 import { WorkflowWorkerPool } from './workflow-worker.pool';
 import { NodeRegistry } from './node-registry';
 import { NodeExecutionContext, NodeJob, NodeResult, RetryConfig } from './types';
-import { findTriggerNodes, hasBranchEdges, nextNodes } from './graph-walker';
+import { failureSuccessors, findTriggerNodes, hasBranchEdges, nextNodes } from './graph-walker';
 import { readGraph } from './snapshot';
 import { OPEN_NODE_RUN_STATUSES, TERMINAL_RUN_STATUSES, WORKFLOW_RUN_CANCELLED } from './run-status';
 import { NodeBranch } from './node-metadata';
@@ -784,7 +784,9 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
         .exec();
       const current = fresh ?? run;
       if (current.status !== WorkflowRunStatus.RUNNING) return;
-      for (const succ of nextNodes(node.id, 'failure', failGraph)) await this.enqueueNode(current, succ, 1);
+      // Nur ausdrücklich beschriftete failure-Edges — eine `always`-Edge des
+      // gescheiterten Nodes führt sonst den Erfolgspfad trotzdem aus.
+      for (const succ of failureSuccessors(node.id, failGraph)) await this.enqueueNode(current, succ, 1);
       await this.maybeFinishRun(current);
       return;
     }
