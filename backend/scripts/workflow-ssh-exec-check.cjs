@@ -335,6 +335,8 @@ async function check(name, fn) {
     assert.doesNotMatch(r.error.message, /nicht darstellbar/);
     assert.deepEqual(r.error.details.quoted, ['nodes.find.todo.title']);
     assert.equal(session.calls.length, 0);
+    // Die Node-Beschreibung (Palette/MCP) nennt die Regel.
+    assert.match(exec.metadata.description, /nie selbst in Anführungszeichen/);
   });
 
   console.log(`${passed} passed`);

@@ -120,7 +120,8 @@ export class SshExecExecutor implements NodeExecutor {
     label: 'SSH-Befehl',
     description:
       'Führt einen Befehl auf einer SSH-Verbindung des Projekts/Kunden aus. ' +
-      '{{…}} im Befehl wird shell-sicher gequotet, {{{…}}} roh eingesetzt.',
+      '{{…}} im Befehl wird shell-sicher gequotet, {{{…}}} roh eingesetzt. ' +
+      'Platzhalter nie selbst in Anführungszeichen setzen — das wird abgelehnt.',
     allowedScopes: [WorkflowScope.PROJECT, WorkflowScope.CUSTOMER],
     configSchema,
     outputs: {
