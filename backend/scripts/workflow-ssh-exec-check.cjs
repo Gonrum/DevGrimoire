@@ -288,6 +288,9 @@ async function check(name, fn) {
     assert.equal(r.connection.ok, true);
     assert.deepEqual(tester.calls[0], { connId: CONN_OWN, opts: { userId: USER } });
     assert.equal(session.calls.length, 0);
+    // Der Test-Dialog rendert nur *Preview-Felder (Final-Review I3).
+    assert.deepEqual(r.outputPreview, r.connection);
+    assert.equal(r.errorPreview, undefined);
   });
 
   await check('connectionCheck: fremde Verbindung → scope_violation, kein Test', async () => {
@@ -296,6 +299,7 @@ async function check(name, fn) {
     const r = await exec.connectionCheck({ projectId: P1 }, { connectionId: CONN_FOREIGN, command: 'true' }, {}, USER);
     assert.equal(r.ok, false);
     assert.equal(r.error.code, 'scope_violation');
+    assert.deepEqual(r.errorPreview, r.error);
     assert.equal(tester.calls.length, 0);
   });
 
@@ -305,6 +309,17 @@ async function check(name, fn) {
     const r = await exec.connectionCheck({ projectId: P1 }, { connectionId: CONN_OWN, command: 'true' }, {}, USER);
     assert.equal(r.ok, false);
     assert.equal(r.connection.error.code, 'auth_failed');
+    // Der Grund muss im Dialog sichtbar sein: errorPreview/outputPreview.
+    assert.deepEqual(r.errorPreview, { code: 'auth_failed', message: 'nope' });
+    assert.equal(r.outputPreview.label, 'prod-web');
+  });
+
+  await check('connectionCheck: ungültige Config / unbekannte Verbindung → errorPreview gesetzt', async () => {
+    const { exec } = executor(makeSession({}), makeTester({ ok: true }));
+    const bad = await exec.connectionCheck({ projectId: P1 }, { connectionId: CONN_OWN }, {}, USER);
+    assert.equal(bad.errorPreview.code, 'invalid_config');
+    const unknown = await exec.connectionCheck({ projectId: P1 }, { connectionId: 'gibts-nicht', command: 'true' }, {}, USER);
+    assert.equal(unknown.errorPreview.code, 'ssh_error');
   });
 
   await check('command mit Platzhalter in Anführungszeichen → template_unresolved mit Grund, kein exec', async () => {

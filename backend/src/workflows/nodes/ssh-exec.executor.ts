@@ -263,7 +263,13 @@ export class SshExecExecutor implements NodeExecutor {
       outputSchema: this.metadata.outputs,
       branches: this.metadata.branches,
     };
-    const fail = (code: string, message: string) => ({ ok: false, ...base, error: { code, message: cap(message) } });
+    // Der Test-Dialog (`TestResultView`) zeigt nur `outputPreview`/`errorPreview`
+    // — ohne diese Schlüssel sah der Nutzer bei einem Fehlschlag keinen Grund.
+    // `error`/`connection` bleiben für MCP-Aufrufer erhalten.
+    const fail = (code: string, message: string) => {
+      const error = { code, message: cap(message) };
+      return { ok: false, ...base, error, errorPreview: error };
+    };
 
     const parsed = configSchema.safeParse(rawConfig);
     if (!parsed.success) return fail('invalid_config', parsed.error.issues.map((i) => i.message).join('; '));
@@ -287,17 +293,21 @@ export class SshExecExecutor implements NodeExecutor {
       const test = await this.tester.testConnection(connectionId, { userId });
       // Nur die Zusammenfassung — Fingerprints sind öffentlich, Zugangsdaten
       // tauchen im Testergebnis ohnehin nicht auf.
+      const error = test.error ? { code: test.error.code, message: cap(test.error.message) } : undefined;
+      const summary = {
+        label: connection.label,
+        ok: test.ok,
+        fingerprint: test.fingerprint,
+        fingerprintAccepted: test.fingerprintAccepted,
+        fingerprintMismatch: test.fingerprintMismatch,
+        error,
+      };
       return {
         ok: test.ok,
         ...base,
-        connection: {
-          label: connection.label,
-          ok: test.ok,
-          fingerprint: test.fingerprint,
-          fingerprintAccepted: test.fingerprintAccepted,
-          fingerprintMismatch: test.fingerprintMismatch,
-          error: test.error ? { code: test.error.code, message: cap(test.error.message) } : undefined,
-        },
+        connection: summary,
+        outputPreview: summary,
+        ...(error ? { errorPreview: error } : {}),
       };
     } catch (err: unknown) {
       return fail('ssh_error', errorMessage(err));
