@@ -157,6 +157,25 @@ export function accountabilityRefusal(nodeType: string, hasActor: boolean): Node
   };
 }
 
+/**
+ * Fehlercodes, die bei einer Wiederholung garantiert wieder auftreten: kein
+ * Akteur, Scope-Verstoß, unauflösbares Template, ungültige Konfiguration.
+ * Ein Node-Retry würde nur Zeit kosten (und Audit-Einträge vervielfachen) —
+ * solche Fehler gehen direkt in die Fehlerbehandlung (failure-Edge bzw. Lauf
+ * scheitert).
+ */
+const DETERMINISTIC_FAILURE_CODES: ReadonlySet<string> = new Set([
+  'no_accountable_user',
+  'scope_violation',
+  'template_unresolved',
+  'invalid_config',
+]);
+
+export function isDeterministicFailure(result: NodeResult): boolean {
+  const code = result.error?.code;
+  return typeof code === 'string' && DETERMINISTIC_FAILURE_CODES.has(code);
+}
+
 @Injectable()
 export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstrap {
   private readonly logger = new Logger(WorkflowEngineService.name);
@@ -765,7 +784,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     // failed
     const retry = this.readRetryConfig(node.config.retry);
     const max = retry.maxAttempts;
-    if (nodeRun.attempt < max + 1) {
+    if (nodeRun.attempt < max + 1 && !isDeterministicFailure(result)) {
       const delay = retry.backoffMs * Math.pow(retry.backoffMultiplier ?? 1, nodeRun.attempt - 1);
       await this.completeNodeRun(nodeRun, { ...result, status: 'failed' });
       await this.enqueueNode(run, node, nodeRun.attempt + 1, delay);

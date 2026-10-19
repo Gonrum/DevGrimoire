@@ -24,7 +24,7 @@ const { WorkflowAccountabilityService } = require('../dist/workflows/engine/work
 const { getWorkflowNodePolicy, requiresAccountableUser } = require('../dist/workflows/workflow-security.policy');
 const { WorkflowsController } = require('../dist/workflows/workflows.controller');
 const { RequestContext } = require('../dist/common/request-context');
-const { accountabilityRefusal, WorkflowEngineService } = require('../dist/workflows/engine/workflow-engine.service');
+const { accountabilityRefusal, isDeterministicFailure, WorkflowEngineService } = require('../dist/workflows/engine/workflow-engine.service');
 const { WorkflowsService } = require('../dist/workflows/workflows.service');
 const { assertActorCanAccessWorkflow } = require('../dist/workflows/workflow-actor-access');
 
@@ -203,6 +203,16 @@ function service(users, defs = [], keys = []) {
     assert.equal(accountabilityRefusal('workspace.exec', false).error.code, 'no_accountable_user');
     assert.equal(accountabilityRefusal('ssh.exec', false).error.code, 'no_accountable_user');
     assert.equal(requiresAccountableUser(getWorkflowNodePolicy('ssh.exec').risk), true);
+  });
+
+  await check('M2 isDeterministicFailure', async () => {
+    for (const code of ['no_accountable_user', 'scope_violation', 'template_unresolved', 'invalid_config']) {
+      assert.equal(isDeterministicFailure({ status: 'failed', error: { code, message: '' } }), true, code);
+    }
+    for (const code of ['ssh_error', 'timeout', 'nonzero_exit', 'executor_threw']) {
+      assert.equal(isDeterministicFailure({ status: 'failed', error: { code, message: '' } }), false, code);
+    }
+    assert.equal(isDeterministicFailure({ status: 'failed' }), false);
   });
 
   await check('Engine-Gate: mit Akteur oder ohne Akteurpflicht kein Eingriff', async () => {
@@ -496,6 +506,27 @@ async function engineChecks() {
       const queued = [];
       for (let j = queue.peek(); j; j = queue.peek()) queued.push(queue.take(j.seq).nodeId);
       assert.deepEqual(queued, ['alarm']);
+    });
+
+    await check('M2 Engine: deterministische Ablehnung überspringt Node-Retries, transiente nicht', async () => {
+      const mk = (fail) => ({ id: 'r', type: 'action.log', config: { fail, retry: { maxAttempts: 3, backoffMs: 0 } }, position: { x: 0, y: 0 } });
+      for (const code of ['no_accountable_user', 'scope_violation', 'template_unresolved', 'invalid_config']) {
+        const n = mk(code);
+        const run = await newRun({ triggeredBy: { type: 'manual', userId: USER_A }, definitionSnapshot: { nodes: [n], edges: [] } });
+        for (let j = queue.peek(); j; j = queue.peek()) queue.take(j.seq);
+        await engine.enqueueNode(run, n, 1);
+        await engine.runJob(queue.take(queue.peek().seq));
+        assert.ok(!queue.peek(), `${code}: kein Retry eingereiht`);
+        assert.equal((await Run.findById(run._id).lean()).status, 'failed', `${code}: Lauf scheitert sofort`);
+      }
+      const t = mk('ssh_error');
+      const run = await newRun({ triggeredBy: { type: 'manual', userId: USER_A }, definitionSnapshot: { nodes: [t], edges: [] } });
+      await engine.enqueueNode(run, t, 1);
+      await engine.runJob(queue.take(queue.peek().seq));
+      const retry = queue.peek();
+      assert.ok(retry, 'transienter Fehler wird wiederholt');
+      assert.equal(retry.attempt, 2);
+      queue.take(retry.seq);
     });
   } finally {
     await Promise.all([Def, Run, NodeRun].map((m) => m.collection.drop().catch(() => {})));
