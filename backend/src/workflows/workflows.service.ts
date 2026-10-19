@@ -36,6 +36,7 @@ import { workflowSecurityIssues } from './workflow-security.policy';
 import { NodeRegistry } from './engine/node-registry';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { RequestContext, RequestUser } from '../common/request-context';
+import { runtimeFingerprint } from './workflow-runtime-fingerprint';
 import { assertActorCanAccessWorkflow } from './workflow-actor-access';
 import { redact } from './workflow-redaction';
 import { summarizeRisk, WORKFLOW_RUNTIME_LIMITS } from './workflow-security.runtime';
@@ -202,8 +203,7 @@ export class WorkflowsService {
     const existing = await this.getDefinition(id);
     const previousStatus = existing.status;
 
-    const touchesRuntime = RUNTIME_FIELDS.some((field) => dto[field] !== undefined);
-    const willBump = dto.publish === true || (touchesRuntime && existing.status !== WorkflowStatus.DRAFT);
+    const fingerprintBefore = runtimeFingerprint(existing);
 
     if (dto.name !== undefined) existing.name = dto.name;
     if (dto.description !== undefined) existing.description = dto.description;
@@ -213,6 +213,12 @@ export class WorkflowsService {
     if (dto.nodes !== undefined) existing.nodes = dto.nodes.map(workflowNodeFromDto);
     if (dto.edges !== undefined) existing.edges = dto.edges;
     if (dto.ui !== undefined) existing.ui = dto.ui;
+
+    // Nur echte Ablauf-Änderungen erzeugen eine neue Version samt Freigabe —
+    // Autosave nach Verschieben/Umbenennen eines Nodes nicht mehr.
+    const touchesRuntime = RUNTIME_FIELDS.some((field) => dto[field] !== undefined)
+      && runtimeFingerprint(existing) !== fingerprintBefore;
+    const willBump = dto.publish === true || (touchesRuntime && previousStatus !== WorkflowStatus.DRAFT);
 
     if ((existing.nodes?.length ?? 0) > WORKFLOW_RUNTIME_LIMITS.maxNodesPerDefinition) {
       throw new BadRequestException(

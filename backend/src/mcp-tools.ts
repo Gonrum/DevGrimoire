@@ -3981,7 +3981,7 @@ const tools = [
   },
   {
     name: 'workflow_update',
-    description: 'Update a workflow. Editing nodes/edges/trigger on a non-draft workflow auto-increments version. Set publish=true to force a version bump.',
+    description: 'Update a workflow. On a non-draft workflow, the version (and approval) increments only when the runtime behaviour changes — node type/config/secretRefs, edges incl. branch/condition/payloadMapping, or trigger; moving or relabelling nodes does not. Set publish=true to force a version bump.',
     inputSchema: {
       type: 'object' as const,
       properties: {
