@@ -10,7 +10,7 @@ export type SshAuditAction =
   | 'terminal_open'
   | 'terminal_close';
 
-export type SshAuditSourceContext = 'terminal' | 'mcp' | 'rest';
+export type SshAuditSourceContext = 'terminal' | 'mcp' | 'rest' | 'workflow';
 
 export type SshAuditDocument = HydratedDocument<SshAudit>;
 
@@ -40,7 +40,7 @@ export class SshAudit {
   @Prop({
     required: true,
     type: String,
-    enum: ['terminal', 'mcp', 'rest'],
+    enum: ['terminal', 'mcp', 'rest', 'workflow'],
   })
   sourceContext: SshAuditSourceContext;
 
@@ -68,6 +68,16 @@ export class SshAudit {
 
   @Prop()
   errorMsg?: string;
+
+  // Nur bei sourceContext='workflow': aus welchem Lauf/Node der Befehl kam.
+  @Prop({ type: Types.ObjectId, ref: 'WorkflowRun' })
+  workflowRunId?: Types.ObjectId;
+
+  @Prop()
+  workflowNodeId?: string;
+
+  @Prop({ type: Types.ObjectId, ref: 'WorkflowDefinition' })
+  workflowDefinitionId?: Types.ObjectId;
 }
 
 export const SshAuditSchema = SchemaFactory.createForClass(SshAudit);

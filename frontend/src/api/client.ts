@@ -1259,7 +1259,7 @@ export type SshAuditAction =
   | 'terminal_open'
   | 'terminal_close';
 
-export type SshAuditSourceContext = 'terminal' | 'mcp' | 'rest';
+export type SshAuditSourceContext = 'terminal' | 'mcp' | 'rest' | 'workflow';
 
 /** One entry as returned by `GET /api/ssh-connections/:id/audit`. */
 export interface SshAuditEntry {

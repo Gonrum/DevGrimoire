@@ -29,6 +29,6 @@ export class AuditQueryDto {
   offset?: number;
 
   @IsOptional()
-  @IsIn(['terminal', 'mcp', 'rest'])
-  sourceContext?: 'terminal' | 'mcp' | 'rest';
+  @IsIn(['terminal', 'mcp', 'rest', 'workflow'])
+  sourceContext?: 'terminal' | 'mcp' | 'rest' | 'workflow';
 }

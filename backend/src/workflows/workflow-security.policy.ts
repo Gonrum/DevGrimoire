@@ -41,6 +41,9 @@ export const WORKFLOW_NODE_POLICIES: Record<string, WorkflowNodePolicy> = {
   'agent.task': { type: 'agent.task', risk: 'agent-write', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: true },
   'secret.read': { type: 'secret.read', risk: 'secret-read', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: false },
   'http.request': { type: 'http.request', risk: 'external-call', allowedScopes: ALL_SCOPES, mvpAllowed: false },
+  // Wirkt auf fremden Servern: nur mit zurechenbarem Akteur (Engine-Gate) und
+  // nur auf Verbindungen im Projekt/Kunden des Laufs (Executor).
+  'ssh.exec': { type: 'ssh.exec', risk: 'external-call', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: true },
   'workspace.exec': { type: 'workspace.exec', risk: 'workspace-git', allowedScopes: [WorkflowScope.PROJECT], mvpAllowed: false },
   'git.action': { type: 'git.action', risk: 'workspace-git', allowedScopes: [WorkflowScope.PROJECT], mvpAllowed: false },
   'entity.delete': { type: 'entity.delete', risk: 'destructive', allowedScopes: ALL_SCOPES, mvpAllowed: false },

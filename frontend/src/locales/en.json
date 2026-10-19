@@ -2783,7 +2783,8 @@
       "source": {
         "terminal": "terminal",
         "mcp": "mcp",
-        "rest": "rest"
+        "rest": "rest",
+        "workflow": "workflow"
       },
       "action": {
         "connect": "connect",

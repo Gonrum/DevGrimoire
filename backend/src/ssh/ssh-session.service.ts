@@ -55,6 +55,21 @@ function asError(value: unknown): Error {
 }
 
 /**
+ * Verbindet ein externes AbortSignal mit dem Abbruch-Hook von `runExec`.
+ * Ist das Signal schon abgebrochen, wird sofort eskaliert — ein später
+ * angehängter Listener würde sonst nie feuern. Liefert das Abmelden.
+ */
+function bindAbortSignal(signal: AbortSignal | undefined, cancel: () => void): () => void {
+  if (!signal) return () => {};
+  if (signal.aborted) {
+    cancel();
+    return () => {};
+  }
+  signal.addEventListener('abort', cancel, { once: true });
+  return () => signal.removeEventListener('abort', cancel);
+}
+
+/**
  * Fehler mit angehängter Ursache.
  *
  * `new Error(msg, { cause })` bräuchte `lib: es2022`; das Backend kompiliert
@@ -100,7 +115,14 @@ const TAIL_STDOUT_BYTES = 4 * 1024;
 const TAIL_STDERR_BYTES = 2 * 1024;
 const JOB_TTL_MS = 10 * 60_000;
 
-export type SshSessionSourceContext = 'mcp' | 'rest' | 'terminal';
+export type SshSessionSourceContext = 'mcp' | 'rest' | 'terminal' | 'workflow';
+
+/** Herkunft eines Workflow-Aufrufs — landet im Audit-Eintrag (Task 6). */
+export interface SshWorkflowRef {
+  runId: string;
+  nodeId: string;
+  definitionId: string;
+}
 
 export interface SshExecOpts {
   timeoutMs?: number;
@@ -117,6 +139,16 @@ export interface SshExecOpts {
   cwd?: string;
   sourceContext?: SshSessionSourceContext;
   userId?: string;
+  /** Workflow-Lauf, aus dem der Befehl stammt; wird im Audit mitgeschrieben. */
+  workflow?: SshWorkflowRef;
+  /**
+   * Abbruch von außen (Workflow-Node-Timeout, Lauf-Abbruch). Läuft über
+   * denselben `escalate('cancelled')`-Pfad wie `cancelJob`, damit der
+   * entfernte Befehl wirklich beendet wird — sonst liefe er nach dem
+   * Aufgeben des Aufrufers weiter und ein Retry startete ihn ein zweites Mal.
+   * Ein bereits abgebrochenes Signal startet gar nichts.
+   */
+  signal?: AbortSignal;
 }
 
 export interface SshExecResult {
@@ -414,8 +446,11 @@ export class SshSessionService {
   ): Promise<SshExecResult> {
     const startedAt = Date.now();
     const sourceContext = opts.sourceContext ?? 'mcp';
+    // Bereits abgebrochen: weder Slot noch Verbindung belegen.
+    if (opts.signal?.aborted) throw new Error('cancelled');
     await this.acquireSlot(connId);
     let client: Ssh2Client | null = null;
+    let detachSignal: (() => void) | undefined;
     try {
       const connection = await this.sshService.findById(connId);
       let creds: ResolvedCreds;
@@ -428,6 +463,7 @@ export class SshSessionService {
           action: 'exec',
           sourceContext,
           userId: opts.userId,
+          workflow: opts.workflow,
           command: this.truncateCommand(command),
           durationMs: Date.now() - startedAt,
           errorMsg: 'credential_missing',
@@ -436,6 +472,9 @@ export class SshSessionService {
       }
 
       client = await this.openClient(connection, creds);
+      // Abbruch während Slot-Wartezeit oder Verbindungsaufbau: der Befehl
+      // wurde noch nicht gesendet, also auch nicht starten.
+      if (opts.signal?.aborted) throw new Error('cancelled');
       const wrappedCommand = opts.cwd
         ? `cd '${this.shellSingleQuoteEscape(opts.cwd)}' && ${command}`
         : command;
@@ -457,6 +496,11 @@ export class SshSessionService {
         opts.env,
         timeoutMs,
         idleTimeoutMs,
+        {
+          onCancelHandleReady: (cancelFn) => {
+            detachSignal = bindAbortSignal(opts.signal, cancelFn);
+          },
+        },
       );
       const durationMs = Date.now() - startedAt;
 
@@ -466,7 +510,9 @@ export class SshSessionService {
       const auditErrorMsg = inner.aborted
         ? inner.aborted === 'idle'
           ? `idle_timeout (${idleTimeoutMs}ms without output)`
-          : `timeout (${timeoutMs}ms)`
+          : inner.aborted === 'cancelled'
+            ? 'cancelled (signal)'
+            : `timeout (${timeoutMs}ms)`
         : undefined;
 
       void this.writeAudit({
@@ -474,6 +520,7 @@ export class SshSessionService {
         action: 'exec',
         sourceContext,
         userId: opts.userId,
+        workflow: opts.workflow,
         command: this.truncateCommand(command),
         exitCode: inner.exitCode ?? undefined,
         durationMs,
@@ -482,6 +529,7 @@ export class SshSessionService {
 
       return { ...inner, durationMs };
     } finally {
+      detachSignal?.();
       if (client) {
         try { client.end(); } catch { /* noop */ }
         try { client.destroy(); } catch { /* noop */ }
@@ -532,6 +580,7 @@ export class SshSessionService {
     startedAt: string;
   }> {
     const sourceContext = opts.sourceContext ?? 'mcp';
+    if (opts.signal?.aborted) throw new Error('cancelled');
     // Acquire the slot synchronously so a flood of async-execs still
     // respects CONCURRENCY_LIMIT. The slot is released by the background
     // task on finalize (or by the catastrophic-error branch).
@@ -624,6 +673,7 @@ export class SshSessionService {
    */
   private async runJobBackground(job: ExecJob, opts: SshExecOpts): Promise<void> {
     let client: Ssh2Client | null = null;
+    let detachSignal: (() => void) | undefined;
     try {
       const connection = await this.sshService.findById(job.connectionId);
       let creds: ResolvedCreds;
@@ -636,6 +686,7 @@ export class SshSessionService {
           action: 'exec',
           sourceContext: job.sourceContext,
           userId: job.userId,
+          workflow: opts.workflow,
           command: this.truncateCommand(job.command),
           durationMs: Date.now() - job.startedAt,
           errorMsg: 'credential_missing',
@@ -644,6 +695,7 @@ export class SshSessionService {
       }
 
       client = await this.openClient(connection, creds);
+      if (opts.signal?.aborted) throw new Error('cancelled');
       const wrappedCommand = opts.cwd
         ? `cd '${this.shellSingleQuoteEscape(opts.cwd)}' && ${job.command}`
         : job.command;
@@ -676,7 +728,10 @@ export class SshSessionService {
             job.stderrBytes = totalBytes;
             this.appendTail(job.stderrTail, chunk, TAIL_STDERR_BYTES, 'stderr', job);
           },
-          onCancelHandleReady: (cancelFn) => { job.cancel = cancelFn; },
+          onCancelHandleReady: (cancelFn) => {
+            job.cancel = cancelFn;
+            detachSignal = bindAbortSignal(opts.signal, cancelFn);
+          },
         },
       );
       const durationMs = Date.now() - job.startedAt;
@@ -706,12 +761,14 @@ export class SshSessionService {
         action: 'exec',
         sourceContext: job.sourceContext,
         userId: job.userId,
+        workflow: opts.workflow,
         command: this.truncateCommand(job.command),
         exitCode: inner.exitCode ?? undefined,
         durationMs,
         errorMsg: auditErrorMsg,
       });
     } finally {
+      detachSignal?.();
       if (client) {
         try { client.end(); } catch { /* noop */ }
         try { client.destroy(); } catch { /* noop */ }
@@ -1070,6 +1127,7 @@ export class SshSessionService {
     sourceContext: SshAuditSourceContext;
     userId?: string;
     agentRoleId?: string;
+    workflow?: SshWorkflowRef;
     command?: string;
     remotePath?: string;
     bytes?: number;
@@ -1104,6 +1162,17 @@ export class SshSessionService {
     if (entry.bytes !== undefined) doc.bytes = entry.bytes;
     if (entry.exitCode !== undefined) doc.exitCode = entry.exitCode;
     if (entry.errorMsg !== undefined) doc.errorMsg = entry.errorMsg;
+    if (entry.workflow) {
+      // Run-/Definitions-Id nur als gültige ObjectId; die Node-Id ist frei
+      // wählbarer Text aus der Definition.
+      if (Types.ObjectId.isValid(entry.workflow.runId)) {
+        doc.workflowRunId = new Types.ObjectId(entry.workflow.runId);
+      }
+      if (Types.ObjectId.isValid(entry.workflow.definitionId)) {
+        doc.workflowDefinitionId = new Types.ObjectId(entry.workflow.definitionId);
+      }
+      doc.workflowNodeId = entry.workflow.nodeId;
+    }
 
     return Promise.resolve(this.auditModel.create(doc))
       .then(() => undefined)

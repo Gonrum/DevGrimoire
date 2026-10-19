@@ -18,7 +18,7 @@
 const assert = require('node:assert/strict');
 
 const { WorkflowAccountabilityService } = require('../dist/workflows/engine/workflow-accountability.service');
-const { requiresAccountableUser } = require('../dist/workflows/workflow-security.policy');
+const { getWorkflowNodePolicy, requiresAccountableUser } = require('../dist/workflows/workflow-security.policy');
 const { WorkflowsController } = require('../dist/workflows/workflows.controller');
 const { RequestContext } = require('../dist/common/request-context');
 const { accountabilityRefusal, WorkflowEngineService } = require('../dist/workflows/engine/workflow-engine.service');
@@ -172,6 +172,8 @@ function service(users, defs = []) {
     assert.equal(r.status, 'failed');
     assert.equal(r.error.code, 'no_accountable_user');
     assert.equal(accountabilityRefusal('workspace.exec', false).error.code, 'no_accountable_user');
+    assert.equal(accountabilityRefusal('ssh.exec', false).error.code, 'no_accountable_user');
+    assert.equal(requiresAccountableUser(getWorkflowNodePolicy('ssh.exec').risk), true);
   });
 
   await check('Engine-Gate: mit Akteur oder ohne Akteurpflicht kein Eingriff', async () => {
@@ -256,6 +258,38 @@ async function engineChecks() {
       const p2 = await newRun({ status: 'failed', triggeredBy: { type: 'manual', userId: USER_A } });
       const c2 = await engine.retryRun(p2._id.toString(), 'a');
       assert.equal(c2.triggeredBy.userId, USER_A);
+    });
+
+    await check('Engine: ssh.exec ohne Akteur → no_accountable_user, Lauf folgt der failure-Edge', async () => {
+      seen = null;
+      const ssh = { id: 'ssh', type: 'ssh.exec', config: { connectionId: 'x', command: 'true' }, position: { x: 0, y: 0 } };
+      const alarm = { id: 'alarm', type: 'action.log', config: {}, position: { x: 0, y: 0 } };
+      const run = await Run.create({
+        definitionId: new mongoose.Types.ObjectId(), definitionVersion: 1, scope: 'project',
+        projectId: new mongoose.Types.ObjectId(),
+        definitionSnapshot: {
+          nodes: [ssh, alarm],
+          edges: [{ id: 'e1', source: 'ssh', target: 'alarm', branch: 'failure' }],
+        },
+        trigger: { type: 'manual' }, status: 'running', triggeredBy: { type: 'manual' },
+        startedAt: new Date(), context: { nodes: {} },
+      });
+      // Reste früherer Checks (Retry-Läufe) abräumen, damit peek() den ssh-Job liefert.
+      for (let j = queue.peek(); j; j = queue.peek()) queue.take(j.seq);
+      await engine.enqueueNode(run, ssh, 1);
+      const job = queue.take(queue.peek().seq);
+      await engine.runJob(job);
+      assert.equal(seen, null, 'Executor darf ohne Akteur nicht laufen');
+      const nr = await NodeRun.findOne({ runId: run._id, nodeId: 'ssh' }).lean();
+      assert.equal(nr.status, 'failed');
+      assert.equal(nr.error.code, 'no_accountable_user');
+      const next = queue.peek();
+      assert.ok(next, 'failure-Edge muss den Folge-Node einreihen');
+      assert.equal(next.nodeId, 'alarm');
+      const after = await Run.findById(run._id).lean();
+      assert.equal(after.context.nodes.ssh.error.code, 'no_accountable_user');
+      assert.notEqual(after.status, 'failed');
+      queue.take(next.seq);
     });
   } finally {
     await Promise.all([Def, Run, NodeRun].map((m) => m.collection.drop().catch(() => {})));

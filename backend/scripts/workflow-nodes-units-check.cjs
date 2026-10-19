@@ -102,6 +102,7 @@ const allExecutors = [
     invalid: { entity: 'todo', action: 'nope' },
   }],
   ['workflows/nodes/agent-task.executor.js', 'AgentTaskExecutor', { config: { prompt: 'hi' }, invalid: { prompt: '' } }],
+  ['workflows/nodes/ssh-exec.executor.js', 'SshExecExecutor', { config: { connectionId: 'x', command: 'true' }, invalid: { command: '' } }],
 ];
 
 for (const [relPath, exportName, fixture] of allExecutors) {

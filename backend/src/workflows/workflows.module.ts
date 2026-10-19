@@ -32,6 +32,7 @@ import { ActionUserQuestionExecutor } from './nodes/action-user-question.executo
 import { ControlConditionExecutor } from './nodes/control-condition.executor';
 import { ControlDelayExecutor } from './nodes/control-delay.executor';
 import { AgentTaskExecutor } from './nodes/agent-task.executor';
+import { SshExecExecutor } from './nodes/ssh-exec.executor';
 import { MilestonesModule } from '../milestones/milestones.module';
 import { TodosModule } from '../todos/todos.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -44,6 +45,7 @@ import { SettingsModule } from '../settings/settings.module';
 import { CommonModule } from '../common/common.module';
 import { BalancerModule } from '../balancer/balancer.module';
 import { AuthModule } from '../auth/auth.module';
+import { SshModule } from '../ssh/ssh.module';
 import { CustomerProjectLink, CustomerProjectLinkSchema } from '../customers/schemas/customer-project-link.schema';
 import { WorkflowScopeGuard } from './workflow-scope.guard';
 import { WorkflowAccountabilityService } from './engine/workflow-accountability.service';
@@ -68,6 +70,7 @@ import { WorkflowAccountabilityService } from './engine/workflow-accountability.
     CommonModule,
     BalancerModule,
     AuthModule,
+    SshModule,
   ],
   controllers: [WorkflowsController, WorkflowNodeTypesController, WorkflowAgentController],
   providers: [
@@ -99,6 +102,7 @@ import { WorkflowAccountabilityService } from './engine/workflow-accountability.
     ControlConditionExecutor,
     ControlDelayExecutor,
     AgentTaskExecutor,
+    SshExecExecutor,
   ],
   exports: [WorkflowsService, WorkflowEngineService, WorkflowAgentService, NodeRegistry],
 })
@@ -122,6 +126,7 @@ export class WorkflowsModule implements OnModuleInit {
     private readonly controlCondition: ControlConditionExecutor,
     private readonly controlDelay: ControlDelayExecutor,
     private readonly agentTask: AgentTaskExecutor,
+    private readonly sshExec: SshExecExecutor,
   ) {}
 
   onModuleInit(): void {
@@ -142,5 +147,6 @@ export class WorkflowsModule implements OnModuleInit {
     this.registry.register(this.controlCondition);
     this.registry.register(this.controlDelay);
     this.registry.register(this.agentTask);
+    this.registry.register(this.sshExec);
   }
 }

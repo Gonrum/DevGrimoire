@@ -50,6 +50,7 @@ import {
 import { getWorkflowNodePolicy, requiresAccountableUser } from '../workflow-security.policy';
 import { RequestContext } from '../../common/request-context';
 import { AccountableActor, WorkflowAccountabilityService } from './workflow-accountability.service';
+import { SshExecExecutor } from '../nodes/ssh-exec.executor';
 
 const DEFAULT_TIMEOUT_MS = WORKFLOW_RUNTIME_LIMITS.defaultNodeTimeoutMs;
 /**
@@ -498,6 +499,20 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       outputSchema: metadata.outputs,
       branches: metadata.branches ?? ['success', 'failure'],
     });
+    // ssh.exec ist eine Aktion, bekommt im Test aber eine echte
+    // Verbindungsprüfung — ohne den Befehl zu senden. Der Lauf-Scope dafür
+    // kommt nur aus einer gespeicherten Definition, nie aus dem Request.
+    if (executor instanceof SshExecExecutor) {
+      if (dto.workflowId === undefined) {
+        return validationOnly('ssh.exec braucht eine workflowId für die Verbindungsprüfung (Projekt-/Kunden-Scope)');
+      }
+      return executor.connectionCheck(
+        { projectId, customerId },
+        parsedConfig,
+        dto.runContext ?? { nodes: {}, input: dto.input ?? {} },
+        RequestContext.getUser()?.userId,
+      );
+    }
     if (metadata.category === 'action') {
       return validationOnly(`node category action may have side effects and is not executed in test mode`);
     }

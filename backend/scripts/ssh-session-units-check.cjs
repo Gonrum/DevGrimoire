@@ -1225,6 +1225,65 @@ function makeFakeSftp({
     );
   });
 
+  // Workflow-Aufrufe (Task 6): AbortSignal + Audit-Herkunft
+  await check('exec() mit bereits abgebrochenem Signal startet nichts', async () => {
+    const conn = makeKeyConnection({ knownHostFingerprint: FAKE_FINGERPRINT });
+    const sshService = makeSshServiceStub({ connection: conn });
+    const captureExec = [];
+    const factory = makeClientFactory({ captureExec });
+    const svc = new SshSessionService(sshService, makeSecretsServiceStub(), makeAuditModelStub(), makeNotificationsStub(), makeSettingsStub(), factory);
+    const ac = new AbortController();
+    ac.abort();
+    await assert.rejects(() => svc.exec(String(conn._id), 'true', { signal: ac.signal }), /cancelled/);
+    assert.equal(captureExec.length, 0);
+    assert.equal(factory._inst._last, null, 'kein Client darf geöffnet werden');
+  });
+
+  await check('exec(): Signal-Abbruch eskaliert zu aborted="cancelled" (TERM), Audit trägt Workflow-Herkunft', async () => {
+    const conn = makeKeyConnection({ knownHostFingerprint: FAKE_FINGERPRINT });
+    const sshService = makeSshServiceStub({ connection: conn });
+    const audit = makeAuditModelStub();
+    const captured = [];
+    let stuck = null;
+    const factory = makeClientFactory({
+      captureSignals: captured,
+      onChannel: (stream) => {
+        stuck = stream;
+        // Der Kanal antwortet erst auf TERM mit close.
+        stream.signal = (sig) => {
+          captured.push(sig);
+          if (sig === 'TERM') setImmediate(() => stream.emit('close'));
+        };
+      },
+    });
+    const svc = new SshSessionService(sshService, makeSecretsServiceStub(), audit, makeNotificationsStub(), makeSettingsStub(), factory);
+    const ac = new AbortController();
+    const userId = new Types.ObjectId().toString();
+    const runId = new Types.ObjectId().toString();
+    const definitionId = new Types.ObjectId().toString();
+    const pending = svc.exec(String(conn._id), 'sleep 600', {
+      userId,
+      timeoutMs: 30_000,
+      idleTimeoutMs: 0,
+      sourceContext: 'workflow',
+      workflow: { runId, nodeId: 'deploy', definitionId },
+      signal: ac.signal,
+    });
+    await waitFor(() => stuck !== null);
+    ac.abort();
+    const out = await pending;
+    assert.equal(out.aborted, 'cancelled');
+    assert.ok(captured.includes('TERM'), `TERM erwartet, war ${captured.join(',')}`);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(audit._writes.length, 1);
+    const row = audit._writes[0];
+    assert.equal(row.sourceContext, 'workflow');
+    assert.equal(String(row.workflowRunId), runId);
+    assert.equal(String(row.workflowDefinitionId), definitionId);
+    assert.equal(row.workflowNodeId, 'deploy');
+    assert.match(String(row.errorMsg), /cancelled/);
+  });
+
   // ------------------------------------------------------------------
   // Summary
   // ------------------------------------------------------------------
