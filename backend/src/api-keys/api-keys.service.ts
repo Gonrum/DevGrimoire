@@ -174,6 +174,21 @@ export class ApiKeysService {
     return apiKey;
   }
 
+  /**
+   * Aktiver, nicht abgelaufener Key per Id — für Workflow-Läufe, die ein Key
+   * ausgelöst oder freigegeben hat und die später ohne Request laufen.
+   * Anders als `validate` ohne `lastUsedAt`-Update: das ist keine Benutzung
+   * durch den Key-Inhaber. Widerrufen heißt gelöscht → `null`.
+   */
+  async findActiveById(id: string): Promise<ApiKeyDocument | null> {
+    // Nur geprüfte Ids in den Filter (Projektregel).
+    if (!Types.ObjectId.isValid(id)) return null;
+    const apiKey = await this.apiKeyModel.findOne({ _id: new Types.ObjectId(id), active: true }).exec();
+    if (!apiKey) return null;
+    if (apiKey.expiresAt && apiKey.expiresAt < new Date()) return null;
+    return apiKey;
+  }
+
   async list(userId: string): Promise<ApiKeyDocument[]> {
     return this.apiKeyModel
       .find({ userId })

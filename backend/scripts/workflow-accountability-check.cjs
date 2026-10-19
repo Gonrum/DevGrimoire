@@ -10,6 +10,9 @@
  *     übergibt stattdessen den Request-Akteur
  *
  *   - die Engine verweigert Nodes mit Akteurpflicht ohne Akteur
+ *   - API-Key-Verengung (Final-Review C1): Lauf/Approval tragen die Key-Id,
+ *     resolve baut Key ∩ Besitzer; Start, Retry, Aktivierung und Node-Test
+ *     verlangen Zugriff auf Projekt/Kunde des Workflows
  *
  * Läuft gegen `dist/`, ohne Nest. Mit MONGODB_TEST_URI (Wegwerf-Datenbank)
  * zusätzlich gegen die echte Engine: Ausführung im RequestContext des Akteurs
@@ -22,6 +25,8 @@ const { getWorkflowNodePolicy, requiresAccountableUser } = require('../dist/work
 const { WorkflowsController } = require('../dist/workflows/workflows.controller');
 const { RequestContext } = require('../dist/common/request-context');
 const { accountabilityRefusal, WorkflowEngineService } = require('../dist/workflows/engine/workflow-engine.service');
+const { WorkflowsService } = require('../dist/workflows/workflows.service');
+const { assertActorCanAccessWorkflow } = require('../dist/workflows/workflow-actor-access');
 
 let passed = 0;
 async function check(name, fn) {
@@ -66,8 +71,30 @@ function fakeDefinitions(defs) {
   };
 }
 
-function service(users, defs = []) {
-  return new WorkflowAccountabilityService(fakeDefinitions(defs), fakeAuth(users));
+const KEY_A = '64b0000000000000000aaa01';
+const KEY_OTHER = '64b0000000000000000aaa02';
+const PROJ_A = '64b00000000000000000a001';
+const PROJ_B = '64b00000000000000000b002';
+
+/** ApiKeysService-Attrappe: `findActiveById` kennt nur die übergebenen (aktiven) Keys. */
+function fakeApiKeys(keys = []) {
+  return { findActiveById: async (id) => keys.find((k) => k._id.toString() === id) ?? null };
+}
+
+/** Key von USER_A, auf Projekt A verengt. */
+function keyA(owner = USER_A) {
+  return {
+    _id: oid(KEY_A), userId: oid(owner), permissions: [],
+    projectScopeMode: 'allowlist', allowedProjectIds: [oid(PROJ_A)],
+    customerScopeMode: 'all', allowedCustomerIds: [],
+  };
+}
+
+/** Request-Akteur eines auf Projekt A verengten Keys von USER_A. */
+const narrowed = { userId: USER_A, username: 'a', role: 'user', apiKeyId: KEY_A, projectScopeMode: 'allowlist', allowedProjectIds: [PROJ_A], customerScopeMode: 'all', allowedCustomerIds: [] };
+
+function service(users, defs = [], keys = []) {
+  return new WorkflowAccountabilityService(fakeDefinitions(defs), fakeAuth(users), fakeApiKeys(keys));
 }
 
 (async () => {
@@ -145,7 +172,7 @@ function service(users, defs = []) {
     const calls = [];
     const workflows = { startRun: async (dto, userId) => { calls.push({ dto, userId }); return { ok: true }; } };
     const controller = new WorkflowsController(workflows, {}, {});
-    const actor = { userId: USER_A, username: 'a', role: 'user' };
+    const actor = { userId: USER_A, username: 'a', role: 'user', apiKeyId: KEY_A };
     await RequestContext.run(actor, undefined, () =>
       controller.startRun({ definitionId: DEF_ID, input: { x: 1 }, triggeredBy: { type: 'schedule', userId: USER_B } }),
     );
@@ -154,17 +181,19 @@ function service(users, defs = []) {
     assert.equal('triggeredBy' in calls[0].dto, false);
     assert.equal(calls[0].dto.definitionId, DEF_ID);
     assert.deepEqual(calls[0].dto.input, { x: 1 });
-    assert.equal(calls[0].userId, USER_A);
+    // Der ganze Request-Akteur samt apiKeyId, nicht nur die userId.
+    assert.equal(calls[0].userId, actor);
   });
 
   await check('Controller.retryRun reicht den Request-Akteur an die Engine', async () => {
     const calls = [];
     const engine = { retryRun: async (...args) => { calls.push(args); return { _id: oid('child') }; } };
     const controller = new WorkflowsController({}, engine, {});
-    await RequestContext.run({ userId: USER_C, username: 'c', role: 'user' }, undefined, () =>
+    const actor = { userId: USER_C, username: 'c', role: 'user', apiKeyId: KEY_A };
+    await RequestContext.run(actor, undefined, () =>
       controller.retryRun('parent', { fromNodeId: 'n2' }),
     );
-    assert.deepEqual(calls[0], ['parent', 'n2', USER_C]);
+    assert.deepEqual(calls[0], ['parent', 'n2', actor]);
   });
 
   await check('Engine-Gate: external-call ohne Akteur → no_accountable_user', async () => {
@@ -180,6 +209,133 @@ function service(users, defs = []) {
     assert.equal(accountabilityRefusal('http.request', true), undefined);
     assert.equal(accountabilityRefusal('action.log', false), undefined);
     assert.equal(accountabilityRefusal('gibt.es.nicht', false), undefined);
+  });
+
+  // ── Final-Review C1: API-Key-Verengung ────────────────────────────────────
+  await check('C1 resolve: triggeredBy.apiKeyId → Key ∩ Besitzer (Projekt A), apiKeyId zurück', async () => {
+    const r = await service([user(USER_A)], [], [keyA()]).resolve({
+      triggeredBy: { type: 'manual', userId: USER_A, apiKeyId: KEY_A },
+      definitionId: oid(DEF_ID),
+    });
+    assert.ok(r);
+    assert.equal(r.userId, USER_A);
+    assert.equal(r.apiKeyId, KEY_A);
+    assert.equal(r.actor.apiKeyId, KEY_A);
+    assert.equal(r.actor.projectScopeMode, 'allowlist');
+    assert.deepEqual(r.actor.allowedProjectIds, [PROJ_A]);
+  });
+
+  await check('C1 resolve: ohne apiKeyId voller Nutzer-Scope (unverändert)', async () => {
+    const r = await service([user(USER_A)], [], [keyA()]).resolve({
+      triggeredBy: { type: 'manual', userId: USER_A }, definitionId: oid(DEF_ID),
+    });
+    assert.equal(r.actor.projectScopeMode, 'all');
+    assert.equal(r.apiKeyId, undefined);
+  });
+
+  await check('C1 resolve: widerrufener/abgelaufener Key → null, kein Ausweichen auf den Besitzer', async () => {
+    const r = await service([user(USER_A)], [], []).resolve({
+      triggeredBy: { type: 'manual', userId: USER_A, apiKeyId: KEY_A }, definitionId: oid(DEF_ID),
+    });
+    assert.equal(r, null);
+  });
+
+  await check('C1 resolve: Key eines anderen Besitzers → null', async () => {
+    const r = await service([user(USER_A)], [], [{ ...keyA(USER_B), _id: oid(KEY_OTHER) }]).resolve({
+      triggeredBy: { type: 'manual', userId: USER_A, apiKeyId: KEY_OTHER }, definitionId: oid(DEF_ID),
+    });
+    assert.equal(r, null);
+  });
+
+  await check('C1 resolve: Zeitplan-Lauf erbt approvedByApiKeyId der letzten Approval', async () => {
+    const def = { _id: oid(DEF_ID), approvals: [{ approvedByUserId: oid(USER_A), approvedByApiKeyId: KEY_A }] };
+    const r = await service([user(USER_A)], [def], [keyA()]).resolve({
+      triggeredBy: { type: 'schedule' }, definitionId: oid(DEF_ID),
+    });
+    assert.equal(r && r.apiKeyId, KEY_A);
+    assert.deepEqual(r.actor.allowedProjectIds, [PROJ_A]);
+  });
+
+
+  /** WorkflowsService mit Attrappen; `def` liegt in `projectId`. */
+  function workflowsWith(def) {
+    const created = [];
+    const defModel = { findById: () => ({ exec: async () => def }) };
+    const runModel = { create: async (doc) => { created.push(doc); return { _id: oid('run'), ...doc }; } };
+    const svc = new WorkflowsService(defModel, runModel, {}, { emit: () => true }, { has: () => false }, { record: async () => {} });
+    return { svc, created };
+  }
+  const activeDef = (projectHex) => ({
+    _id: oid(DEF_ID), name: 'w', status: 'active', scope: 'project', version: 1,
+    projectId: oid(projectHex), nodes: [], edges: [], approvals: [],
+  });
+
+  await check('C1 startRun: verengter Key, fremdes Projekt → Forbidden, kein Lauf', async () => {
+    const { svc, created } = workflowsWith(activeDef(PROJ_B));
+    await assert.rejects(
+      RequestContext.run(narrowed, undefined, () => svc.startRun({ definitionId: DEF_ID })),
+      (e) => e.status === 403,
+    );
+    await assert.rejects(svc.startRun({ definitionId: DEF_ID }, narrowed), (e) => e.status === 403);
+    assert.equal(created.length, 0);
+  });
+
+  await check('C1 startRun: eigenes Projekt → Lauf trägt userId und apiKeyId', async () => {
+    const { svc, created } = workflowsWith(activeDef(PROJ_A));
+    await svc.startRun({ definitionId: DEF_ID }, narrowed);
+    assert.equal(created.length, 1);
+    assert.equal(created[0].triggeredBy.userId, USER_A);
+    assert.equal(created[0].triggeredBy.apiKeyId, KEY_A);
+  });
+
+  await check('C1 startRun: interner Start (triggeredBy) bleibt ohne Akteur-Prüfung', async () => {
+    const { svc, created } = workflowsWith(activeDef(PROJ_B));
+    await RequestContext.run(narrowed, undefined, () => svc.startRun({ definitionId: DEF_ID, triggeredBy: { type: 'event' } }));
+    assert.equal(created.length, 1);
+    assert.equal(created[0].triggeredBy.userId, undefined);
+    assert.equal(created[0].triggeredBy.apiKeyId, undefined);
+  });
+
+  function draftDef(projectHex) {
+    const d = { ...activeDef(projectHex), status: 'draft', saved: 0 };
+    d.save = async () => { d.saved += 1; return d; };
+    return d;
+  }
+
+  await check('C1 Aktivierung: verengter Key, fremdes Projekt → Forbidden, nichts gespeichert', async () => {
+    const d = draftDef(PROJ_B);
+    const { svc } = workflowsWith(d);
+    await assert.rejects(
+      RequestContext.run(narrowed, undefined, () => svc.updateDefinition(DEF_ID, { status: 'active' })),
+      (e) => e.status === 403,
+    );
+    assert.equal(d.saved, 0);
+  });
+
+  await check('C1 Aktivierung: eigenes Projekt → Approval mit approvedByApiKeyId', async () => {
+    const d = draftDef(PROJ_A);
+    const { svc } = workflowsWith(d);
+    await RequestContext.run(narrowed, undefined, () => svc.updateDefinition(DEF_ID, { status: 'active' }));
+    assert.equal(d.saved, 1);
+    assert.equal(d.approvals.length, 1);
+    assert.equal(d.approvals[0].approvedByApiKeyId, KEY_A);
+    assert.equal(d.approvals[0].approvedByUserId.toString(), USER_A);
+  });
+
+  await check('C1 testNode: verengter Key, Workflow in fremdem Projekt → Forbidden', async () => {
+    const defModel = { findById: () => ({ exec: async () => activeDef(PROJ_B) }) };
+    const registry = { get: () => ({ metadata: { allowedScopes: ['project'], configSchema: { safeParse: (c) => ({ success: true, data: c }) }, category: 'control', outputs: {} }, execute: async () => assert.fail('darf nicht laufen') }) };
+    const engine = new WorkflowEngineService(defModel, {}, {}, {}, {}, registry, {}, {}, {}, {}, {}, {});
+    await assert.rejects(
+      RequestContext.run(narrowed, undefined, () => engine.testNode({ node: { id: 'n', type: 'todo.find', config: {} }, workflowId: DEF_ID })),
+      (e) => e.status === 403,
+    );
+  });
+
+  await check('C1 Hilfsfunktion: ohne Akteur intern erlaubt, System-Workflow offen', async () => {
+    assert.doesNotThrow(() => assertActorCanAccessWorkflow(undefined, { projectId: oid(PROJ_B) }));
+    assert.doesNotThrow(() => assertActorCanAccessWorkflow(narrowed, {}));
+    assert.throws(() => assertActorCanAccessWorkflow({ ...narrowed, customerScopeMode: 'none' }, { customerId: oid(PROJ_A) }), (e) => e.status === 403);
   });
 
   await engineChecks();
@@ -225,7 +381,7 @@ async function engineChecks() {
   };
   const queue = new WorkflowQueueService();
   const noop = { record: async () => {}, create: async () => {} };
-  const accountability = new WorkflowAccountabilityService(Def, fakeAuth([user(USER_A)]));
+  const accountability = new WorkflowAccountabilityService(Def, fakeAuth([user(USER_A)]), fakeApiKeys([keyA()]));
   const engine = new WorkflowEngineService(
     Def, Run, NodeRun, queue, {}, registry, new EventEmitter2(), noop, {}, noop, noop, accountability,
   );
@@ -256,12 +412,36 @@ async function engineChecks() {
 
     await check('Engine: Retry trägt den auslösenden Nutzer, sonst den des Elternlaufs', async () => {
       const p1 = await newRun({ status: 'failed', triggeredBy: { type: 'manual', userId: USER_A } });
-      const c1 = await engine.retryRun(p1._id.toString(), 'a', USER_C);
+      const c1 = await engine.retryRun(p1._id.toString(), 'a', { userId: USER_C, username: 'c', role: 'user' });
       assert.equal(c1.triggeredBy.userId, USER_C);
       assert.equal(c1.triggeredBy.type, 'manual');
       const p2 = await newRun({ status: 'failed', triggeredBy: { type: 'manual', userId: USER_A } });
       const c2 = await engine.retryRun(p2._id.toString(), 'a');
       assert.equal(c2.triggeredBy.userId, USER_A);
+    });
+
+    await check('C1 Engine: Retry mit verengtem Key — fremdes Projekt Forbidden ohne Claim, eigenes trägt apiKeyId', async () => {
+      const foreign = await newRun({ status: 'failed', scope: 'project', projectId: new mongoose.Types.ObjectId(PROJ_B), triggeredBy: { type: 'manual', userId: USER_A } });
+      await assert.rejects(engine.retryRun(foreign._id.toString(), 'a', narrowed), (e) => e.status === 403);
+      const after = await Run.findById(foreign._id).lean();
+      assert.equal(after.retryClaimedAt, undefined, 'abgelehnter Retry darf den Elternlauf nicht sperren');
+      const own = await newRun({ status: 'failed', scope: 'project', projectId: new mongoose.Types.ObjectId(PROJ_A), triggeredBy: { type: 'manual', userId: USER_A } });
+      const child = await engine.retryRun(own._id.toString(), 'a', narrowed);
+      assert.equal(child.triggeredBy.userId, USER_A);
+      assert.equal(child.triggeredBy.apiKeyId, KEY_A);
+    });
+
+    await check('M1 Engine: Retry eines Zeitplan-Laufs ohne Request-Akteur erbt den aufgelösten Akteur (Approval + Key)', async () => {
+      const def = await Def.create({
+        scope: 'system', name: 'zeitplan', version: 1, status: 'active', nodes: [], edges: [],
+        approvals: [{ version: 1, approvedAt: new Date(), approvedByUserId: new mongoose.Types.ObjectId(USER_A), approvedByApiKeyId: KEY_A }],
+      });
+      const parent = await newRun({ definitionId: def._id, status: 'failed', triggeredBy: { type: 'schedule' } });
+      const child = await engine.retryRun(parent._id.toString(), 'a');
+      assert.equal(child.triggeredBy.userId, USER_A);
+      assert.equal(child.triggeredBy.apiKeyId, KEY_A);
+      const r = await accountability.resolve(child);
+      assert.deepEqual(r.actor.allowedProjectIds, [PROJ_A]);
     });
 
     await check('Engine: ssh.exec ohne Akteur → no_accountable_user, Lauf folgt der failure-Edge', async () => {

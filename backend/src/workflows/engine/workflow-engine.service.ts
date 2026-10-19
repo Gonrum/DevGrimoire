@@ -48,8 +48,9 @@ import {
   WORKFLOW_RUNTIME_LIMITS,
 } from '../workflow-security.runtime';
 import { getWorkflowNodePolicy, requiresAccountableUser } from '../workflow-security.policy';
-import { RequestContext } from '../../common/request-context';
+import { RequestContext, RequestUser } from '../../common/request-context';
 import { AccountableActor, WorkflowAccountabilityService } from './workflow-accountability.service';
+import { assertActorCanAccessWorkflow } from '../workflow-actor-access';
 import { SshExecExecutor } from '../nodes/ssh-exec.executor';
 
 const DEFAULT_TIMEOUT_MS = WORKFLOW_RUNTIME_LIMITS.defaultNodeTimeoutMs;
@@ -458,6 +459,9 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       if (!isValidObjectId(dto.workflowId)) throw new BadRequestException('Invalid workflowId');
       const def = await this.definitionModel.findById(dto.workflowId).exec();
       if (!def) throw new NotFoundException(`Workflow ${dto.workflowId} not found`);
+      // Der Test läuft im Scope der Definition — der Aufrufer muss dort
+      // zugreifen dürfen (ssh.exec baut sonst eine Verbindung in fremdem Scope auf).
+      assertActorCanAccessWorkflow(RequestContext.getUser(), def);
       scope = def.scope;
       projectId = def.projectId;
       customerId = def.customerId;
@@ -1050,7 +1054,14 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
    * starts executing from `fromNodeId` (or the first failed node, or the
    * trigger if none).
    */
-  async retryRun(runId: string, fromNodeId?: string, userId?: string): Promise<WorkflowRunDocument> {
+  async retryRun(runId: string, fromNodeId?: string, requestActor?: RequestUser): Promise<WorkflowRunDocument> {
+    // Zugriff vor dem Claim prüfen — sonst bliebe ein abgelehnter Versuch als
+    // `retryClaimedAt` am Elternlauf stehen und sperrte jeden weiteren Retry.
+    if (requestActor) {
+      if (!isValidObjectId(runId)) throw new BadRequestException('Invalid run id');
+      const target = await this.runModel.findById(runId).select('projectId customerId').lean().exec();
+      if (target) assertActorCanAccessWorkflow(requestActor, target);
+    }
     // Atomic guard: only allow ONE retry to win for a given parent run. We
     // briefly stamp a marker on the parent (re-set status to itself) so that
     // a second concurrent retryRun call returns null and bails out. Using
@@ -1091,6 +1102,15 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       resolvedFromNodeId = nodeToStart?.id;
     }
 
+    // Wer den Retry auslöst, verantwortet ihn (samt API-Key-Verengung). Ohne
+    // Request-Akteur bleibt zuständig, wem der Elternlauf zuzurechnen war —
+    // aufgelöst, nicht nur `triggeredBy.userId`: ein Zeitplan-/Event-Lauf
+    // trägt dort keinen Nutzer, sein Akteur kommt aus der Approval.
+    const parentActor = requestActor ? null : await this.resolveAccountable(parent);
+    const retryStarter = requestActor
+      ? { userId: requestActor.userId, ...(requestActor.apiKeyId ? { apiKeyId: requestActor.apiKeyId } : {}) }
+      : { userId: parentActor?.userId, ...(parentActor?.apiKeyId ? { apiKeyId: parentActor.apiKeyId } : {}) };
+
     const child = await this.runModel.create({
       definitionId: parent.definitionId,
       definitionVersion: parent.definitionVersion,
@@ -1105,9 +1125,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       // Fresh context — do NOT inherit upstream node outputs, since the user is
       // explicitly asking for a re-execution from a chosen point.
       context: { nodes: {}, input: {} },
-      // Wer den Retry auslöst, verantwortet ihn; ohne Request-Akteur (z. B.
-      // Auth aus) bleibt der Starter des Elternlaufs zuständig.
-      triggeredBy: { type: 'manual', userId: userId ?? parent.triggeredBy?.userId },
+      triggeredBy: { type: 'manual', ...retryStarter },
       parentRunId: parent._id,
       retryFromNodeId: resolvedFromNodeId,
       executedNodeCount: 0,

@@ -63,6 +63,11 @@ export class WorkflowRun {
     type: 'manual' | 'schedule' | 'event';
     scheduleSlotAt?: Date;
     userId?: string;
+    /**
+     * Kam der Start über einen API-Key, dessen Id: der Lauf bekommt dann den
+     * verengten Scope des Keys (Key ∩ Besitzer), nicht den vollen des Besitzers.
+     */
+    apiKeyId?: string;
   };
 
   /** Number of node executions performed by this run. Capped per security policy. */

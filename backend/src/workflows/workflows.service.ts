@@ -35,7 +35,8 @@ import { PROJECT_CHANGED } from '../events/project-event';
 import { workflowSecurityIssues } from './workflow-security.policy';
 import { NodeRegistry } from './engine/node-registry';
 import { AuditLogService } from '../audit-log/audit-log.service';
-import { RequestContext } from '../common/request-context';
+import { RequestContext, RequestUser } from '../common/request-context';
+import { assertActorCanAccessWorkflow } from './workflow-actor-access';
 import { redact } from './workflow-redaction';
 import { summarizeRisk, WORKFLOW_RUNTIME_LIMITS } from './workflow-security.runtime';
 import { getTemplate, listTemplatesPublic, WorkflowTemplate } from './workflow-templates';
@@ -271,6 +272,10 @@ export class WorkflowsService {
       (previousStatus !== WorkflowStatus.ACTIVE || willBump);
     if (becameActive) {
       const actor = RequestContext.getUser();
+      // Wer freigibt, verantwortet die automatischen Läufe — er muss also auf
+      // Projekt/Kunde des Workflows zugreifen dürfen (sonst aktivierte ein
+      // verengter Key einen Workflow in fremdem Scope).
+      assertActorCanAccessWorkflow(actor, existing);
       const risk = summarizeRisk(existing.nodes);
       existing.approvals = [
         ...(existing.approvals ?? []),
@@ -281,6 +286,9 @@ export class WorkflowsService {
             actor?.userId && isValidObjectId(actor.userId) ? new Types.ObjectId(actor.userId) : undefined,
           approvedByUsername: actor?.username,
           approvedByRole: actor?.role,
+          // Freigabe per API-Key: Zeitplan-/Event-Läufe erben dessen verengten
+          // Scope, nicht den vollen des Besitzers (WorkflowAccountabilityService).
+          ...(actor?.apiKeyId ? { approvedByApiKeyId: actor.apiKeyId } : {}),
           riskSummary: risk,
         },
       ];
@@ -315,8 +323,15 @@ export class WorkflowsService {
     await this.audit('workflow.definition.deleted', def);
   }
 
-  async startRun(dto: StartWorkflowRunDto, userId?: string): Promise<WorkflowRunDocument> {
+  async startRun(dto: StartWorkflowRunDto, requestActor?: RequestUser): Promise<WorkflowRunDocument> {
     const def = await this.getDefinition(dto.definitionId);
+    // Interne Starts (Scheduler, Event-Listener) bringen `triggeredBy` mit und
+    // bleiben ohne Request-Akteur — ein Event-Lauf soll nicht dem Nutzer
+    // zugerechnet werden, dessen Aktion das Event zufällig ausgelöst hat (der
+    // RequestContext des Auslösers ist dort noch aktiv). Manuelle Starts ohne
+    // expliziten Akteur (MCP-Tool) übernehmen den aus dem `RequestContext`.
+    const actor = dto.triggeredBy ? undefined : (requestActor ?? RequestContext.getUser());
+    assertActorCanAccessWorkflow(actor, def);
     if (def.status === WorkflowStatus.ARCHIVED) {
       throw new BadRequestException('Cannot start a run for an archived workflow');
     }
@@ -333,12 +348,7 @@ export class WorkflowsService {
       edges: def.edges,
     };
 
-    // Interne Starts (Scheduler, Event-Listener) bringen `triggeredBy` mit und
-    // bleiben ohne Request-Akteur — ein Event-Lauf soll nicht dem Nutzer
-    // zugerechnet werden, dessen Aktion das Event zufällig ausgelöst hat.
-    // Manuelle Starts ohne expliziten `userId` (MCP-Tool) übernehmen den
-    // Akteur aus dem `RequestContext`.
-    const startedBy = userId ?? (dto.triggeredBy ? undefined : RequestContext.getUser()?.userId);
+    const startedBy = actor?.userId;
 
     const run = await this.runModel.create({
       definitionId: def._id,
@@ -359,7 +369,13 @@ export class WorkflowsService {
               : undefined,
             userId: dto.triggeredBy.userId,
           }
-        : { type: 'manual' as const, userId: startedBy },
+        : {
+            type: 'manual' as const,
+            userId: startedBy,
+            // Der Lauf bekommt später den verengten Scope des Keys, nicht den
+            // vollen des Besitzers (WorkflowAccountabilityService.resolve).
+            ...(actor?.apiKeyId ? { apiKeyId: actor.apiKeyId } : {}),
+          },
       context: { nodes: {}, input: dto.input ?? {} },
     });
 

@@ -7901,7 +7901,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'workflow_run_retry': {
           const id = requireString(a, 'id');
-          await workflowEngineService.retryRun(id, optionalString(a, 'fromNodeId'), RequestContext.getUser()?.userId);
+          await workflowEngineService.retryRun(id, optionalString(a, 'fromNodeId'), RequestContext.getUser());
           result = { ok: true, id };
           break;
         }

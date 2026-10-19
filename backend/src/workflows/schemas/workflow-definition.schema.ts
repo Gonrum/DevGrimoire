@@ -113,6 +113,10 @@ export class WorkflowApproval {
   @Prop()
   approvedByRole?: string;
 
+  /** Freigabe über einen API-Key: dessen Id — Zeitplan-/Event-Läufe erben den verengten Key-Scope. */
+  @Prop()
+  approvedByApiKeyId?: string;
+
   @Prop({ type: Object })
   riskSummary?: {
     byRisk: Record<string, number>;

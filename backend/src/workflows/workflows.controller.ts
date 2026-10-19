@@ -80,7 +80,7 @@ export class WorkflowsController {
     // übernommen, könnte ein Aufrufer sich einen fremden `userId` zuschreiben
     // und Nodes in dessen Namen laufen lassen — maßgeblich ist der Request-Akteur.
     const { definitionId, trigger, input } = dto;
-    return this.workflows.startRun({ definitionId, trigger, input }, RequestContext.getUser()?.userId);
+    return this.workflows.startRun({ definitionId, trigger, input }, RequestContext.getUser());
   }
 
   @Post('nodes/test')
@@ -113,7 +113,7 @@ export class WorkflowsController {
     @Param('id') id: string,
     @Body() body: RetryWorkflowRunDto = {},
   ): Promise<{ ok: true; runId: string; parentRunId: string }> {
-    const child = await this.engine.retryRun(id, body.fromNodeId, RequestContext.getUser()?.userId);
+    const child = await this.engine.retryRun(id, body.fromNodeId, RequestContext.getUser());
     return {
       ok: true,
       runId: child._id.toString(),
