@@ -275,19 +275,15 @@ function EditorInner() {
           return {
             id: n.id,
             type: d.type,
+            ...(d.label !== undefined ? { label: d.label } : {}),
             position: n.position,
             config: d.config,
             secretRefs: d.secretRefs ?? [],
           };
         }),
-        edges: edges.map((e) => ({
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          sourcePort: e.sourceHandle ?? undefined,
-          targetPort: e.targetHandle ?? undefined,
-          branch: readEdgeData(e.data).branch,
-        })),
+        // `edgeToWf` statt eigener Abbildung: vorher fielen `condition` und
+        // `payloadMapping` hier weg, jedes Speichern löschte das Mapping.
+        edges: edges.map(edgeToWf),
         ...extra,
       };
       const updated = await workflowsApi.update(id, dto);
@@ -649,6 +645,7 @@ function toReactFlowNode(n: WfNode, byType: Record<string, WorkflowNodeMetadata>
     position: n.position,
     data: {
       type: n.type,
+      label: n.label,
       config: n.config ?? {},
       secretRefs: n.secretRefs ?? [],
       metadata: byType[n.type],

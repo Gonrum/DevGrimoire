@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsMongoId,
   IsNumber,
@@ -8,7 +9,7 @@ import {
   IsString,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { WorkflowNode, WorkflowScope, WorkflowStatus } from '../schemas/workflow-definition.schema';
 
 export class WorkflowNodeDto {
@@ -220,7 +221,13 @@ export class ListWorkflowDefinitionsDto {
   @IsString()
   tag?: string;
 
+  /**
+   * Aus dem Query-String kommt `"false"` als String — ohne Transform war das
+   * truthy und lieferte archivierte Workflows mit aus.
+   */
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) => value === true || value === 'true')
+  @IsBoolean()
   includeArchived?: boolean;
 
   @IsOptional()
