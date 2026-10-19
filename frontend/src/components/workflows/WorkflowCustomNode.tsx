@@ -7,6 +7,7 @@ import { nodeCategoryStyles } from './nodeCategoryStyles';
 import { getNodeIcon } from './nodeTypeIconMap';
 import { runStatusStyles } from './runStatusStyles';
 import { nodeHasConfig } from './nodeConfig';
+import { useWorkflowCanvasActions } from './workflowCanvasActions';
 
 export interface WorkflowNodeData {
   type: string;
@@ -15,9 +16,6 @@ export interface WorkflowNodeData {
   metadata?: WorkflowNodeMetadata;
   runStatus?: WorkflowNodeRunStatus;
   issueCount?: number;
-  onDelete?: (id: string) => void;
-  onDuplicate?: (id: string) => void;
-  onEdit?: (id: string) => void;
   [key: string]: unknown;
 }
 
@@ -26,6 +24,7 @@ type WorkflowFlowNode = Node<WorkflowNodeData, 'workflowNode'>;
 
 function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
   const { t } = useTranslation();
+  const actions = useWorkflowCanvasActions();
   const data = props.data;
   const meta = data.metadata;
   const category = meta?.category ?? 'action';
@@ -43,20 +42,20 @@ function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
             <button
               type="button"
               title={t('workflows.node.edit')}
-              onClick={() => data.onEdit?.(props.id)}
+              onClick={() => actions.onEditNode(props.id)}
               className="rounded-sm p-1 text-gray-300 hover:bg-gray-800 hover:text-cyan-300"
             ><Pencil size={14} /></button>
           )}
           <button
             type="button"
             title={t('workflows.node.duplicate')}
-            onClick={() => data.onDuplicate?.(props.id)}
+            onClick={() => actions.onDuplicateNode(props.id)}
             className="rounded-sm p-1 text-gray-300 hover:bg-gray-800 hover:text-cyan-300"
           ><Copy size={14} /></button>
           <button
             type="button"
             title={t('common.delete')}
-            onClick={() => data.onDelete?.(props.id)}
+            onClick={() => actions.onDeleteNode(props.id)}
             className="rounded-sm p-1 text-gray-300 hover:bg-gray-800 hover:text-red-400"
           ><Trash2 size={14} /></button>
         </div>

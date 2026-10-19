@@ -18,6 +18,7 @@ import { WorkflowRunInspector } from '../components/workflows/WorkflowRunInspect
 import { WorkflowEditorMobileFallback } from '../components/workflows/WorkflowEditorMobileFallback';
 import { WorkflowNodeEditModal } from '../components/workflows/WorkflowNodeEditModal';
 import { nodeHasConfig, SelectedNode } from '../components/workflows/nodeConfig';
+import { WorkflowCanvasActions, WorkflowCanvasActionsContext } from '../components/workflows/workflowCanvasActions';
 import { useNodeTypesCatalog } from '../hooks/useNodeTypesCatalog';
 import { useViewportBreakpoint, ViewportBreakpoint } from '../hooks/useViewportBreakpoint';
 import { useWorkflowDirtyGuard } from '../hooks/useWorkflowDirtyGuard';
@@ -204,17 +205,12 @@ function EditorInner() {
     setEditNodeId(nid);
   }, []);
 
-  // Inject handlers into node/edge data after handlers are stable
-  useEffect(() => {
-    setNodes((ns) => ns.map((n) => ({
-      ...n,
-      data: { ...n.data, onDelete: handleDeleteNode, onDuplicate: handleDuplicateNode, onEdit: handleEditNode },
-    })));
-    setEdges((es) => es.map((e) => ({
-      ...e,
-      data: { ...e.data, onDelete: handleDeleteEdge },
-    })));
-  }, [handleDeleteNode, handleDuplicateNode, handleEditNode, handleDeleteEdge, setNodes, setEdges]);
+  const canvasActions = useMemo<WorkflowCanvasActions>(() => ({
+    onEditNode: handleEditNode,
+    onDuplicateNode: handleDuplicateNode,
+    onDeleteNode: handleDeleteNode,
+    onDeleteEdge: handleDeleteEdge,
+  }), [handleEditNode, handleDuplicateNode, handleDeleteNode, handleDeleteEdge]);
 
   const addNodeOfType = useCallback((type: string, position: { x: number; y: number }) => {
     const meta = byType[type];
@@ -231,15 +227,12 @@ function EditorInner() {
           config: isRecord(defaults) ? defaults : {},
           secretRefs: [],
           metadata: meta,
-          onDelete: handleDeleteNode,
-          onDuplicate: handleDuplicateNode,
-          onEdit: handleEditNode,
         },
       };
       return [...ns, newNode];
     });
     setDirty(true);
-  }, [byType, setNodes, handleDeleteNode, handleDuplicateNode, handleEditNode]);
+  }, [byType, setNodes]);
 
   const handleDrop = useCallback((event: React.DragEvent, position: { x: number; y: number }) => {
     const type = event.dataTransfer.getData('application/x-workflow-node-type');
@@ -483,6 +476,7 @@ function EditorInner() {
         )}
 
         <main className="flex-1">
+          <WorkflowCanvasActionsContext.Provider value={canvasActions}>
           <WorkflowCanvas
             nodes={nodes}
             edges={edges}
@@ -518,6 +512,7 @@ function EditorInner() {
               if (n && nodeHasConfig(byType[readNodeData(n.data).type])) handleEditNode(nid);
             }}
           />
+          </WorkflowCanvasActionsContext.Provider>
         </main>
 
         {(bp === 'desktop' || inspectorOpen) ? (
