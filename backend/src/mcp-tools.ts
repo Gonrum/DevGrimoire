@@ -4096,7 +4096,7 @@ const tools = [
   },
   {
     name: 'workflow_node_test',
-    description: 'Safely test a single workflow node with sample input. Executes side-effect-free trigger/control nodes; agent.task runs as a dry run (only _get/_list/_search tools) when workflowId is given; action nodes are validation-only. With workflowId, scope/project/customer come from the stored workflow.',
+    description: 'Safely test a single workflow node with sample input. Executes side-effect-free trigger/control nodes; agent.task runs as a dry run (only _get/_list/_search tools) when workflowId is given; action nodes are validation-only. ssh.exec only checks the SSH connection (connection_check), the command is never run; todo.find (control) is executed. With workflowId, scope/project/customer come from the stored workflow.',
     inputSchema: {
       type: 'object' as const,
       properties: {
