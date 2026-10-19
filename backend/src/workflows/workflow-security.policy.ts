@@ -26,6 +26,7 @@ export const WORKFLOW_NODE_POLICIES: Record<string, WorkflowNodePolicy> = {
   'trigger.project_event': { type: 'trigger.project_event', risk: 'safe-read', allowedScopes: [WorkflowScope.PROJECT], mvpAllowed: true },
   'trigger.customer_event': { type: 'trigger.customer_event', risk: 'safe-read', allowedScopes: [WorkflowScope.CUSTOMER], mvpAllowed: true },
   'todo.create': { type: 'todo.create', risk: 'safe-write', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: true },
+  'todo.find': { type: 'todo.find', risk: 'safe-read', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: true },
   'todo.update': { type: 'todo.update', risk: 'safe-write', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: true },
   'todo.comment': { type: 'todo.comment', risk: 'safe-write', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: true },
   'todo.link_milestone': { type: 'todo.link_milestone', risk: 'safe-write', allowedScopes: [WorkflowScope.PROJECT], mvpAllowed: true },

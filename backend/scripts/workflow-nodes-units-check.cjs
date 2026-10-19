@@ -102,6 +102,7 @@ const allExecutors = [
     invalid: { entity: 'todo', action: 'nope' },
   }],
   ['workflows/nodes/agent-task.executor.js', 'AgentTaskExecutor', { config: { prompt: 'hi' }, invalid: { prompt: '' } }],
+  ['workflows/nodes/todo-find.executor.js', 'TodoFindExecutor', { config: {}, invalid: { limit: 0 } }],
   ['workflows/nodes/ssh-exec.executor.js', 'SshExecExecutor', { config: { connectionId: 'x', command: 'true' }, invalid: { command: '' } }],
 ];
 

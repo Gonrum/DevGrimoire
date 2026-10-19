@@ -23,6 +23,7 @@
     "check:workflow-scope-guard": "node scripts/workflow-scope-guard-check.cjs",
     "check:workflow-schedule-overlap": "node scripts/workflow-schedule-overlap-check.cjs",
     "check:workflow-accountability": "node scripts/workflow-accountability-check.cjs",
+    "check:workflow-todo-find": "node scripts/workflow-todo-find-check.cjs",
     "check:workflow-ssh-exec": "node scripts/workflow-ssh-exec-check.cjs",
     "check:workflow-engine": "node scripts/workflow-engine-check.cjs",
     "check:workflow-nodes-engine": "node scripts/workflow-nodes-engine-check.cjs",

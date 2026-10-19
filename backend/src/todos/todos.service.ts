@@ -9,7 +9,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { isValidObjectId, Model, Types } from 'mongoose';
-import { Todo, TodoDocument, TodoStatus } from './schemas/todo.schema';
+import { Todo, TodoDocument, TodoPriority, TodoStatus } from './schemas/todo.schema';
 import { Project, ProjectDocument } from '../projects/schemas/project.schema';
 import { CreateTodoDto } from './dto/create-todo.dto';
 import { UpdateTodoDto } from './dto/update-todo.dto';
@@ -25,6 +25,7 @@ import {
   actorCanAccessProject,
 } from '../common/permissions';
 import { buildDualScopeFilter } from '../common/scope';
+import { isRecord, isUnknownArray } from '../common/narrow';
 import { assertSafeCascadeId } from '../common/cascade-guard';
 
 const STATUS_ORDER: TodoStatus[] = [
@@ -154,6 +155,70 @@ export class TodosService {
     if (!filters.includeArchived) query.archived = { $ne: true };
     Object.assign(query, buildDualScopeFilter(RequestContext.getUser()));
     return this.todoModel.find(query).sort({ priority: 1, createdAt: -1 }).exec();
+  }
+
+  /**
+   * Todo-Suche für den Workflow-Node `todo.find`. Filter, Sortierung und Limit
+   * laufen in der Datenbank; der Aufrufer reicht nur bereits erlaubte Owner
+   * (WorkflowScopeGuard.allowedOwners) herein. Der Akteur-Scope kommt obendrauf,
+   * damit ein eingeschränkter Nutzer über einen Workflow nicht mehr sieht als
+   * über die API.
+   */
+  async findForWorkflow(q: {
+    projectIds: string[];
+    customerIds: string[];
+    statuses: TodoStatus[];
+    tags?: string[];
+    milestoneId?: string;
+    priority?: TodoPriority;
+    sort: 'oldest' | 'newest' | 'priority';
+    limit: number;
+  }): Promise<TodoDocument[]> {
+    // Nur geprüfte ObjectIds in den Filter: Mongoose entfernt undefined-Schlüssel,
+    // eine kaputte Id würde sonst die Bedingung stillschweigend wegwerfen.
+    const hex = /^[0-9a-f]{24}$/i;
+    const withStored = (ids: string[]): Array<string | Types.ObjectId> =>
+      ids.filter((id) => hex.test(id)).flatMap((id) => [id, new Types.ObjectId(id)]);
+    const projectIds = withStored(q.projectIds);
+    const customerIds = withStored(q.customerIds);
+    if (projectIds.length === 0 && customerIds.length === 0) return [];
+    if (q.milestoneId !== undefined && !hex.test(q.milestoneId)) return [];
+
+    const owners: Record<string, unknown>[] = [];
+    if (projectIds.length > 0) owners.push({ projectId: { $in: projectIds } });
+    if (customerIds.length > 0) owners.push({ customerId: { $in: customerIds } });
+    const and: Record<string, unknown>[] = [{ $or: owners }];
+    const actorScope = buildDualScopeFilter(RequestContext.getUser());
+    if (isUnknownArray(actorScope.$and)) {
+      for (const clause of actorScope.$and) if (isRecord(clause)) and.push(clause);
+    }
+    const base: Record<string, unknown> = {
+      $and: and,
+      archived: { $ne: true },
+      status: { $in: q.statuses },
+    };
+    if (q.tags?.length) base.tags = { $all: q.tags };
+    if (q.milestoneId !== undefined) base.milestoneId = projectIdFilter(q.milestoneId);
+
+    const find = (extra: Record<string, unknown>, order: 1 | -1, limit: number) =>
+      this.todoModel
+        .find({ ...base, ...extra })
+        .sort({ createdAt: order })
+        .limit(limit)
+        .exec();
+
+    if (q.priority) return find({ priority: q.priority }, q.sort === 'newest' ? -1 : 1, q.limit);
+    if (q.sort !== 'priority') return find({}, q.sort === 'newest' ? -1 : 1, q.limit);
+    // Die Priorität ist ein String ('critical' < 'high' < 'low' < 'medium'), eine
+    // Datenbank-Sortierung darauf wäre falsch. Stufenweise von hoch nach niedrig,
+    // innerhalb einer Stufe der älteste zuerst.
+    const result: TodoDocument[] = [];
+    for (const level of [TodoPriority.CRITICAL, TodoPriority.HIGH, TodoPriority.MEDIUM, TodoPriority.LOW]) {
+      const rest = q.limit - result.length;
+      if (rest <= 0) break;
+      result.push(...(await find({ priority: level }, 1, rest)));
+    }
+    return result;
   }
 
   /**

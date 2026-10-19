@@ -32,6 +32,7 @@ import { ActionUserQuestionExecutor } from './nodes/action-user-question.executo
 import { ControlConditionExecutor } from './nodes/control-condition.executor';
 import { ControlDelayExecutor } from './nodes/control-delay.executor';
 import { AgentTaskExecutor } from './nodes/agent-task.executor';
+import { TodoFindExecutor } from './nodes/todo-find.executor';
 import { SshExecExecutor } from './nodes/ssh-exec.executor';
 import { MilestonesModule } from '../milestones/milestones.module';
 import { TodosModule } from '../todos/todos.module';
@@ -103,6 +104,7 @@ import { WorkflowAccountabilityService } from './engine/workflow-accountability.
     ControlDelayExecutor,
     AgentTaskExecutor,
     SshExecExecutor,
+    TodoFindExecutor,
   ],
   exports: [WorkflowsService, WorkflowEngineService, WorkflowAgentService, NodeRegistry],
 })
@@ -127,6 +129,7 @@ export class WorkflowsModule implements OnModuleInit {
     private readonly controlDelay: ControlDelayExecutor,
     private readonly agentTask: AgentTaskExecutor,
     private readonly sshExec: SshExecExecutor,
+    private readonly todoFind: TodoFindExecutor,
   ) {}
 
   onModuleInit(): void {
@@ -148,5 +151,6 @@ export class WorkflowsModule implements OnModuleInit {
     this.registry.register(this.controlDelay);
     this.registry.register(this.agentTask);
     this.registry.register(this.sshExec);
+    this.registry.register(this.todoFind);
   }
 }
