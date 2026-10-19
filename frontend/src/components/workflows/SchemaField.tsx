@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { Plus, Trash2 } from 'lucide-react';
 import { isRecord, isUnknownArray } from '../../lib/narrow';
 import { TemplatePicker, TemplateOption } from './TemplatePicker';
+import { useWorkflowRefOptions } from './workflowRefOptions';
 
 type JsonSchema = Record<string, unknown>;
 
@@ -45,6 +46,8 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
   const label = fieldKey ?? path[path.length - 1] ?? '';
   const labelText = hideLabel ? '' : String(label);
 
+  const refOptions = useWorkflowRefOptions();
+
   const enumOptions = stringList(schema.enum);
   if (schema.type === 'string' && enumOptions) {
     return (
@@ -73,6 +76,33 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
           onChange={(e) => onChange(e.target.value ? new Date(e.target.value).toISOString() : undefined)}
           className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200"
         />
+      </Labeled>
+    );
+  }
+
+  if (schema.type === 'string' && schema.description === 'ref:ssh-connection') {
+    const current = typeof value === 'string' ? value : '';
+    // Eine gespeicherte ID, die nicht (mehr) in der Liste steht, bleibt sichtbar —
+    // sonst würde die Auswahl still auf „leer" springen und die Verbindung beim
+    // nächsten Speichern verloren gehen.
+    const known = refOptions.sshConnections.some((c) => c.id === current);
+    return (
+      <Labeled label={labelText} required={required}>
+        <select
+          value={current}
+          onChange={(e) => onChange(e.target.value || undefined)}
+          className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-hidden"
+        >
+          <option value="">{t('workflows.schema.select')}</option>
+          {current !== '' && !known && (
+            <option value={current}>{t('workflows.schema.refUnavailable', { id: current })}</option>
+          )}
+          {refOptions.sshConnections.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.inherited ? t('workflows.schema.refInherited', { label: c.label }) : c.label}
+            </option>
+          ))}
+        </select>
       </Labeled>
     );
   }

@@ -2534,6 +2534,8 @@
     },
     "editor": {
       "loadFailed": "Could not load workflow: {{error}}",
+      "externalCommandsHint": "This workflow runs commands on servers.",
+      "reactivateHint": "The workflow is active but was not approved by a user. Please reactivate it so the SSH commands are approved.",
       "placed": "{{type}} placed",
       "saved": "Workflow saved",
       "saveFailed": "Save failed: {{error}}",
@@ -2590,6 +2592,8 @@
       "fieldCount_one": "{{count}} field",
       "fieldCount_other": "{{count}} fields",
       "millisUnit": "Value in milliseconds (1000 = 1 s)",
+      "refInherited": "{{label}} (customer)",
+      "refUnavailable": "{{id}} (unavailable)",
       "millisValue": "= {{seconds}} s (value in milliseconds)"
     },
     "inspector": {
@@ -2660,7 +2664,9 @@
       "waitingFor": "Waiting for",
       "logs": "Logs",
       "autoSaveHint": "Parameter changes are saved automatically.",
+      "sshTestHint": "The test only checks the connection; the command is not run.",
       "mode": {
+        "connection_check": "connection checked",
         "validation_only": "validated only",
         "safe_execute": "executed",
         "dry_run": "dry run"

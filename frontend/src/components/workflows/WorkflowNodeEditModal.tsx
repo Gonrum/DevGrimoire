@@ -205,7 +205,10 @@ export function WorkflowNodeEditModal(p: Props) {
             {p.meta.category === 'agent' && (
               <p className="mb-2 text-[11px] text-gray-500">{t('workflows.nodeModal.agentDryRunHint')}</p>
             )}
-            {p.meta.category === 'action' && (
+            {p.node.type === 'ssh.exec' && (
+              <p className="mb-2 text-[11px] text-gray-500">{t('workflows.nodeModal.sshTestHint')}</p>
+            )}
+            {p.meta.category === 'action' && p.node.type !== 'ssh.exec' && (
               <p className="mb-2 text-[11px] text-gray-500">{t('workflows.nodeModal.actionValidationHint')}</p>
             )}
             <div className="min-h-0 flex-1 overflow-y-auto">

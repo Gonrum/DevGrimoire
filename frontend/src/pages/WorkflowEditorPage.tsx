@@ -8,6 +8,7 @@ import {
 } from '@xyflow/react';
 import { ArrowLeft, Save, Play, CheckCircle, Pause, Trash2, PanelLeftOpen, PanelRightOpen, X } from 'lucide-react';
 
+import { api } from '../api/client';
 import { workflowsApi, WorkflowDefinition, WorkflowNode as WfNode, WorkflowEdge as WfEdge, WorkflowStatus, WorkflowNodeMetadata } from '../api/workflows';
 import { errorMessage, isRecord, isUnknownArray, optionOr } from '../lib/narrow';
 import { WorkflowCanvas } from '../components/workflows/WorkflowCanvas';
@@ -18,6 +19,7 @@ import { WorkflowRunInspector } from '../components/workflows/WorkflowRunInspect
 import { WorkflowEditorMobileFallback } from '../components/workflows/WorkflowEditorMobileFallback';
 import { WorkflowNodeEditModal } from '../components/workflows/WorkflowNodeEditModal';
 import { nodeHasConfig, SelectedNode } from '../components/workflows/nodeConfig';
+import { WorkflowRefOptions, WorkflowRefOptionsContext } from '../components/workflows/workflowRefOptions';
 import { WorkflowCanvasActions, WorkflowCanvasActionsContext } from '../components/workflows/workflowCanvasActions';
 import { useNodeTypesCatalog } from '../hooks/useNodeTypesCatalog';
 import { useViewportBreakpoint, ViewportBreakpoint } from '../hooks/useViewportBreakpoint';
@@ -204,6 +206,34 @@ function EditorInner() {
     setSelectedNodeId(nid);
     setEditNodeId(nid);
   }, []);
+
+  // SSH-Verbindungen für das Auswahlfeld: einmal pro Workflow laden, aus Projekt
+  // bzw. Kunde des Workflows. Schlägt das fehl, bleibt die Liste leer — gespeicherte
+  // IDs zeigt das Feld trotzdem als „nicht verfügbar" an.
+  const [sshConnections, setSshConnections] = useState<WorkflowRefOptions['sshConnections']>([]);
+  const refScopeProjectId = workflow?.projectId;
+  const refScopeCustomerId = workflow?.customerId;
+  useEffect(() => {
+    let cancelled = false;
+    const request = refScopeProjectId
+      ? api.ssh.listForProject(refScopeProjectId)
+      : refScopeCustomerId
+        ? api.ssh.listForCustomer(refScopeCustomerId)
+        : null;
+    if (!request) return;
+    request.then((list) => {
+      if (cancelled) return;
+      setSshConnections(list.map((c) => ({ id: c.id, label: c.label, inherited: !!c.inheritedFromCustomerId })));
+    }).catch(() => {
+      if (!cancelled) setSshConnections([]);
+    });
+    return () => { cancelled = true; };
+  }, [refScopeProjectId, refScopeCustomerId]);
+  const refOptions = useMemo<WorkflowRefOptions>(() => ({ sshConnections }), [sshConnections]);
+
+  const hasSshExec = useMemo(() => nodes.some((n) => readNodeData(n.data).type === 'ssh.exec'), [nodes]);
+  const latestApproval = workflow?.approvals?.[workflow.approvals.length - 1];
+  const needsReactivation = workflow?.status === 'active' && hasSshExec && !!latestApproval && !latestApproval.approvedByUserId;
 
   const canvasActions = useMemo<WorkflowCanvasActions>(() => ({
     onEditNode: handleEditNode,
@@ -422,6 +452,7 @@ function EditorInner() {
   }
 
   return (
+    <WorkflowRefOptionsContext.Provider value={refOptions}>
     <div className="flex h-[calc(100vh-4rem)] flex-col">
       <header className="flex items-center justify-between gap-2 border-b border-gray-800 bg-gray-900 px-4 py-2">
         <div className="flex items-center gap-3 min-w-0">
@@ -454,6 +485,13 @@ function EditorInner() {
           </button>
         </div>
       </header>
+
+      {hasSshExec && (
+        <div className="border-b border-gray-800 bg-gray-900/60 px-4 py-1 text-[11px] text-amber-300">
+          {t('workflows.editor.externalCommandsHint')}
+          {needsReactivation && <span className="ml-2 text-amber-200">{t('workflows.editor.reactivateHint')}</span>}
+        </div>
+      )}
 
       <div className="relative flex flex-1 overflow-hidden">
         {(bp === 'desktop' || paletteOpen) ? (
@@ -596,6 +634,7 @@ function EditorInner() {
 
       {runId && <WorkflowRunInspector runId={runId} onClose={() => setRunId(null)} onNavigate={setRunId} />}
     </div>
+    </WorkflowRefOptionsContext.Provider>
   );
 }
 

@@ -51,6 +51,8 @@ export interface WorkflowDefinition {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   ui?: Record<string, unknown>;
+  /** Freigaben je Version; ohne `approvedByUserId` stammt sie nicht von einem Nutzer. */
+  approvals?: Array<{ version: number; approvedAt: string; approvedByUserId?: string; approvedByUsername?: string }>;
   nextRunAt?: string;
   lastRunAt?: string;
   createdAt: string;
@@ -163,7 +165,7 @@ export interface TestNodeDto {
 export interface NodeTestResult {
   ok: boolean;
   executable: boolean;
-  mode?: 'validation_only' | 'safe_execute' | 'dry_run';
+  mode?: 'validation_only' | 'safe_execute' | 'dry_run' | 'connection_check';
   reason?: string;
   issues?: string[];
   status?: string;

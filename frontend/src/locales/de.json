@@ -2534,6 +2534,8 @@
     },
     "editor": {
       "loadFailed": "Workflow nicht ladbar: {{error}}",
+      "externalCommandsHint": "Dieser Workflow führt Befehle auf Servern aus.",
+      "reactivateHint": "Der Workflow ist aktiv, wurde aber nicht von einem Nutzer freigegeben. Bitte neu aktivieren, damit die SSH-Befehle freigegeben sind.",
       "placed": "{{type}} platziert",
       "saved": "Workflow gespeichert",
       "saveFailed": "Speichern fehlgeschlagen: {{error}}",
@@ -2590,6 +2592,8 @@
       "fieldCount_one": "{{count}} Feld",
       "fieldCount_other": "{{count}} Felder",
       "millisUnit": "Angabe in Millisekunden (1000 = 1 s)",
+      "refInherited": "{{label}} (Kunde)",
+      "refUnavailable": "{{id}} (nicht verfügbar)",
       "millisValue": "= {{seconds}} s (Angabe in Millisekunden)"
     },
     "inspector": {
@@ -2660,7 +2664,9 @@
       "waitingFor": "Wartet auf",
       "logs": "Logs",
       "autoSaveHint": "Änderungen an den Parametern werden automatisch gespeichert.",
+      "sshTestHint": "Im Test wird nur die Verbindung geprüft, der Befehl läuft nicht.",
       "mode": {
+        "connection_check": "Verbindung geprüft",
         "validation_only": "nur geprüft",
         "safe_execute": "ausgeführt",
         "dry_run": "Trockenlauf"
