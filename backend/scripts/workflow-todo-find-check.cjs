@@ -117,6 +117,32 @@ async function check(name, fn) {
     assert.deepEqual(ex.metadata.branches, ['success', 'custom']);
   });
 
+  // Final-Review I5: ein Projekt-Lauf sucht nur im eigenen Projekt, nicht in
+  // den Todos der verlinkten Kunden; ein Kunden-Lauf im Kunden + verlinkten Projekten.
+  const P2 = new Types.ObjectId().toString();
+  const C2 = new Types.ObjectId().toString();
+  await check('Executor: Projekt-Lauf -> nur eigenes Projekt, keine verlinkten Kunden', async () => {
+    let q;
+    const linkedGuard = { allowedOwners: async () => ({ projectIds: [P1], customerIds: [C1, C2] }) };
+    const ex = new TodoFindExecutor({ findForWorkflow: async (x) => { q = x; return []; } }, linkedGuard);
+    await ex.execute(ctx({}));
+    assert.deepEqual(q.projectIds, [P1]);
+    assert.deepEqual(q.customerIds, []);
+  });
+  await check('Executor: Kunden-Lauf -> eigener Kunde plus verlinkte Projekte', async () => {
+    let q;
+    const custRun = { _id: new Types.ObjectId(), customerId: new Types.ObjectId(C1) };
+    const linkedGuard = { allowedOwners: async (r) => { assert.equal(r, custRun); return { projectIds: [P1, P2], customerIds: [C1] }; } };
+    const ex = new TodoFindExecutor({ findForWorkflow: async (x) => { q = x; return []; } }, linkedGuard);
+    await ex.execute({ run: custRun, config: {}, runContext: {} });
+    assert.deepEqual(q.projectIds, [P1, P2]);
+    assert.deepEqual(q.customerIds, [C1]);
+  });
+  await check('Executor: milestoneId ohne ref:milestone (kein UI-Handler, M5)', () => {
+    const ex = new TodoFindExecutor({}, guard);
+    assert.equal(ex.metadata.configSchema.shape.milestoneId.description, undefined);
+  });
+
   if (failed) { console.log(failed + ' failed'); process.exit(1); }
   console.log('all ok');
 })();

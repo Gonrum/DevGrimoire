@@ -12,7 +12,7 @@ import { expandConfig } from './template';
 const configSchema = z.object({
   statuses: z.array(z.nativeEnum(TodoStatus)).min(1).default([TodoStatus.OPEN]),
   tags: z.array(z.string().min(1)).optional(),
-  milestoneId: z.string().min(1).optional().describe('ref:milestone'),
+  milestoneId: z.string().min(1).optional(),
   priority: z.nativeEnum(TodoPriority).optional(),
   sort: z.enum(['oldest', 'newest', 'priority']).default('oldest'),
   limit: z.number().int().min(1).max(20).default(1),
@@ -69,9 +69,14 @@ export class TodoFindExecutor implements NodeExecutor {
     const cfg = parsed.data;
     try {
       const owners = await this.scope.allowedOwners(ctx.run);
+      // Projekt-Lauf: nur das eigene Projekt. `allowedOwners` liefert zusätzlich
+      // die verlinkten Kunden — deren Todos gehören aber nicht zum Projekt, ein
+      // „ältester offener Todo" griffe sonst in fremde Kundenarbeit. Kunden-Lauf:
+      // eigener Kunde plus verlinkte Projekte, wie `allowedOwners` sie liefert.
+      const customerIds = ctx.run.projectId ? [] : owners.customerIds;
       const found = await this.todos.findForWorkflow({
         projectIds: owners.projectIds,
-        customerIds: owners.customerIds,
+        customerIds,
         statuses: cfg.statuses,
         tags: cfg.tags,
         milestoneId: cfg.milestoneId,
