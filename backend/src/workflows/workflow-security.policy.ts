@@ -38,7 +38,7 @@ export const WORKFLOW_NODE_POLICIES: Record<string, WorkflowNodePolicy> = {
   'notification.send': { type: 'notification.send', risk: 'safe-write', allowedScopes: ALL_SCOPES, mvpAllowed: true },
   'log.write': { type: 'log.write', risk: 'safe-write', allowedScopes: ALL_SCOPES, mvpAllowed: true },
   'rag.search': { type: 'rag.search', risk: 'safe-read', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: true },
-  'agent.task': { type: 'agent.task', risk: 'agent-write', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: false },
+  'agent.task': { type: 'agent.task', risk: 'agent-write', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: true },
   'secret.read': { type: 'secret.read', risk: 'secret-read', allowedScopes: PROJECT_CUSTOMER, mvpAllowed: false },
   'http.request': { type: 'http.request', risk: 'external-call', allowedScopes: ALL_SCOPES, mvpAllowed: false },
   'workspace.exec': { type: 'workspace.exec', risk: 'workspace-git', allowedScopes: [WorkflowScope.PROJECT], mvpAllowed: false },

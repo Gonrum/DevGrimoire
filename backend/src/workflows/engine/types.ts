@@ -62,6 +62,12 @@ export interface NodeExecutionContext {
    * Seiteneffekte ein zweites Mal.
    */
   signal: AbortSignal;
+  /**
+   * Gesetzt, wenn der Node aus dem Editor heraus getestet wird. Executoren,
+   * die im Testlauf überhaupt ausgeführt werden (agent.task), schränken sich
+   * dann auf lesende Wirkung ein.
+   */
+  dryRun?: boolean;
 }
 
 export interface NodeExecutor {

@@ -2565,7 +2565,8 @@
       "duplicate": "Duplizieren",
       "branches": "branches",
       "issues_one": "{{count}} Konfigurations-Issue",
-      "issues_other": "{{count}} Konfigurations-Issues"
+      "issues_other": "{{count}} Konfigurations-Issues",
+      "edit": "Bearbeiten & testen"
     },
     "edge": {
       "delete": "Edge löschen"
@@ -2635,6 +2636,33 @@
       "logs": "Logs ({{count}})",
       "selectNodeRun": "Wähle einen Node-Run aus.",
       "retry": "Retry"
+    },
+    "nodeModal": {
+      "input": "Eingabe",
+      "reloadInput": "Vom letzten Lauf laden",
+      "inputEmpty": "Noch kein Lauf mit Node-Ausgaben — leeres Gerüst. Werte unter nodes.<id>.* eintragen.",
+      "inputFromRun": "Kontext aus dem letzten Lauf vom {{at}}",
+      "inputInvalid": "Ungültiges JSON: {{error}}",
+      "inputNotObject": "Der Kontext muss ein JSON-Objekt sein.",
+      "inputHint": "Dieser Kontext ersetzt beim Test den Lauf-Kontext — Templates wie nodes.<id>.<feld> lesen daraus.",
+      "parameters": "Parameter",
+      "output": "Ausgabe",
+      "test": "Node testen",
+      "agentDryRunHint": "Trockenlauf: der Agent wird wirklich aufgerufen (LLM-Kosten), darf aber nur lesende Tools (_get/_list/_search) nutzen.",
+      "actionValidationHint": "Action-Nodes werden im Test nicht ausgeführt, nur ihre Konfiguration wird geprüft.",
+      "noResult": "Noch kein Testergebnis.",
+      "ok": "OK",
+      "failed": "Fehlgeschlagen",
+      "outputData": "Ausgabe-Daten",
+      "error": "Fehler",
+      "waitingFor": "Wartet auf",
+      "logs": "Logs",
+      "autoSaveHint": "Änderungen an den Parametern werden automatisch gespeichert.",
+      "mode": {
+        "validation_only": "nur geprüft",
+        "safe_execute": "ausgeführt",
+        "dry_run": "Trockenlauf"
+      }
     }
   },
   "vermerke": {

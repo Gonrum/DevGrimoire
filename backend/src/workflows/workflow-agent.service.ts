@@ -160,8 +160,13 @@ export class WorkflowAgentService {
     };
   }
 
-  private effectiveAllowlist(nodeAllowlist: string[]): string[] {
-    const envCsv = process.env.WORKFLOW_AGENT_TOOL_ALLOWLIST ?? '';
+  /**
+   * `readOnly` (Testlauf aus dem Editor) lässt die ENV-Erweiterung
+   * `WORKFLOW_AGENT_TOOL_ALLOWLIST` weg — dann zählen nur Tools, deren Name
+   * schon lesende Wirkung verspricht.
+   */
+  private effectiveAllowlist(nodeAllowlist: string[], readOnly = false): string[] {
+    const envCsv = readOnly ? '' : (process.env.WORKFLOW_AGENT_TOOL_ALLOWLIST ?? '');
     const envExplicit = new Set(envCsv.split(',').map((s) => s.trim()).filter(Boolean));
     const suffixOk = (name: string) => /_(get|list|search)$/.test(name);
     const globalAllowed = new Set(
@@ -180,6 +185,8 @@ export class WorkflowAgentService {
     maxToolIterations?: number;
     /** Bricht laufende LLM-Aufrufe ab, wenn der Aufrufer aufgibt (M-13). */
     signal?: AbortSignal;
+    /** Nur `_get`/`_list`/`_search`-Tools, ENV-Erweiterung ignoriert (Testlauf). */
+    readOnlyTools?: boolean;
   }): Promise<{
     response: string;
     iterations: number;
@@ -194,7 +201,7 @@ export class WorkflowAgentService {
     // it just falls back to tools-disabled / the default iteration cap.
     const cfg = await this.loadEndpoint();
     const toolsEnabled = cfg?.toolsEnabled ?? false;
-    const allowlist = toolsEnabled ? this.effectiveAllowlist(input.allowedTools) : [];
+    const allowlist = toolsEnabled ? this.effectiveAllowlist(input.allowedTools, input.readOnlyTools) : [];
     const maxIter = input.maxToolIterations ?? cfg?.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
 
     return this.gateway.runAgent((endpoint) =>

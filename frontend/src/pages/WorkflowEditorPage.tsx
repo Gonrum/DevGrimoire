@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   useNodesState, useEdgesState, addEdge, Connection, Edge, Node,
   useReactFlow, ReactFlowProvider,
@@ -15,6 +16,8 @@ import { WorkflowNodeInspector } from '../components/workflows/WorkflowNodeInspe
 import { WorkflowValidationBanner } from '../components/workflows/WorkflowValidationBanner';
 import { WorkflowRunInspector } from '../components/workflows/WorkflowRunInspector';
 import { WorkflowEditorMobileFallback } from '../components/workflows/WorkflowEditorMobileFallback';
+import { WorkflowNodeEditModal } from '../components/workflows/WorkflowNodeEditModal';
+import { nodeHasConfig, SelectedNode } from '../components/workflows/nodeConfig';
 import { useNodeTypesCatalog } from '../hooks/useNodeTypesCatalog';
 import { useViewportBreakpoint, ViewportBreakpoint } from '../hooks/useViewportBreakpoint';
 import { useWorkflowDirtyGuard } from '../hooks/useWorkflowDirtyGuard';
@@ -115,6 +118,8 @@ function EditorInner() {
   const [edges, setEdges, onEdgesChange] = useEdgesState([] as Edge[]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  /** Node, dessen Edit-/Test-Modal offen ist. */
+  const [editNodeId, setEditNodeId] = useState<string | null>(null);
   const [remoteIssues, setRemoteIssues] = useState<RemoteIssue[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -168,6 +173,7 @@ function EditorInner() {
     setNodes((ns) => ns.filter((n) => n.id !== nid));
     setEdges((es) => es.filter((e) => e.source !== nid && e.target !== nid));
     setSelectedNodeId((cur) => (cur === nid ? null : cur));
+    setEditNodeId((cur) => (cur === nid ? null : cur));
     setDirty(true);
   }, [setNodes, setEdges]);
 
@@ -193,17 +199,22 @@ function EditorInner() {
     setDirty(true);
   }, [setEdges]);
 
+  const handleEditNode = useCallback((nid: string) => {
+    setSelectedNodeId(nid);
+    setEditNodeId(nid);
+  }, []);
+
   // Inject handlers into node/edge data after handlers are stable
   useEffect(() => {
     setNodes((ns) => ns.map((n) => ({
       ...n,
-      data: { ...n.data, onDelete: handleDeleteNode, onDuplicate: handleDuplicateNode },
+      data: { ...n.data, onDelete: handleDeleteNode, onDuplicate: handleDuplicateNode, onEdit: handleEditNode },
     })));
     setEdges((es) => es.map((e) => ({
       ...e,
       data: { ...e.data, onDelete: handleDeleteEdge },
     })));
-  }, [handleDeleteNode, handleDuplicateNode, handleDeleteEdge, setNodes, setEdges]);
+  }, [handleDeleteNode, handleDuplicateNode, handleEditNode, handleDeleteEdge, setNodes, setEdges]);
 
   const addNodeOfType = useCallback((type: string, position: { x: number; y: number }) => {
     const meta = byType[type];
@@ -222,12 +233,13 @@ function EditorInner() {
           metadata: meta,
           onDelete: handleDeleteNode,
           onDuplicate: handleDuplicateNode,
+          onEdit: handleEditNode,
         },
       };
       return [...ns, newNode];
     });
     setDirty(true);
-  }, [byType, setNodes, handleDeleteNode, handleDuplicateNode]);
+  }, [byType, setNodes, handleDeleteNode, handleDuplicateNode, handleEditNode]);
 
   const handleDrop = useCallback((event: React.DragEvent, position: { x: number; y: number }) => {
     const type = event.dataTransfer.getData('application/x-workflow-node-type');
@@ -353,26 +365,7 @@ function EditorInner() {
     if (node) void reactFlowApi.setCenter(node.position.x, node.position.y, { zoom: 1.2, duration: 400 });
   };
 
-  const upstreamNodes = useMemo(() => {
-    if (!selectedNodeId) return [];
-    const incoming = new Set<string>();
-    const stack: string[] = [selectedNodeId];
-    while (stack.length) {
-      const cur = stack.pop()!;
-      for (const e of edges) {
-        if (e.target === cur && !incoming.has(e.source)) {
-          incoming.add(e.source);
-          stack.push(e.source);
-        }
-      }
-    }
-    return nodes
-      .filter((n) => incoming.has(n.id))
-      .map((n) => {
-        const d = readNodeData(n.data);
-        return { id: n.id, type: d.type, config: d.config, secretRefs: d.secretRefs };
-      });
-  }, [nodes, edges, selectedNodeId]);
+  const upstreamNodes = useMemo(() => upstreamOf(selectedNodeId, nodes, edges), [nodes, edges, selectedNodeId]);
 
   const outgoingByBranch = useMemo(() => {
     if (!selectedNodeId) return {};
@@ -407,17 +400,23 @@ function EditorInner() {
 
   const localIssues = useMemo(() => {
     if (!selectedNode) return [];
-    const meta = byType[selectedNodeData.type];
-    if (!meta) return [t('workflows.editor.unknownType')];
-    const issues: string[] = [];
-    const required = readStringArray(meta.configJsonSchema.required) ?? [];
-    const cfg = selectedNodeData.config;
-    for (const r of required) {
-      const v = cfg[r];
-      if (v === undefined || v === null || v === '') issues.push(t('workflows.editor.fieldRequired', { field: `config.${r}` }));
-    }
-    return issues;
+    return issuesFor(byType[selectedNodeData.type], selectedNodeData.config, t);
   }, [selectedNode, selectedNodeData, byType, t]);
+
+  const editNode = useMemo(() => nodes.find((n) => n.id === editNodeId) ?? null, [nodes, editNodeId]);
+  const editNodeData = useMemo(() => readNodeData(editNode?.data), [editNode]);
+  const editMeta = editNode ? byType[editNodeData.type] : undefined;
+  const editUpstream = useMemo(() => upstreamOf(editNodeId, nodes, edges), [nodes, edges, editNodeId]);
+  const editIssues = useMemo(
+    () => (editNode ? issuesFor(editMeta, editNodeData.config, t) : []),
+    [editNode, editMeta, editNodeData, t],
+  );
+  const closeEditModal = useCallback(() => setEditNodeId(null), []);
+
+  const updateNodeConfig = useCallback((nid: string, cfg: Record<string, unknown>) => {
+    setNodes((ns) => ns.map((n) => n.id === nid ? { ...n, data: { ...n.data, config: cfg } } : n));
+    setDirty(true);
+  }, [setNodes]);
 
   if (!workflow) {
     return <div className="container mx-auto p-6 text-sm text-gray-500">{t('common.loading')}</div>;
@@ -518,6 +517,10 @@ function EditorInner() {
               if (bp === 'tablet' && (sel.nodes[0] || sel.edges[0])) setInspectorOpen(true);
             }}
             onDrop={handleDrop}
+            onNodeDoubleClick={(nid) => {
+              const n = nodes.find((x) => x.id === nid);
+              if (n && nodeHasConfig(byType[readNodeData(n.data).type])) handleEditNode(nid);
+            }}
           />
         </main>
 
@@ -539,8 +542,7 @@ function EditorInner() {
               localIssues={localIssues}
               onChangeConfig={(cfg) => {
                 if (!selectedNodeId) return;
-                setNodes((ns) => ns.map((n) => n.id === selectedNodeId ? { ...n, data: { ...n.data, config: cfg } } : n));
-                setDirty(true);
+                updateNodeConfig(selectedNodeId, cfg);
               }}
               onRenameNode={() => { /* follow-up */ }}
               onChangeNodeType={(newType) => {
@@ -554,6 +556,7 @@ function EditorInner() {
               }}
               onDeleteNode={() => selectedNodeId && handleDeleteNode(selectedNodeId)}
               onDuplicateNode={() => selectedNodeId && handleDuplicateNode(selectedNodeId)}
+              onEditNode={() => selectedNodeId && handleEditNode(selectedNodeId)}
               onChangeEdgeBranch={(branch) => {
                 if (!selectedEdgeId) return;
                 setEdges((es) => es.map((e) => e.id === selectedEdgeId ? { ...e, sourceHandle: branch === 'always' ? null : branch, data: { ...e.data, branch } } : e));
@@ -586,9 +589,57 @@ function EditorInner() {
         onDismiss={() => setRemoteIssues([])}
       />
 
+      {editNode && editMeta && nodeHasConfig(editMeta) && (
+        <WorkflowNodeEditModal
+          workflowId={workflow._id}
+          node={{ id: editNode.id, type: editNodeData.type, config: editNodeData.config, secretRefs: editNodeData.secretRefs }}
+          position={editNode.position}
+          meta={editMeta}
+          catalog={catalog}
+          upstreamNodes={editUpstream}
+          localIssues={editIssues}
+          onChangeConfig={(cfg) => updateNodeConfig(editNode.id, cfg)}
+          onClose={closeEditModal}
+        />
+      )}
+
       {runId && <WorkflowRunInspector runId={runId} onClose={() => setRunId(null)} onNavigate={setRunId} />}
     </div>
   );
+}
+
+/** Alle Nodes, deren Ausgaben `nodeId` per Template erreichen kann (transitiv vorgelagert). */
+function upstreamOf(nodeId: string | null, nodes: Node[], edges: Edge[]): SelectedNode[] {
+  if (!nodeId) return [];
+  const incoming = new Set<string>();
+  const stack: string[] = [nodeId];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    for (const e of edges) {
+      if (e.target === cur && !incoming.has(e.source)) {
+        incoming.add(e.source);
+        stack.push(e.source);
+      }
+    }
+  }
+  return nodes
+    .filter((n) => incoming.has(n.id))
+    .map((n) => {
+      const d = readNodeData(n.data);
+      return { id: n.id, type: d.type, config: d.config, secretRefs: d.secretRefs };
+    });
+}
+
+/** Lokale Pflichtfeld-Prüfung — die volle Validierung macht der Server. */
+function issuesFor(meta: WorkflowNodeMetadata | undefined, cfg: Record<string, unknown>, t: TFunction): string[] {
+  if (!meta) return [t('workflows.editor.unknownType')];
+  const issues: string[] = [];
+  const required = readStringArray(meta.configJsonSchema.required) ?? [];
+  for (const r of required) {
+    const v = cfg[r];
+    if (v === undefined || v === null || v === '') issues.push(t('workflows.editor.fieldRequired', { field: `config.${r}` }));
+  }
+  return issues;
 }
 
 function toReactFlowNode(n: WfNode, byType: Record<string, WorkflowNodeMetadata>): Node {

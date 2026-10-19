@@ -1,19 +1,12 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Trash2, Copy, ArrowRight, Plus, X } from 'lucide-react';
+import { Trash2, Copy, ArrowRight, Plus, X, Pencil } from 'lucide-react';
 import { WorkflowNodeMetadata, WorkflowEdge as WfEdge } from '../../api/workflows';
-import { isRecord } from '../../lib/narrow';
-import { SchemaField } from './SchemaField';
-import { SchemaObjectAccordion } from './SchemaObjectAccordion';
-import { TemplateOption } from './TemplatePicker';
+import { NodeConfigForm } from './NodeConfigForm';
 import { nodeCategoryStyles } from './nodeCategoryStyles';
+import { buildTemplateOptions, nodeHasConfig, SelectedNode } from './nodeConfig';
 
-export interface SelectedNode {
-  id: string;
-  type: string;
-  config: Record<string, unknown>;
-  secretRefs?: string[];
-}
+export type { SelectedNode } from './nodeConfig';
 
 interface Props {
   selectedNode: SelectedNode | null;
@@ -33,6 +26,8 @@ interface Props {
   onChangeNodeType: (newType: string) => void;
   onDeleteNode: () => void;
   onDuplicateNode: () => void;
+  /** Öffnet das grosse Edit-/Test-Modal für den gewählten Node. */
+  onEditNode: () => void;
   onChangeEdgeBranch: (branch: 'success' | 'failure' | 'custom' | 'always') => void;
   onDeleteEdge: () => void;
   /** T-325: click an outgoing-edge summary entry to switch to its EdgeInspector. */
@@ -80,25 +75,10 @@ function NodeInspector(p: Props) {
   const cat = meta?.category ?? 'action';
   const style = nodeCategoryStyles[cat];
 
-  const templateOptions = useMemo<TemplateOption[]>(() => {
-    const opts: TemplateOption[] = [
-      { path: 'input.event.entityId', label: 'event.entityId', type: 'string' },
-      { path: 'input.event.entity', label: 'event.entity', type: 'string' },
-      { path: 'input.event.action', label: 'event.action', type: 'string' },
-    ];
-    for (const up of upstreamNodes) {
-      const upMeta = catalog.find((c) => c.type === up.type);
-      if (!upMeta) continue;
-      for (const [outKey, outType] of Object.entries(upMeta.outputs)) {
-        opts.push({
-          path: `nodes.${up.id}.${outKey}`,
-          label: `${up.id} / ${outKey}`,
-          type: outType,
-        });
-      }
-    }
-    return opts;
-  }, [catalog, upstreamNodes]);
+  const templateOptions = useMemo(
+    () => buildTemplateOptions(catalog, upstreamNodes),
+    [catalog, upstreamNodes],
+  );
 
   return (
     <div className="flex h-full flex-col border-l border-gray-800 bg-gray-950">
@@ -106,6 +86,9 @@ function NodeInspector(p: Props) {
         <div className="flex items-center justify-between">
           <span className="font-mono text-xs text-gray-300">id: {node.id}</span>
           <div className="flex gap-1">
+            {nodeHasConfig(meta) && (
+              <button onClick={p.onEditNode} title={t('workflows.node.edit')} className="rounded-sm p-1 text-gray-300 hover:bg-gray-800 hover:text-cyan-300"><Pencil size={14} /></button>
+            )}
             <button onClick={p.onDuplicateNode} title={t('workflows.node.duplicate')} className="rounded-sm p-1 text-gray-300 hover:bg-gray-800"><Copy size={14} /></button>
             <button onClick={p.onDeleteNode} title={t('common.delete')} className="rounded-sm p-1 text-gray-300 hover:bg-gray-800 hover:text-red-400"><Trash2 size={14} /></button>
           </div>
@@ -118,28 +101,12 @@ function NodeInspector(p: Props) {
         <section>
           <h3 className="mb-2 text-xs uppercase tracking-wide text-gray-500">{t('workflows.inspector.configuration')}</h3>
           {meta ? (
-            meta.configJsonSchema.type === 'object' ? (
-              <SchemaObjectAccordion
-                schema={meta.configJsonSchema}
-                value={node.config ?? {}}
-                onChange={(v) => p.onChangeConfig(v)}
-                templateOptions={templateOptions}
-              />
-            ) : (
-              <SchemaField
-                schema={meta.configJsonSchema}
-                path={['config']}
-                value={node.config}
-                onChange={(v) => {
-                  // `SchemaField` meldet `undefined`, wenn die letzte Zeile
-                  // einer additionalProperties-Map gelöscht wird. Vorher ging
-                  // dieses `undefined` als "Config" durch — hier wird daraus
-                  // die leere Config, die es meint.
-                  p.onChangeConfig(isRecord(v) ? v : {});
-                }}
-                templateOptions={templateOptions}
-              />
-            )
+            <NodeConfigForm
+              meta={meta}
+              config={node.config}
+              onChange={p.onChangeConfig}
+              templateOptions={templateOptions}
+            />
           ) : (
             <div className="text-xs text-amber-400">{t('workflows.inspector.unknownType')}</div>
           )}

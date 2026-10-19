@@ -4096,7 +4096,7 @@ const tools = [
   },
   {
     name: 'workflow_node_test',
-    description: 'Safely test a single workflow node with sample input. Executes only side-effect-free trigger/control nodes; action and agent nodes are validation-only.',
+    description: 'Safely test a single workflow node with sample input. Executes side-effect-free trigger/control nodes; agent.task runs as a dry run (only _get/_list/_search tools) when workflowId is given; action nodes are validation-only. With workflowId, scope/project/customer come from the stored workflow.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -4112,6 +4112,7 @@ const tools = [
           },
           required: ['id', 'type', 'position'],
         },
+        workflowId: { type: 'string', description: 'Workflow the node belongs to — supplies scope/project/customer; required for agent dry runs' },
         scope: { type: 'string', enum: ['system', 'project', 'customer'] },
         input: { type: 'object' },
         runContext: { type: 'object' },
@@ -7907,6 +7908,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'workflow_node_test': {
           result = await workflowEngineService.testNode({
             node: requireObject(a, 'node'),
+            workflowId: optionalString(a, 'workflowId'),
             scope: optionalEnum(a, 'scope', Object.values(WorkflowScope)),
             input: optionalObject(a, 'input'),
             runContext: optionalObject(a, 'runContext'),

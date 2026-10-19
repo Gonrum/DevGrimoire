@@ -1,11 +1,12 @@
 import { createElement, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Handle, Position, NodeToolbar, type Node, type NodeProps } from '@xyflow/react';
-import { AlertTriangle, Copy, Trash2 } from 'lucide-react';
+import { AlertTriangle, Copy, Pencil, Trash2 } from 'lucide-react';
 import { WorkflowNodeMetadata, WorkflowNodeRunStatus } from '../../api/workflows';
 import { nodeCategoryStyles } from './nodeCategoryStyles';
 import { getNodeIcon } from './nodeTypeIconMap';
 import { runStatusStyles } from './runStatusStyles';
+import { nodeHasConfig } from './nodeConfig';
 
 export interface WorkflowNodeData {
   type: string;
@@ -16,6 +17,7 @@ export interface WorkflowNodeData {
   issueCount?: number;
   onDelete?: (id: string) => void;
   onDuplicate?: (id: string) => void;
+  onEdit?: (id: string) => void;
   [key: string]: unknown;
 }
 
@@ -37,6 +39,14 @@ function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
     <>
       <NodeToolbar isVisible={props.selected} position={Position.Top} offset={8}>
         <div className="flex gap-1 rounded-sm border border-gray-700 bg-gray-900 p-1 shadow-lg">
+          {nodeHasConfig(meta) && (
+            <button
+              type="button"
+              title={t('workflows.node.edit')}
+              onClick={() => data.onEdit?.(props.id)}
+              className="rounded-sm p-1 text-gray-300 hover:bg-gray-800 hover:text-cyan-300"
+            ><Pencil size={14} /></button>
+          )}
           <button
             type="button"
             title={t('workflows.node.duplicate')}

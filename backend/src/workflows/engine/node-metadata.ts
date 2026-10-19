@@ -54,6 +54,9 @@ export function toPublicMetadata(meta: NodeMetadata): NodeMetadataPublic {
   // resolve internal references. Without this, e.g. control.condition's
   // `default` property emits a `$ref` to a deeply nested branch enum, which
   // the renderer can't follow and falls back to a JSON textarea.
+  // Bewusst ohne `name`: damit hüllt zod-to-json-schema die Wurzel in
+  // `{ $ref, definitions }` — der Editor sah dann kein `type: 'object'` und
+  // zeigte für keinen Node echte Felder (T-503).
   return {
     type: meta.type,
     category: meta.category,
@@ -61,7 +64,6 @@ export function toPublicMetadata(meta: NodeMetadata): NodeMetadataPublic {
     description: meta.description,
     allowedScopes: meta.allowedScopes,
     configJsonSchema: toJsonSchema(meta.configSchema, {
-      name: meta.type,
       $refStrategy: 'none',
     }),
     outputs: meta.outputs,

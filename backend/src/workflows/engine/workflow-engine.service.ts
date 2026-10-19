@@ -1,12 +1,13 @@
 import {
   BadRequestException,
   Injectable,
+  NotFoundException,
   Logger,
   OnModuleInit,
   OnApplicationBootstrap,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, Types, isValidObjectId } from 'mongoose';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { ModuleRef } from '@nestjs/core';
 import {
@@ -365,7 +366,22 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
 
     const executor = this.registry.get(node.type);
     const metadata = executor.metadata;
-    const scope = dto.scope ?? WorkflowScope.PROJECT;
+    // Mit `workflowId` gelten Scope, Projekt und Kunde der gespeicherten
+    // Definition — ein Request kann sich so kein fremdes Projekt erschleichen.
+    let scope = dto.scope ?? WorkflowScope.PROJECT;
+    let projectId: Types.ObjectId | undefined;
+    let customerId: Types.ObjectId | undefined;
+    let definitionId = new Types.ObjectId();
+    if (dto.workflowId !== undefined) {
+      // Der MCP-Pfad läuft ohne DTO-Validierung — die Id wird hier geprüft.
+      if (!isValidObjectId(dto.workflowId)) throw new BadRequestException('Invalid workflowId');
+      const def = await this.definitionModel.findById(dto.workflowId).exec();
+      if (!def) throw new NotFoundException(`Workflow ${dto.workflowId} not found`);
+      scope = def.scope;
+      projectId = def.projectId;
+      customerId = def.customerId;
+      definitionId = def._id;
+    }
     if (!metadata.allowedScopes.includes(scope)) {
       return {
         ok: false,
@@ -389,18 +405,25 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     // liefert, gibt es nicht (alle sind `z.object(...)`).
     const parsedConfig: Record<string, unknown> = isRecord(parsed.data) ? parsed.data : {};
 
-    // Node test mode must never perform writes or external/agent side effects.
-    // For the MVP we execute only trigger/control nodes; action and agent nodes
-    // still get full config validation plus an explicit safety explanation.
-    if (metadata.category === 'action' || metadata.category === 'agent') {
-      return {
-        ok: true,
-        executable: false,
-        mode: 'validation_only',
-        reason: `node category ${metadata.category} may have side effects and is not executed in test mode`,
-        outputSchema: metadata.outputs,
-        branches: metadata.branches ?? ['success', 'failure'],
-      };
+    // Node test mode must never perform writes or external side effects.
+    // Action nodes get config validation plus an explicit safety explanation.
+    // Agent nodes run as a dry run: the executor sees `dryRun` and restricts
+    // its tools to `_get`/`_list`/`_search` — but only with a workflow behind
+    // it, otherwise the tools would run without project/customer scope.
+    const validationOnly = (reason: string) => ({
+      ok: true,
+      executable: false,
+      mode: 'validation_only',
+      reason,
+      outputSchema: metadata.outputs,
+      branches: metadata.branches ?? ['success', 'failure'],
+    });
+    if (metadata.category === 'action') {
+      return validationOnly(`node category action may have side effects and is not executed in test mode`);
+    }
+    const dryRun = metadata.category === 'agent';
+    if (dryRun && dto.workflowId === undefined) {
+      return validationOnly('agent nodes need a workflowId for a dry run (project/customer scope)');
     }
 
     const logs: Array<Record<string, unknown>> = [];
@@ -418,10 +441,12 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       executor.execute({
         run: {
           _id: runId,
-          definitionId: new Types.ObjectId(),
+          definitionId,
           definitionVersion: 0,
           definitionSnapshot: { nodes: [testNodeShape], edges: [] },
           scope,
+          ...(projectId ? { projectId } : {}),
+          ...(customerId ? { customerId } : {}),
           trigger: { type: 'manual', input },
           status: WorkflowRunStatus.RUNNING,
           currentNodeIds: [node.id],
@@ -434,7 +459,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
         nodeRun: {
           _id: nodeRunId,
           runId,
-          definitionId: new Types.ObjectId(),
+          definitionId,
           definitionVersion: 0,
           nodeId: node.id,
           nodeType: node.type,
@@ -454,6 +479,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
         },
         askUser: () => Promise.reject(new Error('askUser is disabled in node test mode')),
         signal: testAbort.signal,
+        dryRun,
       }),
       Number(parsedConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS),
       testAbort,
@@ -462,7 +488,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     return {
       ok: result.status !== 'failed',
       executable: true,
-      mode: 'safe_execute',
+      mode: dryRun ? 'dry_run' : 'safe_execute',
       nodeType: node.type,
       status: result.status,
       branch: result.branch,

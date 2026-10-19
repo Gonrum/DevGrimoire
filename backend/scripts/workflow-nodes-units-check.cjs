@@ -158,6 +158,10 @@ check('toPublicMetadata serializes configJsonSchema', () => {
   const pub = toPublicMetadata(meta);
   assert.equal(pub.type, 'x');
   assert.equal(typeof pub.configJsonSchema, 'object');
+  // Der Editor liest `type`/`properties` an der Wurzel — keine `$ref`-Hülle (T-503).
+  assert.equal(pub.configJsonSchema.type, 'object');
+  assert.equal(pub.configJsonSchema.$ref, undefined);
+  assert.deepEqual(Object.keys(pub.configJsonSchema.properties), ['a']);
 });
 
 // ----------

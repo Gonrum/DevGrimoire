@@ -2565,7 +2565,8 @@
       "duplicate": "Duplicate",
       "branches": "branches",
       "issues_one": "{{count}} configuration issue",
-      "issues_other": "{{count}} configuration issues"
+      "issues_other": "{{count}} configuration issues",
+      "edit": "Edit & test"
     },
     "edge": {
       "delete": "Delete edge"
@@ -2635,6 +2636,33 @@
       "logs": "Logs ({{count}})",
       "selectNodeRun": "Select a node run.",
       "retry": "Retry"
+    },
+    "nodeModal": {
+      "input": "Input",
+      "reloadInput": "Load from last run",
+      "inputEmpty": "No run with node outputs yet — empty skeleton. Add values under nodes.<id>.*.",
+      "inputFromRun": "Context from the last run at {{at}}",
+      "inputInvalid": "Invalid JSON: {{error}}",
+      "inputNotObject": "The context must be a JSON object.",
+      "inputHint": "This context replaces the run context during the test — templates like nodes.<id>.<field> read from it.",
+      "parameters": "Parameters",
+      "output": "Output",
+      "test": "Test node",
+      "agentDryRunHint": "Dry run: the agent is really called (LLM cost) but may only use read-only tools (_get/_list/_search).",
+      "actionValidationHint": "Action nodes are not executed in tests; only their configuration is validated.",
+      "noResult": "No test result yet.",
+      "ok": "OK",
+      "failed": "Failed",
+      "outputData": "Output data",
+      "error": "Error",
+      "waitingFor": "Waiting for",
+      "logs": "Logs",
+      "autoSaveHint": "Parameter changes are saved automatically.",
+      "mode": {
+        "validation_only": "validated only",
+        "safe_execute": "executed",
+        "dry_run": "dry run"
+      }
     }
   },
   "vermerke": {

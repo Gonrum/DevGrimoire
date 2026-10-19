@@ -224,10 +224,12 @@ export class ListWorkflowDefinitionsDto {
   includeArchived?: boolean;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   limit?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   offset?: number;
 }
@@ -285,10 +287,12 @@ export class ListWorkflowRunsDto {
   status?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   limit?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   offset?: number;
 }
@@ -328,6 +332,15 @@ export class TestWorkflowNodeDto {
   @ValidateNested()
   @Type(() => WorkflowNodeDto)
   node: WorkflowNodeDto;
+
+  /**
+   * Workflow, zu dem der Node gehört. Ist er gesetzt, kommen Scope, Projekt
+   * und Kunde aus der gespeicherten Definition — nicht aus dem Request. Ohne
+   * ihn läuft ein Agent-Node nicht als Trockenlauf, sondern nur als Prüfung.
+   */
+  @IsOptional()
+  @IsMongoId()
+  workflowId?: string;
 
   @IsOptional()
   @IsEnum(WorkflowScope)

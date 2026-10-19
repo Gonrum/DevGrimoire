@@ -24,6 +24,7 @@ interface Props {
   onEdgesChange: OnEdgesChange;
   onConnect: (conn: Connection) => void;
   onSelectionChange: (sel: { nodes: Node[]; edges: Edge[] }) => void;
+  onNodeDoubleClick?: (nodeId: string) => void;
   onDrop: (event: React.DragEvent, position: { x: number; y: number }) => void;
 }
 
@@ -106,6 +107,8 @@ function CanvasInner(p: Props) {
         onConnectEnd={onConnectEnd}
         isValidConnection={isValidConnection}
         onSelectionChange={p.onSelectionChange}
+        onNodeDoubleClick={(_event, node) => p.onNodeDoubleClick?.(node.id)}
+        zoomOnDoubleClick={false}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={defaultEdgeOptions}

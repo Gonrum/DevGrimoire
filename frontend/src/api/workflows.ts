@@ -147,6 +147,33 @@ export interface UpdateWorkflowDto {
   publish?: boolean;
 }
 
+export interface TestNodeDto {
+  node: Pick<WorkflowNode, 'id' | 'type' | 'position' | 'config' | 'secretRefs'>;
+  /** Liefert Scope, Projekt und Kunde — für den Agent-Trockenlauf Pflicht. */
+  workflowId?: string;
+  input?: Record<string, unknown>;
+  runContext?: Record<string, unknown>;
+}
+
+/**
+ * Antwort von `POST /workflows/nodes/test`. `validation_only` = nur geprüft
+ * (Grund in `reason`, bei ungültiger Config `issues`), `safe_execute` =
+ * ausgeführt, `dry_run` = Agent mit ausschliesslich lesenden Tools.
+ */
+export interface NodeTestResult {
+  ok: boolean;
+  executable: boolean;
+  mode?: 'validation_only' | 'safe_execute' | 'dry_run';
+  reason?: string;
+  issues?: string[];
+  status?: string;
+  branch?: string;
+  outputPreview?: unknown;
+  errorPreview?: unknown;
+  logPreview?: unknown;
+  waitingForPreview?: unknown;
+}
+
 /* `type` statt `interface` — Begründung siehe `ListFilter`. */
 export type RunFilter = {
   definitionId?: string;
@@ -173,6 +200,8 @@ function toQuery(p: Record<string, QueryValue>): string {
 
 export const workflowsApi = {
   listNodeTypes: () => request<WorkflowNodeMetadata[]>('/workflows/node-types'),
+  testNode: (dto: TestNodeDto) =>
+    request<NodeTestResult>('/workflows/nodes/test', { method: 'POST', body: JSON.stringify(dto) }),
   list: (filter: ListFilter = {}) =>
     request<WorkflowDefinition[]>(`/workflows${toQuery(filter)}`),
   get: (id: string) => request<WorkflowDefinition>(`/workflows/${id}`),
