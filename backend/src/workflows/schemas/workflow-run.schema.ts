@@ -103,7 +103,20 @@ export const WorkflowRunSchema = SchemaFactory.createForClass(WorkflowRun);
 WorkflowRunSchema.index({ definitionId: 1, createdAt: -1 });
 WorkflowRunSchema.index({ scope: 1, projectId: 1, customerId: 1, status: 1, createdAt: -1 });
 WorkflowRunSchema.index({ status: 1, updatedAt: 1 });
+/**
+ * Ein Lauf pro Zeitplan-Slot. Partiell statt `sparse`: bei einem
+ * zusammengesetzten Index greift `sparse` nur, wenn *alle* Felder fehlen —
+ * `definitionId` ist immer gesetzt, also zählte jeder manuelle Lauf als Slot
+ * `null` und ab dem zweiten Start kam E11000. Neuer Name, damit der alte
+ * Index beim Start entfernt werden kann (WorkflowsModule.onModuleInit).
+ */
+export const SCHEDULE_SLOT_INDEX = 'uniq_run_per_schedule_slot_v2';
+export const LEGACY_SCHEDULE_SLOT_INDEX = 'uniq_run_per_schedule_slot';
 WorkflowRunSchema.index(
   { definitionId: 1, 'triggeredBy.scheduleSlotAt': 1 },
-  { unique: true, sparse: true, name: 'uniq_run_per_schedule_slot' },
+  {
+    unique: true,
+    name: SCHEDULE_SLOT_INDEX,
+    partialFilterExpression: { 'triggeredBy.scheduleSlotAt': { $type: 'date' } },
+  },
 );

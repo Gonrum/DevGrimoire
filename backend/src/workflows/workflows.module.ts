@@ -1,9 +1,15 @@
 import { forwardRef, Module, OnModuleInit } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
+import { InjectModel, MongooseModule } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { WorkflowsController } from './workflows.controller';
 import { WorkflowsService } from './workflows.service';
 import { WorkflowDefinition, WorkflowDefinitionSchema } from './schemas/workflow-definition.schema';
-import { WorkflowRun, WorkflowRunSchema } from './schemas/workflow-run.schema';
+import {
+  LEGACY_SCHEDULE_SLOT_INDEX,
+  WorkflowRun,
+  WorkflowRunDocument,
+  WorkflowRunSchema,
+} from './schemas/workflow-run.schema';
 import { WorkflowNodeRun, WorkflowNodeRunSchema } from './schemas/workflow-node-run.schema';
 import { WorkflowEngineService } from './engine/workflow-engine.service';
 import { WorkflowQueueService } from './engine/workflow-queue.service';
@@ -110,6 +116,7 @@ import { WorkflowAccountabilityService } from './engine/workflow-accountability.
 })
 export class WorkflowsModule implements OnModuleInit {
   constructor(
+    @InjectModel(WorkflowRun.name) private readonly runModel: Model<WorkflowRunDocument>,
     private readonly registry: NodeRegistry,
     private readonly triggerManual: TriggerManualExecutor,
     private readonly triggerSchedule: TriggerScheduleExecutor,
@@ -132,7 +139,15 @@ export class WorkflowsModule implements OnModuleInit {
     private readonly todoFind: TodoFindExecutor,
   ) {}
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
+    // Migration: der alte Slot-Index war `sparse` und sperrte jeden zweiten
+    // manuellen Lauf (E11000 auf scheduleSlotAt: null). Den Nachfolger legt
+    // Mongoose per autoIndex an.
+    try {
+      await this.runModel.collection.dropIndex(LEGACY_SCHEDULE_SLOT_INDEX);
+    } catch {
+      // Bereits migriert oder nie angelegt
+    }
     this.registry.register(this.triggerManual);
     this.registry.register(this.triggerSchedule);
     this.registry.register(this.triggerProjectEvent);
