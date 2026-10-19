@@ -2539,6 +2539,7 @@
       "placed": "{{type}} platziert",
       "saved": "Workflow gespeichert",
       "saveFailed": "Speichern fehlgeschlagen: {{error}}",
+      "autosaveBlocked": "Nicht gespeichert: aktiver Workflow speichert erst, wenn alle Pflichtfelder gefüllt sind",
       "activated": "Workflow aktiviert",
       "statusChanged": "Status: {{status}}",
       "statusChangeFailed": "Status nicht änderbar",

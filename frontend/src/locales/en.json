@@ -2539,6 +2539,7 @@
       "placed": "{{type}} placed",
       "saved": "Workflow saved",
       "saveFailed": "Save failed: {{error}}",
+      "autosaveBlocked": "Not saved: an active workflow saves once all required fields are filled",
       "activated": "Workflow activated",
       "statusChanged": "Status: {{status}}",
       "statusChangeFailed": "Could not change status",

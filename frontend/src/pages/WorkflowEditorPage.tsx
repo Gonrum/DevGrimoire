@@ -333,13 +333,32 @@ function EditorInner() {
   const handleSaveRef = useRef(handleSave);
   useEffect(() => { handleSaveRef.current = handleSave; }, [handleSave]);
 
+  // Ein aktiver Workflow speichert nur mit gültigen Node-Configs. Ein frisch
+  // gezogener Node (z.B. ssh.exec ohne Verbindung/Befehl) ist das noch nicht —
+  // Autosave wartet dann, statt alle 800 ms denselben 400 zu kassieren.
+  const autosaveBlocked = useMemo(
+    () => workflow?.status === 'active'
+      && nodes.some((n) => {
+        const d = readNodeData(n.data);
+        return issuesFor(byType[d.type], d.config, t).length > 0;
+      }),
+    [workflow?.status, nodes, byType, t],
+  );
+
+  // Nach einem gescheiterten Autosave erst bei der nächsten Änderung erneut
+  // versuchen — sonst setzt `saving → false` den Timer neu und es entsteht
+  // eine Endlosschleife aus Fehler-Toasts.
+  const [failedSnapshot, setFailedSnapshot] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
+  const autosaveFailed = failedSnapshot?.nodes === nodes && failedSnapshot.edges === edges;
+
   useEffect(() => {
-    if (!dirty || saving) return;
+    if (!dirty || saving || autosaveBlocked || autosaveFailed) return;
+    const snapshot = { nodes, edges };
     const timer = setTimeout(() => {
-      void handleSaveRef.current({}, true);
+      void handleSaveRef.current({}, true).then((ok) => { if (!ok) setFailedSnapshot(snapshot); });
     }, 800);
     return () => clearTimeout(timer);
-  }, [dirty, saving]);
+  }, [dirty, saving, autosaveBlocked, autosaveFailed, nodes, edges]);
 
   const handleActivate = async () => {
     const saved = await handleSave({ status: 'active' });
@@ -460,6 +479,9 @@ function EditorInner() {
           <span className="truncate text-sm font-semibold text-gray-200">{workflow.name}</span>
           <StatusPill status={workflow.status} />
           <span className="rounded-sm bg-gray-800 px-2 py-0.5 text-[10px] text-gray-400">v{workflow.version}</span>
+          {dirty && autosaveBlocked && (
+            <span className="truncate text-[11px] text-amber-400">{t('workflows.editor.autosaveBlocked')}</span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => { void handleSave(); }} disabled={saving} className="inline-flex items-center gap-1 rounded-sm bg-gray-800 px-3 py-1 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-50">
