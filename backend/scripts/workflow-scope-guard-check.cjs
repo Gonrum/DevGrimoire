@@ -10,6 +10,7 @@ const { ActionTodoUpdateExecutor } = require('../dist/workflows/nodes/action-tod
 const { ActionTodoCommentExecutor } = require('../dist/workflows/nodes/action-todo-comment.executor');
 const { ActionTodoLinkMilestoneExecutor } = require('../dist/workflows/nodes/action-todo-link-milestone.executor');
 
+const milestones = { findById: async (id) => ({ projectId: id === 'mForeign' ? P2 : P1 }) };
 const P1 = new Types.ObjectId();
 const P2 = new Types.ObjectId();
 const C = new Types.ObjectId();
@@ -100,7 +101,7 @@ async function check(name, fn) {
         addComment: async () => void (wrote = true),
       };
       const run = { _id: new Types.ObjectId(), projectId: P1 };
-      const res = await new Cls(todos, guard).execute({ run, node: { id: 'n1' }, config: cfg, runContext: {} });
+      const res = await new Cls(todos, guard, milestones).execute({ run, node: { id: 'n1' }, config: cfg, runContext: {} });
       assert.equal(res.status, 'failed');
       assert.equal(res.error.code, 'scope_violation');
       assert.ok(!res.error.message.includes(P2.toString()));
@@ -118,9 +119,25 @@ async function check(name, fn) {
         addComment: async () => void (wrote = true),
       };
       const run = { _id: new Types.ObjectId(), projectId: P1 };
-      const res = await new Cls(todos, guard).execute({ run, node: { id: 'n1' }, config: cfg, runContext: {} });
+      const res = await new Cls(todos, guard, milestones).execute({ run, node: { id: 'n1' }, config: cfg, runContext: {} });
       assert.equal(res.status, 'success');
       assert.equal(wrote, true);
+    });
+  }
+
+  for (const [Cls, cfg] of [
+    [ActionTodoUpdateExecutor, { todoId: 't1', milestoneId: 'mForeign' }],
+    [ActionTodoLinkMilestoneExecutor, { todoId: 't1', milestoneId: 'mForeign' }],
+  ]) {
+    await check(`${Cls.name}: fremder Milestone -> scope_violation ohne Schreibzugriff`, async () => {
+      const { guard, audits } = makeGuard([]);
+      let wrote = false;
+      const todos = { findById: async () => ({ projectId: P1 }), update: async () => void (wrote = true) };
+      const run = { _id: new Types.ObjectId(), projectId: P1 };
+      const res = await new Cls(todos, guard, milestones).execute({ run, node: { id: 'n1' }, config: cfg, runContext: {} });
+      assert.equal(res.error.code, 'scope_violation');
+      assert.equal(wrote, false);
+      assert.deepEqual(audits[0].meta.entity, { type: 'milestone', id: 'mForeign' });
     });
   }
 

@@ -32,6 +32,7 @@ import { ActionUserQuestionExecutor } from './nodes/action-user-question.executo
 import { ControlConditionExecutor } from './nodes/control-condition.executor';
 import { ControlDelayExecutor } from './nodes/control-delay.executor';
 import { AgentTaskExecutor } from './nodes/agent-task.executor';
+import { MilestonesModule } from '../milestones/milestones.module';
 import { TodosModule } from '../todos/todos.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { QuestionsModule } from '../questions/questions.module';
@@ -56,6 +57,7 @@ import { WorkflowAccountabilityService } from './engine/workflow-accountability.
       { name: CustomerProjectLink.name, schema: CustomerProjectLinkSchema },
     ]),
     TodosModule,
+    forwardRef(() => MilestonesModule),
     NotificationsModule,
     QuestionsModule,
     KnowledgeModule,

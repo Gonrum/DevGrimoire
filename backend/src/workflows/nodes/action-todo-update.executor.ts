@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { z } from 'zod';
 import { TodosService } from '../../todos/todos.service';
+import { MilestonesService } from '../../milestones/milestones.service';
 import { WorkflowScopeGuard } from '../workflow-scope.guard';
 import { TodoPriority, TodoStatus } from '../../todos/schemas/todo.schema';
 import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types';
@@ -33,6 +34,7 @@ export class ActionTodoUpdateExecutor implements NodeExecutor {
   constructor(
     private readonly todos: TodosService,
     private readonly scope: WorkflowScopeGuard,
+    private readonly milestones: MilestonesService,
   ) {}
 
   async execute(ctx: NodeExecutionContext): Promise<NodeResult> {
@@ -54,17 +56,26 @@ export class ActionTodoUpdateExecutor implements NodeExecutor {
     } catch (err: unknown) {
       return { status: 'failed', error: { code: 'invalid_config', message: errorMessage(err) } };
     }
+    const milestoneId = asString(expanded.milestoneId);
     try {
       // Erst laden (prüft den Akteur-Scope), dann den Lauf-Scope, erst danach schreiben.
       const todo = await this.todos.findById(todoId);
       if (!(await this.scope.check(ctx.run, todo))) {
         return this.scope.deny(ctx.run, ctx.node.id, { type: 'todo', id: todoId });
       }
+      // Auch der Milestone muss zum Lauf gehören, sonst hängt ein P1-Workflow
+      // sein Todo an einen Milestone aus P2.
+      if (milestoneId) {
+        const milestone = await this.milestones.findById(milestoneId);
+        if (!(await this.scope.check(ctx.run, milestone))) {
+          return this.scope.deny(ctx.run, ctx.node.id, { type: 'milestone', id: milestoneId });
+        }
+      }
       await this.todos.update(todoId, {
         status,
         priority,
         tags: asStringArray(expanded.tags),
-        milestoneId: asString(expanded.milestoneId),
+        milestoneId,
       });
       return { status: 'success', output: { todoId, updated: true } };
     } catch (err: unknown) {
