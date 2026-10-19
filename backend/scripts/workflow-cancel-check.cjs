@@ -77,7 +77,7 @@ async function until(fn, label, ms = 3000) {
   const noop = { record: async () => {}, create: async () => {} };
   const askedQuestions = [];
   const questions = { create: async (dto) => { const q = { _id: new mongoose.Types.ObjectId(), ...dto }; askedQuestions.push(q); return q; } };
-  const engine = new WorkflowEngineService(Def, Run, NodeRun, queue, {}, registry, emitter, questions, {}, noop, noop);
+  const engine = new WorkflowEngineService(Def, Run, NodeRun, queue, {}, registry, emitter, questions, {}, noop, noop, { resolve: async () => null });
   const workflows = new WorkflowsService(Def, Run, NodeRun, emitter, registry, noop);
   // @OnEvent wird ausserhalb von Nest nicht verdrahtet — von Hand.
   emitter.on(WORKFLOW_RUN_CANCELLED, (p) => engine.onRunCancelled(p));

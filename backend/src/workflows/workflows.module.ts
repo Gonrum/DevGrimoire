@@ -42,6 +42,8 @@ import { ChatModule } from '../chat/chat.module';
 import { SettingsModule } from '../settings/settings.module';
 import { CommonModule } from '../common/common.module';
 import { BalancerModule } from '../balancer/balancer.module';
+import { AuthModule } from '../auth/auth.module';
+import { WorkflowAccountabilityService } from './engine/workflow-accountability.service';
 
 @Module({
   imports: [
@@ -60,11 +62,13 @@ import { BalancerModule } from '../balancer/balancer.module';
     SettingsModule,
     CommonModule,
     BalancerModule,
+    AuthModule,
   ],
   controllers: [WorkflowsController, WorkflowNodeTypesController, WorkflowAgentController],
   providers: [
     WorkflowsService,
     WorkflowEngineService,
+    WorkflowAccountabilityService,
     WorkflowQueueService,
     WorkflowWorkerPool,
     WorkflowSchedulerService,

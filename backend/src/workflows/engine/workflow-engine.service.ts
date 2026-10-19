@@ -47,6 +47,9 @@ import {
   checkRuntimeNode,
   WORKFLOW_RUNTIME_LIMITS,
 } from '../workflow-security.runtime';
+import { getWorkflowNodePolicy, requiresAccountableUser } from '../workflow-security.policy';
+import { RequestContext } from '../../common/request-context';
+import { AccountableActor, WorkflowAccountabilityService } from './workflow-accountability.service';
 
 const DEFAULT_TIMEOUT_MS = WORKFLOW_RUNTIME_LIMITS.defaultNodeTimeoutMs;
 /**
@@ -134,6 +137,24 @@ function buildEdgeValues(
   return out;
 }
 
+/**
+ * Verweigert einen Node, dessen Risiko einen zurechenbaren Nutzer verlangt,
+ * wenn der Lauf keinen hat. Das Ergebnis ist ein normales Fehlschlagen — ein
+ * failure-Zweig im Graphen greift wie bei jedem anderen Fehler.
+ */
+export function accountabilityRefusal(nodeType: string, hasActor: boolean): NodeResult | undefined {
+  if (hasActor) return undefined;
+  const risk = getWorkflowNodePolicy(nodeType)?.risk;
+  if (!risk || !requiresAccountableUser(risk)) return undefined;
+  return {
+    status: 'failed',
+    error: {
+      code: 'no_accountable_user',
+      message: `Node "${nodeType}" (${risk}) braucht einen zurechenbaren, aktiven Nutzer — der Lauf hat keinen`,
+    },
+  };
+}
+
 @Injectable()
 export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstrap {
   private readonly logger = new Logger(WorkflowEngineService.name);
@@ -155,6 +176,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     private readonly moduleRef: ModuleRef,
     private readonly auditLog: AuditLogService,
     private readonly notificationsService: NotificationsService,
+    private readonly accountability: WorkflowAccountabilityService,
   ) {}
 
   private audit(action: string, meta: Record<string, unknown> & { runId?: string }): void {
@@ -351,10 +373,22 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     let inFlight = this.inFlight.get(runKey);
     if (!inFlight) { inFlight = new Set(); this.inFlight.set(runKey, inFlight); }
     inFlight.add(abort);
+    // Einmal pro Node-Ausführung auflösen: zwischen zwei Nodes kann der Nutzer
+    // deaktiviert worden sein, und das soll den nächsten Node bereits stoppen.
+    const accountable = await this.resolveAccountable(run);
     const ctx = this.buildContext(run, nodeRun, node, abort.signal);
+    if (accountable) ctx.accountableUserId = accountable.userId;
     let result: NodeResult;
     try {
-      result = await this.withTimeout(executor.execute(ctx), timeoutMs, abort);
+      const refused = accountabilityRefusal(node.type, accountable !== null);
+      if (refused) {
+        result = refused;
+      } else {
+        const execution = accountable
+          ? RequestContext.run(accountable.actor, undefined, () => executor.execute(ctx))
+          : executor.execute(ctx);
+        result = await this.withTimeout(execution, timeoutMs, abort);
+      }
     } catch (err: unknown) {
       result = {
         status: 'failed',
@@ -369,6 +403,20 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     }
 
     await this.applyResult(run, nodeRun, node, result);
+  }
+
+  /**
+   * Ein Lookup-Fehler (DB weg) darf den Node nicht als `executor_threw`
+   * erscheinen lassen: ohne Akteur laufen Nodes ohne Akteurpflicht wie bisher,
+   * die übrigen scheitern sichtbar mit `no_accountable_user`.
+   */
+  private async resolveAccountable(run: WorkflowRunDocument): Promise<AccountableActor | null> {
+    try {
+      return await this.accountability.resolve(run);
+    } catch (err: unknown) {
+      this.logger.warn(`Akteur für Lauf ${run._id.toString()} nicht auflösbar: ${errorMessage(err)}`);
+      return null;
+    }
   }
 
   private async withTimeout<T>(p: Promise<T>, ms: number, abort?: AbortController): Promise<T> {
@@ -985,7 +1033,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
    * starts executing from `fromNodeId` (or the first failed node, or the
    * trigger if none).
    */
-  async retryRun(runId: string, fromNodeId?: string): Promise<WorkflowRunDocument> {
+  async retryRun(runId: string, fromNodeId?: string, userId?: string): Promise<WorkflowRunDocument> {
     // Atomic guard: only allow ONE retry to win for a given parent run. We
     // briefly stamp a marker on the parent (re-set status to itself) so that
     // a second concurrent retryRun call returns null and bails out. Using
@@ -1040,7 +1088,9 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       // Fresh context — do NOT inherit upstream node outputs, since the user is
       // explicitly asking for a re-execution from a chosen point.
       context: { nodes: {}, input: {} },
-      triggeredBy: { type: 'manual' },
+      // Wer den Retry auslöst, verantwortet ihn; ohne Request-Akteur (z. B.
+      // Auth aus) bleibt der Starter des Elternlaufs zuständig.
+      triggeredBy: { type: 'manual', userId: userId ?? parent.triggeredBy?.userId },
       parentRunId: parent._id,
       retryFromNodeId: resolvedFromNodeId,
       executedNodeCount: 0,

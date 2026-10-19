@@ -86,6 +86,18 @@ export function getWorkflowNodePolicy(type: string | undefined): WorkflowNodePol
   return normalized ? WORKFLOW_NODE_POLICIES[normalized] : undefined;
 }
 
+/**
+ * Risiko-Klassen, die nur im Namen eines zurechenbaren, aktiven Nutzers laufen
+ * dürfen. Sie wirken nach außen (fremde Hosts, Workspaces/Git) — ohne Akteur
+ * gäbe es weder eine Scope-Prüfung noch jemanden, dem die Wirkung im Audit
+ * zuzuordnen wäre. Alles andere läuft weiter auch ohne Akteur, wie bisher.
+ */
+const ACCOUNTABLE_RISKS: readonly WorkflowNodeRisk[] = ['external-call', 'workspace-git'];
+
+export function requiresAccountableUser(risk: WorkflowNodeRisk): boolean {
+  return ACCOUNTABLE_RISKS.includes(risk);
+}
+
 export function workflowSecurityIssues(def: {
   scope?: WorkflowScope;
   nodes?: Array<{ id: string; type?: string; secretRefs?: string[] }>;

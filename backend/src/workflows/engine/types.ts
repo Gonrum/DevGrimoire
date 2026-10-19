@@ -68,6 +68,12 @@ export interface NodeExecutionContext {
    * dann auf lesende Wirkung ein.
    */
   dryRun?: boolean;
+  /**
+   * Nutzer, dem der Lauf zuzurechnen ist (`WorkflowAccountabilityService`).
+   * Ist er gesetzt, läuft `execute` in dessen `RequestContext`. Fehlt bei
+   * Testläufen und wenn sich kein aktiver Nutzer auflösen ließ.
+   */
+  accountableUserId?: string;
 }
 
 export interface NodeExecutor {

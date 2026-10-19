@@ -327,6 +327,13 @@ export class WorkflowsService {
       edges: def.edges,
     };
 
+    // Interne Starts (Scheduler, Event-Listener) bringen `triggeredBy` mit und
+    // bleiben ohne Request-Akteur — ein Event-Lauf soll nicht dem Nutzer
+    // zugerechnet werden, dessen Aktion das Event zufällig ausgelöst hat.
+    // Manuelle Starts ohne expliziten `userId` (MCP-Tool) übernehmen den
+    // Akteur aus dem `RequestContext`.
+    const startedBy = userId ?? (dto.triggeredBy ? undefined : RequestContext.getUser()?.userId);
+
     const run = await this.runModel.create({
       definitionId: def._id,
       definitionVersion: def.version,
@@ -337,7 +344,7 @@ export class WorkflowsService {
       trigger: dto.trigger ?? { type: 'manual', input: dto.input ?? {} },
       status: WorkflowRunStatus.QUEUED,
       currentNodeIds: [],
-      createdByUserId: userId && isValidObjectId(userId) ? new Types.ObjectId(userId) : undefined,
+      createdByUserId: startedBy && isValidObjectId(startedBy) ? new Types.ObjectId(startedBy) : undefined,
       triggeredBy: dto.triggeredBy
         ? {
             type: dto.triggeredBy.type,
@@ -346,7 +353,7 @@ export class WorkflowsService {
               : undefined,
             userId: dto.triggeredBy.userId,
           }
-        : { type: 'manual' as const, userId },
+        : { type: 'manual' as const, userId: startedBy },
       context: { nodes: {}, input: dto.input ?? {} },
     });
 

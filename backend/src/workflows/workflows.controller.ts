@@ -14,6 +14,7 @@ import {
   TestWorkflowNodeDto,
   UpdateWorkflowDefinitionDto,
 } from './dto/workflow.dto';
+import { RequestContext } from '../common/request-context';
 
 @Controller('workflows')
 export class WorkflowsController {
@@ -75,7 +76,11 @@ export class WorkflowsController {
   @Post('runs')
   @HttpCode(201)
   startRun(@Body() dto: StartWorkflowRunDto) {
-    return this.workflows.startRun(dto);
+    // `triggeredBy` setzen nur Scheduler und Event-Listener intern. Vom Client
+    // übernommen, könnte ein Aufrufer sich einen fremden `userId` zuschreiben
+    // und Nodes in dessen Namen laufen lassen — maßgeblich ist der Request-Akteur.
+    const { definitionId, trigger, input } = dto;
+    return this.workflows.startRun({ definitionId, trigger, input }, RequestContext.getUser()?.userId);
   }
 
   @Post('nodes/test')
@@ -108,7 +113,7 @@ export class WorkflowsController {
     @Param('id') id: string,
     @Body() body: RetryWorkflowRunDto = {},
   ): Promise<{ ok: true; runId: string; parentRunId: string }> {
-    const child = await this.engine.retryRun(id, body.fromNodeId);
+    const child = await this.engine.retryRun(id, body.fromNodeId, RequestContext.getUser()?.userId);
     return {
       ok: true,
       runId: child._id.toString(),
