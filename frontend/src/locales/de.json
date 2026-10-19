@@ -2588,7 +2588,9 @@
       "entryCount_one": "{{count}} Eintrag",
       "entryCount_other": "{{count}} Einträge",
       "fieldCount_one": "{{count}} Feld",
-      "fieldCount_other": "{{count}} Felder"
+      "fieldCount_other": "{{count}} Felder",
+      "millisUnit": "Angabe in Millisekunden (1000 = 1 s)",
+      "millisValue": "= {{seconds}} s (Angabe in Millisekunden)"
     },
     "inspector": {
       "empty": "Wähle einen Node oder eine Edge aus, oder ziehe einen Eintrag aus der Palette.",

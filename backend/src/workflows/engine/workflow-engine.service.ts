@@ -437,53 +437,66 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     // `as never` zu überschreiben.
     const testNodeShape = workflowNodeFromDto(node);
     const testAbort = new AbortController();
-    const result = await this.withTimeout(
-      executor.execute({
-        run: {
-          _id: runId,
-          definitionId,
-          definitionVersion: 0,
-          definitionSnapshot: { nodes: [testNodeShape], edges: [] },
-          scope,
-          ...(projectId ? { projectId } : {}),
-          ...(customerId ? { customerId } : {}),
-          trigger: { type: 'manual', input },
-          status: WorkflowRunStatus.RUNNING,
-          currentNodeIds: [node.id],
-          triggeredBy: { type: 'manual' },
-          context: runContext,
-          executedNodeCount: 0,
-          createdAt: now,
-          updatedAt: now,
+    // Timeout oder Wurf des Executors ist ein Testergebnis, kein 500 — wie im
+    // echten Lauf (dort als `timeout`/`executor_threw` am NodeRun).
+    let result: NodeResult;
+    try {
+      result = await this.withTimeout(
+        executor.execute({
+          run: {
+            _id: runId,
+            definitionId,
+            definitionVersion: 0,
+            definitionSnapshot: { nodes: [testNodeShape], edges: [] },
+            scope,
+            ...(projectId ? { projectId } : {}),
+            ...(customerId ? { customerId } : {}),
+            trigger: { type: 'manual', input },
+            status: WorkflowRunStatus.RUNNING,
+            currentNodeIds: [node.id],
+            triggeredBy: { type: 'manual' },
+            context: runContext,
+            executedNodeCount: 0,
+            createdAt: now,
+            updatedAt: now,
+          },
+          nodeRun: {
+            _id: nodeRunId,
+            runId,
+            definitionId,
+            definitionVersion: 0,
+            nodeId: node.id,
+            nodeType: node.type,
+            attempt: 1,
+            status: WorkflowNodeRunStatus.RUNNING,
+            startedAt: now,
+            logs,
+          },
+          node: testNodeShape,
+          config: parsedConfig,
+          secretRefs: node.secretRefs ?? [],
+          runContext,
+          logger: {
+            info: (msg: string, data?: Record<string, unknown>) => logs.push({ level: 'info', msg, ...(data ?? {}) }),
+            warn: (msg: string, data?: Record<string, unknown>) => logs.push({ level: 'warn', msg, ...(data ?? {}) }),
+            error: (msg: string, data?: Record<string, unknown>) => logs.push({ level: 'error', msg, ...(data ?? {}) }),
+          },
+          askUser: () => Promise.reject(new Error('askUser is disabled in node test mode')),
+          signal: testAbort.signal,
+          dryRun,
+        }),
+        Number(parsedConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+        testAbort,
+      );
+    } catch (err: unknown) {
+      result = {
+        status: 'failed',
+        error: {
+          code: errorName(err) === 'TimeoutError' ? 'timeout' : 'executor_threw',
+          message: errorMessage(err),
         },
-        nodeRun: {
-          _id: nodeRunId,
-          runId,
-          definitionId,
-          definitionVersion: 0,
-          nodeId: node.id,
-          nodeType: node.type,
-          attempt: 1,
-          status: WorkflowNodeRunStatus.RUNNING,
-          startedAt: now,
-          logs,
-        },
-        node: testNodeShape,
-        config: parsedConfig,
-        secretRefs: node.secretRefs ?? [],
-        runContext,
-        logger: {
-          info: (msg: string, data?: Record<string, unknown>) => logs.push({ level: 'info', msg, ...(data ?? {}) }),
-          warn: (msg: string, data?: Record<string, unknown>) => logs.push({ level: 'warn', msg, ...(data ?? {}) }),
-          error: (msg: string, data?: Record<string, unknown>) => logs.push({ level: 'error', msg, ...(data ?? {}) }),
-        },
-        askUser: () => Promise.reject(new Error('askUser is disabled in node test mode')),
-        signal: testAbort.signal,
-        dryRun,
-      }),
-      Number(parsedConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS),
-      testAbort,
-    );
+      };
+    }
 
     return {
       ok: result.status !== 'failed',

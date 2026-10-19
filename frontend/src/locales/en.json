@@ -2588,7 +2588,9 @@
       "entryCount_one": "{{count}} entry",
       "entryCount_other": "{{count}} entries",
       "fieldCount_one": "{{count}} field",
-      "fieldCount_other": "{{count}} fields"
+      "fieldCount_other": "{{count}} fields",
+      "millisUnit": "Value in milliseconds (1000 = 1 s)",
+      "millisValue": "= {{seconds}} s (value in milliseconds)"
     },
     "inspector": {
       "empty": "Select a node or an edge, or drag an entry from the palette.",

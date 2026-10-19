@@ -122,6 +122,15 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
           }}
           className="w-full rounded-sm border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-cyan-500 focus:outline-hidden"
         />
+        {/* `…Ms`-Felder sind Millisekunden — „1800" sieht nach Sekunden aus
+            und wird dann zu 1,8 s Timeout (T-503). */}
+        {String(label).endsWith('Ms') && (
+          <p className="mt-1 text-[11px] text-gray-500">
+            {typeof value === 'number'
+              ? t('workflows.schema.millisValue', { seconds: (value / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 }) })
+              : t('workflows.schema.millisUnit')}
+          </p>
+        )}
       </Labeled>
     );
   }
