@@ -43,6 +43,13 @@ check('contextUpdatePipeline traegt nodes.<id>.error.code', () => {
   assert.equal(set.value.$literal.error.code, 'ssh_timeout');
   assert.equal(set.value.$literal.stdout, 'x');
 });
+check('failureContextEntry: Defaults ohne Fehler/Output', () => {
+  assert.deepEqual(engine.failureContextEntry({ status: 'failed' }), { error: { code: 'failed', message: 'node failed' } });
+});
+check('failureContextEntry: Output bleibt, Fehler wird uebernommen', () => {
+  const e = engine.failureContextEntry({ status: 'failed', output: { stdout: 'x' }, error: { code: 'c', message: 'm' } });
+  assert.deepEqual(e, { stdout: 'x', error: { code: 'c', message: 'm' } });
+});
 
 if (failures) {
   console.error(`${failures} failed`);

@@ -102,6 +102,38 @@ export function contextUpdatePipeline(
   return stages;
 }
 
+/** Kontext-Eintrag eines gescheiterten Nodes mit Fehlerzweig: Ausgabe plus `error`. */
+export function failureContextEntry(result: NodeResult): Record<string, unknown> {
+  return {
+    ...(result.output ?? {}),
+    error: { code: result.error?.code ?? 'failed', message: result.error?.message ?? 'node failed' },
+  };
+}
+
+/**
+ * T-325: payloadMapping der ausgehenden Edges gegen die (redigierte) Ausgabe
+ * auswerten; gemeinsam für Erfolgs- und Fehlerpfad, damit Korrekturen nicht
+ * nur an einer Stelle landen.
+ */
+function buildEdgeValues(
+  graph: ReturnType<typeof readGraph>,
+  nodeId: string,
+  redacted: Record<string, unknown>,
+): Array<{ edgeId: string; mapped: Record<string, unknown> }> {
+  const out: Array<{ edgeId: string; mapped: Record<string, unknown> }> = [];
+  for (const edge of graph.edges) {
+    if (edge.source !== nodeId) continue;
+    const mapping = edge.payloadMapping;
+    if (!mapping || Object.keys(mapping).length === 0) continue;
+    const mapped: Record<string, unknown> = {};
+    for (const [targetKey, sourcePath] of Object.entries(mapping)) {
+      mapped[targetKey] = lookupPath(sourcePath, redacted);
+    }
+    out.push({ edgeId: edge.id, mapped });
+  }
+  return out;
+}
+
 @Injectable()
 export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstrap {
   private readonly logger = new Logger(WorkflowEngineService.name);
@@ -621,17 +653,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
 
       // T-325: evaluate payloadMapping for outgoing edges and persist the
       // mapped value per edge. Target nodes pick it up in buildContext.
-      const edgeValues: Array<{ edgeId: string; mapped: Record<string, unknown> }> = [];
-      for (const edge of graph.edges) {
-        if (edge.source !== node.id) continue;
-        const mapping = edge.payloadMapping;
-        if (!mapping || Object.keys(mapping).length === 0) continue;
-        const mapped: Record<string, unknown> = {};
-        for (const [targetKey, sourcePath] of Object.entries(mapping)) {
-          mapped[targetKey] = lookupPath(sourcePath, redactedOutput);
-        }
-        edgeValues.push({ edgeId: edge.id, mapped });
-      }
+      const edgeValues = buildEdgeValues(graph, node.id, redactedOutput);
 
       // M-12: atomar NUR die eigenen Einträge setzen, statt das ganze
       // context-Objekt aus einem bis zu 10 min alten Dokument zurückzuschreiben.
@@ -692,21 +714,8 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       await this.completeNodeRun(nodeRun, result);
       // Wie auf dem Erfolgspfad redigiert; der Fehler steht zusätzlich als
       // `error` im Kontext, damit Folge-Nodes ihn auswerten können.
-      const redactedFailure = redactRecord({
-        ...(result.output ?? {}),
-        error: { code: result.error?.code ?? 'failed', message: result.error?.message ?? 'node failed' },
-      });
-      const failEdgeValues: Array<{ edgeId: string; mapped: Record<string, unknown> }> = [];
-      for (const edge of failGraph.edges) {
-        if (edge.source !== node.id) continue;
-        const mapping = edge.payloadMapping;
-        if (!mapping || Object.keys(mapping).length === 0) continue;
-        const mapped: Record<string, unknown> = {};
-        for (const [targetKey, sourcePath] of Object.entries(mapping)) {
-          mapped[targetKey] = lookupPath(sourcePath, redactedFailure);
-        }
-        failEdgeValues.push({ edgeId: edge.id, mapped });
-      }
+      const redactedFailure = redactRecord(failureContextEntry(result));
+      const failEdgeValues = buildEdgeValues(failGraph, node.id, redactedFailure);
       const fresh = await this.runModel
         .findByIdAndUpdate(run._id, contextUpdatePipeline(node.id, redactedFailure, failEdgeValues), { new: true })
         .exec();
