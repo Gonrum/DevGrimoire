@@ -60,4 +60,6 @@ export class ApiKey {
 
 export const ApiKeySchema = SchemaFactory.createForClass(ApiKey);
 ApiKeySchema.index({ userId: 1 });
-ApiKeySchema.index({ keyHash: 1 }, { unique: true });
+// Der Unique-Index auf `keyHash` entsteht schon über `@Prop({ unique: true })`;
+// ein zweites `schema.index` erzeugte dieselbe Definition und eine
+// Mongoose-Warnung bei jedem Laden des Schemas.
