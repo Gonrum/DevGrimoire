@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { z } from 'zod';
 import { TodosService } from '../../todos/todos.service';
+import { WorkflowScopeGuard } from '../workflow-scope.guard';
 import { TodoPriority, TodoStatus } from '../../todos/schemas/todo.schema';
 import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types';
 import { NodeMetadata } from '../engine/node-metadata';
@@ -29,7 +30,10 @@ export class ActionTodoUpdateExecutor implements NodeExecutor {
     branches: ['success', 'failure'],
   };
 
-  constructor(private readonly todos: TodosService) {}
+  constructor(
+    private readonly todos: TodosService,
+    private readonly scope: WorkflowScopeGuard,
+  ) {}
 
   async execute(ctx: NodeExecutionContext): Promise<NodeResult> {
     const expanded = expandConfig(ctx.config, ctx.runContext);
@@ -51,6 +55,11 @@ export class ActionTodoUpdateExecutor implements NodeExecutor {
       return { status: 'failed', error: { code: 'invalid_config', message: errorMessage(err) } };
     }
     try {
+      // Erst laden (prüft den Akteur-Scope), dann den Lauf-Scope, erst danach schreiben.
+      const todo = await this.todos.findById(todoId);
+      if (!(await this.scope.check(ctx.run, todo))) {
+        return this.scope.deny(ctx.run, ctx.node.id, { type: 'todo', id: todoId });
+      }
       await this.todos.update(todoId, {
         status,
         priority,

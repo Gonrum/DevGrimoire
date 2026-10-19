@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { z } from 'zod';
 import { TodosService } from '../../todos/todos.service';
+import { WorkflowScopeGuard } from '../workflow-scope.guard';
 import { NodeExecutor, NodeExecutionContext, NodeResult } from '../engine/types';
 import { NodeMetadata } from '../engine/node-metadata';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
@@ -26,7 +27,10 @@ export class ActionTodoCommentExecutor implements NodeExecutor {
     branches: ['success', 'failure'],
   };
 
-  constructor(private readonly todos: TodosService) {}
+  constructor(
+    private readonly todos: TodosService,
+    private readonly scope: WorkflowScopeGuard,
+  ) {}
 
   async execute(ctx: NodeExecutionContext): Promise<NodeResult> {
     const expanded = expandConfig(ctx.config, ctx.runContext);
@@ -37,6 +41,11 @@ export class ActionTodoCommentExecutor implements NodeExecutor {
     }
     const author = asString(expanded.author) ?? 'workflow';
     try {
+      // Erst laden (prüft den Akteur-Scope), dann den Lauf-Scope, erst danach schreiben.
+      const todo = await this.todos.findById(todoId);
+      if (!(await this.scope.check(ctx.run, todo))) {
+        return this.scope.deny(ctx.run, ctx.node.id, { type: 'todo', id: todoId });
+      }
       await this.todos.addComment(todoId, text, author);
       return { status: 'success', output: { todoId, commented: true } };
     } catch (err: unknown) {

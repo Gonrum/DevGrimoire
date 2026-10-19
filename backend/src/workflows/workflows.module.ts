@@ -43,6 +43,8 @@ import { SettingsModule } from '../settings/settings.module';
 import { CommonModule } from '../common/common.module';
 import { BalancerModule } from '../balancer/balancer.module';
 import { AuthModule } from '../auth/auth.module';
+import { CustomerProjectLink, CustomerProjectLinkSchema } from '../customers/schemas/customer-project-link.schema';
+import { WorkflowScopeGuard } from './workflow-scope.guard';
 import { WorkflowAccountabilityService } from './engine/workflow-accountability.service';
 
 @Module({
@@ -51,6 +53,7 @@ import { WorkflowAccountabilityService } from './engine/workflow-accountability.
       { name: WorkflowDefinition.name, schema: WorkflowDefinitionSchema },
       { name: WorkflowRun.name, schema: WorkflowRunSchema },
       { name: WorkflowNodeRun.name, schema: WorkflowNodeRunSchema },
+      { name: CustomerProjectLink.name, schema: CustomerProjectLinkSchema },
     ]),
     TodosModule,
     NotificationsModule,
@@ -69,6 +72,7 @@ import { WorkflowAccountabilityService } from './engine/workflow-accountability.
     WorkflowsService,
     WorkflowEngineService,
     WorkflowAccountabilityService,
+    WorkflowScopeGuard,
     WorkflowQueueService,
     WorkflowWorkerPool,
     WorkflowSchedulerService,
