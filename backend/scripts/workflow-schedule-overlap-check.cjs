@@ -6,14 +6,14 @@
  *   - offener Lauf: startRun wird nicht aufgerufen, Audit mit slot, nextRunAt/lastRunAt laufen weiter
  *   - kein offener Lauf: startRun wird aufgerufen, kein Audit
  *   - mehrere verpasste Slots: nach dem ersten Start sind die übrigen übersprungen (kein Nachholen)
- *   - WorkflowsService.hasOpenRun fragt nur Läufe ausserhalb TERMINAL_RUN_STATUSES ab
+ *   - WorkflowsService.hasOpenRun zählt nur queued/running — ein wartender Lauf
+ *     (waiting_for_user/timer) blockiert den Zeitplan nicht (Final-Review I4)
  *
  * Läuft gegen `dist/`, ohne Nest/Mongo. Nach `npm run build` ausführen.
  */
 const assert = require('node:assert/strict');
 const { WorkflowSchedulerService } = require('../dist/workflows/engine/workflow-scheduler.service');
 const { WorkflowsService } = require('../dist/workflows/workflows.service');
-const { TERMINAL_RUN_STATUSES } = require('../dist/workflows/engine/run-status');
 
 let passed = 0;
 async function check(name, fn) {
@@ -98,7 +98,7 @@ function setup(open) {
     assert.ok(audits.length >= 1);
   });
 
-  await check('hasOpenRun filtert auf Status ausserhalb TERMINAL_RUN_STATUSES', async () => {
+  await check('hasOpenRun zählt nur queued/running, nicht wartende Läufe', async () => {
     let filter;
     let result = null;
     const runModel = { exists: (f) => { filter = f; return { exec: async () => result }; } };
@@ -107,7 +107,10 @@ function setup(open) {
     const id = { _marker: true };
     assert.equal(await svc.hasOpenRun(id), false);
     assert.equal(filter.definitionId, id);
-    assert.deepEqual(filter.status, { $nin: TERMINAL_RUN_STATUSES });
+    assert.deepEqual([...filter.status.$in].sort(), ['queued', 'running']);
+    for (const waiting of ['waiting_for_user', 'waiting_for_timer']) {
+      assert.equal(filter.status.$in.includes(waiting), false, `${waiting} darf den Zeitplan nicht blockieren`);
+    }
     result = { _id: 1 };
     assert.equal(await svc.hasOpenRun(id), true);
   });

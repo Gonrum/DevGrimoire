@@ -42,6 +42,12 @@ import { getTemplate, listTemplatesPublic, WorkflowTemplate } from './workflow-t
 
 const RUNTIME_FIELDS: Array<keyof UpdateWorkflowDefinitionDto> = ['nodes', 'edges', 'trigger'];
 
+/** Läufe, die gerade Nodes ausführen oder gleich ausführen — siehe `hasOpenRun`. */
+export const ACTIVE_RUN_STATUSES: readonly WorkflowRunStatus[] = [
+  WorkflowRunStatus.QUEUED,
+  WorkflowRunStatus.RUNNING,
+];
+
 @Injectable()
 export class WorkflowsService {
   private readonly logger = new Logger(WorkflowsService.name);
@@ -366,12 +372,17 @@ export class WorkflowsService {
   }
 
   /**
-   * Gibt es für die Definition einen Lauf, der noch nicht abgeschlossen ist?
+   * Läuft für die Definition gerade ein Lauf (eingereiht oder aktiv)?
    * Der Zeitplan nutzt das, damit sich Läufe (z. B. SSH-Wartung) nie überlappen.
+   *
+   * Bewusst nur `queued`/`running`: ein Lauf, der auf eine Antwort oder einen
+   * Timer wartet, kann Tage offen bleiben (oder nie beantwortet werden) — als
+   * „offen" gezählt, blockierte er den Zeitplan dauerhaft. Wartend führt er
+   * keinen Node aus, überlappt also nicht.
    */
   async hasOpenRun(definitionId: Types.ObjectId): Promise<boolean> {
     const open = await this.runModel
-      .exists({ definitionId, status: { $nin: TERMINAL_RUN_STATUSES } })
+      .exists({ definitionId, status: { $in: ACTIVE_RUN_STATUSES } })
       .exec();
     return open !== null;
   }
