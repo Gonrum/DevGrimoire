@@ -242,6 +242,11 @@ export default function SshAuditTab({ open, onClose, connection }: SshAuditTabPr
                           <Badge color={SOURCE_BADGE[entry.sourceContext]}>
                             {t(`ssh.audit.source.${entry.sourceContext}`)}
                           </Badge>
+                          {entry.workflowDebug === true && (
+                            <span className="ml-1" title={t('workflows.sshAudit.debugChipTitle')}>
+                              <Badge color="bg-rose-900/40 text-rose-300">{t('workflows.sshAudit.debugChip')}</Badge>
+                            </span>
+                          )}
                         </td>
                         <td className="py-2 pr-3 text-gray-300 whitespace-nowrap">
                           <span className="mr-1">{ACTION_ICON[entry.action]}</span>

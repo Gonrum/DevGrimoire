@@ -1,8 +1,9 @@
+import { randomBytes } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { z } from 'zod';
 import { SshService } from '../../ssh/ssh.service';
-import { SshExecResult, SshSessionService } from '../../ssh/ssh-session.service';
+import { DEFAULT_IDLE_TIMEOUT_MS, SshExecResult, SshSessionService } from '../../ssh/ssh-session.service';
 import { SshTestService } from '../../ssh/ssh-test.service';
 import { SshConnectionDocument } from '../../ssh/schemas/ssh-connection.schema';
 import { WorkflowScopeGuard } from '../workflow-scope.guard';
@@ -12,11 +13,15 @@ import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { WORKFLOW_RUNTIME_LIMITS } from '../workflow-security.runtime';
 import { errorMessage } from '../workflow-narrow';
 import { expandTemplate } from './template';
-import { expandShellCommand } from './shell-template';
+import { endsInsideQuotes, expandShellCommand, shellQuote } from './shell-template';
+import { SECRET_MASK, findSecretKeys, maskSecrets } from './template-resolver';
+import { WorkflowSecretsResolver } from '../engine/workflow-secrets.resolver';
+import { LineResult, ScriptAbort, ScriptLine, buildScript, lineFailureMessage, parseScriptOutput, splitCommandLines } from './ssh-script';
 
 const configSchema = z.object({
   connectionId: z.string().min(1).describe('ref:ssh-connection'),
-  command: z.string().min(1),
+  // Mehrzeilig: jede Zeile läuft in derselben Shell, das Ergebnis kommt pro Zeile.
+  command: z.string().min(1).describe('widget:shell'),
   cwd: z.string().optional(),
   timeoutMs: z.number().int().positive().max(600000).optional(),
   idleTimeoutMs: z.number().int().min(0).max(600000).optional(),
@@ -27,9 +32,7 @@ const configSchema = z.object({
 const MAX_ERROR_MESSAGE = 500;
 const TEST_REASON = 'Befehl wird im Test nicht ausgeführt';
 
-type AbortCode = 'timeout' | 'idle_timeout' | 'cancelled';
-
-const ABORT_CODES: Record<NonNullable<SshExecResult['aborted']>, AbortCode> = {
+const ABORT_CODES: Record<NonNullable<SshExecResult['aborted']>, ScriptAbort> = {
   timeout: 'timeout',
   idle: 'idle_timeout',
   cancelled: 'cancelled',
@@ -53,15 +56,16 @@ const MIN_SSH_TIMEOUT_MS = 1_000;
  * Ergebnis verlöre stdout/stderr. Deshalb läuft SSH 5 s früher ab und liefert
  * selbst `timeout` samt Ausgabe; das Engine-Timeout bleibt nur Rückfallebene.
  * Das Idle-Timeout darf nicht länger sein als das SSH-Timeout (0 = aus).
+ * Ohne Angabe gilt der Leerlauf-Default des SSH-Stacks — hier aufgelöst statt
+ * dort, damit die Meldung („30 s ohne Ausgabe") die tatsächliche Grenze nennt.
  */
 export function sshTimeouts(config: { timeoutMs?: number; idleTimeoutMs?: number }): {
   timeoutMs: number;
-  idleTimeoutMs: number | undefined;
+  idleTimeoutMs: number;
 } {
   const nodeTimeout = config.timeoutMs ?? WORKFLOW_RUNTIME_LIMITS.defaultNodeTimeoutMs;
   const timeoutMs = Math.max(MIN_SSH_TIMEOUT_MS, nodeTimeout - SSH_TIMEOUT_HEADROOM_MS);
-  const idleTimeoutMs =
-    config.idleTimeoutMs === undefined ? undefined : Math.min(config.idleTimeoutMs, timeoutMs);
+  const idleTimeoutMs = Math.min(config.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS, timeoutMs);
   return { timeoutMs, idleTimeoutMs };
 }
 
@@ -79,6 +83,69 @@ function expandField(value: string, context: Record<string, unknown>): { value: 
   const expanded = expandTemplate(value, context);
   const missing = [...expanded.matchAll(/\{\{\s*([^}]+?)\s*\}\}/g)].map((m) => m[1].trim());
   return { value: expanded, missing };
+}
+
+type CommandPlan =
+  | { ok: true; lines: ScriptLine[] }
+  | { ok: false; result: NodeResult };
+
+/**
+ * Zerlegt den Befehl in Zeilen und setzt Platzhalter je Zeile ein. Je Zeile,
+ * nicht im Ganzen: ein gequoteter Wert mit Zeilenumbruch bliebe sonst nicht
+ * eine Zeile. Ein über das Zeilenende offener Quote wird abgelehnt — zwischen
+ * den Zeilen stehen Marker-Befehle, die er sonst einschlösse (und ein dort
+ * eingesetztes `'…'` stünde in Double-Quotes, `$(…)` im Wert liefe).
+ */
+function planCommand(command: string, context: Record<string, unknown>): CommandPlan {
+  const lines = splitCommandLines(command);
+  if (lines.length === 0) {
+    return {
+      ok: false,
+      result: { status: 'failed', error: { code: 'invalid_config', message: 'Befehl enthält keine ausführbare Zeile' } },
+    };
+  }
+  const open = lines.find((l) => endsInsideQuotes(l.command));
+  if (open) {
+    return {
+      ok: false,
+      result: {
+        status: 'failed',
+        error: {
+          code: 'invalid_config',
+          message:
+            `Zeile ${open.line}: Anführungszeichen nicht geschlossen — jede Zeile läuft einzeln, ` +
+            'mehrzeilige Strings sind nicht möglich (Zeilen mit \\ am Ende verbinden)',
+        },
+      },
+    };
+  }
+  const missing = new Set<string>();
+  const invalid = new Set<string>();
+  const quoted = new Set<string>();
+  const expanded: ScriptLine[] = [];
+  for (const l of lines) {
+    const e = expandShellCommand(l.command, context);
+    if (e.ok) {
+      expanded.push({ line: l.line, command: e.command });
+    } else {
+      e.missing.forEach((p) => missing.add(p));
+      e.invalid.forEach((p) => invalid.add(p));
+      e.quoted.forEach((p) => quoted.add(p));
+    }
+  }
+  if (missing.size > 0 || invalid.size > 0) {
+    return { ok: false, result: templateUnresolved([...missing], [...invalid], [...quoted]) };
+  }
+  return { ok: true, lines: expanded };
+}
+
+/**
+ * Zu maskierende Formen der Secret-Werte: roh **und** shell-gequotet, so wie
+ * `{{secrets.X}}` gesendet wird (aus `a'b` wird `'a'\''b'`, das den Rohwert
+ * nicht mehr am Stück enthält — die Engine-Maskierung fände ihn nicht).
+ */
+function secretForms(secretValues: string[]): string[] {
+  return [...secretValues, ...secretValues.map((v) => shellQuote(v))];
 }
 
 function templateUnresolved(missing: string[], invalid: string[], quoted: string[] = []): NodeResult {
@@ -120,6 +187,7 @@ export class SshExecExecutor implements NodeExecutor {
     label: 'SSH-Befehl',
     description:
       'Führt einen Befehl auf einer SSH-Verbindung des Projekts/Kunden aus. ' +
+      'Mehrere Zeilen laufen nacheinander in derselben Shell, das Ergebnis kommt pro Zeile (lines). ' +
       '{{…}} im Befehl wird shell-sicher gequotet, {{{…}}} roh eingesetzt. ' +
       'Platzhalter nie selbst in Anführungszeichen setzen — das wird abgelehnt.',
     allowedScopes: [WorkflowScope.PROJECT, WorkflowScope.CUSTOMER],
@@ -132,6 +200,7 @@ export class SshExecExecutor implements NodeExecutor {
       truncated: 'object',
       aborted: 'string|null',
       connection: 'string',
+      lines: 'array',
     },
     branches: ['success', 'failure'],
     // Einziger Node-Typ mit echten Secret-Werten: der Befehl geht an den
@@ -144,6 +213,7 @@ export class SshExecExecutor implements NodeExecutor {
     private readonly session: SshSessionService,
     private readonly tester: SshTestService,
     private readonly scope: WorkflowScopeGuard,
+    private readonly secretsResolver: WorkflowSecretsResolver,
   ) {}
 
   async execute(ctx: NodeExecutionContext): Promise<NodeResult> {
@@ -185,25 +255,38 @@ export class SshExecExecutor implements NodeExecutor {
       return this.scope.deny(ctx.run, ctx.node.id, { type: 'ssh-connection', id: connectionId });
     }
 
-    const expansion = expandShellCommand(config.command, ctx.runContext);
-    if (!expansion.ok) return templateUnresolved(expansion.missing, expansion.invalid, expansion.quoted);
+    const plan = planCommand(config.command, ctx.runContext);
+    if (!plan.ok) return plan.result;
 
     if (ctx.signal.aborted) return this.cancelled();
 
+    const nonce = randomBytes(6).toString('hex');
+    const failFast = config.failOnNonZeroExit;
+    // Das Arbeitsverzeichnis gehört ins Skript statt in `opts.cwd`: der
+    // SSH-Stack setzt `cd … && <befehl>` davor, und das `&&` bände nur die
+    // erste Skriptzeile — nach einem gescheiterten `cd` liefen die übrigen
+    // Zeilen im falschen Verzeichnis.
+    const prefix = cwd !== undefined ? `cd -- ${shellQuote(cwd.value)} || exit $?\n` : '';
+    const script = prefix + buildScript(plan.lines, { nonce, failFast });
+    const timeouts = sshTimeouts(config);
+    const forms = secretForms(ctx.secretValues ?? []);
+
     let result: SshExecResult;
     try {
-      const timeouts = sshTimeouts(config);
-      result = await this.session.exec(connectionId, expansion.command, {
+      result = await this.session.exec(connectionId, script, {
         timeoutMs: timeouts.timeoutMs,
         idleTimeoutMs: timeouts.idleTimeoutMs,
-        cwd: cwd?.value,
         userId: ctx.accountableUserId,
         sourceContext: 'workflow',
         workflow: {
           runId: ctx.run._id.toString(),
           nodeId: ctx.node.id,
           definitionId: ctx.run.definitionId.toString(),
+          // Debug-Läufe gibt es erst mit `run.mode` (Task 6).
+          debug: false,
         },
+        // Ins Audit: eingesetzter Befehl ohne Marker, Secrets maskiert.
+        auditCommand: maskSecrets(plan.lines.map((l) => l.command).join('\n'), forms),
         signal: ctx.signal,
       });
     } catch (err: unknown) {
@@ -213,18 +296,27 @@ export class SshExecExecutor implements NodeExecutor {
     }
 
     const aborted = result.aborted ? ABORT_CODES[result.aborted] : null;
+    const ran = parseScriptOutput(
+      plan.lines,
+      { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode, ...(aborted ? { aborted } : {}) },
+      nonce,
+    );
     const output: Record<string, unknown> = {
-      exitCode: result.exitCode,
-      stdout: result.stdout,
-      stderr: result.stderr,
+      exitCode: ran.lastExitCode,
+      stdout: ran.stdout,
+      stderr: ran.stderr,
       durationMs: result.durationMs,
       truncated: result.truncated,
       aborted,
       connection: connection.label,
+      // Die Zeilen tragen den eingesetzten Befehl — auch hier die gequotete
+      // Secret-Form maskieren, die Engine kennt nur die Rohwerte.
+      lines: ran.lines.map((l) => ({ ...l, command: maskSecrets(l.command, forms) })),
     };
     ctx.logger.info('ssh.exec beendet', {
       connection: connection.label,
-      exitCode: result.exitCode,
+      exitCode: ran.lastExitCode,
+      lines: `${ran.lines.length}/${plan.lines.length}`,
       durationMs: result.durationMs,
       aborted,
     });
@@ -232,19 +324,22 @@ export class SshExecExecutor implements NodeExecutor {
     // Ein Abbruch ist nie ein Erfolg — auch nicht mit failOnNonZeroExit:false,
     // der Befehl ist ja nicht zu Ende gelaufen.
     if (aborted) {
+      const line = ran.lines.find((l) => l.aborted !== undefined);
       return {
         status: 'failed',
         output,
-        error: { code: aborted, message: `Befehl abgebrochen (${aborted})` },
+        error: { code: aborted, message: line ? lineFailureMessage(line, timeouts) : `Befehl abgebrochen (${aborted})` },
       };
     }
     // `exitCode: null` ohne Abbruch heißt: per Signal beendet — ebenfalls kein 0.
-    if (config.failOnNonZeroExit && result.exitCode !== 0) {
-      const how = result.exitCode === null ? `Signal ${result.signal ?? 'unbekannt'}` : `Exit-Code ${result.exitCode}`;
+    if (config.failOnNonZeroExit && ran.lastExitCode !== 0) {
+      const line: LineResult | undefined = ran.lines.find((l) => l.exitCode !== 0);
+      const how =
+        ran.lastExitCode === null ? `Signal ${result.signal ?? 'unbekannt'}` : `Exit-Code ${ran.lastExitCode}`;
       return {
         status: 'failed',
         output,
-        error: { code: 'nonzero_exit', message: `Befehl endete mit ${how}` },
+        error: { code: 'nonzero_exit', message: line ? lineFailureMessage(line, timeouts) : `Befehl endete mit ${how}` },
       };
     }
     return { status: 'success', output };
@@ -253,6 +348,8 @@ export class SshExecExecutor implements NodeExecutor {
   /**
    * Testmodus: prüft Konfiguration, Verbindung und Lauf-Scope und baut eine
    * Verbindung auf (`SshTestService`) — der Befehl selbst wird nie gesendet.
+   * Sind alle Platzhalter auflösbar, kommen die eingesetzten Zeilen als
+   * `commands` mit; sonst nennt `commandProblem` den Grund.
    */
   async connectionCheck(
     owner: RunOwner,
@@ -293,6 +390,8 @@ export class SshExecExecutor implements NodeExecutor {
       return fail('scope_violation', 'ssh-connection liegt außerhalb des Scopes dieses Workflows');
     }
 
+    const preview = await this.previewCommands(owner, parsed.data.command, runContext);
+
     try {
       const test = await this.tester.testConnection(connectionId, { userId });
       // Nur die Zusammenfassung — Fingerprints sind öffentlich, Zugangsdaten
@@ -310,12 +409,67 @@ export class SshExecExecutor implements NodeExecutor {
         ok: test.ok,
         ...base,
         connection: summary,
-        outputPreview: summary,
+        ...preview,
+        outputPreview: { ...summary, ...preview },
         ...(error ? { errorPreview: error } : {}),
       };
     } catch (err: unknown) {
       return fail('ssh_error', errorMessage(err));
     }
+  }
+
+  /**
+   * Eingesetzte Zeilen für den Test, ohne je ein Secret zu entschlüsseln.
+   * Ein vom Aufrufer mitgeschicktes `runContext.secrets` zählt nicht — es
+   * käme aus dem Request, nicht aus der Secret-Ablage. Für `{{secrets.KEY}}`
+   * reicht, dass der KEY für den Workflow verfügbar ist; im Ergebnis steht
+   * `••••(KEY)`. Nicht verfügbare KEYs sind `missing` wie jeder andere Pfad.
+   */
+  private async previewCommands(
+    owner: RunOwner,
+    command: string,
+    runContext: Record<string, unknown>,
+  ): Promise<{ commands: ScriptLine[] } | { commandProblem: { code: string; message: string } }> {
+    const context: Record<string, unknown> = { ...runContext };
+    delete context.secrets;
+    // Platzhalterwerte, die nach dem Einsetzen gegen ••••(KEY) getauscht
+    // werden. Hex-Nonce + Index: keine Quotes, also gequotet einfach `'…'`.
+    const display = new Map<string, string>();
+    const keys = findSecretKeys(command);
+    if (keys.length > 0) {
+      let available: Set<string>;
+      try {
+        const infos = await this.secretsResolver.available({
+          projectId: owner.projectId?.toString(),
+          customerId: owner.customerId?.toString(),
+        });
+        available = new Set(infos.map((s) => s.key));
+      } catch (err: unknown) {
+        return { commandProblem: { code: 'secrets_unavailable', message: cap(errorMessage(err)) } };
+      }
+      const nonce = randomBytes(6).toString('hex');
+      const secrets: Record<string, string> = {};
+      keys.forEach((key, i) => {
+        if (!available.has(key)) return;
+        const token = `__DG_SECRET_${nonce}_${i}__`;
+        secrets[key] = token;
+        display.set(token, `${SECRET_MASK}(${key})`);
+      });
+      context.secrets = secrets;
+    }
+    const plan = planCommand(command, context);
+    if (!plan.ok) {
+      const error = plan.result.error ?? { code: 'invalid_config', message: 'Befehl ungültig' };
+      return { commandProblem: { code: error.code, message: error.message } };
+    }
+    const toDisplay = (text: string): string => {
+      let out = text;
+      for (const [token, shown] of display) {
+        out = out.split(shellQuote(token)).join(shown).split(token).join(shown);
+      }
+      return out;
+    };
+    return { commands: plan.lines.map((l) => ({ line: l.line, command: toDisplay(l.command) })) };
   }
 
   private cancelled(): NodeResult {

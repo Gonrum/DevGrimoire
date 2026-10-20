@@ -7,6 +7,7 @@
  * dass bei jeder Ablehnung `exec` NICHT aufgerufen wird. Nach `npm run build`.
  */
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const { Types } = require('mongoose');
 const { WorkflowScopeGuard } = require('../dist/workflows/workflow-scope.guard');
 const { SshExecExecutor, sshTimeouts } = require('../dist/workflows/nodes/ssh-exec.executor');
@@ -44,6 +45,7 @@ function makeSsh() {
   };
 }
 
+/** `result` als Funktion bekommt das gesendete Skript (z. B. für die Nonce). */
 function makeSession(result) {
   const calls = [];
   return {
@@ -51,11 +53,39 @@ function makeSession(result) {
     async exec(connId, command, opts) {
       calls.push({ connId, command, opts });
       if (result instanceof Error) throw result;
+      const partial = typeof result === 'function' ? result(command) : result;
       return {
         stdout: '', stderr: '', exitCode: 0, durationMs: 12,
         truncated: { stdout: false, stderr: false }, stdoutBytes: 0, stderrBytes: 0, lastChunkAgeMs: 0,
-        ...result,
+        ...partial,
       };
+    },
+  };
+}
+
+/** Führt das gesendete Skript in einer echten lokalen bash aus — nur harmlose Befehle. */
+function bashSession() {
+  return makeSession((script) => {
+    const r = spawnSync('bash', ['-c', script], { encoding: 'utf8' });
+    return { stdout: r.stdout, stderr: r.stderr, exitCode: r.status };
+  });
+}
+
+function nonceOf(script) {
+  return /__DG_([0-9a-f]{12})_0_S_/.exec(script)[1];
+}
+
+/** Attrappe von WorkflowSecretsResolver: nur Metadaten, `resolve` darf nie laufen. */
+function makeResolver(keys = []) {
+  const calls = [];
+  return {
+    calls,
+    async available(owner) {
+      calls.push(owner);
+      return keys.map((key) => ({ key, origin: 'project', ownerId: P1.toString() }));
+    },
+    async resolve() {
+      throw new Error('connectionCheck darf nie entschlüsseln');
     },
   };
 }
@@ -92,9 +122,9 @@ function ctx(config, extra = {}) {
   };
 }
 
-function executor(session, tester = makeTester({ ok: true })) {
+function executor(session, tester = makeTester({ ok: true }), resolver = makeResolver()) {
   const { guard, audits } = makeGuard();
-  return { exec: new SshExecExecutor(makeSsh(), session, tester, guard), audits };
+  return { exec: new SshExecExecutor(makeSsh(), session, tester, guard, resolver), audits };
 }
 
 let passed = 0;
@@ -159,7 +189,8 @@ async function check(name, fn) {
     c.runContext = { nodes: {}, input: { t: "x'; rm -rf / #" } };
     const r = await exec.execute(c);
     assert.equal(r.status, 'success');
-    assert.equal(session.calls[0].command, `echo 'x'\\''; rm -rf / #'`);
+    assert.ok(session.calls[0].command.includes(`\necho 'x'\\''; rm -rf / #'\n`), session.calls[0].command);
+    assert.equal(session.calls[0].opts.auditCommand, `echo 'x'\\''; rm -rf / #'`);
   });
 
   await check('unaufgelöstes Template in connectionId → template_unresolved, kein Laden', async () => {
@@ -212,7 +243,11 @@ async function check(name, fn) {
     assert.equal(opts.workflow.runId, c.run._id.toString());
     assert.equal(opts.workflow.nodeId, 'n1');
     assert.equal(opts.workflow.definitionId, c.run.definitionId.toString());
-    assert.equal(opts.cwd, '/srv/shop');
+    // cwd steht im Skript (cd || exit), nicht in opts.cwd: dort bände `&&` nur die erste Zeile.
+    assert.equal(opts.cwd, undefined);
+    assert.ok(session.calls[0].command.startsWith(`cd -- '/srv/shop' || exit $?\n`), session.calls[0].command);
+    assert.equal(opts.workflow.debug, false);
+    assert.equal(opts.auditCommand, 'uptime');
     // SSH läuft 5 s vor dem Engine-Timeout ab (R7), Untergrenze 1 s.
     assert.equal(opts.timeoutMs, 1000);
     assert.equal(opts.idleTimeoutMs, 0);
@@ -225,7 +260,8 @@ async function check(name, fn) {
     assert.equal(sshTimeouts({}).timeoutMs, WORKFLOW_RUNTIME_LIMITS.defaultNodeTimeoutMs - 5000);
     assert.equal(sshTimeouts({ timeoutMs: 60000, idleTimeoutMs: 600000 }).idleTimeoutMs, 55000);
     assert.equal(sshTimeouts({ timeoutMs: 60000, idleTimeoutMs: 0 }).idleTimeoutMs, 0);
-    assert.equal(sshTimeouts({ timeoutMs: 60000 }).idleTimeoutMs, undefined);
+    // Ohne Angabe gilt der Leerlauf-Default (30 s) — sichtbar statt erst im SSH-Stack.
+    assert.equal(sshTimeouts({ timeoutMs: 60000 }).idleTimeoutMs, 30000);
   });
 
   await check('aborted timeout/idle/cancelled → failed mit Code und output', async () => {
@@ -289,7 +325,8 @@ async function check(name, fn) {
     assert.deepEqual(tester.calls[0], { connId: CONN_OWN, opts: { userId: USER } });
     assert.equal(session.calls.length, 0);
     // Der Test-Dialog rendert nur *Preview-Felder (Final-Review I3).
-    assert.deepEqual(r.outputPreview, r.connection);
+    assert.deepEqual(r.outputPreview, { ...r.connection, commands: [{ line: 1, command: 'rm -rf /' }] });
+    assert.deepEqual(r.commands, [{ line: 1, command: 'rm -rf /' }]);
     assert.equal(r.errorPreview, undefined);
   });
 
@@ -337,6 +374,137 @@ async function check(name, fn) {
     assert.equal(session.calls.length, 0);
     // Die Node-Beschreibung (Palette/MCP) nennt die Regel.
     assert.match(exec.metadata.description, /nie selbst in Anführungszeichen/);
+  });
+
+  await check('mehrzeilig, echte Shell: Zeile 2 scheitert → nonzero_exit mit Zeilenmeldung, Zeile 3 läuft nicht', async () => {
+    const session = bashSession();
+    const r = await executor(session).exec.execute(ctx({ connectionId: CONN_OWN, command: 'echo eins\n# kommentar\nfalse\necho nie' }));
+    assert.equal(r.status, 'failed');
+    assert.equal(r.error.code, 'nonzero_exit');
+    assert.equal(r.error.message, 'Zeile 3 endete mit Exit-Code 1');
+    assert.equal(r.output.exitCode, 1);
+    assert.equal(r.output.stdout, 'eins\n');
+    assert.deepEqual(r.output.lines.map((l) => [l.line, l.command, l.exitCode, l.stdout]), [
+      [1, 'echo eins', 0, 'eins\n'],
+      [3, 'false', 1, ''],
+    ]);
+    // Ins Audit geht der eingesetzte Befehl ohne Marker.
+    assert.equal(session.calls[0].opts.auditCommand, 'echo eins\nfalse\necho nie');
+    assert.ok(!session.calls[0].opts.auditCommand.includes('__DG_'));
+    assert.equal(executor(makeSession({})).exec.metadata.outputs.lines, 'array');
+  });
+
+  await check('mehrzeilig, failOnNonZeroExit:false: alle Zeilen laufen, exitCode der letzten', async () => {
+    const session = bashSession();
+    const r = await executor(session).exec.execute(
+      ctx({ connectionId: CONN_OWN, command: 'false\necho weiter', failOnNonZeroExit: false }),
+    );
+    assert.equal(r.status, 'success');
+    assert.equal(r.output.lines.length, 2);
+    assert.equal(r.output.lines[0].exitCode, 1);
+    assert.equal(r.output.exitCode, 0);
+  });
+
+  await check('Leerlauf-Abbruch in Zeile 2 → idle_timeout mit sichtbarer Grenze', async () => {
+    const session = makeSession((script) => {
+      const n = nonceOf(script);
+      return {
+        stdout: `\n__DG_${n}_0_S_1\na\n\n__DG_${n}_0_E_0_2\n\n__DG_${n}_1_S_3\n`,
+        exitCode: null, signal: 'SIGTERM', aborted: 'idle',
+      };
+    });
+    const r = await executor(session).exec.execute(ctx({ connectionId: CONN_OWN, command: 'echo a\nsleep 999\necho c' }));
+    assert.equal(r.error.code, 'idle_timeout');
+    assert.equal(r.error.message, 'Zeile 2 abgebrochen: 30 s ohne Ausgabe');
+    assert.equal(r.output.lines[1].aborted, 'idle_timeout');
+    assert.equal(session.calls[0].opts.idleTimeoutMs, 30000);
+    const t = makeSession((script) => ({ stdout: `\n__DG_${nonceOf(script)}_0_S_1\n`, exitCode: null, aborted: 'timeout' }));
+    const rt = await executor(t).exec.execute(ctx({ connectionId: CONN_OWN, command: 'sleep 999', timeoutMs: 60000 }));
+    assert.equal(rt.error.code, 'timeout');
+    assert.equal(rt.error.message, 'Zeile 1 abgebrochen: Zeitlimit 55 s erreicht');
+  });
+
+  await check('Audit: Secret roh und shell-gequotet (mit Apostroph) maskiert, gesendet im Klartext', async () => {
+    const session = makeSession({});
+    const c = ctx({ connectionId: CONN_OWN, command: 'login {{secrets.T}}\necho {{{secrets.T}}}' });
+    c.runContext = { nodes: {}, input: {}, secrets: { T: "ab'cdefg" } };
+    c.secretValues = ["ab'cdefg"];
+    await executor(session).exec.execute(c);
+    const { command, opts } = session.calls[0];
+    assert.ok(command.includes(`login 'ab'\\''cdefg'`), command);
+    assert.ok(command.includes(`echo ab'cdefg`), command);
+    assert.equal(opts.auditCommand, 'login ••••\necho ••••');
+  });
+
+  await check('output.lines[].command: gequotete Secret-Form maskiert (echte Shell)', async () => {
+    const session = bashSession();
+    const c = ctx({ connectionId: CONN_OWN, command: 'true {{secrets.T}}' });
+    c.runContext = { nodes: {}, input: {}, secrets: { T: "ab'cdefg" } };
+    c.secretValues = ["ab'cdefg"];
+    const r = await executor(session).exec.execute(c);
+    assert.equal(r.status, 'success');
+    assert.equal(r.output.lines[0].command, 'true ••••');
+    assert.ok(!JSON.stringify(r).includes('cdefg'), JSON.stringify(r));
+  });
+
+  await check('Quote über das Zeilenende / nur Kommentare → invalid_config, kein exec', async () => {
+    const session = makeSession({});
+    const { exec } = executor(session);
+    const open = await exec.execute(ctx({ connectionId: CONN_OWN, command: 'echo "a\n{{input.t}}"' }));
+    assert.equal(open.error.code, 'invalid_config');
+    assert.match(open.error.message, /^Zeile 1: Anführungszeichen nicht geschlossen/);
+    const empty = await exec.execute(ctx({ connectionId: CONN_OWN, command: '# nur\n\n' }));
+    assert.equal(empty.error.code, 'invalid_config');
+    assert.equal(session.calls.length, 0);
+  });
+
+  await check('fehlende Platzhalter über mehrere Zeilen gesammelt', async () => {
+    const session = makeSession({});
+    const r = await executor(session).exec.execute(ctx({ connectionId: CONN_OWN, command: 'echo {{a}}\necho {{b}} {{a}}' }));
+    assert.equal(r.error.code, 'template_unresolved');
+    assert.deepEqual(r.error.details.missing, ['a', 'b']);
+    assert.equal(session.calls.length, 0);
+  });
+
+  await check('connectionCheck: verfügbares Secret als ••••(KEY), Aufrufer-Secrets ignoriert, nie entschlüsselt', async () => {
+    const resolver = makeResolver(['T']);
+    const { exec } = executor(makeSession({}), makeTester({ ok: true }), resolver);
+    const r = await exec.connectionCheck(
+      { projectId: P1 },
+      { connectionId: CONN_OWN, command: 'cd /x\nlogin {{secrets.T}} {{{secrets.T}}}' },
+      { nodes: {}, input: {}, secrets: { T: 'vom-aufrufer-123' } },
+      USER,
+    );
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.commands, [
+      { line: 1, command: 'cd /x' },
+      { line: 2, command: 'login ••••(T) ••••(T)' },
+    ]);
+    assert.ok(!JSON.stringify(r).includes('vom-aufrufer-123'));
+    assert.ok(!JSON.stringify(r).includes('__DG_SECRET_'));
+    assert.deepEqual(resolver.calls, [{ projectId: P1.toString(), customerId: undefined }]);
+  });
+
+  await check('connectionCheck: nicht verfügbarer KEY → commandProblem, Aufrufer-Wert zählt nicht', async () => {
+    const resolver = makeResolver(['T']);
+    const { exec } = executor(makeSession({}), makeTester({ ok: true }), resolver);
+    const r = await exec.connectionCheck(
+      { projectId: P1 },
+      { connectionId: CONN_OWN, command: 'login {{secrets.U}}' },
+      { nodes: {}, input: {}, secrets: { U: 'vom-aufrufer-123' } },
+      USER,
+    );
+    assert.equal(r.commands, undefined);
+    assert.equal(r.commandProblem.code, 'template_unresolved');
+    assert.match(r.commandProblem.message, /secrets\.U/);
+    assert.deepEqual(r.outputPreview.commandProblem, r.commandProblem);
+    assert.ok(!JSON.stringify(r).includes('vom-aufrufer-123'));
+    // Ohne Secret-Platzhalter keine Abfrage.
+    const plain = makeResolver([]);
+    await executor(makeSession({}), makeTester({ ok: true }), plain).exec.connectionCheck(
+      { projectId: P1 }, { connectionId: CONN_OWN, command: 'true' }, {}, USER,
+    );
+    assert.equal(plain.calls.length, 0);
   });
 
   console.log(`${passed} passed`);

@@ -1275,6 +1275,11 @@ export interface SshAuditEntry {
   exitCode?: number;
   durationMs?: number;
   errorMsg?: string;
+  workflowRunId?: string;
+  workflowNodeId?: string;
+  workflowDefinitionId?: string;
+  /** Nur gesetzt (true), wenn der Befehl aus einem Workflow-Debug-Lauf kam. */
+  workflowDebug?: boolean;
 }
 
 export interface SshAuditResponse {

@@ -30,6 +30,7 @@
     "check:workflow-accountability": "node scripts/workflow-accountability-check.cjs",
     "check:workflow-todo-find": "node scripts/workflow-todo-find-check.cjs",
     "check:workflow-ssh-exec": "node scripts/workflow-ssh-exec-check.cjs",
+    "check:workflow-ssh-script": "node scripts/workflow-ssh-script-check.cjs",
     "check:workflow-engine": "node scripts/workflow-engine-check.cjs",
     "check:workflow-nodes-engine": "node scripts/workflow-nodes-engine-check.cjs",
     "check:notification-url": "node scripts/notification-url-units-check.cjs",

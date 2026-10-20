@@ -83,6 +83,26 @@ type QuoteState = 'none' | 'single' | 'double';
  * dedupliziert, der Befehl wird dann nicht geliefert.
  */
 export function expandShellCommand(command: string, context: Record<string, unknown>): ShellExpansion {
+  const { out, missing, invalid, quoted } = scanShellTemplate(command, context);
+  return missing.length > 0 || invalid.length > 0
+    ? { ok: false, missing, invalid, quoted }
+    : { ok: true, command: out };
+}
+
+/**
+ * Endet der Text innerhalb eines Quotes? Für mehrzeilige Skripte, die Zeile
+ * für Zeile mit Markern dazwischen laufen: ein über die Zeile offener Quote
+ * schlösse die Marker-Zeile mit ein, und ein dort eingesetztes `'…'` stünde
+ * in Double-Quotes — `$(…)` im Wert liefe wieder.
+ */
+export function endsInsideQuotes(command: string): boolean {
+  return scanShellTemplate(command, {}).state !== 'none';
+}
+
+function scanShellTemplate(
+  command: string,
+  context: Record<string, unknown>,
+): { out: string; missing: string[]; invalid: string[]; quoted: string[]; state: QuoteState } {
   const missing: string[] = [];
   const invalid: string[] = [];
   const quoted: string[] = [];
@@ -136,7 +156,5 @@ export function expandShellCommand(command: string, context: Record<string, unkn
     out += ch;
     i += 1;
   }
-  return missing.length > 0 || invalid.length > 0
-    ? { ok: false, missing, invalid, quoted }
-    : { ok: true, command: out };
+  return { out, missing, invalid, quoted, state };
 }

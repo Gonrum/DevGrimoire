@@ -78,6 +78,10 @@ export class SshAudit {
 
   @Prop({ type: Types.ObjectId, ref: 'WorkflowDefinition' })
   workflowDefinitionId?: Types.ObjectId;
+
+  // Nur gesetzt (true), wenn der Befehl aus einem Debug-Lauf kam.
+  @Prop()
+  workflowDebug?: boolean;
 }
 
 export const SshAuditSchema = SchemaFactory.createForClass(SshAudit);

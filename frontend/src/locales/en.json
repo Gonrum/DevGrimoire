@@ -2469,6 +2469,10 @@
     "confirmDelete": "Really delete this template? Customer entities already created remain untouched."
   },
   "workflows": {
+    "sshAudit": {
+      "debugChip": "Debug",
+      "debugChipTitle": "Command from a debug run"
+    },
     "title": "Workflows",
     "new": "New workflow",
     "empty": "No workflows.",

@@ -2469,6 +2469,10 @@
     "confirmDelete": "Diese Vorlage wirklich löschen? Bereits angelegte Kunden-Entities bleiben erhalten."
   },
   "workflows": {
+    "sshAudit": {
+      "debugChip": "Debug",
+      "debugChipTitle": "Befehl aus einem Debug-Lauf"
+    },
     "title": "Workflows",
     "new": "Neuer Workflow",
     "empty": "Keine Workflows.",

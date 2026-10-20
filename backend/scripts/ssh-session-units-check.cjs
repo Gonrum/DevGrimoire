@@ -1284,6 +1284,31 @@ function makeFakeSftp({
     assert.match(String(row.errorMsg), /cancelled/);
   });
 
+  await check('exec(): auditCommand statt gesendetem Befehl im Audit, workflowDebug nur bei debug:true', async () => {
+    const conn = makeKeyConnection({ knownHostFingerprint: FAKE_FINGERPRINT });
+    const audit = makeAuditModelStub();
+    const sent = [];
+    const factory = makeClientFactory({
+      captureExec: sent,
+      onChannel: (stream) => { stream.emit('exit', 0); stream.emit('close'); },
+    });
+    const svc = new SshSessionService(makeSshServiceStub({ connection: conn }), makeSecretsServiceStub(), audit, makeNotificationsStub(), makeSettingsStub(), factory);
+    const userId = new Types.ObjectId().toString();
+    const workflow = { runId: new Types.ObjectId().toString(), nodeId: 'n', definitionId: new Types.ObjectId().toString() };
+    await svc.exec(String(conn._id), "echo 'klartext'", {
+      userId, sourceContext: 'workflow', workflow: { ...workflow, debug: true }, auditCommand: 'echo ••••',
+    });
+    await svc.exec(String(conn._id), 'true', { userId, sourceContext: 'workflow', workflow });
+    await new Promise((r) => setImmediate(r));
+    assert.equal(sent[0].command, "echo 'klartext'", 'gesendet wird der echte Befehl');
+    assert.equal(audit._writes.length, 2);
+    assert.equal(audit._writes[0].command, 'echo ••••');
+    assert.equal(audit._writes[0].workflowDebug, true);
+    assert.ok(!JSON.stringify(audit._writes).includes('klartext'));
+    assert.equal(audit._writes[1].command, 'true');
+    assert.equal(audit._writes[1].workflowDebug, undefined);
+  });
+
   // ------------------------------------------------------------------
   // Summary
   // ------------------------------------------------------------------

@@ -198,9 +198,11 @@ function doc(key, owner, extra = {}) {
   };
   const resolver = new WorkflowSecretsResolver(Secret, secretsService, scope);
   const sent = [];
+  const auditCommands = [];
   const session = {
-    async exec(connId, command) {
+    async exec(connId, command, opts) {
       sent.push(command);
+      auditCommands.push(opts.auditCommand);
       return {
         stdout: command, stderr: '', exitCode: 0, durationMs: 1,
         truncated: { stdout: false, stderr: false }, stdoutBytes: command.length, stderrBytes: 0, lastChunkAgeMs: 0,
@@ -257,7 +259,10 @@ function doc(key, owner, extra = {}) {
       const node = { id: 'exec', type: 'ssh.exec', config: { connectionId: 'c', command: 'echo {{secrets.T}}' }, position: pos };
       const { run, nr } = await runSingle(node);
       assert.equal(nr.status, 'succeeded', JSON.stringify(nr.error));
-      assert.deepEqual(sent, ["echo 'geheim123'"], 'echter Wert geht an den Server');
+      assert.equal(sent.length, 1);
+      assert.ok(sent[0].includes("\necho 'geheim123'\n"), 'echter Wert geht an den Server');
+      // Ins SSH-Audit geht der maskierte Befehl ohne Marker (Task 4).
+      assert.deepEqual(auditCommands.slice(-1), ['echo ••••']);
       assert.ok(nr.outputSnapshot.stdout.includes('••••'), nr.outputSnapshot.stdout);
       assert.ok(!nr.outputSnapshot.stdout.includes('geheim123'));
       assert.ok(nr.resolvedConfig.command.includes('••••(T)'), nr.resolvedConfig.command);

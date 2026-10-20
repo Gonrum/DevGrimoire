@@ -87,7 +87,7 @@ const MAX_EXEC_TIMEOUT_MS = 600_000;
 // as the absolute timeoutMs. Catches the case where the SSH channel is alive
 // but the remote command silently went away (T-387: 1-hour silent hang on
 // plugin:install). Callers can override or disable with idleTimeoutMs=0.
-const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
+export const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
 const STDOUT_LIMIT = 256 * 1024;
 const STDERR_LIMIT = 64 * 1024;
 const SIGKILL_GRACE_MS = 5_000;
@@ -122,6 +122,8 @@ export interface SshWorkflowRef {
   runId: string;
   nodeId: string;
   definitionId: string;
+  /** Aus einem Debug-Lauf — im Audit als `workflowDebug` sichtbar. */
+  debug?: boolean;
 }
 
 export interface SshExecOpts {
@@ -141,6 +143,12 @@ export interface SshExecOpts {
   userId?: string;
   /** Workflow-Lauf, aus dem der Befehl stammt; wird im Audit mitgeschrieben. */
   workflow?: SshWorkflowRef;
+  /**
+   * Was ins Audit geschrieben wird, falls es vom gesendeten Befehl abweicht:
+   * ein Workflow sendet Klartext-Secrets und Zeilen-Marker, ins Audit gehört
+   * der maskierte Befehl ohne Marker.
+   */
+  auditCommand?: string;
   /**
    * Abbruch von außen (Workflow-Node-Timeout, Lauf-Abbruch). Läuft über
    * denselben `escalate('cancelled')`-Pfad wie `cancelJob`, damit der
@@ -464,7 +472,7 @@ export class SshSessionService {
           sourceContext,
           userId: opts.userId,
           workflow: opts.workflow,
-          command: this.truncateCommand(command),
+          command: this.truncateCommand(opts.auditCommand ?? command),
           durationMs: Date.now() - startedAt,
           errorMsg: 'credential_missing',
         });
@@ -521,7 +529,7 @@ export class SshSessionService {
         sourceContext,
         userId: opts.userId,
         workflow: opts.workflow,
-        command: this.truncateCommand(command),
+        command: this.truncateCommand(opts.auditCommand ?? command),
         exitCode: inner.exitCode ?? undefined,
         durationMs,
         errorMsg: auditErrorMsg,
@@ -1172,6 +1180,7 @@ export class SshSessionService {
         doc.workflowDefinitionId = new Types.ObjectId(entry.workflow.definitionId);
       }
       doc.workflowNodeId = entry.workflow.nodeId;
+      if (entry.workflow.debug === true) doc.workflowDebug = true;
     }
 
     return Promise.resolve(this.auditModel.create(doc))
