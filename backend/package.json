@@ -20,6 +20,7 @@
     "check:workflow-nodes-units": "node scripts/workflow-nodes-units-check.cjs",
     "check:workflow-shell-template": "node scripts/workflow-shell-template-check.cjs",
     "check:workflow-template-resolver": "node scripts/workflow-template-resolver-check.cjs",
+    "check:workflow-node-preflight": "node scripts/workflow-node-preflight-check.cjs",
     "check:workflow-failure-branch": "node scripts/workflow-failure-branch-check.cjs",
     "check:workflow-scope-guard": "node scripts/workflow-scope-guard-check.cjs",
     "check:workflow-schedule-overlap": "node scripts/workflow-schedule-overlap-check.cjs",

@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
+import type { PlaceholderTrace } from '../nodes/template-resolver';
 
 export type WorkflowNodeRunDocument = WorkflowNodeRun & Document;
 
@@ -39,6 +40,22 @@ export class WorkflowNodeRun {
 
   @Prop({ type: Object })
   inputSnapshot?: Record<string, unknown>;
+
+  /** Eingesetzte Config (Secrets als ••••(KEY)) — was der Node tatsächlich bekam. */
+  @Prop({ type: Object })
+  resolvedConfig?: Record<string, unknown>;
+
+  /** Pro Platzhalter: Ausdruck, Status, Vorschau. */
+  @Prop({ type: [Object] })
+  placeholders?: PlaceholderTrace[];
+
+  /** true bei Trockenlauf/Node-Test. */
+  @Prop()
+  dryRun?: boolean;
+
+  /** Node-Definition zum Ausführungszeitpunkt (Debug-Lauf). */
+  @Prop({ type: Object })
+  nodeSnapshot?: Record<string, unknown>;
 
   @Prop({ type: Object })
   outputSnapshot?: Record<string, unknown>;

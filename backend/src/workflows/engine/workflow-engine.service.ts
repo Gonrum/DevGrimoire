@@ -41,6 +41,8 @@ import { AuditLogService } from '../../audit-log/audit-log.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { WORKFLOW_RUN_PROGRESS } from '../../events/project-event';
 import { redact, redactLogs, redactRecord } from '../workflow-redaction';
+import { preflightNode } from './node-preflight';
+import { capSnapshot, inputView } from './snapshot-cap';
 import { asNumber, asStringArray, errorMessage, errorName, isRecord } from '../workflow-narrow';
 import {
   checkRunBudget,
@@ -168,6 +170,7 @@ const DETERMINISTIC_FAILURE_CODES: ReadonlySet<string> = new Set([
   'no_accountable_user',
   'scope_violation',
   'template_unresolved',
+  'secret_not_allowed',
   'invalid_config',
 ]);
 
@@ -399,9 +402,19 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     const accountable = await this.resolveAccountable(run);
     const ctx = this.buildContext(run, nodeRun, node, abort.signal);
     if (accountable) ctx.accountableUserId = accountable.userId;
+    // Vorprüfung vor jeder Ausführung: fehlende Platzhalter lassen den Node
+    // scheitern, und der NodeRun hält fest, was er bekam und was eingesetzt
+    // wurde (redigiert, gekappt — nie Secret-Klartext).
+    const preflight = preflightNode(node.config ?? {}, ctx.runContext, {
+      secretsAllowed: false,
+      nodeType: node.type,
+    });
+    nodeRun.inputSnapshot = capSnapshot(redactRecord(inputView(ctx.runContext)));
+    nodeRun.resolvedConfig = capSnapshot(redactRecord(preflight.resolved.display));
+    nodeRun.placeholders = preflight.resolved.placeholders;
     let result: NodeResult;
     try {
-      const refused = accountabilityRefusal(node.type, accountable !== null);
+      const refused = preflight.failure ?? accountabilityRefusal(node.type, accountable !== null);
       if (refused) {
         result = refused;
       } else {
@@ -826,6 +839,10 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
           : WorkflowNodeRunStatus.FAILED;
     // Redact at WRITE time, not just on read: anyone reading the raw mongo
     // document (replication peer, db dump, RAG indexer) must never see secrets.
+    // Eingang/eingesetzte Config sind Teil des Dokuments, das hier gespeichert wird.
+    nodeRun.markModified('inputSnapshot');
+    nodeRun.markModified('resolvedConfig');
+    nodeRun.markModified('placeholders');
     if (result.output !== undefined) {
       nodeRun.outputSnapshot = redactRecord(result.output);
     }
