@@ -1,4 +1,5 @@
 import { WorkflowScope } from './schemas/workflow-definition.schema';
+import { findSecretKeys } from './nodes/template-resolver';
 import {
   getWorkflowNodePolicy,
   WORKFLOW_NODE_POLICIES,
@@ -122,11 +123,14 @@ export function checkRunBudget(input: {
 
 /** Risk summary used by the activation approval record. */
 export function summarizeRisk(
-  nodes: Array<{ type?: string }>,
-): { byRisk: Record<string, number>; allowedNodeTypes: string[]; nodeCount: number } {
+  nodes: Array<{ type?: string; config?: Record<string, unknown> }>,
+): { byRisk: Record<string, number>; allowedNodeTypes: string[]; nodeCount: number; secretKeys: string[] } {
   const byRisk: Record<string, number> = {};
   const allowedNodeTypes = new Set<string>();
+  // Wer freigibt, soll sehen, welche Secrets der Workflow einsetzt.
+  const secretKeys = new Set<string>();
   for (const node of nodes) {
+    for (const key of findSecretKeys(node.config ?? {})) secretKeys.add(key);
     const policy = getWorkflowNodePolicy(node.type);
     if (!policy) continue;
     byRisk[policy.risk] = (byRisk[policy.risk] ?? 0) + 1;
@@ -136,6 +140,7 @@ export function summarizeRisk(
     byRisk,
     allowedNodeTypes: Array.from(allowedNodeTypes).sort(),
     nodeCount: nodes.length,
+    secretKeys: Array.from(secretKeys).sort(),
   };
 }
 

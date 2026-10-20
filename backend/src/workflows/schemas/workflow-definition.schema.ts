@@ -122,6 +122,8 @@ export class WorkflowApproval {
     byRisk: Record<string, number>;
     allowedNodeTypes: string[];
     nodeCount: number;
+    /** Eingesetzte `{{secrets.KEY}}` — fehlt bei Freigaben vor dieser Angabe. */
+    secretKeys?: string[];
   };
 
   @Prop()

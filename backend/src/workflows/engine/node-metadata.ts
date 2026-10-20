@@ -36,6 +36,12 @@ export interface NodeMetadata {
   configSchema: z.ZodTypeAny;
   outputs: Record<string, string>;
   branches?: NodeBranch[];
+  /**
+   * Darf `{{secrets.KEY}}` mit dem echten Wert einsetzen. Überall sonst ist
+   * ein Secret-Platzhalter `secret_not_allowed` — ein Wert, der in einem
+   * Todo-Titel oder einer Benachrichtigung landet, ist nicht mehr geheim.
+   */
+  secretPlaceholders?: boolean;
 }
 
 export interface NodeMetadataPublic {
@@ -47,6 +53,7 @@ export interface NodeMetadataPublic {
   configJsonSchema: unknown;
   outputs: Record<string, string>;
   branches: NodeBranch[];
+  secretPlaceholders: boolean;
 }
 
 export function toPublicMetadata(meta: NodeMetadata): NodeMetadataPublic {
@@ -68,5 +75,6 @@ export function toPublicMetadata(meta: NodeMetadata): NodeMetadataPublic {
     }),
     outputs: meta.outputs,
     branches: meta.branches ?? ['success', 'failure'],
+    secretPlaceholders: meta.secretPlaceholders ?? false,
   };
 }

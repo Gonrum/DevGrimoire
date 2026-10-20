@@ -134,6 +134,9 @@ export class SshExecExecutor implements NodeExecutor {
       connection: 'string',
     },
     branches: ['success', 'failure'],
+    // Einziger Node-Typ mit echten Secret-Werten: der Befehl geht an den
+    // Server, Ausgabe/Logs/Fehler maskiert die Engine danach wieder.
+    secretPlaceholders: true,
   };
 
   constructor(

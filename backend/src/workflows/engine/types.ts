@@ -74,6 +74,12 @@ export interface NodeExecutionContext {
    * Testläufen und wenn sich kein aktiver Nutzer auflösen ließ.
    */
   accountableUserId?: string;
+  /**
+   * Klartext der in dieser Ausführung eingesetzten Secrets — nur im Speicher.
+   * Die Engine maskiert damit Logs, Ausgabe und Fehler, bevor etwas
+   * gespeichert wird.
+   */
+  secretValues?: string[];
 }
 
 export interface NodeExecutor {

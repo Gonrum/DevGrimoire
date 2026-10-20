@@ -42,6 +42,8 @@ import { NotificationsService } from '../../notifications/notifications.service'
 import { WORKFLOW_RUN_PROGRESS } from '../../events/project-event';
 import { redact, redactLogs, redactRecord } from '../workflow-redaction';
 import { preflightNode, redactPlaceholders } from './node-preflight';
+import { findSecretKeys, maskSecrets } from '../nodes/template-resolver';
+import { WorkflowSecretsResolver } from './workflow-secrets.resolver';
 import { capSnapshot, inputView, SNAPSHOT_REDACT_OPTIONS } from './snapshot-cap';
 import { asNumber, asStringArray, errorMessage, errorName, isRecord } from '../workflow-narrow';
 import {
@@ -201,6 +203,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     private readonly auditLog: AuditLogService,
     private readonly notificationsService: NotificationsService,
     private readonly accountability: WorkflowAccountabilityService,
+    private readonly secretsResolver: WorkflowSecretsResolver,
   ) {}
 
   private audit(action: string, meta: Record<string, unknown> & { runId?: string }): void {
@@ -402,16 +405,33 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     const accountable = await this.resolveAccountable(run);
     const ctx = this.buildContext(run, nodeRun, node, abort.signal);
     if (accountable) ctx.accountableUserId = accountable.userId;
+    // Secrets nur für Node-Typen, die sie einsetzen dürfen — und nur, wenn der
+    // Akteur sie lesen darf. Alle anderen sehen `{{secrets.…}}` als
+    // `secret_not_allowed` (Preflight), ohne dass je ein Wert geladen wurde.
+    // `?.`: Executor-Attrappen ohne Metadaten gelten als nicht Secret-fähig.
+    const secretsAllowed = executor.metadata?.secretPlaceholders === true;
+    const secretKeys = findSecretKeys(node.config ?? {});
+    const secrets = secretsAllowed && secretKeys.length > 0
+      ? await this.resolveSecrets(run, secretKeys, accountable)
+      : {};
     // Vorprüfung vor jeder Ausführung: fehlende Platzhalter lassen den Node
     // scheitern, und der NodeRun hält fest, was er bekam und was eingesetzt
-    // wurde (redigiert, gekappt — nie Secret-Klartext).
+    // wurde (redigiert, gekappt — nie Secret-Klartext: `display` zeigt ••••(KEY)).
     const preflight = preflightNode(node.config ?? {}, ctx.runContext, {
-      secretsAllowed: false,
+      secrets,
+      secretsAllowed,
       nodeType: node.type,
     });
     nodeRun.inputSnapshot = capSnapshot(redactRecord(inputView(ctx.runContext), SNAPSHOT_REDACT_OPTIONS));
     nodeRun.resolvedConfig = capSnapshot(redactRecord(preflight.resolved.display, SNAPSHOT_REDACT_OPTIONS));
     nodeRun.placeholders = redactPlaceholders(preflight.resolved.placeholders);
+    const secretValues = Object.values(secrets);
+    if (!preflight.failure && secretValues.length > 0) {
+      // Nur im Speicher: `inputView` übernimmt `secrets` nicht in den Snapshot,
+      // und `contextUpdatePipeline` schreibt nur `nodes`/`fromEdges` zurück.
+      ctx.runContext.secrets = secrets;
+      ctx.secretValues = secretValues;
+    }
     let result: NodeResult;
     try {
       const refused = preflight.failure ?? accountabilityRefusal(node.type, accountable !== null);
@@ -436,7 +456,33 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       if (inFlight.size === 0) this.inFlight.delete(runKey);
     }
 
+    if (ctx.secretValues?.length) {
+      // Vor applyResult: dort wird redigiert und gespeichert — Ausgabe, Fehler
+      // und Kontext-Eintrag dürfen den Klartext nie zu sehen bekommen. Die
+      // Logs maskiert schon der Logger beim Schreiben; hier noch einmal für
+      // alles, was am Logger vorbei in `nodeRun.logs` landete.
+      result = maskSecrets(result, ctx.secretValues);
+      if (nodeRun.logs?.length) nodeRun.logs = maskSecrets(nodeRun.logs, ctx.secretValues);
+    }
     await this.applyResult(run, nodeRun, node, result);
+  }
+
+  /**
+   * Ein Lookup-Fehler (DB weg) macht die Secrets nur „fehlend" — der Preflight
+   * lässt den Node dann mit `template_unresolved` scheitern, statt dass er als
+   * `executor_threw` erscheint.
+   */
+  private async resolveSecrets(
+    run: WorkflowRunDocument,
+    keys: string[],
+    accountable: AccountableActor | null,
+  ): Promise<Record<string, string>> {
+    try {
+      return (await this.secretsResolver.resolve(run, keys, accountable)).values;
+    } catch (err: unknown) {
+      this.logger.warn(`Secrets für Lauf ${run._id.toString()} nicht auflösbar: ${errorMessage(err)}`);
+      return {};
+    }
   }
 
   /**
@@ -656,9 +702,12 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     const logs: Array<Record<string, unknown>> = nodeRun.logs;
     const append = (level: 'info' | 'warn' | 'error', msg: string, data?: Record<string, unknown>) => {
       // Redact per-entry on push so a crash mid-execute can't leave a raw
-      // secret in the unsaved buffer either.
+      // secret in the unsaved buffer either. Secret-Werte vor der Redaction
+      // maskieren: deren Kürzung könnte einen Wert sonst zerteilen.
       const entry = redactRecord(
-        { at: new Date().toISOString(), level, msg, ...(data ?? {}) },
+        // `ctx.secretValues` setzt `runJob` erst nach dem Aufbau — gelesen
+        // wird es beim Schreiben eines Eintrags.
+        maskSecrets({ at: new Date().toISOString(), level, msg, ...(data ?? {}) }, ctx.secretValues ?? []),
         { maxStringLength: 1024 },
       );
       logs.push(entry);
@@ -676,7 +725,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       if (isRecord(fromEdge)) Object.assign(incoming, fromEdge);
     }
 
-    return {
+    const ctx: NodeExecutionContext = {
       // `toObject<T>()` ist die von Mongoose vorgesehene Stelle, die POJO-Form
       // zu benennen; ohne Typargument liefert es `any` (DocType der
       // untypisierten `Document`-Basis) und das lief vorher in ein `as never`.
@@ -707,6 +756,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       },
       signal,
     };
+    return ctx;
   }
 
   /**

@@ -62,6 +62,12 @@ export class WorkflowsController {
     return this.workflows.getDefinition(id);
   }
 
+  /** Für `{{secrets.KEY}}` erreichbare Secrets — nur KEY, Beschreibung, Herkunft. */
+  @Get(':id/secrets')
+  listSecrets(@Param('id') id: string) {
+    return this.workflows.listAvailableSecrets(id);
+  }
+
   @Put(':id')
   updateDefinition(@Param('id') id: string, @Body() dto: UpdateWorkflowDefinitionDto) {
     return this.workflows.updateDefinition(id, dto);

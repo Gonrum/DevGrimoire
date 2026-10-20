@@ -56,6 +56,9 @@ import { SshModule } from '../ssh/ssh.module';
 import { CustomerProjectLink, CustomerProjectLinkSchema } from '../customers/schemas/customer-project-link.schema';
 import { WorkflowScopeGuard } from './workflow-scope.guard';
 import { WorkflowAccountabilityService } from './engine/workflow-accountability.service';
+import { WorkflowSecretsResolver } from './engine/workflow-secrets.resolver';
+import { SecretsModule } from '../secrets/secrets.module';
+import { Secret, SecretSchema } from '../secrets/schemas/secret.schema';
 
 @Module({
   imports: [
@@ -64,6 +67,9 @@ import { WorkflowAccountabilityService } from './engine/workflow-accountability.
       { name: WorkflowRun.name, schema: WorkflowRunSchema },
       { name: WorkflowNodeRun.name, schema: WorkflowNodeRunSchema },
       { name: CustomerProjectLink.name, schema: CustomerProjectLinkSchema },
+      // Nur lesend für WorkflowSecretsResolver (Metadaten-Abfrage); Werte
+      // entschlüsselt ausschließlich SecretsService mit Zugriffsprüfung.
+      { name: Secret.name, schema: SecretSchema },
     ]),
     TodosModule,
     forwardRef(() => MilestonesModule),
@@ -78,6 +84,7 @@ import { WorkflowAccountabilityService } from './engine/workflow-accountability.
     BalancerModule,
     AuthModule,
     SshModule,
+    SecretsModule,
   ],
   controllers: [WorkflowsController, WorkflowNodeTypesController, WorkflowAgentController],
   providers: [
@@ -85,6 +92,7 @@ import { WorkflowAccountabilityService } from './engine/workflow-accountability.
     WorkflowEngineService,
     WorkflowAccountabilityService,
     WorkflowScopeGuard,
+    WorkflowSecretsResolver,
     WorkflowQueueService,
     WorkflowWorkerPool,
     WorkflowSchedulerService,

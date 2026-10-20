@@ -41,6 +41,11 @@ import { assertActorCanAccessWorkflow } from './workflow-actor-access';
 import { redact } from './workflow-redaction';
 import { summarizeRisk, WORKFLOW_RUNTIME_LIMITS } from './workflow-security.runtime';
 import { getTemplate, listTemplatesPublic, WorkflowTemplate } from './workflow-templates';
+import {
+  secretPlaceholderIssues,
+  WorkflowSecretInfo,
+  WorkflowSecretsResolver,
+} from './engine/workflow-secrets.resolver';
 
 const RUNTIME_FIELDS: Array<keyof UpdateWorkflowDefinitionDto> = ['nodes', 'edges', 'trigger'];
 
@@ -64,6 +69,7 @@ export class WorkflowsService {
     private readonly eventEmitter: EventEmitter2,
     private readonly nodeRegistry: NodeRegistry,
     private readonly auditLog: AuditLogService,
+    private readonly secretsResolver: WorkflowSecretsResolver,
   ) {}
 
   private async audit(
@@ -196,6 +202,20 @@ export class WorkflowsService {
     return def;
   }
 
+  /**
+   * Secrets, die `{{secrets.KEY}}` in diesem Workflow erreichen kann — nur
+   * Metadaten, nie Werte. Ob der Wert zur Laufzeit wirklich gelesen werden
+   * darf, entscheidet erst der Akteur des Laufs.
+   */
+  async listAvailableSecrets(id: string): Promise<WorkflowSecretInfo[]> {
+    const def = await this.getDefinition(id);
+    assertActorCanAccessWorkflow(RequestContext.getUser(), def);
+    return this.secretsResolver.available({
+      projectId: def.projectId?.toString(),
+      customerId: def.customerId?.toString(),
+    });
+  }
+
   async updateDefinition(
     id: string,
     dto: UpdateWorkflowDefinitionDto,
@@ -266,6 +286,18 @@ export class WorkflowsService {
           issues: schemaIssues,
         });
         throw new BadRequestException(`Workflow cannot be activated: ${schemaIssues.join('; ')}`);
+      }
+      // Ein Secret-Platzhalter in einem Node ohne Secret-Erlaubnis scheiterte
+      // zur Laufzeit erst bei jedem Lauf mit `secret_not_allowed`.
+      const secretIssues = secretPlaceholderIssues(
+        existing.nodes,
+        (t) => this.nodeRegistry.has(t) && this.nodeRegistry.getMetadata(t).secretPlaceholders === true,
+      );
+      if (secretIssues.length > 0) {
+        await this.audit('workflow.validation.failed', existing, undefined, {
+          issues: secretIssues,
+        });
+        throw new BadRequestException(`Workflow cannot be activated: ${secretIssues.join('; ')}`);
       }
     }
 
