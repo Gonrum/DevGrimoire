@@ -2706,6 +2706,37 @@
         "secret_forbidden": "Secret nicht erlaubt"
       }
     },
+    "debug": {
+      "button": "Debuggen",
+      "title": "Debug-Lauf",
+      "input": "Eingabe",
+      "inputInvalid": "Ungültiges JSON — erwartet wird ein Objekt, z.B. {}.",
+      "start": "Start",
+      "close": "Debug schließen",
+      "loading": "Lade Debug-Lauf …",
+      "step": "Schritt ausführen",
+      "dry": "Trockenlauf",
+      "repeat": "Schritt wiederholen",
+      "stop": "Beenden",
+      "marked": "Markiert: {{id}}",
+      "noMarked": "Kein Node markiert — klicke einen Node an.",
+      "clickHint": "Klick markiert einen Node, Doppelklick öffnet ihn.",
+      "waitingForUser": "wartet auf Antwort",
+      "result": "Ergebnis",
+      "issuesTitle": "Prüfung fehlgeschlagen",
+      "notYetRun": "Noch nicht ausgeführt",
+      "attempt": "Versuch {{attempt}}",
+      "status": {
+        "queued": "eingereiht",
+        "running": "läuft",
+        "waiting_for_user": "wartet auf Antwort",
+        "waiting_for_timer": "wartet auf Timer",
+        "waiting_for_step": "wartet auf Schritt",
+        "succeeded": "erfolgreich",
+        "failed": "fehlgeschlagen",
+        "cancelled": "abgebrochen"
+      }
+    },
     "preview": {
       "title": "Eingesetzt",
       "hint": "Vorschau mit dem Kontext links — Secrets bleiben als ••••(KEY) maskiert.",

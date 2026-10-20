@@ -2706,6 +2706,37 @@
         "secret_forbidden": "secret not allowed"
       }
     },
+    "debug": {
+      "button": "Debug",
+      "title": "Debug run",
+      "input": "Input",
+      "inputInvalid": "Invalid JSON — an object is expected, e.g. {}.",
+      "start": "Start",
+      "close": "Close debug",
+      "loading": "Loading debug run …",
+      "step": "Run step",
+      "dry": "Dry run",
+      "repeat": "Repeat step",
+      "stop": "Stop",
+      "marked": "Marked: {{id}}",
+      "noMarked": "No node marked — click a node.",
+      "clickHint": "Click marks a node, double click opens it.",
+      "waitingForUser": "waiting for an answer",
+      "result": "Result",
+      "issuesTitle": "Validation failed",
+      "notYetRun": "Not executed yet",
+      "attempt": "Attempt {{attempt}}",
+      "status": {
+        "queued": "queued",
+        "running": "running",
+        "waiting_for_user": "waiting for an answer",
+        "waiting_for_timer": "waiting for timer",
+        "waiting_for_step": "waiting for step",
+        "succeeded": "succeeded",
+        "failed": "failed",
+        "cancelled": "cancelled"
+      }
+    },
     "preview": {
       "title": "Applied",
       "hint": "Preview using the context on the left — secrets stay masked as ••••(KEY).",

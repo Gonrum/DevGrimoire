@@ -14,7 +14,8 @@
     "check:research-lib": "node scripts/research-lib-check.cjs",
     "check:workflow-reactivation": "node scripts/workflow-reactivation-check.cjs",
     "check:placeholder-view": "node scripts/placeholder-view-check.cjs",
-    "check:command-diagnostics": "node scripts/command-diagnostics-check.cjs"
+    "check:command-diagnostics": "node scripts/command-diagnostics-check.cjs",
+    "check:debug-view": "node scripts/debug-view-check.cjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",

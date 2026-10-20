@@ -6,7 +6,7 @@ import {
   useNodesState, useEdgesState, addEdge, Connection, Edge, Node,
   useReactFlow, ReactFlowProvider,
 } from '@xyflow/react';
-import { ArrowLeft, Save, Play, CheckCircle, Pause, Trash2, PanelLeftOpen, PanelRightOpen, X, KeyRound } from 'lucide-react';
+import { ArrowLeft, Save, Play, CheckCircle, Pause, Trash2, PanelLeftOpen, PanelRightOpen, X, KeyRound, Bug } from 'lucide-react';
 
 import { api } from '../api/client';
 import { workflowsApi, WorkflowSecretInfo, WorkflowDefinition, WorkflowNode as WfNode, WorkflowEdge as WfEdge, WorkflowStatus, WorkflowNodeMetadata } from '../api/workflows';
@@ -22,6 +22,10 @@ import { WorkflowSecretsPanel } from '../components/workflows/WorkflowSecretsPan
 import { nodeHasConfig, SelectedNode } from '../components/workflows/nodeConfig';
 import { WorkflowRefOptions, WorkflowRefOptionsContext } from '../components/workflows/workflowRefOptions';
 import { WorkflowCanvasActions, WorkflowCanvasActionsContext } from '../components/workflows/workflowCanvasActions';
+import { WorkflowDebugView, WorkflowDebugViewContext } from '../components/workflows/workflowDebugView';
+import { WorkflowDebugBar } from '../components/workflows/WorkflowDebugBar';
+import { WorkflowDebugPanel } from '../components/workflows/WorkflowDebugPanel';
+import { useWorkflowRunLive } from '../components/workflows/useWorkflowRunLive';
 import { useNodeTypesCatalog } from '../hooks/useNodeTypesCatalog';
 import { useViewportBreakpoint, ViewportBreakpoint } from '../hooks/useViewportBreakpoint';
 import { useWorkflowDirtyGuard } from '../hooks/useWorkflowDirtyGuard';
@@ -32,6 +36,7 @@ import { useToast } from '../components/Toast';
 import i18n from '../i18n';
 import { secretPlaceholderIssue } from '../lib/placeholder-view';
 import { needsSshReactivation } from '../lib/workflow-reactivation';
+import { nodeDebugStates } from '../lib/debug-view';
 
 export default function WorkflowEditorPage() {
   return (
@@ -133,6 +138,12 @@ function EditorInner() {
   const [paletteOverride, setPaletteOverride] = useState<PanelOverride>(null);
   const [inspectorOverride, setInspectorOverride] = useState<PanelOverride>(null);
   const draggedTypeRef = useRef<string | null>(null);
+  // Debug-Modus: Leiste offen, laufender Debug-Lauf, vom Nutzer markierter
+  // Node (sonst gilt der aktuelle, also der nächste wartende).
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugRunId, setDebugRunId] = useState<string | null>(null);
+  const [markedOverride, setMarkedOverride] = useState<string | null>(null);
+  const debugLive = useWorkflowRunLive(debugRunId);
 
   const paletteOpen = panelOpen(paletteOverride, bp);
   const inspectorOpen = panelOpen(inspectorOverride, bp);
@@ -323,17 +334,7 @@ function EditorInner() {
     setSaving(true);
     try {
       const dto: UpdateDto = {
-        nodes: nodes.map((n) => {
-          const d = readNodeData(n.data);
-          return {
-            id: n.id,
-            type: d.type,
-            ...(d.label !== undefined ? { label: d.label } : {}),
-            position: n.position,
-            config: d.config,
-            secretRefs: d.secretRefs ?? [],
-          };
-        }),
+        nodes: nodes.map(nodeToWf),
         // `edgeToWf` statt eigener Abbildung: vorher fielen `condition` und
         // `payloadMapping` hier weg, jedes Speichern löschte das Mapping.
         edges: edges.map(edgeToWf),
@@ -432,6 +433,33 @@ function EditorInner() {
     const node = nodes.find((n) => n.id === nodeId);
     if (node) void reactFlowApi.setCenter(node.position.x, node.position.y, { zoom: 1.2, duration: 400 });
   };
+
+  // Debug-Lauf: jeder Start/Schritt schickt den aktuellen Editor-Graphen in
+  // derselben Abbildung wie das Speichern-DTO — auch ungespeichert.
+  const getDebugGraph = useCallback(
+    () => ({ nodes: nodes.map(nodeToWf), edges: edges.map(edgeToWf) }),
+    [nodes, edges],
+  );
+
+  // Nur die Ids zählen für den Debug-Zustand. Über einen Schlüssel-String
+  // gemerkt, damit Ziehen eines Nodes nicht bei jedem Frame einen neuen
+  // Kontextwert erzeugt und alle Nodes neu rendert.
+  const nodeIdsKey = nodes.map((n) => n.id).join('\n');
+  const nodeIds = useMemo(() => (nodeIdsKey === '' ? [] : nodeIdsKey.split('\n')), [nodeIdsKey]);
+  const debugRun = debugLive.run;
+  const debugNodeRuns = debugLive.nodeRuns;
+  const debugView = useMemo<WorkflowDebugView | null>(() => {
+    if (debugRunId === null || debugRun === null) return null;
+    const pending = debugRun.debug?.pendingNodeIds ?? [];
+    const marked = markedOverride !== null && nodeIds.includes(markedOverride) ? markedOverride : (pending[0] ?? null);
+    return { states: nodeDebugStates(nodeIds, debugNodeRuns, pending), markedNodeId: marked };
+  }, [debugRunId, debugRun, debugNodeRuns, nodeIds, markedOverride]);
+
+  const closeDebug = useCallback(() => {
+    setDebugOpen(false);
+    setDebugRunId(null);
+    setMarkedOverride(null);
+  }, []);
 
   const upstreamNodes = useMemo(() => upstreamOf(selectedNodeId, nodes, edges), [nodes, edges, selectedNodeId]);
 
@@ -540,6 +568,15 @@ function EditorInner() {
               <CheckCircle size={12} /> {t('workflows.editor.activate')}
             </button>
           )}
+          {workflow.status !== 'archived' && (
+            <button
+              onClick={() => setDebugOpen(true)}
+              disabled={debugOpen}
+              className="inline-flex items-center gap-1 rounded-sm bg-violet-700 px-3 py-1 text-xs text-white hover:bg-violet-600 disabled:opacity-50"
+            >
+              <Bug size={12} /> {t('workflows.debug.button')}
+            </button>
+          )}
           {workflow.status === 'active' && (
             <>
               <button onClick={() => { void handleRun(); }} className="inline-flex items-center gap-1 rounded-sm bg-green-600 px-3 py-1 text-xs text-white hover:bg-green-500">
@@ -583,8 +620,24 @@ function EditorInner() {
           <button onClick={() => setPaletteOpen(false)} className="absolute left-[252px] top-2 z-30 rounded-sm bg-gray-800 p-1 text-gray-300"><X size={14} /></button>
         )}
 
-        <main className="flex-1">
+        <main className="flex min-w-0 flex-1 flex-col">
+          {debugOpen && (
+            <WorkflowDebugBar
+              workflowId={workflow._id}
+              getGraph={getDebugGraph}
+              runId={debugRunId}
+              run={debugRun}
+              nodeRuns={debugNodeRuns}
+              loadError={debugLive.error}
+              markedNodeId={debugView?.markedNodeId ?? null}
+              onStarted={(rid) => { setDebugRunId(rid); setMarkedOverride(null); }}
+              onStepped={() => setMarkedOverride(null)}
+              onClose={closeDebug}
+            />
+          )}
+          <div className="min-h-0 flex-1">
           <WorkflowCanvasActionsContext.Provider value={canvasActions}>
+          <WorkflowDebugViewContext.Provider value={debugView}>
           <WorkflowCanvas
             nodes={nodes}
             edges={edges}
@@ -615,12 +668,22 @@ function EditorInner() {
               if (bp === 'tablet' && (sel.nodes[0] || sel.edges[0])) setInspectorOpen(true);
             }}
             onDrop={handleDrop}
+            onNodeClick={(nid) => {
+              // Im Debug-Modus markiert ein Klick den Node für Schritt und Panel;
+              // der Doppelklick öffnet weiter das Modal.
+              if (debugRunId !== null) setMarkedOverride(nid);
+            }}
             onNodeDoubleClick={(nid) => {
               const n = nodes.find((x) => x.id === nid);
               if (n && nodeHasConfig(byType[readNodeData(n.data).type])) handleEditNode(nid);
             }}
           />
+          </WorkflowDebugViewContext.Provider>
           </WorkflowCanvasActionsContext.Provider>
+          </div>
+          {debugRunId !== null && (
+            <WorkflowDebugPanel markedNodeId={debugView?.markedNodeId ?? null} nodeRuns={debugNodeRuns} />
+          )}
         </main>
 
         {(bp === 'desktop' || inspectorOpen) ? (
@@ -771,6 +834,19 @@ function toReactFlowEdge(e: WfEdge): Edge {
     targetHandle: e.targetPort ?? null,
     type: 'workflowEdge',
     data: { branch: e.branch ?? 'always', condition: e.condition, payloadMapping: e.payloadMapping },
+  };
+}
+
+/** Node des Editors → Definition, gemeinsam für Speichern-DTO und Debug-Lauf. */
+function nodeToWf(n: Node): WfNode {
+  const d = readNodeData(n.data);
+  return {
+    id: n.id,
+    type: d.type,
+    ...(d.label !== undefined ? { label: d.label } : {}),
+    position: n.position,
+    config: d.config,
+    secretRefs: d.secretRefs ?? [],
   };
 }
 

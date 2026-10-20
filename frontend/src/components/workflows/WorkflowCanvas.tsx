@@ -25,6 +25,8 @@ interface Props {
   onConnect: (conn: Connection) => void;
   onSelectionChange: (sel: { nodes: Node[]; edges: Edge[] }) => void;
   onNodeDoubleClick?: (nodeId: string) => void;
+  /** Einfacher Klick — im Debug-Modus markiert er den Node für Schritt und Panel. */
+  onNodeClick?: (nodeId: string) => void;
   onDrop: (event: React.DragEvent, position: { x: number; y: number }) => void;
 }
 
@@ -107,6 +109,7 @@ function CanvasInner(p: Props) {
         onConnectEnd={onConnectEnd}
         isValidConnection={isValidConnection}
         onSelectionChange={p.onSelectionChange}
+        onNodeClick={(_event, node) => p.onNodeClick?.(node.id)}
         onNodeDoubleClick={(_event, node) => p.onNodeDoubleClick?.(node.id)}
         zoomOnDoubleClick={false}
         nodeTypes={nodeTypes}

@@ -8,6 +8,13 @@ import { getNodeIcon } from './nodeTypeIconMap';
 import { runStatusStyles } from './runStatusStyles';
 import { nodeHasConfig } from './nodeConfig';
 import { useWorkflowCanvasActions } from './workflowCanvasActions';
+import { useWorkflowDebugView } from './workflowDebugView';
+import { optionOr } from '../../lib/narrow';
+
+/** Schlüssel von `runStatusStyles` — der Debug-Zustand trägt den Status als String. */
+const RUN_STATUS_KEYS = [
+  'idle', 'queued', 'running', 'waiting', 'succeeded', 'failed', 'skipped', 'retrying', 'interrupted',
+] as const satisfies ReadonlyArray<WorkflowNodeRunStatus | 'idle'>;
 
 export interface WorkflowNodeData {
   type: string;
@@ -15,6 +22,10 @@ export interface WorkflowNodeData {
   secretRefs?: string[];
   metadata?: WorkflowNodeMetadata;
   runStatus?: WorkflowNodeRunStatus;
+  /** Zuletzt trocken gelaufen — gestrichelter Rand. */
+  runDry?: boolean;
+  /** Nächster Node eines Debug-Laufs — gelber Ring. */
+  debugCurrent?: boolean;
   issueCount?: number;
   [key: string]: unknown;
 }
@@ -29,7 +40,18 @@ function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
   const meta = data.metadata;
   const category = meta?.category ?? 'action';
   const style = nodeCategoryStyles[category];
-  const status = runStatusStyles[data.runStatus ?? 'idle'];
+  // Im Debug-Modus kommt der Zustand aus dem Kontext, nicht aus `data` —
+  // so schreibt eine Live-Aktualisierung des Laufs keine Nodes neu.
+  const debug = useWorkflowDebugView();
+  const debugState = debug?.states[props.id];
+  const statusKey = debugState ? optionOr(debugState.status, RUN_STATUS_KEYS, 'idle') : (data.runStatus ?? 'idle');
+  const status = runStatusStyles[statusKey];
+  const dry = debugState ? debugState.dry : data.runDry === true;
+  const current = debugState ? debugState.current : data.debugCurrent === true;
+  const marked = debug !== null && debug.markedNodeId === props.id;
+  // Noch nicht gelaufen und nicht an der Reihe: gedimmt, damit der Weg durch
+  // den Graphen sichtbar wird.
+  const dimmed = debug !== null && statusKey === 'idle' && !current;
   const isTrigger = category === 'trigger';
   const branches = meta?.branches ?? ['success'];
   const issueCount = data.issueCount ?? 0;
@@ -62,7 +84,7 @@ function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
       </NodeToolbar>
 
       <div
-        className={`min-w-[220px] rounded-lg border-2 bg-gray-900 shadow-md ${style.border} ${status.ring} ${props.selected ? 'ring-offset-2 ring-offset-gray-950' : ''}`}
+        className={`min-w-[220px] rounded-lg border-2 bg-gray-900 shadow-md ${style.border} ${current ? 'ring-4 ring-yellow-300' : status.ring} ${dry ? 'border-dashed' : ''} ${dimmed ? 'opacity-50' : ''} ${marked ? 'outline-2 outline-offset-4 outline-cyan-400' : ''} ${props.selected ? 'ring-offset-2 ring-offset-gray-950' : ''}`}
       >
         {!isTrigger && <Handle type="target" position={Position.Left} className="h-2! w-2! bg-gray-500!" />}
 

@@ -27,6 +27,12 @@ export async function readErrorMessage(res: Response): Promise<string> {
   if (body !== null && typeof body === 'object') {
     const message = (body as { message?: unknown }).message;
     if (typeof message === 'string' && message.length > 0) return message;
+    // NestJS liefert Prüfungsfehler als String-Array (z.B. Debug-Schritt):
+    // mit „; " verbunden statt verworfen — sonst bliebe nur „Bad Request".
+    if (Array.isArray(message)) {
+      const lines = message.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+      if (lines.length > 0) return lines.join('; ');
+    }
   }
   return res.statusText;
 }
