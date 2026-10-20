@@ -32,6 +32,21 @@ export class WorkflowSchedulerService {
     await this.processDueSchedules(new Date());
   }
 
+  /**
+   * Debug-Läufe ohne Schritt seit `DEBUG_IDLE_MS` abbrechen
+   * (`WorkflowsService.cancelIdleDebugRuns`). Unabhängig vom Zeitplan-Schalter:
+   * das ist Aufräumen, kein automatischer Start.
+   */
+  @Cron(CronExpression.EVERY_MINUTE)
+  async cancelIdleDebugRuns(): Promise<void> {
+    try {
+      const cancelled = await this.workflowsService.cancelIdleDebugRuns();
+      if (cancelled > 0) this.logger.log(`${cancelled} Debug-Lauf/-Läufe nach Leerlauf abgebrochen`);
+    } catch (err: unknown) {
+      this.logger.error(`Leerlauf-Abbruch der Debug-Läufe fehlgeschlagen: ${errorMessage(err)}`);
+    }
+  }
+
   /** Exposed for tests / manual triggering. */
   async processDueSchedules(now: Date): Promise<void> {
     const due = await this.definitionModel

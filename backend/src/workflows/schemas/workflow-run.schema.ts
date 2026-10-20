@@ -1,14 +1,28 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Prop, Schema, SchemaFactory, raw } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { WorkflowScope } from './workflow-definition.schema';
 
 export type WorkflowRunDocument = WorkflowRun & Document;
+
+export type WorkflowRunMode = 'normal' | 'debug';
+
+/** Zustand eines Debug-Laufs (`mode: 'debug'`). */
+export interface WorkflowRunDebugState {
+  /** Nodes, die als Nächstes drankommen dürfen; die erste Id ist der nächste Schritt. */
+  pendingNodeIds: string[];
+  /** Letzter Schritt bzw. Start — Grundlage für den Leerlauf-Abbruch. */
+  lastActivityAt: Date;
+  /** Hinweise an den Debuggenden, z. B. entfernte, übersprungene Nodes. */
+  notices: string[];
+}
 
 export enum WorkflowRunStatus {
   QUEUED = 'queued',
   RUNNING = 'running',
   WAITING_FOR_USER = 'waiting_for_user',
   WAITING_FOR_TIMER = 'waiting_for_timer',
+  /** Debug-Lauf: hält vor dem nächsten Node an, bis ein Schritt per REST kommt. */
+  WAITING_FOR_STEP = 'waiting_for_step',
   SUCCEEDED = 'succeeded',
   FAILED = 'failed',
   CANCELLED = 'cancelled',
@@ -42,6 +56,24 @@ export class WorkflowRun {
 
   @Prop({ type: [String], default: [] })
   currentNodeIds: string[];
+
+  /**
+   * `debug`: Schritt-für-Schritt-Lauf aus dem Editor. Nachfolger werden nicht
+   * eingereiht, sondern in `debug.pendingNodeIds` gesammelt.
+   */
+  @Prop({ type: String, enum: ['normal', 'debug'], default: 'normal' })
+  mode: WorkflowRunMode;
+
+  // `default: undefined`: Mongoose legt Arrays sonst immer als `[]` an — und
+  // jeder normale Lauf trüge ein leeres `debug`-Objekt.
+  @Prop(
+    raw({
+      pendingNodeIds: { type: [String], default: undefined },
+      lastActivityAt: { type: Date },
+      notices: { type: [String], default: undefined },
+    }),
+  )
+  debug?: WorkflowRunDebugState;
 
   @Prop()
   startedAt?: Date;

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types, isValidObjectId } from 'mongoose';
@@ -25,6 +25,7 @@ import {
   CancelWorkflowRunDto,
   CreateWorkflowDefinitionDto,
   ListWorkflowDefinitionsDto,
+  StartDebugRunDto,
   ListWorkflowRunsDto,
   StartWorkflowRunDto,
   UpdateWorkflowDefinitionDto,
@@ -46,6 +47,7 @@ import {
   WorkflowSecretInfo,
   WorkflowSecretsResolver,
 } from './engine/workflow-secrets.resolver';
+import { DEBUG_IDLE_MS, withoutUndefined } from './engine/debug-step';
 
 const RUNTIME_FIELDS: Array<keyof UpdateWorkflowDefinitionDto> = ['nodes', 'edges', 'trigger'];
 
@@ -426,6 +428,113 @@ export class WorkflowsService {
   }
 
   /**
+   * Debug-Lauf aus dem Editor starten. Erlaubt in jedem Status außer
+   * `archived` — Debuggen ist Teil des Bauens, und Aktivieren hieße Freigabe
+   * für automatische Läufe. Der Lauf nimmt den mitgeschickten Editor-Graphen
+   * (auch ungespeichert) als Snapshot und hält vor dem ersten Node an; jeder
+   * Schritt kommt einzeln über `WorkflowEngineService.debugStep`.
+   */
+  async startDebugRun(
+    definitionId: string,
+    dto: StartDebugRunDto,
+    requestActor?: RequestUser,
+  ): Promise<WorkflowRunDocument> {
+    const def = await this.getDefinition(definitionId);
+    const actor = requestActor ?? RequestContext.getUser();
+    // Der Debuggende ist der zurechenbare Nutzer jedes Schritts — ohne ihn
+    // gäbe es niemanden, dem die Schritte gehören.
+    if (!actor?.userId) throw new ForbiddenException('Debug-Lauf braucht einen angemeldeten Nutzer');
+    assertActorCanAccessWorkflow(actor, def);
+    if (def.status === WorkflowStatus.ARCHIVED) {
+      throw new BadRequestException('Cannot debug an archived workflow');
+    }
+    const nodes = (dto.nodes ?? []).map(workflowNodeFromDto);
+    const edges = dto.edges ?? [];
+    if (nodes.length > WORKFLOW_RUNTIME_LIMITS.maxNodesPerDefinition) {
+      throw new BadRequestException(`Workflow exceeds ${WORKFLOW_RUNTIME_LIMITS.maxNodesPerDefinition} nodes`);
+    }
+    const validation = this.validateGraph({
+      scope: def.scope,
+      projectId: def.projectId?.toString(),
+      customerId: def.customerId?.toString(),
+      nodes,
+      edges,
+    });
+    if (!validation.valid) {
+      throw new BadRequestException(`Debug-Lauf nicht möglich: ${validation.issues.join('; ')}`);
+    }
+    const triggerIds = nodes
+      .filter((n) => this.nodeRegistry.has(n.type) && this.nodeRegistry.getMetadata(n.type).category === 'trigger')
+      .map((n) => n.id);
+    if (triggerIds.length === 0) {
+      throw new BadRequestException('Debug-Lauf nicht möglich: kein Trigger-Node im Graphen');
+    }
+
+    const now = new Date();
+    const input = dto.input ?? {};
+    const run = await this.runModel.create({
+      definitionId: def._id,
+      definitionVersion: def.version,
+      definitionSnapshot: {
+        name: def.name,
+        description: def.description,
+        scope: def.scope,
+        trigger: def.trigger,
+        nodes: nodes.map(withoutUndefined),
+        edges: edges.map(withoutUndefined),
+      },
+      scope: def.scope,
+      projectId: def.projectId,
+      customerId: def.customerId,
+      trigger: { type: 'manual', input },
+      mode: 'debug',
+      status: WorkflowRunStatus.WAITING_FOR_STEP,
+      currentNodeIds: [],
+      startedAt: now,
+      createdByUserId: isValidObjectId(actor.userId) ? new Types.ObjectId(actor.userId) : undefined,
+      triggeredBy: {
+        type: 'manual' as const,
+        userId: actor.userId,
+        ...(actor.apiKeyId ? { apiKeyId: actor.apiKeyId } : {}),
+      },
+      context: { nodes: {}, input },
+      debug: { pendingNodeIds: triggerIds, lastActivityAt: now, notices: [] },
+    });
+
+    this.emitRun('created', run, `Debug-Lauf für "${def.name}" gestartet`);
+    await this.audit('workflow.debug.started', def, run);
+    return run;
+  }
+
+  /**
+   * Debug-Läufe, die {@link DEBUG_IDLE_MS} lang nicht weitergeschaltet wurden,
+   * abbrechen. Nur `waiting_for_step`: ein Lauf, der auf eine Antwort wartet
+   * oder gerade einen Schritt ausführt, bleibt — die Frage hält die Uhr an.
+   */
+  async cancelIdleDebugRuns(now = new Date()): Promise<number> {
+    const idle = await this.runModel
+      .find({
+        mode: 'debug',
+        status: WorkflowRunStatus.WAITING_FOR_STEP,
+        'debug.lastActivityAt': { $lt: new Date(now.getTime() - DEBUG_IDLE_MS) },
+      })
+      .select('_id')
+      .lean()
+      .exec();
+    let cancelled = 0;
+    for (const run of idle) {
+      try {
+        await this.cancelRun(run._id.toString(), { reason: 'debug_idle' });
+        cancelled += 1;
+      } catch (err: unknown) {
+        // Inzwischen beendet oder weitergeschaltet — kein Fehler des Aufräumens.
+        this.logger.debug(`Debug-Lauf ${run._id.toString()} nicht abgebrochen: ${errorMessage(err)}`);
+      }
+    }
+    return cancelled;
+  }
+
+  /**
    * Läuft für die Definition gerade ein Lauf (eingereiht oder aktiv)?
    * Der Zeitplan nutzt das, damit sich Läufe (z. B. SSH-Wartung) nie überlappen.
    *
@@ -433,10 +542,14 @@ export class WorkflowsService {
    * Timer wartet, kann Tage offen bleiben (oder nie beantwortet werden) — als
    * „offen" gezählt, blockierte er den Zeitplan dauerhaft. Wartend führt er
    * keinen Node aus, überlappt also nicht.
+   *
+   * Debug-Läufe zählen nie: jeder Schritt wird einzeln vom Nutzer angestoßen,
+   * und ein offener Debug-Lauf soll den Zeitplan nicht bis zum Leerlauf-
+   * Abbruch blockieren.
    */
   async hasOpenRun(definitionId: Types.ObjectId): Promise<boolean> {
     const open = await this.runModel
-      .exists({ definitionId, status: { $in: ACTIVE_RUN_STATUSES } })
+      .exists({ definitionId, status: { $in: ACTIVE_RUN_STATUSES }, mode: { $ne: 'debug' } })
       .exec();
     return open !== null;
   }

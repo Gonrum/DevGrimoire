@@ -17,6 +17,7 @@ import { expandShellCommand, shellLineShape, shellQuote } from './shell-template
 import { isRecord } from '../workflow-narrow';
 import { SECRET_MASK, findSecretKeys, maskSecrets } from './template-resolver';
 import { WorkflowSecretsResolver } from '../engine/workflow-secrets.resolver';
+import { dryPlaceholder } from '../engine/debug-step';
 import { LineResult, ScriptAbort, ScriptLine, buildScript, lineFailureMessage, parseScriptOutput, splitCommandLines } from './ssh-script';
 
 const configSchema = z.object({
@@ -342,8 +343,8 @@ export class SshExecExecutor implements NodeExecutor {
           runId: ctx.run._id.toString(),
           nodeId: ctx.node.id,
           definitionId: ctx.run.definitionId.toString(),
-          // Debug-Läufe gibt es erst mit `run.mode` (Task 6).
-          debug: false,
+          // Im SSH-Audit als Debug-Lauf erkennbar (`workflowDebug`).
+          debug: ctx.run.mode === 'debug',
         },
         // Ins Audit: eingesetzter Befehl ohne Marker, Secrets maskiert.
         auditCommand: plan.lines.map((l) => shownLines.get(l.line) ?? SECRET_MASK).join('\n'),
@@ -476,6 +477,46 @@ export class SshExecExecutor implements NodeExecutor {
     } catch (err: unknown) {
       return fail('ssh_error', errorMessage(err));
     }
+  }
+
+  /**
+   * Trockenlauf im Debug-Lauf: Verbindung prüfen und die fertigen Befehle
+   * zeigen wie im Modal-Test (`connectionCheck`) — gesendet wird nichts, kein
+   * Secret wird entschlüsselt (`••••(KEY)`). Die Ausgabe ist der
+   * Platzhalter mit `dryRun: true`, damit Folge-Nodes weiterlaufen, plus
+   * `preview` mit Verbindung und Befehlen. Ist die Verbindung nicht nutzbar
+   * oder der Befehl nicht baubar, scheitert der Schritt — ein echter Lauf
+   * täte es auch.
+   */
+  async dryRunPreview(ctx: NodeExecutionContext): Promise<NodeResult> {
+    // Ein `runContext.secrets` gibt es im Vorschau-Schritt nicht; falls doch,
+    // gehört es nicht in die Vorschau (R9).
+    const { secrets: _ignored, ...runContext } = ctx.runContext;
+    void _ignored;
+    const check = await this.connectionCheck(
+      { projectId: ctx.run.projectId, customerId: ctx.run.customerId },
+      ctx.config,
+      runContext,
+      ctx.accountableUserId,
+    );
+    const commandProblem = isRecord(check.commandProblem) ? check.commandProblem : undefined;
+    const output: Record<string, unknown> = {
+      ...dryPlaceholder(this.metadata.outputs),
+      preview: {
+        connection: isRecord(check.connection) ? check.connection : null,
+        commands: Array.isArray(check.commands) ? check.commands : null,
+        ...(commandProblem ? { commandProblem } : {}),
+      },
+    };
+    // `errorPreview` trägt den Grund in beiden Fehlerfällen von `connectionCheck`
+    // (Config/Scope/Verbindung und fehlgeschlagener Verbindungstest).
+    const problem = check.ok !== true ? check.errorPreview : commandProblem;
+    if (check.ok !== true || commandProblem) {
+      const code = isRecord(problem) && typeof problem.code === 'string' ? problem.code : 'ssh_error';
+      const message = isRecord(problem) && typeof problem.message === 'string' ? problem.message : 'Verbindungsprüfung fehlgeschlagen';
+      return { status: 'failed', output, error: { code, message } };
+    }
+    return { status: 'success', branch: 'success', output };
   }
 
   /**

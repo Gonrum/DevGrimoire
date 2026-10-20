@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Logger,
@@ -35,15 +37,21 @@ import { readGraph } from './snapshot';
 import { OPEN_NODE_RUN_STATUSES, TERMINAL_RUN_STATUSES, WORKFLOW_RUN_CANCELLED } from './run-status';
 import { NodeBranch } from './node-metadata';
 import { QuestionsService, QUESTION_ANSWERED, QUESTION_EXPIRED } from '../../questions/questions.service';
-import { PreviewWorkflowNodeDto, TestWorkflowNodeDto, workflowNodeFromDto } from '../dto/workflow.dto';
+import {
+  DebugStepDto,
+  PreviewWorkflowNodeDto,
+  TestWorkflowNodeDto,
+  workflowNodeFromDto,
+} from '../dto/workflow.dto';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { WORKFLOW_RUN_PROGRESS } from '../../events/project-event';
 import { redact, redactLogs, redactRecord } from '../workflow-redaction';
 import { NodePreview, preflightNode, previewFromContext, redactPlaceholders } from './node-preflight';
-import { findSecretKeys, maskSecrets } from '../nodes/template-resolver';
-import { WorkflowSecretsResolver } from './workflow-secrets.resolver';
+import { findSecretKeys, maskSecrets, PlaceholderTrace } from '../nodes/template-resolver';
+import { secretPlaceholderIssues, WorkflowSecretsResolver } from './workflow-secrets.resolver';
+import { dropMissing, dryPlaceholder, dryStrategy, DryStrategy, nextPending, withoutUndefined } from './debug-step';
 import { capSnapshot, inputView, SNAPSHOT_REDACT_OPTIONS } from './snapshot-cap';
 import { asNumber, asStringArray, errorMessage, errorName, isRecord } from '../workflow-narrow';
 import {
@@ -51,7 +59,7 @@ import {
   checkRuntimeNode,
   WORKFLOW_RUNTIME_LIMITS,
 } from '../workflow-security.runtime';
-import { getWorkflowNodePolicy, requiresAccountableUser } from '../workflow-security.policy';
+import { getWorkflowNodePolicy, requiresAccountableUser, WorkflowNodeRisk } from '../workflow-security.policy';
 import { RequestContext, RequestUser } from '../../common/request-context';
 import { AccountableActor, WorkflowAccountabilityService } from './workflow-accountability.service';
 import { assertActorCanAccessWorkflow } from '../workflow-actor-access';
@@ -342,10 +350,15 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     }
 
     // Run budget — hard cap on executed node count + total wall-clock time.
-    const budget = checkRunBudget({
-      startedAt: run.startedAt,
-      executedNodeCount: run.executedNodeCount,
-    });
+    // Nicht im Debug-Lauf: jeder Schritt wird einzeln angestoßen, und die
+    // Laufzeit misst dort vor allem die Pausen des Nutzers.
+    const debug = run.mode === 'debug';
+    const budget = debug
+      ? { ok: true as const, code: undefined, message: undefined }
+      : checkRunBudget({
+          startedAt: run.startedAt,
+          executedNodeCount: run.executedNodeCount,
+        });
     if (!budget.ok) {
       this.audit('workflow.run.budget_exceeded', {
         runId: run._id.toString(),
@@ -411,9 +424,23 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     // `?.`: Executor-Attrappen ohne Metadaten gelten als nicht Secret-fähig.
     const secretsAllowed = executor.metadata?.secretPlaceholders === true;
     const secretKeys = findSecretKeys(node.config ?? {});
-    const secrets = secretsAllowed && secretKeys.length > 0
-      ? await this.resolveSecrets(run, secretKeys, accountable)
-      : {};
+    // Debug-Lauf: die Strategie entscheidet, ob der Node wirklich läuft. Was
+    // nur eine Vorschau liefert, entschlüsselt kein Secret — verfügbare KEYs
+    // erscheinen als ••••(KEY) wie in der Node-Vorschau.
+    const strategy: DryStrategy = debug
+      ? dryStrategy(
+          node.type,
+          policyCheck.policy?.risk ?? 'destructive',
+          executor.metadata?.category ?? 'action',
+          job.debugDry === true,
+        )
+      : 'execute';
+    const previewOnly = strategy !== 'execute' && strategy !== 'agent_dry';
+    const secrets = !secretsAllowed || secretKeys.length === 0
+      ? {}
+      : previewOnly
+        ? await this.availableSecretTokens(run, secretKeys)
+        : await this.resolveSecrets(run, secretKeys, accountable);
     // Vorprüfung vor jeder Ausführung: fehlende Platzhalter lassen den Node
     // scheitern, und der NodeRun hält fest, was er bekam und was eingesetzt
     // wurde (redigiert, gekappt — nie Secret-Klartext: `display` zeigt ••••(KEY)).
@@ -426,7 +453,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     nodeRun.resolvedConfig = capSnapshot(redactRecord(preflight.resolved.display, SNAPSHOT_REDACT_OPTIONS));
     nodeRun.placeholders = redactPlaceholders(preflight.resolved.placeholders);
     const secretValues = Object.values(secrets);
-    if (!preflight.failure && secretValues.length > 0) {
+    if (!previewOnly && !preflight.failure && secretValues.length > 0) {
       // Nur im Speicher: `inputView` übernimmt `secrets` nicht in den Snapshot,
       // und `contextUpdatePipeline` schreibt nur `nodes`/`fromEdges` zurück.
       ctx.runContext.secrets = secrets;
@@ -434,13 +461,36 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     }
     let result: NodeResult;
     try {
-      const refused = preflight.failure ?? accountabilityRefusal(node.type, accountable !== null);
+      const refused =
+        preflight.failure
+        ?? this.dryInputRefusal(debug, strategy, policyCheck.policy?.risk, preflight.resolved.placeholders)
+        ?? accountabilityRefusal(node.type, accountable !== null);
       if (refused) {
         result = refused;
+      } else if (strategy === 'placeholder') {
+        // Trockenlauf eines schreibenden Nodes: die eingesetzte Config steht
+        // schon am NodeRun, ausgeführt wird nichts.
+        result = { status: 'success', branch: 'success', output: dryPlaceholder(executor.metadata?.outputs ?? {}) };
+      } else if (strategy === 'skip_delay') {
+        result = { status: 'success', output: { skipped: true, reason: 'Verzögerung im Debug übersprungen' } };
       } else {
+        // agent.task läuft im Trockenlauf mit Read-only-Tools (wie der Modal-Test).
+        if (strategy === 'agent_dry') ctx.dryRun = true;
+        // Ein `ssh_preview` ohne den echten SSH-Executor fällt auf den
+        // Platzhalter zurück — ein Trockenlauf darf nie doch ausführen.
+        const invoke = (): Promise<NodeResult> =>
+          strategy !== 'ssh_preview'
+            ? executor.execute(ctx)
+            : executor instanceof SshExecExecutor
+              ? executor.dryRunPreview(ctx)
+              : Promise.resolve({
+                  status: 'success',
+                  branch: 'success',
+                  output: dryPlaceholder(executor.metadata?.outputs ?? {}),
+                });
         const execution = accountable
-          ? RequestContext.run(accountable.actor, undefined, () => executor.execute(ctx))
-          : executor.execute(ctx);
+          ? RequestContext.run(accountable.actor, undefined, invoke)
+          : invoke();
         result = await this.withTimeout(execution, timeoutMs, abort);
       }
     } catch (err: unknown) {
@@ -481,6 +531,53 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       return (await this.secretsResolver.resolve(run, keys, accountable)).values;
     } catch (err: unknown) {
       this.logger.warn(`Secrets für Lauf ${run._id.toString()} nicht auflösbar: ${errorMessage(err)}`);
+      return {};
+    }
+  }
+
+  /**
+   * Debug-Lauf: ein **echter** Schritt eines verändernden Nodes, dessen
+   * Platzhalter auf Ausgaben eines Trockenlaufs zeigen (`unknown`), liefe mit
+   * `null`/leer statt mit dem echten Wert — ein Todo-Titel „null", ein
+   * SSH-Befehl mit `'null'`. Das ist keine Vorschau mehr; der Schritt
+   * scheitert, bis der Vorgänger echt lief oder dieser Schritt trocken läuft.
+   * Lesende Nodes und Trockenläufe dürfen mit unbekannten Werten weiter.
+   */
+  private dryInputRefusal(
+    debug: boolean,
+    strategy: DryStrategy,
+    risk: WorkflowNodeRisk | undefined,
+    placeholders: PlaceholderTrace[],
+  ): NodeResult | undefined {
+    if (!debug || strategy !== 'execute' || risk === 'safe-read') return undefined;
+    const unknown = [...new Set(placeholders.filter((p) => p.status === 'unknown').map((p) => p.expr))];
+    if (unknown.length === 0) return undefined;
+    return {
+      status: 'failed',
+      error: {
+        code: 'template_unresolved',
+        message: `Platzhalter mit unbekanntem Wert aus einem Trockenlauf: ${unknown.join(', ')} — Vorgänger echt ausführen oder diesen Schritt trocken laufen lassen`,
+      },
+    };
+  }
+
+  /**
+   * Für Vorschau-Schritte im Debug-Lauf: verfügbare KEYs mit leerem Wert, wie
+   * `previewFromContext` — der Preflight zeigt sie als ••••(KEY), ohne dass ein
+   * Secret entschlüsselt wird. Fehlt ein KEY, bleibt er `missing`.
+   */
+  private async availableSecretTokens(run: WorkflowRunDocument, keys: string[]): Promise<Record<string, string>> {
+    try {
+      const infos = await this.secretsResolver.available({
+        projectId: run.projectId?.toString(),
+        customerId: run.customerId?.toString(),
+      });
+      const available = new Set(infos.map((s) => s.key));
+      const tokens: Record<string, string> = {};
+      for (const key of keys) if (available.has(key)) tokens[key] = '';
+      return tokens;
+    } catch (err: unknown) {
+      this.logger.warn(`Secrets für Lauf ${run._id.toString()} nicht abfragbar: ${errorMessage(err)}`);
       return {};
     }
   }
@@ -629,6 +726,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
             ...(projectId ? { projectId } : {}),
             ...(customerId ? { customerId } : {}),
             trigger: { type: 'manual', input },
+            mode: 'normal',
             status: WorkflowRunStatus.RUNNING,
             currentNodeIds: [node.id],
             triggeredBy: { type: 'manual' },
@@ -822,6 +920,14 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       return;
     }
 
+    // Debug-Lauf: Nachfolger werden gesammelt statt eingereiht. Wartet der
+    // Node auf eine Antwort, geht es wie gehabt nach `waiting_for_user`; die
+    // Antwort kommt über `handleQuestionAnswered` wieder hier an.
+    if (run.mode === 'debug' && result.status !== 'waiting') {
+      await this.applyDebugResult(run, nodeRun, node, result);
+      return;
+    }
+
     if (result.status === 'success') {
       await this.completeNodeRun(nodeRun, result);
       // Persist redacted output to run.context so downstream nodes can read
@@ -907,6 +1013,215 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     }
     await this.completeNodeRun(nodeRun, result);
     await this.failRun(run, result.error ?? { code: 'failed', message: 'node failed' });
+  }
+
+  /**
+   * Ergebnis eines Debug-Schritts. Gleiche Zweig-Regeln wie im normalen Lauf
+   * (success/custom/failure-Kanten), aber kein Retry und kein Einreihen: die
+   * Nachfolger landen in `debug.pendingNodeIds`, der Lauf wartet auf den
+   * nächsten Schritt. Ein Fehlschlag ohne failure-Kante lässt den Lauf nicht
+   * scheitern — der Node bleibt vorne in der Liste, damit er nach einer
+   * Korrektur wiederholt werden kann. Erfolgreich endet der Lauf erst, wenn
+   * nichts mehr wartet und der letzte Schritt gelang oder behandelt war.
+   */
+  private async applyDebugResult(
+    run: WorkflowRunDocument,
+    nodeRun: WorkflowNodeRunDocument,
+    node: WorkflowNode,
+    result: NodeResult,
+  ): Promise<void> {
+    const graph = readGraph(run.definitionSnapshot);
+    // Wiederholung: die Nachfolger des vorigen Laufs werden ersetzt. Welcher
+    // Zweig damals galt, steht am NodeRun nicht — also alle direkten Ziele.
+    const previousSuccessors =
+      nodeRun.attempt > 1 ? [...new Set(graph.edges.filter((e) => e.source === node.id).map((e) => e.target))] : [];
+    let successors: string[] = [];
+    let handled = true;
+    if (result.status === 'success') {
+      await this.completeNodeRun(nodeRun, result);
+      const redactedOutput = redactRecord(result.output ?? {});
+      const edgeValues = buildEdgeValues(graph, node.id, redactedOutput);
+      await this.runModel
+        .findByIdAndUpdate(run._id, contextUpdatePipeline(node.id, redactedOutput, edgeValues))
+        .exec();
+      successors = nextNodes(node.id, result.branch ?? 'success', graph).map((n) => n.id);
+    } else if (hasBranchEdges(node.id, 'failure', graph)) {
+      await this.completeNodeRun(nodeRun, result);
+      const redactedFailure = redactRecord(failureContextEntry(result));
+      const failEdgeValues = buildEdgeValues(graph, node.id, redactedFailure);
+      await this.runModel
+        .findByIdAndUpdate(run._id, contextUpdatePipeline(node.id, redactedFailure, failEdgeValues))
+        .exec();
+      successors = failureSuccessors(node.id, graph).map((n) => n.id);
+    } else {
+      await this.completeNodeRun(nodeRun, result);
+      handled = false;
+    }
+
+    // Nur ein Schritt zur Zeit (atomarer Claim in `debugStep`) — die Liste
+    // ändert sich zwischen Lesen und Schreiben nicht.
+    const current = await this.runModel.findById(run._id).select('debug').exec();
+    let pending = nextPending(current?.debug?.pendingNodeIds ?? [], node.id, successors, previousSuccessors);
+    if (!handled) pending = [node.id, ...pending];
+    const finish = handled && pending.length === 0;
+    const moved = await this.runModel
+      .findOneAndUpdate(
+        { _id: run._id, status: WorkflowRunStatus.RUNNING },
+        {
+          $set: {
+            'debug.pendingNodeIds': pending,
+            'debug.lastActivityAt': new Date(),
+            ...(finish ? {} : { status: WorkflowRunStatus.WAITING_FOR_STEP }),
+          },
+        },
+        { new: true },
+      )
+      .exec();
+    // Inzwischen abgebrochen: nichts mehr umstellen.
+    if (!moved) return;
+    if (finish) {
+      await this.maybeFinishRun(moved);
+      // Kann nur ausbleiben, wenn noch ein NodeRun offen ist — dann wartet der
+      // Lauf lieber auf einen Schritt, als für immer `running` zu bleiben.
+      if (moved.status !== WorkflowRunStatus.SUCCEEDED) {
+        await this.runModel
+          .updateOne({ _id: run._id, status: WorkflowRunStatus.RUNNING }, { $set: { status: WorkflowRunStatus.WAITING_FOR_STEP } })
+          .exec();
+      }
+    }
+    this.eventEmitter.emit(WORKFLOW_RUN_PROGRESS, { runId: run._id.toString() });
+  }
+
+  /**
+   * Ein Schritt eines Debug-Laufs. Der Graph kommt bei jedem Schritt aus dem
+   * Editor (auch ungespeichert) und ersetzt den Snapshot des Laufs; der
+   * ausgeführte Node wird wie bei der Aktivierung geprüft, aber ohne
+   * Freigabe-Eintrag und Versionssprung. Antwortet sofort mit dem Lauf
+   * (`running`) — das Ergebnis kommt über den Fortschritts-Stream.
+   */
+  async debugStep(runId: string, dto: DebugStepDto, actor?: RequestUser): Promise<WorkflowRunDocument> {
+    if (!isValidObjectId(runId)) throw new BadRequestException('Invalid run id');
+    const run = await this.runModel.findById(runId).exec();
+    if (!run) throw new NotFoundException(`Workflow run ${runId} not found`);
+    if (run.mode !== 'debug' || !run.debug) throw new BadRequestException('Lauf ist kein Debug-Lauf');
+    if (run.status !== WorkflowRunStatus.WAITING_FOR_STEP) {
+      throw new ConflictException('Debug-Lauf wartet nicht auf einen Schritt');
+    }
+    // Der Debuggende ist der zurechenbare Nutzer — weiterschalten darf nur er.
+    if (!actor?.userId || actor.userId !== run.triggeredBy?.userId) {
+      throw new ForbiddenException('Nur wer den Debug-Lauf gestartet hat, darf ihn weiterschalten');
+    }
+    assertActorCanAccessWorkflow(actor, run);
+
+    const nodes = (dto.nodes ?? []).map(workflowNodeFromDto);
+    const edges = dto.edges ?? [];
+    if (nodes.length > WORKFLOW_RUNTIME_LIMITS.maxNodesPerDefinition) {
+      throw new BadRequestException(`Workflow exceeds ${WORKFLOW_RUNTIME_LIMITS.maxNodesPerDefinition} nodes`);
+    }
+    const matches = nodes.filter((n) => n.id === dto.nodeId);
+    if (matches.length !== 1) {
+      throw new BadRequestException(
+        matches.length === 0 ? `Node ${dto.nodeId} ist nicht im Graphen` : `Node-Id ${dto.nodeId} ist doppelt vergeben`,
+      );
+    }
+    const node = matches[0];
+
+    const { pending, dropped } = dropMissing(run.debug.pendingNodeIds ?? [], nodes.map((n) => n.id));
+    const notices = dropped.map((id) => `Node ${id} wurde entfernt und übersprungen`);
+    const previousRuns = await this.nodeRunModel.countDocuments({ runId: run._id, nodeId: node.id }).exec();
+    if (!pending.includes(node.id) && previousRuns === 0) {
+      throw new BadRequestException(`Node ${node.id} ist nicht an der Reihe`);
+    }
+    const issues = this.debugNodeIssues(run.scope, node);
+    if (issues.length > 0) {
+      throw new BadRequestException({ statusCode: 400, error: 'Bad Request', message: issues });
+    }
+
+    // Atomar: von zwei gleichzeitigen Schritten gewinnt einer, der andere
+    // bekommt 409. `lastActivityAt` dient als Versionsmarke — ein Schritt, der
+    // zwischen Lesen und Claim komplett durchlief, hat sie verändert.
+    const now = new Date();
+    const lastActivityAt = run.debug.lastActivityAt;
+    const claimed = await this.runModel
+      .findOneAndUpdate(
+        {
+          _id: run._id,
+          status: WorkflowRunStatus.WAITING_FOR_STEP,
+          ...(lastActivityAt instanceof Date ? { 'debug.lastActivityAt': lastActivityAt } : {}),
+        },
+        {
+          $set: {
+            status: WorkflowRunStatus.RUNNING,
+            'definitionSnapshot.nodes': nodes.map(withoutUndefined),
+            'definitionSnapshot.edges': edges.map(withoutUndefined),
+            'debug.pendingNodeIds': pending,
+            'debug.lastActivityAt': now,
+          },
+          ...(notices.length > 0 ? { $push: { 'debug.notices': { $each: notices } } } : {}),
+        },
+        { new: true },
+      )
+      .exec();
+    if (!claimed) throw new ConflictException('Debug-Lauf wartet nicht auf einen Schritt');
+
+    const dry = dto.mode === 'dry';
+    const attempt = previousRuns + 1;
+    const nodeRun = await this.nodeRunModel.create({
+      runId: claimed._id,
+      definitionId: claimed.definitionId,
+      definitionVersion: claimed.definitionVersion,
+      nodeId: node.id,
+      nodeType: node.type,
+      attempt,
+      status: WorkflowNodeRunStatus.QUEUED,
+      dryRun: dry,
+      nodeSnapshot: withoutUndefined(node),
+    });
+    this.audit('workflow.debug.step', {
+      runId: claimed._id.toString(),
+      nodeId: node.id,
+      nodeType: node.type,
+      attempt,
+      mode: dto.mode,
+    });
+    this.queue.enqueue({
+      runId: claimed._id.toString(),
+      nodeRunId: nodeRun._id.toString(),
+      definitionId: claimed.definitionId.toString(),
+      nodeId: node.id,
+      nodeType: node.type,
+      attempt,
+      debugDry: dry,
+    });
+    this.eventEmitter.emit(WORKFLOW_RUN_PROGRESS, { runId: claimed._id.toString() });
+    return claimed;
+  }
+
+  /**
+   * Prüfung des auszuführenden Nodes wie bei der Aktivierung: Policy und
+   * Scope, Config-Schema, Secret-Platzhalter nur in erlaubten Node-Typen.
+   */
+  private debugNodeIssues(scope: WorkflowScope, node: WorkflowNode): string[] {
+    const issues: string[] = [];
+    const policy = checkRuntimeNode({ scope, type: node.type, secretRefs: node.secretRefs });
+    if (!policy.ok) issues.push(policy.message ?? `node "${node.id}" (${node.type}) blocked by policy`);
+    if (!this.registry.has(node.type)) {
+      issues.push(`node "${node.id}": kein Executor für "${node.type}"`);
+      return issues;
+    }
+    const parsed = this.registry.getMetadata(node.type).configSchema.safeParse(node.config ?? {});
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        issues.push(`node "${node.id}" (${node.type}) config.${issue.path.join('.')}: ${issue.message}`);
+      }
+    }
+    issues.push(
+      ...secretPlaceholderIssues(
+        [node],
+        (t) => this.registry.has(t) && this.registry.getMetadata(t).secretPlaceholders === true,
+      ),
+    );
+    return issues;
   }
 
   private async completeNodeRun(nodeRun: WorkflowNodeRunDocument, result: NodeResult): Promise<void> {
@@ -1172,11 +1487,12 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
   async retryRun(runId: string, fromNodeId?: string, requestActor?: RequestUser): Promise<WorkflowRunDocument> {
     // Zugriff vor dem Claim prüfen — sonst bliebe ein abgelehnter Versuch als
     // `retryClaimedAt` am Elternlauf stehen und sperrte jeden weiteren Retry.
-    if (requestActor) {
-      if (!isValidObjectId(runId)) throw new BadRequestException('Invalid run id');
-      const target = await this.runModel.findById(runId).select('projectId customerId').lean().exec();
-      if (target) assertActorCanAccessWorkflow(requestActor, target);
-    }
+    if (!isValidObjectId(runId)) throw new BadRequestException('Invalid run id');
+    const target = await this.runModel.findById(runId).select('projectId customerId mode').lean().exec();
+    if (requestActor && target) assertActorCanAccessWorkflow(requestActor, target);
+    // Ein Debug-Lauf wird im Editor wiederholt (Schritt wiederholen bzw. neu
+    // debuggen) — ein Retry liefe als normaler Lauf ohne Halt vor den Nodes.
+    if (target?.mode === 'debug') throw new BadRequestException('Debug-Läufe können nicht per Retry neu gestartet werden');
     // Atomic guard: only allow ONE retry to win for a given parent run. We
     // briefly stamp a marker on the parent (re-set status to itself) so that
     // a second concurrent retryRun call returns null and bails out. Using
@@ -1270,6 +1586,10 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     // „mindestens einmal": ob seine Seiteneffekte vor dem Absturz geschahen,
     // ist nicht feststellbar.
     for (const run of stale) {
+      if (run.mode === 'debug') {
+        await this.recoverDebugRun(run);
+        continue;
+      }
       const interrupted = await this.nodeRunModel
         .find({ runId: run._id, status: { $in: [WorkflowNodeRunStatus.RUNNING, WorkflowNodeRunStatus.QUEUED] } })
         .exec();
@@ -1303,5 +1623,31 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     for (const run of queued) {
       this.eventEmitter.emit('workflow.run.queued', { runId: run._id.toString() });
     }
+  }
+
+  /**
+   * Ein beim Neustart unterbrochener Debug-Schritt wird nicht neu eingereiht:
+   * der Job trug `debugDry`, ein erneutes Einreihen ohne ihn liefe echt statt
+   * trocken. Der NodeRun wird `interrupted`, der Lauf wartet wieder auf einen
+   * Schritt — der Nutzer kann ihn wiederholen.
+   */
+  private async recoverDebugRun(run: WorkflowRunDocument): Promise<void> {
+    const now = new Date();
+    await this.nodeRunModel
+      .updateMany(
+        { runId: run._id, status: { $in: [WorkflowNodeRunStatus.RUNNING, WorkflowNodeRunStatus.QUEUED] } },
+        { $set: { status: WorkflowNodeRunStatus.INTERRUPTED, finishedAt: now } },
+      )
+      .exec();
+    await this.runModel
+      .updateOne(
+        { _id: run._id, status: WorkflowRunStatus.RUNNING },
+        {
+          $set: { status: WorkflowRunStatus.WAITING_FOR_STEP, 'debug.lastActivityAt': now },
+          $push: { 'debug.notices': 'Schritt durch Neustart unterbrochen — bitte wiederholen' },
+        },
+      )
+      .exec();
+    this.logger.warn(`Debug-Lauf ${run._id.toString()} nach Neustart wieder auf waiting_for_step`);
   }
 }

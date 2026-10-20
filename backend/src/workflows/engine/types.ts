@@ -95,4 +95,6 @@ export interface NodeJob {
   nodeId: string;
   nodeType: string;
   attempt: number;
+  /** Debug-Lauf: Schritt als Trockenlauf (`dryStrategy`). */
+  debugDry?: boolean;
 }

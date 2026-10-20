@@ -562,5 +562,45 @@ async function check(name, fn) {
     assert.equal(r.output.stdout, 'a | <<b &&\nok\n');
   });
 
+  await check('Debug-Lauf: SSH-Audit trägt workflow.debug = true', async () => {
+    const session = makeSession({});
+    const c = ctx({ connectionId: CONN_OWN, command: 'true' });
+    c.run.mode = 'debug';
+    await executor(session).exec.execute(c);
+    assert.equal(session.calls[0].opts.workflow.debug, true);
+  });
+
+  await check('dryRunPreview: Platzhalter-Ausgabe + Vorschau, nichts gesendet, nichts entschlüsselt', async () => {
+    const session = makeSession({});
+    const resolver = makeResolver(['T']);
+    const tester = makeTester({ ok: true, fingerprint: 'ab:cd', fingerprintAccepted: true });
+    const { exec } = executor(session, tester, resolver);
+    const c = ctx({ connectionId: CONN_OWN, command: 'login {{secrets.T}}\necho {{input.x}}' });
+    c.runContext = { nodes: {}, input: { x: 'hi' }, secrets: { T: 'klartext-geheim' } };
+    const r = await exec.dryRunPreview(c);
+    assert.equal(r.status, 'success', JSON.stringify(r.error));
+    assert.equal(r.output.dryRun, true);
+    assert.equal(r.output.exitCode, null);
+    assert.equal(r.output.stdout, null);
+    assert.equal(r.output.preview.connection.label, 'prod-web');
+    assert.deepEqual(r.output.preview.commands, [
+      { line: 1, command: 'login ••••(T)' },
+      { line: 2, command: "echo 'hi'" },
+    ]);
+    assert.equal(session.calls.length, 0);
+    assert.ok(!JSON.stringify(r).includes('klartext-geheim'));
+  });
+
+  await check('dryRunPreview: fehlgeschlagener Verbindungstest → failed mit Code', async () => {
+    const tester = makeTester({ ok: false, error: { code: 'auth_failed', message: 'nope' } });
+    const { exec } = executor(makeSession({}), tester);
+    const r = await exec.dryRunPreview(ctx({ connectionId: CONN_OWN, command: 'true' }));
+    assert.equal(r.status, 'failed');
+    assert.deepEqual(r.error, { code: 'auth_failed', message: 'nope' });
+    assert.equal(r.output.dryRun, true);
+    const foreign = await exec.dryRunPreview(ctx({ connectionId: CONN_FOREIGN, command: 'true' }));
+    assert.equal(foreign.error.code, 'scope_violation');
+  });
+
   console.log(`${passed} passed`);
 })();

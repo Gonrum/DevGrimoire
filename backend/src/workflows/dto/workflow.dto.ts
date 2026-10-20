@@ -2,6 +2,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsMongoId,
   IsNumber,
   IsObject,
@@ -378,4 +379,43 @@ export class PreviewWorkflowNodeDto {
   @IsOptional()
   @IsObject()
   runContext?: Record<string, unknown>;
+}
+
+/**
+ * Start eines Debug-Laufs. Der Graph kommt aus dem Editor (auch ungespeichert)
+ * und wird zum Snapshot des Laufs; die gespeicherte Definition bleibt unberührt.
+ */
+export class StartDebugRunDto {
+  @IsOptional()
+  @IsObject()
+  input?: Record<string, unknown>;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => WorkflowNodeDto)
+  nodes: WorkflowNodeDto[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => WorkflowEdgeDto)
+  edges: WorkflowEdgeDto[];
+}
+
+/** Ein Schritt eines Debug-Laufs — immer mit dem aktuellen Editor-Graphen. */
+export class DebugStepDto {
+  @IsString()
+  nodeId: string;
+
+  @IsIn(['execute', 'dry'])
+  mode: 'execute' | 'dry';
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => WorkflowNodeDto)
+  nodes: WorkflowNodeDto[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => WorkflowEdgeDto)
+  edges: WorkflowEdgeDto[];
 }

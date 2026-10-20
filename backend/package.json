@@ -128,6 +128,7 @@
     "check:settings-write": "node scripts/settings-write-check.cjs",
     "check:chat-persist-safety": "node scripts/chat-persist-safety-check.cjs",
     "check:workflow-cancel": "node scripts/workflow-cancel-check.cjs",
+    "check:workflow-debug": "node scripts/workflow-debug-check.cjs",
     "check:rag-index-consistency": "node scripts/rag-index-consistency-check.cjs",
     "check:event-entities": "node scripts/event-entities-check.cjs",
     "check:source-text": "node scripts/source-text-check.cjs",

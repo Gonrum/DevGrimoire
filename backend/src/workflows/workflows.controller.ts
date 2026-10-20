@@ -6,10 +6,12 @@ import { toPublicMetadata, NodeMetadataPublic } from './engine/node-metadata';
 import {
   CancelWorkflowRunDto,
   CreateWorkflowDefinitionDto,
+  DebugStepDto,
   InstantiateWorkflowTemplateDto,
   ListWorkflowDefinitionsDto,
   ListWorkflowRunsDto,
   RetryWorkflowRunDto,
+  StartDebugRunDto,
   StartWorkflowRunDto,
   PreviewWorkflowNodeDto,
   TestWorkflowNodeDto,
@@ -98,6 +100,24 @@ export class WorkflowsController {
   @Post('nodes/preview')
   previewNode(@Body() dto: PreviewWorkflowNodeDto) {
     return this.engine.previewNode(dto);
+  }
+
+  /**
+   * Debug-Lauf aus dem Editor starten — auch für Draft/Paused. Nach den
+   * literalen POST-Routen (`runs`, `nodes/…`, `templates/instantiate`)
+   * deklariert; deren zweites Segment ist ohnehin nie `debug`.
+   */
+  @Post(':id/debug')
+  @HttpCode(201)
+  startDebugRun(@Param('id') id: string, @Body() dto: StartDebugRunDto) {
+    return this.workflows.startDebugRun(id, dto, RequestContext.getUser());
+  }
+
+  /** Nächster Schritt eines Debug-Laufs (echt oder trocken) mit dem aktuellen Editor-Graphen. */
+  @Post('runs/:id/debug/step')
+  @HttpCode(200)
+  debugStep(@Param('id') id: string, @Body() dto: DebugStepDto) {
+    return this.engine.debugStep(id, dto, RequestContext.getUser());
   }
 
   @Get('runs/list')

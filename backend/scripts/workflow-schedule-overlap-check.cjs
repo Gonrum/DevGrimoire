@@ -108,6 +108,8 @@ function setup(open) {
     assert.equal(await svc.hasOpenRun(id), false);
     assert.equal(filter.definitionId, id);
     assert.deepEqual([...filter.status.$in].sort(), ['queued', 'running']);
+    // Debug-Läufe blockieren den Zeitplan nie (Workflows debugbar machen, Task 6).
+    assert.deepEqual(filter.mode, { $ne: 'debug' });
     for (const waiting of ['waiting_for_user', 'waiting_for_timer']) {
       assert.equal(filter.status.$in.includes(waiting), false, `${waiting} darf den Zeitplan nicht blockieren`);
     }
