@@ -10,7 +10,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const { preflightNode } = require('../dist/workflows/engine/node-preflight');
+const { preflightNode, redactPlaceholders } = require('../dist/workflows/engine/node-preflight');
 const { capSnapshot, inputView } = require('../dist/workflows/engine/snapshot-cap');
 
 let passed = 0;
@@ -58,6 +58,17 @@ async function check(name, fn) {
   await check('inputView hat genau input, incoming, nodes', async () => {
     const v = inputView({ input: { a: 1 }, incoming: { b: 2 }, nodes: { c: 3 }, fromEdges: { z: 1 } });
     assert.deepEqual(Object.keys(v).sort(), ['incoming', 'input', 'nodes']);
+  });
+
+  await check('redactPlaceholders maskiert Authorization-Feld und KV-Muster im preview', async () => {
+    const r = preflightNode(
+      { headers: { Authorization: 'Bearer {{nodes.l.v}}' }, note: 'x {{nodes.l.kv}}' },
+      { nodes: { l: { v: 'PLAINTOKEN123', kv: 'password=hunter2xyz' } } },
+      { secretsAllowed: false, nodeType: 'action.log' },
+    );
+    const json = JSON.stringify(redactPlaceholders(r.resolved.placeholders));
+    assert.ok(!json.includes('PLAINTOKEN123'), json);
+    assert.ok(!json.includes('hunter2xyz'), json);
   });
 
   const uri = process.env.MONGODB_TEST_URI;
@@ -134,6 +145,28 @@ async function check(name, fn) {
       await runNext();
       assert.deepEqual(executions, ['handler']);
       assert.equal((await Run.findById(run._id).lean()).status, 'succeeded');
+    });
+
+    await check('Engine: Authorization-Platzhalter und großer Kontext im NodeRun', async () => {
+      let deep = 'DEEPVALUE';
+      for (let i = 0; i < 8; i += 1) deep = { n: deep };
+      const n = { id: 'big', type: 'action.log', config: { headers: { Authorization: 'Bearer {{nodes.t.tok}}' }, m: '{{nodes.t.kv}}' }, position: pos };
+      const run = await Run.create({
+        definitionId: new mongoose.Types.ObjectId(), definitionVersion: 1, scope: 'system',
+        definitionSnapshot: { nodes: [n], edges: [] }, trigger: { type: 'manual' }, status: 'running',
+        startedAt: new Date(),
+        context: { nodes: { t: { tok: 'PLAINTOKEN123', kv: 'password=hunter2xyz', big: 'y'.repeat(3000), big2: 'z'.repeat(3000), deep } } },
+      });
+      for (let j = queue.peek(); j; j = queue.peek()) queue.take(j.seq);
+      await engine.enqueueNode(run, n, 1);
+      await runNext();
+      const nr = await NodeRun.findOne({ runId: run._id, nodeId: 'big' }).lean();
+      const ph = JSON.stringify(nr.placeholders);
+      assert.ok(!ph.includes('PLAINTOKEN123') && !ph.includes('hunter2xyz'), ph);
+      assert.equal(typeof nr.inputSnapshot.nodes, 'object');
+      assert.equal(nr.inputSnapshot.truncated, undefined);
+      assert.equal(nr.inputSnapshot.nodes.t.big.length, 3000);
+      assert.equal(nr.inputSnapshot.nodes.t.deep.n.n.n.n.n.n.n.n, 'DEEPVALUE');
     });
 
     await check('Engine: erfolgreicher Node speichert eingesetzte Config', async () => {

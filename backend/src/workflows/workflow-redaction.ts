@@ -18,7 +18,7 @@
 import { isUnknownArray } from '../common/tool-args';
 import { isRecord } from './workflow-narrow';
 
-const SENSITIVE_KEY = /(authorization|api[-_]?key|secret|token|password|passwd|credential|private[-_]?key|cookie)/i;
+export const SENSITIVE_KEY = /(authorization|api[-_]?key|secret|token|password|passwd|credential|private[-_]?key|cookie)/i;
 const BEARER_RE = /Bearer\s+[A-Za-z0-9._~+/=-]+/gi;
 const KV_RE = /(api[-_]?key|secret|token|password|passwd)\s*[:=]\s*[^\s,;]+/gi;
 

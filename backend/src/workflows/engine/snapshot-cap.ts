@@ -8,6 +8,18 @@ import { isRecord } from '../../common/tool-args';
 export const SNAPSHOT_MAX_CHARS = 20_000;
 
 /**
+ * Redaction-Grenzen für Snapshots: bewusst so weit, dass `capSnapshot` die
+ * einzige Größenbegrenzung ist. Mit den Defaults von `redactRecord` (4096
+ * Zeichen, Tiefe 6, Strings 500) wurde jeder größere Eingang schon dort zu
+ * `{ redacted, truncated }` und die 20 000er-Grenze war toter Code.
+ */
+export const SNAPSHOT_REDACT_OPTIONS = {
+  maxChars: SNAPSHOT_MAX_CHARS,
+  maxDepth: 12,
+  maxStringLength: 4_000,
+} as const;
+
+/**
  * Gibt das Objekt unverändert zurück, solange seine JSON-Form in die Grenze
  * passt; sonst nur den Anfang als `preview` samt `truncated`-Markierung.
  */

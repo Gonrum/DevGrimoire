@@ -41,8 +41,8 @@ import { AuditLogService } from '../../audit-log/audit-log.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { WORKFLOW_RUN_PROGRESS } from '../../events/project-event';
 import { redact, redactLogs, redactRecord } from '../workflow-redaction';
-import { preflightNode } from './node-preflight';
-import { capSnapshot, inputView } from './snapshot-cap';
+import { preflightNode, redactPlaceholders } from './node-preflight';
+import { capSnapshot, inputView, SNAPSHOT_REDACT_OPTIONS } from './snapshot-cap';
 import { asNumber, asStringArray, errorMessage, errorName, isRecord } from '../workflow-narrow';
 import {
   checkRunBudget,
@@ -409,9 +409,9 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       secretsAllowed: false,
       nodeType: node.type,
     });
-    nodeRun.inputSnapshot = capSnapshot(redactRecord(inputView(ctx.runContext)));
-    nodeRun.resolvedConfig = capSnapshot(redactRecord(preflight.resolved.display));
-    nodeRun.placeholders = preflight.resolved.placeholders;
+    nodeRun.inputSnapshot = capSnapshot(redactRecord(inputView(ctx.runContext), SNAPSHOT_REDACT_OPTIONS));
+    nodeRun.resolvedConfig = capSnapshot(redactRecord(preflight.resolved.display, SNAPSHOT_REDACT_OPTIONS));
+    nodeRun.placeholders = redactPlaceholders(preflight.resolved.placeholders);
     let result: NodeResult;
     try {
       const refused = preflight.failure ?? accountabilityRefusal(node.type, accountable !== null);

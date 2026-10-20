@@ -1,5 +1,20 @@
 import { NodeResult } from './types';
-import { resolveConfig, ResolveOptions, ResolvedConfig } from '../nodes/template-resolver';
+import { PlaceholderTrace, resolveConfig, ResolveOptions, ResolvedConfig } from '../nodes/template-resolver';
+import { redactValue, SENSITIVE_KEY } from '../workflow-redaction';
+
+/**
+ * Spur vor dem Persistieren redigieren: `resolvedConfig` maskiert Werte unter
+ * credential-artigen Schlüsseln, die Spur trägt denselben Wert aber im
+ * `preview`. Liegt ein Segment von `field` auf so einem Schlüssel, wird der
+ * Preview maskiert; sonst läuft die String-Redaction (Bearer, token=…).
+ */
+export function redactPlaceholders(traces: PlaceholderTrace[]): PlaceholderTrace[] {
+  return traces.map((t) => {
+    if (t.preview === undefined) return t;
+    const sensitive = t.field.split('.').some((seg) => SENSITIVE_KEY.test(seg));
+    return { ...t, preview: sensitive ? '[MASKED]' : redactValue(t.preview) };
+  });
+}
 
 /**
  * Vorprüfung vor `executor.execute`: löst die Node-Config gegen den Lauf-Kontext
