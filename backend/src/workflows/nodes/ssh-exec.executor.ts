@@ -16,6 +16,7 @@ import { expandTemplate } from './template';
 import { expandShellCommand, shellLineShape, shellQuote } from './shell-template';
 import { isRecord } from '../workflow-narrow';
 import { SECRET_MASK, findSecretKeys, maskSecrets } from './template-resolver';
+import { redactValue } from '../workflow-redaction';
 import { WorkflowSecretsResolver } from '../engine/workflow-secrets.resolver';
 import { dryPlaceholder } from '../engine/debug-step';
 import { LineResult, ScriptAbort, ScriptLine, buildScript, lineFailureMessage, parseScriptOutput, splitCommandLines } from './ssh-script';
@@ -79,12 +80,17 @@ export function sshTimeouts(config: { timeoutMs?: number; idleTimeoutMs?: number
  */
 export const LINE_OUTPUT_MAX_CHARS = 2_000;
 
-function capLineOutput(l: LineResult): LineResult & { truncated: boolean } {
+function capLineOutput(l: LineResult, secretForms: string[]): LineResult & { truncated: boolean } {
   const truncated = l.stdout.length > LINE_OUTPUT_MAX_CHARS || l.stderr.length > LINE_OUTPUT_MAX_CHARS;
+  // Erst maskieren, dann kürzen: schneidet der Schnitt mitten durch ein Secret
+  // (oder durch „Bearer "/„password="), erkennt die spätere Maskierung den
+  // Rest nicht mehr und das Suffix bliebe im Klartext in den Zeilen stehen.
+  const safe = (text: string): string =>
+    redactValue(maskSecrets(text, secretForms), { maxStringLength: Number.MAX_SAFE_INTEGER });
   return {
     ...l,
-    stdout: l.stdout.slice(-LINE_OUTPUT_MAX_CHARS),
-    stderr: l.stderr.slice(-LINE_OUTPUT_MAX_CHARS),
+    stdout: safe(l.stdout).slice(-LINE_OUTPUT_MAX_CHARS),
+    stderr: safe(l.stderr).slice(-LINE_OUTPUT_MAX_CHARS),
     truncated,
   };
 }
@@ -397,7 +403,7 @@ export class SshExecExecutor implements NodeExecutor {
       connection: connection.label,
       // Die Zeilen tragen den eingesetzten Befehl in der Anzeige-Fassung — die
       // Engine maskiert nur Rohwerte ab vier Zeichen.
-      lines: ran.lines.map((l) => ({ ...capLineOutput(l), command: shownLines.get(l.line) ?? SECRET_MASK })),
+      lines: ran.lines.map((l) => ({ ...capLineOutput(l, forms), command: shownLines.get(l.line) ?? SECRET_MASK })),
     };
     ctx.logger.info('ssh.exec beendet', {
       connection: connection.label,

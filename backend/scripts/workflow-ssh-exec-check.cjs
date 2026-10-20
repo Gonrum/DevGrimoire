@@ -762,6 +762,44 @@ async function mongoChecks() {
     assert.equal(r.output.stdout.length, 3004, 'Gesamt-stdout ungekürzt');
   });
 
+  for (const stream of ['stdout', 'stderr']) {
+    await check(`Zeilen-Ausgabe: Secret am 2000-Zeichen-Schnitt (${stream}) bleibt nicht als Suffix stehen`, async () => {
+      const secret = 'geheimTOKEN123';
+      const fd = stream === 'stdout' ? '' : ' >&2';
+      // Schnitt fällt mitten ins Secret: nach dem Secret bleiben 1 995 Zeichen,
+      // vom Secret bliebe roh nur das Ende (die letzten 5 Zeichen).
+      const command = [
+        `printf 'x%.0s' $(seq 500)${fd}`,
+        `printf '%s' '${secret}'${fd}`,
+        `printf 'y%.0s' $(seq 1995)${fd}`,
+      ].join('; ');
+      const c = ctx({ connectionId: CONN_OWN, command });
+      c.secretValues = [secret];
+      const r = await executor(bashSession()).exec.execute(c);
+      assert.equal(r.status, 'success', JSON.stringify(r.error));
+      const line = r.output.lines[0];
+      assert.equal(line.truncated, true);
+      const text = line[stream];
+      assert.ok(text.length <= 2000);
+      assert.ok(!text.includes(secret), 'volles Secret');
+      for (let i = 0; i + 4 <= secret.length; i++) {
+        assert.ok(!text.includes(secret.slice(i, i + 4)), `Teilstück ${secret.slice(i, i + 4)}`);
+      }
+    });
+  }
+
+  await check('Zeilen-Ausgabe: Bearer-Token bleibt auch bei Schnitt hinter „Bearer " maskiert', async () => {
+    const token = 'abcDEF1234567890xyz';
+    // „Authorization: Bearer " liegt vor dem Schnitt, das Token ragt in die letzten 2 000 Zeichen.
+    const command = `printf 'Authorization: Bearer %s' '${token}'; printf 'y%.0s' $(seq 1990)`;
+    const r = await executor(bashSession()).exec.execute(ctx({ connectionId: CONN_OWN, command }));
+    assert.equal(r.status, 'success', JSON.stringify(r.error));
+    const line = r.output.lines[0];
+    assert.equal(line.truncated, true);
+    assert.ok(!line.stdout.includes(token.slice(-8)), line.stdout.slice(0, 40));
+    assert.ok(!line.stdout.includes('Bearer ' + token));
+  });
+
   await mongoChecks();
 
   console.log(`${passed} passed`);
