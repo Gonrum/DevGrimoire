@@ -51,7 +51,8 @@ check('groupByField: leer → leer', () => {
 
 check('readLines: Array → Zeilen, sonst null', () => {
   const l = { line: 1, command: 'ls', exitCode: 0, stdout: 'a', stderr: '', durationMs: 5 };
-  assert.deepEqual(readLines({ lines: [l] }), [l]);
+  assert.deepEqual(readLines({ lines: [l] }), [{ ...l, truncated: false }]);
+  assert.equal(readLines({ lines: [{ ...l, truncated: true }] })[0].truncated, true, 'Kürzung je Zeile');
   assert.equal(readLines({ lines: 'x' }), null);
   assert.equal(readLines({ lines: [{ foo: 1 }] }), null);
   assert.equal(readLines(undefined), null);
@@ -60,6 +61,10 @@ check('readLines: Array → Zeilen, sonst null', () => {
 check('isTruncatedSnapshot', () => {
   assert.equal(isTruncatedSnapshot({ truncated: true, preview: '{' }), true);
   assert.equal(isTruncatedSnapshot({ truncated: true }), false);
+  // redactRecord-Faltung: Struktur zu groß → String in `redacted`.
+  assert.equal(isTruncatedSnapshot({ redacted: 'x', truncated: true }), true);
+  assert.equal(isTruncatedSnapshot({ redacted: 'x', truncated: false }), false);
+  assert.equal(isTruncatedSnapshot({ exitCode: 0, truncated: { stdout: false, stderr: false } }), false, 'ssh.exec-Ausgabe');
   assert.equal(isTruncatedSnapshot(null), false);
 });
 

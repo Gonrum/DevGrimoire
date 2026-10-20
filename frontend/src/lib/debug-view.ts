@@ -4,7 +4,7 @@
  * Bundler nach CommonJS übersetzen und prüfen kann.
  */
 
-export interface NodeDebugState { status: string; dry: boolean; current: boolean }
+export interface NodeDebugState { status: string; dry: boolean; current: boolean; dimmed: boolean }
 
 interface NodeRunLike { nodeId: string; status: string; dryRun?: boolean; attempt: number }
 
@@ -24,23 +24,37 @@ export function latestNodeRun<T extends NodeRunLike>(nodeRuns: T[], nodeId: stri
  * NodeRuns, ohne NodeRun `idle`. Aktuell ist nur der erste wartende Node —
  * der Debug-Lauf schaltet mehrere Nachfolger nacheinander weiter.
  * NodeRuns gelöschter Nodes fallen heraus: das Canvas zeigt nur, was es gibt.
+ * Ist der Lauf zu Ende (auch abgebrochen), wartet nichts mehr: kein gelber
+ * Ring, nichts gedimmt — die liegengebliebene `pendingNodeIds` zählt nicht.
  */
 export function nodeDebugStates(
   nodeIds: string[],
   nodeRuns: NodeRunLike[],
   pending: string[],
+  runStatus?: string,
 ): Record<string, NodeDebugState> {
-  const current = pending.length > 0 ? pending[0] : null;
+  const ended = isTerminalRunStatus(runStatus);
+  const active = activePending(runStatus, pending);
+  const current = active.length > 0 ? active[0] : null;
   const out: Record<string, NodeDebugState> = {};
   for (const id of nodeIds) {
     const latest = latestNodeRun(nodeRuns, id);
+    const status = latest ? latest.status : 'idle';
     out[id] = {
-      status: latest ? latest.status : 'idle',
+      status,
       dry: latest?.dryRun === true,
       current: id === current,
+      // Noch nicht gelaufen und nicht an der Reihe: gedimmt, damit der Weg
+      // durch den Graphen sichtbar wird — nur solange der Lauf noch läuft.
+      dimmed: !ended && status === 'idle' && id !== current,
     };
   }
   return out;
+}
+
+/** Wartende Nodes eines Laufs; nach seinem Ende keine mehr. */
+export function activePending(runStatus: string | undefined, pending: string[]): string[] {
+  return isTerminalRunStatus(runStatus) ? [] : pending;
 }
 
 /** Ein Schritt ist nur möglich, solange der Lauf vor einem Node anhält. */

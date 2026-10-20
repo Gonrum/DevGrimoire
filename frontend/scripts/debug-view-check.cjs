@@ -21,7 +21,7 @@ try {
   console.error(err.stdout ? err.stdout.toString() : err.message);
   process.exit(1);
 }
-const { nodeDebugStates, canStep, latestNodeRun, isTerminalRunStatus, parseDebugInput, issueLines } =
+const { nodeDebugStates, activePending, canStep, latestNodeRun, isTerminalRunStatus, parseDebugInput, issueLines } =
   require(path.join(outDir, 'debug-view.js'));
 
 let failures = 0;
@@ -42,9 +42,9 @@ check('nodeDebugStates: höchster attempt gewinnt, ohne NodeRun idle, current = 
     ],
     ['b'],
   );
-  assert.deepEqual(states.t, { status: 'succeeded', dry: false, current: false });
-  assert.deepEqual(states.a, { status: 'succeeded', dry: true, current: false });
-  assert.deepEqual(states.b, { status: 'idle', dry: false, current: true });
+  assert.deepEqual(states.t, { status: 'succeeded', dry: false, current: false, dimmed: false });
+  assert.deepEqual(states.a, { status: 'succeeded', dry: true, current: false, dimmed: false });
+  assert.deepEqual(states.b, { status: 'idle', dry: false, current: true, dimmed: false });
 });
 check('nodeDebugStates: Reihenfolge der NodeRuns egal, nur erster pending ist current', () => {
   const states = nodeDebugStates(
@@ -55,13 +55,33 @@ check('nodeDebugStates: Reihenfolge der NodeRuns egal, nur erster pending ist cu
     ],
     ['c', 'b'],
   );
-  assert.deepEqual(states.a, { status: 'succeeded', dry: false, current: false });
+  assert.deepEqual(states.a, { status: 'succeeded', dry: false, current: false, dimmed: false });
   assert.equal(states.b.current, false);
+  assert.equal(states.b.dimmed, true, 'idle und nicht an der Reihe');
   assert.equal(states.c.current, true);
 });
 check('nodeDebugStates: NodeRuns entfernter Nodes erscheinen nicht', () => {
   const states = nodeDebugStates(['a'], [{ nodeId: 'gone', status: 'failed', attempt: 1 }], []);
   assert.deepEqual(Object.keys(states), ['a']);
+});
+
+check('nodeDebugStates: Lauf zu Ende → kein current, nichts gedimmt', () => {
+  for (const status of ['cancelled', 'succeeded', 'failed']) {
+    const states = nodeDebugStates(['a', 'b', 'c'], [{ nodeId: 'a', status: 'succeeded', attempt: 1 }], ['b', 'c'], status);
+    for (const id of ['a', 'b', 'c']) {
+      assert.equal(states[id].current, false, `${status}/${id} current`);
+      assert.equal(states[id].dimmed, false, `${status}/${id} dimmed`);
+    }
+  }
+  const live = nodeDebugStates(['a', 'b', 'c'], [], ['b', 'c'], 'waiting_for_step');
+  assert.equal(live.b.current, true);
+  assert.equal(live.c.dimmed, true);
+});
+check('activePending: nach Ende leer, sonst unverändert', () => {
+  assert.deepEqual(activePending('cancelled', ['b']), []);
+  assert.deepEqual(activePending('succeeded', ['b']), []);
+  assert.deepEqual(activePending('waiting_for_step', ['b', 'c']), ['b', 'c']);
+  assert.deepEqual(activePending(undefined, ['b']), ['b']);
 });
 
 check('canStep nur bei waiting_for_step', () => {

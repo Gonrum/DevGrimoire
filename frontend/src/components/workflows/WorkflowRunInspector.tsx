@@ -133,7 +133,8 @@ export function WorkflowRunInspector({ runId, onClose, onNavigate }: Props) {
               {!TERMINAL.includes(run.status) && (
                 <button onClick={() => { void onCancel(); }} className="rounded-sm bg-amber-900/50 px-3 py-1 text-xs text-amber-200 hover:bg-amber-900">{t('common.cancel')}</button>
               )}
-              {(run.status === 'failed' || run.status === 'cancelled') && (
+              {/* Debug-Läufe lehnt der Server beim Wiederholen ab (400). */}
+              {(run.status === 'failed' || run.status === 'cancelled') && run.mode !== 'debug' && (
                 <button onClick={() => { void onRetry(); }} className="rounded-sm bg-cyan-900/50 px-3 py-1 text-xs text-cyan-200 hover:bg-cyan-900">{t('workflows.run.retry')}</button>
               )}
               <button onClick={onClose} className="rounded-sm bg-gray-800 px-3 py-1 text-xs text-gray-200 hover:bg-gray-700">{t('common.close')}</button>

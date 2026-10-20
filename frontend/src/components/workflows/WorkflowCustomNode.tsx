@@ -49,9 +49,8 @@ function WorkflowCustomNodeImpl(props: NodeProps<WorkflowFlowNode>) {
   const dry = debugState ? debugState.dry : data.runDry === true;
   const current = debugState ? debugState.current : data.debugCurrent === true;
   const marked = debug !== null && debug.markedNodeId === props.id;
-  // Noch nicht gelaufen und nicht an der Reihe: gedimmt, damit der Weg durch
-  // den Graphen sichtbar wird.
-  const dimmed = debug !== null && statusKey === 'idle' && !current;
+  // Gedimmt wird nur im laufenden Debug-Lauf (siehe `nodeDebugStates`).
+  const dimmed = debugState?.dimmed === true;
   const isTrigger = category === 'trigger';
   const branches = meta?.branches ?? ['success'];
   const issueCount = data.issueCount ?? 0;

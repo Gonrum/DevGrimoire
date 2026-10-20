@@ -103,7 +103,7 @@ export function WorkflowDebugBar(p: Props) {
     if (p.runId === null || busy) return;
     setBusy(true);
     try {
-      await workflowsApi.cancelRun(p.runId, 'Debug-Lauf beendet');
+      await workflowsApi.cancelRun(p.runId, t('workflows.debug.stopReason'));
     } catch (err) {
       showError(err);
     } finally {

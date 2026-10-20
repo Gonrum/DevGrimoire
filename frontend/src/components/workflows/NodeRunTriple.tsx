@@ -30,15 +30,19 @@ export function NodeRunTriple({ nodeRun, emptyHint }: Props) {
   const traces = nodeRun.placeholders ?? [];
   const output = nodeRun.outputSnapshot;
   const lines = readLines(output);
-  const truncated = isTruncatedSnapshot(output) || isTruncatedSnapshot(nodeRun.inputSnapshot) || isTruncatedSnapshot(nodeRun.resolvedConfig);
+  const truncatedHint = (
+    <div className="mb-2 rounded-sm bg-amber-900/30 px-2 py-1 text-[11px] text-amber-200">{t('workflows.triple.truncated')}</div>
+  );
 
   return (
     <div className="@container"><div className="grid grid-cols-1 gap-3 p-3 @3xl:grid-cols-3">
       <Column title={t('workflows.triple.received')}>
+        {isTruncatedSnapshot(nodeRun.inputSnapshot) && truncatedHint}
         <JsonBlock data={nodeRun.inputSnapshot} emptyText={t('workflows.triple.receivedEmpty')} />
       </Column>
 
       <Column title={t('workflows.triple.applied')}>
+        {isTruncatedSnapshot(nodeRun.resolvedConfig) && truncatedHint}
         <JsonBlock data={nodeRun.resolvedConfig} emptyText={t('workflows.triple.appliedEmpty')} />
         <PlaceholderList traces={traces} />
       </Column>
@@ -47,9 +51,7 @@ export function NodeRunTriple({ nodeRun, emptyHint }: Props) {
         {nodeRun.dryRun && (
           <div className="mb-2 rounded-sm bg-violet-900/30 px-2 py-1 text-[11px] text-violet-200">{t('workflows.triple.dryRun')}</div>
         )}
-        {truncated && (
-          <div className="mb-2 rounded-sm bg-amber-900/30 px-2 py-1 text-[11px] text-amber-200">{t('workflows.triple.truncated')}</div>
-        )}
+        {isTruncatedSnapshot(output) && truncatedHint}
         {nodeRun.error && (
           <div className="mb-2 rounded-sm bg-red-900/20 p-2 text-xs text-red-300">
             <div className="font-mono">{nodeRun.error.code}</div>
@@ -107,7 +109,12 @@ function LineRow({ line }: { line: NonNullable<ReturnType<typeof readLines>>[num
         onClick={hasOutput ? () => setOpen((o) => !o) : undefined}
       >
         <td className="px-1 py-1 text-gray-400">{hasOutput ? (open ? '▾ ' : '▸ ') : ''}{line.line}</td>
-        <td className="px-1 py-1 font-mono break-all text-gray-200">{line.command}</td>
+        <td className="px-1 py-1 font-mono break-all text-gray-200">
+          {line.command}
+          {line.truncated && (
+            <span className="ml-2 font-sans text-[10px] text-amber-300">{t('workflows.triple.lineTruncated')}</span>
+          )}
+        </td>
         <td className={`px-1 py-1 font-mono ${failed ? 'text-red-300' : 'text-green-300'}`}>
           {line.aborted ?? (line.exitCode ?? '—')}
         </td>

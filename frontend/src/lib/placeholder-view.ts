@@ -51,11 +51,16 @@ export function groupByField(traces: PlaceholderTrace[]): Array<{ field: string;
 
 const SECRET_REF = /\{\{\{?\s*secrets\.([A-Za-z0-9_.-]+?)\s*\}?\}\}/g;
 
+/** Lokal statt aus `lib/narrow.ts`: die Datei bleibt importfrei (siehe oben). */
+function isUnknownArray(v: unknown): v is unknown[] {
+  return Array.isArray(v);
+}
+
 function collectSecretKeys(value: unknown, into: Set<string>): void {
   if (typeof value === 'string') {
     for (const m of value.matchAll(SECRET_REF)) into.add(m[1]);
-  } else if (Array.isArray(value)) {
-    for (const v of value as unknown[]) collectSecretKeys(v, into);
+  } else if (isUnknownArray(value)) {
+    for (const v of value) collectSecretKeys(v, into);
   } else if (value !== null && typeof value === 'object') {
     for (const v of Object.values(value)) collectSecretKeys(v, into);
   }
@@ -83,6 +88,8 @@ export interface LineResult {
   stderr: string;
   durationMs: number | null;
   aborted?: 'timeout' | 'idle_timeout' | 'cancelled';
+  /** stdout/stderr der Zeile auf die letzten Zeichen gekürzt (Gesamtausgabe bleibt vollständig). */
+  truncated: boolean;
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -91,7 +98,7 @@ function isObject(v: unknown): v is Record<string, unknown> {
 
 function toLineResult(v: unknown): LineResult | null {
   if (!isObject(v)) return null;
-  const { line, command, exitCode, stdout, stderr, durationMs, aborted } = v;
+  const { line, command, exitCode, stdout, stderr, durationMs, aborted, truncated } = v;
   if (typeof line !== 'number' || typeof command !== 'string') return null;
   const result: LineResult = {
     line,
@@ -100,6 +107,7 @@ function toLineResult(v: unknown): LineResult | null {
     stdout: typeof stdout === 'string' ? stdout : '',
     stderr: typeof stderr === 'string' ? stderr : '',
     durationMs: typeof durationMs === 'number' ? durationMs : null,
+    truncated: truncated === true,
   };
   if (aborted === 'timeout' || aborted === 'idle_timeout' || aborted === 'cancelled') result.aborted = aborted;
   return result;
@@ -124,7 +132,12 @@ export function readLines(output: unknown): LineResult[] | null {
   return lines;
 }
 
-/** Snapshot der Form `{ truncated: true, preview }` (engine/snapshot-cap.ts). */
-export function isTruncatedSnapshot(value: unknown): value is { truncated: true; preview: string } {
-  return isObject(value) && value.truncated === true && typeof value.preview === 'string';
+/**
+ * Gekürzter Snapshot: `{ truncated: true, preview }` (engine/snapshot-cap.ts)
+ * oder `{ redacted, truncated: true }` (workflow-redaction.ts `redactRecord`,
+ * wenn die Struktur zu einem String zusammengefaltet wurde).
+ */
+export function isTruncatedSnapshot(value: unknown): boolean {
+  if (!isObject(value) || value.truncated !== true) return false;
+  return typeof value.preview === 'string' || 'redacted' in value;
 }

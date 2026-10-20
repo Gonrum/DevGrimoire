@@ -1,7 +1,19 @@
 import { useTranslation } from 'react-i18next';
-import type { WorkflowNodeRun } from '../../api/workflows';
+import type { WorkflowNodeRun, WorkflowNodeRunStatus } from '../../api/workflows';
 import { latestNodeRun } from '../../lib/debug-view';
 import { NodeRunTriple } from './NodeRunTriple';
+
+/** Statische Map statt dynamischem Schlüssel; gleiche Wörter wie der Lauf-Status, wo es sie gibt. */
+const NODE_STATUS_KEY: Record<WorkflowNodeRunStatus, string> = {
+  queued: 'workflows.debug.status.queued',
+  running: 'workflows.debug.status.running',
+  waiting: 'workflows.debug.nodeStatus.waiting',
+  succeeded: 'workflows.debug.status.succeeded',
+  failed: 'workflows.debug.status.failed',
+  skipped: 'workflows.debug.nodeStatus.skipped',
+  retrying: 'workflows.debug.nodeStatus.retrying',
+  interrupted: 'workflows.debug.nodeStatus.interrupted',
+};
 
 interface Props {
   markedNodeId: string | null;
@@ -23,7 +35,7 @@ export function WorkflowDebugPanel({ markedNodeId, nodeRuns }: Props) {
         {nodeRun && (
           <>
             <span>{t('workflows.debug.attempt', { attempt: nodeRun.attempt })}</span>
-            <span>{nodeRun.status}</span>
+            <span>{t(NODE_STATUS_KEY[nodeRun.status])}</span>
           </>
         )}
       </header>

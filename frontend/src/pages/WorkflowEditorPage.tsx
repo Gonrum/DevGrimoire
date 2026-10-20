@@ -36,7 +36,7 @@ import { useToast } from '../components/Toast';
 import i18n from '../i18n';
 import { secretPlaceholderIssue } from '../lib/placeholder-view';
 import { needsSshReactivation } from '../lib/workflow-reactivation';
-import { nodeDebugStates } from '../lib/debug-view';
+import { activePending, isTerminalRunStatus, nodeDebugStates } from '../lib/debug-view';
 
 export default function WorkflowEditorPage() {
   return (
@@ -450,16 +450,23 @@ function EditorInner() {
   const debugNodeRuns = debugLive.nodeRuns;
   const debugView = useMemo<WorkflowDebugView | null>(() => {
     if (debugRunId === null || debugRun === null) return null;
-    const pending = debugRun.debug?.pendingNodeIds ?? [];
+    const pending = activePending(debugRun.status, debugRun.debug?.pendingNodeIds ?? []);
     const marked = markedOverride !== null && nodeIds.includes(markedOverride) ? markedOverride : (pending[0] ?? null);
-    return { states: nodeDebugStates(nodeIds, debugNodeRuns, pending), markedNodeId: marked };
+    return { states: nodeDebugStates(nodeIds, debugNodeRuns, pending, debugRun.status), markedNodeId: marked };
   }, [debugRunId, debugRun, debugNodeRuns, nodeIds, markedOverride]);
 
+  // Schließen beendet einen noch offenen Lauf — er bliebe sonst unsichtbar
+  // wartend liegen, bis ihn der Leerlauf-Abbruch nach 30 min holt. Ein Fehler
+  // (z. B. inzwischen schon beendet) ändert am Schließen nichts.
+  const debugRunStatus = debugRun?.status;
   const closeDebug = useCallback(() => {
+    if (debugRunId !== null && !isTerminalRunStatus(debugRunStatus)) {
+      void workflowsApi.cancelRun(debugRunId, t('workflows.debug.stopReason')).catch(() => undefined);
+    }
     setDebugOpen(false);
     setDebugRunId(null);
     setMarkedOverride(null);
-  }, []);
+  }, [debugRunId, debugRunStatus, t]);
 
   const upstreamNodes = useMemo(() => upstreamOf(selectedNodeId, nodes, edges), [nodes, edges, selectedNodeId]);
 

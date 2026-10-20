@@ -2691,6 +2691,7 @@
       "lineShort": "L. {{line}}",
       "dryRun": "Dry run — nothing was executed",
       "truncated": "truncated — start of the snapshot",
+      "lineTruncated": "truncated — end of the output only",
       "colLine": "Line",
       "colCommand": "Command",
       "colExit": "Exit",
@@ -2735,6 +2736,13 @@
         "succeeded": "succeeded",
         "failed": "failed",
         "cancelled": "cancelled"
+      },
+      "stopReason": "Debug run ended",
+      "nodeStatus": {
+        "waiting": "waiting",
+        "skipped": "skipped",
+        "retrying": "retrying",
+        "interrupted": "interrupted"
       }
     },
     "preview": {
