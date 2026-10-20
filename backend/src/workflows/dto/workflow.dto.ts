@@ -361,3 +361,21 @@ export class TestWorkflowNodeDto {
   @IsObject()
   runContext?: Record<string, unknown>;
 }
+
+/** Vorschau der eingesetzten Config: wie der Test, aber ohne `scope`, `workflowId` Pflicht. */
+export class PreviewWorkflowNodeDto {
+  @ValidateNested()
+  @Type(() => WorkflowNodeDto)
+  node: WorkflowNodeDto;
+
+  @IsMongoId()
+  workflowId: string;
+
+  @IsOptional()
+  @IsObject()
+  input?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
+  runContext?: Record<string, unknown>;
+}

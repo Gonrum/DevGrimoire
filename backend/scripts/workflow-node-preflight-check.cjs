@@ -10,7 +10,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const { preflightNode, redactPlaceholders } = require('../dist/workflows/engine/node-preflight');
+const { preflightNode, redactPlaceholders, previewFromContext } = require('../dist/workflows/engine/node-preflight');
 const { capSnapshot, inputView } = require('../dist/workflows/engine/snapshot-cap');
 
 let passed = 0;
@@ -45,6 +45,29 @@ async function check(name, fn) {
     assert.equal(r.failure.error.code, 'secret_not_allowed');
     assert.ok(r.failure.error.message.includes('action.log'));
     assert.ok(r.failure.error.message.includes('T'));
+  });
+
+  await check('previewFromContext: verfügbares Secret -> ••••(T), keine Issues', async () => {
+    const p = previewFromContext({ c: '{{secrets.T}} {{nodes.a.x}}' }, { nodes: { a: { x: '1' } } }, ['T'], true);
+    assert.equal(p.display.c, '••••(T) 1');
+    assert.deepEqual(p.issues, []);
+  });
+
+  await check('previewFromContext: fehlendes Secret -> Issue nennt secrets.T', async () => {
+    const p = previewFromContext({ c: '{{secrets.T}}' }, { nodes: {} }, [], true);
+    assert.ok(p.issues.some((i) => i.includes('secrets.T')));
+    assert.ok(p.issues[0].startsWith('Platzhalter nicht auflösbar:'));
+  });
+
+  await check('previewFromContext: Secret nicht erlaubt -> secret_not_allowed-Text', async () => {
+    const p = previewFromContext({ c: '{{secrets.T}}' }, { nodes: {} }, ['T'], false, 'action.log');
+    assert.ok(p.issues.includes('Secrets sind in action.log nicht erlaubt: T'));
+  });
+
+  await check('previewFromContext: runContext.secrets des Aufrufers wird ignoriert', async () => {
+    const p = previewFromContext({ c: '{{secrets.T}}' }, { nodes: {}, secrets: { T: 'geheim-wert' } }, [], true);
+    assert.ok(!JSON.stringify(p).includes('geheim-wert'));
+    assert.ok(p.issues.some((i) => i.includes('secrets.T')));
   });
 
   await check('capSnapshot kappt große Snapshots, lässt kleine durch', async () => {

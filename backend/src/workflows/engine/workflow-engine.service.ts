@@ -35,13 +35,13 @@ import { readGraph } from './snapshot';
 import { OPEN_NODE_RUN_STATUSES, TERMINAL_RUN_STATUSES, WORKFLOW_RUN_CANCELLED } from './run-status';
 import { NodeBranch } from './node-metadata';
 import { QuestionsService, QUESTION_ANSWERED, QUESTION_EXPIRED } from '../../questions/questions.service';
-import { TestWorkflowNodeDto, workflowNodeFromDto } from '../dto/workflow.dto';
+import { PreviewWorkflowNodeDto, TestWorkflowNodeDto, workflowNodeFromDto } from '../dto/workflow.dto';
 import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { WORKFLOW_RUN_PROGRESS } from '../../events/project-event';
 import { redact, redactLogs, redactRecord } from '../workflow-redaction';
-import { preflightNode, redactPlaceholders } from './node-preflight';
+import { NodePreview, preflightNode, previewFromContext, redactPlaceholders } from './node-preflight';
 import { findSecretKeys, maskSecrets } from '../nodes/template-resolver';
 import { WorkflowSecretsResolver } from './workflow-secrets.resolver';
 import { capSnapshot, inputView, SNAPSHOT_REDACT_OPTIONS } from './snapshot-cap';
@@ -687,6 +687,35 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       errorPreview: this.safeTestPreview(result.error),
       logPreview: this.safeTestPreview(logs),
     };
+  }
+
+  /**
+   * Vorschau der eingesetzten Config für den Node-Dialog. Zugriff wie
+   * `testNode`; Scope kommt aus der gespeicherten Definition. Secrets werden
+   * nicht entschlüsselt, nur ihre Verfügbarkeit (Metadaten) fließt ein.
+   */
+  async previewNode(dto: PreviewWorkflowNodeDto): Promise<NodePreview> {
+    const node = dto.node;
+    if (!node?.type) throw new BadRequestException('node.type is required');
+    if (!isValidObjectId(dto.workflowId)) throw new BadRequestException('Invalid workflowId');
+    const def = await this.definitionModel.findById(dto.workflowId).exec();
+    if (!def) throw new NotFoundException(`Workflow ${dto.workflowId} not found`);
+    assertActorCanAccessWorkflow(RequestContext.getUser(), def);
+    const metadata = this.registry.get(node.type).metadata;
+    const secretsAllowed = metadata.secretPlaceholders === true;
+    const available = secretsAllowed
+      ? await this.secretsResolver.available({
+          projectId: def.projectId?.toString(),
+          customerId: def.customerId?.toString(),
+        })
+      : [];
+    return previewFromContext(
+      node.config ?? {},
+      dto.runContext ?? { nodes: {}, input: dto.input ?? {} },
+      available.map((s) => s.key),
+      secretsAllowed,
+      node.type,
+    );
   }
 
   private safeTestPreview(value: unknown): unknown {
