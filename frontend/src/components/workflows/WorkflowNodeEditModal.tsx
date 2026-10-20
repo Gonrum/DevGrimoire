@@ -4,6 +4,7 @@ import { Play, RotateCcw, X, Loader2 } from 'lucide-react';
 import { workflowsApi, NodePreview, NodeTestResult, WorkflowNodeMetadata } from '../../api/workflows';
 import { errorMessage, isRecord, isUnknownArray } from '../../lib/narrow';
 import { NodeConfigForm } from './NodeConfigForm';
+import { CommandDiagnosticsContext } from './commandDiagnosticsContext';
 import { nodeCategoryStyles } from './nodeCategoryStyles';
 import { getNodeIcon } from './nodeTypeIconMap';
 import { buildTemplateOptions, SelectedNode } from './nodeConfig';
@@ -130,6 +131,8 @@ export function WorkflowNodeEditModal(p: Props) {
     }, PREVIEW_DEBOUNCE_MS);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [previewKey, inputValue, workflowId, nodeId, nodeType, nodeConfig, nodeSecretRefs, posX, posY]);
+  // Spuren nur des aktuellen Ergebnisses; ein fehlgeschlagener Abruf liefert keine.
+  const commandTraces = useMemo(() => (preview?.ok ? preview.data.placeholders : []), [preview]);
   const previewLoading = previewKey !== null && preview?.key !== previewKey;
 
   const runTest = async () => {
@@ -218,12 +221,14 @@ export function WorkflowNodeEditModal(p: Props) {
               {p.meta.description && <p className="mt-1 text-xs text-gray-500">{p.meta.description}</p>}
             </div>
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4">
-              <NodeConfigForm
-                meta={p.meta}
-                config={p.node.config}
-                onChange={p.onChangeConfig}
-                templateOptions={templateOptions}
-              />
+              <CommandDiagnosticsContext.Provider value={commandTraces}>
+                <NodeConfigForm
+                  meta={p.meta}
+                  config={p.node.config}
+                  onChange={p.onChangeConfig}
+                  templateOptions={templateOptions}
+                />
+              </CommandDiagnosticsContext.Provider>
               {p.localIssues.length > 0 && (
                 <ul className="text-xs text-amber-300">
                   {p.localIssues.map((iss) => <li key={iss}>⚠ {iss}</li>)}

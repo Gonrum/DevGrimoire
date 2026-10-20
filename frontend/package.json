@@ -13,9 +13,18 @@
     "check:tool-preview": "node scripts/tool-preview-check.cjs",
     "check:research-lib": "node scripts/research-lib-check.cjs",
     "check:workflow-reactivation": "node scripts/workflow-reactivation-check.cjs",
-    "check:placeholder-view": "node scripts/placeholder-view-check.cjs"
+    "check:placeholder-view": "node scripts/placeholder-view-check.cjs",
+    "check:command-diagnostics": "node scripts/command-diagnostics-check.cjs"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.4",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/legacy-modes": "^6.5.5",
+    "@codemirror/lint": "^6.9.7",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@lezer/highlight": "^1.2.5",
     "@xyflow/react": "^12.10.2",
     "i18next": "^25.8.18",
     "i18next-browser-languagedetector": "^8.2.1",

@@ -3,6 +3,8 @@ import { Plus, Trash2 } from 'lucide-react';
 import { isRecord, isUnknownArray } from '../../lib/narrow';
 import { TemplatePicker, TemplateOption } from './TemplatePicker';
 import { useWorkflowRefOptions } from './workflowRefOptions';
+import { CommandEditor } from './CommandEditor';
+import { useCommandPlaceholders } from './commandDiagnosticsContext';
 
 type JsonSchema = Record<string, unknown>;
 
@@ -47,6 +49,7 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
   const labelText = hideLabel ? '' : String(label);
 
   const refOptions = useWorkflowRefOptions();
+  const commandPlaceholders = useCommandPlaceholders();
 
   const enumOptions = stringList(schema.enum);
   if (schema.type === 'string' && enumOptions) {
@@ -103,6 +106,25 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
             </option>
           ))}
         </select>
+      </Labeled>
+    );
+  }
+
+  if (schema.type === 'string' && schema.description === 'widget:shell') {
+    const v = typeof value === 'string' ? value : '';
+    return (
+      <Labeled label={labelText} required={required}>
+        <div className="flex items-start gap-1">
+          <div className="min-w-0 flex-1">
+            <CommandEditor
+              value={v}
+              onChange={onChange}
+              templateOptions={templateOptions}
+              placeholders={commandPlaceholders}
+            />
+          </div>
+          <TemplatePicker options={templateOptions} onPick={(p) => onChange(v + p)} />
+        </div>
       </Labeled>
     );
   }
