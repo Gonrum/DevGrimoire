@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { EditorState } from '@codemirror/state';
 import {
   Decoration,
@@ -6,6 +7,8 @@ import {
   MatchDecorator,
   ViewPlugin,
   lineNumbers,
+  highlightActiveLine,
+  highlightActiveLineGutter,
   keymap,
   type DecorationSet,
   type ViewUpdate,
@@ -13,7 +16,7 @@ import {
 import { StreamLanguage, syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching } from '@codemirror/language';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
 import { tags } from '@lezer/highlight';
-import { autocompletion, closeBrackets, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
+import { autocompletion, closeBrackets, closeBracketsKeymap, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
 import { forceLinting, linter, type Diagnostic } from '@codemirror/lint';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { commandDiagnostics } from '../../lib/command-diagnostics';
@@ -123,6 +126,8 @@ function templateCompletion(getOptions: () => TemplateOption[]) {
 }
 
 export function CommandEditor({ value, onChange, templateOptions, placeholders = NO_TRACES, issues = [] }: Props) {
+  const { t } = useTranslation();
+  const tRef = useRef(t);
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   // Aktuelle Werte für die einmalig erzeugten Erweiterungen (Autocomplete, Linter, onChange);
@@ -133,7 +138,8 @@ export function CommandEditor({ value, onChange, templateOptions, placeholders =
   useEffect(() => {
     onChangeRef.current = onChange;
     optionsRef.current = templateOptions;
-  }, [onChange, templateOptions]);
+    tRef.current = t;
+  }, [onChange, templateOptions, t]);
 
   // EditorView einmal pro Mount; Cleanup zerstört ihn (React 19 StrictMode mountet doppelt).
   // `value` wird hier bewusst nur als Startwert gelesen, spätere Änderungen gleicht der nächste Effect ab.
@@ -147,6 +153,8 @@ export function CommandEditor({ value, onChange, templateOptions, placeholders =
         doc: initialValue.current,
         extensions: [
           lineNumbers(),
+          highlightActiveLine(),
+          highlightActiveLineGutter(),
           history(),
           indentOnInput(),
           bracketMatching(),
@@ -160,12 +168,12 @@ export function CommandEditor({ value, onChange, templateOptions, placeholders =
               const doc = v.state.doc;
               return commandDiagnostics(doc.toString(), placeholdersRef.current).map((d) => {
                 const line = doc.line(Math.min(Math.max(d.line, 1), doc.lines));
-                return { from: line.from, to: line.to, severity: d.severity, message: d.message };
+                return { from: line.from, to: line.to, severity: d.severity, message: tRef.current(`workflows.commandEditor.diag.${d.code}`, { expr: d.expr ?? '', defaultValue: d.message }) };
               });
             },
             { delay: 250 },
           ),
-          keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+          keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) onChangeRef.current(update.state.doc.toString());
           }),
@@ -196,7 +204,7 @@ export function CommandEditor({ value, onChange, templateOptions, placeholders =
     placeholdersRef.current = placeholders;
     const view = viewRef.current;
     if (view) forceLinting(view);
-  }, [placeholders]);
+  }, [placeholders, t]);
 
   return (
     <div>

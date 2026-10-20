@@ -2728,6 +2728,14 @@
         "customer": "Customer"
       },
       "notAllowed": "{{placeholder}} is not allowed in this node type (ssh.exec only)."
+    },
+    "commandEditor": {
+      "diag": {
+        "unresolved": "Placeholder cannot be resolved: {{expr}}",
+        "secret_forbidden": "Secret not allowed: {{expr}}",
+        "unknown": "Value only known after a dry run",
+        "quoted": "Do not put placeholders in quotes"
+      }
     }
   },
   "vermerke": {

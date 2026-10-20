@@ -17,6 +17,9 @@ export interface CommandDiagnostic {
   line: number;
   message: string;
   severity: 'error' | 'warning';
+  /** Stabiler Schlüssel für die Übersetzung in der Anzeige; `message` bleibt der deutsche Klartext. */
+  code: 'unresolved' | 'secret_forbidden' | 'unknown' | 'quoted';
+  expr?: string;
 }
 
 /**
@@ -60,17 +63,17 @@ export function commandDiagnostics(command: string, placeholders: PlaceholderTra
   for (const trace of placeholders) {
     if (trace.field !== 'command') continue;
     if (trace.status === 'missing') {
-      out.push({ line: clamp(trace.line), severity: 'error', message: `Platzhalter nicht auflösbar: ${trace.expr}` });
+      out.push({ line: clamp(trace.line), severity: 'error', code: 'unresolved', expr: trace.expr, message: `Platzhalter nicht auflösbar: ${trace.expr}` });
     } else if (trace.status === 'secret_forbidden') {
-      out.push({ line: clamp(trace.line), severity: 'error', message: `Secret nicht erlaubt: ${trace.expr}` });
+      out.push({ line: clamp(trace.line), severity: 'error', code: 'secret_forbidden', expr: trace.expr, message: `Secret nicht erlaubt: ${trace.expr}` });
     } else if (trace.status === 'unknown') {
-      out.push({ line: clamp(trace.line), severity: 'warning', message: 'Wert erst nach Trockenlauf bekannt' });
+      out.push({ line: clamp(trace.line), severity: 'warning', code: 'unknown', expr: trace.expr, message: 'Wert erst nach Trockenlauf bekannt' });
     }
   }
 
   lines.forEach((text, idx) => {
     if (quotedPlaceholderInLine(text)) {
-      out.push({ line: idx + 1, severity: 'error', message: 'Platzhalter nicht in Anführungszeichen setzen' });
+      out.push({ line: idx + 1, severity: 'error', code: 'quoted', message: 'Platzhalter nicht in Anführungszeichen setzen' });
     }
   });
   return out;

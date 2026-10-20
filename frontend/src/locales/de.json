@@ -2728,6 +2728,14 @@
         "customer": "Kunde"
       },
       "notAllowed": "{{placeholder}} ist in diesem Node-Typ nicht erlaubt (nur ssh.exec)."
+    },
+    "commandEditor": {
+      "diag": {
+        "unresolved": "Platzhalter nicht auflösbar: {{expr}}",
+        "secret_forbidden": "Secret nicht erlaubt: {{expr}}",
+        "unknown": "Wert erst nach Trockenlauf bekannt",
+        "quoted": "Platzhalter nicht in Anführungszeichen setzen"
+      }
     }
   },
   "vermerke": {

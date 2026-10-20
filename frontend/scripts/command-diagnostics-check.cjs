@@ -34,7 +34,7 @@ const trace = (over) => ({ field: 'command', line: 1, expr: 'x.y', raw: false, s
 
 check('Platzhalter in doppelten Anführungszeichen -> Fehler in Zeile 2', () => {
   assert.deepEqual(commandDiagnostics('ls\necho "{{nodes.a.x}}"', []),
-    [{ line: 2, severity: 'error', message: 'Platzhalter nicht in Anführungszeichen setzen' }]);
+    [{ line: 2, severity: 'error', code: 'quoted', message: 'Platzhalter nicht in Anführungszeichen setzen' }]);
 });
 check('Platzhalter in einfachen Anführungszeichen -> Fehler', () => {
   assert.equal(commandDiagnostics("echo '{{{nodes.a.x}}}'", []).length, 1);
@@ -47,16 +47,18 @@ check('Anführungszeichen in anderer Zeile zählen nicht', () => {
 });
 check('missing -> Fehler in der Spur-Zeile', () => {
   assert.deepEqual(commandDiagnostics('a\nb\nc', [trace({ line: 3, status: 'missing' })]),
-    [{ line: 3, severity: 'error', message: 'Platzhalter nicht auflösbar: x.y' }]);
+    [{ line: 3, severity: 'error', code: 'unresolved', expr: 'x.y', message: 'Platzhalter nicht auflösbar: x.y' }]);
 });
 check('secret_forbidden -> Fehler', () => {
   const d = commandDiagnostics('a', [trace({ expr: 'secrets.K', status: 'secret_forbidden' })]);
   assert.equal(d.length, 1);
   assert.equal(d[0].severity, 'error');
+  assert.equal(d[0].code, 'secret_forbidden');
+  assert.equal(d[0].expr, 'secrets.K');
 });
 check('unknown -> Warnung', () => {
   assert.deepEqual(commandDiagnostics('a', [trace({ status: 'unknown' })]),
-    [{ line: 1, severity: 'warning', message: 'Wert erst nach Trockenlauf bekannt' }]);
+    [{ line: 1, severity: 'warning', code: 'unknown', expr: 'x.y', message: 'Wert erst nach Trockenlauf bekannt' }]);
 });
 check('resolved/empty/secret -> keine Diagnose', () => {
   assert.deepEqual(commandDiagnostics('a', [trace({ status: 'resolved' }), trace({ status: 'empty' }), trace({ status: 'secret' })]), []);
