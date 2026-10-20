@@ -152,6 +152,8 @@ export interface WorkflowNodeMetadata {
   configJsonSchema: Record<string, unknown>;
   outputs: Record<string, string>;
   branches: Branch[];
+  /** true → `{{secrets.KEY}}` wird echt aufgelöst (heute nur ssh.exec). */
+  secretPlaceholders?: boolean;
 }
 
 /*

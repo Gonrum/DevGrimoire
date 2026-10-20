@@ -21,6 +21,8 @@ interface Props {
    *  edge inspector can pull source-side output keys. */
   nodesById: Record<string, { id: string; type: string; label?: string }>;
   localIssues: string[];
+  /** Schlüssel der erreichbaren Secrets (nur für Node-Typen mit `secretPlaceholders`). */
+  secretKeys?: string[];
   onChangeConfig: (config: Record<string, unknown>) => void;
   onRenameNode: (oldId: string, newId: string) => void;
   onChangeNodeType: (newType: string) => void;
@@ -76,8 +78,8 @@ function NodeInspector(p: Props) {
   const style = nodeCategoryStyles[cat];
 
   const templateOptions = useMemo(
-    () => buildTemplateOptions(catalog, upstreamNodes),
-    [catalog, upstreamNodes],
+    () => buildTemplateOptions(catalog, upstreamNodes, meta?.secretPlaceholders ? p.secretKeys : undefined),
+    [catalog, upstreamNodes, meta?.secretPlaceholders, p.secretKeys],
   );
 
   return (

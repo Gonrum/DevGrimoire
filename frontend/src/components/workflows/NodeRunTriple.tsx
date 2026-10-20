@@ -2,25 +2,16 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { WorkflowNodeRun } from '../../api/workflows';
 import {
-  groupByField,
   isTruncatedSnapshot,
-  placeholderTone,
   readLines,
-  type PlaceholderTone,
 } from '../../lib/placeholder-view';
+import { PlaceholderList } from './PlaceholderList';
 
 interface Props {
   nodeRun?: WorkflowNodeRun;
   /** Text, solange kein NodeRun gewählt ist. */
   emptyHint?: string;
 }
-
-const TONE_CLASS: Record<PlaceholderTone, string> = {
-  ok: 'text-green-300',
-  muted: 'text-gray-500',
-  warn: 'text-amber-300',
-  error: 'text-red-300',
-};
 
 function isEmpty(data: Record<string, unknown> | undefined): boolean {
   return !data || Object.keys(data).length === 0;
@@ -37,7 +28,6 @@ export function NodeRunTriple({ nodeRun, emptyHint }: Props) {
     return <div className="p-4 text-xs text-gray-500">{emptyHint ?? t('workflows.triple.empty')}</div>;
   }
   const traces = nodeRun.placeholders ?? [];
-  const groups = groupByField(traces);
   const output = nodeRun.outputSnapshot;
   const lines = readLines(output);
   const truncated = isTruncatedSnapshot(output) || isTruncatedSnapshot(nodeRun.inputSnapshot) || isTruncatedSnapshot(nodeRun.resolvedConfig);
@@ -50,30 +40,7 @@ export function NodeRunTriple({ nodeRun, emptyHint }: Props) {
 
       <Column title={t('workflows.triple.applied')}>
         <JsonBlock data={nodeRun.resolvedConfig} emptyText={t('workflows.triple.appliedEmpty')} />
-        {groups.length > 0 && (
-          <div className="mt-2" data-testid="placeholder-list">
-            <h5 className="mb-1 text-[10px] uppercase tracking-wide text-gray-500">{t('workflows.triple.placeholders')}</h5>
-            {groups.map((g) => (
-              <div key={g.field} className="mb-1.5">
-                <div className="font-mono text-[11px] text-gray-400">{g.field}</div>
-                <ul className="ml-2 space-y-0.5">
-                  {g.traces.map((tr, i) => (
-                    <li key={i} className="text-[11px]">
-                      <span className="text-gray-500">{t('workflows.triple.lineShort', { line: tr.line })}</span>{' '}
-                      <code className="text-cyan-300">{tr.raw ? `{{{${tr.expr}}}}` : `{{${tr.expr}}}`}</code>{' '}
-                      <span className={TONE_CLASS[placeholderTone(tr.status)]}>
-                        {t(`workflows.triple.status.${tr.status}`)}
-                      </span>
-                      {tr.preview !== undefined && tr.preview !== '' && (
-                        <span className="ml-1 font-mono text-gray-300">{tr.preview}</span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        )}
+        <PlaceholderList traces={traces} />
       </Column>
 
       <Column title={t('workflows.triple.result')}>

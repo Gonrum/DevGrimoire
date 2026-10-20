@@ -6,10 +6,10 @@ import {
   useNodesState, useEdgesState, addEdge, Connection, Edge, Node,
   useReactFlow, ReactFlowProvider,
 } from '@xyflow/react';
-import { ArrowLeft, Save, Play, CheckCircle, Pause, Trash2, PanelLeftOpen, PanelRightOpen, X } from 'lucide-react';
+import { ArrowLeft, Save, Play, CheckCircle, Pause, Trash2, PanelLeftOpen, PanelRightOpen, X, KeyRound } from 'lucide-react';
 
 import { api } from '../api/client';
-import { workflowsApi, WorkflowDefinition, WorkflowNode as WfNode, WorkflowEdge as WfEdge, WorkflowStatus, WorkflowNodeMetadata } from '../api/workflows';
+import { workflowsApi, WorkflowSecretInfo, WorkflowDefinition, WorkflowNode as WfNode, WorkflowEdge as WfEdge, WorkflowStatus, WorkflowNodeMetadata } from '../api/workflows';
 import { errorMessage, isRecord, isUnknownArray, optionOr } from '../lib/narrow';
 import { WorkflowCanvas } from '../components/workflows/WorkflowCanvas';
 import { WorkflowNodePalette } from '../components/workflows/WorkflowNodePalette';
@@ -18,6 +18,7 @@ import { WorkflowValidationBanner } from '../components/workflows/WorkflowValida
 import { WorkflowRunInspector } from '../components/workflows/WorkflowRunInspector';
 import { WorkflowEditorMobileFallback } from '../components/workflows/WorkflowEditorMobileFallback';
 import { WorkflowNodeEditModal } from '../components/workflows/WorkflowNodeEditModal';
+import { WorkflowSecretsPanel } from '../components/workflows/WorkflowSecretsPanel';
 import { nodeHasConfig, SelectedNode } from '../components/workflows/nodeConfig';
 import { WorkflowRefOptions, WorkflowRefOptionsContext } from '../components/workflows/workflowRefOptions';
 import { WorkflowCanvasActions, WorkflowCanvasActionsContext } from '../components/workflows/workflowCanvasActions';
@@ -29,6 +30,7 @@ import { getDefaultsFromJsonSchema } from '../components/workflows/schemaDefault
 import { generateNodeId } from '../components/workflows/generateNodeId';
 import { useToast } from '../components/Toast';
 import i18n from '../i18n';
+import { secretPlaceholderIssue } from '../lib/placeholder-view';
 import { needsSshReactivation } from '../lib/workflow-reactivation';
 
 export default function WorkflowEditorPage() {
@@ -211,6 +213,34 @@ function EditorInner() {
   // SSH-Verbindungen für das Auswahlfeld: einmal pro Workflow laden, aus Projekt
   // bzw. Kunde des Workflows. Schlägt das fehl, bleibt die Liste leer — gespeicherte
   // IDs zeigt das Feld trotzdem als „nicht verfügbar" an.
+  // Für `{{secrets.KEY}}` erreichbare Secrets (nur Schlüssel) — einmal geladen,
+  // beim Öffnen des Panels aufgefrischt, damit frisch angelegte Secrets erscheinen.
+  const [secrets, setSecrets] = useState<WorkflowSecretInfo[]>([]);
+  const [secretsLoading, setSecretsLoading] = useState(true);
+  const [secretsError, setSecretsError] = useState<string | null>(null);
+  const [secretsOpen, setSecretsOpen] = useState(false);
+  const loadSecrets = useCallback((cancelled: () => boolean = () => false) => {
+    workflowsApi.listSecrets(id).then((list) => {
+      if (cancelled()) return;
+      setSecrets(list);
+      setSecretsError(null);
+    }).catch((err: unknown) => {
+      if (cancelled()) return;
+      setSecretsError(i18n.t('workflows.secrets.loadFailed', { error: errorMessage(err) }));
+    }).finally(() => {
+      if (!cancelled()) setSecretsLoading(false);
+    });
+  }, [id]);
+  useEffect(() => {
+    let stop = false;
+    loadSecrets(() => stop);
+    return () => { stop = true; };
+  }, [loadSecrets]);
+  const secretKeys = useMemo(() => secrets.map((s) => s.key), [secrets]);
+  const secretsManageHref = workflow?.projectId
+    ? `/projects/${workflow.projectId}?tab=secrets`
+    : workflow?.customerId ? `/customers/${workflow.customerId}?tab=secrets` : null;
+
   const [sshConnections, setSshConnections] = useState<WorkflowRefOptions['sshConnections']>([]);
   const refScopeProjectId = workflow?.projectId;
   const refScopeCustomerId = workflow?.customerId;
@@ -484,6 +514,24 @@ function EditorInner() {
           )}
         </div>
         <div className="flex items-center gap-1">
+          <div className="relative">
+            <button
+              onClick={() => { if (!secretsOpen) loadSecrets(); setSecretsOpen((o) => !o); }}
+              aria-expanded={secretsOpen}
+              className="inline-flex items-center gap-1 rounded-sm bg-gray-800 px-3 py-1 text-xs text-gray-200 hover:bg-gray-700"
+            >
+              <KeyRound size={12} /> {t('workflows.secrets.button')}
+            </button>
+            {secretsOpen && (
+              <WorkflowSecretsPanel
+                secrets={secrets}
+                loading={secretsLoading}
+                error={secretsError}
+                manageHref={secretsManageHref}
+                onClose={() => setSecretsOpen(false)}
+              />
+            )}
+          </div>
           <button onClick={() => { void handleSave(); }} disabled={saving} className="inline-flex items-center gap-1 rounded-sm bg-gray-800 px-3 py-1 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-50">
             <Save size={12} /> {t('common.save')}
           </button>
@@ -591,6 +639,7 @@ function EditorInner() {
               outgoingEdges={outgoingEdgesForSelected}
               nodesById={nodesById}
               localIssues={localIssues}
+              secretKeys={secretKeys}
               onChangeConfig={(cfg) => {
                 if (!selectedNodeId) return;
                 updateNodeConfig(selectedNodeId, cfg);
@@ -649,6 +698,7 @@ function EditorInner() {
           catalog={catalog}
           upstreamNodes={editUpstream}
           localIssues={editIssues}
+          secretKeys={secretKeys}
           onChangeConfig={(cfg) => updateNodeConfig(editNode.id, cfg)}
           onClose={closeEditModal}
         />
@@ -690,6 +740,9 @@ function issuesFor(meta: WorkflowNodeMetadata | undefined, cfg: Record<string, u
   for (const r of required) {
     const v = cfg[r];
     if (v === undefined || v === null || v === '') issues.push(t('workflows.editor.fieldRequired', { field: `config.${r}` }));
+  }
+  for (const key of secretPlaceholderIssue(meta.type, meta.secretPlaceholders === true, cfg)) {
+    issues.push(t('workflows.secrets.notAllowed', { placeholder: `{{secrets.${key}}}` }));
   }
   return issues;
 }

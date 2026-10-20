@@ -2599,7 +2599,8 @@
       "millisUnit": "Angabe in Millisekunden (1000 = 1 s)",
       "refInherited": "{{label}} (Kunde)",
       "refUnavailable": "{{id}} (nicht verfügbar)",
-      "millisValue": "= {{seconds}} s (Angabe in Millisekunden)"
+      "millisValue": "= {{seconds}} s (Angabe in Millisekunden)",
+      "idleTimeoutHint": "Standard 30 s ohne Ausgabe · 0 = aus"
     },
     "inspector": {
       "empty": "Wähle einen Node oder eine Edge aus, oder ziehe einen Eintrag aus der Palette.",
@@ -2704,6 +2705,29 @@
         "secret": "Secret",
         "secret_forbidden": "Secret nicht erlaubt"
       }
+    },
+    "preview": {
+      "title": "Eingesetzt",
+      "hint": "Vorschau mit dem Kontext links — Secrets bleiben als ••••(KEY) maskiert.",
+      "loading": "Berechne Vorschau …",
+      "error": "Vorschau nicht verfügbar: {{error}}",
+      "invalidInput": "Eingabe-JSON ungültig — Vorschau pausiert.",
+      "issues": "Hinweise"
+    },
+    "secrets": {
+      "title": "Secrets",
+      "button": "Secrets",
+      "hint": "Als Platzhalter secrets.KEY erreichbar (Projekt gewinnt vor Kunde). Werte werden nie angezeigt.",
+      "empty": "Keine Secrets erreichbar.",
+      "manage": "Secrets verwalten",
+      "copy": "Platzhalter kopieren",
+      "copied": "Platzhalter kopiert",
+      "loadFailed": "Secrets konnten nicht geladen werden: {{error}}",
+      "origin": {
+        "project": "Projekt",
+        "customer": "Kunde"
+      },
+      "notAllowed": "{{placeholder}} ist in diesem Node-Typ nicht erlaubt (nur ssh.exec)."
     }
   },
   "vermerke": {

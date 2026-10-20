@@ -1,12 +1,13 @@
 import { createElement, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Play, RotateCcw, X, Loader2 } from 'lucide-react';
-import { workflowsApi, NodeTestResult, WorkflowNodeMetadata } from '../../api/workflows';
+import { workflowsApi, NodePreview, NodeTestResult, WorkflowNodeMetadata } from '../../api/workflows';
 import { errorMessage, isRecord, isUnknownArray } from '../../lib/narrow';
 import { NodeConfigForm } from './NodeConfigForm';
 import { nodeCategoryStyles } from './nodeCategoryStyles';
 import { getNodeIcon } from './nodeTypeIconMap';
 import { buildTemplateOptions, SelectedNode } from './nodeConfig';
+import { PlaceholderList } from './PlaceholderList';
 
 interface Props {
   workflowId: string;
@@ -16,11 +17,19 @@ interface Props {
   catalog: WorkflowNodeMetadata[];
   upstreamNodes: SelectedNode[];
   localIssues: string[];
+  /** Schlüssel der erreichbaren Secrets (für den TemplatePicker). */
+  secretKeys?: string[];
   onChangeConfig: (config: Record<string, unknown>) => void;
   onClose: () => void;
 }
 
 const EMPTY_CONTEXT = { input: {}, nodes: {} };
+const PREVIEW_DEBOUNCE_MS = 400;
+
+/** Vorschau-Stand samt dem Eingabe-Schlüssel, für den er berechnet wurde. */
+type PreviewState =
+  | { key: string; ok: true; data: NodePreview }
+  | { key: string; ok: false; error: string };
 
 type InputSource =
   | { kind: 'loading' }
@@ -84,9 +93,44 @@ export function WorkflowNodeEditModal(p: Props) {
   }, [inputText, t]);
 
   const templateOptions = useMemo(
-    () => buildTemplateOptions(p.catalog, p.upstreamNodes),
-    [p.catalog, p.upstreamNodes],
+    () => buildTemplateOptions(p.catalog, p.upstreamNodes, p.meta.secretPlaceholders ? p.secretKeys : undefined),
+    [p.catalog, p.upstreamNodes, p.meta.secretPlaceholders, p.secretKeys],
   );
+
+  // Eingesetzt-Vorschau: 400 ms nach der letzten Änderung von Config oder
+  // Eingabe-JSON. Der Schlüssel ersetzt ein setState im Effect für „lädt":
+  // läuft er dem Ergebnis voraus, wird neu berechnet.
+  const [preview, setPreview] = useState<PreviewState | null>(null);
+  const { workflowId } = p;
+  const nodeId = p.node.id;
+  const nodeType = p.node.type;
+  const nodeConfig = p.node.config;
+  const nodeSecretRefs = p.node.secretRefs;
+  const posX = p.position.x;
+  const posY = p.position.y;
+  const inputValue = parsedInput.ok ? parsedInput.value : null;
+  const previewKey = useMemo(
+    () => (inputValue ? JSON.stringify([nodeId, nodeType, nodeConfig, inputValue]) : null),
+    [nodeId, nodeType, nodeConfig, inputValue],
+  );
+  useEffect(() => {
+    if (previewKey === null || inputValue === null) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      workflowsApi.previewNode({
+        workflowId,
+        node: { id: nodeId, type: nodeType, position: { x: posX, y: posY }, config: nodeConfig, secretRefs: nodeSecretRefs ?? [] },
+        input: isRecord(inputValue.input) ? inputValue.input : {},
+        runContext: inputValue,
+      }).then((data) => {
+        if (!cancelled) setPreview({ key: previewKey, ok: true, data });
+      }).catch((err: unknown) => {
+        if (!cancelled) setPreview({ key: previewKey, ok: false, error: errorMessage(err) });
+      });
+    }, PREVIEW_DEBOUNCE_MS);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [previewKey, inputValue, workflowId, nodeId, nodeType, nodeConfig, nodeSecretRefs, posX, posY]);
+  const previewLoading = previewKey !== null && preview?.key !== previewKey;
 
   const runTest = async () => {
     if (!parsedInput.ok) return;
@@ -185,6 +229,31 @@ export function WorkflowNodeEditModal(p: Props) {
                   {p.localIssues.map((iss) => <li key={iss}>⚠ {iss}</li>)}
                 </ul>
               )}
+              <div className="border-t border-gray-800 pt-3" data-testid="node-preview">
+                <h3 className="text-xs uppercase tracking-wide text-gray-500">{t('workflows.preview.title')}</h3>
+                <p className="mt-1 text-[11px] text-gray-600">{t('workflows.preview.hint')}</p>
+                {!parsedInput.ok && <p className="mt-1 text-xs text-gray-500">{t('workflows.preview.invalidInput')}</p>}
+                {parsedInput.ok && previewLoading && (
+                  <p className="mt-1 text-xs text-gray-500">{t('workflows.preview.loading')}</p>
+                )}
+                {parsedInput.ok && preview && !previewLoading && !preview.ok && (
+                  <p className="mt-1 text-xs text-gray-500">{t('workflows.preview.error', { error: preview.error })}</p>
+                )}
+                {parsedInput.ok && preview?.ok && (
+                  <div className={previewLoading ? 'opacity-60' : undefined}>
+                    <JsonBlock title="" value={preview.data.display} />
+                    <PlaceholderList traces={preview.data.placeholders} />
+                    {preview.data.issues.length > 0 && (
+                      <div className="mt-2">
+                        <h4 className="mb-1 text-[10px] uppercase tracking-wide text-gray-500">{t('workflows.preview.issues')}</h4>
+                        <ul className="space-y-0.5 text-xs text-amber-300">
+                          {preview.data.issues.map((iss) => <li key={iss}>⚠ {iss}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </section>
 
@@ -266,7 +335,7 @@ function JsonBlock({ title, value, tone }: { title: string; value: unknown; tone
   if (isUnknownArray(value) && value.length === 0) return null;
   return (
     <div>
-      <h4 className="mb-1 text-[10px] uppercase tracking-wide text-gray-500">{title}</h4>
+      {title !== '' && <h4 className="mb-1 text-[10px] uppercase tracking-wide text-gray-500">{title}</h4>}
       <pre className={`max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-sm border border-gray-800 bg-gray-900 p-2 font-mono text-[11px] ${tone === 'error' ? 'text-red-300' : 'text-gray-200'}`}>
         {JSON.stringify(value, null, 2)}
       </pre>

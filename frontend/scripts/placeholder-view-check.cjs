@@ -20,7 +20,7 @@ try {
   console.error(err.stdout ? err.stdout.toString() : err.message);
   process.exit(1);
 }
-const { placeholderTone, groupByField, readLines, isTruncatedSnapshot } = require(path.join(outDir, 'placeholder-view.js'));
+const { placeholderTone, groupByField, readLines, isTruncatedSnapshot, secretPlaceholderIssue } = require(path.join(outDir, 'placeholder-view.js'));
 
 let failures = 0;
 function check(label, fn) {
@@ -61,6 +61,15 @@ check('isTruncatedSnapshot', () => {
   assert.equal(isTruncatedSnapshot({ truncated: true, preview: '{' }), true);
   assert.equal(isTruncatedSnapshot({ truncated: true }), false);
   assert.equal(isTruncatedSnapshot(null), false);
+});
+
+check('secretPlaceholderIssue: Node ohne Freigabe → KEYs', () => {
+  assert.deepEqual(secretPlaceholderIssue('action.notify', false, { body: '{{secrets.T}}' }), ['T']);
+  assert.deepEqual(secretPlaceholderIssue('action.notify', false, { a: ['x {{ secrets.A }}', { b: '{{secrets.B}} {{secrets.A}}' }] }), ['A', 'B']);
+  assert.deepEqual(secretPlaceholderIssue('action.notify', false, { body: '{{nodes.x.y}}' }), []);
+});
+check('secretPlaceholderIssue: erlaubt → leer', () => {
+  assert.deepEqual(secretPlaceholderIssue('ssh.exec', true, { command: '{{secrets.T}}' }), []);
 });
 
 fs.rmSync(outDir, { recursive: true, force: true });

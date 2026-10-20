@@ -2599,7 +2599,8 @@
       "millisUnit": "Value in milliseconds (1000 = 1 s)",
       "refInherited": "{{label}} (customer)",
       "refUnavailable": "{{id}} (unavailable)",
-      "millisValue": "= {{seconds}} s (value in milliseconds)"
+      "millisValue": "= {{seconds}} s (value in milliseconds)",
+      "idleTimeoutHint": "Default 30 s without output · 0 = off"
     },
     "inspector": {
       "empty": "Select a node or an edge, or drag an entry from the palette.",
@@ -2704,6 +2705,29 @@
         "secret": "secret",
         "secret_forbidden": "secret not allowed"
       }
+    },
+    "preview": {
+      "title": "Applied",
+      "hint": "Preview using the context on the left — secrets stay masked as ••••(KEY).",
+      "loading": "Computing preview …",
+      "error": "Preview unavailable: {{error}}",
+      "invalidInput": "Input JSON invalid — preview paused.",
+      "issues": "Notes"
+    },
+    "secrets": {
+      "title": "Secrets",
+      "button": "Secrets",
+      "hint": "Available as placeholder secrets.KEY (project wins over customer). Values are never shown.",
+      "empty": "No secrets available.",
+      "manage": "Manage secrets",
+      "copy": "Copy placeholder",
+      "copied": "Placeholder copied",
+      "loadFailed": "Could not load secrets: {{error}}",
+      "origin": {
+        "project": "Project",
+        "customer": "Customer"
+      },
+      "notAllowed": "{{placeholder}} is not allowed in this node type (ssh.exec only)."
     }
   },
   "vermerke": {

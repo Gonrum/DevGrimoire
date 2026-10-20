@@ -49,6 +49,31 @@ export function groupByField(traces: PlaceholderTrace[]): Array<{ field: string;
   return Array.from(groups, ([field, list]) => ({ field, traces: list }));
 }
 
+const SECRET_REF = /\{\{\{?\s*secrets\.([A-Za-z0-9_.-]+?)\s*\}?\}\}/g;
+
+function collectSecretKeys(value: unknown, into: Set<string>): void {
+  if (typeof value === 'string') {
+    for (const m of value.matchAll(SECRET_REF)) into.add(m[1]);
+  } else if (Array.isArray(value)) {
+    for (const v of value as unknown[]) collectSecretKeys(v, into);
+  } else if (value !== null && typeof value === 'object') {
+    for (const v of Object.values(value)) collectSecretKeys(v, into);
+  }
+}
+
+/**
+ * KEYs aller `{{secrets.KEY}}` in der Config eines Node-Typs ohne
+ * `secretPlaceholders` — dort ist das ein Validierungsfehler
+ * (`secret_not_allowed`), den der Editor schon vor dem Speichern zeigt.
+ * `type` dient nur der Lesbarkeit am Aufrufer; entschieden wird über `allowed`.
+ */
+export function secretPlaceholderIssue(_type: string, allowed: boolean, config: unknown): string[] {
+  if (allowed) return [];
+  const keys = new Set<string>();
+  collectSecretKeys(config, keys);
+  return Array.from(keys);
+}
+
 /** Ergebnis einer Zeile von `ssh.exec` (`outputSnapshot.lines`). */
 export interface LineResult {
   line: number;

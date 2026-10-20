@@ -27,6 +27,8 @@ export function nodeHasConfig(meta: WorkflowNodeMetadata | undefined): boolean {
 export function buildTemplateOptions(
   catalog: WorkflowNodeMetadata[],
   upstreamNodes: SelectedNode[],
+  /** Nur für Node-Typen mit `secretPlaceholders` übergeben. */
+  secretKeys: string[] = [],
 ): TemplateOption[] {
   const opts: TemplateOption[] = [
     { path: 'input.event.entityId', label: 'event.entityId', type: 'string' },
@@ -43,6 +45,9 @@ export function buildTemplateOptions(
         type: outType,
       });
     }
+  }
+  for (const key of secretKeys) {
+    opts.push({ path: `secrets.${key}`, label: `secrets / ${key}`, type: 'secret' });
   }
   return opts;
 }

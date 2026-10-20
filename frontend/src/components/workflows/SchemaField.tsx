@@ -161,6 +161,9 @@ export function SchemaField({ schema, path, value, onChange, required, fieldKey,
               : t('workflows.schema.millisUnit')}
           </p>
         )}
+        {fieldKey === 'idleTimeoutMs' && (
+          <p className="mt-1 text-[11px] text-gray-500">{t('workflows.schema.idleTimeoutHint')}</p>
+        )}
       </Labeled>
     );
   }
