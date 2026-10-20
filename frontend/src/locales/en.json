@@ -2646,7 +2646,8 @@
       "outputEmpty": "(no outputSnapshot — e.g. because the node failed or writes no output)",
       "logs": "Logs ({{count}})",
       "selectNodeRun": "Select a node run.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "waitingForStep": "waiting for step"
     },
     "nodeModal": {
       "input": "Input",
@@ -2675,6 +2676,33 @@
         "validation_only": "validated only",
         "safe_execute": "executed",
         "dry_run": "dry run"
+      }
+    },
+    "triple": {
+      "empty": "Select a node run.",
+      "received": "Received",
+      "applied": "Applied",
+      "result": "Result",
+      "receivedEmpty": "(no inputSnapshot recorded)",
+      "appliedEmpty": "(no resolved config recorded)",
+      "resultEmpty": "(no outputSnapshot — e.g. the node failed or writes no output)",
+      "placeholders": "Placeholders",
+      "lineShort": "L. {{line}}",
+      "dryRun": "Dry run — nothing was executed",
+      "truncated": "truncated — start of the snapshot",
+      "colLine": "Line",
+      "colCommand": "Command",
+      "colExit": "Exit",
+      "colDuration": "Duration",
+      "stdout": "stdout",
+      "stderr": "stderr",
+      "status": {
+        "resolved": "resolved",
+        "empty": "empty",
+        "missing": "missing",
+        "unknown": "unknown",
+        "secret": "secret",
+        "secret_forbidden": "secret not allowed"
       }
     }
   },

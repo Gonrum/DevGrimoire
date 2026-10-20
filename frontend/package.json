@@ -12,7 +12,8 @@
     "lint:fix": "NODE_OPTIONS=--max-old-space-size=8192 eslint . --fix",
     "check:tool-preview": "node scripts/tool-preview-check.cjs",
     "check:research-lib": "node scripts/research-lib-check.cjs",
-    "check:workflow-reactivation": "node scripts/workflow-reactivation-check.cjs"
+    "check:workflow-reactivation": "node scripts/workflow-reactivation-check.cjs",
+    "check:placeholder-view": "node scripts/placeholder-view-check.cjs"
   },
   "dependencies": {
     "@xyflow/react": "^12.10.2",

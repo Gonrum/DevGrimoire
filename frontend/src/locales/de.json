@@ -2646,7 +2646,8 @@
       "outputEmpty": "(kein outputSnapshot — z.B. weil der Node fehlschlug oder kein Output schreibt)",
       "logs": "Logs ({{count}})",
       "selectNodeRun": "Wähle einen Node-Run aus.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "waitingForStep": "wartet auf Schritt"
     },
     "nodeModal": {
       "input": "Eingabe",
@@ -2675,6 +2676,33 @@
         "validation_only": "nur geprüft",
         "safe_execute": "ausgeführt",
         "dry_run": "Trockenlauf"
+      }
+    },
+    "triple": {
+      "empty": "Wähle einen Node-Run aus.",
+      "received": "Bekommen",
+      "applied": "Eingesetzt",
+      "result": "Ergebnis",
+      "receivedEmpty": "(kein inputSnapshot erfasst)",
+      "appliedEmpty": "(keine eingesetzte Config erfasst)",
+      "resultEmpty": "(kein outputSnapshot — z.B. weil der Node fehlschlug oder kein Output schreibt)",
+      "placeholders": "Platzhalter",
+      "lineShort": "Z. {{line}}",
+      "dryRun": "Trockenlauf — nichts wurde ausgeführt",
+      "truncated": "gekürzt — Anfang des Snapshots",
+      "colLine": "Zeile",
+      "colCommand": "Befehl",
+      "colExit": "Exit",
+      "colDuration": "Dauer",
+      "stdout": "stdout",
+      "stderr": "stderr",
+      "status": {
+        "resolved": "aufgelöst",
+        "empty": "leer",
+        "missing": "fehlt",
+        "unknown": "unbekannt",
+        "secret": "Secret",
+        "secret_forbidden": "Secret nicht erlaubt"
       }
     }
   },

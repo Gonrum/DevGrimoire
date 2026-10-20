@@ -1,11 +1,14 @@
 import { request } from './client';
+import type { PlaceholderTrace } from '../lib/placeholder-view';
+
+export type { PlaceholderStatus, PlaceholderTrace, LineResult } from '../lib/placeholder-view';
 
 type Branch = 'success' | 'failure' | 'custom';
 
 export type WorkflowScope = 'system' | 'project' | 'customer';
 export type WorkflowStatus = 'draft' | 'active' | 'paused' | 'archived';
 export type WorkflowRunStatus =
-  | 'queued' | 'running' | 'waiting_for_user' | 'waiting_for_timer'
+  | 'queued' | 'running' | 'waiting_for_user' | 'waiting_for_timer' | 'waiting_for_step'
   | 'succeeded' | 'failed' | 'cancelled';
 export type WorkflowNodeRunStatus =
   | 'queued' | 'running' | 'waiting' | 'succeeded' | 'failed'
@@ -67,6 +70,9 @@ export interface WorkflowRun {
   projectId?: string;
   customerId?: string;
   status: WorkflowRunStatus;
+  mode?: 'normal' | 'debug';
+  /** Nur bei Debug-Läufen: nächster Schritt, letzte Aktivität, Hinweise. */
+  debug?: { pendingNodeIds: string[]; lastActivityAt: string; notices: string[] };
   startedAt?: string;
   finishedAt?: string;
   error?: { code: string; message: string };
@@ -89,10 +95,52 @@ export interface WorkflowNodeRun {
   finishedAt?: string;
   durationMs?: number;
   inputSnapshot?: Record<string, unknown>;
+  /** Eingesetzte Config (Secrets als ••••(KEY)). */
+  resolvedConfig?: Record<string, unknown>;
+  placeholders?: PlaceholderTrace[];
+  /** true bei Trockenlauf. */
+  dryRun?: boolean;
+  /** Node-Definition zum Ausführungszeitpunkt (Debug-Lauf). */
+  nodeSnapshot?: Record<string, unknown>;
   outputSnapshot?: Record<string, unknown>;
   logs?: Array<Record<string, unknown>>;
   error?: { code: string; message: string };
   waitingFor?: { type: 'question' | 'delay'; refId?: string; resumeAt?: string };
+}
+
+/** Antwort von `POST /workflows/nodes/preview`. */
+export interface NodePreview {
+  display: Record<string, unknown>;
+  placeholders: PlaceholderTrace[];
+  issues: string[];
+}
+
+export interface PreviewNodeDto {
+  workflowId: string;
+  node: Pick<WorkflowNode, 'id' | 'type' | 'position' | 'config' | 'secretRefs'>;
+  input?: Record<string, unknown>;
+  runContext?: Record<string, unknown>;
+}
+
+/** Für `{{secrets.KEY}}` erreichbares Secret — nie der Wert. */
+export interface WorkflowSecretInfo {
+  key: string;
+  description?: string;
+  origin: 'project' | 'customer';
+  ownerId: string;
+}
+
+export interface StartDebugDto {
+  input?: Record<string, unknown>;
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+}
+
+export interface DebugStepDto {
+  nodeId: string;
+  mode: 'execute' | 'dry';
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
 }
 
 export interface WorkflowNodeMetadata {
@@ -246,6 +294,13 @@ export const workflowsApi = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
+  startDebug: (id: string, dto: StartDebugDto) =>
+    request<WorkflowRun>(`/workflows/${id}/debug`, { method: 'POST', body: JSON.stringify(dto) }),
+  debugStep: (runId: string, dto: DebugStepDto) =>
+    request<WorkflowRun>(`/workflows/runs/${runId}/debug/step`, { method: 'POST', body: JSON.stringify(dto) }),
+  previewNode: (dto: PreviewNodeDto) =>
+    request<NodePreview>('/workflows/nodes/preview', { method: 'POST', body: JSON.stringify(dto) }),
+  listSecrets: (id: string) => request<WorkflowSecretInfo[]>(`/workflows/${id}/secrets`),
   listNodeRuns: (runId: string) =>
     request<WorkflowNodeRun[]>(`/workflows/runs/${runId}/node-runs`),
 };
