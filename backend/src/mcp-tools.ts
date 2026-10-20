@@ -3935,7 +3935,7 @@ const tools = [
   },
   {
     name: 'workflow_create',
-    description: 'Create a workflow definition (graph of triggers, nodes and edges). Scope controls visibility: system (admin-only), project (requires projectId), customer (requires customerId).',
+    description: 'Create a workflow definition (graph of triggers, nodes and edges). Scope controls visibility: system (admin-only), project (requires projectId), customer (requires customerId). Templates in node config: {{path}} reads run data; a missing path fails the node with `template_unresolved` (failure branch applies), null/empty becomes an empty string, `\\{{...}}` stays literal, only own properties are looked up. {{secrets.KEY}} resolves only in ssh.exec (project/customer secrets without environment; linked customers for project workflows; project wins), elsewhere it is rejected with `secret_not_allowed`; secret values are masked as •••• everywhere. ssh.exec `command`: one command per line, all lines run in one shell (cd/export persist) and stop at the first failing line unless failOnNonZeroExit=false; a trailing `\\` continues a line; lines ending in |, && or || and here-docs are rejected; output adds `lines[]` (line, command, exitCode, stdout, stderr, durationMs, aborted); idleTimeoutMs defaults to 30000 (0 = off).',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -3981,7 +3981,7 @@ const tools = [
   },
   {
     name: 'workflow_update',
-    description: 'Update a workflow. On a non-draft workflow, the version (and approval) increments only when the runtime behaviour changes — node type/config/secretRefs, edges incl. branch/condition/payloadMapping, or trigger; moving or relabelling nodes does not. Set publish=true to force a version bump.',
+    description: 'Update a workflow. On a non-draft workflow, the version (and approval) increments only when the runtime behaviour changes — node type/config/secretRefs, edges incl. branch/condition/payloadMapping, or trigger; moving or relabelling nodes does not. Set publish=true to force a version bump. Templates in node config: {{path}} reads run data; a missing path fails the node with `template_unresolved` (failure branch applies), null/empty becomes an empty string, `\\{{...}}` stays literal, only own properties are looked up. {{secrets.KEY}} resolves only in ssh.exec (project/customer secrets without environment; linked customers for project workflows; project wins), elsewhere it is rejected with `secret_not_allowed`; secret values are masked as •••• everywhere. ssh.exec `command`: one command per line, all lines run in one shell (cd/export persist) and stop at the first failing line unless failOnNonZeroExit=false; a trailing `\\` continues a line; lines ending in |, && or || and here-docs are rejected; output adds `lines[]` (line, command, exitCode, stdout, stderr, durationMs, aborted); idleTimeoutMs defaults to 30000 (0 = off).',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -4038,7 +4038,7 @@ const tools = [
   },
   {
     name: 'workflow_run_list',
-    description: 'List workflow runs (compact). Filter by definitionId, scope/ownership, or status.',
+    description: 'List workflow runs (compact). Filter by definitionId, scope/ownership, or status (`waiting_for_step` = paused debug run).',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -4046,7 +4046,7 @@ const tools = [
         scope: { type: 'string', enum: ['system', 'project', 'customer'] },
         projectId: { type: 'string' },
         customerId: { type: 'string' },
-        status: { type: 'string', enum: ['queued', 'running', 'waiting_for_user', 'succeeded', 'failed', 'cancelled'] },
+        status: { type: 'string', enum: ['queued', 'running', 'waiting_for_user', 'waiting_for_step', 'succeeded', 'failed', 'cancelled'] },
         limit: { type: 'number', description: 'Default 50' },
         offset: { type: 'number' },
       },
@@ -4054,7 +4054,7 @@ const tools = [
   },
   {
     name: 'workflow_run_get',
-    description: 'Get a workflow run with its frozen definition snapshot, status and current node ids',
+    description: 'Get a workflow run with its frozen definition snapshot, status and current node ids. Status may be `waiting_for_step` and mode `debug` for step-by-step debug runs (REST: POST /api/workflows/:id/debug, POST /api/workflows/runs/:id/debug/step).',
     inputSchema: {
       type: 'object' as const,
       properties: { id: { type: 'string' } },
@@ -4131,7 +4131,7 @@ const tools = [
   },
   {
     name: 'workflow_node_types_list',
-    description: 'Returns the catalog of registered workflow node types with their JSON-Schema configs, outputs, scopes and branches. Read-only — used by UI and agents constructing workflows.',
+    description: 'Returns the catalog of registered workflow node types with their JSON-Schema configs, outputs, scopes and branches. Read-only — used by UI and agents constructing workflows. Config templates: missing {{path}} -> `template_unresolved`; {{secrets.KEY}} only in node types with secretPlaceholders (ssh.exec), else `secret_not_allowed`; ssh.exec takes multi-line commands and returns `lines[]`.',
     inputSchema: { type: 'object' as const, properties: {} },
   },
   {
