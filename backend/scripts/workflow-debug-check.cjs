@@ -9,7 +9,8 @@
  * Mongo-Teil (MONGODB_TEST_URI, Wegwerf-Datenbank; eigene Collections, werden
  * gelöscht): `startDebugRun` auf einem Draft, Schritte echt und trocken,
  * paralleler Schritt → 409, Wiederholen mit korrigierter Config, `hasOpenRun`
- * ignoriert Debug-Läufe, Leerlauf-Abbruch nach 30 min. Ohne die Variable wird
+ * ignoriert Debug-Läufe, Leerlauf-Abbruch nach 30 min, Neustart mitten im
+ * Schritt (ohne Alters-Grenze). Ohne die Variable wird
  * der Mongo-Teil übersprungen.
  *
  * Lädt aus dist/; vorher `npm run build`.
@@ -29,7 +30,7 @@ function loadCompiled(rel) {
 const debugStep = loadCompiled('workflows/engine/debug-step.js');
 
 const EXPECTED_PURE = 6;
-const EXPECTED_MONGO = 11;
+const EXPECTED_MONGO = 12;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -292,6 +293,25 @@ async function mongoChecks(uri) {
       const r = (await workflows.startDebugRun(defId, { ...graph() }, actor))._id.toString();
       await workflows.cancelRun(r, { reason: 'test' });
       await assert.rejects(() => engine.retryRun(r, undefined, actor), (e) => status(e) === 400);
+    });
+
+    await check('Neustart mitten im Schritt: frischer Debug-Lauf → waiting_for_step, NodeRun interrupted, kein Re-Enqueue', async () => {
+      const r = (await workflows.startDebugRun(defId, { input: { msg: 'boot' }, ...graph() }, actor))._id.toString();
+      await step(r, 't', 'execute');
+      // Kein drain: der Schritt steckt in der (beim Neustart verlorenen) Queue.
+      while (queue.size() > 0) queue.take(queue.peek().seq);
+      const before = await Run.findById(r);
+      assert.equal(before.status, 'running');
+      assert.ok(before.updatedAt > new Date(Date.now() - 60_000), 'frisch — älter als die Recovery-Grenze wäre der alte Pfad');
+      assert.equal(await NodeRun.countDocuments({ runId: oid(r), status: { $in: ['queued', 'running'] } }), 1);
+      await engine.recoverInterruptedRuns();
+      const after = await Run.findById(r);
+      assert.equal(after.status, 'waiting_for_step');
+      assert.ok(after.debug.notices.includes('Schritt durch Neustart unterbrochen — bitte wiederholen'), JSON.stringify(after.debug.notices));
+      const nr = await NodeRun.findOne({ runId: oid(r), nodeId: 't' });
+      assert.equal(nr.status, 'interrupted');
+      assert.equal(queue.size(), 0, 'nichts neu eingereiht');
+      await workflows.cancelRun(r, { reason: 'test' });
     });
 
     await check('cancelIdleDebugRuns: 31 min ohne Schritt → cancelled, frischer bleibt', async () => {

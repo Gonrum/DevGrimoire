@@ -110,7 +110,7 @@ for (const v of ["it's", '$(id)', '"', '\\']) {
 }
 
 // Zeilenform für mehrzeilige Skripte (Task 4): Quotes und Kommentare zählen nicht.
-assert.deepEqual(shellLineShape('echo hi'), { openQuote: false, heredoc: false });
+assert.deepEqual(shellLineShape('echo hi'), { openQuote: false, heredoc: false, multilineConstruct: false });
 assert.equal(endsInsideQuotes('echo "a'), true);
 assert.equal(endsInsideQuotes("echo hi # it's done"), false);
 assert.equal(endsInsideQuotes("echo a#b'"), true, '# mitten im Wort ist kein Kommentar');

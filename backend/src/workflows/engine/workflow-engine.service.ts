@@ -52,7 +52,7 @@ import { NodePreview, preflightNode, previewFromContext, redactPlaceholders } fr
 import { findSecretKeys, maskSecrets, PlaceholderTrace } from '../nodes/template-resolver';
 import { secretPlaceholderIssues, WorkflowSecretsResolver } from './workflow-secrets.resolver';
 import { dropMissing, dryPlaceholder, dryStrategy, DryStrategy, nextPending, withoutUndefined } from './debug-step';
-import { capSnapshot, inputView, SNAPSHOT_REDACT_OPTIONS } from './snapshot-cap';
+import { capSnapshot, inputView, SNAPSHOT_REDACT_OPTIONS, structuredSnapshot } from './snapshot-cap';
 import { asNumber, asStringArray, errorMessage, errorName, isRecord } from '../workflow-narrow';
 import {
   checkRunBudget,
@@ -932,7 +932,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       await this.completeNodeRun(nodeRun, result);
       // Persist redacted output to run.context so downstream nodes can read
       // upstream output without re-leaking secrets via the context object.
-      const redactedOutput = redactRecord(result.output ?? {});
+      const redactedOutput = structuredSnapshot(result.output ?? {});
       const graph = readGraph(run.definitionSnapshot);
 
       // T-325: evaluate payloadMapping for outgoing edges and persist the
@@ -998,7 +998,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       await this.completeNodeRun(nodeRun, result);
       // Wie auf dem Erfolgspfad redigiert; der Fehler steht zusätzlich als
       // `error` im Kontext, damit Folge-Nodes ihn auswerten können.
-      const redactedFailure = redactRecord(failureContextEntry(result));
+      const redactedFailure = structuredSnapshot(failureContextEntry(result));
       const failEdgeValues = buildEdgeValues(failGraph, node.id, redactedFailure);
       const fresh = await this.runModel
         .findByIdAndUpdate(run._id, contextUpdatePipeline(node.id, redactedFailure, failEdgeValues), { new: true })
@@ -1039,7 +1039,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     let handled = true;
     if (result.status === 'success') {
       await this.completeNodeRun(nodeRun, result);
-      const redactedOutput = redactRecord(result.output ?? {});
+      const redactedOutput = structuredSnapshot(result.output ?? {});
       const edgeValues = buildEdgeValues(graph, node.id, redactedOutput);
       await this.runModel
         .findByIdAndUpdate(run._id, contextUpdatePipeline(node.id, redactedOutput, edgeValues))
@@ -1047,7 +1047,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
       successors = nextNodes(node.id, result.branch ?? 'success', graph).map((n) => n.id);
     } else if (hasBranchEdges(node.id, 'failure', graph)) {
       await this.completeNodeRun(nodeRun, result);
-      const redactedFailure = redactRecord(failureContextEntry(result));
+      const redactedFailure = structuredSnapshot(failureContextEntry(result));
       const failEdgeValues = buildEdgeValues(graph, node.id, redactedFailure);
       await this.runModel
         .findByIdAndUpdate(run._id, contextUpdatePipeline(node.id, redactedFailure, failEdgeValues))
@@ -1238,7 +1238,7 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
     nodeRun.markModified('resolvedConfig');
     nodeRun.markModified('placeholders');
     if (result.output !== undefined) {
-      nodeRun.outputSnapshot = redactRecord(result.output);
+      nodeRun.outputSnapshot = structuredSnapshot(result.output);
     }
     if (result.error) {
       nodeRun.error = redactRecord(result.error);
@@ -1575,8 +1575,14 @@ export class WorkflowEngineService implements OnModuleInit, OnApplicationBootstr
 
   private async recoverInterruptedRuns(): Promise<void> {
     const cutoff = new Date(Date.now() - RECOVERY_AGE_MS);
+    // Debug-Läufe ohne Alters-Grenze: ihr Schritt hängt an der Queue im
+    // Speicher, nach dem Neustart käme er nie an — der Lauf bliebe sonst
+    // dauerhaft `running` und jeder weitere Schritt würde abgewiesen.
     const stale = await this.runModel
-      .find({ status: WorkflowRunStatus.RUNNING, updatedAt: { $lt: cutoff } })
+      .find({
+        status: WorkflowRunStatus.RUNNING,
+        $or: [{ mode: 'debug' }, { updatedAt: { $lt: cutoff } }],
+      })
       .exec();
     // H-18: Vorher wurde jeder unterbrochene Run auf QUEUED gesetzt und
     // startete am TRIGGER neu — jeder bereits erfolgreiche Node lief noch

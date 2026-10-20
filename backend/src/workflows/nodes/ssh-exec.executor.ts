@@ -71,6 +71,24 @@ export function sshTimeouts(config: { timeoutMs?: number; idleTimeoutMs?: number
   return { timeoutMs, idleTimeoutMs };
 }
 
+/**
+ * Je Zeile bleiben nur die letzten Zeichen von stdout/stderr: die Zeilen
+ * wiederholen die Gesamtausgabe, und bei ein paar gesprächigen Zeilen sprengte
+ * das sonst die Snapshot-Grenze — dann fiele die ganze Ausgabe samt Exit-Codes
+ * zu einer Vorschau zusammen. Das Ende ist bei einem Fehler das Aufschlussreiche.
+ */
+export const LINE_OUTPUT_MAX_CHARS = 2_000;
+
+function capLineOutput(l: LineResult): LineResult & { truncated: boolean } {
+  const truncated = l.stdout.length > LINE_OUTPUT_MAX_CHARS || l.stderr.length > LINE_OUTPUT_MAX_CHARS;
+  return {
+    ...l,
+    stdout: l.stdout.slice(-LINE_OUTPUT_MAX_CHARS),
+    stderr: l.stderr.slice(-LINE_OUTPUT_MAX_CHARS),
+    truncated,
+  };
+}
+
 function cap(message: string): string {
   return message.length > MAX_ERROR_MESSAGE ? message.slice(0, MAX_ERROR_MESSAGE) : message;
 }
@@ -136,7 +154,8 @@ function planCommand(command: string, context: Record<string, unknown>): Command
  * Alles, was die Shell über das Zeilenende hinaus weiterlesen ließe, schlösse
  * die Marker-Befehle zwischen den Zeilen ein: offener Quote (dann stünde ein
  * eingesetztes `'…'` in Double-Quotes, `$(…)` im Wert liefe), Operator am
- * Ende, Here-Doc. Quotes und Kommentare zählen dabei nicht.
+ * Ende, Here-Doc, über Zeilen verteilte Blöcke (if/for/while/case/{ }).
+ * Quotes und Kommentare zählen dabei nicht.
  */
 function lineProblem(l: ScriptLine): string | undefined {
   const shape = shellLineShape(l.command);
@@ -147,6 +166,12 @@ function lineProblem(l: ScriptLine): string | undefined {
     );
   }
   if (shape.heredoc) return `Zeile ${l.line}: Here-Docs werden nicht unterstützt`;
+  if (shape.multilineConstruct) {
+    return (
+      `Zeile ${l.line}: mehrzeilige Konstrukte (if/for/while/case/{ }) werden nicht unterstützt — ` +
+      'bitte in eine Zeile schreiben oder mit \\ fortsetzen'
+    );
+  }
   if (shape.trailingOperator) {
     return (
       `Zeile ${l.line}: Befehl endet mit "${shape.trailingOperator}" — mehrzeilige Konstrukte werden nicht ` +
@@ -372,7 +397,7 @@ export class SshExecExecutor implements NodeExecutor {
       connection: connection.label,
       // Die Zeilen tragen den eingesetzten Befehl in der Anzeige-Fassung — die
       // Engine maskiert nur Rohwerte ab vier Zeichen.
-      lines: ran.lines.map((l) => ({ ...l, command: shownLines.get(l.line) ?? SECRET_MASK })),
+      lines: ran.lines.map((l) => ({ ...capLineOutput(l), command: shownLines.get(l.line) ?? SECRET_MASK })),
     };
     ctx.logger.info('ssh.exec beendet', {
       connection: connection.label,

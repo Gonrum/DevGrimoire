@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
  * Node `ssh.exec` gegen Attrappen (SshService, SshSessionService, SshTestService,
- * Link-Modell/Audit des echten WorkflowScopeGuard). Kein Netz, kein Mongo.
+ * Link-Modell/Audit des echten WorkflowScopeGuard). Kein Netz. Mit
+ * MONGODB_TEST_URI (Wegwerf-Datenbank) zusätzlich: Ergebnis mit viel Ausgabe
+ * durch die echte Engine — NodeRun und Lauf-Kontext bleiben strukturiert.
  *
  * Prüft die Reihenfolge Verbindung → Lauf-Scope → Shell-Expansion → exec und
  * dass bei jeder Ablehnung `exec` NICHT aufgerufen wird. Nach `npm run build`.
@@ -136,6 +138,100 @@ async function check(name, fn) {
   } catch (err) {
     console.error(`FAIL ${name}\n`, err);
     process.exitCode = 1;
+  }
+}
+
+/**
+ * Echte Engine (Mongo) mit dem Ergebnis eines echten `ssh.exec`-Laufs (lokale
+ * bash, kein SSH): drei Zeilen à 3 000 Zeichen stdout + 1 000 stderr. Vorher
+ * kollabierte das in NodeRun und Lauf-Kontext zu `{ redacted, truncated }` —
+ * keine Zeilentabelle, `{{nodes.exec.exitCode}}` unauflösbar.
+ */
+async function mongoChecks() {
+  const uri = process.env.MONGODB_TEST_URI;
+  if (!uri) {
+    console.log('(Engine-Checks übersprungen: MONGODB_TEST_URI nicht gesetzt)');
+    return;
+  }
+  const path = require('node:path');
+  const mongoose = require(path.resolve(__dirname, '..', 'node_modules', 'mongoose'));
+  const { EventEmitter2 } = require(path.resolve(__dirname, '..', 'node_modules', '@nestjs/event-emitter'));
+  require(path.resolve(__dirname, '..', 'node_modules', '@nestjs/common')).Logger.overrideLogger(['error', 'warn']);
+  const { WorkflowEngineService } = require('../dist/workflows/engine/workflow-engine.service');
+  const { WorkflowQueueService } = require('../dist/workflows/engine/workflow-queue.service');
+  const { WorkflowRunSchema } = require('../dist/workflows/schemas/workflow-run.schema');
+  const { WorkflowNodeRunSchema } = require('../dist/workflows/schemas/workflow-node-run.schema');
+  const { WorkflowDefinitionSchema } = require('../dist/workflows/schemas/workflow-definition.schema');
+
+  // Ergebnis des echten Executors vorab erzeugen; in der Engine liefert es
+  // ein Node eines Typs ohne Akteur-Pflicht (sonst bräuchte es Akteur,
+  // Secrets-Auflösung und Verbindung).
+  const line = "printf 'o%.0s' $(seq 3000); printf 'e%.0s' $(seq 1000) >&2";
+  const sshResult = await executor(bashSession()).exec.execute(
+    ctx({ connectionId: CONN_OWN, command: [line, line, line].join('\n') }),
+  );
+  assert.equal(sshResult.status, 'success', JSON.stringify(sshResult.error));
+
+  const conn = await mongoose.createConnection(uri, { serverSelectionTimeoutMS: 5000 }).asPromise();
+  const suffix = `_sshexeccheck_${Date.now()}`;
+  const Def = conn.model('WorkflowDefinition', WorkflowDefinitionSchema, `workflowdefinitions${suffix}`);
+  const Run = conn.model('WorkflowRun', WorkflowRunSchema, `workflowruns${suffix}`);
+  const NodeRun = conn.model('WorkflowNodeRun', WorkflowNodeRunSchema, `workflownoderuns${suffix}`);
+  const seen = [];
+  const registry = {
+    get: () => ({
+      execute: async (c) => {
+        if (c.node.id === 'exec') return sshResult;
+        seen.push(c.config.message);
+        return { status: 'success', output: { message: c.config.message } };
+      },
+    }),
+  };
+  const queue = new WorkflowQueueService();
+  const noop = { record: async () => {}, create: async () => {} };
+  const engine = new WorkflowEngineService(
+    Def, Run, NodeRun, queue, {}, registry, new EventEmitter2(), noop, {}, noop, noop, { resolve: async () => null },
+  );
+  const pos = { x: 0, y: 0 };
+  const execNode = { id: 'exec', type: 'action.log', config: { message: 'ssh' }, position: pos };
+  const next = { id: 'next', type: 'action.log', config: { message: 'exit={{nodes.exec.exitCode}}' }, position: pos };
+  try {
+    await check('Engine: viel ssh.exec-Ausgabe bleibt strukturiert, Folge-Node löst {{nodes.exec.exitCode}} auf', async () => {
+      const run = await Run.create({
+        definitionId: new mongoose.Types.ObjectId(), definitionVersion: 1, scope: 'system',
+        definitionSnapshot: { nodes: [execNode, next], edges: [{ id: 'e1', source: 'exec', target: 'next' }] },
+        trigger: { type: 'manual' }, status: 'running', startedAt: new Date(), context: { nodes: {} },
+      });
+      await engine.enqueueNode(run, execNode, 1);
+      for (let i = 0; i < 5 && queue.peek(); i += 1) await engine.runJob(queue.take(queue.peek().seq));
+
+      const nr = await NodeRun.findOne({ runId: run._id, nodeId: 'exec' }).lean();
+      assert.equal(nr.status, 'succeeded', JSON.stringify(nr.error));
+      assert.equal(nr.outputSnapshot.redacted, undefined, JSON.stringify(nr.outputSnapshot).slice(0, 200));
+      assert.ok(Array.isArray(nr.outputSnapshot.lines), 'lines ist Array');
+      assert.equal(nr.outputSnapshot.lines.length, 3);
+      for (const l of nr.outputSnapshot.lines) {
+        assert.equal(l.exitCode, 0);
+        assert.equal(l.truncated, true);
+        assert.equal(l.stdout.length, 2000);
+        assert.equal(l.stderr.length, 1000);
+      }
+      assert.equal(nr.outputSnapshot.exitCode, 0);
+      assert.ok(JSON.stringify(nr.outputSnapshot).length <= 20_000);
+
+      const fresh = await Run.findById(run._id).lean();
+      assert.equal(typeof fresh.context.nodes.exec.exitCode, 'number', JSON.stringify(fresh.context.nodes.exec).slice(0, 200));
+      assert.equal(fresh.context.nodes.exec.lines.length, 3);
+      // Die Vorprüfung hätte den Folge-Node mit template_unresolved scheitern lassen.
+      const after = await NodeRun.findOne({ runId: run._id, nodeId: 'next' }).lean();
+      assert.equal(after.status, 'succeeded', JSON.stringify(after.error));
+      assert.equal(after.resolvedConfig.message, 'exit=0');
+      assert.equal(seen.length, 1);
+      assert.equal(fresh.status, 'succeeded');
+    });
+  } finally {
+    await Promise.all([Def, Run, NodeRun].map((m) => m.collection.drop().catch(() => {})));
+    await conn.close();
   }
 }
 
@@ -562,6 +658,53 @@ async function check(name, fn) {
     assert.equal(r.output.stdout, 'a | <<b &&\nok\n');
   });
 
+  await check('Mehrzeilige Blöcke (if/for/while/case/{ }) → invalid_config mit Zeile, kein exec', async () => {
+    const session = makeSession({});
+    const { exec } = executor(session);
+    const msg = (n) =>
+      `Zeile ${n}: mehrzeilige Konstrukte (if/for/while/case/{ }) werden nicht unterstützt — bitte in eine Zeile schreiben oder mit \\ fortsetzen`;
+    for (const [command, line] of [
+      ['if [ -f x ]; then\necho ja\nfi', 1],
+      ['if true\nthen echo a; fi', 2],
+      ['for i in 1 2; do\necho $i\ndone', 1],
+      ['for i in 1 2\ndo echo $i; done', 2],
+      ['while true; do\nsleep 1\ndone', 1],
+      ['case "$x" in\na) echo a;;\nesac', 1],
+      ['true\nf() {\necho\n}', 2],
+      ['echo a\nelse', 2],
+      ['echo a\nelse echo b; fi', 2],
+      ['echo a\ndo echo b; done', 2],
+      ['echo a\nelif true; then echo b; fi', 2],
+      ['echo a\nfi', 2],
+      ['echo a\ndone', 2],
+      ['echo a\nesac', 2],
+      ['echo a\n}', 2],
+      ['if true; then # Kommentar\necho\nfi', 1],
+    ]) {
+      const r = await exec.execute(ctx({ connectionId: CONN_OWN, command }));
+      assert.equal(r.status, 'failed', command);
+      assert.equal(r.error.code, 'invalid_config', command);
+      assert.equal(r.error.message, msg(line), command);
+    }
+    assert.equal(session.calls.length, 0);
+  });
+
+  await check('Einzeilige Blöcke und Schlüsselwörter als Argument/in Quotes laufen (echte Shell)', async () => {
+    const session = bashSession();
+    const command = [
+      'if true; then echo a; fi',
+      'for i in 1 2; do echo $i; done',
+      'case x in x) echo c;; esac',
+      '{ echo d; }',
+      'echo then do fi',
+      'echo "if x; then" \'{\'',
+      'echo login',
+    ].join('\n');
+    const r = await executor(session).exec.execute(ctx({ connectionId: CONN_OWN, command }));
+    assert.equal(r.status, 'success', JSON.stringify(r.error));
+    assert.equal(r.output.stdout, 'a\n1\n2\nc\nd\nthen do fi\nif x; then {\nlogin\n');
+  });
+
   await check('Debug-Lauf: SSH-Audit trägt workflow.debug = true', async () => {
     const session = makeSession({});
     const c = ctx({ connectionId: CONN_OWN, command: 'true' });
@@ -601,6 +744,25 @@ async function check(name, fn) {
     const foreign = await exec.dryRunPreview(ctx({ connectionId: CONN_FOREIGN, command: 'true' }));
     assert.equal(foreign.error.code, 'scope_violation');
   });
+
+  await check('Zeilen-Ausgabe: je Zeile nur die letzten 2 000 Zeichen + truncated, Gesamtausgabe vollständig', async () => {
+    const session = bashSession();
+    const command = [
+      "printf 'A%.0s' $(seq 2999); printf 'Z'",
+      "printf 'kurz'",
+    ].join('\n');
+    const r = await executor(session).exec.execute(ctx({ connectionId: CONN_OWN, command }));
+    assert.equal(r.status, 'success', JSON.stringify(r.error));
+    const [first, second] = r.output.lines;
+    assert.equal(first.stdout.length, 2000);
+    assert.ok(first.stdout.endsWith('AZ'), 'das Ende bleibt');
+    assert.equal(first.truncated, true);
+    assert.equal(second.stdout, 'kurz');
+    assert.equal(second.truncated, false);
+    assert.equal(r.output.stdout.length, 3004, 'Gesamt-stdout ungekürzt');
+  });
+
+  await mongoChecks();
 
   console.log(`${passed} passed`);
 })();

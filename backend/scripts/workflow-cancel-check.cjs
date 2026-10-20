@@ -139,6 +139,9 @@ async function until(fn, label, ms = 3000) {
       const job = await enqueueAndTake(run, node('a'));
       const running = engine.runJob(job);
       await until(async () => (await NodeRun.findById(job.nodeRunId)).status === 'running', 'Knoten läuft');
+      // `running` steht vor dem Aufruf des Executors in der DB — erst warten,
+      // bis er wirklich läuft, sonst gibt es noch kein `release` (unter Last rot).
+      await until(async () => typeof release === 'function', 'Executor läuft');
       // Abbruch direkt in der DB, ohne Abort — simuliert einen Executor, der
       // das Signal ignoriert und danach mit einem Fehler zurückkommt.
       await Run.updateOne({ _id: run._id }, { $set: { status: 'cancelled' } });
@@ -157,6 +160,7 @@ async function until(fn, label, ms = 3000) {
       const job = await enqueueAndTake(run, node('a'));
       const running = engine.runJob(job);
       await until(async () => (await NodeRun.findById(job.nodeRunId)).status === 'running', 'Knoten läuft');
+      await until(async () => typeof release === 'function', 'Executor läuft');
       await Run.updateOne({ _id: run._id }, { $set: { status: 'cancelled' } });
       release();
       await running;

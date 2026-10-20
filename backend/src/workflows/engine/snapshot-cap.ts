@@ -1,4 +1,5 @@
 import { isRecord } from '../../common/tool-args';
+import { redactRecord } from '../workflow-redaction';
 
 /**
  * Obergrenze für Snapshots im NodeRun (Eingang, eingesetzte Config). Ein Node,
@@ -27,6 +28,26 @@ export function capSnapshot(value: unknown, maxChars: number = SNAPSHOT_MAX_CHAR
   const json = JSON.stringify(value) ?? '';
   if (json.length <= maxChars && isRecord(value)) return value;
   return { truncated: true, preview: json.slice(0, maxChars) };
+}
+
+/** Stufen für die Länge einzelner Strings, bis die Struktur in die Grenze passt. */
+const STRING_LIMIT_STEPS = [SNAPSHOT_REDACT_OPTIONS.maxStringLength, 1_000, 200];
+
+/**
+ * Redaction für Node-Ausgaben (`outputSnapshot`, `run.context.nodes.<id>`).
+ * Anders als `capSnapshot` bleibt die Struktur erhalten: ist das Objekt zu
+ * groß, werden zuerst die Strings kürzer gekappt — `exitCode` & Co. bleiben
+ * Felder, `{{nodes.X.exitCode}}` löst weiter auf. Erst wenn auch das nicht
+ * reicht (sehr viele Felder), bleibt nur die Vorschau.
+ */
+export function structuredSnapshot(value: unknown, maxChars: number = SNAPSHOT_MAX_CHARS): Record<string, unknown> {
+  for (const maxStringLength of STRING_LIMIT_STEPS) {
+    // `maxChars` hier ohne Wirkung: die Grenze prüft die Schleife selbst,
+    // sonst faltete `redact` die Struktur vorher zu einem String.
+    const redacted = redactRecord(value, { ...SNAPSHOT_REDACT_OPTIONS, maxStringLength, maxChars: Number.MAX_SAFE_INTEGER });
+    if ((JSON.stringify(redacted) ?? '').length <= maxChars) return redacted;
+  }
+  return capSnapshot(redactRecord(value, SNAPSHOT_REDACT_OPTIONS), maxChars);
 }
 
 /** Was ein Node vom Lauf sieht: nur `input`, `incoming`, `nodes` — nichts Internes (z.B. `fromEdges`). */

@@ -97,7 +97,24 @@ export interface ShellLineShape {
   trailingOperator?: '|' | '&&' | '||';
   /** Ungequotetes `<<` (Here-Doc) — liest die folgenden Zeilen als Eingabe. */
   heredoc: boolean;
+  /**
+   * Die Zeile öffnet einen Block über mehrere Zeilen (`then`, `do`, `case … in`,
+   * `{` am Ende) oder ist dessen Fortsetzung/Abschluss (`fi`, `done`, `esac`,
+   * `}` allein; beginnt mit `then`, `do`, `else`, `elif`).
+   */
+  multilineConstruct: boolean;
 }
+
+/** Block-Öffner am Zeilenende — nur in Befehlsposition (Zeilenanfang, nach `;`, `&`, `|`, `(`, `)`). */
+const BLOCK_OPENER = /(^|[;&|()]\s*)(then|do|\{)$/;
+/** `case … in` ohne Muster auf derselben Zeile. */
+const CASE_OPENER = /^case\s.*\sin$/;
+/**
+ * Fortsetzung oder Ende eines Blocks: `fi`, `done`, `esac`, `}` allein, oder
+ * eine Zeile, die mit `then`, `do`, `else`, `elif` beginnt — einzeilige
+ * Konstrukte fangen nie so an.
+ */
+const BLOCK_PART = /^(fi|done|esac|\})$|^(then|do|else|elif)(\s.*)?$/;
 
 /**
  * Für mehrzeilige Skripte, die Zeile für Zeile mit Markern dazwischen laufen:
@@ -116,6 +133,10 @@ export function shellLineShape(command: string): ShellLineShape {
     ...(trailingOperator ? { trailingOperator } : {}),
     // `<<<` ist ein Here-String und bleibt auf der Zeile.
     heredoc: /(^|[^<])<<(?!<)/.test(code),
+    // Einzeilig (`if …; then …; fi`) ist das kein Problem; über Zeilen
+    // verteilt stünden die Marker-Befehle mitten im Block — ein `fi` allein
+    // als Zeile wäre für die Shell ein Syntaxfehler im Gesamtskript.
+    multilineConstruct: [BLOCK_OPENER, CASE_OPENER, BLOCK_PART].some((re) => re.test(tail.trimStart())),
   };
 }
 
