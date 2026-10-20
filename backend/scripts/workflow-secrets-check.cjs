@@ -262,7 +262,7 @@ function doc(key, owner, extra = {}) {
       assert.equal(sent.length, 1);
       assert.ok(sent[0].includes("\necho 'geheim123'\n"), 'echter Wert geht an den Server');
       // Ins SSH-Audit geht der maskierte Befehl ohne Marker (Task 4).
-      assert.deepEqual(auditCommands.slice(-1), ['echo ••••']);
+      assert.deepEqual(auditCommands.slice(-1), ['echo ••••(T)']);
       assert.ok(nr.outputSnapshot.stdout.includes('••••'), nr.outputSnapshot.stdout);
       assert.ok(!nr.outputSnapshot.stdout.includes('geheim123'));
       assert.ok(nr.resolvedConfig.command.includes('••••(T)'), nr.resolvedConfig.command);

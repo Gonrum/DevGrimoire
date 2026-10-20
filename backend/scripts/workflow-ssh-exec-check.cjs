@@ -433,7 +433,7 @@ async function check(name, fn) {
     const { command, opts } = session.calls[0];
     assert.ok(command.includes(`login 'ab'\\''cdefg'`), command);
     assert.ok(command.includes(`echo ab'cdefg`), command);
-    assert.equal(opts.auditCommand, 'login ••••\necho ••••');
+    assert.equal(opts.auditCommand, 'login ••••(T)\necho ••••(T)');
   });
 
   await check('output.lines[].command: gequotete Secret-Form maskiert (echte Shell)', async () => {
@@ -443,7 +443,7 @@ async function check(name, fn) {
     c.secretValues = ["ab'cdefg"];
     const r = await executor(session).exec.execute(c);
     assert.equal(r.status, 'success');
-    assert.equal(r.output.lines[0].command, 'true ••••');
+    assert.equal(r.output.lines[0].command, 'true ••••(T)');
     assert.ok(!JSON.stringify(r).includes('cdefg'), JSON.stringify(r));
   });
 
@@ -505,6 +505,61 @@ async function check(name, fn) {
       { projectId: P1 }, { connectionId: CONN_OWN, command: 'true' }, {}, USER,
     );
     assert.equal(plain.calls.length, 0);
+  });
+
+  await check('kurze Secrets (3 und 1 Zeichen) weder im Audit noch in lines[].command (echte Shell)', async () => {
+    for (const [value, command] of [
+      ['a1b', 'true {{{secrets.T}}}'],
+      ['a1b', 'true {{secrets.T}}'],
+      ['Z', 'true {{secrets.T}} {{{secrets.T}}}'],
+    ]) {
+      const session = bashSession();
+      const c = ctx({ connectionId: CONN_OWN, command });
+      c.runContext = { nodes: {}, input: {}, secrets: { T: value } };
+      c.secretValues = [value];
+      const r = await executor(session).exec.execute(c);
+      assert.equal(r.status, 'success', command);
+      const audit = session.calls[0].opts.auditCommand;
+      assert.ok(!audit.includes(value), `${command}: ${audit}`);
+      assert.ok(audit.startsWith('true ••••(T)'), audit);
+      assert.ok(!r.output.lines[0].command.includes(value), r.output.lines[0].command);
+      assert.equal(r.output.lines[0].command, audit);
+      // An den Server geht der echte Wert.
+      assert.ok(session.calls[0].command.includes(value));
+    }
+  });
+
+  await check('Kommentar mit Apostroph wird angenommen und läuft (echte Shell)', async () => {
+    const session = bashSession();
+    const r = await executor(session).exec.execute(ctx({ connectionId: CONN_OWN, command: "echo hi # it's done" }));
+    assert.equal(r.status, 'success', JSON.stringify(r.error));
+    assert.equal(r.output.stdout, 'hi\n');
+    assert.equal(r.output.lines[0].command, "echo hi # it's done");
+  });
+
+  await check('Zeile endet mit | / && / || oder Here-Doc → invalid_config mit Zeile, kein exec', async () => {
+    const session = makeSession({});
+    const { exec } = executor(session);
+    for (const [command, message] of [
+      ['ls |\nwc -l', 'Zeile 1: Befehl endet mit "|" — mehrzeilige Konstrukte werden nicht unterstützt, bitte in eine Zeile schreiben oder mit \\ fortsetzen'],
+      ['true\nmake &&\nmake install', 'Zeile 2: Befehl endet mit "&&" — mehrzeilige Konstrukte werden nicht unterstützt, bitte in eine Zeile schreiben oder mit \\ fortsetzen'],
+      ['test -f x ||\ntouch x', 'Zeile 1: Befehl endet mit "||" — mehrzeilige Konstrukte werden nicht unterstützt, bitte in eine Zeile schreiben oder mit \\ fortsetzen'],
+      ['cat <<EOF\nhallo\nEOF', 'Zeile 1: Here-Docs werden nicht unterstützt'],
+    ]) {
+      const r = await exec.execute(ctx({ connectionId: CONN_OWN, command }));
+      assert.equal(r.error.code, 'invalid_config', command);
+      assert.equal(r.error.message, message);
+    }
+    assert.equal(session.calls.length, 0);
+  });
+
+  await check('Operatoren/<< in Quotes oder Kommentar sind erlaubt (echte Shell)', async () => {
+    const session = bashSession();
+    const r = await executor(session).exec.execute(
+      ctx({ connectionId: CONN_OWN, command: 'echo "a |" \'<<b &&\'\necho ok # sonst && <<EOF' }),
+    );
+    assert.equal(r.status, 'success', JSON.stringify(r.error));
+    assert.equal(r.output.stdout, 'a | <<b &&\nok\n');
   });
 
   console.log(`${passed} passed`);

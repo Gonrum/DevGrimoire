@@ -89,20 +89,48 @@ export function expandShellCommand(command: string, context: Record<string, unkn
     : { ok: true, command: out };
 }
 
-/**
- * Endet der Text innerhalb eines Quotes? Für mehrzeilige Skripte, die Zeile
- * für Zeile mit Markern dazwischen laufen: ein über die Zeile offener Quote
- * schlösse die Marker-Zeile mit ein, und ein dort eingesetztes `'…'` stünde
- * in Double-Quotes — `$(…)` im Wert liefe wieder.
- */
-export function endsInsideQuotes(command: string): boolean {
-  return scanShellTemplate(command, {}).state !== 'none';
+/** Form einer Skriptzeile, soweit sie für das Zeilen-Skript zählt. */
+export interface ShellLineShape {
+  /** Die Zeile endet innerhalb eines Quotes. */
+  openQuote: boolean;
+  /** Ungequoteter Operator am Zeilenende, der mit der nächsten Zeile weitermacht. */
+  trailingOperator?: '|' | '&&' | '||';
+  /** Ungequotetes `<<` (Here-Doc) — liest die folgenden Zeilen als Eingabe. */
+  heredoc: boolean;
 }
+
+/**
+ * Für mehrzeilige Skripte, die Zeile für Zeile mit Markern dazwischen laufen:
+ * Alles, was die Shell über das Zeilenende hinaus weiterlesen ließe, schlösse
+ * die Marker-Befehle mit ein. Ein offener Quote ist dabei gefährlich (ein dort
+ * eingesetztes `'…'` stünde in Double-Quotes — `$(…)` im Wert liefe wieder),
+ * `|`/`&&`/`||` am Ende und Here-Docs verschieben die Marker. Ausgewertet wird
+ * nur Code außerhalb von Quotes und Kommentaren.
+ */
+export function shellLineShape(command: string): ShellLineShape {
+  const { state, code } = scanShellTemplate(command, {});
+  const tail = code.trimEnd();
+  const trailingOperator = tail.endsWith('||') ? '||' : tail.endsWith('&&') ? '&&' : tail.endsWith('|') ? '|' : undefined;
+  return {
+    openQuote: state !== 'none',
+    ...(trailingOperator ? { trailingOperator } : {}),
+    // `<<<` ist ein Here-String und bleibt auf der Zeile.
+    heredoc: /(^|[^<])<<(?!<)/.test(code),
+  };
+}
+
+/** Endet der Text innerhalb eines Quotes? */
+export function endsInsideQuotes(command: string): boolean {
+  return shellLineShape(command).openQuote;
+}
+
+/** Zeichen, nach denen ein `#` ein Wort beginnt — und damit einen Kommentar. */
+const WORD_BREAK = /[\s;&|()<>]/;
 
 function scanShellTemplate(
   command: string,
   context: Record<string, unknown>,
-): { out: string; missing: string[]; invalid: string[]; quoted: string[]; state: QuoteState } {
+): { out: string; missing: string[]; invalid: string[]; quoted: string[]; state: QuoteState; code: string } {
   const missing: string[] = [];
   const invalid: string[] = [];
   const quoted: string[] = [];
@@ -110,6 +138,10 @@ function scanShellTemplate(
     if (!list.includes(path)) list.push(path);
   };
   let out = '';
+  // Gerüst der Zeile: nur ungequoteter Code außerhalb von Kommentaren, alles
+  // andere (Quote-Inhalt, Platzhalter, Escapes) als `x`.
+  let code = '';
+  let comment = false;
   let state: QuoteState = 'none';
   let i = 0;
   while (i < command.length) {
@@ -117,6 +149,7 @@ function scanShellTemplate(
     const m = PLACEHOLDER.exec(command);
     if (m) {
       i += m[0].length;
+      if (!comment) code += 'x';
       const rawPath: string | undefined = m[1];
       const path = (rawPath ?? m[2] ?? '').trim();
       if (state !== 'none') {
@@ -138,13 +171,26 @@ function scanShellTemplate(
       continue;
     }
     const ch = command[i];
+    // Ein ungequotetes `#` am Wortanfang beginnt einen Kommentar bis zum
+    // Zeilenende: Quotes darin (`# it's done`) öffnen nichts. Der Text wird
+    // unverändert übernommen.
+    if (!comment && state === 'none' && ch === '#' && (i === 0 || WORD_BREAK.test(command[i - 1]))) {
+      comment = true;
+    }
+    if (comment) {
+      out += ch;
+      i += 1;
+      continue;
+    }
     // Backslash maskiert außerhalb von Single-Quotes das nächste Zeichen — ein
     // `\"` öffnet also keinen Quote. Beide Zeichen werden unverändert übernommen.
     if (ch === '\\' && state !== 'single' && i + 1 < command.length) {
       out += command.slice(i, i + 2);
+      code += 'xx';
       i += 2;
       continue;
     }
+    const before = state;
     if (state === 'none') {
       if (ch === "'") state = 'single';
       else if (ch === '"') state = 'double';
@@ -153,8 +199,9 @@ function scanShellTemplate(
     } else if (ch === '"') {
       state = 'none';
     }
+    code += before === 'none' && state === 'none' ? ch : 'x';
     out += ch;
     i += 1;
   }
-  return { out, missing, invalid, quoted, state };
+  return { out, missing, invalid, quoted, state, code };
 }

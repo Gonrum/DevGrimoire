@@ -4,7 +4,7 @@
  * ohne Nest und ohne MongoDB.
  */
 const assert = require('node:assert/strict');
-const { shellQuote, expandShellCommand } = require('../dist/workflows/nodes/shell-template');
+const { shellQuote, expandShellCommand, shellLineShape, endsInsideQuotes } = require('../dist/workflows/nodes/shell-template');
 
 assert.equal(shellQuote("a'b"), "'a'\\''b'");
 assert.equal(shellQuote(''), "''");
@@ -108,5 +108,25 @@ for (const v of ["it's", '$(id)', '"', '\\']) {
   assert.equal(r.ok, true);
   assert.equal(execFileSync('sh', ['-c', r.command]).toString(), `[${v}]`);
 }
+
+// Zeilenform für mehrzeilige Skripte (Task 4): Quotes und Kommentare zählen nicht.
+assert.deepEqual(shellLineShape('echo hi'), { openQuote: false, heredoc: false });
+assert.equal(endsInsideQuotes('echo "a'), true);
+assert.equal(endsInsideQuotes("echo hi # it's done"), false);
+assert.equal(endsInsideQuotes("echo a#b'"), true, '# mitten im Wort ist kein Kommentar');
+assert.equal(endsInsideQuotes("echo 'a # b'"), false);
+assert.equal(shellLineShape('ls |').trailingOperator, '|');
+assert.equal(shellLineShape('make &&  ').trailingOperator, '&&');
+assert.equal(shellLineShape('test -f x ||').trailingOperator, '||');
+assert.equal(shellLineShape('echo "a |"').trailingOperator, undefined);
+assert.equal(shellLineShape('echo a \\|').trailingOperator, undefined, 'escaptes | ist kein Operator');
+assert.equal(shellLineShape('echo a # weiter &&').trailingOperator, undefined);
+assert.equal(shellLineShape('cat <<EOF').heredoc, true);
+assert.equal(shellLineShape('cat <<-"EOF" > f').heredoc, true);
+assert.equal(shellLineShape('cat <<< "x"').heredoc, false, 'Here-String bleibt auf der Zeile');
+assert.equal(shellLineShape('echo "<<x"').heredoc, false);
+assert.equal(shellLineShape('echo x # <<EOF').heredoc, false);
+// Platzhalter im Kommentar nach Apostroph: nicht mehr als „in Quotes" abgelehnt.
+assert.deepEqual(expandShellCommand("true # it's {{t}}", { t: 'v' }), { ok: true, command: "true # it's 'v'" });
 
 console.log('workflow-shell-template-check: OK');

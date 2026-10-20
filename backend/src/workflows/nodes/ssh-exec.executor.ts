@@ -13,7 +13,8 @@ import { WorkflowScope } from '../schemas/workflow-definition.schema';
 import { WORKFLOW_RUNTIME_LIMITS } from '../workflow-security.runtime';
 import { errorMessage } from '../workflow-narrow';
 import { expandTemplate } from './template';
-import { endsInsideQuotes, expandShellCommand, shellQuote } from './shell-template';
+import { expandShellCommand, shellLineShape, shellQuote } from './shell-template';
+import { isRecord } from '../workflow-narrow';
 import { SECRET_MASK, findSecretKeys, maskSecrets } from './template-resolver';
 import { WorkflowSecretsResolver } from '../engine/workflow-secrets.resolver';
 import { LineResult, ScriptAbort, ScriptLine, buildScript, lineFailureMessage, parseScriptOutput, splitCommandLines } from './ssh-script';
@@ -104,20 +105,11 @@ function planCommand(command: string, context: Record<string, unknown>): Command
       result: { status: 'failed', error: { code: 'invalid_config', message: 'Befehl enthält keine ausführbare Zeile' } },
     };
   }
-  const open = lines.find((l) => endsInsideQuotes(l.command));
-  if (open) {
-    return {
-      ok: false,
-      result: {
-        status: 'failed',
-        error: {
-          code: 'invalid_config',
-          message:
-            `Zeile ${open.line}: Anführungszeichen nicht geschlossen — jede Zeile läuft einzeln, ` +
-            'mehrzeilige Strings sind nicht möglich (Zeilen mit \\ am Ende verbinden)',
-        },
-      },
-    };
+  for (const l of lines) {
+    const problem = lineProblem(l);
+    if (problem) {
+      return { ok: false, result: { status: 'failed', error: { code: 'invalid_config', message: problem } } };
+    }
   }
   const missing = new Set<string>();
   const invalid = new Set<string>();
@@ -137,6 +129,62 @@ function planCommand(command: string, context: Record<string, unknown>): Command
     return { ok: false, result: templateUnresolved([...missing], [...invalid], [...quoted]) };
   }
   return { ok: true, lines: expanded };
+}
+
+/**
+ * Alles, was die Shell über das Zeilenende hinaus weiterlesen ließe, schlösse
+ * die Marker-Befehle zwischen den Zeilen ein: offener Quote (dann stünde ein
+ * eingesetztes `'…'` in Double-Quotes, `$(…)` im Wert liefe), Operator am
+ * Ende, Here-Doc. Quotes und Kommentare zählen dabei nicht.
+ */
+function lineProblem(l: ScriptLine): string | undefined {
+  const shape = shellLineShape(l.command);
+  if (shape.openQuote) {
+    return (
+      `Zeile ${l.line}: Anführungszeichen nicht geschlossen — jede Zeile läuft einzeln, ` +
+      'mehrzeilige Strings sind nicht möglich (Zeilen mit \\ am Ende verbinden)'
+    );
+  }
+  if (shape.heredoc) return `Zeile ${l.line}: Here-Docs werden nicht unterstützt`;
+  if (shape.trailingOperator) {
+    return (
+      `Zeile ${l.line}: Befehl endet mit "${shape.trailingOperator}" — mehrzeilige Konstrukte werden nicht ` +
+      'unterstützt, bitte in eine Zeile schreiben oder mit \\ fortsetzen'
+    );
+  }
+  return undefined;
+}
+
+/**
+ * Setzt den Befehl ein wie für den Server, aber mit `••••(KEY)` statt der
+ * Secret-Werte — für Audit, `lines[].command` und den Test-Dialog. Ersetzt
+ * wird über den Platzhalter, nicht über den Wert: so bleibt auch ein Secret
+ * aus ein bis drei Zeichen verborgen (Wert-Maskierung greift erst ab vier).
+ * Je KEY steht vorübergehend ein Hex-Token im Kontext; er enthält keine
+ * Quotes, gequotet ist er also einfach `'token'`.
+ */
+function displayPlan(command: string, context: Record<string, unknown>, keys: string[]): CommandPlan {
+  const withTokens: Record<string, unknown> = { ...context };
+  delete withTokens.secrets;
+  const nonce = randomBytes(6).toString('hex');
+  const shown = new Map<string, string>();
+  const secrets: Record<string, string> = {};
+  keys.forEach((key, i) => {
+    const token = `__DG_SECRET_${nonce}_${i}__`;
+    secrets[key] = token;
+    shown.set(token, `${SECRET_MASK}(${key})`);
+  });
+  if (keys.length > 0) withTokens.secrets = secrets;
+  const plan = planCommand(command, withTokens);
+  if (!plan.ok) return plan;
+  const toDisplay = (text: string): string => {
+    let out = text;
+    for (const [token, display] of shown) {
+      out = out.split(shellQuote(token)).join(display).split(token).join(display);
+    }
+    return out;
+  };
+  return { ok: true, lines: plan.lines.map((l) => ({ line: l.line, command: toDisplay(l.command) })) };
 }
 
 /**
@@ -270,6 +318,18 @@ export class SshExecExecutor implements NodeExecutor {
     const script = prefix + buildScript(plan.lines, { nonce, failFast });
     const timeouts = sshTimeouts(config);
     const forms = secretForms(ctx.secretValues ?? []);
+    // Anzeige-Fassung über die Platzhalter; die Wert-Maskierung darüber fängt
+    // Secrets ab, die auf anderem Weg (z. B. Vorgänger-Ausgabe) im Befehl landen.
+    const secretKeys = isRecord(ctx.runContext.secrets) ? Object.keys(ctx.runContext.secrets) : [];
+    const display = displayPlan(config.command, ctx.runContext, secretKeys);
+    // Kann nicht scheitern, wenn der echte Plan gelang (gleiche Pfade, Tokens
+    // sind Strings); falls doch, lieber gar nichts zeigen als einen Wert.
+    const shownLines = new Map(
+      (display.ok ? display.lines : plan.lines.map((l) => ({ line: l.line, command: SECRET_MASK }))).map((l) => [
+        l.line,
+        maskSecrets(l.command, forms),
+      ]),
+    );
 
     let result: SshExecResult;
     try {
@@ -286,7 +346,7 @@ export class SshExecExecutor implements NodeExecutor {
           debug: false,
         },
         // Ins Audit: eingesetzter Befehl ohne Marker, Secrets maskiert.
-        auditCommand: maskSecrets(plan.lines.map((l) => l.command).join('\n'), forms),
+        auditCommand: plan.lines.map((l) => shownLines.get(l.line) ?? SECRET_MASK).join('\n'),
         signal: ctx.signal,
       });
     } catch (err: unknown) {
@@ -309,9 +369,9 @@ export class SshExecExecutor implements NodeExecutor {
       truncated: result.truncated,
       aborted,
       connection: connection.label,
-      // Die Zeilen tragen den eingesetzten Befehl — auch hier die gequotete
-      // Secret-Form maskieren, die Engine kennt nur die Rohwerte.
-      lines: ran.lines.map((l) => ({ ...l, command: maskSecrets(l.command, forms) })),
+      // Die Zeilen tragen den eingesetzten Befehl in der Anzeige-Fassung — die
+      // Engine maskiert nur Rohwerte ab vier Zeichen.
+      lines: ran.lines.map((l) => ({ ...l, command: shownLines.get(l.line) ?? SECRET_MASK })),
     };
     ctx.logger.info('ssh.exec beendet', {
       connection: connection.label,
@@ -430,46 +490,28 @@ export class SshExecExecutor implements NodeExecutor {
     command: string,
     runContext: Record<string, unknown>,
   ): Promise<{ commands: ScriptLine[] } | { commandProblem: { code: string; message: string } }> {
-    const context: Record<string, unknown> = { ...runContext };
-    delete context.secrets;
-    // Platzhalterwerte, die nach dem Einsetzen gegen ••••(KEY) getauscht
-    // werden. Hex-Nonce + Index: keine Quotes, also gequotet einfach `'…'`.
-    const display = new Map<string, string>();
-    const keys = findSecretKeys(command);
-    if (keys.length > 0) {
-      let available: Set<string>;
+    // `displayPlan` verwirft ein mitgeschicktes `runContext.secrets`; nur
+    // verfügbare KEYs bekommen einen Token, die übrigen bleiben `missing`.
+    let keys: string[] = [];
+    const wanted = findSecretKeys(command);
+    if (wanted.length > 0) {
       try {
         const infos = await this.secretsResolver.available({
           projectId: owner.projectId?.toString(),
           customerId: owner.customerId?.toString(),
         });
-        available = new Set(infos.map((s) => s.key));
+        const available = new Set(infos.map((s) => s.key));
+        keys = wanted.filter((k) => available.has(k));
       } catch (err: unknown) {
         return { commandProblem: { code: 'secrets_unavailable', message: cap(errorMessage(err)) } };
       }
-      const nonce = randomBytes(6).toString('hex');
-      const secrets: Record<string, string> = {};
-      keys.forEach((key, i) => {
-        if (!available.has(key)) return;
-        const token = `__DG_SECRET_${nonce}_${i}__`;
-        secrets[key] = token;
-        display.set(token, `${SECRET_MASK}(${key})`);
-      });
-      context.secrets = secrets;
     }
-    const plan = planCommand(command, context);
+    const plan = displayPlan(command, runContext, keys);
     if (!plan.ok) {
       const error = plan.result.error ?? { code: 'invalid_config', message: 'Befehl ungültig' };
       return { commandProblem: { code: error.code, message: error.message } };
     }
-    const toDisplay = (text: string): string => {
-      let out = text;
-      for (const [token, shown] of display) {
-        out = out.split(shellQuote(token)).join(shown).split(token).join(shown);
-      }
-      return out;
-    };
-    return { commands: plan.lines.map((l) => ({ line: l.line, command: toDisplay(l.command) })) };
+    return { commands: plan.lines };
   }
 
   private cancelled(): NodeResult {
