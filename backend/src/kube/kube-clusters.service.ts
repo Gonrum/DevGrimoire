@@ -11,6 +11,7 @@ import { KubeTransportService, requireHttpsUrl } from './kube-transport.service'
 import { assertClusterAccess, canAccessCluster } from './kube-access.guard';
 import { isDuplicateKeyError } from '../common/narrow';
 import { RequestContext } from '../common/request-context';
+import { actorCanAccessCustomer, actorCanAccessProject } from '../common/permissions';
 import { UserRole } from '../auth/schemas/user.schema';
 import { CreateKubeClusterDto, KubePrometheusDto } from './dto/create-kube-cluster.dto';
 import { UpdateKubeClusterDto } from './dto/update-kube-cluster.dto';
@@ -94,6 +95,19 @@ export class KubeClustersService {
     }
     if (dto.projectId && dto.customerId) {
       throw new BadRequestException('projectId und customerId schließen sich gegenseitig aus');
+    }
+    // T-477: Anlegen in einem fremden Projekt/Kunden ist so verboten wie das
+    // Lesen dort — sonst legte ein verengter Key einen Cluster samt
+    // Kubeconfig-Secret in einen Scope, den er selbst nicht sehen darf.
+    // `if (actor)` wie in findById(): ohne Actor ist der Aufrufer intern.
+    const actor = RequestContext.getUser();
+    if (actor) {
+      const allowed = dto.projectId
+        ? actorCanAccessProject(actor, dto.projectId)
+        : actorCanAccessCustomer(actor, dto.customerId);
+      if (!allowed) {
+        throw new ForbiddenException('Kein Zugriff auf das Ziel-Projekt bzw. den Ziel-Kunden');
+      }
     }
 
     const parsed = parseKubeconfig(dto.kubeconfig);

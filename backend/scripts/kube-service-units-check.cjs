@@ -390,6 +390,36 @@ function makeSecretsService() {
     });
   });
 
+  await check('T-477: create in fremdes Projekt/fremden Kunden wird abgelehnt, nichts angelegt', async () => {
+    const clusterModel = makeModel();
+    const secretModel = makeModel();
+    let secretCreates = 0;
+    const secrets = makeSecretsService();
+    const origCreate = secrets.create.bind(secrets);
+    secrets.create = async (dto) => { secretCreates += 1; return origCreate(dto); };
+    const svc = new KubeClustersService(clusterModel, secretModel, secrets, makeTransportStub());
+    const foreignProject = String(new Types.ObjectId());
+    const foreignCustomer = String(new Types.ObjectId());
+    await asScopedActor([String(PROJECT)], async () => {
+      for (const owner of [{ projectId: foreignProject }, { customerId: foreignCustomer }]) {
+        const err = await svc.create({
+          label: 'X', slug: 'x', ...owner,
+          kubeconfig: GOOD_KUBECONFIG, contextName: 'prod', transport: 'direct',
+        }).then(() => null, (e) => e);
+        assert.ok(err, `create in ${JSON.stringify(owner)} hätte abgelehnt werden müssen`);
+        assert.equal(err.getStatus(), 403);
+      }
+      assert.equal(clusterModel._store.size, 0, 'ein Cluster wurde trotz Ablehnung angelegt');
+      assert.equal(secretCreates, 0, 'das Kubeconfig-Secret wurde vor der Scope-Prüfung angelegt');
+      // Im eigenen Projekt geht es weiter.
+      const own = await svc.create({
+        label: 'Own', slug: 'own', projectId: String(PROJECT),
+        kubeconfig: GOOD_KUBECONFIG, contextName: 'prod', transport: 'direct',
+      });
+      assert.equal(own.slug, 'own');
+    });
+  });
+
   await check('T-477: kein Actor (interner Aufrufer / stdio-MCP) bleibt ungegated', async () => {
     const fx = await twoClusterFixture();
     // Dokumentierte Konvention dieses Moduls (siehe assertFlagPermission und

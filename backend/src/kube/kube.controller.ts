@@ -127,6 +127,10 @@ export class KubeController {
     @Param('id') id: string,
     @Query() q: KubeAuditQueryDto,
   ) {
+    // T-477: das Audit nennt Namespaces, Ressourcen und Fehlertexte eines
+    // Clusters — erst den Zugriff auf den Cluster prüfen (findById wirft 403
+    // bzw. 404), dann lesen.
+    await this.clusters.findById(id);
     const { items, total } = await this.audit.list(id, {
       limit: q.limit,
       offset: q.offset,
