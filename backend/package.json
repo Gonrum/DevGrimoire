@@ -28,6 +28,7 @@
     "check:workflow-run-slot-index": "node scripts/workflow-run-slot-index-check.cjs",
     "check:workflow-runtime-fingerprint": "node scripts/workflow-runtime-fingerprint-check.cjs",
     "check:workflow-accountability": "node scripts/workflow-accountability-check.cjs",
+    "check:workflow-actor-scope": "node scripts/workflow-actor-scope-check.cjs",
     "check:workflow-todo-find": "node scripts/workflow-todo-find-check.cjs",
     "check:workflow-ssh-exec": "node scripts/workflow-ssh-exec-check.cjs",
     "check:workflow-ssh-script": "node scripts/workflow-ssh-script-check.cjs",

@@ -39,6 +39,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { RequestContext, RequestUser } from '../common/request-context';
 import { runtimeFingerprint } from './workflow-runtime-fingerprint';
 import { assertActorCanAccessWorkflow } from './workflow-actor-access';
+import { buildDualScopeFilter } from '../common/scope';
 import { redact } from './workflow-redaction';
 import { summarizeRisk, WORKFLOW_RUNTIME_LIMITS } from './workflow-security.runtime';
 import { getTemplate, listTemplatesPublic, WorkflowTemplate } from './workflow-templates';
@@ -155,6 +156,10 @@ export class WorkflowsService {
 
   async createDefinition(dto: CreateWorkflowDefinitionDto): Promise<WorkflowDefinitionDocument> {
     this.assertScope(dto);
+    // T-505: ein auf Projekt A verengter Key darf keinen Workflow in Projekt B
+    // anlegen — auch als Entwurf nicht, denn wer ihn später freigibt, sieht
+    // einen fertigen Ablauf, den ein Fremder geschrieben hat.
+    assertActorCanAccessWorkflow(RequestContext.getUser(), dto);
     if ((dto.nodes?.length ?? 0) > WORKFLOW_RUNTIME_LIMITS.maxNodesPerDefinition) {
       throw new BadRequestException(
         `Workflow exceeds ${WORKFLOW_RUNTIME_LIMITS.maxNodesPerDefinition} nodes`,
@@ -189,6 +194,10 @@ export class WorkflowsService {
     if (!query.includeArchived) {
       filter.status = filter.status ?? { $ne: WorkflowStatus.ARCHIVED };
     }
+    // T-505: nur Workflows aus Projekten/Kunden im Scope des Akteurs.
+    // System-Workflows (weder projectId noch customerId) bleiben sichtbar —
+    // dieselbe Regel wie assertActorCanAccessWorkflow.
+    Object.assign(filter, buildDualScopeFilter(RequestContext.getUser()));
     return this.definitionModel
       .find(filter)
       .sort({ updatedAt: -1 })
@@ -197,7 +206,24 @@ export class WorkflowsService {
       .exec();
   }
 
+  /**
+   * Definition für einen Aufrufer von aussen (REST, MCP): prüft, ob der
+   * Request-Akteur auf Projekt/Kunde des Workflows zugreifen darf (T-505).
+   * Ohne Akteur — Scheduler, Engine — bleibt es beim reinen Laden.
+   */
   async getDefinition(id: string): Promise<WorkflowDefinitionDocument> {
+    const def = await this.findDefinition(id);
+    assertActorCanAccessWorkflow(RequestContext.getUser(), def);
+    return def;
+  }
+
+  /**
+   * Laden ohne Akteurprüfung. Nur für Pfade, die selbst entscheiden, gegen
+   * welchen Akteur sie prüfen: `startRun` prüft bei Event-/Zeitplan-Läufen
+   * bewusst *nicht* gegen den Request-Akteur — der Event-Listener läuft noch
+   * im RequestContext des Auslösers, und der ist nicht der Verantwortliche.
+   */
+  private async findDefinition(id: string): Promise<WorkflowDefinitionDocument> {
     if (!isValidObjectId(id)) throw new BadRequestException('Invalid workflow id');
     const def = await this.definitionModel.findById(id).exec();
     if (!def) throw new NotFoundException(`Workflow ${id} not found`);
@@ -211,7 +237,6 @@ export class WorkflowsService {
    */
   async listAvailableSecrets(id: string): Promise<WorkflowSecretInfo[]> {
     const def = await this.getDefinition(id);
-    assertActorCanAccessWorkflow(RequestContext.getUser(), def);
     return this.secretsResolver.available({
       projectId: def.projectId?.toString(),
       customerId: def.customerId?.toString(),
@@ -364,7 +389,7 @@ export class WorkflowsService {
   }
 
   async startRun(dto: StartWorkflowRunDto, requestActor?: RequestUser): Promise<WorkflowRunDocument> {
-    const def = await this.getDefinition(dto.definitionId);
+    const def = await this.findDefinition(dto.definitionId);
     // Interne Starts (Scheduler, Event-Listener) bringen `triggeredBy` mit und
     // bleiben ohne Request-Akteur — ein Event-Lauf soll nicht dem Nutzer
     // zugerechnet werden, dessen Aktion das Event zufällig ausgelöst hat (der
@@ -439,7 +464,7 @@ export class WorkflowsService {
     dto: StartDebugRunDto,
     requestActor?: RequestUser,
   ): Promise<WorkflowRunDocument> {
-    const def = await this.getDefinition(definitionId);
+    const def = await this.findDefinition(definitionId);
     const actor = requestActor ?? RequestContext.getUser();
     // Der Debuggende ist der zurechenbare Nutzer jedes Schritts — ohne ihn
     // gäbe es niemanden, dem die Schritte gehören.
@@ -561,6 +586,7 @@ export class WorkflowsService {
     if (query.projectId) filter.projectId = new Types.ObjectId(query.projectId);
     if (query.customerId) filter.customerId = new Types.ObjectId(query.customerId);
     if (query.status) filter.status = query.status;
+    Object.assign(filter, buildDualScopeFilter(RequestContext.getUser()));
     return this.runModel
       .find(filter)
       .sort({ createdAt: -1 })
@@ -569,7 +595,14 @@ export class WorkflowsService {
       .exec();
   }
 
+  /** Lauf für einen Aufrufer von aussen — mit Akteurprüfung wie `getDefinition`. */
   async getRun(id: string): Promise<WorkflowRunDocument> {
+    const run = await this.findRun(id);
+    assertActorCanAccessWorkflow(RequestContext.getUser(), run);
+    return run;
+  }
+
+  private async findRun(id: string): Promise<WorkflowRunDocument> {
     if (!isValidObjectId(id)) throw new BadRequestException('Invalid run id');
     const run = await this.runModel.findById(id).exec();
     if (!run) throw new NotFoundException(`Workflow run ${id} not found`);
@@ -578,7 +611,7 @@ export class WorkflowsService {
 
   async inspectRun(id: string): Promise<Record<string, unknown>> {
     const run = await this.getRun(id);
-    const nodeRuns = await this.listNodeRuns(id);
+    const nodeRuns = await this.nodeRunsOf(run._id);
     const counts = nodeRuns.reduce<Record<string, number>>((acc, nr) => {
       acc[nr.status] = (acc[nr.status] ?? 0) + 1;
       return acc;
@@ -746,14 +779,25 @@ export class WorkflowsService {
   }
 
   async listNodeRuns(runId: string): Promise<WorkflowNodeRunDocument[]> {
-    if (!isValidObjectId(runId)) throw new BadRequestException('Invalid run id');
-    return this.nodeRunModel.find({ runId: new Types.ObjectId(runId) }).sort({ createdAt: 1 }).exec();
+    const run = await this.getRun(runId);
+    return this.nodeRunsOf(run._id);
   }
 
+  private nodeRunsOf(runId: Types.ObjectId): Promise<WorkflowNodeRunDocument[]> {
+    return this.nodeRunModel.find({ runId }).sort({ createdAt: 1 }).exec();
+  }
+
+  /**
+   * Ein NodeRun trägt selbst kein Projekt — der Zugriff entscheidet sich am
+   * Lauf. Ein verwaister NodeRun (Lauf gelöscht) ist für niemanden mehr
+   * erreichbar, auch nicht für einen unverengten Akteur: ohne Lauf lässt sich
+   * nicht sagen, wem er gehört.
+   */
   async getNodeRun(id: string): Promise<WorkflowNodeRunDocument> {
     if (!isValidObjectId(id)) throw new BadRequestException('Invalid node run id');
     const nr = await this.nodeRunModel.findById(id).exec();
     if (!nr) throw new NotFoundException(`Node run ${id} not found`);
+    await this.getRun(nr.runId.toString());
     return nr;
   }
 
