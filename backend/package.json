@@ -115,6 +115,7 @@
     "check:chat-tool-confirm": "node scripts/chat-tool-confirm-check.cjs",
     "check:briefing-allowlist": "node scripts/briefing-allowlist-check.cjs",
     "check:replication-entity-maps": "node scripts/replication-entity-maps-check.cjs",
+    "check:replication-full-sync-apply": "node scripts/replication-full-sync-apply-check.cjs",
     "check:kubeconfig-parser": "node scripts/kubeconfig-parser-check.cjs",
     "check:kube-schema": "node scripts/kube-schema-check.cjs",
     "check:kube-service": "node scripts/kube-service-units-check.cjs",

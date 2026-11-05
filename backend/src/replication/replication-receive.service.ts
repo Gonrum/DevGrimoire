@@ -299,13 +299,19 @@ export class ReplicationReceiveService {
           const id = idToString(rawId);
           if (!id) throw new Error('unusable _id in full-sync document');
 
-          const cleanDoc: Record<string, unknown> = { ...rawDoc };
+          let cleanDoc: Record<string, unknown> = { ...rawDoc };
           delete cleanDoc._id;
+          // Transportfeld des Senders: die Binärdaten gehen nach MinIO (unten),
+          // nicht als Base64 ins Mongo-Dokument — dort lagen sie vorher mit
+          // jedem Full-Sync erneut, bis zu 10 MB pro Anhang.
+          const binaryBase64 = cleanDoc._binaryBase64;
+          delete cleanDoc._binaryBase64;
 
           // Convert string ObjectIds (Truthiness-Prüfung wie oben: '' wirft)
           if (cleanDoc.projectId && typeof cleanDoc.projectId === 'string') {
             cleanDoc.projectId = new ObjectId(cleanDoc.projectId);
           }
+          cleanDoc = this.castBySchema(collectionName, cleanDoc);
           this.normalizeTimestamps(cleanDoc);
 
           // LWW: skip upsert when the local doc has a newer `updatedAt` than
@@ -339,8 +345,8 @@ export class ReplicationReceiveService {
           // `_binaryBase64` (bzw. ein fehlender storageKey) wirft weiter statt
           // still den Anhang zu überspringen: das landet im catch unten als
           // errors++ mit Warnung, wie vorher über `Buffer.from`/putObject.
-          if (key === 'attachments' && cleanDoc._binaryBase64 && this.minioService.isEnabled()) {
-            const base64 = asString(cleanDoc._binaryBase64);
+          if (key === 'attachments' && binaryBase64 && this.minioService.isEnabled()) {
+            const base64 = asString(binaryBase64);
             const storageKey = asString(cleanDoc.storageKey);
             if (!base64) throw new Error('attachment _binaryBase64 is not a string');
             if (!storageKey) throw new Error('attachment has no storageKey');
@@ -359,5 +365,38 @@ export class ReplicationReceiveService {
     }
 
     return { entities, errors, skipped };
+  }
+  /**
+   * Wandelt die Felder eines per JSON übertragenen Dokuments anhand des
+   * Mongoose-Schemas der Collection zurück: ObjectId-Referenzen (auch in
+   * Arrays und verschachtelt), Daten, Zahlen.
+   *
+   * Vorher wandelte der Full-Sync nur `projectId`. Jede andere Referenz —
+   * `todoId`, `topicId`, `customerId`, `resolvedTargetUserIds` … — landete als
+   * String, und Mongoose-Abfragen (die per ObjectId filtern) fanden das
+   * Dokument danach nicht mehr (T-466). Eine eigene Feldliste wie in den
+   * anderen Empfangspfaden wäre wieder eine Tabelle, die beim nächsten Schema
+   * still veraltet; das Schema selbst kann das nicht.
+   *
+   * `castObject` verwirft Felder, die das Schema nicht kennt, und mit
+   * `ignoreCastErrors` auch unwandelbare Werte. Deshalb wird das Ergebnis
+   * über das Original gelegt: unbekannte Felder (neuere Sender-Version) und
+   * unwandelbare Werte bleiben, wie sie ankamen. Collections ohne
+   * registriertes Modell laufen unverändert durch.
+   */
+  private castBySchema(collectionName: string, doc: Record<string, unknown>): Record<string, unknown> {
+    // `?? {}`: Attrappen-Connections (Checks) tragen kein `models`.
+    const models: Connection['models'] | undefined = this.connection.models;
+    const model = Object.values(models ?? {}).find(
+      (m) => m.collection.collectionName === collectionName,
+    );
+    if (!model) return doc;
+    try {
+      const cast: unknown = model.castObject(doc, { ignoreCastErrors: true });
+      return isRecord(cast) ? { ...doc, ...cast } : doc;
+    } catch (err) {
+      this.logger.warn(`Full sync: Schema-Cast für ${collectionName} fehlgeschlagen, Dokument unverändert: ${errorMessage(err)}`);
+      return doc;
+    }
   }
 }
