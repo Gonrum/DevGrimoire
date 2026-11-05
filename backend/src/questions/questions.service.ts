@@ -137,6 +137,17 @@ export class QuestionsService implements OnModuleInit {
         projectId,
         customerId: dto.customerId,
       });
+      // T-461: Eine leere Zielliste heisst in answer()/findPending()
+      // „Altbestand bzw. implizite Broadcast — jeder darf". Für eine gezielt
+      // adressierte Frage (Nutzer oder Rolle), die auf niemanden Aktiven mit
+      // Zugriff auflöst — Ziel deaktiviert, Rolle leer, Projekt nicht im
+      // Scope —, wäre das genau das Gegenteil der Absicht. Lieber hier
+      // ablehnen als eine Frage anlegen, die jeder beantworten kann.
+      if (resolved.userIds.length === 0 && (dto.targetUserId || dto.targetRole)) {
+        throw new BadRequestException(
+          'Kein aktiver Empfänger: der adressierte Nutzer bzw. die Rolle hat keinen aktiven Nutzer mit Zugriff auf dieses Projekt/diesen Kunden.',
+        );
+      }
       resolvedTargetUserIds = resolved.userIds.map((id) => new Types.ObjectId(id));
     }
 
@@ -952,12 +963,19 @@ export class QuestionsService implements OnModuleInit {
       });
       const newTargetIds = resolved.userIds.map((id) => new Types.ObjectId(id));
 
-      entry.resolvedTargetUserIds = newTargetIds;
-      entry.targetUserId = stepConfig.kind === 'user' && stepConfig.userId
-        ? new Types.ObjectId(stepConfig.userId)
-        : undefined;
-      entry.targetRole = stepConfig.kind === 'role' ? stepConfig.role : undefined;
-      entry.broadcast = stepConfig.kind === 'broadcast';
+      // T-461: Ein Nutzer-/Rollen-Schritt, der auf niemanden Aktiven auflöst,
+      // darf die bisherigen Empfänger nicht durch eine leere Liste ersetzen —
+      // leer hiesse „jeder darf antworten" (siehe create()). Der Schritt zählt
+      // trotzdem (Frist und Historie laufen weiter), die Zuständigkeit bleibt.
+      const keepPrevious = stepConfig.kind !== 'broadcast' && newTargetIds.length === 0;
+      if (!keepPrevious) {
+        entry.resolvedTargetUserIds = newTargetIds;
+        entry.targetUserId = stepConfig.kind === 'user' && stepConfig.userId
+          ? new Types.ObjectId(stepConfig.userId)
+          : undefined;
+        entry.targetRole = stepConfig.kind === 'role' ? stepConfig.role : undefined;
+        entry.broadcast = stepConfig.kind === 'broadcast';
+      }
       entry.escalationStep = nextStepIdx;
       entry.expiresAt = new Date(Date.now() + stepConfig.afterMs);
       entry.timeoutMs = stepConfig.afterMs;
@@ -994,6 +1012,7 @@ export class QuestionsService implements OnModuleInit {
         step: nextStepIdx,
         kind: stepConfig.kind,
         resolvedTargets: resolved.userIds.length,
+        ...(keepPrevious ? { keptPreviousTargets: true } : {}),
       });
     }
 

@@ -527,6 +527,91 @@ check('escalateDueQuestions: due question with chain → walks one step', async 
 });
 
 // ------------------------------------------------------------------
+// T-461: leere Zielliste heisst „jeder darf" — darf für gezielt
+// adressierte Fragen nicht entstehen
+// ------------------------------------------------------------------
+
+function withCreate(model) {
+  model.create = async (doc) => {
+    const stored = { _id: new Types.ObjectId(), status: 'pending', responses: [], ...doc };
+    model._docs.push(stored);
+    return makeLiveDoc(model._docs, stored);
+  };
+  return model;
+}
+
+check('T-461 create: Ziel-Nutzer ohne aktiven Treffer → 400, keine Frage angelegt', async () => {
+  const model = withCreate(makeQuestionModel([]));
+  const svc = instantiateService(model, {
+    authService: { findUserById: async () => null, resolveQuestionTargets: async () => ({ userIds: [], usernames: {} }) },
+  });
+  for (const dto of [
+    { question: 'q', targetUserId: new Types.ObjectId().toString() },
+    { question: 'q', targetRole: 'admin' },
+  ]) {
+    await assert.rejects(svc.create(dto), (e) => e.status === 400 && /Kein aktiver Empfänger/.test(e.message));
+  }
+  assert.equal(model._docs.length, 0, 'trotz Ablehnung wurde eine Frage angelegt');
+});
+
+check('T-461 create: ohne gezielte Adressierung bleibt eine leere Liste erlaubt (Einzelnutzer-Setup)', async () => {
+  const model = withCreate(makeQuestionModel([]));
+  const svc = instantiateService(model, {
+    authService: { findUserById: async () => null, resolveQuestionTargets: async () => ({ userIds: [], usernames: {} }) },
+  });
+  await svc.create({ question: 'q' });
+  await svc.create({ question: 'q', broadcast: true });
+  assert.equal(model._docs.length, 2);
+});
+
+check('T-461 answer: gezielt adressierte Frage — Fremder wird abgewiesen', async () => {
+  const target = new Types.ObjectId();
+  const model = withCreate(makeQuestionModel([]));
+  const svc = instantiateService(model, {
+    authService: {
+      findUserById: async () => ({ username: 'x' }),
+      resolveQuestionTargets: async () => ({ userIds: [target.toString()], usernames: {} }),
+    },
+  });
+  const q = await svc.create({ question: 'q', targetUserId: target.toString() });
+  await assert.rejects(
+    svc.answer(String(q._id), 'a', { userId: new Types.ObjectId().toString() }),
+    /not addressed/,
+  );
+});
+
+check('T-461 escalate: Rollen-Schritt ohne aktiven Treffer behält die bisherigen Empfänger', async () => {
+  const questionId = new Types.ObjectId();
+  const prev = new Types.ObjectId();
+  const model = makeQuestionModel([
+    {
+      _id: questionId,
+      question: 'q',
+      direction: 'agent_to_user',
+      status: 'pending',
+      expiresAt: new Date(Date.now() - 60_000),
+      targetUserId: prev,
+      escalationChain: [{ kind: 'role', role: 'admin', afterMs: 60_000 }],
+      escalationStep: 0,
+      escalationHistory: [],
+      resolvedTargetUserIds: [prev],
+      responses: [],
+    },
+  ]);
+  const svc = instantiateService(model, {
+    authService: { findUserById: async () => null, resolveQuestionTargets: async () => ({ userIds: [], usernames: {} }) },
+  });
+  const summary = await svc.escalateDueQuestions();
+  assert.equal(summary.escalated, 1);
+  const stored = model._docs.find((d) => String(d._id) === String(questionId));
+  assert.deepEqual(stored.resolvedTargetUserIds.map(String), [String(prev)], 'Empfänger durch leere Liste ersetzt');
+  assert.equal(String(stored.targetUserId), String(prev));
+  assert.equal(stored.targetRole, undefined);
+  assert.equal(stored.escalationStep, 1, 'Schritt zählt trotzdem');
+  assert.ok(stored.expiresAt > new Date(), 'Frist neu gesetzt');
+});
+
+// ------------------------------------------------------------------
 // T-394 lifecycle (cancel / snooze / supersede / wake) + audit
 // ------------------------------------------------------------------
 
