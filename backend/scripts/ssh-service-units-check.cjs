@@ -246,11 +246,18 @@ function sshInvariants(doc) {
 }
 
 // ------------------------------------------------------------------
-// SecretsService stub: emulates create() with deterministic ids, plus a
-// "fail at next create" hook for the rollback test.
+// SecretsService stub. Models the real create(): an UPSERT over
+// (scope, environmentId, key) — see secrets.service.ts. A second create()
+// with the same key in the same scope overwrites the existing secret and
+// returns ITS _id. (T-476: the old stub minted a fresh _id per call and so
+// hid exactly the bug where a duplicate SSH slug clobbered and then rolled
+// back the credentials of the existing connection.)
+// Plus a "fail at next create" hook for the rollback test.
 // ------------------------------------------------------------------
 function makeSecretsServiceWith(secretModel) {
   let failNext = false;
+  const scopeKey = (projectId, customerId, environmentId, key) =>
+    [projectId ? `p:${String(projectId)}` : `c:${String(customerId)}`, environmentId || null, key].join('|');
   const svc = {
     failNextCreate() {
       failNext = true;
@@ -260,21 +267,32 @@ function makeSecretsServiceWith(secretModel) {
         failNext = false;
         throw new Error('synthetic SecretsService.create failure');
       }
-      const _id = new Types.ObjectId();
-      const doc = {
-        _id,
-        projectId: dto.projectId ? new Types.ObjectId(dto.projectId) : undefined,
-        customerId: dto.customerId ? new Types.ObjectId(dto.customerId) : undefined,
-        environmentId: dto.environmentId || null,
-        key: dto.key,
-        type: dto.type || 'variable',
-        description: dto.description,
-        // We don't actually encrypt in the stub — value held in-memory.
-        encryptedValue: `enc:${dto.value}`,
-      };
-      secretModel._store.set(String(_id), doc);
+      const wanted = scopeKey(dto.projectId, dto.customerId, dto.environmentId, dto.key);
+      let doc = [...secretModel._store.values()].find(
+        (d) => scopeKey(d.projectId, d.customerId, d.environmentId, d.key) === wanted,
+      );
+      if (doc) {
+        // Upsert hit: same _id, value/type/description overwritten.
+        doc.encryptedValue = `enc:${dto.value}`;
+        doc.type = dto.type || 'variable';
+        doc.description = dto.description;
+      } else {
+        const _id = new Types.ObjectId();
+        doc = {
+          _id,
+          projectId: dto.projectId ? new Types.ObjectId(dto.projectId) : undefined,
+          customerId: dto.customerId ? new Types.ObjectId(dto.customerId) : undefined,
+          environmentId: dto.environmentId || null,
+          key: dto.key,
+          type: dto.type || 'variable',
+          description: dto.description,
+          // We don't actually encrypt in the stub — value held in-memory.
+          encryptedValue: `enc:${dto.value}`,
+        };
+        secretModel._store.set(String(_id), doc);
+      }
       return {
-        _id: String(_id),
+        _id: String(doc._id),
         projectId: doc.projectId ? String(doc.projectId) : null,
         customerId: doc.customerId ? String(doc.customerId) : null,
         environmentId: doc.environmentId,
@@ -608,6 +626,101 @@ const userId = new Types.ObjectId().toString();
       secretCountBefore,
       `secrets rolled back (expected ${secretCountBefore}, got ${secretModel._store.size})`,
     );
+  });
+
+  // ----------------------------------------------------------------
+  // T-476: duplicate slug must not clobber the existing connection's secrets
+  // ----------------------------------------------------------------
+  /** Snapshot of the secrets a connection references, for before/after diffs. */
+  function secretsOf(secretModel, conn) {
+    return ['privateKeySecretId', 'passphraseSecretId', 'passwordSecretId']
+      .filter((f) => conn[f])
+      .map((f) => {
+        const d = secretModel._store.get(String(conn[f]));
+        return d
+          ? { field: f, id: String(d._id), value: d.encryptedValue, owner: String(d.ownedBySshConnectionId) }
+          : { field: f, id: String(conn[f]), missing: true };
+      });
+  }
+
+  await check('T-476 create() with duplicate slug leaves the existing secrets untouched', async () => {
+    const { svc, sshModel, secretModel } = newWorld();
+    const first = await svc.create(
+      {
+        label: 'orig', slug: 'dup', projectId, host: 'h', username: 'u', authMethod: 'key',
+        inlineSecrets: { key: { privateKey: 'KEY-ORIGINAL', passphrase: 'PP-ORIGINAL' } },
+      },
+      userId,
+    );
+    const before = secretsOf(secretModel, first);
+    assert.equal(before.length, 2);
+    const countBefore = secretModel._store.size;
+
+    await assert.rejects(
+      () =>
+        svc.create(
+          {
+            label: 'intruder', slug: 'dup', projectId, host: 'h2', username: 'u2', authMethod: 'key',
+            inlineSecrets: { key: { privateKey: 'KEY-FOREIGN', passphrase: 'PP-FOREIGN' } },
+          },
+          userId,
+        ),
+      (e) => e.status === 409 && /already exists/.test(e.message),
+    );
+
+    assert.equal(sshModel._store.size, 1);
+    const after = secretsOf(secretModel, sshModel._store.get(String(first._id)));
+    assert.deepEqual(after, before, 'value, _id and ownedBySshConnectionId of the existing secrets are unchanged');
+    for (const s of after) assert.equal(s.owner, String(first._id));
+    assert.equal(secretModel._store.size, countBefore, 'the failed attempt leaves no secrets behind');
+  });
+
+  await check('T-476 create() never overwrites an unrelated secret that happens to share the old key', async () => {
+    const { svc, secretsService, secretModel } = newWorld();
+    // A hand-made secret with exactly the key the old slug-only scheme derived.
+    const foreign = await secretsService.create({ projectId, key: 'ssh:clash:password', value: 'MINE', type: 'password' });
+    const conn = await svc.create(
+      {
+        label: 'c', slug: 'clash', projectId, host: 'h', username: 'u', authMethod: 'password',
+        inlineSecrets: { password: { password: 'CONN-PW' } },
+      },
+      userId,
+    );
+    const f = secretModel._store.get(String(foreign._id));
+    assert.equal(f.encryptedValue, 'enc:MINE', 'foreign secret value untouched');
+    assert.equal(f.ownedBySshConnectionId, undefined, 'foreign secret not adopted');
+    assert.notEqual(String(conn.passwordSecretId), String(foreign._id));
+  });
+
+  await check('T-476 rotation replaces the own secret and leaves unrelated same-key secrets alone', async () => {
+    const { svc, secretsService, secretModel } = newWorld();
+    const conn = await svc.create(
+      {
+        label: 'r', slug: 'rot', projectId, host: 'h', username: 'u', authMethod: 'key',
+        inlineSecrets: { key: { privateKey: 'OLD' } },
+      },
+      userId,
+    );
+    const oldId = String(conn.privateKeySecretId);
+    const foreign = await secretsService.create({ projectId, key: 'ssh:rot:privatekey', value: 'MINE', type: 'ssh_key' });
+
+    const rotated = await svc.update(String(conn._id), { inlineSecrets: { key: { privateKey: 'NEW' } } });
+    const newId = String(rotated.privateKeySecretId);
+    assert.notEqual(newId, oldId);
+    assert.equal(secretModel._store.get(oldId), undefined, 'old owned secret deleted');
+    const fresh = secretModel._store.get(newId);
+    assert.equal(fresh.encryptedValue, 'enc:NEW');
+    assert.equal(String(fresh.ownedBySshConnectionId), String(conn._id));
+    const f = secretModel._store.get(String(foreign._id));
+    assert.equal(f.encryptedValue, 'enc:MINE');
+    assert.equal(f.ownedBySshConnectionId, undefined);
+
+    // A second rotation must work again (no self-collision, no orphan).
+    const again = await svc.update(String(conn._id), { inlineSecrets: { key: { privateKey: 'NEWER' } } });
+    assert.equal(secretModel._store.get(newId), undefined, 'previous owned secret deleted');
+    assert.equal(secretModel._store.get(String(again.privateKeySecretId)).encryptedValue, 'enc:NEWER');
+    const owned = [...secretModel._store.values()].filter((d) => String(d.ownedBySshConnectionId) === String(conn._id));
+    assert.equal(owned.length, 1, 'exactly one owned secret after two rotations');
   });
 
   await check('create() rolls back when SecretsService throws mid-stream', async () => {

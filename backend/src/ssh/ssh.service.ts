@@ -126,6 +126,10 @@ export class SshService {
       dto.privateKeySecretId, dto.passphraseSecretId, dto.passwordSecretId,
     ]);
 
+    // Die _id steht vor den Secrets fest, damit deren Keys von ihr abhängen
+    // (T-476) — siehe ownedSecretKey().
+    const connectionId = new Types.ObjectId();
+
     // (b) Create inline secrets, collect rollback refs.
     const createdSecrets: CreatedOwnedSecretRef[] = [];
     const refs: {
@@ -139,7 +143,7 @@ export class SshService {
         if (dto.inlineSecrets?.key) {
           const pkRef = await this.createOwnedSecret({
             scope: { customerId: dto.customerId, projectId: dto.projectId },
-            key: `ssh:${dto.slug}:privatekey`,
+            key: this.ownedSecretKey(dto.slug, connectionId, 'privatekey'),
             value: dto.inlineSecrets.key.privateKey,
             type: 'ssh_key',
             description: `SSH private key for ${dto.label}`,
@@ -150,7 +154,7 @@ export class SshService {
           if (dto.inlineSecrets.key.passphrase) {
             const ppRef = await this.createOwnedSecret({
               scope: { customerId: dto.customerId, projectId: dto.projectId },
-              key: `ssh:${dto.slug}:passphrase`,
+              key: this.ownedSecretKey(dto.slug, connectionId, 'passphrase'),
               value: dto.inlineSecrets.key.passphrase,
               type: 'password',
               description: `SSH key passphrase for ${dto.label}`,
@@ -175,7 +179,7 @@ export class SshService {
         if (dto.inlineSecrets?.password) {
           const pwRef = await this.createOwnedSecret({
             scope: { customerId: dto.customerId, projectId: dto.projectId },
-            key: `ssh:${dto.slug}:password`,
+            key: this.ownedSecretKey(dto.slug, connectionId, 'password'),
             value: dto.inlineSecrets.password.password,
             type: 'password',
             description: `SSH password for ${dto.label}`,
@@ -192,6 +196,7 @@ export class SshService {
 
       // (c) Create SshConnection.
       const created = await this.sshModel.create({
+        _id: connectionId,
         label: dto.label,
         slug: dto.slug,
         customerId: dto.customerId ? this.toObjectId(dto.customerId, 'customerId') : undefined,
@@ -510,7 +515,7 @@ export class SshService {
         if (effectiveAuthMethod === 'key' && dto.inlineSecrets.key) {
           const pkRef = await this.createOwnedSecret({
             scope,
-            key: `ssh:${doc.slug}:privatekey`,
+            key: this.ownedSecretKey(doc.slug, doc._id, 'privatekey'),
             value: dto.inlineSecrets.key.privateKey,
             type: 'ssh_key',
             description: `SSH private key for ${doc.label}`,
@@ -521,7 +526,7 @@ export class SshService {
           if (dto.inlineSecrets.key.passphrase) {
             const ppRef = await this.createOwnedSecret({
               scope,
-              key: `ssh:${doc.slug}:passphrase`,
+              key: this.ownedSecretKey(doc.slug, doc._id, 'passphrase'),
               value: dto.inlineSecrets.key.passphrase,
               type: 'password',
               description: `SSH key passphrase for ${doc.label}`,
@@ -536,7 +541,7 @@ export class SshService {
         } else if (effectiveAuthMethod === 'password' && dto.inlineSecrets.password) {
           const pwRef = await this.createOwnedSecret({
             scope,
-            key: `ssh:${doc.slug}:password`,
+            key: this.ownedSecretKey(doc.slug, doc._id, 'password'),
             value: dto.inlineSecrets.password.password,
             type: 'password',
             description: `SSH password for ${doc.label}`,
@@ -897,6 +902,30 @@ export class SshService {
         `authMethod must be 'key' or 'password'`,
       );
     }
+  }
+
+  /**
+   * Key eines Secrets, das einer SSH-Verbindung gehört.
+   *
+   * Hängt von der Verbindungs-_id ab, nicht nur vom Slug (T-476):
+   * `SecretsService.create()` ist ein Upsert über (Scope, environmentId, Key).
+   * Mit `ssh:<slug>:<kind>` traf ein zweiter Anlegeversuch mit belegtem Slug
+   * das Secret der *bestehenden* Verbindung — überschrieb dessen Wert mit
+   * fremden Credentials, stempelte es um, und der Rollback nach dem
+   * E11000 der Verbindung löschte es dann. Dasselbe galt für jedes andere,
+   * zufällig gleich benannte Secret im Scope.
+   *
+   * Mit der _id im Key kann der Upsert nur noch einfügen. Auch die Rotation
+   * nutzt ihn: sie löscht die eigenen alten Secrets vorher, eine Kollision mit
+   * sich selbst gibt es also nicht, eine mit fremden Secrets jetzt auch nicht.
+   * Bestehende Verbindungen behalten ihre alten Keys bis zur nächsten Rotation.
+   */
+  private ownedSecretKey(
+    slug: string,
+    connectionId: Types.ObjectId,
+    kind: 'privatekey' | 'passphrase' | 'password',
+  ): string {
+    return `ssh:${slug}:${connectionId.toString()}:${kind}`;
   }
 
   private async createOwnedSecret(args: {
