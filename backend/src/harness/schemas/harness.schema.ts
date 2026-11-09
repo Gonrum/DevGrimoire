@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import {
   HARNESS_MERGE_STRATEGIES,
   HARNESS_SCOPES,
@@ -55,10 +55,10 @@ export class Harness {
   @Prop({ required: true, enum: HARNESS_SCOPES })
   scope: HarnessScope;
 
-  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer' })
   customerId?: Types.ObjectId;
 
   @Prop({ maxlength: 500 })

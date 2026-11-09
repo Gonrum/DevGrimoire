@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export enum CustomerProjectLinkStatus {
   ACTIVE = 'active',
@@ -11,10 +11,10 @@ export type CustomerProjectLinkDocument = HydratedDocument<CustomerProjectLink>;
 
 @Schema({ timestamps: true })
 export class CustomerProjectLink {
-  @Prop({ type: Types.ObjectId, ref: 'Customer', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer', required: true, index: true })
   customerId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', required: true, index: true })
   projectId: Types.ObjectId;
 
   @Prop({ type: String, enum: CustomerProjectLinkStatus, default: CustomerProjectLinkStatus.ACTIVE })
@@ -26,7 +26,7 @@ export class CustomerProjectLink {
   @Prop()
   notes?: string;
 
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Environment' }], default: [] })
+  @Prop({ type: [{ type: SchemaTypes.ObjectId, ref: 'Environment' }], default: [] })
   environmentIds: Types.ObjectId[];
 
   // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber

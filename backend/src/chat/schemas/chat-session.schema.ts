@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type ChatSessionDocument = HydratedDocument<ChatSession>;
 
@@ -119,13 +119,13 @@ export const ChatMessageSchema = SchemaFactory.createForClass(ChatMessage);
 
 @Schema({ timestamps: true })
 export class ChatSession {
-  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer' })
   customerId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User', required: true })
   userId: Types.ObjectId;
 
   @Prop({ required: true })

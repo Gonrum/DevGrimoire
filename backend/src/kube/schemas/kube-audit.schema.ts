@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type KubeAuditAction =
   | 'connect' | 'list' | 'get' | 'logs' | 'metrics_query'
@@ -11,7 +11,7 @@ export type KubeAuditDocument = HydratedDocument<KubeAudit>;
 
 @Schema({ collection: 'kubeaudits' })
 export class KubeAudit {
-  @Prop({ type: Types.ObjectId, ref: 'KubeCluster', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'KubeCluster', required: true })
   clusterId: Types.ObjectId;
 
   @Prop({ required: true, default: () => new Date() })
@@ -36,20 +36,20 @@ export class KubeAudit {
    * Feld dagegen ganz (`undefined`), greift die Pflicht weiterhin.
    */
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: 'User',
     required(this: KubeAudit) { return this.sourceContext !== 'dg' && this.userId !== null; },
   })
   userId?: Types.ObjectId | null;
 
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: 'Workspace',
     required(this: KubeAudit) { return this.sourceContext === 'dg'; },
   })
   workspaceId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'AgentRole' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'AgentRole' })
   agentRoleId?: Types.ObjectId;
 
   @Prop()

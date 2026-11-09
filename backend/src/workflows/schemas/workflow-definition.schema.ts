@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 
 export type WorkflowDefinitionDocument = WorkflowDefinition & Document;
 
@@ -104,7 +104,7 @@ export class WorkflowApproval {
   @Prop({ required: true })
   approvedAt: Date;
 
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   approvedByUserId?: Types.ObjectId;
 
   @Prop()
@@ -137,10 +137,10 @@ export class WorkflowDefinition {
   @Prop({ required: true, enum: WorkflowScope, index: true })
   scope: WorkflowScope;
 
-  @Prop({ type: Types.ObjectId, ref: 'Project', index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', index: true })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Customer', index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer', index: true })
   customerId?: Types.ObjectId;
 
   @Prop({ required: true })
@@ -170,10 +170,10 @@ export class WorkflowDefinition {
   @Prop({ type: Object })
   ui?: Record<string, unknown>;
 
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   createdByUserId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   updatedByUserId?: Types.ObjectId;
 
   @Prop()

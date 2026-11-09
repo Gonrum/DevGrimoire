@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import type { ScopeMode } from '../../common/permissions';
 
 export type ApiKeyDocument = HydratedDocument<ApiKey>;
@@ -15,7 +15,7 @@ export class ApiKey {
   @Prop({ required: true })
   name: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User', required: true })
   userId: Types.ObjectId;
 
   @Prop()
@@ -42,14 +42,14 @@ export class ApiKey {
   @Prop({ type: String, enum: ['all', 'allowlist', 'none'], default: 'all' })
   projectScopeMode: ScopeMode;
 
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Project' }], default: [] })
+  @Prop({ type: [{ type: SchemaTypes.ObjectId, ref: 'Project' }], default: [] })
   allowedProjectIds: Types.ObjectId[];
 
   // Customer-scope (T-220), independent from projectScopeMode.
   @Prop({ type: String, enum: ['all', 'allowlist', 'none'], default: 'all' })
   customerScopeMode: ScopeMode;
 
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Customer' }], default: [] })
+  @Prop({ type: [{ type: SchemaTypes.ObjectId, ref: 'Customer' }], default: [] })
   allowedCustomerIds: Types.ObjectId[];
 
   // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber

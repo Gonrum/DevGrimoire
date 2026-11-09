@@ -1,11 +1,11 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type ContactDocument = HydratedDocument<Contact>;
 
 @Schema({ timestamps: true })
 export class Contact {
-  @Prop({ type: Types.ObjectId, ref: 'Customer', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer', required: true, index: true })
   customerId: Types.ObjectId;
 
   @Prop({ required: true, trim: true })

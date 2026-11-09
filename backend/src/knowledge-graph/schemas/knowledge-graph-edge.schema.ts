@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type KnowledgeGraphEdgeDocument = HydratedDocument<KnowledgeGraphEdge>;
 
@@ -52,7 +52,7 @@ class KgEndpoint {
 
 @Schema({ timestamps: true, collection: 'knowledgegraphedges' })
 export class KnowledgeGraphEdge {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', required: true, index: true })
   projectId: Types.ObjectId;
 
   @Prop({ type: KgEndpoint, required: true })

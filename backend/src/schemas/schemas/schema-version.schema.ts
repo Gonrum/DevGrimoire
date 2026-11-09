@@ -1,12 +1,12 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { SchemaField, SchemaIndex } from './db-schema.schema';
 
 export type SchemaVersionDocument = HydratedDocument<SchemaVersion>;
 
 @Schema({ timestamps: { createdAt: true, updatedAt: false } })
 export class SchemaVersion {
-  @Prop({ type: Types.ObjectId, ref: 'DbSchema', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'DbSchema', required: true })
   schemaId: Types.ObjectId;
 
   @Prop({ required: true })

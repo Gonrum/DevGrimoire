@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 
 export type FeatureDocument = Feature & Document;
 
@@ -18,7 +18,7 @@ export enum FeaturePriority {
 
 @Schema({ timestamps: true })
 export class Feature {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', required: true, index: true })
   projectId: Types.ObjectId;
 
   @Prop({ required: true })

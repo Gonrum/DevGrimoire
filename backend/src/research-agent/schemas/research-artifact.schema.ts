@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { ALL_SENSITIVITY_LEVELS, Sensitivity, SensitivityLevel } from '../../common/sensitivity';
 
 export type ResearchArtifactDocument = HydratedDocument<ResearchArtifact>;
@@ -9,7 +9,7 @@ export const ARTIFACT_UNIQUE = { topicId: 1, slug: 1 } as const;
 
 @Schema({ timestamps: true })
 export class ResearchArtifact {
-  @Prop({ type: Types.ObjectId, ref: 'ResearchTopic', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'ResearchTopic', required: true })
   topicId: Types.ObjectId;
 
   @Prop({ required: true })
@@ -37,16 +37,16 @@ export class ResearchArtifact {
   @Prop({ type: String, enum: ALL_SENSITIVITY_LEVELS, default: Sensitivity.INTERNAL })
   sensitivity: SensitivityLevel;
 
-  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer' })
   customerId?: Types.ObjectId;
 
   @Prop({ default: false })
   isGlobal: boolean;
 
-  @Prop({ type: Types.ObjectId, ref: 'ResearchRun' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'ResearchRun' })
   lastRunId?: Types.ObjectId;
 }
 

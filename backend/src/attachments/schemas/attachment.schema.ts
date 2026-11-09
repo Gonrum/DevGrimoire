@@ -1,21 +1,21 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { ALL_SENSITIVITY_LEVELS, Sensitivity, SensitivityLevel } from '../../common/sensitivity';
 
 export type AttachmentDocument = HydratedDocument<Attachment>;
 
 @Schema({ timestamps: true })
 export class Attachment {
-  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer' })
   customerId?: Types.ObjectId;
 
   @Prop({ type: String })
   entityType?: string;
 
-  @Prop({ type: Types.ObjectId })
+  @Prop({ type: SchemaTypes.ObjectId })
   entityId?: Types.ObjectId;
 
   @Prop({ required: true })

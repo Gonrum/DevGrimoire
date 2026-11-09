@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type ResearchTopicDocument = HydratedDocument<ResearchTopic>;
 
@@ -106,7 +106,7 @@ export class ResearchTopic {
   guardrails: ResearchGuardrails;
 
   // Run context (rights/scope for the background agent run).
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User', required: true })
   ownerUserId: Types.ObjectId;
 
   @Prop({ default: false })

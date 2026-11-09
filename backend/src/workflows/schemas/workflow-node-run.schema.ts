@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 import type { PlaceholderTrace } from '../nodes/template-resolver';
 
 export type WorkflowNodeRunDocument = WorkflowNodeRun & Document;
@@ -17,10 +17,10 @@ export enum WorkflowNodeRunStatus {
 
 @Schema({ timestamps: true })
 export class WorkflowNodeRun {
-  @Prop({ type: Types.ObjectId, ref: 'WorkflowRun', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'WorkflowRun', required: true, index: true })
   runId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'WorkflowDefinition', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'WorkflowDefinition', required: true, index: true })
   definitionId: Types.ObjectId;
 
   @Prop({ required: true, min: 1 })

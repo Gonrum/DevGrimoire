@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export enum HealthcheckMethod {
   GET = 'GET',
@@ -35,7 +35,7 @@ export class HealthcheckSecretHeader {
 
   // Reference to a Secret document. Stored as ObjectId so cascading delete on
   // the Secret can null this entry; resolution happens at execution time.
-  @Prop({ type: Types.ObjectId, ref: 'Secret', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Secret', required: true })
   secretId: Types.ObjectId;
 }
 export const HealthcheckSecretHeaderSchema = SchemaFactory.createForClass(HealthcheckSecretHeader);
@@ -44,16 +44,16 @@ export type HealthcheckDocument = HydratedDocument<Healthcheck>;
 
 @Schema({ timestamps: true, collection: 'healthchecks' })
 export class Healthcheck {
-  @Prop({ type: Types.ObjectId, ref: 'Customer', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer', required: true, index: true })
   customerId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'CustomerProjectLink' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'CustomerProjectLink' })
   customerProjectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Environment' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Environment' })
   environmentId?: Types.ObjectId;
 
   @Prop({ required: true, trim: true })

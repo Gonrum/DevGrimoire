@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export enum HttpRequestMethod {
   GET = 'GET', POST = 'POST', PUT = 'PUT', PATCH = 'PATCH',
@@ -48,10 +48,10 @@ export type SavedRequestDocument = HydratedDocument<SavedRequest>;
 
 @Schema({ timestamps: true, collection: 'http_saved_requests' })
 export class SavedRequest {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', required: true, index: true })
   projectId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'RequestCollection', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'RequestCollection', required: true, index: true })
   collectionId: Types.ObjectId;
 
   @Prop({ required: true, trim: true })

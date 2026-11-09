@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { errorMessage } from '../../common/narrow';
 
 export type SshAuthMethod = 'key' | 'password';
@@ -27,10 +27,10 @@ export class SshConnection {
   slug: string;
 
   // ---- Scope (exactly one of customerId / projectId; enforced in pre-save) --
-  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer' })
   customerId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
   // ---- Connection parameters -----------------------------------------------
@@ -48,13 +48,13 @@ export class SshConnection {
 
   // ---- Credential references (FK -> Secret) --------------------------------
   // Only set in combinations consistent with authMethod (validated pre-save).
-  @Prop({ type: Types.ObjectId, ref: 'Secret' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Secret' })
   privateKeySecretId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Secret' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Secret' })
   passphraseSecretId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Secret' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Secret' })
   passwordSecretId?: Types.ObjectId;
 
   // ---- Metadata -------------------------------------------------------------

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 @Schema({ _id: false })
 export class HistoryHeader {
@@ -12,13 +12,13 @@ export type RequestHistoryDocument = HydratedDocument<RequestHistoryEntry>;
 
 @Schema({ timestamps: true, collection: 'http_request_history' })
 export class RequestHistoryEntry {
-  @Prop({ type: Types.ObjectId, ref: 'SavedRequest', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'SavedRequest', required: true, index: true })
   requestId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'RequestCollection' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'RequestCollection' })
   collectionId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Project', index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', index: true })
   projectId?: Types.ObjectId;
 
   @Prop({ required: true })
@@ -36,7 +36,7 @@ export class RequestHistoryEntry {
   @Prop({ type: [HistoryHeaderSchema], default: [] })
   requestHeaders: HistoryHeader[];
   @Prop() requestBody?: string;
-  @Prop({ type: Types.ObjectId, ref: 'Environment' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Environment' })
   environmentId?: Types.ObjectId;
   @Prop() environmentName?: string;
 

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type DocUpdateProposalDocument = HydratedDocument<DocUpdateProposal>;
 
@@ -59,7 +59,7 @@ class DocProposalTarget {
   @Prop({ required: true, enum: DocProposalTargetType })
   type: DocProposalTargetType;
 
-  @Prop({ type: Types.ObjectId })
+  @Prop({ type: SchemaTypes.ObjectId })
   id?: Types.ObjectId;
 
   @Prop({ trim: true, maxlength: 500 })
@@ -98,7 +98,7 @@ class DocProposalSafety {
 
 @Schema({ timestamps: true, collection: 'docupdateproposals' })
 export class DocUpdateProposal {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', required: true, index: true })
   projectId: Types.ObjectId;
 
   @Prop({ required: true, enum: DocProposalStatus, default: DocProposalStatus.OPEN, index: true })

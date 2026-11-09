@@ -164,7 +164,7 @@ export class ReplicationReceiveService {
       // Prepare document for upsert — convert _id string to ObjectId.
       // `payload.document` ist JSON aus dem Request-Body (kein Mongoose-Dokument),
       // die flache Kopie enthält also wirklich alle Felder.
-      const doc: Record<string, unknown> = { ...payload.document };
+      let doc: Record<string, unknown> = { ...payload.document };
       const docId = doc._id;
       delete doc._id;
 
@@ -193,6 +193,10 @@ export class ReplicationReceiveService {
           try { return new ObjectId(id); } catch { return id; }
         });
       }
+      // T-510: alle übrigen Referenzen (todoId, customerId, userId …) über das
+      // Schema der Collection. Die Einzelfälle oben bleiben für Collections
+      // ohne registriertes Modell.
+      doc = this.castBySchema(collection, doc);
       this.normalizeTimestamps(doc);
 
       await coll.replaceOne(

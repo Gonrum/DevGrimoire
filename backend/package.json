@@ -145,7 +145,10 @@
     "check:kube-writes-rest": "node scripts/kube-writes-rest-check.cjs",
     "checks": "node scripts/run-checks.cjs",
     "check:notification-prefs": "node scripts/notification-prefs-check.cjs",
-    "check:notification-redaction": "node scripts/notification-redaction-check.cjs"
+    "check:notification-redaction": "node scripts/notification-redaction-check.cjs",
+    "check:objectid-schema-guard": "node scripts/objectid-schema-guard-check.cjs",
+    "check:objectid-migrate": "node scripts/objectid-migrate-check.cjs",
+    "objectid:migrate": "node scripts/objectid-migrate.cjs"
   },
   "dependencies": {
     "@kubernetes/client-node": "^2.0.0",

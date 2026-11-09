@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 
 export type ReleaseDocument = Release & Document;
 
@@ -44,7 +44,7 @@ export const ReleaseAssetSchema = SchemaFactory.createForClass(ReleaseAsset);
 
 @Schema({ timestamps: true })
 export class Release {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', required: true, index: true })
   projectId: Types.ObjectId;
 
   @Prop({ required: true })

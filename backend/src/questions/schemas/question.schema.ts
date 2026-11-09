@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type QuestionDocument = HydratedDocument<Question>;
 
@@ -67,10 +67,10 @@ export class Question {
   @Prop()
   context?: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'Todo' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Todo' })
   todoId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
   /**
@@ -78,26 +78,26 @@ export class Question {
    * projectId in practice but stored independently so role/scope filters can
    * see customer-side traffic.
    */
-  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer' })
   customerId?: Types.ObjectId;
 
   /** Originating research session (M-45 / T-390). Legacy research-sessions
    *  module was removed (T-22); field kept inert for existing data. */
-  @Prop({ type: Types.ObjectId })
+  @Prop({ type: SchemaTypes.ObjectId })
   researchSessionId?: Types.ObjectId;
 
   /** Originating chat session (M-45 / T-390). */
-  @Prop({ type: Types.ObjectId, ref: 'ChatSession' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'ChatSession' })
   chatSessionId?: Types.ObjectId;
 
   /** Owning milestone if the question is tied to a milestone-level decision. */
-  @Prop({ type: Types.ObjectId, ref: 'Milestone' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Milestone' })
   milestoneId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   targetUserId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   createdByUserId?: Types.ObjectId;
 
   /**
@@ -135,21 +135,21 @@ export class Question {
   closeReason?: string;
 
   /** When superseded → points at the replacement Question. */
-  @Prop({ type: Types.ObjectId, ref: 'Question' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Question' })
   supersededByQuestionId?: Types.ObjectId;
 
   /** Knowledge entry that captured the answer as a decision (T-391). */
-  @Prop({ type: Types.ObjectId, ref: 'Knowledge' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Knowledge' })
   decisionKnowledgeId?: Types.ObjectId;
 
   /** Todo created as a follow-up after this question was answered (T-391). */
-  @Prop({ type: Types.ObjectId, ref: 'Todo' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Todo' })
   followupTodoId?: Types.ObjectId;
 
   @Prop()
   answer?: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   answeredByUserId?: Types.ObjectId;
 
   /** True when the answer was written by an agent (T-247 user→agent flow). */
@@ -164,7 +164,7 @@ export class Question {
    * Knowledge entry that was created from this question's Q&A. Bidirectional
    * link: Knowledge.sourceQuestionId points back here.
    */
-  @Prop({ type: Types.ObjectId, ref: 'Knowledge' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Knowledge' })
   knowledgeId?: Types.ObjectId;
 
   /**
@@ -204,7 +204,7 @@ export class Question {
    * escalation step). Empty array = "implicit broadcast" — every project
    * member sees it. Used by findPending and the per-user permission filter.
    */
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
+  @Prop({ type: [{ type: SchemaTypes.ObjectId, ref: 'User' }], default: [] })
   resolvedTargetUserIds: Types.ObjectId[];
 
   /**

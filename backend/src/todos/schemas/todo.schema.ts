@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type TodoDocument = HydratedDocument<Todo>;
 
@@ -40,10 +40,10 @@ export class AcceptanceCriterion {
 
 @Schema({ timestamps: true })
 export class Todo {
-  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Customer', index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer', index: true })
   customerId?: Types.ObjectId;
 
   @Prop({ required: true })
@@ -61,10 +61,10 @@ export class Todo {
   @Prop({ type: [String], default: [] })
   tags: string[];
 
-  @Prop({ type: Types.ObjectId, ref: 'Milestone' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Milestone' })
   milestoneId: Types.ObjectId;
 
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Todo' }], default: [] })
+  @Prop({ type: [{ type: SchemaTypes.ObjectId, ref: 'Todo' }], default: [] })
   blockedBy: Types.ObjectId[];
 
   @Prop({ type: [TodoComment], default: [] })
@@ -94,7 +94,7 @@ export class Todo {
   @Prop()
   edgeCases?: string;
 
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Question' }], default: [] })
+  @Prop({ type: [{ type: SchemaTypes.ObjectId, ref: 'Question' }], default: [] })
   openQuestions: Types.ObjectId[];
 
   // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber

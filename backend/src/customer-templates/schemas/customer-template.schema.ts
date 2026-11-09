@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 
 export type CustomerTemplateDocument = CustomerTemplate & Document;
 
@@ -70,10 +70,10 @@ export class CustomerTemplate {
   @Prop({ type: [CustomerTemplateItemSchema], default: [] })
   items: CustomerTemplateItem[];
 
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   createdByUserId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   updatedByUserId?: Types.ObjectId;
 
   createdAt?: Date;

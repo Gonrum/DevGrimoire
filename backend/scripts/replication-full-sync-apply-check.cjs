@@ -11,23 +11,23 @@
  * acht in T-466 neu übertragenen Typen hiess „übertragen" damit nur „als
  * Leiche angekommen".
  *
- * Die Wandlung läuft über das Mongoose-Schema der Collection. ABER: alle mit
- * `@Prop({ type: Types.ObjectId })` deklarierten Felder sind wegen
- * @nestjs/mongoose in Wahrheit `Mixed` (Folge-Todo zu T-466) — dort castet
- * das Schema heute nichts. Dieser Check belegt deshalb die Mechanik an einem
- * korrekt typisierten Testschema und, dass die echten Schemas nicht schaden.
+ * Die Wandlung läuft über das Mongoose-Schema der Collection. Bis T-510 waren
+ * die Referenzfelder wegen @nestjs/mongoose `Mixed` und castete nichts; seit
+ * T-510 sind sie echte ObjectId-Pfade. Der Check belegt beides: die Mechanik
+ * an einem eigenen Testschema und die Wirkung an den echten Schemas.
  *
  * Belegt:
  *   - mit korrekt typisiertem Schema: Referenzen werden zu ObjectIds, Daten zu
  *     Date (auch in Arrays und verschachtelt)
- *   - mit den heutigen (Mixed-)Schemas: nichts geht verloren, projectId wird
- *     weiterhin gecastet
+ *   - mit den echten Schemas: todoId, Empfänger-Arrays, projectId werden zu
+ *     ObjectIds und sind per Mongoose-Abfrage auffindbar
  *   - unbekannte Felder (neuere Sender-Version) bleiben erhalten
  *   - unwandelbare Werte bleiben stehen statt den Datensatz zu verlieren
  *   - Collections ohne registriertes Modell laufen wie bisher durch
  *   - Anhänge: Binärdaten gehen nach MinIO, `_binaryBase64` landet NICHT im
  *     Mongo-Dokument
  *   - unbekannte Export-Keys im Payload werden übersprungen
+ *   - T-510: auch der Live-Empfang (`applyChange`) castet per Schema
  *
  * Braucht MONGODB_TEST_URI (Wegwerf-Datenbank, wird danach gelöscht).
  * Nach `npm run build` ausführen.
@@ -77,8 +77,7 @@ const overTheWire = (v) => JSON.parse(JSON.stringify(v));
     for (const [cls, schema] of [[Question, QuestionSchema], [Harness, HarnessSchema], [Attachment, AttachmentSchema]]) {
       conn.model(cls.name, schema);
     }
-    // So sähe ein Schema nach dem Ursachen-Fix aus: Schema.Types.ObjectId statt
-    // Types.ObjectId. Collection `researchartifacts`, damit der Full-Sync sie
+    // Eigenes Schema mit verschachtelten Pfaden. Collection `researchartifacts`, damit der Full-Sync sie
     // als replizierte Collection behandelt.
     const OID = mongoose.Schema.Types.ObjectId;
     conn.model('TypedArtifact', new mongoose.Schema({
@@ -91,7 +90,7 @@ const overTheWire = (v) => JSON.parse(JSON.stringify(v));
       conn,
       { get: async () => 'local-instance' },
       { isEnabled: () => true, putObject: async (key, buf, mime) => { puts.push({ key, buf, mime }); } },
-      {},
+      { isReplicationEnabled: async () => true },
     );
 
     const projectId = new Types.ObjectId();
@@ -149,14 +148,15 @@ const overTheWire = (v) => JSON.parse(JSON.stringify(v));
       assert.ok(viaModel, 'per topicId (ObjectId) nicht auffindbar');
     });
 
-    await check('heutiges Frage-Schema (Mixed): nichts verloren, projectId und Daten gewandelt', async () => {
+    await check('echtes Frage-Schema: todoId, Empfänger-Array, projectId als ObjectId; Daten als Date', async () => {
       const q = await db.collection('questions').findOne({ _id: question._id });
       assert.ok(q.projectId instanceof Types.ObjectId);
+      assert.ok(q.todoId instanceof Types.ObjectId, `todoId ist ${typeof q.todoId} (Schema wieder Mixed? T-510)`);
+      assert.ok(q.resolvedTargetUserIds.every((x) => x instanceof Types.ObjectId));
+      assert.ok(q.createdByUserId instanceof Types.ObjectId);
       assert.ok(q.expiresAt instanceof Date && q.createdAt instanceof Date);
-      assert.equal(String(q.todoId), String(todoId));
-      if (!(q.todoId instanceof Types.ObjectId)) {
-        console.log('     (bekannt: todoId bleibt String, solange das Schema Mixed ist — Folge-Todo)');
-      }
+      const viaModel = await conn.model(Question.name).findOne({ todoId: todoId.toString() }).exec();
+      assert.ok(viaModel, 'per todoId nicht auffindbar');
     });
 
     await check('Frage: unbekanntes Feld bleibt, unwandelbarer Wert bleibt stehen', async () => {
@@ -194,6 +194,23 @@ const overTheWire = (v) => JSON.parse(JSON.stringify(v));
     await check('zweiter Lauf mit demselben Stand: LWW überspringt, keine Fehler', async () => {
       const again = await svc.applyFullSync(payload);
       assert.equal(again.errors, 0);
+    });
+
+    await check('Live-Empfang (applyChange): todoId und Empfänger als ObjectId (T-510)', async () => {
+      const live = overTheWire({
+        _id: new Types.ObjectId(), question: 'live?', options: [], direction: 'agent_to_user', status: 'pending',
+        projectId, todoId, resolvedTargetUserIds: [userA], createdAt: now, updatedAt: now,
+      });
+      const res = await svc.applyChange({
+        event: { projectId: String(projectId), entity: 'question', action: 'created', entityId: live._id },
+        document: live,
+        timestamp: now.toISOString(),
+        sourceInstanceId: 'peer-instance',
+      });
+      assert.equal(res.applied, true, res.reason);
+      const q = await db.collection('questions').findOne({ _id: new Types.ObjectId(live._id) });
+      assert.ok(q.todoId instanceof Types.ObjectId, `todoId ist ${typeof q.todoId}`);
+      assert.ok(q.resolvedTargetUserIds.every((x) => x instanceof Types.ObjectId));
     });
   } finally {
     await conn.dropDatabase().catch(() => {});

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type SshAuditAction =
   | 'connect'
@@ -16,7 +16,7 @@ export type SshAuditDocument = HydratedDocument<SshAudit>;
 
 @Schema({ collection: 'sshaudits' })
 export class SshAudit {
-  @Prop({ type: Types.ObjectId, ref: 'SshConnection', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'SshConnection', required: true })
   connectionId: Types.ObjectId;
 
   @Prop({ required: true, default: () => new Date() })
@@ -44,10 +44,10 @@ export class SshAudit {
   })
   sourceContext: SshAuditSourceContext;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User', required: true })
   userId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'AgentRole' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'AgentRole' })
   agentRoleId?: Types.ObjectId;
 
   // For action='exec', truncated to 500 chars (enforced at write site).
@@ -70,13 +70,13 @@ export class SshAudit {
   errorMsg?: string;
 
   // Nur bei sourceContext='workflow': aus welchem Lauf/Node der Befehl kam.
-  @Prop({ type: Types.ObjectId, ref: 'WorkflowRun' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'WorkflowRun' })
   workflowRunId?: Types.ObjectId;
 
   @Prop()
   workflowNodeId?: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'WorkflowDefinition' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'WorkflowDefinition' })
   workflowDefinitionId?: Types.ObjectId;
 
   // Nur gesetzt (true), wenn der Befehl aus einem Debug-Lauf kam.

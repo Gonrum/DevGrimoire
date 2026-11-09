@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { ALL_SENSITIVITY_LEVELS, Sensitivity, SensitivityLevel } from '../../common/sensitivity';
 import type { ResearchDepth, ResearchMode, ResearchStatus, TaskStatus, TaskVia } from '../research-types';
 
@@ -44,13 +44,13 @@ export const ResearchFileSchema = SchemaFactory.createForClass(ResearchFile);
 @Schema({ timestamps: true })
 export class Research {
   // Besitzer einer persönlichen (nicht zugeordneten) Recherche. Alt-Einträge: null.
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User', default: null, index: true })
   ownerUserId?: Types.ObjectId | null;
 
-  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer' })
   customerId?: Types.ObjectId;
 
   @Prop({ required: true })

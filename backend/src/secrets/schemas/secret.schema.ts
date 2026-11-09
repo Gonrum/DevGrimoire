@@ -1,14 +1,14 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type SecretDocument = HydratedDocument<Secret>;
 
 @Schema({ timestamps: true })
 export class Secret {
-  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer' })
   customerId?: Types.ObjectId;
 
   @Prop({ type: String, default: null })
@@ -29,13 +29,13 @@ export class Secret {
   // Marker for cascade-delete from SshConnection. When set, the secret is
   // deleted together with its owning SshConnection. Secrets the user picked
   // explicitly via "Pick-Existing" leave this unset and stay independent.
-  @Prop({ type: Types.ObjectId, ref: 'SshConnection' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'SshConnection' })
   ownedBySshConnectionId?: Types.ObjectId;
 
   // Marker for cascade-delete from KubeCluster. Analog zu
   // ownedBySshConnectionId: beim Löschen des Clusters fliegt die
   // verschlüsselte Kubeconfig mit.
-  @Prop({ type: Types.ObjectId, ref: 'KubeCluster' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'KubeCluster' })
   ownedByKubeClusterId?: Types.ObjectId;
 
   // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber

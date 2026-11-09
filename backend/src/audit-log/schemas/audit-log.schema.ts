@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type AuditLogDocument = HydratedDocument<AuditLog>;
 
@@ -15,7 +15,7 @@ export class AuditLog {
   @Prop({ required: true, index: true })
   action: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User', index: true })
   actorUserId?: Types.ObjectId;
 
   @Prop()
@@ -24,14 +24,14 @@ export class AuditLog {
   @Prop()
   actorRole?: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'ApiKey' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'ApiKey' })
   actorApiKeyId?: Types.ObjectId;
 
   /** Optional: entity affected by the action — entityType is the lowercase singular. */
   @Prop({ index: true })
   entityType?: string;
 
-  @Prop({ type: Types.ObjectId, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, index: true })
   entityId?: Types.ObjectId;
 
   /** Free-form structured payload — diff snippets, scope before/after, etc. */

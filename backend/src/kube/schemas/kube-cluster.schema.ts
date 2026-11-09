@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type KubeTransport = 'direct' | 'ssh-tunnel';
 
@@ -43,14 +43,14 @@ export class KubeCluster {
   slug: string;
 
   // Genau eines von beiden — Pre-Save-Invariante unten.
-  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer' })
   customerId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
   // FK -> Secret. Enthält die vollständige Kubeconfig, AES-256-GCM.
-  @Prop({ type: Types.ObjectId, ref: 'Secret', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Secret', required: true })
   kubeconfigSecretId: Types.ObjectId;
 
   @Prop({ required: true, trim: true })
@@ -66,7 +66,7 @@ export class KubeCluster {
   @Prop({ required: true, type: String, enum: ['direct', 'ssh-tunnel'], default: 'direct' })
   transport: KubeTransport;
 
-  @Prop({ type: Types.ObjectId, ref: 'SshConnection' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'SshConnection' })
   sshConnectionId?: Types.ObjectId;
 
   // DevGrimoire-Ebene, nicht Cluster-RBAC. Siehe Spec, Abschnitt K3.

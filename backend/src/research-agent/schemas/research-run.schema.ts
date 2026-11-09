@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type ResearchRunDocument = HydratedDocument<ResearchRun>;
 
@@ -28,7 +28,7 @@ export interface RunTokenUsage {
 
 @Schema({ timestamps: true })
 export class ResearchRun {
-  @Prop({ type: Types.ObjectId, ref: 'ResearchTopic', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'ResearchTopic', required: true })
   topicId: Types.ObjectId;
 
   @Prop()

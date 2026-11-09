@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type ChatActivityDocument = HydratedDocument<ChatActivity>;
 
@@ -18,16 +18,16 @@ export interface ChatActivityToolUse {
  */
 @Schema({ timestamps: { createdAt: true, updatedAt: false } })
 export class ChatActivity {
-  @Prop({ type: Types.ObjectId, ref: 'ChatSession', index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'ChatSession', index: true })
   sessionId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User', index: true })
   userId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Project', index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', index: true })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Customer', index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer', index: true })
   customerId?: Types.ObjectId;
 
   /** 'server' (HTTP-streamed) or 'browser' (browser-mode + persist endpoint). */

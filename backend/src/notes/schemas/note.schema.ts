@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type NoteDocument = HydratedDocument<Note>;
 
@@ -15,13 +15,13 @@ export class PromotedRef {
   @Prop({ required: true, enum: ['knowledge', 'snippet', 'todo', 'research', 'manual'] })
   entityType: PromotedEntityType;
 
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: SchemaTypes.ObjectId, required: true })
   entityId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId })
+  @Prop({ type: SchemaTypes.ObjectId })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId })
+  @Prop({ type: SchemaTypes.ObjectId })
   customerId?: Types.ObjectId;
 }
 
@@ -29,7 +29,7 @@ export const PromotedRefSchema = SchemaFactory.createForClass(PromotedRef);
 
 @Schema({ timestamps: true })
 export class Note {
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User', required: true, index: true })
   userId: Types.ObjectId;
 
   @Prop({ type: String, default: '' })

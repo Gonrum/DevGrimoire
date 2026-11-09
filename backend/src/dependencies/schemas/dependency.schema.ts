@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 
 export type DependencyDocument = Dependency & Document;
 
@@ -16,7 +16,7 @@ export enum PackageManager {
 
 @Schema({ timestamps: true })
 export class Dependency {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', required: true })
   projectId: Types.ObjectId;
 
   @Prop({ required: true })

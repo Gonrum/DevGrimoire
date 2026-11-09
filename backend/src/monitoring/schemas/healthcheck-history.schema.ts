@@ -1,15 +1,15 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { HealthcheckStatus } from './healthcheck.schema';
 
 export type HealthcheckHistoryDocument = HydratedDocument<HealthcheckHistory>;
 
 @Schema({ timestamps: true, collection: 'healthcheck_history' })
 export class HealthcheckHistory {
-  @Prop({ type: Types.ObjectId, ref: 'Healthcheck', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Healthcheck', required: true, index: true })
   healthcheckId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Customer', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer', required: true, index: true })
   customerId: Types.ObjectId;
 
   @Prop({ required: true })

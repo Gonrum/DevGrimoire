@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 
 export type RecurringTaskDocument = RecurringTask & Document;
 
@@ -58,10 +58,10 @@ export const RecurringChatConfigSchema = SchemaFactory.createForClass(RecurringC
 
 @Schema({ timestamps: true })
 export class RecurringTask {
-  @Prop({ type: Types.ObjectId, ref: 'Project', index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', index: true })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Customer', index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer', index: true })
   customerId?: Types.ObjectId;
 
   @Prop({ required: true })
@@ -76,7 +76,7 @@ export class RecurringTask {
   @Prop({ type: [String], default: [] })
   tags: string[];
 
-  @Prop({ type: Types.ObjectId, ref: 'Milestone' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Milestone' })
   milestoneId?: Types.ObjectId;
 
   @Prop()
@@ -106,7 +106,7 @@ export class RecurringTask {
   @Prop({ required: true })
   nextRun: Date;
 
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Todo' }], default: [] })
+  @Prop({ type: [{ type: SchemaTypes.ObjectId, ref: 'Todo' }], default: [] })
   createdTodoIds: Types.ObjectId[];
 
   @Prop({ default: 3, min: 1, max: 10 })
@@ -121,11 +121,11 @@ export class RecurringTask {
   chat?: RecurringChatConfig;
 
   /** Owning user — required for chat actions so the chat session can be persisted. */
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   createdByUserId?: Types.ObjectId;
 
   /** Chat sessions produced by `action === 'chat'` runs. Most recent last. */
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'ChatSession' }], default: [] })
+  @Prop({ type: [{ type: SchemaTypes.ObjectId, ref: 'ChatSession' }], default: [] })
   chatSessionIds: Types.ObjectId[];
 
   /** Result of the last run — surfaced in the UI so users see failures, not just silence. */

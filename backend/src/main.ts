@@ -10,6 +10,10 @@ import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { AppModule } from './app.module';
+import { MongooseErrorFilter } from './common/mongoose-error.filter';
+import { runObjectIdMigrationOnce } from './common/objectid-migration.boot';
+import { getConnectionToken } from '@nestjs/mongoose';
+import type { Connection } from 'mongoose';
 import { ProjectsService } from './projects/projects.service';
 import { TodosService } from './todos/todos.service';
 import { SessionsService } from './sessions/sessions.service';
@@ -196,6 +200,8 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
   });
+  // T-510: vor allem, was abfragt (onModuleInit-Hooks laufen erst mit listen).
+  await runObjectIdMigrationOnce(app.get<Connection>(getConnectionToken()));
 
   const expressApp = app.getHttpAdapter().getInstance();
 
@@ -733,6 +739,7 @@ async function bootstrap() {
   app.enableCors({
     origin: process.env.CORS_ORIGIN || 'http://localhost:8080',
   });
+  app.useGlobalFilters(new MongooseErrorFilter());
   app.useGlobalPipes(
     // Vor der ValidationPipe: skalare String-Query-Parameter dürfen weder
     // Objekt noch Array sein (M-2).

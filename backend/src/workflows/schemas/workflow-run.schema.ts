@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory, raw } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 import { WorkflowScope } from './workflow-definition.schema';
 
 export type WorkflowRunDocument = WorkflowRun & Document;
@@ -30,7 +30,7 @@ export enum WorkflowRunStatus {
 
 @Schema({ timestamps: true })
 export class WorkflowRun {
-  @Prop({ type: Types.ObjectId, ref: 'WorkflowDefinition', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'WorkflowDefinition', required: true, index: true })
   definitionId: Types.ObjectId;
 
   @Prop({ required: true, min: 1 })
@@ -42,10 +42,10 @@ export class WorkflowRun {
   @Prop({ required: true, enum: WorkflowScope, index: true })
   scope: WorkflowScope;
 
-  @Prop({ type: Types.ObjectId, ref: 'Project', index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', index: true })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Customer', index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer', index: true })
   customerId?: Types.ObjectId;
 
   @Prop({ type: Object, required: true })
@@ -81,7 +81,7 @@ export class WorkflowRun {
   @Prop()
   finishedAt?: Date;
 
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
   createdByUserId?: Types.ObjectId;
 
   @Prop({ type: Object })
@@ -111,7 +111,7 @@ export class WorkflowRun {
    * runs share `definitionId` and `definitionSnapshot`. The retry's status is
    * independent — the parent stays in its terminal status (FAILED/CANCELLED).
    */
-  @Prop({ type: Types.ObjectId, ref: 'WorkflowRun', index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'WorkflowRun', index: true })
   parentRunId?: Types.ObjectId;
 
   /** Optional: node id the retry started from (vs. resuming from the failed node). */

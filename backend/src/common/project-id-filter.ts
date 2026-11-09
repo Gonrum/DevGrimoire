@@ -15,15 +15,14 @@ import { Types } from 'mongoose';
  * Usage:
  *   if (filters.projectId) query.projectId = projectIdFilter(filters.projectId);
  *
- * Returns an `$in` clause with both representations (or just the raw value if
- * the input isn't a valid 24-char hex so the caller gets a deterministic no-
- * match rather than a throw).
+ * Returns an `$in` clause with both representations, or an empty `$in` if
+ * the input isn't a valid ObjectId, so the caller gets a deterministic no-
+ * match rather than a throw.
  */
 export function projectIdFilter(id: string): { $in: Array<string | Types.ObjectId> } {
-  if (!id) return { $in: [] };
-  try {
-    return { $in: [id, new Types.ObjectId(id)] };
-  } catch {
-    return { $in: [id] };
-  }
+  // T-510: seit die Felder echte ObjectId-Pfade sind, würde Mongoose einen
+  // ungültigen String im Filter nicht mehr „nicht finden", sondern mit einem
+  // CastError ablehnen. Ungültig heisst deshalb: leeres `$in`, kein Treffer.
+  if (!id || !Types.ObjectId.isValid(id)) return { $in: [] };
+  return { $in: [id, new Types.ObjectId(id)] };
 }

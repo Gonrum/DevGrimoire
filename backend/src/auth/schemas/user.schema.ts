@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import type { ScopeMode } from '../../common/permissions';
 import type { StoredNotificationPrefs } from '../../notifications/notification-prefs';
 
@@ -51,13 +51,13 @@ export class User {
   @Prop({ type: String, enum: ['all', 'allowlist', 'none'], default: 'all' })
   projectScopeMode: ScopeMode;
 
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Project' }], default: [] })
+  @Prop({ type: [{ type: SchemaTypes.ObjectId, ref: 'Project' }], default: [] })
   allowedProjectIds: Types.ObjectId[];
 
   @Prop({ type: String, enum: ['all', 'allowlist', 'none'], default: 'all' })
   customerScopeMode: ScopeMode;
 
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Customer' }], default: [] })
+  @Prop({ type: [{ type: SchemaTypes.ObjectId, ref: 'Customer' }], default: [] })
   allowedCustomerIds: Types.ObjectId[];
 
   @Prop({

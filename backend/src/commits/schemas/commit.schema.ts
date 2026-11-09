@@ -1,12 +1,12 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { GIT_PROVIDERS, GitProvider } from './git-repository.schema';
 
 export type CommitDocument = HydratedDocument<Commit>;
 
 @Schema({ timestamps: true })
 export class Commit {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', required: true })
   projectId: Types.ObjectId;
 
   /**

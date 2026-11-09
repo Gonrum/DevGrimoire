@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { KG_ENTITY_TYPES, KgEntityType } from '../../knowledge-graph/schemas/knowledge-graph-edge.schema';
 
 export type OracleSuggestionDocument = HydratedDocument<OracleSuggestion>;
@@ -38,7 +38,7 @@ class OracleAffectedEntity {
 
 @Schema({ timestamps: true, collection: 'oraclesuggestions' })
 export class OracleSuggestion {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', required: true, index: true })
   projectId: Types.ObjectId;
 
   @Prop({ required: true, enum: OracleRiskType, index: true })

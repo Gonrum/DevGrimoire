@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type WorkspaceDocument = HydratedDocument<Workspace>;
 
@@ -16,7 +16,7 @@ export const WORKSPACE_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 
 @Schema({ timestamps: true, collection: 'workspaces' })
 export class Workspace {
-  @Prop({ type: Types.ObjectId, ref: 'Project', required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project', required: true, index: true })
   projectId: Types.ObjectId;
 
   @Prop({ required: true, maxlength: 64 })

@@ -1,11 +1,11 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type ResearchArtifactVersionDocument = HydratedDocument<ResearchArtifactVersion>;
 
 @Schema({ timestamps: true })
 export class ResearchArtifactVersion {
-  @Prop({ type: Types.ObjectId, ref: 'ResearchArtifact', required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'ResearchArtifact', required: true })
   artifactId: Types.ObjectId;
 
   @Prop({ required: true })
@@ -17,7 +17,7 @@ export class ResearchArtifactVersion {
   @Prop()
   changeNote?: string;
 
-  @Prop({ type: Types.ObjectId })
+  @Prop({ type: SchemaTypes.ObjectId })
   runId?: Types.ObjectId;
 }
 

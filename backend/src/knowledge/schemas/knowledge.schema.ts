@@ -1,15 +1,15 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { ALL_SENSITIVITY_LEVELS, Sensitivity, SensitivityLevel } from '../../common/sensitivity';
 
 export type KnowledgeDocument = HydratedDocument<Knowledge>;
 
 @Schema({ timestamps: true })
 export class Knowledge {
-  @Prop({ type: Types.ObjectId, ref: 'Project' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Customer' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer' })
   customerId?: Types.ObjectId;
 
   @Prop({ type: String, enum: ['global', 'project', 'customer'], default: 'project' })
@@ -38,7 +38,7 @@ export class Knowledge {
    * Set by POST /api/questions/:id/convert-to-knowledge. Optional — not set
    * for manually created Knowledge entries.
    */
-  @Prop({ type: Types.ObjectId, ref: 'Question' })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Question' })
   sourceQuestionId?: Types.ObjectId;
 
   // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
