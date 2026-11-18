@@ -66,8 +66,9 @@ function terminalEventFrom(run: {
  *
  * SSE handlers (`startRun`, `attachToRun`) follow the project's established
  * SSE-over-REST pattern EXACTLY: raw Express `@Res()`, the same four headers
- * + `flushHeaders()`, a guarded `send()`, a 15s `: ping` heartbeat, and an
- * `AbortController` wired to `req.on('close')`.
+ * + `flushHeaders()`, a guarded `send()` and a 15s `: ping` heartbeat.
+ * Only `attachToRun` (GET) stops on client disconnect — it merely detaches
+ * an observer. `startRun` deliberately does not cancel the run (see there).
  */
 @Controller()
 export class ResearchAgentController {
@@ -152,7 +153,7 @@ export class ResearchAgentController {
    * still get wrong) cannot arise here in the first place.
    */
   @Post('research-topics/:id/runs')
-  async startRun(@Param('id') id: string, @Req() req: Request, @Res() res: Response): Promise<void> {
+  async startRun(@Param('id') id: string, @Res() res: Response): Promise<void> {
     // Validates the topic exists BEFORE any SSE header goes out, so a bad id
     // gets a normal JSON 404 instead of an SSE stream carrying an error line.
     await this.topicService.get(id);
@@ -193,14 +194,17 @@ export class ResearchAgentController {
       if (!res.writableEnded) res.write(': ping\n\n');
     }, 15000);
 
-    const abort = new AbortController();
-    req.on('close', () => abort.abort());
-
+    // Bewusst KEIN Abbruch bei getrenntem Client: der Lauf soll Tab-Schliessen
+    // und Navigation überleben, man hängt sich über
+    // `GET research-runs/:id/stream` wieder an. Begrenzt wird er durch
+    // `guardrails.timeoutMs`. Der frühere `req.on('close')`-Listener war
+    // ohnehin wirkungslos — bei einem POST feuert 'close' schon, sobald der
+    // Body gelesen ist, also bevor der Listener hier hing.
     let unsubscribe: (() => void) | undefined;
     let terminalSent = false;
 
     try {
-      const runPromise = this.agentService.run(id, 'manual', abort.signal, (runId) => {
+      const runPromise = this.agentService.run(id, 'manual', undefined, (runId) => {
         // Fires synchronously, before `agentService.run()` can publish
         // anything else — subscribing here means no step is ever missed.
         send({ type: 'run_started', runId, trigger: 'manual' });
