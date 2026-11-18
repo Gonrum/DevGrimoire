@@ -960,6 +960,13 @@ app.post('/exec', async (req, res) => {
  * abortSignal → SIGTERM → SIGKILL.
  */
 app.post('/exec/stream', async (req, res) => {
+  // Abbruch durch den Client: am `res` und VOR jedem await. `req`-'close'
+  // feuert bei einem POST schon, sobald express.json den Body gelesen hat —
+  // der frühere Listener dort sah das Ereignis nie, ein abgebrochener Stream
+  // liess den Befehl bis zu seinem Timeout weiterlaufen. `writableFinished`
+  // unterscheidet den Verbindungsabbruch vom eigenen res.end().
+  const abort = new AbortController();
+  res.on('close', () => { if (!res.writableFinished) abort.abort(); });
   const id = requireWorkspaceId(req, res); if (!id) return;
   const command = req.body?.command;
   if (typeof command !== 'string' || !command.trim()) {
@@ -985,8 +992,6 @@ app.post('/exec/stream', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('X-Accel-Buffering', 'no');
 
-  const abort = new AbortController();
-  req.on('close', () => abort.abort());
 
   const startedAt = Date.now();
   const env = buildExecEnv(req.body?.env);

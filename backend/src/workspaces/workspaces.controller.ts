@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseEnumPipe, Post, Put, Query, Req, Res } from '@nestjs/common';
-import type { Request, Response } from 'express';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseEnumPipe, Post, Put, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { WorkspacesService } from './workspaces.service';
 import { WorkspaceClient } from './workspace-client.service';
 import { WorkspaceTtlScheduler } from './workspace-ttl.scheduler';
@@ -83,9 +83,16 @@ export class WorkspacesController {
   async execStream(
     @Param('id') id: string,
     @Body() dto: ExecWorkspaceDto,
-    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
+    // Abbruch durch den Browser: am `res` und VOR dem ersten await. `req`-
+    // 'close' feuert bei einem POST schon, sobald der Body gelesen ist — der
+    // frühere Listener sah es nie, und ein abgebrochener Stream liess den
+    // Befehl im Sidecar bis zum Timeout weiterlaufen. `writableFinished`
+    // trennt den Verbindungsabbruch vom eigenen res.end().
+    const abort = new AbortController();
+    res.on('close', () => { if (!res.writableFinished) abort.abort(); });
+
     // findById throws 404 BEFORE we open the SSE channel — the browser then
     // gets a clean JSON error instead of a half-opened stream.
     const ws = await this.workspacesService.findById(id);
@@ -98,9 +105,6 @@ export class WorkspacesController {
     // verloren. Das `?.` behält die Absicherung für Response-Mocks ohne
     // flushHeaders, die der frühere Cast bezweckte.
     res.flushHeaders?.();
-
-    const abort = new AbortController();
-    req.on('close', () => abort.abort());
 
     const send = (event: Record<string, unknown>) => {
       if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
