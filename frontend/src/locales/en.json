@@ -3010,6 +3010,23 @@
       "done": "Uploaded ({{bytes}} bytes).",
       "noFile": "Please choose a file.",
       "noPath": "Please enter a remote path."
+    },
+    "dock": {
+      "title": "Terminals",
+      "openButton": "Terminals: project SSH servers and workspaces",
+      "newTab": "New SSH session",
+      "minimize": "Minimize — sessions keep running",
+      "closeAll": "Close all sessions",
+      "closeTab": "Close {{label}}",
+      "pickTitle": "What do you want to connect to?",
+      "empty": "No SSH connections are configured for this project (\"Servers\" tab).",
+      "noProject": "Open a project to start more connections.",
+      "hint": "Live SSH shell. Ctrl+D or `exit` ends the session. Minimizing keeps all tabs running.",
+      "confirmCloseAllTitle": "Close all sessions?",
+      "confirmCloseAllBody": "{{count}} active SSH session(s) will be terminated.",
+      "sectionServers": "Servers (SSH)",
+      "sectionWorkspaces": "Workspaces",
+      "emptyWorkspaces": "No active workspaces in this project."
     }
   },
   "kube": {

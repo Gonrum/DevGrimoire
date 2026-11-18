@@ -136,6 +136,19 @@ function rawDataToString(data: WebSocket.RawData): string {
   return Buffer.from(data).toString('utf8');
 }
 
+/**
+ * PTY-Größe aus einem `resize`-Frame. Nur ganze, positive Werte in einem
+ * plausiblen Bereich — ein kaputter Frame darf das PTY nicht auf 0 oder auf
+ * Millionen Spalten setzen.
+ */
+function toPtySize(cols: unknown, rows: unknown): { cols: number; rows: number } | undefined {
+  const c = Number(cols);
+  const r = Number(rows);
+  if (!Number.isInteger(c) || !Number.isInteger(r)) return undefined;
+  if (c < 1 || r < 1 || c > 1000 || r > 1000) return undefined;
+  return { cols: c, rows: r };
+}
+
 /** Vom Client geschickte Resize-Nachricht — ungeprüftes JSON, deshalb alles `unknown`. */
 function asResizeMessage(value: unknown): { cols: unknown; rows: unknown } | undefined {
   if (value === null || typeof value !== 'object') return undefined;
@@ -979,8 +992,12 @@ async function bootstrap() {
     // shell allocation; the frontend will follow up with explicit resize
     // frames anyway, but starting with the right viewport avoids a flash
     // of misformatted output.
-    const initialCols = Number.parseInt(url.searchParams.get('cols') || '', 10) || 80;
-    const initialRows = Number.parseInt(url.searchParams.get('rows') || '', 10) || 24;
+    const initialSize = toPtySize(
+      url.searchParams.get('cols') ?? undefined,
+      url.searchParams.get('rows') ?? undefined,
+    );
+    const initialCols = initialSize?.cols ?? 80;
+    const initialRows = initialSize?.rows ?? 24;
 
     // ssh2 client setup happens AFTER the WS upgrade so we can surface
     // ssh errors as close-frames (with a reason the UI can render),
@@ -1014,6 +1031,54 @@ async function bootstrap() {
         }
       };
 
+      // Latest PTY size the browser asked for. The frontend sends its first
+      // `resize` frame on WS-open — i.e. while `connect()` below is still
+      // negotiating. That frame used to arrive before any 'message' listener
+      // existed and was dropped, so every shell started at 80×24 and full-
+      // screen tools (btop, htop, vim) only used a corner of the terminal
+      // until the browser window happened to be resized. The handler is
+      // therefore registered right here, and the remembered size feeds
+      // `client.shell()` once the channel opens.
+      let ptySize = { cols: initialCols, rows: initialRows };
+
+      clientWs.on('message', (data, isBinary) => {
+        if (!isBinary) {
+          const text = rawDataToString(data);
+          // Tolerate either a stringified Buffer or a real text frame.
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(text);
+          } catch {
+            parsed = undefined; // Not JSON — treated as stdin below.
+          }
+          const resize = asResizeMessage(parsed);
+          if (resize) {
+            const size = toPtySize(resize.cols, resize.rows);
+            if (size) {
+              ptySize = size;
+              if (channel) {
+                try { channel.setWindow(size.rows, size.cols, 0, 0); } catch { /* noop */ }
+              }
+            }
+            return;
+          }
+          // Pre-shell stdin gets dropped; the user is typing before the
+          // channel is alive. Cheaper than buffering.
+          if (!channel) return;
+          try { channel.write(text); } catch { /* noop */ }
+          return;
+        }
+        if (!channel) return;
+        try { channel.write(data); } catch { /* noop */ }
+      });
+
+      // Also before `connect()`: a browser that gives up while the SSH
+      // handshake is still running (tab closed, Reconnect clicked) must mark
+      // the session closed — otherwise the shell below was opened anyway and
+      // the ssh2 client lived on with nobody attached.
+      clientWs.on('close', () => closeAll());
+      clientWs.on('error', () => closeAll(1011, 'ws_error'));
+
       try {
         sshClient = await sshSessionService.connect(connectionId, {
           ptyCols: initialCols,
@@ -1031,6 +1096,16 @@ async function bootstrap() {
         return;
       }
 
+      if (closed) {
+        // WS went away during the handshake — `closeAll()` already ran with
+        // `sshClient === null`, so the fresh client is ours to release.
+        // An 'error' without a listener would take the whole process down.
+        sshClient.on('error', () => { /* already closing */ });
+        try { sshClient.end(); } catch { /* noop */ }
+        try { sshClient.destroy(); } catch { /* noop */ }
+        return;
+      }
+
       // We have a ready client → log the open. Best-effort; never block
       // the user-facing data path.
       if (MongoTypes.ObjectId.isValid(connectionId)) {
@@ -1044,7 +1119,7 @@ async function bootstrap() {
       }
 
       sshClient.shell(
-        { term: 'xterm-256color', cols: initialCols, rows: initialRows },
+        { term: 'xterm-256color', cols: ptySize.cols, rows: ptySize.rows },
         (err, stream) => {
           if (err) {
             // Post-connect failure → 1011 (internal). Spec §4.3's 4xxx codes
@@ -1054,6 +1129,8 @@ async function bootstrap() {
             return;
           }
           channel = stream;
+          // A resize may have landed between `shell()` and this callback.
+          try { stream.setWindow(ptySize.rows, ptySize.cols, 0, 0); } catch { /* noop */ }
 
           // SSH → WS: ship both stdout and stderr as binary frames. ssh2
           // separates them on the channel but xterm-js handles ANSI on a
@@ -1084,40 +1161,9 @@ async function bootstrap() {
         },
       );
 
-      // WS → SSH: text JSON frames are control (only `resize` defined);
-      // anything else gets piped to stdin as bytes. Mirrors the
-      // workspace-terminal direction for protocol symmetry.
-      clientWs.on('message', (data, isBinary) => {
-        if (!channel) {
-          // Pre-shell stdin gets dropped; the user is typing before the
-          // channel is alive. Cheaper than buffering.
-          return;
-        }
-        if (!isBinary) {
-          const text = rawDataToString(data);
-          // Tolerate either a stringified Buffer or a real text frame.
-          try {
-            const resize = asResizeMessage(JSON.parse(text));
-            if (resize) {
-              const cols = Number(resize.cols);
-              const rows = Number(resize.rows);
-              if (Number.isFinite(cols) && Number.isFinite(rows) && cols > 0 && rows > 0) {
-                try { channel.setWindow(rows, cols, 0, 0); } catch { /* noop */ }
-              }
-              return;
-            }
-            // Unknown control frame — fall through and treat as stdin.
-          } catch {
-            // Not JSON — fall through to stdin.
-          }
-          try { channel.write(text); } catch { /* noop */ }
-          return;
-        }
-        try { channel.write(data); } catch { /* noop */ }
-      });
+      // WS → SSH: handled by the 'message' listener registered before
+      // `connect()` above (text JSON `resize` = control, everything else stdin).
 
-      clientWs.on('close', () => closeAll());
-      clientWs.on('error', () => closeAll(1011, 'ws_error'));
       sshClient.on('end', () => closeAll());
       sshClient.on('close', () => closeAll());
       sshClient.on('error', (err) => closeAll(1011, err.message || 'ssh_error'));

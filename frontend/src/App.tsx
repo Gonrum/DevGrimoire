@@ -53,6 +53,7 @@ import ParticleBackground from './components/ParticleBackground';
 import QuestionDialog from './components/QuestionDialog';
 import ChatDock from './components/ChatDock';
 import NotepadDock from './notepad/NotepadDock';
+import SshDock from './components/ssh/SshDock';
 
 function NotFound() {
   const { t } = useTranslation();
@@ -481,6 +482,7 @@ function AppShell() {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
+      <SshDock />
       <ChatDock />
       <NotepadDock />
     </div>

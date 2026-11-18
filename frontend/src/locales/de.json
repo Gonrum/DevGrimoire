@@ -3009,6 +3009,23 @@
       "done": "Hochgeladen ({{bytes}} Bytes).",
       "noFile": "Bitte eine Datei auswählen.",
       "noPath": "Bitte einen Ziel-Pfad angeben."
+    },
+    "dock": {
+      "title": "Terminals",
+      "openButton": "Terminals: SSH-Server und Workspaces des Projekts",
+      "newTab": "Neue SSH-Sitzung",
+      "minimize": "Minimieren — Sitzungen laufen weiter",
+      "closeAll": "Alle Sitzungen schließen",
+      "closeTab": "{{label}} schließen",
+      "pickTitle": "Womit verbinden?",
+      "empty": "Für dieses Projekt sind keine SSH-Verbindungen hinterlegt (Tab „Server“).",
+      "noProject": "Öffne ein Projekt, um weitere Verbindungen zu starten.",
+      "hint": "Live-SSH-Shell. Strg+D oder `exit` beendet die Sitzung. Minimieren lässt alle Tabs weiterlaufen.",
+      "confirmCloseAllTitle": "Alle Sitzungen schließen?",
+      "confirmCloseAllBody": "{{count}} aktive SSH-Sitzung(en) werden beendet.",
+      "sectionServers": "Server (SSH)",
+      "sectionWorkspaces": "Workspaces",
+      "emptyWorkspaces": "Keine aktiven Workspaces in diesem Projekt."
     }
   },
   "kube": {

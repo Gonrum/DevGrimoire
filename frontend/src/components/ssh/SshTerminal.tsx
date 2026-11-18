@@ -15,14 +15,40 @@ import { isRecord, readApiBaseUrl } from '../../lib/narrow';
  */
 const BASE_URL = readApiBaseUrl();
 
+/**
+ * Where the PTY lives. Both backends speak the same control protocol
+ * (`resize` in, `exit` out), so one component serves both:
+ *   - `ssh`: `/ssh/:id/terminal` — ssh2 shell on a remote host
+ *   - `workspace`: `/workspaces/:id/terminal` — bash in the workspace sidecar;
+ *     `sessionId` keys the sidecar's PTY map, so a reconnect with the same id
+ *     re-attaches to the same bash.
+ */
+export type TerminalTarget =
+  | { kind: 'ssh'; connectionId: string }
+  | { kind: 'workspace'; workspaceId: string; sessionId: string };
+
 export interface SshTerminalProps {
-  connectionId: string;
+  /** SSH connection id — shorthand for `target: { kind: 'ssh', connectionId }`. */
+  connectionId?: string;
+  /** Overrides `connectionId`; required for workspace terminals. */
+  target?: TerminalTarget;
   connectionLabel: string;
   hostInfo: string;
   authToken: string | null;
   onClose?: () => void;
   /** Called when the WS state transitions (used by parent for Esc-confirm). */
   onConnectionStateChange?: (state: TerminalState) => void;
+  /**
+   * Whether this terminal is the visible one. Hosts that keep several
+   * sessions mounted (the tabbed `SshDock`) pass `false` for background tabs;
+   * flipping back to `true` refits, re-sends the size and focuses the shell.
+   * Defaults to `true` for single-terminal hosts.
+   */
+  active?: boolean;
+  /** Footer hint override — the default mentions the modal's Esc-confirm. */
+  hint?: string;
+  /** Height classes of the root box; hosts that size the frame pass `h-full`. */
+  heightClassName?: string;
 }
 
 export type TerminalState =
@@ -32,13 +58,25 @@ export type TerminalState =
   | 'disconnected'
   | 'error';
 
-function buildWsUrl(connectionId: string, token: string | null): string {
+function buildWsUrl(
+  target: TerminalTarget,
+  token: string | null,
+  size: { cols: number; rows: number },
+): string {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const apiPath = BASE_URL.startsWith('http')
     ? BASE_URL.replace(/^http/i, proto)
     : `${proto}://${window.location.host}${BASE_URL}`;
-  const url = new URL(`${apiPath}/ssh/${connectionId}/terminal`);
+  const url =
+    target.kind === 'ssh'
+      ? new URL(`${apiPath}/ssh/${target.connectionId}/terminal`)
+      : new URL(`${apiPath}/workspaces/${target.workspaceId}/terminal`);
   url.searchParams.set('token', token || '');
+  if (target.kind === 'workspace') url.searchParams.set('sessionId', target.sessionId);
+  // Initial PTY size, so the shell starts at the real viewport instead of
+  // 80×24 (the explicit `resize` frame on open follows anyway).
+  url.searchParams.set('cols', String(size.cols));
+  url.searchParams.set('rows', String(size.rows));
   return url.toString();
 }
 
@@ -117,13 +155,27 @@ function parseControlFrame(text: string): SshControlFrame | null {
  */
 export default function SshTerminal({
   connectionId,
+  target,
   connectionLabel,
   hostInfo,
   authToken,
   onClose,
   onConnectionStateChange,
+  active = true,
+  hint,
+  heightClassName = 'h-[80vh] min-h-[480px]',
 }: SshTerminalProps) {
   const { t } = useTranslation();
+  // Primitive key so the connect-effect only re-runs when the endpoint
+  // really changes, not when a caller passes a fresh `target` object.
+  const targetKind = target?.kind ?? 'ssh';
+  const targetId =
+    target?.kind === 'workspace'
+      ? target.workspaceId
+      : target?.kind === 'ssh'
+        ? target.connectionId
+        : (connectionId ?? '');
+  const targetSession = target?.kind === 'workspace' ? target.sessionId : '';
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -172,7 +224,11 @@ export default function SshTerminal({
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container || !targetId) return;
+    const endpoint: TerminalTarget =
+      targetKind === 'workspace'
+        ? { kind: 'workspace', workspaceId: targetId, sessionId: targetSession }
+        : { kind: 'ssh', connectionId: targetId };
 
     const term = new Terminal({
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
@@ -202,7 +258,9 @@ export default function SshTerminal({
     setCloseInfo(null);
     notifyState('connecting');
 
-    const ws = new WebSocket(buildWsUrl(connectionId, authTokenRef.current));
+    const ws = new WebSocket(
+      buildWsUrl(endpoint, authTokenRef.current, { cols: term.cols, rows: term.rows }),
+    );
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
 
@@ -271,6 +329,10 @@ export default function SshTerminal({
 
     const sendResize = () => {
       if (!fitRef.current || !termRef.current) return;
+      // A hidden host (display:none, collapsed panel) reports a 0×0 box.
+      // FitAddon would then shrink the PTY to its minimum and the remote
+      // shell (vim, htop, …) would redraw into a 2×1 window.
+      if (container.clientWidth === 0 || container.clientHeight === 0) return;
       try {
         fitRef.current.fit();
       } catch {
@@ -312,7 +374,29 @@ export default function SshTerminal({
     // `authToken` deliberately stays OUT of these deps — see `authTokenRef`.
     // The Reconnect path still picks up the freshest token because it reads
     // the ref when it rebuilds the URL.
-  }, [connectionId, reconnectKey, notifyState, t]);
+  }, [targetKind, targetId, targetSession, reconnectKey, notifyState, t]);
+
+  // Tab became visible again: the container may have changed size while it
+  // was in the background, and keyboard focus belongs to the visible shell.
+  useEffect(() => {
+    if (!active) return;
+    const term = termRef.current;
+    const fit = fitRef.current;
+    const container = containerRef.current;
+    if (!term || !fit || !container) return;
+    if (container.clientWidth > 0 && container.clientHeight > 0) {
+      try {
+        fit.fit();
+      } catch {
+        // layout not ready — the ResizeObserver catches up
+      }
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      }
+    }
+    term.focus();
+  }, [active]);
 
   const handleDisconnect = () => {
     try {
@@ -345,7 +429,7 @@ export default function SshTerminal({
   const canReconnect = state === 'disconnected' || state === 'error' || state === 'exited';
 
   return (
-    <div className="flex flex-col h-[80vh] min-h-[480px]">
+    <div className={`flex flex-col ${heightClassName}`}>
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 bg-gray-950">
         <div className="text-xs min-w-0">
           <div className="flex items-center gap-2">
@@ -373,7 +457,7 @@ export default function SshTerminal({
       />
 
       <div className="px-3 py-1.5 text-[10px] text-gray-500 border-t border-gray-800 bg-gray-950">
-        {t('ssh.terminal.hint')}
+        {hint ?? t('ssh.terminal.hint')}
       </div>
     </div>
   );
