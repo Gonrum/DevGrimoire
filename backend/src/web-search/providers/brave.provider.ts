@@ -2,6 +2,7 @@ import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 import { HttpService } from '@nestjs/axios';
 import { SearchProvider, SearchProviderOptions, SearchResult } from './search-provider.interface';
 import { providerErrorMessage } from './provider-error';
+import { braveEndpoint } from './endpoint-url';
 
 // `title` und `web.results` sind optional deklariert, weil der Mapper unten
 // genau so damit umgeht (`r.title ?? ''`, `raw.web?.results ?? []`). Nur `url`
@@ -37,7 +38,7 @@ export class BraveProvider implements SearchProvider {
   ) {}
 
   async search(query: string, opts: SearchProviderOptions): Promise<SearchResult[]> {
-    const baseUrl = this.cfg.baseUrl || 'https://api.search.brave.com/res/v1/web/search';
+    const baseUrl = braveEndpoint(this.cfg.baseUrl);
     const params: Record<string, string | number> = {
       q: query,
       count: opts.limit ?? 5,
@@ -61,9 +62,12 @@ export class BraveProvider implements SearchProvider {
       const res = await this.http.axiosRef.get<BraveResponse>(baseUrl, {
         params,
         timeout: 15000,
+        // Ohne Key (eigener Endpoint ohne Auth) kein leerer Token-Header —
+        // manche Gateways lehnen einen leeren Header härter ab als einen
+        // fehlenden.
         headers: {
           Accept: 'application/json',
-          'X-Subscription-Token': this.cfg.apiKey,
+          ...(this.cfg.apiKey ? { 'X-Subscription-Token': this.cfg.apiKey } : {}),
         },
       });
       return res.data;

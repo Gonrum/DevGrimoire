@@ -16,6 +16,14 @@ const PROVIDER_LABEL_KEY: Record<WebSearchProviderType, string> = {
   serpapi: 'settings.webSearch.providerSerpapi',
 };
 
+/** Format-Hinweis unter dem Endpoint-Feld (i18n-Key), pro Provider. */
+const PROVIDER_URL_HINT_KEY: Record<WebSearchProviderType, string> = {
+  searxng: 'settings.webSearch.urlHintSearxng',
+  tavily: 'settings.webSearch.urlHintTavily',
+  brave: 'settings.webSearch.urlHintBrave',
+  serpapi: 'settings.webSearch.urlHintSerpapi',
+};
+
 const PROVIDER_DEFAULT_URL: Record<WebSearchProviderType, string> = {
   searxng: 'http://searxng:8080',
   tavily: 'https://api.tavily.com',
@@ -101,12 +109,6 @@ export default function WebSearchSettings() {
   const [providerError, setProviderError] = useState<string | null>(null);
   const [providerSuccess, setProviderSuccess] = useState<string | null>(null);
   const [providerTests, setProviderTests] = useState<Partial<Record<WebSearchProviderType, ProviderTestResult>>>({});
-  const [advancedOpen, setAdvancedOpen] = useState<Record<WebSearchProviderType, boolean>>({
-    searxng: false,
-    tavily: false,
-    brave: false,
-    serpapi: false,
-  });
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -195,7 +197,10 @@ export default function WebSearchSettings() {
         providers: PROVIDER_TYPES.map((type): SetWebSearchProvider => {
           const entry = providerForms[type];
           const provider: SetWebSearchProvider = { type };
-          if (entry.baseUrl.trim()) provider.baseUrl = entry.baseUrl.trim();
+          // Immer mitschicken: `""` heißt „zurück auf den Standard-Endpoint".
+          // Vorher fiel ein geleertes Feld weg, und das Backend behielt die
+          // alte URL — ein eigener Endpoint ließ sich nie mehr entfernen.
+          provider.baseUrl = entry.baseUrl.trim();
           if (entry.apiKey !== undefined) provider.apiKey = entry.apiKey;
           return provider;
         }),
@@ -450,6 +455,7 @@ export default function WebSearchSettings() {
                         value={entry.baseUrl}
                         onChange={(e) => updateProviderField(type, { baseUrl: e.target.value })}
                         placeholder={PROVIDER_DEFAULT_URL[type]}
+                        helpText={t(PROVIDER_URL_HINT_KEY[type])}
                       />
                     ) : (
                       <div className="space-y-2">
@@ -471,22 +477,13 @@ export default function WebSearchSettings() {
                             </button>
                           </div>
                         )}
-                        {advancedOpen[type] || entry.baseUrl.trim() ? (
-                          <FormInput
-                            label={t('settings.webSearch.providerBaseUrlOverride')}
-                            value={entry.baseUrl}
-                            onChange={(e) => updateProviderField(type, { baseUrl: e.target.value })}
-                            placeholder={PROVIDER_DEFAULT_URL[type]}
-                          />
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setAdvancedOpen((prev) => ({ ...prev, [type]: true }))}
-                            className="text-xs text-gray-500 hover:text-gray-300"
-                          >
-                            {t('settings.webSearch.advancedEndpoint')}
-                          </button>
-                        )}
+                        <FormInput
+                          label={t('settings.webSearch.providerBaseUrlOverride')}
+                          value={entry.baseUrl}
+                          onChange={(e) => updateProviderField(type, { baseUrl: e.target.value })}
+                          placeholder={PROVIDER_DEFAULT_URL[type]}
+                          helpText={t(PROVIDER_URL_HINT_KEY[type])}
+                        />
                       </div>
                     )}
 

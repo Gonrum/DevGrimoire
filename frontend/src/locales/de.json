@@ -1649,8 +1649,7 @@
       "providerBrave": "Brave Search",
       "providerSerpapi": "SerpApi",
       "providerBaseUrl": "Base-URL",
-      "providerBaseUrlOverride": "Endpoint-URL (optional)",
-      "advancedEndpoint": "Erweitert: eigenen Endpoint (Proxy/Self-Host)",
+      "providerBaseUrlOverride": "Endpoint-URL (leer = offizieller Dienst)",
       "providerApiKey": "API-Key",
       "apiKeyStored": "API-Key gespeichert",
       "apiKeyPlaceholder": "API-Key eingeben",
@@ -1659,7 +1658,11 @@
       "test": "Testen",
       "testing": "Teste…",
       "testOk": "Erreichbar ({{count}} Treffer)",
-      "testFail": "Fehler: {{error}}"
+      "testFail": "Fehler: {{error}}",
+      "urlHintSearxng": "Leer lassen, um die SearXNG-URL aus den Grundeinstellungen oben zu nutzen.",
+      "urlHintTavily": "Für eine eigene Instanz oder einen Proxy. Basis-URL genügt, /search wird ergänzt. Der API-Key geht als Bearer-Header und im Body mit und ist ohne Auth optional.",
+      "urlHintBrave": "Für eine eigene Instanz oder einen Proxy. Ohne Pfad wird /res/v1/web/search ergänzt, sonst die URL unverändert genutzt. Ohne API-Key wird kein Token-Header gesendet.",
+      "urlHintSerpapi": "Vollständige Such-URL eines eigenen Endpoints oder Proxys."
     },
     "chatDescription": "Verhaltens-Optionen für den projektbezogenen Chat (Sampling-Parameter, History-Limit, Tool-Calling). Die LLM-Endpunkte werden zentral unter LLM-Endpunkte verwaltet.",
     "chatFeatureEnabled": "Chat-Feature aktiv",

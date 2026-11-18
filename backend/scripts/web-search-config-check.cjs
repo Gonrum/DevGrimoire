@@ -13,6 +13,15 @@ const svc = new WebSearchConfigService(settings, enc, null);
   assert.ok(!('apiKey' in pub.providers[0]));
   await svc.setConfig({ activeProvider: 'tavily', providers: [{ type: 'tavily', apiKey: '' }] });
   assert.ok(!JSON.parse(store.get('web_search_config')).providers[0].apiKeyEnc, 'empty deletes key');
+  // Eigener Endpoint: setzen, behalten (undefined), löschen ("").
+  const tav = () => JSON.parse(store.get('web_search_config')).providers[0];
+  await svc.setConfig({ activeProvider: 'tavily', providers: [{ type: 'tavily', baseUrl: ' https://tav.intern ' }] });
+  assert.strictEqual(tav().baseUrl, 'https://tav.intern', 'baseUrl wird getrimmt gespeichert');
+  await svc.setConfig({ activeProvider: 'tavily', providers: [{ type: 'tavily' }] });
+  assert.strictEqual(tav().baseUrl, 'https://tav.intern', 'undefined behält den Endpoint');
+  await svc.setConfig({ activeProvider: 'tavily', providers: [{ type: 'tavily', baseUrl: '' }] });
+  assert.ok(!('baseUrl' in tav()), 'leerer String löscht den Endpoint');
+
   const encOff = { ...enc, isEnabled: () => false };
   const svc2 = new WebSearchConfigService(settings, encOff, null);
   await assert.rejects(() => svc2.setConfig({ activeProvider: 'brave', providers: [{ type: 'brave', apiKey: 'x' }] }));

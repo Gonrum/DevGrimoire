@@ -1649,8 +1649,7 @@
       "providerBrave": "Brave Search",
       "providerSerpapi": "SerpApi",
       "providerBaseUrl": "Base URL",
-      "providerBaseUrlOverride": "Endpoint URL (optional)",
-      "advancedEndpoint": "Advanced: custom endpoint (proxy/self-host)",
+      "providerBaseUrlOverride": "Endpoint URL (empty = official service)",
       "providerApiKey": "API key",
       "apiKeyStored": "API key stored",
       "apiKeyPlaceholder": "Enter API key",
@@ -1659,7 +1658,11 @@
       "test": "Test",
       "testing": "Testing…",
       "testOk": "Reachable ({{count}} results)",
-      "testFail": "Error: {{error}}"
+      "testFail": "Error: {{error}}",
+      "urlHintSearxng": "Leave empty to use the SearXNG URL from the basic settings above.",
+      "urlHintTavily": "For your own instance or a proxy. A base URL is enough, /search is appended. The API key is sent as a Bearer header and in the body, and is optional without auth.",
+      "urlHintBrave": "For your own instance or a proxy. Without a path, /res/v1/web/search is appended; otherwise the URL is used as is. Without an API key no token header is sent.",
+      "urlHintSerpapi": "Full search URL of your own endpoint or proxy."
     },
     "chatDescription": "Behavior options for the project chat (sampling parameters, history limit, tool-calling). LLM endpoints are now managed centrally under LLM Endpoints.",
     "chatFeatureEnabled": "Chat feature enabled",

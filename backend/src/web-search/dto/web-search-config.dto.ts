@@ -1,4 +1,4 @@
-import { IsArray, IsIn, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsIn, IsOptional, IsString, IsUrl, ValidateIf, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export const SEARCH_PROVIDER_TYPES = ['searxng', 'tavily', 'brave', 'serpapi'] as const;
@@ -33,8 +33,15 @@ export class ProviderConfigDto {
   @IsIn(SEARCH_PROVIDER_TYPES)
   type: SearchProviderType;
 
+  /**
+   * Eigener Endpoint (Self-Host/Proxy). `undefined` = unverändert, `""` =
+   * zurück auf den Standard. Sonst eine http(s)-URL; Hosts ohne TLD
+   * (`http://searxng:8080`, `http://10.0.0.5`) sind ausdrücklich erlaubt.
+   */
   @IsOptional()
   @IsString()
+  @ValidateIf((o: { baseUrl?: string }) => !!o.baseUrl && o.baseUrl.trim() !== '')
+  @IsUrl({ require_tld: false, require_protocol: true, protocols: ['http', 'https'] })
   baseUrl?: string;
 
   /**

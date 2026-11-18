@@ -2,6 +2,7 @@ import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 import { HttpService } from '@nestjs/axios';
 import { SearchProvider, SearchProviderOptions, SearchResult } from './search-provider.interface';
 import { providerErrorMessage } from './provider-error';
+import { tavilySearchEndpoint } from './endpoint-url';
 
 // `title` und `results` optional wie der Mapper sie liest (`r.title ?? ''`,
 // `raw.results ?? []`). `score`/`published_date` liefert Tavily je Treffer
@@ -35,15 +36,18 @@ export class TavilyProvider implements SearchProvider {
   ) {}
 
   async search(query: string, opts: SearchProviderOptions): Promise<SearchResult[]> {
-    const baseUrl = this.cfg.baseUrl || 'https://api.tavily.com';
-    const body = {
-      api_key: this.cfg.apiKey,
+    const endpoint = tavilySearchEndpoint(this.cfg.baseUrl);
+    const body: Record<string, unknown> = {
       query,
       max_results: opts.limit ?? 5,
       search_depth: 'basic',
     };
+    // Tavily nimmt den Key im Body (klassisch) und als Bearer-Header (aktuelle
+    // API). Beides mitzuschicken deckt die offizielle API und kompatible
+    // Self-Host-/Proxy-Endpunkte ab, die nur eine der Formen kennen.
+    if (this.cfg.apiKey) body.api_key = this.cfg.apiKey;
 
-    const raw = await this.callTavily(baseUrl, body);
+    const raw = await this.callTavily(endpoint, body);
     const results = raw.results ?? [];
 
     return results.map((r) => ({
@@ -56,13 +60,16 @@ export class TavilyProvider implements SearchProvider {
   }
 
   private async callTavily(
-    baseUrl: string,
+    endpoint: string,
     body: Record<string, unknown>,
   ): Promise<TavilyResponse> {
     try {
-      const res = await this.http.axiosRef.post<TavilyResponse>(`${baseUrl}/search`, body, {
+      const res = await this.http.axiosRef.post<TavilyResponse>(endpoint, body, {
         timeout: 15000,
-        headers: { Accept: 'application/json' },
+        headers: {
+          Accept: 'application/json',
+          ...(this.cfg.apiKey ? { Authorization: `Bearer ${this.cfg.apiKey}` } : {}),
+        },
       });
       return res.data;
     } catch (err: unknown) {

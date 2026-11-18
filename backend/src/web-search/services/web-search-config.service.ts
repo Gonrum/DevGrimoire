@@ -179,9 +179,13 @@ export class WebSearchConfigService {
 
   private toStoredProvider(p: ProviderConfig, prev?: StoredProviderConfig): StoredProviderConfig {
     const stored: StoredProviderConfig = { type: p.type };
-    if (p.baseUrl !== undefined) {
-      stored.baseUrl = p.baseUrl;
-    } else if (prev?.baseUrl !== undefined) {
+    // Gleiche Semantik wie beim Key: `undefined` = behalten, `""` = löschen.
+    // Vorher gab es kein „löschen" — das Frontend ließ ein geleertes Feld weg,
+    // und ein einmal gesetzter eigener Endpoint blieb für immer stehen.
+    const baseUrl = p.baseUrl?.trim();
+    if (baseUrl) {
+      stored.baseUrl = baseUrl;
+    } else if (baseUrl === undefined && prev?.baseUrl) {
       stored.baseUrl = prev.baseUrl;
     }
 
