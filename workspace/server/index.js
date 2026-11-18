@@ -438,13 +438,196 @@ app.post('/read-stream', async (req, res) => {
     return res.status(400).json({ error: err.message });
   }
   const stream = fs.createReadStream(target);
-  // Abort the read if the client disconnects mid-stream.
-  req.on('close', () => { try { stream.destroy(); } catch { /* noop */ } });
+  // Abort the read if the client disconnects mid-stream. Am `res`, nicht am
+  // `req`: dessen 'close' feuert seit Node 16 schon, sobald der (hier kleine
+  // JSON-)Body gelesen ist — also bevor dieser Listener überhaupt hängt. Ein
+  // abgebrochener Download hielt so Datei-Handle und Stream offen, bis der
+  // Prozess endete. Nach vollständigem Senden ist destroy() ein No-op.
+  res.on('close', () => { try { stream.destroy(); } catch { /* noop */ } });
   stream.on('error', (err) => {
     if (!res.headersSent) res.status(500).json({ error: err.message });
     else res.destroy(err);
   });
   stream.pipe(res);
+});
+
+/** Ein einzelner Dateiname — kein Pfadtrenner, nicht `.`/`..`, kein NUL. */
+function isPlainFileName(name) {
+  return typeof name === 'string'
+    && name.length > 0
+    && name.length <= 255
+    && name !== '.'
+    && name !== '..'
+    && !name.includes('/')
+    && !name.includes('\0');
+}
+
+function isInside(root, candidate) {
+  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
+  return candidate === root || candidate.startsWith(rootWithSep);
+}
+
+/**
+ * Gegenstück zu /read-stream (`dg scp host:… ./…`): der Request-Body ist die
+ * Datei selbst (application/octet-stream), die Parameter kommen über die
+ * Query, weil der Body nicht JSON ist. Geschrieben wird in eine temporäre
+ * Datei im Zielverzeichnis und erst nach vollständigem Empfang per rename()
+ * an ihren Platz gelegt — ein abgebrochener Transfer hinterlässt keine halbe
+ * Datei und überschreibt nichts.
+ *
+ * Query:
+ *   workspaceId   wie überall
+ *   path          Ziel relativ zur Workspace-Wurzel; endet es auf `/` oder
+ *                 ist es ein vorhandenes Verzeichnis, wird `fileName` angehängt
+ *   fileName      Dateiname für Verzeichnisziele (Basename der Quelle)
+ *   size          erwartete Länge — weicht der Empfang ab, wird verworfen
+ *   mode          Dateirechte als Dezimalzahl (Default 0o644)
+ *   createDirs    "1" legt fehlende Elternverzeichnisse an
+ *
+ * Symlinks: das Elternverzeichnis wird per realpath() aufgelöst und muss in
+ * der Workspace-Wurzel liegen; rename() ersetzt einen Symlink am Ziel selbst,
+ * statt ihm zu folgen.
+ */
+app.post('/write-stream', async (req, res) => {
+  const q = req.query || {};
+  const id = typeof q.workspaceId === 'string' && WORKSPACE_ID_PATTERN.test(q.workspaceId) ? q.workspaceId : null;
+  if (!id) return res.status(400).json({ error: 'workspaceId must be a slug-compatible string' });
+  const requested = q.path;
+  if (typeof requested !== 'string' || !requested || requested.includes('\0')) {
+    return res.status(400).json({ error: 'path must be a non-empty string' });
+  }
+  const fileName = q.fileName;
+  if (fileName !== undefined && !isPlainFileName(fileName)) {
+    return res.status(400).json({ error: 'fileName must be a plain file name' });
+  }
+  let expectedSize;
+  if (q.size !== undefined) {
+    if (typeof q.size !== 'string' || !/^\d+$/.test(q.size)) return res.status(400).json({ error: 'size must be a non-negative integer' });
+    expectedSize = Number(q.size);
+    if (expectedSize > STREAM_MAX_BYTES) {
+      return res.status(413).json({ error: `file too large (>${STREAM_MAX_BYTES} bytes)`, size: expectedSize });
+    }
+  }
+  let mode = 0o644;
+  if (q.mode !== undefined) {
+    if (typeof q.mode !== 'string' || !/^\d+$/.test(q.mode) || Number(q.mode) > 0o777) {
+      return res.status(400).json({ error: 'mode must be an integer between 0 and 511' });
+    }
+    mode = Number(q.mode);
+  }
+  const createDirs = q.createDirs === '1';
+
+  if (!await workspaceExists(id)) {
+    return res.status(404).json({ error: 'workspace directory does not exist' });
+  }
+  let root;
+  try {
+    root = await fsp.realpath(workspaceRoot(id));
+  } catch {
+    // Zwischen workspaceExists und hier gelöscht (Cleanup-Race).
+    return res.status(404).json({ error: 'workspace directory does not exist' });
+  }
+
+  let target;
+  try {
+    target = path.resolve(root, requested);
+    if (!isInside(root, target)) throw new Error('path escapes workspace root');
+    let isDirTarget = requested.endsWith('/') || target === root;
+    if (!isDirTarget) {
+      try {
+        isDirTarget = (await fsp.stat(target)).isDirectory();
+      } catch (err) {
+        if (err.code !== 'ENOENT') throw err;
+      }
+    }
+    if (isDirTarget) {
+      if (!fileName) throw new Error('path is a directory and no fileName was given');
+      target = path.join(target, fileName);
+    }
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  const base = path.basename(target);
+  let parent = path.dirname(target);
+  try {
+    if (createDirs) {
+      // mkdir -p folgt Symlinks in den Zwischenkomponenten und legte so
+      // Verzeichnisse AUSSERHALB des Workspace an (`evil -> /tmp`,
+      // `evil/neu/x`), bevor eine Prüfung danach greifen konnte. Deshalb
+      // zuerst den tiefsten vorhandenen Vorfahren auflösen und prüfen; was
+      // darunter neu entsteht, legt mkdir selbst an — Symlinks sind es nicht.
+      let existing = parent;
+      for (;;) {
+        try {
+          await fsp.lstat(existing);
+          break;
+        } catch (err) {
+          if (err.code !== 'ENOENT') throw err;
+          existing = path.dirname(existing);
+        }
+      }
+      if (!isInside(root, await fsp.realpath(existing))) {
+        return res.status(400).json({ error: 'resolved path escapes workspace root' });
+      }
+      await fsp.mkdir(parent, { recursive: true });
+    }
+    parent = await fsp.realpath(parent);
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'target directory does not exist (use --mkdir)' });
+    return res.status(400).json({ error: err.message });
+  }
+  if (!isInside(root, parent)) {
+    return res.status(400).json({ error: 'resolved path escapes workspace root' });
+  }
+  const finalPath = path.join(parent, base);
+  try {
+    if ((await fsp.lstat(finalPath)).isDirectory()) {
+      return res.status(409).json({ error: 'target is a directory' });
+    }
+  } catch (err) {
+    if (err.code !== 'ENOENT') return res.status(400).json({ error: err.message });
+  }
+
+  const tmpPath = path.join(parent, `.${base}.${crypto.randomBytes(6).toString('hex')}.part`);
+  const out = fs.createWriteStream(tmpPath, { flags: 'wx', mode });
+  let received = 0;
+  let failed = false;
+  const fail = (status, message) => {
+    if (failed) return;
+    failed = true;
+    req.unpipe(out);
+    // Erst nach 'close' löschen: ein noch laufendes open('wx') könnte die
+    // Datei sonst nach dem rm() anlegen und eine .part-Datei zurücklassen.
+    out.once('close', () => { fsp.rm(tmpPath, { force: true }).catch(() => undefined); });
+    out.destroy();
+    if (!res.headersSent) res.status(status).json({ error: message });
+    // Den Rest des Bodys nicht mehr lesen — die Gegenseite soll abbrechen.
+    req.destroy();
+  };
+
+  req.on('data', (chunk) => {
+    received += chunk.length;
+    if (received > STREAM_MAX_BYTES) fail(413, `file too large (>${STREAM_MAX_BYTES} bytes)`);
+  });
+  req.on('aborted', () => fail(499, 'client aborted upload'));
+  req.on('error', (err) => fail(400, err.message));
+  out.on('error', (err) => fail(err.code === 'ENOSPC' ? 507 : 500, err.message));
+  out.on('finish', async () => {
+    if (failed) return;
+    if (expectedSize !== undefined && received !== expectedSize) {
+      return fail(400, `incomplete transfer: received ${received} of ${expectedSize} bytes`);
+    }
+    try {
+      // `mode` aus dem open() unterliegt der umask; chmod setzt ihn exakt.
+      await fsp.chmod(tmpPath, mode);
+      await fsp.rename(tmpPath, finalPath);
+    } catch (err) {
+      return fail(500, err.message);
+    }
+    res.json({ ok: true, path: path.relative(root, finalPath), size: received });
+  });
+  req.pipe(out);
 });
 
 app.post('/tree', async (req, res) => {

@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import * as net from 'node:net';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -11,7 +11,7 @@ import {
   ConnectConfig,
 } from 'ssh2';
 import { SshService } from './ssh.service';
-import { errorMessage, errorWithCause } from '../common/narrow';
+import { errorMessage, errorWithCause, isRecord } from '../common/narrow';
 import { outboundGuard } from '../common/outbound-guard';
 import { SecretsService } from '../secrets/secrets.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -115,7 +115,7 @@ const TAIL_STDOUT_BYTES = 4 * 1024;
 const TAIL_STDERR_BYTES = 2 * 1024;
 const JOB_TTL_MS = 10 * 60_000;
 
-export type SshSessionSourceContext = 'mcp' | 'rest' | 'terminal' | 'workflow';
+export type SshSessionSourceContext = 'mcp' | 'rest' | 'terminal' | 'workflow' | 'dg';
 
 /** Herkunft eines Workflow-Aufrufs — landet im Audit-Eintrag (Task 6). */
 export interface SshWorkflowRef {
@@ -261,6 +261,8 @@ export interface SshUploadOpts {
   createDirs?: boolean;
   sourceContext?: Exclude<SshSessionSourceContext, 'terminal'>;
   userId?: string;
+  /** Bei sourceContext='dg': der auslösende Workspace (ersetzt userId im Audit). */
+  workspaceId?: string;
   /**
    * Append to an existing remote file instead of truncating it. Used for
    * chunked inline uploads where each chunk is verified on its own. The
@@ -289,12 +291,35 @@ export interface SshUploadStreamOpts extends Omit<SshUploadOpts, 'append'> {
   expectedSize?: number;
   /** Pre-resolved effective limit; if omitted, resolveUploadLimit is called. */
   limitBytes?: number;
+  /**
+   * scp-Semantik: ist `remotePath` ein vorhandenes Verzeichnis, wird dieser
+   * Dateiname angehängt. Muss ein einzelner Name ohne `/` sein.
+   */
+  fileNameIfDir?: string;
 }
 
 export interface SshDownloadOpts {
   maxBytes?: number;
   sourceContext?: Exclude<SshSessionSourceContext, 'terminal'>;
   userId?: string;
+}
+
+/**
+ * Streaming-Download (`dg scp host:… ./…`). Kein Puffer im Backend: die
+ * SFTP-Lesequelle wird an `sink` gereicht, der sie weiterschreibt. Grenze ist
+ * dasselbe effektive Transferlimit wie beim Upload (bis 500 MB), nicht die
+ * 10 MB von `sftpDownload` — die gelten nur, weil dort alles im Speicher landet.
+ */
+export interface SshDownloadStreamOpts {
+  sourceContext?: Exclude<SshSessionSourceContext, 'terminal'>;
+  userId?: string;
+  workspaceId?: string;
+}
+
+export interface SshDownloadStreamResult<T> {
+  remotePath: string;
+  size: number;
+  sinkResult: T;
 }
 
 export interface SshDownloadResult {
@@ -987,6 +1012,17 @@ export class SshSessionService {
         held.client = client;
         const sftp = await this.openSftp(client);
 
+        if (opts.fileNameIfDir !== undefined) {
+          const name = opts.fileNameIfDir;
+          if (!name || name === '.' || name === '..' || name.includes('/')) {
+            try { source.destroy(); } catch { /* noop */ }
+            throw new Error(`invalid_file_name: ${name}`);
+          }
+          if (await this.isRemoteDir(sftp, remotePath)) {
+            remotePath = `${remotePath.replace(/\/+$/, '')}/${name}`;
+          }
+        }
+
         if (opts.createDirs) {
           await this.ensureParentDirs(sftp, remotePath);
         }
@@ -1004,6 +1040,7 @@ export class SshSessionService {
           action: 'upload',
           sourceContext,
           userId: opts.userId,
+          workspaceId: opts.workspaceId,
           remotePath,
           bytes: result.bytesWritten,
           durationMs: Date.now() - startedAt,
@@ -1012,6 +1049,11 @@ export class SshSessionService {
         return result;
       });
     } finally {
+      // Jeder Fehler vor dem Pipen (Slot-Timeout, Credentials, Host nicht
+      // erreichbar …) liess die Quelle sonst offen — beim Workspace-Upload
+      // hielt der Sidecar Datei-Handle und Response, bis der GC aufräumte.
+      // Nach vollständigem Lesen ist destroy() ein No-op.
+      try { source.destroy(); } catch { /* noop */ }
       const client = held.client;
       if (client) {
         try { client.end(); } catch { /* noop */ }
@@ -1058,6 +1100,101 @@ export class SshSessionService {
         return result;
       });
     } finally {
+      const client = held.client;
+      if (client) {
+        try { client.end(); } catch { /* noop */ }
+        try { client.destroy(); } catch { /* noop */ }
+      }
+      this.releaseSlot(connId);
+    }
+  }
+
+  /**
+   * Streaming download: öffnet die Remote-Datei, prüft Typ und Größe gegen das
+   * effektive Transferlimit und reicht die Lesequelle an `sink`. Slot,
+   * Timeout und Client-Abbau wie bei den anderen SFTP-Pfaden — der Client
+   * lebt, bis `sink` fertig ist.
+   */
+  async sftpDownloadStream<T>(
+    connId: string,
+    remotePath: string,
+    sink: (source: Readable, size: number) => Promise<T>,
+    opts: SshDownloadStreamOpts = {},
+  ): Promise<SshDownloadStreamResult<T>> {
+    const startedAt = Date.now();
+    const sourceContext = opts.sourceContext ?? 'mcp';
+    await this.acquireSlot(connId);
+    const held: { client: Ssh2Client | null; source: Readable | null } = { client: null, source: null };
+    try {
+      return await this.withOpTimeout(SFTP_TRANSFER_TIMEOUT_MS, 'sftpDownloadStream', async () => {
+        const connection = await this.sshService.findById(connId);
+        const limit = await this.resolveUploadLimit(connection);
+        const creds = await this.resolveCredentialsOrFail(connection);
+        const client = await this.openClient(connection, creds);
+        held.client = client;
+        const sftp = await this.openSftp(client);
+
+        const stats = await new Promise<{ size: number; isFile: boolean }>((resolve, reject) => {
+          try {
+            sftp.stat(remotePath, (err, st) => {
+              if (err) {
+                const code: unknown = isRecord(err) ? err.code : undefined;
+                reject(new Error(code === 2
+                  ? `remote_not_found: ${remotePath}`
+                  : `remote_stat_failed: ${remotePath} (${errorMessage(err)})`));
+                return;
+              }
+              resolve({ size: st.size, isFile: st.isFile() });
+            });
+          } catch (err) {
+            reject(asError(err));
+          }
+        });
+        if (!stats.isFile) {
+          throw new Error(`remote_not_a_file: ${remotePath}`);
+        }
+        if (stats.size > limit) {
+          throw new Error(`download_too_large: ${stats.size} > ${limit}`);
+        }
+
+        // Die Größe aus stat() ist eine Momentaufnahme: wächst die Datei
+        // während des Transfers, bricht der Zähler am Limit ab, statt
+        // unbegrenzt weiterzulesen.
+        const remote = sftp.createReadStream(remotePath);
+        let seen = 0;
+        const limited = new Transform({
+          transform(chunk: Buffer, _enc, cb) {
+            seen += chunk.length;
+            if (seen > limit) {
+              cb(new Error(`download_too_large: ${seen} > ${limit}`));
+              return;
+            }
+            cb(null, chunk);
+          },
+        });
+        remote.on('error', (err: Error) => limited.destroy(err));
+        limited.on('close', () => { try { remote.destroy(); } catch { /* noop */ } });
+        remote.pipe(limited);
+        held.source = limited;
+        const sinkResult = await sink(limited, stats.size);
+
+        void this.writeAudit({
+          connectionId: connection._id,
+          action: 'download',
+          sourceContext,
+          userId: opts.userId,
+          workspaceId: opts.workspaceId,
+          remotePath,
+          bytes: seen,
+          durationMs: Date.now() - startedAt,
+        });
+
+        return { remotePath, size: seen, sinkResult };
+      });
+    } finally {
+      if (held.source) {
+        try { held.source.destroy(); } catch { /* noop */ }
+      }
       const client = held.client;
       if (client) {
         try { client.end(); } catch { /* noop */ }
@@ -1134,6 +1271,8 @@ export class SshSessionService {
     action: SshAuditAction;
     sourceContext: SshAuditSourceContext;
     userId?: string;
+    /** Pflicht bei sourceContext='dg' — dort gibt es keinen Nutzer im Token. */
+    workspaceId?: string;
     agentRoleId?: string;
     workflow?: SshWorkflowRef;
     command?: string;
@@ -1148,7 +1287,12 @@ export class SshSessionService {
     // We log at debug so silent drops are visible in dev/ops but don't
     // pollute prod logs (most legitimate non-ObjectId paths are 'system'
     // and internal callers without a user context).
-    if (!entry.userId || !Types.ObjectId.isValid(entry.userId)) {
+    if (entry.sourceContext === 'dg') {
+      if (!entry.workspaceId || !Types.ObjectId.isValid(entry.workspaceId)) {
+        this.logger.warn(`Audit-Write übersprungen: dg-Eintrag ohne gültige workspaceId (action=${entry.action})`);
+        return Promise.resolve();
+      }
+    } else if (!entry.userId || !Types.ObjectId.isValid(entry.userId)) {
       this.logger.debug(
         `Audit-Write übersprungen: userId='${entry.userId ?? 'undefined'}' ist kein ObjectId (action=${entry.action}, sourceContext=${entry.sourceContext})`,
       );
@@ -1159,9 +1303,14 @@ export class SshSessionService {
       at: new Date(),
       action: entry.action,
       sourceContext: entry.sourceContext,
-      userId: new Types.ObjectId(entry.userId),
       durationMs: entry.durationMs,
     };
+    if (entry.userId && Types.ObjectId.isValid(entry.userId)) {
+      doc.userId = new Types.ObjectId(entry.userId);
+    }
+    if (entry.workspaceId && Types.ObjectId.isValid(entry.workspaceId)) {
+      doc.workspaceId = new Types.ObjectId(entry.workspaceId);
+    }
     if (entry.agentRoleId && Types.ObjectId.isValid(entry.agentRoleId)) {
       doc.agentRoleId = new Types.ObjectId(entry.agentRoleId);
     }
@@ -1647,6 +1796,17 @@ export class SshSessionService {
       });
       throw err;
     }
+  }
+
+  /** true nur für ein vorhandenes Verzeichnis; jeder Fehler (fehlt, kein Recht) → false. */
+  private isRemoteDir(sftp: SFTPWrapper, remotePath: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      try {
+        sftp.stat(remotePath, (err, st) => resolve(!err && st.isDirectory()));
+      } catch {
+        resolve(false);
+      }
+    });
   }
 
   private runSftpRead(

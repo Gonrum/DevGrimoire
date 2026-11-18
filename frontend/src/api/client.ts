@@ -1259,7 +1259,7 @@ export type SshAuditAction =
   | 'terminal_open'
   | 'terminal_close';
 
-export type SshAuditSourceContext = 'terminal' | 'mcp' | 'rest' | 'workflow';
+export type SshAuditSourceContext = 'terminal' | 'mcp' | 'rest' | 'workflow' | 'dg';
 
 /** One entry as returned by `GET /api/ssh-connections/:id/audit`. */
 export interface SshAuditEntry {
@@ -1268,6 +1268,8 @@ export interface SshAuditEntry {
   action: SshAuditAction;
   sourceContext: SshAuditSourceContext;
   userId?: string;
+  /** Nur bei sourceContext='dg' (`dg scp` aus einem Workspace). */
+  workspaceId?: string;
   agentRoleId?: string;
   command?: string;
   remotePath?: string;

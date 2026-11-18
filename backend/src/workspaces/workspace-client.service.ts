@@ -3,6 +3,8 @@ import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 import { isAxiosError } from 'axios';
 import { firstValueFrom } from 'rxjs';
 import { Readable } from 'node:stream';
+import * as http from 'node:http';
+import * as https from 'node:https';
 import { errorMessage, errorWithCause, isNullaryMethod, isRecord } from '../common/narrow';
 
 /**
@@ -42,6 +44,7 @@ export interface TreeResponse { root: string; depth: number; truncated: boolean;
 export interface SearchResponse { matches: string; truncated: boolean; timedOut: boolean }
 export interface StatusResponse { status: string }
 export interface SizeResponse { sizeBytes: number }
+export interface WriteStreamResponse { ok: true; path: string; size: number }
 export interface ExecResponse {
   exitCode: number | null;
   signal: string | null;
@@ -173,6 +176,98 @@ export class WorkspaceClient {
     const size = Number.parseInt(res.headers.get('content-length') ?? '0', 10);
     const stream = Readable.fromWeb(res.body);
     return { stream, size: Number.isNaN(size) ? 0 : size };
+  }
+
+  /**
+   * Gegenstück zu readStream: schreibt `source` als Datei in den Workspace,
+   * ohne zu puffern (`dg scp host:… ./…`). `node:http` statt fetch, weil ein
+   * Node-Readable als fetch-Body nur über `duplex: 'half'` und eine Assertion
+   * auf BodyInit ginge. Der Sidecar schreibt in eine temporäre Datei und
+   * benennt erst nach vollständigem Empfang um.
+   */
+  async writeStream(
+    workspaceId: string,
+    path: string,
+    source: Readable,
+    opts: { fileName?: string; size?: number; mode?: number; createDirs?: boolean } = {},
+  ): Promise<WriteStreamResponse> {
+    if (!this.token) {
+      try { source.destroy(); } catch { /* noop */ }
+      throw new ServiceUnavailableException(
+        'Workspace sidecar is not configured — set WORKSPACE_API_TOKEN to enable workspace_* tools',
+      );
+    }
+    const url = new URL(`${this.baseUrl}/write-stream`);
+    url.searchParams.set('workspaceId', workspaceId);
+    url.searchParams.set('path', path);
+    if (opts.fileName !== undefined) url.searchParams.set('fileName', opts.fileName);
+    if (opts.size !== undefined) url.searchParams.set('size', String(opts.size));
+    if (opts.mode !== undefined) url.searchParams.set('mode', String(opts.mode));
+    if (opts.createDirs) url.searchParams.set('createDirs', '1');
+    const transport = url.protocol === 'https:' ? https : http;
+
+    return new Promise<WriteStreamResponse>((resolve, reject) => {
+      let settled = false;
+      const finish = (err: Error | null, value?: WriteStreamResponse) => {
+        if (settled) return;
+        settled = true;
+        if (err) {
+          try { source.destroy(); } catch { /* noop */ }
+          reject(err);
+        } else if (value) {
+          resolve(value);
+        }
+      };
+      const req = transport.request(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          'Content-Type': 'application/octet-stream',
+        },
+      }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('error', (err) => finish(err));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          let body: unknown;
+          try { body = JSON.parse(text); } catch { body = undefined; }
+          const status = res.statusCode ?? 0;
+          if (status < 200 || status >= 300) {
+            const remote = isRecord(body) && typeof body.error === 'string' ? body.error : text || res.statusMessage;
+            finish(new Error(`sidecar ${status} /write-stream: ${remote}`));
+            return;
+          }
+          if (!isRecord(body) || typeof body.path !== 'string' || typeof body.size !== 'number') {
+            finish(new Error('sidecar /write-stream: unexpected response'));
+            return;
+          }
+          finish(null, { ok: true, path: body.path, size: body.size });
+        });
+      });
+      req.on('error', (err) => {
+        this.logger.warn(`sidecar transport error on /write-stream: ${err.message}`);
+        finish(new ServiceUnavailableException(`workspace sidecar unreachable at ${this.baseUrl} (${err.message})`));
+      });
+      // Bricht die Quelle ab (SFTP-Fehler, Limit), darf der Sidecar die
+      // Teildatei nicht als fertig ansehen: Request abbrechen statt beenden.
+      source.on('error', (err: Error) => {
+        req.destroy(err);
+        finish(err);
+      });
+      // Ein destroy() ohne Fehler (Timeout im Aufrufer) feuert nur 'close'.
+      // Ohne diesen Zweig bliebe der Request halb offen und der Sidecar
+      // wartete endlos auf den Rest des Bodys.
+      let ended = false;
+      source.on('end', () => { ended = true; });
+      source.on('close', () => {
+        if (ended) return;
+        const err = new Error('source closed before end of file');
+        req.destroy(err);
+        finish(err);
+      });
+      source.pipe(req);
+    });
   }
 
   search(workspaceId: string, query: string, include?: string[], exclude?: string[]): Promise<SearchResponse> {

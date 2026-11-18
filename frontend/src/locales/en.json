@@ -2897,7 +2897,8 @@
         "terminal": "terminal",
         "mcp": "mcp",
         "rest": "rest",
-        "workflow": "workflow"
+        "workflow": "workflow",
+        "dg": "dg (Workspace)"
       },
       "action": {
         "connect": "connect",

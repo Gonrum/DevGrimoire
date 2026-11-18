@@ -7,6 +7,7 @@ import { WorkspacesService } from './workspaces.service';
 import { WorkspacesController } from './workspaces.controller';
 import { WorkspaceCliController } from './workspace-cli.controller';
 import { WorkspaceCliKubeController } from './workspace-cli-kube.controller';
+import { WorkspaceCliSshController } from './workspace-cli-ssh.controller';
 import { WorkspaceClient } from './workspace-client.service';
 import { WorkspaceTtlScheduler } from './workspace-ttl.scheduler';
 import { WorkspaceGitTokensService } from './workspace-git-tokens.service';
@@ -20,6 +21,7 @@ import { AttachmentsModule } from '../attachments/attachments.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { TodosModule } from '../todos/todos.module';
 import { KubeModule } from '../kube/kube.module';
+import { SshModule } from '../ssh/ssh.module';
 import { resolveJwtSecret } from '../common/jwt-secret';
 import { JWT_ALGORITHM } from '../common/access-token';
 
@@ -44,8 +46,15 @@ import { JWT_ALGORITHM } from '../common/access-token';
     TodosModule,
     // `dg kube` (C-3): Cluster-Zugriff aus der Shell läuft über das Backend.
     KubeModule,
+    // `dg ssh` / `dg scp`: SFTP-Transfer über das Backend, Credentials bleiben dort.
+    SshModule,
   ],
-  controllers: [WorkspacesController, WorkspaceCliController, WorkspaceCliKubeController],
+  controllers: [
+    WorkspacesController,
+    WorkspaceCliController,
+    WorkspaceCliKubeController,
+    WorkspaceCliSshController,
+  ],
   providers: [
     WorkspacesService,
     WorkspaceClient,

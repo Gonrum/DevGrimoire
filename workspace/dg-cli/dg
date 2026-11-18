@@ -19,12 +19,14 @@
 #   dg todo <title> [--description=...] [--priority=low|medium|high|critical]
 #                   [--tags=a,b] [--milestone=<id>]
 #   dg kube clusters|get|describe|logs|events|top   (read-only, see dg kube --help)
+#   dg ssh list
+#   dg scp [--mode=644] [--mkdir] <src> <dst>        (one side is <conn>:<path>)
 #   dg whoami
 #   dg --help | dg --version
 
 set -euo pipefail
 
-DG_VERSION="0.2.0"
+DG_VERSION="0.3.0"
 
 usage() {
     cat <<'EOF'
@@ -38,6 +40,10 @@ dg — DevGrimoire workspace CLI
   dg todo <title> [--description=X] [--priority=low|medium|high|critical]
                   [--tags=a,b] [--milestone=<id>]
   dg kube …                         (read-only cluster access, see: dg kube --help)
+  dg ssh list                       (SSH connections this project may use)
+  dg scp [--mode=644] [--mkdir] <src> <dst>
+                                    (one file; one side is <conn>:<path>,
+                                     see: dg scp --help)
   dg whoami
   dg --help | dg --version
 
@@ -391,6 +397,172 @@ cmd_kube() {
     esac
 }
 
+scp_usage() {
+    cat <<'EOF'
+dg scp — copy ONE file between this workspace and an SSH server.
+The SSH credentials stay in the DevGrimoire backend; this workspace never
+sees a key or password. Connections: dg ssh list.
+
+  dg scp [options] <local-file>          <conn>:<remote-path>   (upload)
+  dg scp [options] <conn>:<remote-file>  <local-path>           (download)
+
+  <conn>          slug (or id) of an SSH connection of this project or of a
+                  customer linked to it
+  <remote-path>   absolute, or relative to the login's home directory
+                  (a leading ~/ is accepted). Ending in / or naming an
+                  existing directory: the file name is kept.
+  <local-path>    inside this workspace; ending in / or an existing
+                  directory: the remote file name is kept.
+
+Options:
+  --mode=644      permissions of the written file (octal, default 644)
+  --mkdir, -p     create missing parent directories on the target side
+
+Limit: the connection's transfer limit (default 10 MB, up to 500 MB per
+connection or globally via the setting ssh.maxUploadBytes). Files are
+streamed, never buffered; a failed download leaves no partial file behind.
+A local path containing ':' must be written as ./path.
+EOF
+}
+
+# Prints "slug<TAB>path" for a remote spec, nothing for a local path.
+scp_split_remote() {
+    local arg="$1"
+    case "$arg" in
+        /*|./*|../*) return 0 ;;
+    esac
+    if [[ "$arg" =~ ^([A-Za-z0-9][A-Za-z0-9_-]{0,63}):(.*)$ ]]; then
+        local rpath="${BASH_REMATCH[2]}"
+        # SFTP kennt kein ~ — relative Pfade beginnen ohnehin im Home.
+        if [[ "$rpath" == "~" ]]; then rpath=""; fi
+        rpath="${rpath#\~/}"
+        printf '%s\t%s' "${BASH_REMATCH[1]}" "$rpath"
+    fi
+}
+
+# Lexical cwd-relative → workspace-relative path; keeps a trailing slash.
+# Unlike resolve_workspace_path it works for paths that do not exist yet.
+scp_local_target() {
+    python3 -c '
+import os, sys
+raw, root = sys.argv[1], sys.argv[2]
+trail = raw.endswith("/") or raw in (".", "..") or raw.endswith("/.") or raw.endswith("/..")
+abs_ = os.path.normpath(os.path.join(os.getcwd(), raw))
+if abs_ != root and not abs_.startswith(root + "/"):
+    sys.stderr.write("error: %s is outside this workspace\n" % raw)
+    sys.exit(2)
+rel = os.path.relpath(abs_, root)
+if trail and rel != ".":
+    rel += "/"
+sys.stdout.write(rel)
+' "$1" "/workspaces/${DG_WORKSPACE_ID:-}"
+}
+
+cmd_scp() {
+    local mode="" mkdir="" args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help) scp_usage; return 0 ;;
+            --mode=*)  mode="${1#*=}" ;;
+            --mode)    mode="${2:-}"; shift ;;
+            --mkdir|-p) mkdir=1 ;;
+            --)        shift; args+=("$@"); break ;;
+            -*)        echo "unknown flag: $1" >&2; exit 2 ;;
+            *)         args+=("$1") ;;
+        esac
+        shift
+    done
+    if [[ ${#args[@]} -ne 2 ]]; then
+        echo "usage: dg scp [--mode=644] [--mkdir] <src> <dst>   (see: dg scp --help)" >&2
+        exit 2
+    fi
+    local mode_dec=""
+    if [[ -n "$mode" ]]; then
+        if [[ ! "$mode" =~ ^0?[0-7]{3}$ ]]; then
+            echo "error: --mode must be octal like 644 or 0755" >&2; exit 2
+        fi
+        mode_dec=$((8#$mode))
+    fi
+    require_env
+
+    local src_remote dst_remote
+    src_remote="$(scp_split_remote "${args[0]}")"
+    dst_remote="$(scp_split_remote "${args[1]}")"
+    if [[ -n "$src_remote" && -n "$dst_remote" ]]; then
+        echo "error: remote-to-remote copies are not supported — one side must be local" >&2; exit 2
+    fi
+    if [[ -z "$src_remote" && -z "$dst_remote" ]]; then
+        echo "error: neither side is <conn>:<path> — for local copies use cp" >&2; exit 2
+    fi
+
+    local payload endpoint rel
+    if [[ -n "$dst_remote" ]]; then
+        local local_src="${args[0]}"
+        if [[ ! -f "$local_src" ]]; then
+            echo "error: $local_src is not a regular file (directories: tar them first)" >&2; exit 2
+        fi
+        rel="$(resolve_workspace_path "$local_src")"
+        endpoint="ssh/upload"
+        payload="{\"connection\":$(json_encode "${dst_remote%%$'\t'*}"),\"source\":$(json_encode "$rel"),\"remotePath\":$(json_encode "${dst_remote#*$'\t'}")"
+    else
+        rel="$(scp_local_target "${args[1]}")" || exit 2
+        endpoint="ssh/download"
+        payload="{\"connection\":$(json_encode "${src_remote%%$'\t'*}"),\"remotePath\":$(json_encode "${src_remote#*$'\t'}"),\"target\":$(json_encode "$rel")"
+    fi
+    [[ -n "$mode_dec" ]] && payload+=",\"mode\":${mode_dec}"
+    [[ -n "$mkdir" ]] && payload+=",\"createDirs\":true"
+    payload+="}"
+
+    local out
+    out="$(api_post "$endpoint" "$payload")"
+    echo "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+n = float(d.get("bytes", 0))
+unit = "B"
+for u in ("KB", "MB", "GB"):
+    if n < 1024: break
+    n /= 1024
+    unit = u
+size = ("%d B" % n) if unit == "B" else ("%.1f %s" % (n, unit))
+if d.get("direction") == "upload":
+    print("%s -> %s:%s  (%s)" % (d["source"], d["connection"], d["remotePath"], size))
+else:
+    print("%s:%s -> %s  (%s)" % (d["connection"], d["remotePath"], d["target"], size))
+' 2>/dev/null || echo "$out"
+}
+
+cmd_ssh() {
+    case "${1:-}" in
+        list|ls)
+            require_env
+            local out
+            out="$(api_post ssh/list "{}")"
+            echo "$out" | python3 -c '
+import json, sys
+rows = json.load(sys.stdin)
+if not rows:
+    print("no SSH connections for this project")
+    sys.exit(0)
+w = max(len(r.get("slug") or "") for r in rows)
+for r in rows:
+    target = "%s@%s:%s" % (r.get("username"), r.get("host"), r.get("port"))
+    extra = "  (customer)" if r.get("inherited") else ""
+    print("%-*s  %-40s  %s%s" % (w, r.get("slug"), target, r.get("label") or "", extra))
+' 2>/dev/null || echo "$out"
+            ;;
+        -h|--help|help|"")
+            cat <<'EOF'
+dg ssh — SSH connections of this project (credentials stay in the backend).
+
+  dg ssh list        slug, user@host:port, label
+  dg scp …           copy files, see: dg scp --help
+EOF
+            ;;
+        *) echo "unknown: dg ssh $1 (try: dg ssh list)" >&2; exit 2 ;;
+    esac
+}
+
 cmd_whoami() {
     require_env
     api_post whoami "{}"
@@ -402,6 +574,8 @@ case "${1:-}" in
     note)        shift; cmd_note "$@" ;;
     todo)        shift; cmd_todo "$@" ;;
     kube)        shift; cmd_kube "$@" ;;
+    ssh)         shift; cmd_ssh "$@" ;;
+    scp)         shift; cmd_scp "$@" ;;
     whoami)      shift; cmd_whoami ;;
     -h|--help|help|"") usage ;;
     -v|--version) echo "dg ${DG_VERSION}" ;;

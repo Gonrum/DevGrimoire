@@ -10,7 +10,9 @@ export type SshAuditAction =
   | 'terminal_open'
   | 'terminal_close';
 
-export type SshAuditSourceContext = 'terminal' | 'mcp' | 'rest' | 'workflow';
+// 'dg': `dg scp` aus einem Workspace-Terminal. Dort gibt es keinen Nutzer im
+// Token, nur den Workspace — userId entfällt, workspaceId ist Pflicht.
+export type SshAuditSourceContext = 'terminal' | 'mcp' | 'rest' | 'workflow' | 'dg';
 
 export type SshAuditDocument = HydratedDocument<SshAudit>;
 
@@ -40,12 +42,24 @@ export class SshAudit {
   @Prop({
     required: true,
     type: String,
-    enum: ['terminal', 'mcp', 'rest', 'workflow'],
+    enum: ['terminal', 'mcp', 'rest', 'workflow', 'dg'],
   })
   sourceContext: SshAuditSourceContext;
 
-  @Prop({ type: SchemaTypes.ObjectId, ref: 'User', required: true })
-  userId: Types.ObjectId;
+  @Prop({
+    type: SchemaTypes.ObjectId,
+    ref: 'User',
+    required(this: { sourceContext?: string }) { return this.sourceContext !== 'dg'; },
+  })
+  userId?: Types.ObjectId;
+
+  /** Nur bei sourceContext='dg': aus welchem Workspace der Transfer kam. */
+  @Prop({
+    type: SchemaTypes.ObjectId,
+    ref: 'Workspace',
+    required(this: { sourceContext?: string }) { return this.sourceContext === 'dg'; },
+  })
+  workspaceId?: Types.ObjectId;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: 'AgentRole' })
   agentRoleId?: Types.ObjectId;

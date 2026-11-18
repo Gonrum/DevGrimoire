@@ -17,7 +17,7 @@ import { useSshAudit } from './hooks/useSshAudit';
 const PAGE_SIZE = 50;
 const DETAIL_TRUNCATE = 80;
 
-const SOURCE_CONTEXT_VALUES = ['terminal', 'mcp', 'rest', 'workflow'] as const satisfies readonly SshAuditSourceContext[];
+const SOURCE_CONTEXT_VALUES = ['terminal', 'mcp', 'rest', 'workflow', 'dg'] as const satisfies readonly SshAuditSourceContext[];
 
 /**
  * The filter select adds an empty "all" option on top of the API values. Kept
@@ -39,6 +39,7 @@ const SOURCE_BADGE: Record<SshAuditSourceContext, string> = {
   mcp: 'bg-violet-900/40 text-violet-300',
   rest: 'bg-gray-800 text-gray-400',
   workflow: 'bg-amber-900/40 text-amber-300',
+  dg: 'bg-emerald-900/40 text-emerald-300',
 };
 
 /** Action → icon mapping (spec §5.8). */
