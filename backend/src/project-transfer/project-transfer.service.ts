@@ -36,6 +36,8 @@ import { FeatureStatus, FeaturePriority } from '../features/schemas/feature.sche
 import { ALL_SENSITIVITY_LEVELS } from '../common/sensitivity';
 import { asString, isNullaryMethod, isRecord, isUnknownArray, PlainDoc } from '../common/tool-args';
 import { ProjectExport } from './project-export.interface';
+import { RequestContext } from '../common/request-context';
+import { assertUnrestrictedScope } from '../common/scope-guard';
 
 /*
  * Datentransfer-Pfad. Zwei Regeln gelten hier über allem anderen:
@@ -408,6 +410,8 @@ interface SecretInput {
   description?: string;
   type: string;
   sourceEnvironmentId?: string;
+  /** `_id` in the export — lets gitRepositories[].tokenSecretId be remapped. */
+  sourceId?: string;
 }
 
 /**
@@ -488,7 +492,37 @@ function prepareSecret(src: PlainDoc, at: string): SecretInput | undefined {
     description: optString(src, 'description', at),
     type: optString(src, 'type', at) || 'variable',
     sourceEnvironmentId: optIdString(src, 'environmentId', at),
+    sourceId: optIdString(src, '_id', at),
   };
+}
+
+/**
+ * Imported `gitRepositories` are untrusted: the commit cron later decrypts
+ * `tokenSecretId` without an actor and sends it to `baseUrl`. A crafted export
+ * could point it at any secret of the instance. So the reference is only kept
+ * when it points to a secret that is imported with this project (remapped to
+ * the new id); everything else is dropped. `allowPrivateHost` is admin-only.
+ */
+function sanitizeImportedGitRepositories(
+  value: unknown,
+  secretIdMap: Map<string, string>,
+  isAdmin: boolean,
+): PlainDoc[] | undefined {
+  if (!isUnknownArray(value)) return undefined;
+  const out: PlainDoc[] = [];
+  for (const entry of value) {
+    const repo = asPlainDoc(entry);
+    if (!repo) continue;
+    const copy: PlainDoc = { ...repo };
+    delete copy._id;
+    const sourceToken = idAsString(repo.tokenSecretId);
+    const mapped = sourceToken ? secretIdMap.get(sourceToken) : undefined;
+    if (mapped) copy.tokenSecretId = mapped;
+    else delete copy.tokenSecretId;
+    if (!isAdmin) copy.allowPrivateHost = false;
+    out.push(copy);
+  }
+  return out;
 }
 
 function prepareChangelog(src: PlainDoc, at: string): ChangelogInput {
@@ -769,6 +803,11 @@ export class ProjectTransferService {
     data: unknown,
     nameOverride?: string,
   ): Promise<{ projectId: string; projectName: string; stats: Record<string, number> }> {
+    // The imported entity gets a new id that is not on a narrowed actor's
+    // allowlist, so every follow-up create (environments, todos, knowledge …)
+    // would fail its scope check and leave a half-imported, invisible entity.
+    // Reject up front instead.
+    assertUnrestrictedScope('Project import');
     const exp = asPlainDoc(data);
     if (!exp || exp._exportVersion !== 1 || exp._source !== 'DevGrimoire') {
       throw new BadRequestException('Invalid export format');
@@ -791,6 +830,8 @@ export class ProjectTransferService {
 
     delete projectData.createdAt;
     delete projectData.updatedAt;
+    // A crafted `_id` would let the import choose the new project's id.
+    delete projectData._id;
 
     const environments = prepareSection(exp.environments, 'environments', prepareEnvironment);
     const secrets = prepareSection(exp.secrets, 'secrets', prepareSecret);
@@ -811,7 +852,9 @@ export class ProjectTransferService {
     // HTTP 500 zurück.
     let finalName = baseName;
     let suffix = 0;
-    while (await this.projectsService.findByName(finalName)) {
+    // `nameExists`, not `findByName`: the name is unique instance-wide, and
+    // `findByName` now rejects foreign projects with 403.
+    while (await this.projectsService.nameExists(finalName)) {
       suffix += 1;
       finalName = suffix === 1 ? `${baseName} (Import)` : `${baseName} (Import ${suffix})`;
     }
@@ -826,6 +869,26 @@ export class ProjectTransferService {
     // mit, und welche Felder geschrieben werden, entscheidet das
     // Mongoose-Schema. Ein explizites Feld-Mapping würde genau diese Felder
     // verlieren.
+    // New secret ids are fixed before the project exists, so imported
+    // gitRepositories can reference the imported token secrets directly.
+    const secretIdMap = new Map<string, string>();
+    const newSecretIds = new Map<Prepared<SecretInput | undefined>, Types.ObjectId>();
+    for (const sec of secrets) {
+      if (!sec.input) continue;
+      const newId = new Types.ObjectId();
+      newSecretIds.set(sec, newId);
+      if (sec.input.sourceId) secretIdMap.set(sec.input.sourceId, newId.toString());
+    }
+    if (projectData.gitRepositories !== undefined) {
+      const sanitized = sanitizeImportedGitRepositories(
+        projectData.gitRepositories,
+        secretIdMap,
+        RequestContext.getUser()?.role === 'admin' || !RequestContext.getUser(),
+      );
+      if (sanitized) projectData.gitRepositories = sanitized;
+      else delete projectData.gitRepositories;
+    }
+
     const project = await this.projectsService.create({ ...projectData, name: finalName });
     const projectId = project._id.toString();
 
@@ -856,6 +919,7 @@ export class ProjectTransferService {
         ? envIdMap.get(input.sourceEnvironmentId)
         : undefined;
       await this.secretModel.create({
+        _id: newSecretIds.get(sec),
         projectId,
         key: input.key,
         encryptedValue: input.encryptedValue,

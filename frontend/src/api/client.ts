@@ -1268,7 +1268,7 @@ export interface SshAuditEntry {
   action: SshAuditAction;
   sourceContext: SshAuditSourceContext;
   userId?: string;
-  /** Nur bei sourceContext='dg' (`dg scp` aus einem Workspace). */
+  /** Only with sourceContext='dg' (`dg scp` from a workspace). */
   workspaceId?: string;
   agentRoleId?: string;
   command?: string;

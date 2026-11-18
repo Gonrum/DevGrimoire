@@ -17,6 +17,14 @@ import { Project, ProjectDocument } from '../projects/schemas/project.schema';
 import { projectIdFilter } from '../common/project-id-filter';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { isDuplicateKeyError } from '../common/narrow';
+import {
+  assertAdmin,
+  assertCustomerInScope,
+  assertOwnerInScope,
+  assertProjectInScope,
+  assertUnrestrictedScope,
+  scopeFilter,
+} from '../common/scope-guard';
 
 export interface HarnessOwner {
   scope: HarnessScope;
@@ -113,6 +121,9 @@ export class HarnessService {
     if (!Types.ObjectId.isValid(projectId)) {
       throw new BadRequestException(`'${projectId}' is not a valid project id`);
     }
+    // The resolved harness includes customer and project layers — a narrowed
+    // actor must not read the conventions of a project outside its scope.
+    assertProjectInScope(projectId);
 
     const project = await this.projectModel
       .findOne({ _id: projectIdFilter(projectId) })
@@ -212,6 +223,7 @@ export class HarnessService {
    * each other, which a read-modify-write of `sections` would do.
    */
   async sectionSet(owner: HarnessOwner, dto: HarnessSectionDto): Promise<HarnessDocument> {
+    assertOwnerWrite(owner);
     const harness = await this.ensureOwner(owner);
     const section = sectionFromDto(dto);
 
@@ -258,6 +270,7 @@ export class HarnessService {
 
   /** Removes a section by key. Unknown key → 404, so a typo is not silent. */
   async sectionDelete(owner: HarnessOwner, key: string): Promise<HarnessDocument> {
+    assertOwnerWrite(owner);
     const harness = await this.findByOwner(owner);
     if (!harness) {
       throw new NotFoundException(`No harness for scope '${owner.scope}'`);
@@ -285,6 +298,9 @@ export class HarnessService {
    * would reject the second).
    */
   async ensureOwner(owner: HarnessOwner): Promise<HarnessDocument> {
+    // Creating a level is a write: the global level needs admin, an owned level
+    // needs the owner in scope (findByOwner below only checks read access).
+    assertOwnerWrite(owner);
     const existing = await this.findByOwner(owner);
     if (existing) return existing;
 
@@ -306,22 +322,52 @@ export class HarnessService {
   }
 
   async create(dto: CreateHarnessDto): Promise<HarnessDocument> {
+    assertOwnerWrite(dto);
     const harness = await this.harnessModel.create(dto);
     this.emitChange(harness, 'created', `Harness-Ebene '${harness.scope}' angelegt`);
     return harness;
   }
 
+  /**
+   * Reading by id: the global level is readable by everyone (it is delivered
+   * to every agent anyway), owned levels only within the actor's scope.
+   */
   async findById(id: string): Promise<HarnessDocument | null> {
-    return this.harnessModel.findById(id).exec();
+    if (!Types.ObjectId.isValid(id)) return null;
+    const harness = await this.harnessModel.findById(id).exec();
+    if (harness) assertOwnerInScope(harness, `Harness ${id}`);
+    return harness;
   }
 
   async findByOwner(owner: HarnessOwner): Promise<HarnessDocument | null> {
+    assertOwnerRead(owner);
     return this.harnessModel.findOne(this.ownerFilter(owner)).exec();
   }
 
+  /**
+   * Load + 404 + write check BEFORE mutating, so an id guessed from another
+   * project (or the global level without admin) is rejected unchanged.
+   */
+  private async findForWrite(id: string): Promise<HarnessDocument> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException(`Harness ${id} not found`);
+    }
+    const harness = await this.harnessModel.findById(id).exec();
+    if (!harness) {
+      throw new NotFoundException(`Harness ${id} not found`);
+    }
+    assertOwnerWrite({
+      scope: harness.scope,
+      projectId: harness.projectId?.toString(),
+      customerId: harness.customerId?.toString(),
+    });
+    return harness;
+  }
+
   async update(id: string, dto: UpdateHarnessDto): Promise<HarnessDocument> {
+    const existing = await this.findForWrite(id);
     const harness = await this.harnessModel
-      .findByIdAndUpdate(id, { $set: dto }, { new: true, runValidators: true })
+      .findByIdAndUpdate(existing._id, { $set: dto }, { new: true, runValidators: true })
       .exec();
     if (!harness) {
       throw new NotFoundException(`Harness ${id} not found`);
@@ -331,16 +377,22 @@ export class HarnessService {
   }
 
   async remove(id: string): Promise<void> {
-    const result = await this.harnessModel.findByIdAndDelete(id).exec();
+    const existing = await this.findForWrite(id);
+    const result = await this.harnessModel.findByIdAndDelete(existing._id).exec();
     if (!result) {
       throw new NotFoundException(`Harness ${id} not found`);
     }
     this.emitChange(result, 'deleted', `Harness-Ebene '${result.scope}' gelöscht`);
   }
 
-  /** Metadata only — the resolved content is served by `resolve()` (T-438). */
+  /**
+   * Metadata only — the resolved content is served by `resolve()` (T-438).
+   * Filtered to the actor's scope; the global level has no owner axis and
+   * therefore stays visible.
+   */
   async list(scope?: HarnessScope): Promise<HarnessSummary[]> {
     const filter: FilterQuery<HarnessDocument> = scope ? { scope } : {};
+    Object.assign(filter, scopeFilter());
     const harnesses = await this.harnessModel.find(filter).sort({ scope: 1 }).exec();
     return harnesses.map((harness) => ({
       id: harness._id.toString(),
@@ -384,6 +436,29 @@ export class HarnessService {
         throw new BadRequestException(`Unknown harness scope '${String(owner.scope)}'`);
     }
   }
+}
+
+/**
+ * Read access to a level: global is open to every actor, project/customer
+ * levels require the owner in scope.
+ */
+function assertOwnerRead(owner: HarnessOwner): void {
+  if (owner.scope === 'project') assertProjectInScope(owner.projectId);
+  if (owner.scope === 'customer') assertCustomerInScope(owner.customerId);
+}
+
+/**
+ * Write access to a level. The global level is injected into every agent of
+ * the instance (system_instructions_get / harness_get), so writing it is an
+ * instance-wide prompt injection vector: admin role AND unrestricted scope.
+ */
+function assertOwnerWrite(owner: HarnessOwner): void {
+  if (owner.scope === 'global') {
+    assertAdmin('Writing the global harness');
+    assertUnrestrictedScope('Writing the global harness');
+    return;
+  }
+  assertOwnerRead(owner);
 }
 
 /**

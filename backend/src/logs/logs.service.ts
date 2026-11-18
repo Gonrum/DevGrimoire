@@ -5,6 +5,21 @@ import { LogEntry, LogEntryDocument } from './schemas/log-entry.schema';
 import { CreateLogDto } from './dto/create-log.dto';
 import { RequestContext } from '../common/request-context';
 import { actorCanAccessProject } from '../common/permissions';
+import { assertProjectInScope } from '../common/scope-guard';
+
+/**
+ * Validate the projectId before it becomes an ObjectId in a filter and check
+ * it against the actor's scope. Log entries include `workspace_terminal`
+ * lines with full commands — a narrowed actor must neither read nor write
+ * logs of foreign projects.
+ */
+function scopedProjectId(projectId: string | undefined): Types.ObjectId {
+  if (!projectId || !Types.ObjectId.isValid(projectId)) {
+    throw new BadRequestException(`Invalid projectId: ${String(projectId)}`);
+  }
+  assertProjectInScope(projectId);
+  return new Types.ObjectId(projectId);
+}
 
 const LOG_TTL_DAYS = parseInt(process.env.LOG_TTL_DAYS || '5', 10);
 
@@ -55,16 +70,19 @@ export class LogsService {
     const expiresAt = new Date(Date.now() + LOG_TTL_DAYS * 24 * 60 * 60 * 1000);
     return this.logModel.create({
       ...dto,
-      projectId: new Types.ObjectId(dto.projectId),
+      projectId: scopedProjectId(dto.projectId),
       expiresAt,
     });
   }
 
   async createBatch(dtos: CreateLogDto[]): Promise<number> {
     const expiresAt = new Date(Date.now() + LOG_TTL_DAYS * 24 * 60 * 60 * 1000);
+    if (!Array.isArray(dtos)) throw new BadRequestException('logs must be an array');
+    // Map (and thereby check) every entry before inserting anything, so one
+    // foreign projectId rejects the whole batch.
     const docs = dtos.map((dto) => ({
       ...dto,
-      projectId: new Types.ObjectId(dto.projectId),
+      projectId: scopedProjectId(dto.projectId),
       expiresAt,
     }));
     const result = await this.logModel.insertMany(docs, { ordered: false });
@@ -83,7 +101,7 @@ export class LogsService {
       offset?: number;
     },
   ) {
-    const filter: FilterQuery<LogEntry> = { projectId: new Types.ObjectId(projectId) };
+    const filter: FilterQuery<LogEntry> = { projectId: scopedProjectId(projectId) };
 
     if (options?.level) filter.level = options.level;
     if (options?.service) filter.service = options.service;
@@ -125,6 +143,9 @@ export class LogsService {
     const filter: FilterQuery<LogEntry> = {};
 
     if (options?.projectIds && options.projectIds.length > 0) {
+      for (const id of options.projectIds) {
+        if (!Types.ObjectId.isValid(id)) throw new BadRequestException(`Invalid projectId: ${id}`);
+      }
       filter.projectId = { $in: options.projectIds.map((id) => new Types.ObjectId(id)) };
     }
     if (options?.level) filter.level = options.level;
@@ -170,7 +191,7 @@ export class LogsService {
     oldestEntry: Date | null;
     newestEntry: Date | null;
   }> {
-    const pid = new Types.ObjectId(projectId);
+    const pid = scopedProjectId(projectId);
 
     // `aggregate()` ohne Typargument liefert `any[]` — damit war jeder Zugriff
     // auf `_id`/`count` ein unsafe-member-access. Das Typargument beschreibt die

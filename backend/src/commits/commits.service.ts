@@ -11,6 +11,7 @@ import { ProjectsService } from '../projects/projects.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertAdmin, assertOwnerInScope, assertProjectInScope } from '../common/scope-guard';
 
 /**
  * MongoDB-Duplikatsfehler (E11000). Verengung statt Cast: der Treiber wirft
@@ -50,9 +51,14 @@ export class CommitsService {
     private projectsService: ProjectsService,
   ) {}
 
-  private async getToken(tokenSecretId: string): Promise<string> {
-    const secret = await this.secretsService.findById(tokenSecretId);
-    return secret.value;
+  /**
+   * The commit cron calls this WITHOUT an actor, so the scope check in
+   * `SecretsService.findById` would not run. The token must belong to exactly
+   * this project regardless of the actor — otherwise a stored foreign
+   * `tokenSecretId` lets the cron decrypt any secret and send it to `baseUrl`.
+   */
+  private async getToken(projectId: string, tokenSecretId: string): Promise<string> {
+    return this.secretsService.findValueForOwner(tokenSecretId, { projectId }, `project ${projectId}`);
   }
 
   async syncRepository(projectId: string, repoIndex: number): Promise<{ newCommits: number }> {
@@ -68,7 +74,7 @@ export class CommitsService {
       throw new BadRequestException('No token configured for this repository');
     }
 
-    const token = await this.getToken(repoConfig.tokenSecretId);
+    const token = await this.getToken(projectId, repoConfig.tokenSecretId);
     const provider = this.registry.get(repoConfig.provider);
 
     // `lastSyncAt` is only trustworthy AFTER we've actually fetched a commit
@@ -228,6 +234,7 @@ export class CommitsService {
       offset?: number;
     },
   ): Promise<CommitDocument[]> {
+    assertProjectInScope(projectId);
     const filter: FilterQuery<CommitDocument> = { projectId: projectIdFilter(projectId) };
     if (options?.branch) filter.branch = options.branch;
     if (options?.repoLabel) filter.repoLabel = options.repoLabel;
@@ -268,6 +275,7 @@ export class CommitsService {
     // enthält projectId historisch als ObjectId *und* als String. Ein rohes
     // `{ projectId }` hätte in `commit_search` genau die Commits übersehen, die
     // `commit_list` findet.
+    assertProjectInScope(projectId);
     return this.commitModel
       .find(
         { projectId: projectIdFilter(projectId), $text: { $search: searchQuery } },
@@ -281,10 +289,12 @@ export class CommitsService {
   async findById(id: string): Promise<CommitDocument> {
     const commit = await this.commitModel.findById(id).exec();
     if (!commit) throw new NotFoundException(`Commit ${id} not found`);
+    assertOwnerInScope({ projectId: commit.projectId }, `Commit ${id}`);
     return commit;
   }
 
   async countByProject(projectId: string, repoLabel?: string): Promise<number> {
+    assertProjectInScope(projectId);
     const filter: FilterQuery<CommitDocument> = { projectId: projectIdFilter(projectId) };
     if (repoLabel) filter.repoLabel = repoLabel;
     return this.commitModel.countDocuments(filter).exec();
@@ -298,6 +308,9 @@ export class CommitsService {
   }
 
   async validateRepoToken(config: GitRepository, token: string): Promise<boolean> {
+    // allowPrivateHost lifts the private-address block of the git target —
+    // instance-wide network reach, so admin only.
+    if (config.allowPrivateHost) assertAdmin('allowPrivateHost');
     const provider = this.registry.get(config.provider);
     return provider.validateToken(config, token);
   }
@@ -315,7 +328,7 @@ export class CommitsService {
       throw new BadRequestException('No token configured for this repository');
     }
 
-    const token = await this.getToken(repoConfig.tokenSecretId);
+    const token = await this.getToken(projectId, repoConfig.tokenSecretId);
     const provider = this.registry.get(repoConfig.provider);
     return provider.fetchBranches(repoConfig, token);
   }

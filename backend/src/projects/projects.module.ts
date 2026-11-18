@@ -5,6 +5,7 @@ import {
   CustomerProjectLink,
   CustomerProjectLinkSchema,
 } from '../customers/schemas/customer-project-link.schema';
+import { Secret, SecretSchema } from '../secrets/schemas/secret.schema';
 import { ProjectsService } from './projects.service';
 import { ProjectsController } from './projects.controller';
 
@@ -25,6 +26,10 @@ import { ProjectsController } from './projects.controller';
       // Die CustomersModule registriert dasselbe Schema zusätzlich für ihre
       // eigene Service-Logik — das ist OK, MongooseModule.forFeature ist idempotent.
       { name: CustomerProjectLink.name, schema: CustomerProjectLinkSchema },
+      // Read-only: ProjectsService validates gitRepositories[].tokenSecretId
+      // ownership on write. Model instead of SecretsService avoids a DI cycle
+      // (SecretsService -> CustomersService).
+      { name: Secret.name, schema: SecretSchema },
     ]),
   ],
   controllers: [ProjectsController],

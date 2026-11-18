@@ -49,7 +49,7 @@ function mkResponse({ status = 200, ok = true, body = [], headers = {} } = {}) {
 }
 
 const giteaConfig = {
-  provider: 'gitea', baseUrl: 'https://gitea.example.com', owner: 'acme', repo: 'widget',
+  provider: 'gitea', baseUrl: 'https://203.0.113.10', owner: 'acme', repo: 'widget',
   defaultBranch: 'main', allowPrivateHost: false, label: '', gitlabProjectId: '', syncEnabled: true,
 };
 const ghConfig = { ...giteaConfig, provider: 'github', baseUrl: '' };
@@ -65,7 +65,7 @@ const glConfig = { ...giteaConfig, provider: 'gitlab', baseUrl: '' };
     await withStubFetch(async () => mkResponse({ body: [{
       sha: 'abc123',
       commit: { message: 'feat: stuff', author: { name: 'Alice', email: 'a@x', date: '2026-05-01T12:00:00Z' } },
-      html_url: 'https://gitea.example.com/acme/widget/commit/abc123',
+      html_url: 'https://203.0.113.10/acme/widget/commit/abc123',
       stats: { additions: 10, deletions: 2 },
       files: [{ filename: 'a.ts' }, { filename: 'b.ts' }],
     }] }), async () => {
@@ -89,7 +89,7 @@ const glConfig = { ...giteaConfig, provider: 'gitlab', baseUrl: '' };
     await withStubFetch(async () => mkResponse({ body: [{
       id: 42, tag_name: 'v1.2.0', name: 'Release 1.2', body: 'changes',
       published_at: '2026-04-01T10:00:00Z',
-      html_url: 'https://gitea.example.com/acme/widget/releases/tag/v1.2.0',
+      html_url: 'https://203.0.113.10/acme/widget/releases/tag/v1.2.0',
       draft: false, prerelease: false,
       assets: [{ name: 'bin.zip', browser_download_url: 'https://x/bin.zip', type: 'application/zip' }],
     }] }), async () => {
@@ -122,17 +122,24 @@ const glConfig = { ...giteaConfig, provider: 'gitlab', baseUrl: '' };
     });
   });
 
-  await check('[gitea] allowPrivateHost=true bypasses SSRF validator', async () => {
-    const cfg = { ...giteaConfig, baseUrl: 'http://127.0.0.1:3000', allowPrivateHost: true };
+  // allowPrivateHost opens private networks (RFC1918), never loopback — that
+  // would be the backend container itself.
+  await check('[gitea] allowPrivateHost=true allows a private network target', async () => {
+    const cfg = { ...giteaConfig, baseUrl: 'http://10.0.0.5:3000', allowPrivateHost: true };
     await withStubFetch(async () => mkResponse({ body: [] }), async () => {
       const r = await gitea.fetchCommits(cfg, 'tkn');
       assert.deepEqual(r.commits, []);
     });
   });
 
-  await check('[gitea] allowPrivateHost=false blocks loopback', async () => {
-    const cfg = { ...giteaConfig, baseUrl: 'http://127.0.0.1:3000', allowPrivateHost: false };
-    await assert.rejects(gitea.fetchCommits(cfg, 'tkn'), /private/);
+  await check('[gitea] allowPrivateHost=false blocks a private target', async () => {
+    const cfg = { ...giteaConfig, baseUrl: 'http://10.0.0.5:3000', allowPrivateHost: false };
+    await assert.rejects(gitea.fetchCommits(cfg, 'tkn'));
+  });
+
+  await check('[gitea] loopback stays blocked even with allowPrivateHost=true', async () => {
+    const cfg = { ...giteaConfig, baseUrl: 'http://127.0.0.1:3000', allowPrivateHost: true };
+    await assert.rejects(gitea.fetchCommits(cfg, 'tkn'));
   });
 
   // ---------------- new: sparse / hostile payloads ----------------
@@ -146,7 +153,7 @@ const glConfig = { ...giteaConfig, provider: 'gitlab', baseUrl: '' };
       assert.equal(r.commits[0].sha, 'ok1');
       assert.equal(r.commits[0].authorName, 'Unknown');
       assert.equal(r.commits[0].message, '');
-      assert.equal(r.commits[0].url, 'https://gitea.example.com/acme/widget/commit/ok1');
+      assert.equal(r.commits[0].url, 'https://203.0.113.10/acme/widget/commit/ok1');
       assert.equal(r.commits[0].committedAt.toISOString(), '2026-05-02T12:00:00.000Z');
     });
   });
@@ -158,7 +165,7 @@ const glConfig = { ...giteaConfig, provider: 'gitlab', baseUrl: '' };
       assert.equal(rels[0].providerReleaseId, 'v9');
       assert.equal(rels[0].name, 'v9');
       assert.deepEqual(rels[0].assets, []);
-      assert.equal(rels[0].url, 'https://gitea.example.com/acme/widget/releases/tag/v9');
+      assert.equal(rels[0].url, 'https://203.0.113.10/acme/widget/releases/tag/v9');
       assert.equal(rels[0].releasedAt.getTime(), 0);
     });
   });
@@ -302,9 +309,9 @@ const glConfig = { ...giteaConfig, provider: 'gitlab', baseUrl: '' };
 
   await check('[gitlab] release without assets block and without _links falls back', async () => {
     await withStubFetch(async () => mkResponse({ body: [{ tag_name: 'v4', created_at: '2026-05-05T00:00:00Z' }] }), async () => {
-      const rels = await gitlab.fetchReleases({ ...glConfig, baseUrl: 'https://gl.example' }, 'tkn');
+      const rels = await gitlab.fetchReleases({ ...glConfig, baseUrl: 'https://203.0.113.20' }, 'tkn');
       assert.deepEqual(rels[0].assets, []);
-      assert.equal(rels[0].url, 'https://gl.example/-/releases/v4');
+      assert.equal(rels[0].url, 'https://203.0.113.20/-/releases/v4');
       assert.equal(rels[0].name, 'v4');
       assert.equal(rels[0].releasedAt.toISOString(), '2026-05-05T00:00:00.000Z');
     });

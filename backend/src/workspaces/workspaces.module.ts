@@ -46,7 +46,7 @@ import { JWT_ALGORITHM } from '../common/access-token';
     TodosModule,
     // `dg kube` (C-3): Cluster-Zugriff aus der Shell läuft über das Backend.
     KubeModule,
-    // `dg ssh` / `dg scp`: SFTP-Transfer über das Backend, Credentials bleiben dort.
+    // `dg ssh` / `dg scp`: SFTP transfers via the backend, credentials stay there.
     SshModule,
   ],
   controllers: [

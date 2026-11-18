@@ -30,6 +30,8 @@ import { readBodyCapped } from '../common/read-body-capped';
 import { Readable } from 'node:stream';
 import { guardStream } from '../common/stream-guard';
 import { guardedFetch } from '../common/guarded-fetch';
+import { ProjectsService } from '../projects/projects.service';
+import { EnvironmentDocument } from '../environments/schemas/environment.schema';
 
 const HISTORY_TTL_DAYS = 30;
 const MAX_RESPONSE_BODY = 1_000_000; // 1 MB, wie in der Spec
@@ -117,6 +119,7 @@ export class HttpRequestsService {
     @InjectModel(RequestHistoryEntry.name) protected readonly historyModel: Model<RequestHistoryDocument>,
     protected readonly secretsService: SecretsService,
     protected readonly environmentsService: EnvironmentsService,
+    protected readonly projectsService: ProjectsService,
   ) {}
 
   protected objectId(id: string, label = 'id'): Types.ObjectId {
@@ -248,6 +251,30 @@ export class HttpRequestsService {
     // ohne diesen Filter beantwortet die Route „welche Requests hat Collection
     // X" für jede Collection der Instanz — inklusive der Klartext-Auth.
     return this.filterByActorScope(docs);
+  }
+
+  /**
+   * Environment usable for a request of `projectId`: scope-checked by
+   * `EnvironmentsService.findById`, and owned by that project or by a customer
+   * linked to it. Previously a customer-bound environment (no projectId) was
+   * accepted for ANY request, so its variables leaked into foreign requests.
+   */
+  private async loadEnvironmentForProject(environmentId: string, projectId: string): Promise<EnvironmentDocument> {
+    const env = await this.environmentsService.findById(environmentId);
+    const envProj = env.projectId?.toString();
+    const envCust = env.customerId?.toString();
+    if (envProj) {
+      if (envProj !== projectId) throw new BadRequestException('Environment gehört nicht zu diesem Projekt');
+    } else if (!envCust || !(await this.projectsService.isLinkedToCustomer(projectId, envCust))) {
+      throw new BadRequestException('Environment gehört nicht zu diesem Projekt');
+    }
+    return env;
+  }
+
+  /** Issue-time check for the download ticket (request + environment). */
+  async assertDownloadAllowed(id: string, environmentId?: string): Promise<void> {
+    const doc = await this.getRequest(id);
+    if (environmentId) await this.loadEnvironmentForProject(environmentId, doc.projectId.toString());
   }
 
   async getRequest(id: string): Promise<SavedRequestDocument> {
@@ -386,11 +413,7 @@ export class HttpRequestsService {
     let environmentName: string | undefined;
     let environmentOid: Types.ObjectId | undefined;
     if (opts.environmentId) {
-      const env = await this.environmentsService.findById(opts.environmentId);
-      const envProj = env.projectId?.toString();
-      if (envProj && envProj !== projectId) {
-        throw new BadRequestException('Environment gehört nicht zu diesem Projekt');
-      }
+      const env = await this.loadEnvironmentForProject(opts.environmentId, projectId);
       variables = (env.variables ?? []).map((v) => ({ key: v.key, value: v.value }));
       envSecrets = await this.secretsService.getDecryptedForEnvironment({ projectId }, opts.environmentId);
       environmentName = env.name;

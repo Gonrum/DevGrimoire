@@ -6,6 +6,7 @@ import { Soul, SoulDocument } from './schemas/soul.schema';
 import { UpdateSoulDto } from './dto/update-soul.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerParamsInScope } from '../common/scope-guard';
 
 interface SoulOwner {
   projectId?: string;
@@ -25,6 +26,9 @@ export class SoulsService {
 
     const $set: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(dto)) {
+      // Owner fields come only from `owner` (scope-checked); a stray owner in
+      // the payload must not re-home the soul into a foreign project/customer.
+      if (key === 'projectId' || key === 'customerId' || key === '_id') continue;
       if (value !== undefined) {
         $set[key] = value;
       }
@@ -79,6 +83,11 @@ export class SoulsService {
     if (owner.projectId && owner.customerId) {
       throw new BadRequestException('projectId and customerId are mutually exclusive');
     }
+    // Central scope check: every read and write goes through this filter, so a
+    // narrowed actor can neither read nor overwrite a foreign project's or
+    // customer's soul (souls are injected into agent prompts). There is no
+    // global soul — an owner is always required above.
+    assertOwnerParamsInScope(owner);
     return owner.projectId ? { projectId: owner.projectId } : { customerId: owner.customerId };
   }
 }

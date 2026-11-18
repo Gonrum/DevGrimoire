@@ -27,6 +27,7 @@ import { TodoDocument, TodoPriority, TodoStatus } from '../todos/schemas/todo.sc
 import { Manual, ManualDocument } from '../manuals/schemas/manual.schema';
 import { Knowledge, KnowledgeDocument } from '../knowledge/schemas/knowledge.schema';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerInScope, assertProjectInScope, projectScopeFilter } from '../common/scope-guard';
 
 const ALLOWED_TRANSITIONS: Record<DocProposalStatus, DocProposalStatus[]> = {
   [DocProposalStatus.OPEN]: [
@@ -83,6 +84,15 @@ export class DocUpdateProposalsService {
   ) {}
 
   async create(dto: CreateDocUpdateProposalDto): Promise<DocUpdateProposalDocument> {
+    if (!Types.ObjectId.isValid(dto.projectId)) {
+      throw new BadRequestException(`Invalid projectId: ${dto.projectId}`);
+    }
+    if (dto.target.id !== undefined && !Types.ObjectId.isValid(dto.target.id)) {
+      throw new BadRequestException(`Invalid target.id: ${dto.target.id}`);
+    }
+    // A narrowed actor must not plant proposals (which end up as todos via
+    // convertToTodo) in a foreign project.
+    assertProjectInScope(dto.projectId);
     const dup = await this.proposalModel
       .findOne({
         projectId: new Types.ObjectId(dto.projectId),
@@ -132,7 +142,19 @@ export class DocUpdateProposalsService {
 
   async list(query: ListDocUpdateProposalsDto): Promise<DocUpdateProposalDocument[]> {
     const filter: Record<string, unknown> = {};
-    if (query.projectId) filter.projectId = new Types.ObjectId(query.projectId);
+    if (query.projectId) {
+      if (!Types.ObjectId.isValid(query.projectId)) {
+        throw new BadRequestException(`Invalid projectId: ${query.projectId}`);
+      }
+      assertProjectInScope(query.projectId);
+      filter.projectId = new Types.ObjectId(query.projectId);
+    } else {
+      // Without a project filter this used to list proposals of every project.
+      Object.assign(filter, projectScopeFilter());
+    }
+    if (query.targetId && !Types.ObjectId.isValid(query.targetId)) {
+      throw new BadRequestException(`Invalid targetId: ${query.targetId}`);
+    }
     if (query.status) filter.status = query.status;
     if (query.sourceType) filter['source.type'] = query.sourceType;
     if (query.sourceId) filter['source.id'] = query.sourceId;
@@ -142,10 +164,21 @@ export class DocUpdateProposalsService {
     return this.proposalModel.find(filter).sort({ createdAt: -1 }).limit(limit).exec();
   }
 
-  async findById(id: string): Promise<DocUpdateProposalDocument> {
+  /**
+   * Load + 404 + scope check — used by every by-id path (get, status change,
+   * convert) so a narrowed actor cannot read or steer proposals of foreign
+   * projects by id.
+   */
+  private async findScoped(id: string): Promise<DocUpdateProposalDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException(`DocUpdateProposal ${id} not found`);
     const proposal = await this.proposalModel.findById(id).exec();
     if (!proposal) throw new NotFoundException(`DocUpdateProposal ${id} not found`);
+    assertOwnerInScope({ projectId: proposal.projectId }, `DocUpdateProposal ${id}`);
     return proposal;
+  }
+
+  async findById(id: string): Promise<DocUpdateProposalDocument> {
+    return this.findScoped(id);
   }
 
   async updateStatus(

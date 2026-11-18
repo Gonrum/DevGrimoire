@@ -1,6 +1,6 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res, UnauthorizedException } from '@nestjs/common';
 import { errorMessage } from '../common/narrow';
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { pipeline } from 'node:stream';
 import { HttpRequestsService } from './http-requests.service';
 import { CreateCollectionDto } from './dto/create-collection.dto';
@@ -12,12 +12,7 @@ import { ParseCurlDto } from './dto/parse-curl.dto';
 import { Public } from '../auth/decorators/public.decorator';
 import { DownloadTicketService } from './download-ticket.service';
 import { DownloadTicketDto } from './dto/download-ticket.dto';
-
-/** `JwtAuthGuard` hängt global (`app.module.ts`), `req.user` ist also gesetzt,
- * sobald ein Request hier ankommt — gleiche Form wie in `auth.controller.ts`. */
-interface AuthRequest extends Request {
-  user?: { userId?: string };
-}
+import { RequestContext } from '../common/request-context';
 
 @Controller()
 export class HttpRequestsController {
@@ -109,10 +104,19 @@ export class HttpRequestsController {
   // ---- Streaming-Download ----
   @Post('requests/:id/download-ticket')
   @HttpCode(200)
-  async downloadTicket(@Param('id') id: string, @Body() dto: DownloadTicketDto, @Req() req: AuthRequest) {
-    await this.svc.getRequest(id); // Existenz-Check (wirft NotFound, wenn der Request nicht existiert)
-    const userId = req.user?.userId ?? 'anonymous';
-    const ticket = this.tickets.mint({ requestId: id, environmentId: dto.environmentId, userId });
+  async downloadTicket(@Param('id') id: string, @Body() dto: DownloadTicketDto) {
+    // Scope check of the request AND of the environment (must belong to the
+    // request's project or a linked customer) before anything is issued.
+    await this.svc.assertDownloadAllowed(id, dto.environmentId);
+    // The ticket carries the issuing actor; redemption restores it.
+    const actor = RequestContext.getUser();
+    if (!actor) throw new UnauthorizedException('Download-Ticket braucht einen angemeldeten Benutzer');
+    const ticket = this.tickets.mint({
+      requestId: id,
+      environmentId: dto.environmentId,
+      actor,
+      apiKey: RequestContext.getApiKey(),
+    });
     return { ticket, url: `/api/requests/${id}/download?ticket=${encodeURIComponent(ticket)}` };
   }
 
@@ -120,9 +124,13 @@ export class HttpRequestsController {
   @Get('requests/:id/download')
   async download(@Param('id') id: string, @Query('ticket') ticket: string, @Res() res: Response) {
     // Wirft UnauthorizedException (→ 401 via Exception-Filter) bei ungültig/abgelaufen/verbraucht.
-    const { environmentId } = this.tickets.verifyAndConsume(ticket, id);
+    const { environmentId, actor, apiKey } = this.tickets.verifyAndConsume(ticket, id);
     try {
-      const { upstream, body, filename } = await this.svc.openStream(id, { environmentId });
+      // Public route => no actor here. Run as the issuing user so getRequest,
+      // the environment lookup and secret resolution are scope-checked.
+      const { upstream, body, filename } = await RequestContext.run(actor, apiKey, () =>
+        this.svc.openStream(id, { environmentId }),
+      );
       res.status(upstream.status);
       const ct = upstream.headers.get('content-type');
       if (ct) res.setHeader('Content-Type', ct);

@@ -6,12 +6,15 @@ import { UpdateStackDto } from './dto/update-stack.dto';
 import { CreateStackEntryDto } from './dto/create-stack-entry.dto';
 import { UpdateStackEntryDto } from './dto/update-stack-entry.dto';
 import { ReorderEntriesDto } from './dto/reorder-entries.dto';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../auth/schemas/user.schema';
 
 @Controller('stacks')
 export class StacksController {
   constructor(private readonly stacksService: StacksService) {}
 
   @Post()
+  @Roles(UserRole.ADMIN)
   @HttpCode(201)
   create(@Body() dto: CreateStackDto) {
     return this.stacksService.create(dto);
@@ -44,32 +47,38 @@ export class StacksController {
   }
 
   @Patch(':id/reorder')
+  @Roles(UserRole.ADMIN)
   reorder(@Param('id') id: string, @Body() dto: ReorderEntriesDto) {
     return this.stacksService.reorderEntries(id, dto.entryIds);
   }
 
   @Patch(':id')
+  @Roles(UserRole.ADMIN)
   update(@Param('id') id: string, @Body() dto: UpdateStackDto) {
     return this.stacksService.update(id, dto);
   }
 
   @Delete(':id')
+  @Roles(UserRole.ADMIN)
   @HttpCode(204)
   remove(@Param('id') id: string) {
     return this.stacksService.remove(id);
   }
 
   @Post(':id/entries')
+  @Roles(UserRole.ADMIN)
   addEntry(@Param('id') id: string, @Body() dto: CreateStackEntryDto) {
     return this.stacksService.addEntry(id, dto);
   }
 
   @Patch(':id/entries/:entryId')
+  @Roles(UserRole.ADMIN)
   updateEntry(@Param('id') id: string, @Param('entryId') entryId: string, @Body() dto: UpdateStackEntryDto) {
     return this.stacksService.updateEntry(id, entryId, dto);
   }
 
   @Delete(':id/entries/:entryId')
+  @Roles(UserRole.ADMIN)
   @HttpCode(204)
   removeEntry(@Param('id') id: string, @Param('entryId') entryId: string) {
     return this.stacksService.removeEntry(id, entryId);

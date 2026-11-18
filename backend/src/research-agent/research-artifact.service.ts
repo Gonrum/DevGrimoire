@@ -11,6 +11,7 @@ import {
   ResearchScope, ResearchTopic, ResearchTopicDocument,
 } from './schemas/research-topic.schema';
 import { assertTopicAccessible } from './research-access';
+import { assertOwnerInScope } from '../common/scope-guard';
 import { PROJECT_CHANGED } from '../events/project-event';
 
 /** Fields the research agent (or an operator) supplies when writing an artifact. */
@@ -129,6 +130,10 @@ export class ResearchArtifactService {
     const topicObjectId = new Types.ObjectId(topicId);
     const slug = normalizeSlug(input.slug);
     const ownership = this.deriveOwnership(scope);
+    // Second line of defense for topics stored before scope ids were checked:
+    // the artifact lands in this project's/customer's RAG, so the writing
+    // actor (the topic owner during a run) must have it in scope.
+    assertOwnerInScope(ownership, `Research artifact '${slug}'`);
     const runId = input.runId ? new Types.ObjectId(input.runId) : undefined;
 
     const existing = await this.artifactModel.findOne({ topicId: topicObjectId, slug }).exec();

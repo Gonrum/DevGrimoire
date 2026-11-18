@@ -12,6 +12,13 @@ import { PROJECT_CHANGED } from '../events/project-event';
 import { TodosService } from '../todos/todos.service';
 import { TodoPriority, TodoStatus, TodoDocument } from '../todos/schemas/todo.schema';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerInScope, assertProjectInScope, projectScopeFilter } from '../common/scope-guard';
+
+function assertOptionalObjectId(value: string | undefined, field: string): void {
+  if (value !== undefined && value !== '' && !Types.ObjectId.isValid(value)) {
+    throw new BadRequestException(`Invalid ${field}: ${value}`);
+  }
+}
 
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/(Authorization:\s*Bearer\s+)[^\s]+/gi, '$1***'],
@@ -40,6 +47,22 @@ export class ValidationReportsService {
   ) {}
 
   async create(dto: CreateValidationReportDto): Promise<ValidationReportDocument> {
+    if (!Types.ObjectId.isValid(dto.projectId)) {
+      throw new BadRequestException(`Invalid projectId: ${dto.projectId}`);
+    }
+    assertOptionalObjectId(dto.todoId, 'todoId');
+    assertOptionalObjectId(dto.commitId, 'commitId');
+    assertOptionalObjectId(dto.workflowRunId, 'workflowRunId');
+    assertProjectInScope(dto.projectId);
+    if (dto.todoId) {
+      // The todo link is resolved later (latestForTodo, oracle hotspots,
+      // bug-todo proposals). It must belong to the same project, otherwise a
+      // report could be attached to — and surface in — a foreign todo.
+      const todo = await this.todosService.findById(dto.todoId);
+      if (todo.projectId && todo.projectId.toString() !== dto.projectId) {
+        throw new BadRequestException(`Todo ${dto.todoId} does not belong to project ${dto.projectId}`);
+      }
+    }
     const summary = truncate(maskValidationText(dto.summary), 8_000);
     const output = truncate(maskValidationText(dto.outputSnippet), 16_000);
     const report = await this.reportModel.create({
@@ -66,8 +89,19 @@ export class ValidationReportsService {
   }
 
   async list(query: ListValidationReportsDto): Promise<ValidationReportDocument[]> {
+    assertOptionalObjectId(query.projectId, 'projectId');
+    assertOptionalObjectId(query.todoId, 'todoId');
+    assertOptionalObjectId(query.commitId, 'commitId');
+    assertOptionalObjectId(query.workflowRunId, 'workflowRunId');
     const filter: Record<string, unknown> = {};
-    if (query.projectId) filter.projectId = new Types.ObjectId(query.projectId);
+    if (query.projectId) {
+      assertProjectInScope(query.projectId);
+      filter.projectId = new Types.ObjectId(query.projectId);
+    } else {
+      // Reports carry build/test output — never list them instance-wide for a
+      // narrowed actor (filtering by todo/commit alone used to bypass scope).
+      Object.assign(filter, projectScopeFilter());
+    }
     if (query.todoId) filter.todoId = new Types.ObjectId(query.todoId);
     if (query.commitId) filter.commitId = new Types.ObjectId(query.commitId);
     if (query.workflowRunId) filter.workflowRunId = new Types.ObjectId(query.workflowRunId);
@@ -77,13 +111,26 @@ export class ValidationReportsService {
   }
 
   async latestForTodo(todoId: string): Promise<ValidationReportDocument | null> {
-    return this.reportModel.findOne({ todoId: new Types.ObjectId(todoId) }).sort({ createdAt: -1 }).exec();
+    if (!Types.ObjectId.isValid(todoId)) return null;
+    const report = await this.reportModel
+      .findOne({ todoId: new Types.ObjectId(todoId), ...projectScopeFilter() })
+      .sort({ createdAt: -1 })
+      .exec();
+    if (report) assertOwnerInScope({ projectId: report.projectId }, `ValidationReport ${report._id.toString()}`);
+    return report;
+  }
+
+  /** Load + 404 + scope check; every by-id path (get, bug-todo proposal) uses it. */
+  private async findScoped(id: string): Promise<ValidationReportDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException(`ValidationReport ${id} not found`);
+    const report = await this.reportModel.findById(id).exec();
+    if (!report) throw new NotFoundException(`ValidationReport ${id} not found`);
+    assertOwnerInScope({ projectId: report.projectId }, `ValidationReport ${id}`);
+    return report;
   }
 
   async findById(id: string): Promise<ValidationReportDocument> {
-    const report = await this.reportModel.findById(id).exec();
-    if (!report) throw new NotFoundException(`ValidationReport ${id} not found`);
-    return report;
+    return this.findScoped(id);
   }
 
   async removeByProject(projectId: string): Promise<void> {

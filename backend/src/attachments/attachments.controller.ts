@@ -14,6 +14,7 @@ import {
   BadRequestException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { McpToolEquivalent } from '../auth/decorators/mcp-tool-equivalent.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { AttachmentsService } from './attachments.service';
@@ -120,6 +121,7 @@ export class AttachmentsController {
     return this.attachmentsService.findById(id);
   }
 
+  @McpToolEquivalent('attachment_download')
   @Get(':id/download')
   async download(@Param('id') id: string, @Res() res: Response) {
     const { stream, attachment } = await this.attachmentsService.download(id);

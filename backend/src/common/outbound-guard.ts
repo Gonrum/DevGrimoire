@@ -2,28 +2,35 @@ import { ForbiddenException } from '@nestjs/common';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { networkInterfaces } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 
 /**
- * Ausgehende Verbindungen zu nutzerkonfigurierten Zielen (M-4).
+ * Outbound connections to user-configured targets (M-4).
  *
- * Interne Ziele sind hier Kernnutzen — SSH-Server, Kube-Cluster und
- * Monitoring-Checks liegen regulär auf `10.x`/`192.168.x`. Eine
- * Private-IP-Sperre wie in `readability.service.ts` (web_fetch) würde genau das
- * abschalten. Gesperrt wird deshalb nur, was **nie** ein legitimes Ziel ist:
+ * Internal targets are the core use case here — SSH servers, Kube clusters
+ * and monitoring checks regularly live on `10.x`/`192.168.x`. A private-IP
+ * block like the one in `readability.service.ts` (web_fetch) would switch
+ * exactly that off. Only what is NEVER a legitimate target is blocked:
  *
- * - Loopback und „unspecified" (`0.0.0.0` verbindet unter Linux nach lokal) —
- *   das wäre der Backend-Container selbst.
- * - Link-Local inklusive der Cloud-Metadaten-Adresse `169.254.169.254`, dazu
- *   die Metadaten-Adressen, die ausserhalb von Link-Local liegen.
- * - Die Dienste dieser Instanz: die eigenen Interface-Adressen und die
- *   Adressen der Compose-Dienste (MongoDB, Redis, Sidecar, …).
+ * - Loopback and "unspecified" (`0.0.0.0` connects locally on Linux) — that
+ *   would be the backend container itself.
+ * - Link-local including the cloud metadata address `169.254.169.254`, plus
+ *   the metadata addresses outside link-local.
+ * - This instance's services: its own interface addresses and the addresses
+ *   of the compose services (MongoDB, Redis, MinIO, sidecar, …), and — inside
+ *   a container — the default gateway (= the Docker host with its published
+ *   ports, e.g. this instance's own :80 and :3200).
  *
- * Geprüft wird **nach** der DNS-Auflösung und gegen **alle** Adressen eines
- * Namens — sonst reicht ein Hostname, der auf `127.0.0.1` zeigt, oder ein
- * zweiter A-Record. `resolve()` liefert die geprüfte Adresse zurück; wer mit
- * ihr statt mit dem Namen verbindet, schliesst auch DNS-Rebinding aus.
+ * Note: this also blocks services that run directly on the Docker host
+ * (a local k3s/kind cluster, Gitea or SSH on the same machine). Allow them
+ * explicitly via `OUTBOUND_ALLOW_HOSTS`.
  *
- * Ausnahmen: `OUTBOUND_ALLOW_HOSTS` (Komma-Liste, Hostnamen oder IPs, exakt).
+ * Checks run AFTER DNS resolution and against ALL addresses of a name —
+ * otherwise a hostname pointing at `127.0.0.1`, or a second A record, would
+ * do. `resolve()` returns the checked address; connecting to it instead of the
+ * name also rules out DNS rebinding.
+ *
+ * Exceptions: `OUTBOUND_ALLOW_HOSTS` (comma list, host names or IPs, exact).
  */
 
 export const OUTBOUND_BLOCKED_CODE = 'outbound_blocked';
@@ -52,7 +59,11 @@ const REASON_TEXT: Record<BlockReason, string> = {
 const METADATA_ADDRESSES = new Set(['100.100.100.200', 'fd00:ec2:0:0:0:0:0:254']);
 
 /** Compose-Dienstnamen dieser Instanz (`docker-compose.yml`). */
-const DEFAULT_INSTANCE_HOSTS = ['mongodb', 'redis', 'workspace', 'searxng', 'backend', 'frontend'];
+const DEFAULT_INSTANCE_HOSTS = [
+  'mongodb', 'redis', 'workspace', 'searxng', 'backend', 'frontend', 'minio',
+  // Docker's alias for the host gateway (when configured via extra_hosts).
+  'host.docker.internal',
+];
 
 const INSTANCE_CACHE_MS = 60_000;
 
@@ -67,6 +78,13 @@ export interface OutboundGuardDeps {
   interfaceAddresses: () => string[];
   env: NodeJS.ProcessEnv;
   now: () => number;
+  /**
+   * Default-gateway addresses of the container. Inside a Docker bridge the
+   * gateway IS the Docker host, which reaches every port the host publishes
+   * (MongoDB, the backend itself, MinIO …) — an instance service by another
+   * address. Optional so callers/tests without it keep working.
+   */
+  gatewayAddresses?: () => string[];
 }
 
 /** Volle 8-Gruppen-Form einer IPv6-Adresse, `null` wenn keine. */
@@ -141,10 +159,72 @@ function mongoHosts(uri: string | undefined): string[] {
   return m[1].split(',').map((h) => h.replace(/:\d+$/, '').replace(/^\[|\]$/g, '')).filter(Boolean);
 }
 
+/** `MINIO_ENDPOINT` is a bare host (`minio`, `minio:9000`) or, rarely, a URL. */
+function minioHost(raw: string | undefined): string | null {
+  const v = raw?.trim();
+  if (!v) return null;
+  if (v.includes('://')) return hostOfUrl(v)?.toLowerCase() ?? null;
+  if (v.startsWith('[')) return v.slice(1, v.indexOf(']') > 0 ? v.indexOf(']') : undefined).toLowerCase() || null;
+  // A single colon is a port; several mean a bare IPv6 literal.
+  const bare = v.split(':').length === 2 ? v.replace(/:\d+$/, '') : v;
+  return bare.toLowerCase() || null;
+}
+
+/** Little-endian hex IPv4 from /proc/net/route (`0102A8C0` -> `192.168.2.1`). */
+function hexV4(hex: string): string | null {
+  if (!/^[0-9a-f]{8}$/i.test(hex)) return null;
+  const n = parseInt(hex, 16);
+  return [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff].join('.');
+}
+
+/** Gateways of the default routes in `/proc/net/route` (IPv4). */
+export function parseProcNetRoute(text: string): string[] {
+  const out: string[] = [];
+  for (const line of text.split('\n').slice(1)) {
+    const cols = line.trim().split(/\s+/);
+    if (cols.length < 8) continue;
+    const [, dest, gateway, , , , , mask] = cols;
+    if (dest !== '00000000' || mask !== '00000000') continue;
+    const ip = hexV4(gateway);
+    if (ip && ip !== '0.0.0.0') out.push(ip);
+  }
+  return out;
+}
+
+/** Next hops of the default routes in `/proc/net/ipv6_route`. */
+export function parseProcNetIpv6Route(text: string): string[] {
+  const out: string[] = [];
+  for (const line of text.split('\n')) {
+    const cols = line.trim().split(/\s+/);
+    if (cols.length < 10) continue;
+    const [dest, prefix, , , nextHop] = cols;
+    if (!/^0{32}$/.test(dest) || prefix !== '00' || !/^[0-9a-f]{32}$/i.test(nextHop) || /^0{32}$/.test(nextHop)) continue;
+    out.push(canonicalIp(nextHop.match(/.{4}/g)?.join(':') ?? ''));
+  }
+  return out;
+}
+
+/**
+ * Best-effort default gateways — only inside a container, where the gateway
+ * is the Docker host. On a bare host the gateway is the LAN router, which may
+ * be a legitimate monitoring target. Exceptions go through OUTBOUND_ALLOW_HOSTS
+ * (the gateway IP, or `host.docker.internal`).
+ */
+function readDefaultGateways(): string[] {
+  const inContainer = existsSync('/.dockerenv') || existsSync('/run/.containerenv');
+  if (!inContainer) return [];
+  const read = (path: string): string => {
+    try { return readFileSync(path, 'utf8'); } catch { return ''; }
+  };
+  return [...parseProcNetRoute(read('/proc/net/route')), ...parseProcNetIpv6Route(read('/proc/net/ipv6_route'))];
+}
+
 export function instanceHosts(env: NodeJS.ProcessEnv): string[] {
   const hosts = new Set<string>(DEFAULT_INSTANCE_HOSTS);
   for (const h of mongoHosts(env.MONGODB_URI)) hosts.add(h.toLowerCase());
   if (env.REDIS_HOST) hosts.add(env.REDIS_HOST.toLowerCase());
+  const minio = minioHost(env.MINIO_ENDPOINT);
+  if (minio) hosts.add(minio);
   for (const u of [env.WORKSPACE_API_URL, env.SEARXNG_URL]) {
     const h = hostOfUrl(u);
     if (h) hosts.add(h.toLowerCase());
@@ -162,6 +242,15 @@ export function createOutboundGuard(deps: OutboundGuardDeps) {
   async function collectInstanceIps(allow: Set<string>): Promise<Set<string>> {
     const ips = new Set<string>();
     for (const ip of deps.interfaceAddresses()) ips.add(canonicalIp(ip));
+    // An allowlisted gateway IP is still honoured by the per-address allow
+    // check in resolve().
+    if (deps.gatewayAddresses) {
+      try {
+        for (const ip of deps.gatewayAddresses()) ips.add(canonicalIp(ip));
+      } catch {
+        // Best-effort: no route table readable — nothing to add.
+      }
+    }
     const names = instanceHosts(deps.env).filter((h) => !allow.has(h));
     await Promise.all(names.map(async (name) => {
       try {
@@ -242,4 +331,5 @@ export const outboundGuard = createOutboundGuard({
     Object.values(networkInterfaces()).flatMap((list) => (list ?? []).map((i) => i.address)),
   env: process.env,
   now: () => Date.now(),
+  gatewayAddresses: readDefaultGateways,
 });

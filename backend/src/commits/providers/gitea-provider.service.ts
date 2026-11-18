@@ -9,7 +9,7 @@ import {
   NormalizedReleaseAsset,
 } from './git-provider.interface';
 import { GitRepository } from '../schemas/git-repository.schema';
-import { validateGitBaseUrl } from './url-validator';
+import { gitFetch, validateGitBaseUrl } from './url-validator';
 import {
   BranchResponse,
   GiteaCommit,
@@ -68,7 +68,7 @@ export class GiteaProviderService implements GitProviderInterface {
       if (since) params.set('since', since.toISOString());
 
       const url = `${baseUrl}/api/v1/repos/${this.repoPath(config)}/commits?${params}`;
-      const response = await fetch(url, {
+      const response = await gitFetch(config, url, {
         headers: this.getHeaders(token),
         signal: AbortSignal.timeout(FETCH_TIMEOUT),
       });
@@ -129,7 +129,7 @@ export class GiteaProviderService implements GitProviderInterface {
     validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
     const baseUrl = this.getBaseUrl(config);
     const url = `${baseUrl}/api/v1/repos/${this.repoPath(config)}/git/commits/${encodeURIComponent(sha)}`;
-    const response = await fetch(url, {
+    const response = await gitFetch(config, url, {
       headers: this.getHeaders(token),
       signal: AbortSignal.timeout(FETCH_TIMEOUT),
     });
@@ -147,7 +147,7 @@ export class GiteaProviderService implements GitProviderInterface {
     validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
     const baseUrl = this.getBaseUrl(config);
     const url = `${baseUrl}/api/v1/repos/${this.repoPath(config)}/branches?limit=50`;
-    const response = await fetch(url, {
+    const response = await gitFetch(config, url, {
       headers: this.getHeaders(token),
       signal: AbortSignal.timeout(FETCH_TIMEOUT),
     });
@@ -174,7 +174,7 @@ export class GiteaProviderService implements GitProviderInterface {
     validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
     const baseUrl = this.getBaseUrl(config);
     const url = `${baseUrl}/api/v1/repos/${this.repoPath(config)}/releases?limit=50`;
-    const response = await fetch(url, {
+    const response = await gitFetch(config, url, {
       headers: this.getHeaders(token),
       signal: AbortSignal.timeout(FETCH_TIMEOUT),
     });
@@ -235,7 +235,7 @@ export class GiteaProviderService implements GitProviderInterface {
       validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
       const baseUrl = this.getBaseUrl(config);
       const url = `${baseUrl}/api/v1/repos/${this.repoPath(config)}`;
-      const response = await fetch(url, {
+      const response = await gitFetch(config, url, {
         headers: this.getHeaders(token),
         signal: AbortSignal.timeout(FETCH_TIMEOUT),
       });

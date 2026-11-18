@@ -7,6 +7,8 @@ import { ResearchService, researchDetailForTool } from '../research/research.ser
 import { ResearchControlService } from '../research/research-control.service';
 import { readDepth, readTopics } from '../research/research-tool-input';
 import { errorMessage } from '../common/narrow';
+import { assertCustomerInScope, assertProjectInScope } from '../common/scope-guard';
+import { RequestContext } from '../common/request-context';
 import { ManualsService } from '../manuals/manuals.service';
 import { SessionsService } from '../sessions/sessions.service';
 import { SchemasService } from '../schemas/schemas.service';
@@ -1508,10 +1510,19 @@ export class ChatToolsService {
     // Ein nicht-String in args.projectId zählt wie „nicht gesetzt"; früher wurde er
     // per Assertion durchgereicht und erst in der Query zum Problem.
     const argProjectId = typeof args.projectId === 'string' ? args.projectId : undefined;
-    const projectId = isWrite
-      ? ctx.projectId || undefined
-      : argProjectId || ctx.projectId || undefined;
-    const effectiveArgs = isWrite ? { ...args, projectId } : args;
+    const argCustomerId = typeof args.customerId === 'string' ? args.customerId : undefined;
+    let projectId: string | undefined;
+    try {
+      projectId = this.resolveToolProjectId(isWrite, argProjectId, ctx);
+      // customerId comes from the LLM as well — a prompt-injected document must
+      // not steer a read into a customer outside the caller's scope.
+      if (argCustomerId) assertCustomerInScope(argCustomerId);
+    } catch (err) {
+      return { success: false, error: errorMessage(err) };
+    }
+    // The resolved projectId replaces whatever the LLM put into args, so the
+    // dispatch cases that read `args.projectId` see the checked value too.
+    const effectiveArgs = { ...args, projectId };
 
     const result = await this.dispatch(name, effectiveArgs, projectId);
     if (isWrite) {
@@ -1519,6 +1530,29 @@ export class ChatToolsService {
       void this.auditWrite(name, projectId, effectiveArgs, result);
     }
     return result;
+  }
+
+  /**
+   * Which project a tool call may touch. `args.projectId` is LLM output and
+   * therefore attacker-controllable (prompt injection via RAG content):
+   * - write tools: always the session project;
+   * - read tools in a session with a project: pinned to it, unless a real
+   *   actor asks for another project that is in its scope;
+   * - read tools without a session project: the requested project, scope-checked.
+   * Without an actor (scheduler-run workflow) nothing can vouch for a foreign
+   * id, so the context project wins.
+   */
+  private resolveToolProjectId(
+    isWrite: boolean,
+    argProjectId: string | undefined,
+    ctx: ToolContext,
+  ): string | undefined {
+    const ctxProjectId = ctx.projectId || undefined;
+    if (isWrite) return ctxProjectId;
+    if (!argProjectId || argProjectId === ctxProjectId) return ctxProjectId;
+    if (ctxProjectId && !RequestContext.getUser()) return ctxProjectId;
+    assertProjectInScope(argProjectId);
+    return argProjectId;
   }
 
   /** Internal: the actual tool dispatch table. Assumes authorization + projectId checks already ran. */

@@ -28,6 +28,8 @@ import { errorMessage, isDuplicateKeyError, isRecord } from '../common/narrow';
 import { discardBody, readBodyCapped } from '../common/read-body-capped';
 import { assertSafeCascadeId } from '../common/cascade-guard';
 import { guardedFetch } from '../common/guarded-fetch';
+import { assertOwnerInScope, assertOwnerParamsInScope, scopeFilter } from '../common/scope-guard';
+import type { SecretOwnerRef } from '../secrets/secret-owner';
 
 /**
  * Wie viele Healthchecks gleichzeitig laufen (M-45). Über
@@ -99,11 +101,35 @@ export class MonitoringService {
     });
   }
 
+  /**
+   * Which secrets a check may reference: its customer's, its project's, and
+   * project-only secrets of projects linked to the customer (the UI offers
+   * those). Anything else — another customer's or an unlinked project's
+   * secret — is rejected, because the scheduler decrypts the reference without
+   * an actor and sends it to the check's URL.
+   */
+  private async secretOwnerFor(customerId: string, projectId?: string | null): Promise<SecretOwnerRef> {
+    const links = await this.customersService.findProjectLinks(customerId);
+    return {
+      customerId,
+      projectId: projectId || undefined,
+      linkedProjectIds: links.map((l) => l.projectId.toString()),
+    };
+  }
+
   async create(dto: CreateHealthcheckDto): Promise<HealthcheckDocument> {
     if (!dto.customerId) {
       throw new BadRequestException('customerId is required');
     }
+    assertOwnerParamsInScope({ customerId: dto.customerId, projectId: dto.projectId });
     await this.customersService.findById(dto.customerId);
+    // The scheduler resolves secretHeaders without an actor and sends the
+    // values to `url` — only secrets of this check's owner may be referenced.
+    await this.secretsService.assertRefsBelongTo(
+      (dto.secretHeaders ?? []).map((h) => h.secretId),
+      await this.secretOwnerFor(dto.customerId, dto.projectId),
+      'this healthcheck',
+    );
 
     try {
       const check = await this.checkModel.create({
@@ -135,8 +161,12 @@ export class MonitoringService {
 
   async findByCustomer(customerId: string): Promise<HealthcheckDocument[]> {
     await this.customersService.findById(customerId);
+    // Project axis too: a check bound to a project outside the actor's scope
+    // must not be listed (findById rejects it as well).
+    const filter: Record<string, unknown> = { customerId: this.objectId(customerId, 'customerId') };
+    Object.assign(filter, scopeFilter());
     return this.checkModel
-      .find({ customerId: this.objectId(customerId, 'customerId') })
+      .find(filter)
       .sort({ createdAt: -1 })
       .exec();
   }
@@ -144,8 +174,9 @@ export class MonitoringService {
   async findById(id: string): Promise<HealthcheckDocument> {
     const check = await this.checkModel.findById(this.objectId(id, 'id')).exec();
     if (!check) throw new NotFoundException(`Healthcheck ${id} not found`);
-    // Authorization: piggyback on customer-scope check.
+    // Authorization: piggyback on customer-scope check, plus the project axis.
     await this.customersService.findById(check.customerId.toString());
+    assertOwnerInScope({ customerId: check.customerId, projectId: check.projectId }, `Healthcheck ${id}`);
     return check;
   }
 
@@ -190,6 +221,21 @@ export class MonitoringService {
     optionalRef('projectId', 'projectId');
     optionalRef('customerProjectId', 'customerProjectId');
     optionalRef('environmentId', 'environmentId');
+
+    // Owner after this update: a changed projectId moves the check (and decides
+    // which secrets it may reference), so it must be in scope too.
+    const nextProjectId = dto.projectId === undefined ? existing.projectId?.toString() : dto.projectId || undefined;
+    if (dto.projectId) assertOwnerParamsInScope({ projectId: dto.projectId });
+    const nextOwner = await this.secretOwnerFor(existing.customerId.toString(), nextProjectId);
+    // Re-validate ALL references against the new owner — also the stored ones
+    // when only projectId changes, otherwise moving the check could keep a
+    // reference to the previous project's secret.
+    const nextSecretIds = dto.secretHeaders !== undefined
+      ? dto.secretHeaders.map((h) => h.secretId)
+      : dto.projectId !== undefined
+        ? (existing.secretHeaders ?? []).map((h) => h.secretId?.toString())
+        : [];
+    await this.secretsService.assertRefsBelongTo(nextSecretIds, nextOwner, 'this healthcheck');
 
     if (dto.secretHeaders !== undefined) {
       $set.secretHeaders = dto.secretHeaders.map((h) => ({
@@ -553,8 +599,13 @@ export class MonitoringService {
     for (const sh of check.secretHeaders || []) {
       if (!sh?.name || !sh?.secretId) continue;
       try {
-        const secret = await this.secretsService.findById(sh.secretId.toString());
-        out[sh.name] = secret.value;
+        // Ownership is enforced here as well, independent of the actor: the
+        // cron runs without one, and stored data may predate write validation.
+        out[sh.name] = await this.secretsService.findValueForOwner(
+          sh.secretId.toString(),
+          await this.secretOwnerFor(check.customerId.toString(), check.projectId?.toString()),
+          `healthcheck ${check._id.toString()}`,
+        );
       } catch (err: unknown) {
         // Nur Id und Fehlertext — der aufgelöste Wert darf nirgends hin außer in
         // `out`, und `out` geht ausschließlich in den fetch-Header.

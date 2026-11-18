@@ -38,7 +38,7 @@ import { NodeRegistry } from './engine/node-registry';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { RequestContext, RequestUser } from '../common/request-context';
 import { runtimeFingerprint } from './workflow-runtime-fingerprint';
-import { assertActorCanAccessWorkflow } from './workflow-actor-access';
+import { assertActorCanAccessWorkflow, assertActorCanWriteWorkflow } from './workflow-actor-access';
 import { buildDualScopeFilter } from '../common/scope';
 import { redact } from './workflow-redaction';
 import { summarizeRisk, WORKFLOW_RUNTIME_LIMITS } from './workflow-security.runtime';
@@ -159,7 +159,8 @@ export class WorkflowsService {
     // T-505: ein auf Projekt A verengter Key darf keinen Workflow in Projekt B
     // anlegen — auch als Entwurf nicht, denn wer ihn später freigibt, sieht
     // einen fertigen Ablauf, den ein Fremder geschrieben hat.
-    assertActorCanAccessWorkflow(RequestContext.getUser(), dto);
+    // System scope additionally requires admin (instance-wide workflow).
+    assertActorCanWriteWorkflow(RequestContext.getUser(), dto);
     if ((dto.nodes?.length ?? 0) > WORKFLOW_RUNTIME_LIMITS.maxNodesPerDefinition) {
       throw new BadRequestException(
         `Workflow exceeds ${WORKFLOW_RUNTIME_LIMITS.maxNodesPerDefinition} nodes`,
@@ -248,6 +249,8 @@ export class WorkflowsService {
     dto: UpdateWorkflowDefinitionDto,
   ): Promise<WorkflowDefinitionDocument> {
     const existing = await this.getDefinition(id);
+    // Editing/enabling a system workflow is an instance-wide change: admin only.
+    assertActorCanWriteWorkflow(RequestContext.getUser(), existing);
     const previousStatus = existing.status;
 
     const fingerprintBefore = runtimeFingerprint(existing);
@@ -381,6 +384,7 @@ export class WorkflowsService {
 
   async deleteDefinition(id: string): Promise<void> {
     const def = await this.getDefinition(id);
+    assertActorCanWriteWorkflow(RequestContext.getUser(), def);
     await this.runModel.deleteMany({ definitionId: def._id }).exec();
     await this.nodeRunModel.deleteMany({ definitionId: def._id }).exec();
     await def.deleteOne();

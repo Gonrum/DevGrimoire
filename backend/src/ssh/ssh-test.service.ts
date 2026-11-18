@@ -468,7 +468,12 @@ export class SshTestService {
   ): Promise<void> {
     const title = `SSH-Auth fehlgeschlagen: ${connection.label}`;
     const body = `Authentifizierung gegen ${connection.username}@${connection.host}:${connection.port} schlug fehl.`;
-    await this.notificationsService.create(title, body, undefined, 'ssh_auth_failure');
+    // Scope the notification to the connection's owner. As a broadcast it
+    // exposed user@host:port of customer servers to every user.
+    await this.notificationsService.create(title, body, undefined, 'ssh_auth_failure', {
+      projectId: connection.projectId ? connection.projectId.toString() : null,
+      customerId: connection.customerId ? connection.customerId.toString() : null,
+    });
   }
 
   private async writeAudit(entry: {

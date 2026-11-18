@@ -1,4 +1,5 @@
 import {
+  UseGuards,
   Controller, Get, Post, Put, Patch, Param, Body, Query, HttpCode,
   BadRequestException, ConflictException,
 } from '@nestjs/common';
@@ -24,6 +25,7 @@ import {
   SyncReceiveRequest, SyncReceiveResponse, SyncPullResponse, SyncCycleResult, SyncStatus,
 } from './replication-sync.types';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { UnrestrictedScopeGuard } from '../auth/guards/unrestricted-scope.guard';
 import { UserRole } from '../auth/schemas/user.schema';
 import {
   REPL_ROLE, REPL_SLAVE_URL, REPL_SLAVE_API_KEY,
@@ -45,6 +47,19 @@ import { randomUUID } from 'crypto';
  *  rounds rather than blowing memory in one shot. */
 const PULL_MAX_DOCS = 500;
 
+/**
+ * Admin-only as a whole. The receive/pull/sync routes used to have no role
+ * requirement: a peer authenticates with an ordinary `cv_` key, so ANY valid
+ * user JWT or API key counted as a peer. `full-sync` upserts raw documents
+ * straight into the collections (projects, secrets, global harness, MinIO
+ * objects), bypassing every service-level scope check, and `pull`/`sync/pull`
+ * served raw documents of all replicated projects. The peer's API key must
+ * therefore belong to an admin on this instance — with unrestricted scope,
+ * because replication is instance-wide and a project-narrowed admin key must
+ * not be able to pull every replicated project.
+ */
+@Roles(UserRole.ADMIN)
+@UseGuards(UnrestrictedScopeGuard)
 @Controller('replication')
 export class ReplicationController {
   constructor(

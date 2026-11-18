@@ -28,18 +28,22 @@ export class ContactsController {
   }
 
   @Get(':contactId')
-  get(@Param('contactId') contactId: string) {
-    return this.contactsService.findById(contactId);
+  get(@Param('customerId') customerId: string, @Param('contactId') contactId: string) {
+    return this.contactsService.findById(contactId, customerId);
   }
 
   @Put(':contactId')
-  update(@Param('contactId') contactId: string, @Body() dto: UpdateContactDto) {
-    return this.contactsService.update(contactId, dto);
+  update(
+    @Param('customerId') customerId: string,
+    @Param('contactId') contactId: string,
+    @Body() dto: UpdateContactDto,
+  ) {
+    return this.contactsService.update(contactId, dto, customerId);
   }
 
   @Delete(':contactId')
   @HttpCode(204)
-  remove(@Param('contactId') contactId: string) {
-    return this.contactsService.remove(contactId);
+  remove(@Param('customerId') customerId: string, @Param('contactId') contactId: string) {
+    return this.contactsService.remove(contactId, customerId);
   }
 }

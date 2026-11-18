@@ -29,6 +29,16 @@ import {
 import { Commit, CommitDocument } from '../commits/schemas/commit.schema';
 import { projectIdFilter } from '../common/project-id-filter';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerInScope, assertProjectInScope, projectScopeFilter } from '../common/scope-guard';
+import { RequestContext } from '../common/request-context';
+
+/** Reject non-ObjectId project ids before they reach `new Types.ObjectId()` or a filter. */
+function projectOidOf(projectId: string): Types.ObjectId {
+  if (!Types.ObjectId.isValid(projectId)) {
+    throw new BadRequestException(`Invalid projectId: ${projectId}`);
+  }
+  return new Types.ObjectId(projectId);
+}
 
 const REBUILD_ENTITIES: Array<ProjectChangeEvent['entity']> = [
   'todo',
@@ -92,9 +102,13 @@ export class KnowledgeGraphService {
     ) {
       throw new BadRequestException('Self-loops are not allowed');
     }
+    // Without this a narrowed actor could plant edges (with arbitrary labels)
+    // into a foreign project's graph.
+    const projectOid = projectOidOf(dto.projectId);
+    assertProjectInScope(dto.projectId);
     try {
       return await this.edgeModel.create({
-        projectId: new Types.ObjectId(dto.projectId),
+        projectId: projectOid,
         source: dto.source,
         target: dto.target,
         relation: dto.relation,
@@ -110,7 +124,7 @@ export class KnowledgeGraphService {
         // Duplicate — return existing
         const existing = await this.edgeModel
           .findOne({
-            projectId: new Types.ObjectId(dto.projectId),
+            projectId: projectOid,
             'source.entityType': dto.source.entityType,
             'source.entityId': dto.source.entityId,
             'target.entityType': dto.target.entityType,
@@ -126,7 +140,14 @@ export class KnowledgeGraphService {
 
   async list(query: ListKgEdgesDto): Promise<KnowledgeGraphEdgeDocument[]> {
     const filter: Record<string, unknown> = {};
-    if (query.projectId) filter.projectId = new Types.ObjectId(query.projectId);
+    if (query.projectId) {
+      filter.projectId = projectOidOf(query.projectId);
+      assertProjectInScope(query.projectId);
+    } else {
+      // Without a projectId the query used to return edges (with labels) of
+      // every project — restrict to the actor's scope instead.
+      Object.assign(filter, projectScopeFilter());
+    }
     if (query.entityType && query.entityId) {
       filter.$or = [
         { 'source.entityType': query.entityType, 'source.entityId': query.entityId },
@@ -143,15 +164,22 @@ export class KnowledgeGraphService {
     return this.edgeModel.find(filter).sort({ createdAt: -1 }).limit(limit).exec();
   }
 
-  async findById(id: string): Promise<KnowledgeGraphEdgeDocument> {
+  /** Load + 404 + scope check — every by-id path goes through here before mutating. */
+  private async findScoped(id: string): Promise<KnowledgeGraphEdgeDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException(`Edge ${id} not found`);
     const edge = await this.edgeModel.findById(id).exec();
     if (!edge) throw new NotFoundException(`Edge ${id} not found`);
+    assertOwnerInScope({ projectId: edge.projectId }, `Edge ${id}`);
     return edge;
   }
 
+  async findById(id: string): Promise<KnowledgeGraphEdgeDocument> {
+    return this.findScoped(id);
+  }
+
   async remove(id: string): Promise<void> {
-    const result = await this.edgeModel.findByIdAndDelete(id).exec();
-    if (!result) throw new NotFoundException(`Edge ${id} not found`);
+    const edge = await this.findScoped(id);
+    await this.edgeModel.deleteOne({ _id: edge._id }).exec();
   }
 
   async confirm(id: string, confirmed: boolean): Promise<KnowledgeGraphEdgeDocument> {
@@ -174,9 +202,11 @@ export class KnowledgeGraphService {
     entityType: KgEntityType,
     entityId: string,
   ): Promise<KnowledgeGraphEdgeDocument[]> {
+    const projectOid = projectOidOf(projectId);
+    assertProjectInScope(projectId);
     return this.edgeModel
       .find({
-        projectId: new Types.ObjectId(projectId),
+        projectId: projectOid,
         $or: [
           { 'source.entityType': entityType, 'source.entityId': entityId },
           { 'target.entityType': entityType, 'target.entityId': entityId },
@@ -197,7 +227,8 @@ export class KnowledgeGraphService {
     edges: KnowledgeGraphEdgeDocument[];
   }> {
     const maxDepth = Math.max(1, Math.min(5, depth));
-    const projectOid = new Types.ObjectId(projectId);
+    const projectOid = projectOidOf(projectId);
+    assertProjectInScope(projectId);
     const visited = new Map<string, { depth: number; label?: string }>();
     const allEdges: KnowledgeGraphEdgeDocument[] = [];
     const focalKey = `${entityType}:${entityId}`;
@@ -272,9 +303,13 @@ export class KnowledgeGraphService {
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
       this.debouncedProjects.delete(projectId);
-      this.discoverForProject(projectId).catch((err) => {
-        this.logger.warn(`Graph rebuild failed for project ${projectId}: ${errorMessage(err)}`);
-      });
+      // System rebuild triggered by a change event: run as trusted internal
+      // caller instead of inheriting whichever actor's async context emitted it.
+      void RequestContext.run(undefined, undefined, () =>
+        this.discoverForProject(projectId).catch((err) => {
+          this.logger.warn(`Graph rebuild failed for project ${projectId}: ${errorMessage(err)}`);
+        }),
+      );
     }, 1500);
     this.debouncedProjects.set(projectId, timer);
   }
@@ -287,6 +322,9 @@ export class KnowledgeGraphService {
     if (!Types.ObjectId.isValid(projectId)) {
       throw new BadRequestException(`Invalid projectId: ${projectId}`);
     }
+    // Discovery reads labels of todos/milestones/knowledge… of the project and
+    // returns counts — a narrowed actor must not trigger it for foreign projects.
+    assertProjectInScope(projectId);
     const projectOid = new Types.ObjectId(projectId);
     const edges = new Map<string, DiscoveredEdge>();
     const push = (e: DiscoveredEdge) => {

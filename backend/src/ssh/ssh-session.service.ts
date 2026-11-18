@@ -261,7 +261,7 @@ export interface SshUploadOpts {
   createDirs?: boolean;
   sourceContext?: Exclude<SshSessionSourceContext, 'terminal'>;
   userId?: string;
-  /** Bei sourceContext='dg': der auslösende Workspace (ersetzt userId im Audit). */
+  /** With sourceContext='dg': the originating workspace (replaces userId in the audit). */
   workspaceId?: string;
   /**
    * Append to an existing remote file instead of truncating it. Used for
@@ -292,8 +292,8 @@ export interface SshUploadStreamOpts extends Omit<SshUploadOpts, 'append'> {
   /** Pre-resolved effective limit; if omitted, resolveUploadLimit is called. */
   limitBytes?: number;
   /**
-   * scp-Semantik: ist `remotePath` ein vorhandenes Verzeichnis, wird dieser
-   * Dateiname angehängt. Muss ein einzelner Name ohne `/` sein.
+   * scp semantics: if `remotePath` is an existing directory, this file name
+   * is appended. Must be a single name without `/`.
    */
   fileNameIfDir?: string;
 }
@@ -305,10 +305,10 @@ export interface SshDownloadOpts {
 }
 
 /**
- * Streaming-Download (`dg scp host:… ./…`). Kein Puffer im Backend: die
- * SFTP-Lesequelle wird an `sink` gereicht, der sie weiterschreibt. Grenze ist
- * dasselbe effektive Transferlimit wie beim Upload (bis 500 MB), nicht die
- * 10 MB von `sftpDownload` — die gelten nur, weil dort alles im Speicher landet.
+ * Streaming download (`dg scp host:… ./…`). No buffering in the backend: the
+ * SFTP read stream is handed to `sink`, which writes it on. The limit is the
+ * same effective transfer limit as for uploads (up to 500 MB), not the 10 MB
+ * of `sftpDownload` — those only exist because that path buffers in memory.
  */
 export interface SshDownloadStreamOpts {
   sourceContext?: Exclude<SshSessionSourceContext, 'terminal'>;
@@ -1049,10 +1049,10 @@ export class SshSessionService {
         return result;
       });
     } finally {
-      // Jeder Fehler vor dem Pipen (Slot-Timeout, Credentials, Host nicht
-      // erreichbar …) liess die Quelle sonst offen — beim Workspace-Upload
-      // hielt der Sidecar Datei-Handle und Response, bis der GC aufräumte.
-      // Nach vollständigem Lesen ist destroy() ein No-op.
+      // Any failure before piping (slot timeout, credentials, unreachable
+      // host …) otherwise left the source open — for workspace uploads the
+      // sidecar kept the file handle and response until GC cleaned up.
+      // After a complete read, destroy() is a no-op.
       try { source.destroy(); } catch { /* noop */ }
       const client = held.client;
       if (client) {
@@ -1110,10 +1110,10 @@ export class SshSessionService {
   }
 
   /**
-   * Streaming download: öffnet die Remote-Datei, prüft Typ und Größe gegen das
-   * effektive Transferlimit und reicht die Lesequelle an `sink`. Slot,
-   * Timeout und Client-Abbau wie bei den anderen SFTP-Pfaden — der Client
-   * lebt, bis `sink` fertig ist.
+   * Streaming download: opens the remote file, checks type and size against
+   * the effective transfer limit and hands the read stream to `sink`. Slot,
+   * timeout and client teardown as on the other SFTP paths — the client stays
+   * alive until `sink` has finished.
    */
   async sftpDownloadStream<T>(
     connId: string,
@@ -1157,9 +1157,9 @@ export class SshSessionService {
           throw new Error(`download_too_large: ${stats.size} > ${limit}`);
         }
 
-        // Die Größe aus stat() ist eine Momentaufnahme: wächst die Datei
-        // während des Transfers, bricht der Zähler am Limit ab, statt
-        // unbegrenzt weiterzulesen.
+        // The size from stat() is a snapshot: if the file grows during the
+        // transfer, the counter aborts at the limit instead of reading on
+        // without bound.
         const remote = sftp.createReadStream(remotePath);
         let seen = 0;
         const limited = new Transform({
@@ -1271,7 +1271,7 @@ export class SshSessionService {
     action: SshAuditAction;
     sourceContext: SshAuditSourceContext;
     userId?: string;
-    /** Pflicht bei sourceContext='dg' — dort gibt es keinen Nutzer im Token. */
+    /** Required with sourceContext='dg' — the token carries no user there. */
     workspaceId?: string;
     agentRoleId?: string;
     workflow?: SshWorkflowRef;
@@ -1798,7 +1798,7 @@ export class SshSessionService {
     }
   }
 
-  /** true nur für ein vorhandenes Verzeichnis; jeder Fehler (fehlt, kein Recht) → false. */
+  /** true only for an existing directory; any error (missing, no permission) → false. */
   private isRemoteDir(sftp: SFTPWrapper, remotePath: string): Promise<boolean> {
     return new Promise((resolve) => {
       try {
@@ -2055,7 +2055,12 @@ export class SshSessionService {
   ): Promise<void> {
     const title = `SSH-Auth fehlgeschlagen: ${connection.label}`;
     const body = `Authentifizierung gegen ${connection.username}@${connection.host}:${connection.port} schlug fehl.`;
-    await this.notificationsService.create(title, body, undefined, 'ssh_auth_failure');
+    // Scope the notification to the connection's owner. As a broadcast it
+    // exposed user@host:port of customer servers to every user.
+    await this.notificationsService.create(title, body, undefined, 'ssh_auth_failure', {
+      projectId: connection.projectId ? connection.projectId.toString() : null,
+      customerId: connection.customerId ? connection.customerId.toString() : null,
+    });
   }
 
   private async recordError(connId: string, code: string, err: unknown): Promise<void> {

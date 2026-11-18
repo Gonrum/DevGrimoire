@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { FilterQuery, Model } from 'mongoose';
+import { FilterQuery, Model, Types } from 'mongoose';
 import { Secret, SecretDocument } from './schemas/secret.schema';
 import { CreateSecretDto } from './dto/create-secret.dto';
 import { UpdateSecretDto } from './dto/update-secret.dto';
@@ -19,6 +19,8 @@ import {
   actorCanAccessProject,
 } from '../common/permissions';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerInScope, assertOwnerParamsInScope } from '../common/scope-guard';
+import { secretBelongsTo, SecretOwnerRef } from './secret-owner';
 
 export interface SecretListItem {
   _id: string;
@@ -54,6 +56,9 @@ export class SecretsService {
     if (dto.projectId && dto.customerId) {
       throw new BadRequestException('projectId and customerId are mutually exclusive');
     }
+    // The create is an upsert on (owner, environment, key): without this check a
+    // narrowed actor could overwrite secrets of a foreign project or customer.
+    assertOwnerParamsInScope(dto);
     if (dto.customerId) {
       await this.customersService.findById(dto.customerId);
     }
@@ -213,6 +218,9 @@ export class SecretsService {
     if (!owner.projectId && !owner.customerId) {
       throw new BadRequestException('projectId or customerId is required');
     }
+    // Decryption path (MCP `environment_export`, HTTP-request templating): a
+    // narrowed actor must not export the secrets of a foreign owner.
+    assertOwnerParamsInScope(owner);
 
     const filter: FilterQuery<SecretDocument> = {};
     if (owner.projectId) filter.projectId = owner.projectId;
@@ -225,6 +233,53 @@ export class SecretsService {
       key: s.key,
       value: this.encryptionService.decrypt(s.encryptedValue),
     }));
+  }
+
+  /**
+   * Write-time check for stored secret references: every id must be a valid
+   * ObjectId of an existing secret that belongs to `owner` (see
+   * `secretBelongsTo`) and is in the current actor's scope. A background job
+   * resolves the reference later without an actor — this is the only point
+   * where the reference can be checked against a user.
+   */
+  async assertRefsBelongTo(ids: (string | undefined | null)[], owner: SecretOwnerRef, what: string): Promise<void> {
+    const wanted = [...new Set(ids.filter((id): id is string => !!id))];
+    if (wanted.length === 0) return;
+    for (const id of wanted) {
+      if (!Types.ObjectId.isValid(id)) throw new BadRequestException(`Invalid secret id ${id}`);
+    }
+    const found = await this.secretModel
+      .find({ _id: { $in: wanted.map((id) => new Types.ObjectId(id)) } })
+      .select('projectId customerId')
+      .lean()
+      .exec();
+    const byId = new Map(found.map((s) => [s._id.toString(), s]));
+    for (const id of wanted) {
+      const secret = byId.get(id);
+      if (!secret) throw new BadRequestException(`Secret ${id} not found`);
+      if (!secretBelongsTo(secret, owner)) {
+        throw new ForbiddenException(`Secret ${id} does not belong to ${what}`);
+      }
+      assertOwnerInScope(secret, `Secret ${id}`);
+    }
+  }
+
+  /**
+   * Decrypts a referenced secret only if it belongs to `owner`. Used by
+   * background jobs that resolve stored references without an actor — the
+   * ownership check runs regardless of the actor (defense in depth for data
+   * stored before write-time validation existed). With an actor, the scope
+   * check runs as well.
+   */
+  async findValueForOwner(id: string, owner: SecretOwnerRef, what: string): Promise<string> {
+    if (!Types.ObjectId.isValid(id)) throw new BadRequestException(`Invalid secret id ${id}`);
+    const secret = await this.secretModel.findById(new Types.ObjectId(id)).exec();
+    if (!secret) throw new NotFoundException('Secret not found');
+    if (!secretBelongsTo(secret, owner)) {
+      throw new ForbiddenException(`Secret ${id} does not belong to ${what}`);
+    }
+    this.assertAccess(secret);
+    return this.encryptionService.decrypt(secret.encryptedValue);
   }
 
   private toListItem(secret: SecretDocument): SecretListItem {

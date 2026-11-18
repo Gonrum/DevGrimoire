@@ -11,6 +11,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { isValidObjectId, Model, Types } from 'mongoose';
 import { Todo, TodoDocument, TodoPriority, TodoStatus } from './schemas/todo.schema';
 import { Project, ProjectDocument } from '../projects/schemas/project.schema';
+import { Milestone, MilestoneDocument } from '../milestones/schemas/milestone.schema';
 import { CreateTodoDto } from './dto/create-todo.dto';
 import { UpdateTodoDto } from './dto/update-todo.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
@@ -27,6 +28,7 @@ import {
 import { buildDualScopeFilter } from '../common/scope';
 import { isRecord, isUnknownArray } from '../common/narrow';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerParamsInScope, assertProjectInScope } from '../common/scope-guard';
 
 const STATUS_ORDER: TodoStatus[] = [
   TodoStatus.OPEN,
@@ -45,7 +47,55 @@ export class TodosService {
     private eventEmitter: EventEmitter2,
     @Inject(forwardRef(() => QuestionsService))
     private questionsService: QuestionsService,
+    @InjectModel(Milestone.name) private milestoneModel: Model<MilestoneDocument>,
   ) {}
+
+  /**
+   * Stored references must stay inside the todo's own owner. Otherwise a
+   * narrowed actor could hang its todo onto a foreign milestone (it then shows
+   * up in that milestone's progress and AI completion) or block on foreign
+   * todos — and later actor-less jobs resolve those ids without any check.
+   */
+  private async assertReferencesInOwner(
+    owner: { projectId?: string | null; customerId?: string | null },
+    refs: { milestoneId?: string | null; blockedBy?: string[] | null },
+  ): Promise<void> {
+    const ownerFilter: Record<string, unknown> | null = owner.projectId
+      ? { projectId: projectIdFilter(owner.projectId) }
+      : owner.customerId
+        ? { customerId: projectIdFilter(owner.customerId) }
+        : null;
+
+    if (refs.milestoneId) {
+      if (!isValidObjectId(refs.milestoneId)) {
+        throw new BadRequestException(`Invalid milestoneId ${refs.milestoneId}`);
+      }
+      // Milestones are project-bound only — a customer todo cannot reference one.
+      const milestone = owner.projectId
+        ? await this.milestoneModel
+            .exists({ _id: new Types.ObjectId(refs.milestoneId), projectId: projectIdFilter(owner.projectId) })
+            .exec()
+        : null;
+      if (!milestone) {
+        throw new BadRequestException(`Milestone ${refs.milestoneId} does not belong to this todo's project`);
+      }
+    }
+
+    if (refs.blockedBy?.length) {
+      const ids = [...new Set(refs.blockedBy)];
+      if (ids.some((b) => !isValidObjectId(b))) {
+        throw new BadRequestException('blockedBy contains an invalid id');
+      }
+      const count = ownerFilter
+        ? await this.todoModel
+            .countDocuments({ _id: { $in: ids.map((b) => new Types.ObjectId(b)) }, ...ownerFilter })
+            .exec()
+        : 0;
+      if (count !== ids.length) {
+        throw new BadRequestException('blockedBy references todos outside this todo\'s project or customer');
+      }
+    }
+  }
 
   private validateStatusTransition(current: TodoStatus, next: TodoStatus): void {
     const currentIdx = STATUS_ORDER.indexOf(current);
@@ -70,12 +120,15 @@ export class TodosService {
   }
 
   async findByNumber(projectId: string, number: number): Promise<TodoDocument> {
+    // Number lookups bypass findScoped — check the project parameter first.
+    assertProjectInScope(projectId);
     const todo = await this.todoModel.findOne({ projectId, number }).exec();
     if (!todo) throw new NotFoundException(`Todo #${number} not found in project ${projectId}`);
     return todo;
   }
 
   async findByDisplayNumber(projectId: string, displayNumber: string): Promise<TodoDocument> {
+    assertProjectInScope(projectId);
     const todo = await this.todoModel.findOne({ projectId, displayNumber }).exec();
     if (!todo) throw new NotFoundException(`Todo "${displayNumber}" not found in project ${projectId}`);
     return todo;
@@ -103,6 +156,13 @@ export class TodosService {
     if (dto.projectId && dto.customerId) {
       throw new BadRequestException('Todo can have either projectId or customerId, not both');
     }
+    // Checked in the service: notes promotion, recurring tasks and the dg CLI
+    // call create() directly, without the controller's scope pipe.
+    assertOwnerParamsInScope({ projectId: dto.projectId, customerId: dto.customerId });
+    await this.assertReferencesInOwner(
+      { projectId: dto.projectId, customerId: dto.customerId },
+      { milestoneId: dto.milestoneId, blockedBy: dto.blockedBy },
+    );
 
     let displayNumber: string;
     let seq: number;
@@ -260,6 +320,20 @@ export class TodosService {
     // geschrieben. Derselbe Load liefert den bisherigen Status für die
     // Übergangs-Prüfung und ersetzt damit das separate .select('status').lean().
     const existing = await this.findScoped(id);
+    // Validate only what this update ADDS. The UI always sends the complete
+    // blockedBy list, and stored entries can be dangling (blockers are not
+    // cleaned up when a todo is deleted) — re-validating them would make the
+    // dependencies of such a todo impossible to edit. An unchanged milestone
+    // is skipped for the same reason (it may have been deleted since).
+    const storedBlockers = new Set((existing.blockedBy ?? []).map((b) => b.toString()));
+    const existingMilestone = existing.milestoneId?.toString() ?? null;
+    await this.assertReferencesInOwner(
+      { projectId: existing.projectId?.toString() ?? null, customerId: existing.customerId?.toString() ?? null },
+      {
+        milestoneId: dto.milestoneId && dto.milestoneId !== existingMilestone ? dto.milestoneId : undefined,
+        blockedBy: dto.blockedBy?.filter((b) => !storedBlockers.has(b)),
+      },
+    );
     if (dto.status) {
       this.validateStatusTransition(existing.status, dto.status);
 

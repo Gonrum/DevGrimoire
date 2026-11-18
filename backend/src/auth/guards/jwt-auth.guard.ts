@@ -1,9 +1,10 @@
-import { ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { firstValueFrom, isObservable } from 'rxjs';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { MCP_TOOL_EQUIVALENT_KEY } from '../decorators/mcp-tool-equivalent.decorator';
 import { AuthService } from '../auth.service';
 import { ApiKeysService } from '../../api-keys/api-keys.service';
 import { actorFromApiKey, scopeFromUser } from '../../common/actor-scope';
@@ -71,6 +72,22 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       }
       if (owner.active === false) {
         throw new UnauthorizedException('API key owner is deactivated');
+      }
+      // A key with a tool allowlist is an MCP-only key. The allowlist used to
+      // apply to /mcp and /sse only: a key restricted to "todo_list" in the UI
+      // could still read plaintext secrets, the user list and every API key
+      // over REST. Only routes explicitly mapped to an allowlisted tool
+      // (@McpToolEquivalent) remain reachable.
+      if (Array.isArray(validated.allowedTools)) {
+        const tool = this.reflector.getAllAndOverride<string | undefined>(MCP_TOOL_EQUIVALENT_KEY, [
+          context.getHandler(),
+          context.getClass(),
+        ]);
+        if (!tool || !validated.allowedTools.includes(tool)) {
+          throw new ForbiddenException(
+            'Dieser API-Key ist auf MCP-Tools eingeschränkt und gilt nicht für die REST-API',
+          );
+        }
       }
       // Scope on the request.user combines the api-key scope with the owning
       // user's scope so an api-key can never widen access beyond its owner.

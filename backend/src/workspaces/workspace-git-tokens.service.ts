@@ -30,6 +30,7 @@ export class WorkspaceGitTokensService {
     } catch {
       return env;
     }
+    const projectId = workspace.projectId.toString();
     const repos = project.gitRepositories ?? [];
     if (!repos.length) return env;
 
@@ -39,7 +40,7 @@ export class WorkspaceGitTokensService {
     if (workspace.gitRepoId) {
       const explicit = repos.find((r) => r._id?.toString() === workspace.gitRepoId);
       if (explicit?.tokenSecretId) {
-        const token = await this.decrypt(explicit.tokenSecretId);
+        const token = await this.decrypt(explicit.tokenSecretId, projectId);
         if (token) {
           if (explicit.provider === 'github') {
             env.GH_TOKEN = token;
@@ -67,13 +68,13 @@ export class WorkspaceGitTokensService {
     for (const repo of repos) {
       if (!repo.tokenSecretId) continue;
       if (repo.provider === 'github' && !ghDone) {
-        const token = await this.decrypt(repo.tokenSecretId);
+        const token = await this.decrypt(repo.tokenSecretId, projectId);
         if (token) {
           env.GH_TOKEN = token;
           ghDone = true;
         }
       } else if (repo.provider === 'gitlab' && !glDone) {
-        const token = await this.decrypt(repo.tokenSecretId);
+        const token = await this.decrypt(repo.tokenSecretId, projectId);
         if (token) {
           env.GITLAB_TOKEN = token;
           const host = normaliseGitlabHost(repo.baseUrl);
@@ -81,7 +82,7 @@ export class WorkspaceGitTokensService {
           glDone = true;
         }
       } else if (repo.provider === 'gitea' && !gtDone) {
-        const token = await this.decrypt(repo.tokenSecretId);
+        const token = await this.decrypt(repo.tokenSecretId, projectId);
         if (token) {
           env.GITEA_TOKEN = token;
           const host = normaliseGiteaHost(repo.baseUrl);
@@ -134,7 +135,7 @@ export class WorkspaceGitTokensService {
 
     const matched = pickRepoForUrl(repos, parsed.host, workspace.gitRepoId);
     if (!matched?.tokenSecretId) return repoUrl;
-    const token = await this.decrypt(matched.tokenSecretId);
+    const token = await this.decrypt(matched.tokenSecretId, workspace.projectId.toString());
     if (!token) return repoUrl;
 
     const userPrefix =
@@ -146,10 +147,15 @@ export class WorkspaceGitTokensService {
     return parsed.toString();
   }
 
-  private async decrypt(secretId: string): Promise<string | null> {
+  /**
+   * The token secret must belong to the workspace's project. Workspace exec
+   * injects it into the environment of arbitrary commands — a foreign
+   * tokenSecretId stored on the project would otherwise hand another
+   * project's Git token to whoever runs `env` in this workspace.
+   */
+  private async decrypt(secretId: string, projectId: string): Promise<string | null> {
     try {
-      const secret = await this.secrets.findById(secretId);
-      return secret.value;
+      return await this.secrets.findValueForOwner(secretId, { projectId }, `project ${projectId}`);
     } catch (err: unknown) {
       this.logger.warn(
         `git token secret ${secretId} could not be loaded: ${errorMessage(err)}`,

@@ -38,6 +38,14 @@ export class AppNotification {
   @Prop({ type: String, default: null })
   projectId: string | null;
 
+  /**
+   * Customer owner. Without it, customer-related notifications (SSH auth
+   * failures on customer servers, health checks) were broadcasts visible to
+   * every user regardless of customer scope.
+   */
+  @Prop({ type: String, default: null })
+  customerId: string | null;
+
   /** Nutzer, die die Notification gelesen haben — Status pro Nutzer. */
   @Prop({ type: [String], default: [] })
   readBy: string[];

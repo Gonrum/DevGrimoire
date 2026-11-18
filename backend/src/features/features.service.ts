@@ -1,13 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Feature, FeatureDocument, FeatureStatus } from './schemas/feature.schema';
 import { CreateFeatureDto } from './dto/create-feature.dto';
 import { UpdateFeatureDto } from './dto/update-feature.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerInScope, assertProjectInScope } from '../common/scope-guard';
 
 @Injectable()
 export class FeaturesService {
@@ -17,6 +18,8 @@ export class FeaturesService {
   ) {}
 
   async create(dto: CreateFeatureDto): Promise<FeatureDocument> {
+    // Internal callers (no actor) pass; a narrowed actor must not write into foreign projects.
+    assertProjectInScope(dto.projectId);
     const feature = await this.featureModel.create(dto);
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: feature.projectId.toString(),
@@ -32,19 +35,28 @@ export class FeaturesService {
     projectId: string,
     filters?: { status?: FeatureStatus; category?: string },
   ): Promise<FeatureDocument[]> {
+    assertProjectInScope(projectId);
     const query: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (filters?.status) query.status = filters.status;
     if (filters?.category) query.category = filters.category;
     return this.featureModel.find(query).sort({ status: 1, name: 1 }).exec();
   }
 
-  async findById(id: string): Promise<FeatureDocument> {
+  /** Load + 404 + scope check — every by-id path goes through here before mutating. */
+  private async findScoped(id: string): Promise<FeatureDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException(`Feature ${id} not found`);
     const feature = await this.featureModel.findById(id).exec();
     if (!feature) throw new NotFoundException(`Feature ${id} not found`);
+    assertOwnerInScope({ projectId: feature.projectId }, `Feature ${id}`);
     return feature;
   }
 
+  async findById(id: string): Promise<FeatureDocument> {
+    return this.findScoped(id);
+  }
+
   async update(id: string, dto: UpdateFeatureDto): Promise<FeatureDocument> {
+    await this.findScoped(id);
     const feature = await this.featureModel.findByIdAndUpdate(id, dto, { new: true }).exec();
     if (!feature) throw new NotFoundException(`Feature ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
@@ -58,6 +70,7 @@ export class FeaturesService {
   }
 
   async remove(id: string): Promise<void> {
+    await this.findScoped(id);
     const result = await this.featureModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException(`Feature ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {

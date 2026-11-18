@@ -1,4 +1,4 @@
-import { ActorScope, actorCanAccessProject } from '../common/permissions';
+import { ActorScope, actorCanAccessCustomer, actorCanAccessProject } from '../common/permissions';
 import type { ProjectChangeEvent } from './project-event';
 import type { QuestionEvent } from './events-bus.service';
 
@@ -23,6 +23,11 @@ export function isProjectEventVisible(
   // Nutzer-gerichtete Events nie an andere Nutzer.
   if (event.userId && event.userId !== userId) return false;
   if (actor && event.projectId !== null && !actorCanAccessProject(actor, String(event.projectId))) {
+    return false;
+  }
+  // Customer axis: customer-scoped events (projectId null) used to reach every
+  // subscriber, leaking change summaries of foreign customers.
+  if (actor && event.customerId && !actorCanAccessCustomer(actor, String(event.customerId))) {
     return false;
   }
   return true;

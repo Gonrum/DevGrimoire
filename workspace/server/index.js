@@ -438,11 +438,11 @@ app.post('/read-stream', async (req, res) => {
     return res.status(400).json({ error: err.message });
   }
   const stream = fs.createReadStream(target);
-  // Abort the read if the client disconnects mid-stream. Am `res`, nicht am
-  // `req`: dessen 'close' feuert seit Node 16 schon, sobald der (hier kleine
-  // JSON-)Body gelesen ist — also bevor dieser Listener überhaupt hängt. Ein
-  // abgebrochener Download hielt so Datei-Handle und Stream offen, bis der
-  // Prozess endete. Nach vollständigem Senden ist destroy() ein No-op.
+  // Abort the read if the client disconnects mid-stream. On `res`, not on
+  // `req`: since Node 16 the request's 'close' fires as soon as its (small
+  // JSON) body has been read — before this listener is even attached. An
+  // aborted download kept the file handle and stream open until the process
+  // exited. After a complete send, destroy() is a no-op.
   res.on('close', () => { try { stream.destroy(); } catch { /* noop */ } });
   stream.on('error', (err) => {
     if (!res.headersSent) res.status(500).json({ error: err.message });
@@ -451,7 +451,7 @@ app.post('/read-stream', async (req, res) => {
   stream.pipe(res);
 });
 
-/** Ein einzelner Dateiname — kein Pfadtrenner, nicht `.`/`..`, kein NUL. */
+/** A single file name — no path separator, not `.`/`..`, no NUL. */
 function isPlainFileName(name) {
   return typeof name === 'string'
     && name.length > 0
@@ -468,25 +468,24 @@ function isInside(root, candidate) {
 }
 
 /**
- * Gegenstück zu /read-stream (`dg scp host:… ./…`): der Request-Body ist die
- * Datei selbst (application/octet-stream), die Parameter kommen über die
- * Query, weil der Body nicht JSON ist. Geschrieben wird in eine temporäre
- * Datei im Zielverzeichnis und erst nach vollständigem Empfang per rename()
- * an ihren Platz gelegt — ein abgebrochener Transfer hinterlässt keine halbe
- * Datei und überschreibt nichts.
+ * Counterpart of /read-stream (`dg scp host:… ./…`): the request body is the
+ * file itself (application/octet-stream); parameters come via the query
+ * because the body is not JSON. The file is written to a temporary file in
+ * the target directory and only renamed into place once fully received — an
+ * aborted transfer leaves no partial file and overwrites nothing.
  *
  * Query:
- *   workspaceId   wie überall
- *   path          Ziel relativ zur Workspace-Wurzel; endet es auf `/` oder
- *                 ist es ein vorhandenes Verzeichnis, wird `fileName` angehängt
- *   fileName      Dateiname für Verzeichnisziele (Basename der Quelle)
- *   size          erwartete Länge — weicht der Empfang ab, wird verworfen
- *   mode          Dateirechte als Dezimalzahl (Default 0o644)
- *   createDirs    "1" legt fehlende Elternverzeichnisse an
+ *   workspaceId   as everywhere
+ *   path          target relative to the workspace root; if it ends in `/`
+ *                 or is an existing directory, `fileName` is appended
+ *   fileName      file name for directory targets (basename of the source)
+ *   size          expected length — a mismatch discards the upload
+ *   mode          file permissions as a decimal number (default 0o644)
+ *   createDirs    "1" creates missing parent directories
  *
- * Symlinks: das Elternverzeichnis wird per realpath() aufgelöst und muss in
- * der Workspace-Wurzel liegen; rename() ersetzt einen Symlink am Ziel selbst,
- * statt ihm zu folgen.
+ * Symlinks: the parent directory is resolved with realpath() and must be
+ * inside the workspace root; rename() replaces a symlink at the target
+ * itself instead of following it.
  */
 app.post('/write-stream', async (req, res) => {
   const q = req.query || {};
@@ -524,7 +523,7 @@ app.post('/write-stream', async (req, res) => {
   try {
     root = await fsp.realpath(workspaceRoot(id));
   } catch {
-    // Zwischen workspaceExists und hier gelöscht (Cleanup-Race).
+    // Deleted between workspaceExists and here (cleanup race).
     return res.status(404).json({ error: 'workspace directory does not exist' });
   }
 
@@ -552,11 +551,11 @@ app.post('/write-stream', async (req, res) => {
   let parent = path.dirname(target);
   try {
     if (createDirs) {
-      // mkdir -p folgt Symlinks in den Zwischenkomponenten und legte so
-      // Verzeichnisse AUSSERHALB des Workspace an (`evil -> /tmp`,
-      // `evil/neu/x`), bevor eine Prüfung danach greifen konnte. Deshalb
-      // zuerst den tiefsten vorhandenen Vorfahren auflösen und prüfen; was
-      // darunter neu entsteht, legt mkdir selbst an — Symlinks sind es nicht.
+      // mkdir -p follows symlinks in intermediate components and thereby
+      // created directories OUTSIDE the workspace (`evil -> /tmp`,
+      // `evil/new/x`) before any later check could catch it. So resolve and
+      // check the deepest existing ancestor first; whatever mkdir creates
+      // below it is created by mkdir itself and cannot be a symlink.
       let existing = parent;
       for (;;) {
         try {
@@ -597,12 +596,12 @@ app.post('/write-stream', async (req, res) => {
     if (failed) return;
     failed = true;
     req.unpipe(out);
-    // Erst nach 'close' löschen: ein noch laufendes open('wx') könnte die
-    // Datei sonst nach dem rm() anlegen und eine .part-Datei zurücklassen.
+    // Delete only after 'close': a still-pending open('wx') could otherwise
+    // create the file after rm() and leave a .part file behind.
     out.once('close', () => { fsp.rm(tmpPath, { force: true }).catch(() => undefined); });
     out.destroy();
     if (!res.headersSent) res.status(status).json({ error: message });
-    // Den Rest des Bodys nicht mehr lesen — die Gegenseite soll abbrechen.
+    // Stop reading the rest of the body — the peer should abort.
     req.destroy();
   };
 
@@ -619,7 +618,7 @@ app.post('/write-stream', async (req, res) => {
       return fail(400, `incomplete transfer: received ${received} of ${expectedSize} bytes`);
     }
     try {
-      // `mode` aus dem open() unterliegt der umask; chmod setzt ihn exakt.
+      // `mode` from open() is subject to the umask; chmod sets it exactly.
       await fsp.chmod(tmpPath, mode);
       await fsp.rename(tmpPath, finalPath);
     } catch (err) {
@@ -960,11 +959,11 @@ app.post('/exec', async (req, res) => {
  * abortSignal → SIGTERM → SIGKILL.
  */
 app.post('/exec/stream', async (req, res) => {
-  // Abbruch durch den Client: am `res` und VOR jedem await. `req`-'close'
-  // feuert bei einem POST schon, sobald express.json den Body gelesen hat —
-  // der frühere Listener dort sah das Ereignis nie, ein abgebrochener Stream
-  // liess den Befehl bis zu seinem Timeout weiterlaufen. `writableFinished`
-  // unterscheidet den Verbindungsabbruch vom eigenen res.end().
+  // Client abort: on `res` and BEFORE any await. For a POST, the request's
+  // 'close' already fires once express.json has read the body — the former
+  // listener never saw the event, and an aborted stream left the command
+  // running until its timeout. `writableFinished` tells a dropped connection
+  // apart from our own res.end().
   const abort = new AbortController();
   res.on('close', () => { if (!res.writableFinished) abort.abort(); });
   const id = requireWorkspaceId(req, res); if (!id) return;

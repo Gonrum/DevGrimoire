@@ -94,9 +94,12 @@ const ADMIN_ONLY = new Set([
   'POST promote',
 ]);
 
-// PEER_FACING: wird von der GEGENINSTANZ mit einem API-Key aufgerufen, nicht
-// von einem Admin im Browser. Ein @Roles(ADMIN) hier würde die Replikation
-// abschalten, sobald der Key-Inhaber kein Admin ist — deshalb bewusst offen.
+// PEER_FACING: called by the PEER instance with an API key, not by an admin in
+// the browser. These routes used to be deliberately open so that a non-admin
+// key owner could act as peer — but a peer authenticates with an ordinary
+// `cv_` key, so ANY user counted as a peer: `full-sync` upserts raw documents
+// past every scope check, `pull` serves raw documents of all replicated
+// projects. They are admin-only now; the peer's key must belong to an admin.
 const PEER_FACING = new Set([
   'POST receive',
   'POST full-sync',
@@ -106,9 +109,9 @@ const PEER_FACING = new Set([
   'GET status',
 ]);
 
-// Bewusst (noch) nicht gegated: lesbare UI-Zustände ohne Credential- oder
-// Schreibwirkung. Steht hier, damit die Menge vollständig ist und eine neue
-// Route klassifiziert werden muss.
+// Readable UI states used only by the admin settings page. The whole
+// controller is admin-only now, so these are gated too; kept as a separate set
+// so every route stays explicitly classified.
 const UNGATED_UI = new Set([
   'GET projects',
   'GET config',
@@ -249,13 +252,12 @@ const UNGATED_UI = new Set([
     }
   });
 
-  check('replication: keine PEER_FACING-Route trägt @Roles', () => {
+  check('replication: every PEER_FACING route requires admin', () => {
     for (const key of PEER_FACING) {
       const route = routes.get(key);
       assert.ok(route, `Route "${key}" existiert nicht mehr — Matrix ist veraltet`);
-      assert.equal(route.roles, undefined,
-        `"${key}" trägt @Roles — das würde die Replikation abschalten, ` +
-        'sobald der API-Key-Inhaber kein Admin ist');
+      assert.deepEqual(route.roles, [UserRole.ADMIN],
+        `"${key}" is not admin-gated — any authenticated user could act as a peer`);
     }
   });
 
@@ -274,12 +276,12 @@ const UNGATED_UI = new Set([
       '(ADMIN_ONLY / PEER_FACING / UNGATED_UI) statt sie ungeprüft zu lassen');
   });
 
-  check('replication: keine UNGATED_UI-Route trägt versehentlich @Roles', () => {
+  check('replication: every admin-UI read route requires admin', () => {
     for (const key of UNGATED_UI) {
       const route = routes.get(key);
       assert.ok(route, `Route "${key}" existiert nicht mehr — Matrix ist veraltet`);
-      assert.equal(route.roles, undefined,
-        `"${key}" ist als ungegated klassifiziert, trägt aber @Roles — Matrix anpassen`);
+      assert.deepEqual(route.roles, [UserRole.ADMIN],
+        `"${key}" is not admin-gated — the replication controller is admin-only as a whole`);
     }
   });
 

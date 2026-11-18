@@ -55,7 +55,9 @@ function mkResponse({ status = 200, ok = true, body = [], headers = {} } = {}) {
 
 const baseConfig = {
   provider: 'gitea',
-  baseUrl: 'https://gitea.example.com',
+  // Public IP literal (TEST-NET-3): the git outbound guard resolves the target
+  // before every request, a literal keeps the check independent of DNS.
+  baseUrl: 'https://203.0.113.10',
   owner: 'acme',
   repo: 'widget',
   defaultBranch: 'main',
@@ -168,7 +170,7 @@ const baseConfig = {
   });
 
   await check('allowPrivateHost=true bypasses SSRF validator', async () => {
-    const cfg = { ...baseConfig, baseUrl: 'http://127.0.0.1:3000', allowPrivateHost: true };
+    const cfg = { ...baseConfig, baseUrl: 'http://10.0.0.5:3000', allowPrivateHost: true };
     await withStubFetch(
       async () => mkResponse({ body: [] }),
       async () => {
@@ -179,9 +181,24 @@ const baseConfig = {
     );
   });
 
-  await check('allowPrivateHost=false blocks loopback', async () => {
-    const cfg = { ...baseConfig, baseUrl: 'http://127.0.0.1:3000', allowPrivateHost: false };
+  await check('allowPrivateHost=false blocks a private address', async () => {
+    const cfg = { ...baseConfig, baseUrl: 'http://10.0.0.5:3000', allowPrivateHost: false };
     await assert.rejects(svc.fetchCommits(cfg, 'tkn'), /private/);
+  });
+
+  await check('allowPrivateHost=false blocks a single-label (docker) host', async () => {
+    const cfg = { ...baseConfig, baseUrl: 'http://gitea:3000', allowPrivateHost: false };
+    await assert.rejects(svc.fetchCommits(cfg, 'tkn'), /private/);
+  });
+
+  await check('loopback stays blocked even with allowPrivateHost=true', async () => {
+    const cfg = { ...baseConfig, baseUrl: 'http://127.0.0.1:3000', allowPrivateHost: true };
+    await withStubFetch(
+      async () => mkResponse({ body: [] }),
+      async () => {
+        await assert.rejects(svc.fetchCommits(cfg, 'tkn'), /outbound_blocked/);
+      },
+    );
   });
 
   console.log(`\n${total - failures}/${total} checks passed.`);

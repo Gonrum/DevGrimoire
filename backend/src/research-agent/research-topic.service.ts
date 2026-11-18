@@ -26,6 +26,11 @@ import { CountersService } from '../counters/counters.service';
 import { computeNextRun, nextStatusUpdate } from './research-schedule.util';
 import { assertTopicOwner } from './research-access';
 import { RequestContext } from '../common/request-context';
+import {
+  assertCustomerInScope,
+  assertProjectInScope,
+  assertUnrestrictedScope,
+} from '../common/scope-guard';
 
 export interface ResearchTopicListFilter {
   active?: boolean;
@@ -69,8 +74,8 @@ export class ResearchTopicService {
     const mode = dto?.mode ?? 'all';
     const scope: ResearchScope = {
       mode,
-      projectIds: (dto?.projectIds || []).map((id) => new Types.ObjectId(id)),
-      customerIds: (dto?.customerIds || []).map((id) => new Types.ObjectId(id)),
+      projectIds: (dto?.projectIds || []).map((id) => this.scopedId(id, 'project')),
+      customerIds: (dto?.customerIds || []).map((id) => this.scopedId(id, 'customer')),
       // Mode-dependent default (final-review fix, F1): `mode: 'all'` is
       // already an unbounded sweep, so defaulting `includeGlobal` to `true`
       // there adds nothing extra. `mode: 'selected'` is an operator-curated,
@@ -83,7 +88,28 @@ export class ResearchTopicService {
       includeGlobal: dto?.includeGlobal ?? mode === 'all',
     };
     this.validateScope(scope);
+    // Without any project/customer the artifacts are written as GLOBAL
+    // (ResearchArtifactService.deriveOwnership) and show up in every
+    // project's RAG — same rule as global knowledge.
+    if (scope.projectIds.length === 0 && scope.customerIds.length === 0) {
+      assertUnrestrictedScope('A research topic without projects or customers (global artifacts)');
+    }
     return scope;
+  }
+
+  /**
+   * Validates one scope id and checks it against the caller. The scheduled
+   * run later writes artifacts into the FIRST configured project/customer
+   * without an actor check, so an id outside the caller's scope would plant
+   * content into a foreign project's RAG.
+   */
+  private scopedId(id: string, axis: 'project' | 'customer'): Types.ObjectId {
+    if (typeof id !== 'string' || !isValidObjectId(id)) {
+      throw new BadRequestException(`scope.${axis}Ids contains an invalid id`);
+    }
+    if (axis === 'project') assertProjectInScope(id);
+    else assertCustomerInScope(id);
+    return new Types.ObjectId(id);
   }
 
   private validateScope(scope: ResearchScope): void {

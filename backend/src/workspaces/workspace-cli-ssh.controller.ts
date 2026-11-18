@@ -25,10 +25,10 @@ import { SshService, SshConnectionWithInheritance } from '../ssh/ssh.service';
 import { SshSessionService } from '../ssh/ssh-session.service';
 import { errorMessage } from '../common/narrow';
 
-/** Slug oder 24-Hex-Id, wie bei `dg kube --cluster`. */
+/** Slug or 24-hex id, like `dg kube --cluster`. */
 const CONNECTION_REF = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 const OBJECT_ID = /^[a-f0-9]{24}$/i;
-/** Kein NUL und keine Zeilenumbrüche — SFTP-Pfade sind Bytefolgen, die Audit-Zeile nicht. */
+/** No NUL and no line breaks — SFTP paths are byte strings, the audit line is not. */
 const SAFE_PATH = /^[^\0\r\n]*$/;
 
 class DgSshConnectionRef {
@@ -37,11 +37,11 @@ class DgSshConnectionRef {
 }
 
 class DgScpUploadDto extends DgSshConnectionRef {
-  /** Workspace-relativer Pfad der Quelldatei. */
+  /** Workspace-relative path of the source file. */
   @IsString() @MaxLength(2048) @Matches(SAFE_PATH)
   source!: string;
 
-  /** Leer oder mit `/` am Ende: Basename der Quelle wird angehängt. */
+  /** Empty or ending in `/`: the source's basename is appended. */
   @IsString() @MaxLength(4096) @Matches(SAFE_PATH)
   remotePath!: string;
 
@@ -56,7 +56,7 @@ class DgScpDownloadDto extends DgSshConnectionRef {
   @IsString() @MaxLength(4096) @Matches(SAFE_PATH)
   remotePath!: string;
 
-  /** Workspace-relatives Ziel; leer, `.` oder mit `/` am Ende: Verzeichnis. */
+  /** Workspace-relative target; empty, `.` or ending in `/`: a directory. */
   @IsString() @MaxLength(2048) @Matches(SAFE_PATH)
   target!: string;
 
@@ -68,9 +68,9 @@ class DgScpDownloadDto extends DgSshConnectionRef {
 }
 
 /**
- * Fehler aus dem SSH-Pfad lesbar an `dg` durchreichen. Die Service-Schicht
- * wirft Klartext-Codes (`upload_too_large: …`, `tofu_not_accepted`, …);
- * ohne Abbildung kämen sie als nichtssagender 500 an.
+ * Pass SSH-path errors on to `dg` in readable form. The service layer throws
+ * plain-text codes (`upload_too_large: …`, `tofu_not_accepted`, …); without
+ * this mapping they would arrive as a meaningless 500.
  */
 function mapTransferError(err: unknown): never {
   if (err instanceof HttpException) throw err;
@@ -94,14 +94,13 @@ function mapTransferError(err: unknown): never {
 }
 
 /**
- * `dg ssh list` und `dg scp` aus dem Workspace-Terminal.
+ * `dg ssh list` and `dg scp` from the workspace terminal.
  *
- * Die Zugangsdaten bleiben im Backend — der Workspace bekommt weder Key noch
- * Passwort zu sehen, er nennt nur die Verbindung. Wie bei `dg kube` gibt es
- * im Token keinen Nutzer: `RequestContext` ist leer, also prüft
- * `SshService.findById` keinen Actor. Die einzige Grenze ist deshalb
- * `resolveConnection()`: nur Verbindungen des Projekts und der mit ihm
- * verlinkten Kunden. Darf nicht wegfallen.
+ * Credentials stay in the backend — the workspace never sees a key or
+ * password, it only names the connection. As with `dg kube`, the token
+ * carries no user: `RequestContext` is empty, so `SshService.findById` checks
+ * no actor. The only boundary is therefore `resolveConnection()`: the
+ * project's own connections only. It must not be removed.
  */
 @Controller('internal/dg/ssh')
 @Public()
@@ -117,7 +116,7 @@ export class WorkspaceCliSshController {
   @Post('list')
   async list(@Req() req: Request) {
     const claim = await this.claim(req);
-    const docs = await this.ssh.findByProjectId(claim.projectId);
+    const docs = await this.projectConnections(claim.projectId);
     return docs.map((d) => ({
       connectionId: d._id.toString(),
       slug: d.slug,
@@ -125,8 +124,21 @@ export class WorkspaceCliSshController {
       host: d.host,
       port: d.port,
       username: d.username,
-      inherited: Boolean(d.inheritedFromCustomerId),
     }));
+  }
+
+  /**
+   * Only the project's OWN connections, like `dg kube` with its clusters.
+   * Connections inherited from a linked customer are customer-scoped: over
+   * REST, `canAccessConnection` checks the customer axis, and access to a
+   * project does not grant access to its customers' servers. The dg token
+   * carries no user, so that check cannot run here — including inherited
+   * connections let a user without access to the customer upload to (or
+   * download from) the customer's servers.
+   */
+  private async projectConnections(projectId: string): Promise<SshConnectionWithInheritance[]> {
+    const docs = await this.ssh.findByProjectId(projectId);
+    return docs.filter((d) => !d.inheritedFromCustomerId);
   }
 
   @Post('upload')
@@ -199,7 +211,7 @@ export class WorkspaceCliSshController {
     }
   }
 
-  /** Wie bei `dg kube`: ein Token eines umgehängten Workspace darf nichts mehr. */
+  /** As with `dg kube`: a token of a workspace that moved projects may do nothing. */
   private async claim(req: Request): Promise<WorkspaceCliClaim> {
     const claim = req.workspaceCli!;
     const ws = await this.workspaces.findById(claim.workspaceId);
@@ -210,24 +222,20 @@ export class WorkspaceCliSshController {
   }
 
   /**
-   * Verbindung über Slug oder Id — nur aus der Liste, die das Projekt sieht
-   * (eigene + geerbte Kundenverbindungen). Eine fremde Verbindung ist „nicht
-   * gefunden", nicht „verboten": die Antwort soll nicht verraten, dass es sie
-   * gibt. Bei gleichem Slug gewinnt die projekteigene; sind es mehrere geerbte,
-   * muss per Id gewählt werden.
+   * Connection by slug or id — only from the project's own connections. A
+   * foreign connection is "not found", not "forbidden": the response must not
+   * reveal that it exists.
    */
   private async resolveConnection(
     claim: WorkspaceCliClaim,
     ref: string,
   ): Promise<SshConnectionWithInheritance> {
-    const docs = await this.ssh.findByProjectId(claim.projectId);
+    const docs = await this.projectConnections(claim.projectId);
     if (OBJECT_ID.test(ref)) {
       const byId = docs.find((d) => d._id.toString() === ref.toLowerCase());
       if (byId) return byId;
     }
     const bySlug = docs.filter((d) => d.slug === ref);
-    const own = bySlug.filter((d) => !d.inheritedFromCustomerId);
-    if (own.length === 1) return own[0];
     if (bySlug.length === 1) return bySlug[0];
     if (bySlug.length > 1) {
       throw new BadRequestException(

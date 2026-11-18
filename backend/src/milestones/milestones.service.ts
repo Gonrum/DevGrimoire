@@ -16,6 +16,7 @@ import { TodosService } from '../todos/todos.service';
 import { TodoDocument, TodoPriority, TodoStatus } from '../todos/schemas/todo.schema';
 import { ChatLlmService } from '../chat/chat-llm.service';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerInScope, assertProjectInScope } from '../common/scope-guard';
 
 // ── AI-Complete types ─────────────────────────────────────────────────────────
 
@@ -142,12 +143,15 @@ export class MilestonesService implements OnModuleInit {
   ) {}
 
   async findByNumber(projectId: string, number: number): Promise<MilestoneDocument> {
+    // Lookup by number is scoped by the caller-supplied projectId — check it first.
+    assertProjectInScope(projectId);
     const ms = await this.milestoneModel.findOne({ projectId: projectIdFilter(projectId), number }).exec();
     if (!ms) throw new NotFoundException(`Milestone #${number} not found in project ${projectId}`);
     return ms;
   }
 
   async findByDisplayNumber(projectId: string, displayNumber: string): Promise<MilestoneDocument> {
+    assertProjectInScope(projectId);
     const ms = await this.milestoneModel.findOne({ projectId: projectIdFilter(projectId), displayNumber }).exec();
     if (!ms) throw new NotFoundException(`Milestone "${displayNumber}" not found in project ${projectId}`);
     return ms;
@@ -166,6 +170,10 @@ export class MilestonesService implements OnModuleInit {
   }
 
   async create(dto: CreateMilestoneDto): Promise<MilestoneDocument> {
+    // Before the project lookup, so a narrowed actor cannot probe foreign projects.
+    // Covers importFromParsed and milestone_create_with_todos, which create through here.
+    assertProjectInScope(dto.projectId);
+    if (!Types.ObjectId.isValid(dto.projectId)) throw new NotFoundException(`Project ${dto.projectId} not found`);
     const project = await this.projectModel.findById(dto.projectId).exec();
     if (!project) throw new NotFoundException(`Project ${dto.projectId} not found`);
     const seq = await this.countersService.getNextSequence(dto.projectId, 'milestone');
@@ -187,16 +195,27 @@ export class MilestonesService implements OnModuleInit {
   }
 
   async findByProject(projectId: string, status?: MilestoneStatus, includeArchived?: boolean): Promise<MilestoneDocument[]> {
+    assertProjectInScope(projectId);
     const query: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (status) query.status = status;
     if (!includeArchived) query.archived = { $ne: true };
     return this.milestoneModel.find(query).sort({ createdAt: -1 }).exec();
   }
 
-  async findById(id: string): Promise<MilestoneDocument> {
+  /**
+   * Load + 404 + scope check — every by-id path (get, update, delete, export,
+   * ai-complete) goes through here before reading or mutating.
+   */
+  private async findScoped(id: string): Promise<MilestoneDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException(`Milestone ${id} not found`);
     const milestone = await this.milestoneModel.findById(id).exec();
     if (!milestone) throw new NotFoundException(`Milestone ${id} not found`);
+    assertOwnerInScope({ projectId: milestone.projectId }, `Milestone ${id}`);
     return milestone;
+  }
+
+  async findById(id: string): Promise<MilestoneDocument> {
+    return this.findScoped(id);
   }
 
   /**
@@ -225,12 +244,18 @@ export class MilestonesService implements OnModuleInit {
    * setzt, nicht nur bei status=done. Prüft beide Speicherformen (ObjectId und
    * Altbestand als String). Der Unique-Index fängt die verbleibende Race.
    */
-  private async assertChangelogAssignable(changelogId: string, milestoneId: string): Promise<void> {
+  private async assertChangelogAssignable(
+    changelogId: string,
+    milestoneId: string,
+    milestoneProjectId: string,
+  ): Promise<void> {
     if (!Types.ObjectId.isValid(changelogId)) {
       throw new BadRequestException(`Ungültige changelogId ${changelogId}`);
     }
     const changelog = await this.changelogModel.findById(changelogId).exec();
-    if (!changelog) {
+    // A changelog of another project is treated as non-existent: linking it
+    // would expose a foreign changelog via the milestone (and the graph).
+    if (!changelog || changelog.projectId?.toString() !== milestoneProjectId) {
       throw new BadRequestException(`Changelog ${changelogId} nicht gefunden.`);
     }
     const other = await this.milestoneModel.collection.findOne({
@@ -238,22 +263,26 @@ export class MilestonesService implements OnModuleInit {
       _id: { $ne: new Types.ObjectId(milestoneId) },
     });
     if (other) {
+      // Name the conflicting milestone only when it lives in the same project
+      // — otherwise the message would leak a foreign milestone's name.
+      const sameProject = String(other.projectId) === milestoneProjectId;
       throw new BadRequestException(
-        `Changelog ${changelogId} ist bereits dem Milestone "${String(other.name)}" zugeordnet. Erstelle einen neuen Changelog-Eintrag.`,
+        sameProject
+          ? `Changelog ${changelogId} ist bereits dem Milestone "${String(other.name)}" zugeordnet. Erstelle einen neuen Changelog-Eintrag.`
+          : `Changelog ${changelogId} ist bereits einem anderen Milestone zugeordnet. Erstelle einen neuen Changelog-Eintrag.`,
       );
     }
   }
 
   async update(id: string, dto: UpdateMilestoneDto): Promise<MilestoneDocument> {
-    if (!Types.ObjectId.isValid(id)) throw new NotFoundException(`Milestone ${id} not found`);
+    // Scope check BEFORE any mutation (findByIdAndUpdate would already write).
+    const current = await this.findScoped(id);
+    const currentProjectId = current.projectId.toString();
     if (dto.changelogId) {
-      await this.assertChangelogAssignable(dto.changelogId, id);
+      await this.assertChangelogAssignable(dto.changelogId, id, currentProjectId);
     }
     // When setting status to done, require a changelogId
     if (dto.status === MilestoneStatus.DONE) {
-      const current = await this.milestoneModel.findById(id).exec();
-      if (!current) throw new NotFoundException(`Milestone ${id} not found`);
-
       const changelogId = dto.changelogId || current.changelogId?.toString();
       if (!changelogId) {
         throw new BadRequestException(
@@ -264,7 +293,7 @@ export class MilestonesService implements OnModuleInit {
 
       // Existenz und Eindeutigkeit (für einen schon gesetzten changelogId,
       // der nicht im dto steht; ein dto.changelogId ist oben geprüft).
-      if (!dto.changelogId) await this.assertChangelogAssignable(changelogId, id);
+      if (!dto.changelogId) await this.assertChangelogAssignable(changelogId, id, currentProjectId);
     }
 
     let milestone: MilestoneDocument | null;
@@ -292,6 +321,7 @@ export class MilestonesService implements OnModuleInit {
   }
 
   async remove(id: string): Promise<void> {
+    await this.findScoped(id);
     const result = await this.milestoneModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException(`Milestone ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {

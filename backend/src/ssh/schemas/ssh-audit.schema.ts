@@ -10,8 +10,8 @@ export type SshAuditAction =
   | 'terminal_open'
   | 'terminal_close';
 
-// 'dg': `dg scp` aus einem Workspace-Terminal. Dort gibt es keinen Nutzer im
-// Token, nur den Workspace — userId entfällt, workspaceId ist Pflicht.
+// 'dg': `dg scp` from a workspace terminal. The token carries no user, only
+// the workspace — userId is omitted, workspaceId is required.
 export type SshAuditSourceContext = 'terminal' | 'mcp' | 'rest' | 'workflow' | 'dg';
 
 export type SshAuditDocument = HydratedDocument<SshAudit>;
@@ -53,7 +53,7 @@ export class SshAudit {
   })
   userId?: Types.ObjectId;
 
-  /** Nur bei sourceContext='dg': aus welchem Workspace der Transfer kam. */
+  /** Only with sourceContext='dg': the workspace the transfer came from. */
   @Prop({
     type: SchemaTypes.ObjectId,
     ref: 'Workspace',

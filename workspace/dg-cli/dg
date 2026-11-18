@@ -40,7 +40,7 @@ dg — DevGrimoire workspace CLI
   dg todo <title> [--description=X] [--priority=low|medium|high|critical]
                   [--tags=a,b] [--milestone=<id>]
   dg kube …                         (read-only cluster access, see: dg kube --help)
-  dg ssh list                       (SSH connections this project may use)
+  dg ssh list                       (this project's own SSH connections)
   dg scp [--mode=644] [--mkdir] <src> <dst>
                                     (one file; one side is <conn>:<path>,
                                      see: dg scp --help)
@@ -406,8 +406,9 @@ sees a key or password. Connections: dg ssh list.
   dg scp [options] <local-file>          <conn>:<remote-path>   (upload)
   dg scp [options] <conn>:<remote-file>  <local-path>           (download)
 
-  <conn>          slug (or id) of an SSH connection of this project or of a
-                  customer linked to it
+  <conn>          slug (or id) of an SSH connection of this project
+                  (connections inherited from a linked customer are not
+                  available here — use the DevGrimoire UI or MCP for those)
   <remote-path>   absolute, or relative to the login's home directory
                   (a leading ~/ is accepted). Ending in / or naming an
                   existing directory: the file name is kept.
@@ -433,7 +434,7 @@ scp_split_remote() {
     esac
     if [[ "$arg" =~ ^([A-Za-z0-9][A-Za-z0-9_-]{0,63}):(.*)$ ]]; then
         local rpath="${BASH_REMATCH[2]}"
-        # SFTP kennt kein ~ — relative Pfade beginnen ohnehin im Home.
+        # SFTP has no ~ — relative paths start in the home directory anyway.
         if [[ "$rpath" == "~" ]]; then rpath=""; fi
         rpath="${rpath#\~/}"
         printf '%s\t%s' "${BASH_REMATCH[1]}" "$rpath"
@@ -547,8 +548,7 @@ if not rows:
 w = max(len(r.get("slug") or "") for r in rows)
 for r in rows:
     target = "%s@%s:%s" % (r.get("username"), r.get("host"), r.get("port"))
-    extra = "  (customer)" if r.get("inherited") else ""
-    print("%-*s  %-40s  %s%s" % (w, r.get("slug"), target, r.get("label") or "", extra))
+    print("%-*s  %-40s  %s" % (w, r.get("slug"), target, r.get("label") or ""))
 ' 2>/dev/null || echo "$out"
             ;;
         -h|--help|help|"")

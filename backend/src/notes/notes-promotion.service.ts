@@ -9,6 +9,8 @@ import { ResearchService } from '../research/research.service';
 import { ManualsService } from '../manuals/manuals.service';
 import { NotesService, type NoteWithIdle } from './notes.service';
 import type { Note } from './schemas/note.schema';
+import { Types } from 'mongoose';
+import { assertOwnerParamsInScope, assertUnrestrictedScope } from '../common/scope-guard';
 
 /** Single source of truth for the promotion targets — used for parsing *and* dispatch. */
 export const PROMOTION_ENTITY_TYPES = [
@@ -203,6 +205,22 @@ export class NotesPromotionService {
     // narrows to `never`. Callers that bypass the DTO validation still get a 400.
     if (!PROMOTION_ENTITY_TYPES.includes(payload.entityType)) {
       throw new BadRequestException(`Unknown entityType: ${payload.entityType}`);
+    }
+
+    // The owner ids come straight from the client (or the LLM proposal) and
+    // go into the target service's create — check them here, explicitly and
+    // before anything is written, so a narrowed user cannot promote a note
+    // into a foreign project/customer.
+    if (projectId && !Types.ObjectId.isValid(projectId)) {
+      throw new BadRequestException(`Invalid projectId: ${projectId}`);
+    }
+    if (customerId && !Types.ObjectId.isValid(customerId)) {
+      throw new BadRequestException(`Invalid customerId: ${customerId}`);
+    }
+    assertOwnerParamsInScope({ projectId, customerId });
+    if (!projectId && !customerId) {
+      // Owner-less knowledge is global and visible in every project.
+      assertUnrestrictedScope('Global knowledge');
     }
 
     let entityId: string;

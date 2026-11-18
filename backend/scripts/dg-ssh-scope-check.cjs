@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 /*
- * dg-ssh-Scope-Check (`dg ssh list` / `dg scp`).
+ * dg ssh scope check (`dg ssh list` / `dg scp`).
  *
- * Die Route ist @Public (dg-Token statt Nutzer-JWT), RequestContext hat
- * keinen Actor, und `SshService.findById()` prüft ohne Actor NICHTS. Die
- * Auflösung im Controller (Projekt + verlinkte Kunden) ist damit die einzige
- * Grenze — dieser Check hält sie fest:
- *   - fremde Verbindung per Id/Slug -> 404, kein Transfer
- *   - geerbte Kundenverbindung -> erlaubt; eigener Slug schlägt geerbten
- *   - gleicher Slug bei mehreren geerbten -> 400 mit Ids
- *   - Workspace gehört nicht (mehr) zum Projekt des Tokens -> 403
- *   - Upload/Download reichen sourceContext 'dg' + workspaceId durch
- *   - scp-Pfadregeln: `host:` / `host:dir/` behalten den Dateinamen
- *   - Fehlercodes werden zu lesbaren 4xx statt 500
- *   - Audit-Schema: 'dg' ohne userId gültig, aber nur mit workspaceId
+ * The route is @Public (dg token instead of a user JWT), RequestContext has
+ * no actor, and `SshService.findById()` checks NOTHING without one. The
+ * controller's resolution (the project's own connections) is therefore the
+ * only boundary — this check pins it:
+ *   - foreign connection by id/slug -> 404, no transfer
+ *   - connection inherited from a linked customer -> 404 (customer scope
+ *     cannot be checked without a user, same rule as `dg kube`)
+ *   - workspace no longer belongs to the token's project -> 403
+ *   - upload/download pass sourceContext 'dg' + workspaceId through
+ *   - scp path rules: `host:` / `host:dir/` keep the file name
+ *   - error codes become readable 4xx instead of 500
+ *   - audit schema: 'dg' valid without userId, but only with workspaceId
  *
- * Lädt aus dist/; vorher `npm run build`.
+ * Loads from dist/; run `npm run build` first.
  */
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -59,9 +59,9 @@ function conn(slug, { projectId, inheritedFromCustomerId } = {}) {
 }
 
 /**
- * Controller mit In-Memory-Fakes. `visible` ist, was findByProjectId für das
- * Projekt des Tokens liefert (eigene + geerbte); alles andere existiert zwar,
- * darf aber nicht erreichbar sein.
+ * Controller with in-memory fakes. `visible` is what findByProjectId returns
+ * for the token's project (own + inherited); everything else exists but must
+ * not be reachable.
  */
 function setup({ visible, workspaceProject = PROJECT, uploadError, downloadError }) {
   const calls = { uploads: [], downloads: [], writes: [], touched: 0 };
@@ -104,7 +104,7 @@ function setup({ visible, workspaceProject = PROJECT, uploadError, downloadError
   const inheritedProd = conn('prod', { inheritedFromCustomerId: oid().toString() });
   const foreign = conn('fremd', { projectId: OTHER_PROJECT });
 
-  await check('fremde Verbindung per Id und Slug -> 404, kein Transfer', async () => {
+  await check('foreign connection by id and slug -> 404, no transfer', async () => {
     const { ctrl, req, calls } = setup({ visible: [own] });
     await assert.rejects(() => ctrl.upload(req, { connection: foreign._id.toString(), source: 'a.txt', remotePath: '/tmp/' }), (e) => statusOf(e) === 404);
     await assert.rejects(() => ctrl.download(req, { connection: 'fremd', remotePath: '/etc/hosts', target: '.' }), (e) => statusOf(e) === 404);
@@ -112,43 +112,42 @@ function setup({ visible, workspaceProject = PROJECT, uploadError, downloadError
     assert.deepEqual(calls.downloads, []);
   });
 
-  await check('geerbte Kundenverbindung per Slug -> erlaubt', async () => {
+  await check('inherited customer connection by slug and id -> 404, no transfer', async () => {
     const { ctrl, req, calls } = setup({ visible: [own, inherited] });
-    await ctrl.upload(req, { connection: 'kunde', source: 'a.txt', remotePath: '/srv/a.txt' });
-    assert.equal(calls.uploads[0].connId, inherited._id.toString());
+    await assert.rejects(() => ctrl.upload(req, { connection: 'kunde', source: 'a.txt', remotePath: '/srv/a.txt' }), (e) => statusOf(e) === 404);
+    await assert.rejects(() => ctrl.download(req, { connection: inherited._id.toString(), remotePath: '/x', target: '.' }), (e) => statusOf(e) === 404);
+    assert.deepEqual(calls.uploads, []);
+    assert.deepEqual(calls.downloads, []);
   });
 
-  await check('eigener Slug schlägt gleichnamigen geerbten', async () => {
+  await check('own slug is used even when an inherited one has the same slug', async () => {
     const { ctrl, req, calls } = setup({ visible: [own, inheritedProd] });
     await ctrl.upload(req, { connection: 'prod', source: 'a.txt', remotePath: '/srv/a.txt' });
     assert.equal(calls.uploads[0].connId, own._id.toString());
   });
 
-  await check('gleicher Slug bei mehreren geerbten -> 400 mit Ids', async () => {
+  await check('only inherited connections with that slug -> 404', async () => {
     const other = conn('prod', { inheritedFromCustomerId: oid().toString() });
     const { ctrl, req, calls } = setup({ visible: [inheritedProd, other] });
-    await assert.rejects(
-      () => ctrl.upload(req, { connection: 'prod', source: 'a.txt', remotePath: '/x' }),
-      (e) => statusOf(e) === 400 && e.message.includes(other._id.toString()),
-    );
+    await assert.rejects(() => ctrl.upload(req, { connection: 'prod', source: 'a.txt', remotePath: '/x' }), (e) => statusOf(e) === 404);
     assert.deepEqual(calls.uploads, []);
   });
 
-  await check('Workspace gehört nicht zum Projekt des Tokens -> 403', async () => {
+  await check('workspace does not belong to the token\'s project -> 403', async () => {
     const { ctrl, req, calls } = setup({ visible: [own], workspaceProject: OTHER_PROJECT });
     await assert.rejects(() => ctrl.list(req), (e) => statusOf(e) === 403);
     await assert.rejects(() => ctrl.upload(req, { connection: 'prod', source: 'a', remotePath: '/x' }), (e) => statusOf(e) === 403);
     assert.deepEqual(calls.uploads, []);
   });
 
-  await check('list zeigt eigene + geerbte, ohne Secret-Referenzen', async () => {
+  await check('list shows only own connections, without secret references', async () => {
     const { ctrl, req } = setup({ visible: [own, inherited] });
     const rows = await ctrl.list(req);
-    assert.deepEqual(rows.map((r) => [r.slug, r.inherited]), [['prod', false], ['kunde', true]]);
+    assert.deepEqual(rows.map((r) => r.slug), ['prod']);
     assert.ok(!('privateKeySecretId' in rows[0]));
   });
 
-  await check('Upload: host: und host:dir/ behalten den Dateinamen, Audit als dg', async () => {
+  await check('upload: host: and host:dir/ keep the file name, audited as dg', async () => {
     const { ctrl, req, calls } = setup({ visible: [own] });
     await ctrl.upload(req, { connection: 'prod', source: 'dist/app.tar.gz', remotePath: '' });
     await ctrl.upload(req, { connection: 'prod', source: 'dist/app.tar.gz', remotePath: '/opt/app/' });
@@ -162,7 +161,7 @@ function setup({ visible, workspaceProject = PROJECT, uploadError, downloadError
     }
   });
 
-  await check('Download: Ziel, Dateiname und Größe gehen an den Sidecar; Verzeichnisquelle -> 400', async () => {
+  await check('download: target, file name and size reach the sidecar; directory source -> 400', async () => {
     const { ctrl, req, calls } = setup({ visible: [own] });
     const res = await ctrl.download(req, { connection: 'prod', remotePath: '/var/log/app.log', target: '' });
     assert.equal(calls.writes[0].target, '.');
@@ -175,7 +174,7 @@ function setup({ visible, workspaceProject = PROJECT, uploadError, downloadError
     await assert.rejects(() => ctrl.download(req, { connection: 'prod', remotePath: '/var/log/', target: '.' }), (e) => statusOf(e) === 400);
   });
 
-  await check('Fehlercodes werden zu 413 / 404 / 403 statt 500', async () => {
+  await check('error codes become 413 / 404 / 403 instead of 500', async () => {
     let s = setup({ visible: [own], uploadError: 'upload_too_large: 20 > 10' });
     await assert.rejects(() => s.ctrl.upload(s.req, { connection: 'prod', source: 'a', remotePath: '/x' }), (e) => statusOf(e) === 413);
     s = setup({ visible: [own], downloadError: 'remote_not_found: /nope' });
@@ -184,7 +183,7 @@ function setup({ visible, workspaceProject = PROJECT, uploadError, downloadError
     await assert.rejects(() => s.ctrl.download(s.req, { connection: 'prod', remotePath: '/x', target: '.' }), (e) => statusOf(e) === 403);
   });
 
-  await check('Audit-Schema: dg braucht workspaceId statt userId, alle anderen weiter userId', () => {
+  await check('audit schema: dg needs workspaceId instead of userId, all others still need userId', () => {
     const Model = mongoose.model('SshAuditCheck', SshAuditSchema);
     const base = { connectionId: oid(), action: 'upload' };
     assert.equal(new Model({ ...base, sourceContext: 'dg', workspaceId: oid() }).validateSync(), undefined);
@@ -195,7 +194,7 @@ function setup({ visible, workspaceProject = PROJECT, uploadError, downloadError
 
   console.log(`\n${total - failures}/${total} passed`);
   if (total !== EXPECTED_CHECKS) {
-    console.error(`Erwartet ${EXPECTED_CHECKS} Checks, gelaufen ${total}`);
+    console.error(`Expected ${EXPECTED_CHECKS} checks, ran ${total}`);
     process.exit(1);
   }
   process.exit(failures === 0 ? 0 : 1);

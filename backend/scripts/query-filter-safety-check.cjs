@@ -98,10 +98,12 @@ async function check(label, fn) {
   function makeMilestones(otherHolder) {
     const svc = Object.create(MilestonesService.prototype);
     const writes = [];
-    svc.changelogModel = { findById: () => ({ exec: async () => ({ _id: 'c' }) }) };
+    // Milestone and changelog must share a project (scope fix content-a).
+    const projectId = new Types.ObjectId();
+    svc.changelogModel = { findById: () => ({ exec: async () => ({ _id: 'c', projectId }) }) };
     svc.milestoneModel = {
-      collection: { findOne: async (f) => otherHolder(f) },
-      findById: () => ({ exec: async () => ({ changelogId: undefined }) }),
+      collection: { findOne: async (f) => { const o = otherHolder(f); return o && { projectId, ...o }; } },
+      findById: () => ({ exec: async () => ({ projectId, changelogId: undefined }) }),
       findByIdAndUpdate: (id, dto) => ({ exec: async () => { writes.push(dto); return { projectId: 'p', name: 'm', ...dto }; } }),
     };
     svc.eventEmitter = { emit() {} };

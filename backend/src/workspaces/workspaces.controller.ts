@@ -85,11 +85,11 @@ export class WorkspacesController {
     @Body() dto: ExecWorkspaceDto,
     @Res() res: Response,
   ): Promise<void> {
-    // Abbruch durch den Browser: am `res` und VOR dem ersten await. `req`-
-    // 'close' feuert bei einem POST schon, sobald der Body gelesen ist — der
-    // frühere Listener sah es nie, und ein abgebrochener Stream liess den
-    // Befehl im Sidecar bis zum Timeout weiterlaufen. `writableFinished`
-    // trennt den Verbindungsabbruch vom eigenen res.end().
+    // Browser abort: on `res` and BEFORE the first await. For a POST, the
+    // request's 'close' already fires once the body has been read — the
+    // former listener never saw it, and an aborted stream left the command
+    // running in the sidecar until its timeout. `writableFinished` tells a
+    // dropped connection apart from our own res.end().
     const abort = new AbortController();
     res.on('close', () => { if (!res.writableFinished) abort.abort(); });
 

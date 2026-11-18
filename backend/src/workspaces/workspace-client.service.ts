@@ -179,11 +179,11 @@ export class WorkspaceClient {
   }
 
   /**
-   * Gegenstück zu readStream: schreibt `source` als Datei in den Workspace,
-   * ohne zu puffern (`dg scp host:… ./…`). `node:http` statt fetch, weil ein
-   * Node-Readable als fetch-Body nur über `duplex: 'half'` und eine Assertion
-   * auf BodyInit ginge. Der Sidecar schreibt in eine temporäre Datei und
-   * benennt erst nach vollständigem Empfang um.
+   * Counterpart of readStream: writes `source` as a file into the workspace
+   * without buffering (`dg scp host:… ./…`). `node:http` instead of fetch,
+   * because a Node Readable as fetch body would need `duplex: 'half'` and an
+   * assertion to BodyInit. The sidecar writes to a temporary file and only
+   * renames it once fully received.
    */
   async writeStream(
     workspaceId: string,
@@ -249,15 +249,15 @@ export class WorkspaceClient {
         this.logger.warn(`sidecar transport error on /write-stream: ${err.message}`);
         finish(new ServiceUnavailableException(`workspace sidecar unreachable at ${this.baseUrl} (${err.message})`));
       });
-      // Bricht die Quelle ab (SFTP-Fehler, Limit), darf der Sidecar die
-      // Teildatei nicht als fertig ansehen: Request abbrechen statt beenden.
+      // If the source fails (SFTP error, limit), the sidecar must not treat
+      // the partial file as complete: abort the request instead of ending it.
       source.on('error', (err: Error) => {
         req.destroy(err);
         finish(err);
       });
-      // Ein destroy() ohne Fehler (Timeout im Aufrufer) feuert nur 'close'.
-      // Ohne diesen Zweig bliebe der Request halb offen und der Sidecar
-      // wartete endlos auf den Rest des Bodys.
+      // A destroy() without error (timeout in the caller) only fires 'close'.
+      // Without this branch the request would stay half open and the sidecar
+      // would wait forever for the rest of the body.
       let ended = false;
       source.on('end', () => { ended = true; });
       source.on('close', () => {

@@ -7,7 +7,7 @@ import {
 import { errorMessage, streamToBuffer } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Model } from 'mongoose';
+import { isValidObjectId, Model } from 'mongoose';
 import { randomUUID } from 'crypto';
 import { Readable } from 'stream';
 import { Attachment, AttachmentDocument } from './schemas/attachment.schema';
@@ -23,6 +23,7 @@ import {
 } from '../common/permissions';
 import { MAX_ATTACHMENT_SIZE, base64DecodedSize } from './attachment-limits';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerParamsInScope } from '../common/scope-guard';
 
 /** Mimetypes treated as extractable text */
 const TEXT_MIMETYPES = new Set([
@@ -93,6 +94,13 @@ export class AttachmentsService {
     if (fields.projectId && fields.customerId) {
       throw new BadRequestException('projectId and customerId are mutually exclusive');
     }
+    // The owner id becomes part of the storage key — only real ObjectIds.
+    if ((fields.projectId && !isValidObjectId(fields.projectId)) || (fields.customerId && !isValidObjectId(fields.customerId))) {
+      throw new BadRequestException('projectId/customerId must be a valid id');
+    }
+    // BEFORE putObject: a narrowed actor must not store files (which are then
+    // text-extracted into the RAG index) in a foreign project or customer.
+    assertOwnerParamsInScope({ projectId: fields.projectId, customerId: fields.customerId });
     if (fields.customerId) {
       await this.customersService.findById(fields.customerId);
     }
@@ -329,6 +337,8 @@ export class AttachmentsService {
     },
     base64Content: string,
   ): Promise<AttachmentDocument> {
+    // Scope first, so a foreign upload is not even decoded; create() checks again.
+    assertOwnerParamsInScope({ projectId: fields.projectId, customerId: fields.customerId });
     // VOR dem Decodieren prüfen — sonst läge der übergrosse Buffer schon im
     // Speicher, bevor create() ihn ablehnt.
     const decodedSize = base64DecodedSize(base64Content);

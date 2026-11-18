@@ -19,6 +19,8 @@ export interface NotificationTarget {
   userId?: string | null;
   /** Projektbezug; dann nur für Actors mit Zugriff auf das Projekt sichtbar. */
   projectId?: string | null;
+  /** Customer owner; visible only to actors with access to that customer. */
+  customerId?: string | null;
 }
 
 /** Was die API ausliefert: `read` pro Nutzer, ohne die Listen der anderen. */
@@ -47,6 +49,20 @@ function projectScopeFilter(actor: ActorScope): FilterQuery<AppNotification> | n
   if (mode === 'none') return { projectId: null };
   const allowed = (actor.allowedProjectIds ?? []).map(String);
   return { $or: [{ projectId: null }, { projectId: { $in: allowed } }] };
+}
+
+/**
+ * Customer axis, same shape as the project axis. Without it a customer-bound
+ * notification (projectId null) was visible to every user, including actors
+ * narrowed away from that customer. `customerId: null` also matches rows
+ * without the field (all legacy rows), so nothing changes for them.
+ */
+function customerScopeFilter(actor: ActorScope): FilterQuery<AppNotification> | null {
+  const mode = actor.customerScopeMode ?? 'all';
+  if (mode === 'all') return null;
+  if (mode === 'none') return { customerId: null };
+  const allowed = (actor.allowedCustomerIds ?? []).map(String);
+  return { $or: [{ customerId: null }, { customerId: { $in: allowed } }] };
 }
 
 export const NOTIFICATION_CREATED = 'notification.created';
@@ -137,6 +153,7 @@ export class NotificationsService implements OnModuleInit {
       title, body, url, category,
       userId: target.userId ?? null,
       projectId: target.projectId ?? null,
+      ...(target.customerId ? { customerId: target.customerId } : {}),
       expiresAt: expiresAtFor(category),
     });
     const created: NotificationCreatedEvent = {
@@ -252,6 +269,8 @@ export class NotificationsService implements OnModuleInit {
     ];
     const scope = projectScopeFilter(actor);
     if (scope) parts.push(scope);
+    const customerScope = customerScopeFilter(actor);
+    if (customerScope) parts.push(customerScope);
     return { $and: parts };
   }
 

@@ -7,9 +7,6 @@
 const path = require('node:path');
 const assert = require('node:assert/strict');
 
-// EncryptionService reads SECRETS_ENCRYPTION_KEY in its constructor.
-process.env.SECRETS_ENCRYPTION_KEY = 'a'.repeat(64);
-
 function loadCompiled(rel) {
   const abs = path.resolve(__dirname, '..', 'dist', rel);
   try { return require(abs); }
@@ -19,11 +16,10 @@ function loadCompiled(rel) {
     process.exit(2);
   }
 }
-const { EncryptionService } = loadCompiled('common/encryption.service.js');
 const { DownloadTicketService } = loadCompiled('http-requests/download-ticket.service.js');
 
-const enc = new EncryptionService();
-const svc = new DownloadTicketService(enc);
+const svc = new DownloadTicketService();
+const actor = { userId: 'u1', username: 'alice', role: 'user', projectScopeMode: 'allowlist', allowedProjectIds: ['p1'] };
 
 let failures = 0, total = 0;
 function check(label, fn) {
@@ -33,35 +29,47 @@ function check(label, fn) {
 }
 
 check('mint → verifyAndConsume returns payload', () => {
-  const t = svc.mint({ requestId: 'r1', environmentId: 'e1', userId: 'u1' });
+  const t = svc.mint({ requestId: 'r1', environmentId: 'e1', actor });
   const out = svc.verifyAndConsume(t, 'r1');
-  assert.equal(out.userId, 'u1');
+  assert.equal(out.actor.userId, 'u1');
+  assert.deepEqual(out.actor.allowedProjectIds, ['p1']);
   assert.equal(out.environmentId, 'e1');
 });
 
 check('single-use: second consume throws', () => {
-  const t = svc.mint({ requestId: 'r2', userId: 'u1' });
+  const t = svc.mint({ requestId: 'r2', actor });
   svc.verifyAndConsume(t, 'r2');
   assert.throws(() => svc.verifyAndConsume(t, 'r2'), /verwendet/);
 });
 
 check('wrong requestId throws', () => {
-  const t = svc.mint({ requestId: 'r3', userId: 'u1' });
+  const t = svc.mint({ requestId: 'r3', actor });
   assert.throws(() => svc.verifyAndConsume(t, 'OTHER'), /passt nicht/);
+  // A mismatched id must not burn the ticket for its real request.
+  svc.verifyAndConsume(t, 'r3');
 });
 
 check('tampered ticket throws', () => {
-  const t = svc.mint({ requestId: 'r4', userId: 'u1' });
+  const t = svc.mint({ requestId: 'r4', actor });
   assert.throws(() => svc.verifyAndConsume(t + 'ff', 'r4'), /Ungültig/);
 });
 
 check('expired ticket throws', () => {
-  // Construct a ticket with a past exp directly via the encryption service.
-  const expired = enc.encrypt(JSON.stringify({
-    purpose: 'wk-download', requestId: 'r5', environmentId: null, userId: 'u1',
-    exp: Date.now() - 1000, jti: 'fixed-jti',
-  }));
-  assert.throws(() => svc.verifyAndConsume(expired, 'r5'), /abgelaufen/);
+  const realNow = Date.now;
+  const t = svc.mint({ requestId: 'r5', actor });
+  try {
+    Date.now = () => realNow() + 61_000;
+    assert.throws(() => svc.verifyAndConsume(t, 'r5'), /abgelaufen/);
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+check('encrypted JSON (old ticket format) is not accepted', () => {
+  // The old format was forgeable via a secret's encryptedValue; any string
+  // that was not minted by this instance must be rejected.
+  assert.throws(() => svc.verifyAndConsume('00:11:22', 'r6'), /Ungültig/);
+  assert.throws(() => svc.verifyAndConsume(undefined, 'r6'), /Ungültig/);
 });
 
 console.log(`\n${total - failures}/${total} passed`);

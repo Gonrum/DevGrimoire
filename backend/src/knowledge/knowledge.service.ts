@@ -9,13 +9,13 @@ import { CustomersService } from '../customers/customers.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
 import { RequestContext } from '../common/request-context';
-import {
-  actorCanAccessCustomer,
-  actorCanAccessProject,
-} from '../common/permissions';
 import { buildDualScopeFilter } from '../common/scope';
-import { ForbiddenException } from '@nestjs/common';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import {
+  assertOwnerInScope,
+  assertOwnerParamsInScope,
+  assertUnrestrictedScope,
+} from '../common/scope-guard';
 
 @Injectable()
 export class KnowledgeService {
@@ -34,6 +34,13 @@ export class KnowledgeService {
     if (scope === 'customer' && !dto.customerId) {
       throw new BadRequestException('customerId is required for scope "customer"');
     }
+    // Checked here, not only in the controller pipe: notes promotion and
+    // recurring tasks call create() directly. Every id that is present is
+    // checked — also a customerId riding along on a 'project' entry.
+    assertOwnerParamsInScope({ projectId: dto.projectId, customerId: dto.customerId });
+    // Global knowledge flows into every project's context and RAG — a narrowed
+    // actor must not be able to inject content there.
+    if (scope === 'global') assertUnrestrictedScope('Global knowledge');
     if (scope === 'customer') {
       await this.customersService.findById(dto.customerId!);
     }
@@ -123,15 +130,10 @@ export class KnowledgeService {
    * `if (actor)` ist die dokumentierte Konvention (siehe AttachmentsService).
    */
   private assertAccess(entry: KnowledgeDocument): void {
-    const actor = RequestContext.getUser();
-    if (!actor) return;
-    const projectId = entry.projectId?.toString() || null;
-    const customerId = entry.customerId?.toString() || null;
-    const projectOk = !projectId || actorCanAccessProject(actor, projectId);
-    const customerOk = !customerId || actorCanAccessCustomer(actor, customerId);
-    if (!projectOk || !customerOk) {
-      throw new ForbiddenException(`Knowledge ${entry._id.toString()} is not in your scope`);
-    }
+    assertOwnerInScope(
+      { projectId: entry.projectId, customerId: entry.customerId },
+      `Knowledge ${entry._id.toString()}`,
+    );
   }
 
   /** Lädt, prüft 404 und Scope — die eine Stelle, die jeder Pfad benutzt. */
@@ -139,6 +141,18 @@ export class KnowledgeService {
     const entry = await this.knowledgeModel.findById(id).exec();
     if (!entry) throw new NotFoundException(`Knowledge ${id} not found`);
     this.assertAccess(entry);
+    return entry;
+  }
+
+  /**
+   * Write variant: an entry without any owner axis (or explicitly global)
+   * passes assertAccess for everyone, yet it is visible in every project.
+   * Changing or deleting it therefore requires an unrestricted actor.
+   */
+  private async findScopedForWrite(id: string): Promise<KnowledgeDocument> {
+    const entry = await this.findScoped(id);
+    const isGlobal = entry.scope === 'global' || (!entry.projectId && !entry.customerId);
+    if (isGlobal) assertUnrestrictedScope('Global knowledge');
     return entry;
   }
 
@@ -151,7 +165,7 @@ export class KnowledgeService {
     dto: UpdateKnowledgeDto,
   ): Promise<KnowledgeDocument> {
     // VOR der Mutation prüfen — findByIdAndUpdate hätte sonst schon geschrieben.
-    await this.findScoped(id);
+    await this.findScopedForWrite(id);
     const entry = await this.knowledgeModel
       .findByIdAndUpdate(id, dto, { new: true })
       .exec();
@@ -169,7 +183,7 @@ export class KnowledgeService {
 
   async remove(id: string): Promise<void> {
     // VOR dem Löschen prüfen; das geladene Dokument trägt alles für das Event.
-    const existing = await this.findScoped(id);
+    const existing = await this.findScopedForWrite(id);
     await this.knowledgeModel.deleteOne({ _id: existing._id }).exec();
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: existing.projectId?.toString() || null,

@@ -11,6 +11,7 @@ import { BalancerGateway } from '../balancer/balancer-gateway.service';
 import { LlmClient } from '../balancer/llm-client.service';
 import { LlmProviderKind } from '../balancer/balancer.types';
 import { asString } from '../common/tool-args';
+import { assertAdmin } from '../common/scope-guard';
 import { asNumber, errorMessage, isRecord } from './workflow-narrow';
 
 const SETTING_KEY = 'workflow_agent_endpoint_v1';
@@ -125,6 +126,9 @@ export class WorkflowAgentService {
   }
 
   async setConfig(dto: UpdateWorkflowAgentConfigDto): Promise<void> {
+    // Defense in depth next to the route's @Roles: any other caller of this
+    // setter must not let a non-admin enable tools instance-wide.
+    assertAdmin('Changing the workflow agent config');
     const previous = await this.loadEndpoint();
     let apiKeyEncrypted: string | undefined;
     if (dto.apiKey === undefined) {

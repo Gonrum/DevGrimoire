@@ -24,6 +24,7 @@ import {
 } from './schemas/oracle-suggestion.schema';
 import { KgEntityType } from '../knowledge-graph/schemas/knowledge-graph-edge.schema';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerInScope, assertProjectInScope, projectScopeFilter } from '../common/scope-guard';
 
 const STAGNATION_DAYS = 14;
 const STAGNATION_CRITICAL_DAYS = 30;
@@ -287,6 +288,10 @@ export class OracleService {
     if (!Types.ObjectId.isValid(projectId)) {
       throw new BadRequestException(`Invalid projectId: ${projectId}`);
     }
+    // The analysis reads todos, milestones and validation reports of the project
+    // and writes suggestions into it — a narrowed actor must not trigger it for
+    // a foreign project.
+    assertProjectInScope(projectId);
     const filter = projectIdFilter(projectId);
     const [todos, milestones, validationReports] = await Promise.all([
       this.todoModel
@@ -380,7 +385,17 @@ export class OracleService {
 
   async list(query: ListOracleSuggestionsDto): Promise<OracleSuggestionDocument[]> {
     const filter: Record<string, unknown> = {};
-    if (query.projectId) filter.projectId = new Types.ObjectId(query.projectId);
+    if (query.projectId) {
+      if (!Types.ObjectId.isValid(query.projectId)) {
+        throw new BadRequestException(`Invalid projectId: ${query.projectId}`);
+      }
+      assertProjectInScope(query.projectId);
+      filter.projectId = new Types.ObjectId(query.projectId);
+    } else {
+      // Without a project filter the query used to return the suggestions of
+      // every project on the instance — restrict it to the actor's scope.
+      Object.assign(filter, projectScopeFilter());
+    }
     if (query.status) filter.status = query.status;
     if (query.severity) filter.severity = query.severity;
     if (query.type) filter.type = query.type;
@@ -398,10 +413,21 @@ export class OracleService {
     return all.slice(0, limit);
   }
 
-  async findById(id: string): Promise<OracleSuggestionDocument> {
+  /**
+   * Load + 404 + scope check. Every by-id path (get, status change, comment,
+   * convert, delete) goes through here so a narrowed actor cannot read or
+   * mutate suggestions of foreign projects by guessing ids.
+   */
+  private async findScoped(id: string): Promise<OracleSuggestionDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException(`OracleSuggestion ${id} not found`);
     const s = await this.suggestionModel.findById(id).exec();
     if (!s) throw new NotFoundException(`OracleSuggestion ${id} not found`);
+    assertOwnerInScope({ projectId: s.projectId }, `OracleSuggestion ${id}`);
     return s;
+  }
+
+  async findById(id: string): Promise<OracleSuggestionDocument> {
+    return this.findScoped(id);
   }
 
   async updateStatus(
@@ -508,8 +534,9 @@ export class OracleService {
   }
 
   async remove(id: string): Promise<void> {
-    const res = await this.suggestionModel.findByIdAndDelete(id).exec();
-    if (!res) throw new NotFoundException(`OracleSuggestion ${id} not found`);
+    // Check BEFORE deleting — findByIdAndDelete would already have removed it.
+    const s = await this.findScoped(id);
+    await this.suggestionModel.deleteOne({ _id: s._id }).exec();
   }
 
   async removeByProject(projectId: string): Promise<void> {

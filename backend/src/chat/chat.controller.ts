@@ -921,6 +921,7 @@ export class ChatController {
           send,
           abort,
           projectId: projectId ?? null,
+          customerId,
           effectiveAllowlist,
           conversation,
           persisted: persistedToolCalls,
@@ -1122,6 +1123,7 @@ export class ChatController {
         await this.executeToolCall(pending.call, {
           send,
           projectId: pending.projectId,
+          customerId: pending.customerId,
           effectiveAllowlist: pending.effectiveAllowlist,
           conversation: pending.conversation,
           persisted: pending.persisted,
@@ -1148,6 +1150,7 @@ export class ChatController {
         send,
         abort,
         projectId: pending.projectId,
+        customerId: pending.customerId,
         effectiveAllowlist: pending.effectiveAllowlist,
         conversation: pending.conversation,
         persisted: pending.persisted,
@@ -1263,6 +1266,7 @@ export class ChatController {
     send: (event: Record<string, unknown>) => void;
     abort: AbortController;
     projectId: string | null;
+    customerId?: string;
     effectiveAllowlist: string[];
     conversation: LlmMessageWithTools[];
     persisted: ChatToolCallRecord[];
@@ -1393,6 +1397,7 @@ export class ChatController {
     p: {
       send: (event: Record<string, unknown>) => void;
       projectId: string | null;
+      customerId?: string;
       effectiveAllowlist: string[];
       conversation: LlmMessageWithTools[];
       persisted: ChatToolCallRecord[];
@@ -1422,7 +1427,14 @@ export class ChatController {
       return;
     }
 
-    const result = await this.tools.execute(tc.name, parsedArgs, { projectId: p.projectId }, p.effectiveAllowlist);
+    // Same pinning as the browser path (executeTool): the owner ids always come
+    // from the session, never from LLM-generated arguments.
+    const args = {
+      ...parsedArgs,
+      ...(p.projectId ? { projectId: p.projectId } : {}),
+      ...(p.customerId ? { customerId: p.customerId } : {}),
+    };
+    const result = await this.tools.execute(tc.name, args, { projectId: p.projectId }, p.effectiveAllowlist);
     const resultJson = JSON.stringify(result.success ? result.result : { error: result.error });
     const truncated = resultJson.length > MAX_TOOL_RESULT_CHARS
       ? resultJson.slice(0, MAX_TOOL_RESULT_CHARS) + '…[truncated]'

@@ -9,6 +9,7 @@ import { BulkCreateDependencyDto } from './dto/bulk-create-dependency.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerInScope, assertProjectInScope } from '../common/scope-guard';
 
 @Injectable()
 export class DependenciesService {
@@ -18,6 +19,8 @@ export class DependenciesService {
   ) {}
 
   async create(dto: CreateDependencyDto): Promise<DependencyDocument> {
+    // A narrowed actor must not plant dependencies into a foreign project.
+    assertProjectInScope(dto.projectId);
     const dep = await this.dependencyModel.create(dto);
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: dep.projectId.toString(),
@@ -30,6 +33,8 @@ export class DependenciesService {
   }
 
   async bulkCreate(dto: BulkCreateDependencyDto): Promise<{ created: number; updated: number; total: number }> {
+    // The upsert writes into dto.projectId — check it before the first write.
+    assertProjectInScope(dto.projectId);
     let created = 0;
     let updated = 0;
 
@@ -77,6 +82,7 @@ export class DependenciesService {
     projectId: string,
     filters?: { packageManager?: PackageManager; category?: string; devDependency?: boolean },
   ): Promise<DependencyDocument[]> {
+    assertProjectInScope(projectId);
     const query: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (filters?.packageManager) query.packageManager = filters.packageManager;
     if (filters?.category) query.category = filters.category;
@@ -84,13 +90,21 @@ export class DependenciesService {
     return this.dependencyModel.find(query).sort({ name: 1 }).exec();
   }
 
-  async findById(id: string): Promise<DependencyDocument> {
+  /** Load + 404 + scope check — every by-id path goes through here before mutating. */
+  private async findScoped(id: string): Promise<DependencyDocument> {
     const dep = await this.dependencyModel.findById(id).exec();
     if (!dep) throw new NotFoundException(`Dependency ${id} not found`);
+    assertOwnerInScope({ projectId: dep.projectId }, `Dependency ${id}`);
     return dep;
   }
 
+  async findById(id: string): Promise<DependencyDocument> {
+    return this.findScoped(id);
+  }
+
   async update(id: string, dto: UpdateDependencyDto): Promise<DependencyDocument> {
+    // Check before findByIdAndUpdate — it would already have written.
+    await this.findScoped(id);
     const dep = await this.dependencyModel.findByIdAndUpdate(id, dto, { new: true }).exec();
     if (!dep) throw new NotFoundException(`Dependency ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
@@ -104,6 +118,7 @@ export class DependenciesService {
   }
 
   async remove(id: string): Promise<void> {
+    await this.findScoped(id);
     const result = await this.dependencyModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException(`Dependency ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {

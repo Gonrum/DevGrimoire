@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
+import { assertProjectInScope, scopeFilter } from '../common/scope-guard';
 import { Todo, TodoDocument } from '../todos/schemas/todo.schema';
 import { Knowledge, KnowledgeDocument } from '../knowledge/schemas/knowledge.schema';
 import { Changelog, ChangelogDocument } from '../changelog/schemas/changelog.schema';
@@ -39,7 +40,19 @@ export class SearchService {
 
   async search(query: string, projectId?: string, limit = 20): Promise<SearchResult[]> {
     const regex = new RegExp(escapeRegex(query), 'i');
-    const projectFilter = projectId ? { projectId } : {};
+    // An invalid id would otherwise surface as a Mongoose CastError (500).
+    if (projectId && !Types.ObjectId.isValid(projectId)) {
+      throw new BadRequestException('Invalid projectId');
+    }
+    // Without these checks the global search leaked titles/snippets of every
+    // project and customer to narrowed users and API keys.
+    assertProjectInScope(projectId);
+    // Merged into every model query (key `$and`, no collision with `$or`).
+    // Entities without an owner axis (e.g. global knowledge) stay visible.
+    const projectFilter: Record<string, unknown> = {
+      ...(projectId ? { projectId: new Types.ObjectId(projectId) } : {}),
+      ...scopeFilter(),
+    };
 
     const [todos, knowledge, changelogs, research, milestones] = await Promise.all([
       this.todoModel

@@ -12,6 +12,7 @@ import { projectIdFilter } from '../common/project-id-filter';
 import { GitProviderRegistry } from '../commits/providers/git-provider.registry';
 import { GitProvider, GitRepository } from '../commits/schemas/git-repository.schema';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerInScope, assertProjectInScope } from '../common/scope-guard';
 
 /**
  * MongoDB duplicate-key error (E11000). Narrowing instead of casting: the
@@ -67,6 +68,8 @@ export class ReleasesService implements OnApplicationBootstrap {
   }
 
   async create(dto: CreateReleaseDto): Promise<ReleaseDocument> {
+    // A narrowed actor must not create releases in a foreign project.
+    assertProjectInScope(dto.projectId);
     const release = await this.releaseModel.create(dto);
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: release.projectId.toString(),
@@ -84,6 +87,7 @@ export class ReleasesService implements OnApplicationBootstrap {
     limit?: number,
     offset?: number,
   ): Promise<ReleaseDocument[]> {
+    assertProjectInScope(projectId);
     const query: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (filters?.status) query.status = filters.status;
     if (filters?.platform) query.platform = filters.platform;
@@ -96,13 +100,21 @@ export class ReleasesService implements OnApplicationBootstrap {
       .exec();
   }
 
-  async findById(id: string): Promise<ReleaseDocument> {
+  /** Load + 404 + scope check — every by-id path goes through here before mutating. */
+  private async findScoped(id: string): Promise<ReleaseDocument> {
     const release = await this.releaseModel.findById(id).exec();
     if (!release) throw new NotFoundException(`Release ${id} not found`);
+    assertOwnerInScope({ projectId: release.projectId }, `Release ${id}`);
     return release;
   }
 
+  async findById(id: string): Promise<ReleaseDocument> {
+    return this.findScoped(id);
+  }
+
   async update(id: string, dto: UpdateReleaseDto): Promise<ReleaseDocument> {
+    // Check before findByIdAndUpdate — it would already have written.
+    await this.findScoped(id);
     const release = await this.releaseModel.findByIdAndUpdate(id, dto, { new: true }).exec();
     if (!release) throw new NotFoundException(`Release ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
@@ -116,6 +128,7 @@ export class ReleasesService implements OnApplicationBootstrap {
   }
 
   async remove(id: string): Promise<void> {
+    await this.findScoped(id);
     const result = await this.releaseModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException(`Release ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {
@@ -137,6 +150,9 @@ export class ReleasesService implements OnApplicationBootstrap {
   // =========================================================================
 
   async syncReleases(projectId: string, repoIndex?: number): Promise<{ synced: number; created: number; updated: number }> {
+    // The sync decrypts the project's repo token and writes releases into the
+    // project — never for a project outside the actor's scope.
+    assertProjectInScope(projectId);
     const project = await this.projectsService.findById(projectId);
     const projectObj = project.toObject();
     const repos: GitRepository[] = projectObj.gitRepositories || [];
@@ -162,8 +178,14 @@ export class ReleasesService implements OnApplicationBootstrap {
         throw new BadRequestException('No token configured for this repository');
       }
 
-      const secret = await this.secretsService.findById(repoConfig.tokenSecretId);
-      const token = secret.value;
+      // The token secret must belong to this project — same rule as
+      // CommitsService.getToken; a foreign tokenSecretId must never be
+      // decrypted and sent to a provider.
+      const token = await this.secretsService.findValueForOwner(
+        repoConfig.tokenSecretId,
+        { projectId },
+        `project ${projectId}`,
+      );
       const result = await this.fetchAndSyncReleases(projectId, repoConfig, token);
       totalCreated += result.created;
       totalUpdated += result.updated;

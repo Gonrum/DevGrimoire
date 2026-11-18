@@ -9,6 +9,7 @@ import { UpdateSchemaDto } from './dto/update-schema.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerInScope, assertProjectInScope } from '../common/scope-guard';
 
 @Injectable()
 export class SchemasService {
@@ -21,6 +22,8 @@ export class SchemasService {
   ) {}
 
   async create(dto: CreateSchemaDto): Promise<DbSchemaDocument> {
+    // A narrowed actor must not document schemas in a foreign project.
+    assertProjectInScope(dto.projectId);
     const entry = await this.dbSchemaModel.create({ ...dto, version: 1 });
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: entry.projectId.toString(),
@@ -37,21 +40,28 @@ export class SchemasService {
     dbType?: string,
     tags?: string[],
   ): Promise<DbSchemaDocument[]> {
+    assertProjectInScope(projectId);
     const filter: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (dbType) filter.dbType = dbType;
     if (tags?.length) filter.tags = { $all: tags };
     return this.dbSchemaModel.find(filter).sort({ name: 1 }).exec();
   }
 
-  async findById(id: string): Promise<DbSchemaDocument> {
+  /** Load + 404 + scope check — every by-id path (incl. versions) goes through here. */
+  private async findScoped(id: string): Promise<DbSchemaDocument> {
     const entry = await this.dbSchemaModel.findById(id).exec();
     if (!entry) throw new NotFoundException(`Schema ${id} not found`);
+    assertOwnerInScope({ projectId: entry.projectId }, `Schema ${id}`);
     return entry;
   }
 
+  async findById(id: string): Promise<DbSchemaDocument> {
+    return this.findScoped(id);
+  }
+
   async update(id: string, dto: UpdateSchemaDto): Promise<DbSchemaDocument> {
-    const current = await this.dbSchemaModel.findById(id).exec();
-    if (!current) throw new NotFoundException(`Schema ${id} not found`);
+    // Scope check before the update AND before the version snapshot is written.
+    const current = await this.findScoped(id);
 
     // Apply updates first, then snapshot with changeNote
     const { changeNote, ...updateData } = dto;
@@ -83,10 +93,12 @@ export class SchemasService {
   }
 
   async remove(id: string): Promise<void> {
-    const result = await this.dbSchemaModel.findByIdAndDelete(id).exec();
+    // Checked before the delete — the cascade would wipe a foreign history too.
+    const current = await this.findScoped(id);
+    const result = await this.dbSchemaModel.findByIdAndDelete(current._id).exec();
     if (!result) throw new NotFoundException(`Schema ${id} not found`);
     // Cascade delete all versions
-    await this.schemaVersionModel.deleteMany({ schemaId: id }).exec();
+    await this.schemaVersionModel.deleteMany({ schemaId: current._id }).exec();
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: result.projectId.toString(),
       entity: 'schema',
@@ -97,8 +109,11 @@ export class SchemasService {
   }
 
   async getVersions(schemaId: string): Promise<SchemaVersionDocument[]> {
+    // Versions carry no owner themselves — the parent schema decides the scope.
+    // Filtering by the loaded _id also keeps the raw param out of the query.
+    const parent = await this.findScoped(schemaId);
     return this.schemaVersionModel
-      .find({ schemaId })
+      .find({ schemaId: parent._id })
       .sort({ version: -1 })
       .exec();
   }
@@ -107,8 +122,9 @@ export class SchemasService {
     schemaId: string,
     version: number,
   ): Promise<SchemaVersionDocument> {
+    const parent = await this.findScoped(schemaId);
     const entry = await this.schemaVersionModel
-      .findOne({ schemaId, version })
+      .findOne({ schemaId: parent._id, version })
       .exec();
     if (!entry)
       throw new NotFoundException(

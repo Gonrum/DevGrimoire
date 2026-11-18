@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { GitProviderInterface, NormalizedCommit, FetchCommitsResult, GitBranch, CommitStats, NormalizedRelease, NormalizedReleaseAsset } from './git-provider.interface';
 import { GitRepository } from '../schemas/git-repository.schema';
-import { validateGitBaseUrl } from './url-validator';
+import { gitFetch, validateGitBaseUrl } from './url-validator';
 import {
   GitHubBranch,
   GitHubRelease,
@@ -62,7 +62,7 @@ export class GitHubProviderService implements GitProviderInterface {
       const url = `${baseUrl}/repos/${config.owner}/${config.repo}/commits?${params}`;
       const headers = this.getHeaders(token, page === 1 ? etag : undefined);
 
-      const response = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+      const response = await gitFetch(config, url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT) });
 
       if (response.status === 304) {
         return { commits: [], notModified: true, etag };
@@ -129,7 +129,7 @@ export class GitHubProviderService implements GitProviderInterface {
     validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
     const baseUrl = this.getBaseUrl(config);
     const url = `${baseUrl}/repos/${config.owner}/${config.repo}/commits/${sha}`;
-    const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    const response = await gitFetch(config, url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
     if (!response.ok) return {};
     const data = await readJsonObject<GitHubStyleCommit>(response);
     if (!data) return {};
@@ -144,7 +144,7 @@ export class GitHubProviderService implements GitProviderInterface {
     validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
     const baseUrl = this.getBaseUrl(config);
     const url = `${baseUrl}/repos/${config.owner}/${config.repo}/branches?per_page=100`;
-    const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    const response = await gitFetch(config, url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
     if (!response.ok) {
       throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
     }
@@ -168,7 +168,7 @@ export class GitHubProviderService implements GitProviderInterface {
       validateGitBaseUrl(config.baseUrl, config.allowPrivateHost);
       const baseUrl = this.getBaseUrl(config);
       const url = `${baseUrl}/repos/${config.owner}/${config.repo}`;
-      const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+      const response = await gitFetch(config, url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
       return response.ok;
     } catch {
       return false;
@@ -180,7 +180,7 @@ export class GitHubProviderService implements GitProviderInterface {
     const baseUrl = this.getBaseUrl(config);
     const url = `${baseUrl}/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/releases?per_page=100`;
 
-    const response = await fetch(url, {
+    const response = await gitFetch(config, url, {
       headers: this.getHeaders(token),
       signal: AbortSignal.timeout(FETCH_TIMEOUT),
     });

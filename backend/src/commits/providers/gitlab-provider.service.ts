@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { GitProviderInterface, NormalizedCommit, FetchCommitsResult, GitBranch, CommitStats, NormalizedRelease, NormalizedReleaseAsset } from './git-provider.interface';
 import { GitRepository } from '../schemas/git-repository.schema';
-import { validateGitBaseUrl } from './url-validator';
+import { gitFetch, validateGitBaseUrl } from './url-validator';
 import {
   GitLabBranch,
   GitLabCommit,
@@ -62,7 +62,7 @@ export class GitLabProviderService implements GitProviderInterface {
       }
 
       const url = `${baseUrl}/api/v4/projects/${projectPath}/repository/commits?${params}`;
-      const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+      const response = await gitFetch(config, url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
 
       if (response.status === 401 || response.status === 403) {
         throw new Error(`GitLab auth error: ${response.status}`);
@@ -123,7 +123,7 @@ export class GitLabProviderService implements GitProviderInterface {
     const projectPath = this.getProjectPath(config);
     // Fetch diff to get file count
     const diffUrl = `${baseUrl}/api/v4/projects/${projectPath}/repository/commits/${sha}/diff`;
-    const diffResp = await fetch(diffUrl, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    const diffResp = await gitFetch(config, diffUrl, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
     let changedFiles: number | undefined;
     if (diffResp.ok) {
       // Vom Diff brauchen wir nur die Anzahl der Einträge, keine Feldform.
@@ -132,7 +132,7 @@ export class GitLabProviderService implements GitProviderInterface {
     }
     // Fetch single commit for stats (additions/deletions)
     const commitUrl = `${baseUrl}/api/v4/projects/${projectPath}/repository/commits/${sha}?stats=true`;
-    const commitResp = await fetch(commitUrl, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    const commitResp = await gitFetch(config, commitUrl, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
     if (!commitResp.ok) return { changedFiles };
     const data = await readJsonObject<GitLabCommitDetail>(commitResp);
     if (!data) return { changedFiles };
@@ -148,7 +148,7 @@ export class GitLabProviderService implements GitProviderInterface {
     const baseUrl = this.getBaseUrl(config);
     const projectPath = this.getProjectPath(config);
     const url = `${baseUrl}/api/v4/projects/${projectPath}/repository/branches?per_page=100`;
-    const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    const response = await gitFetch(config, url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
     if (!response.ok) {
       throw new Error(`GitLab API error: ${response.status} ${response.statusText}`);
     }
@@ -173,7 +173,7 @@ export class GitLabProviderService implements GitProviderInterface {
       const baseUrl = this.getBaseUrl(config);
       const projectPath = this.getProjectPath(config);
       const url = `${baseUrl}/api/v4/projects/${projectPath}`;
-      const response = await fetch(url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+      const response = await gitFetch(config, url, { headers: this.getHeaders(token), signal: AbortSignal.timeout(FETCH_TIMEOUT) });
       return response.ok;
     } catch {
       return false;
@@ -186,7 +186,7 @@ export class GitLabProviderService implements GitProviderInterface {
     const projectPath = this.getProjectPath(config);
     const url = `${baseUrl}/api/v4/projects/${projectPath}/releases?per_page=100`;
 
-    const response = await fetch(url, {
+    const response = await gitFetch(config, url, {
       headers: this.getHeaders(token),
       signal: AbortSignal.timeout(FETCH_TIMEOUT),
     });

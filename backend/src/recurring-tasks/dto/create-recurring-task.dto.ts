@@ -116,7 +116,7 @@ export class CreateRecurringTaskDto {
   @Type(() => RecurringChatConfigDto)
   chat?: RecurringChatConfigDto;
 
-  @IsOptional()
-  @IsMongoId()
-  createdByUserId?: string;
+  // No `createdByUserId` here on purpose: the owner is always the calling
+  // actor. Accepting it from the body let a caller plant a chat task that
+  // posts into — and runs tools as — another user's chat.
 }

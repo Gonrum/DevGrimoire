@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, createHash, timingSafeEqual } from 'crypto';
 import { ApiKey, ApiKeyDocument } from './schemas/api-key.schema';
 import type { ScopeMode } from '../common/permissions';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { RequestContext } from '../common/request-context';
 
 interface ScopeFields {
   permissions?: string[];
@@ -42,6 +43,23 @@ export class ApiKeysService {
     @InjectModel(ApiKey.name) private apiKeyModel: Model<ApiKeyDocument>,
     private readonly auditLog: AuditLogService,
   ) {}
+
+  /**
+   * Key management (create/update/revoke) requires a user session (JWT).
+   *
+   * Without this a narrowed API key could escalate itself: create a fresh key
+   * with the default all/all scope and no tool allowlist (effective scope =
+   * the owner's full scope, admin role included), widen itself via update
+   * (`projectScopeMode: 'all'`, `allowedTools: null`), or revoke the owner's
+   * other keys. API-key actors carry `apiKeyId` (see `actorFromApiKey`).
+   * No actor = trusted internal caller, passes.
+   */
+  private assertUserSession(action: string): void {
+    const actor = RequestContext.getUser();
+    if (actor?.apiKeyId) {
+      throw new ForbiddenException(`${action} requires a user login; API keys cannot manage API keys`);
+    }
+  }
 
   private hashKey(plainKey: string): string {
     return createHash('sha256').update(plainKey).digest('hex');
@@ -118,6 +136,7 @@ export class ApiKeysService {
     expiresAt?: Date,
     scope?: ScopeFields & { allowedTools?: string[] },
   ): Promise<{ key: string; apiKey: ApiKeyDocument }> {
+    this.assertUserSession('Creating an API key');
     const raw = randomBytes(32).toString('hex');
     const plainKey = `cv_${raw}`;
     const keyHash = this.hashKey(plainKey);
@@ -155,6 +174,18 @@ export class ApiKeysService {
     });
 
     return { key: plainKey, apiKey };
+  }
+
+  /**
+   * Whether `plainKey` is the key behind `apiKey` (constant-time hash compare,
+   * no DB access). Used by MCP `/messages` to make sure a request that presents
+   * a key presents the SAME key its SSE session was opened with.
+   */
+  isSameKey(plainKey: string, apiKey: { keyHash?: string }): boolean {
+    if (!apiKey.keyHash) return false;
+    const a = Buffer.from(this.hashKey(plainKey), 'hex');
+    const b = Buffer.from(apiKey.keyHash, 'hex');
+    return a.length === b.length && timingSafeEqual(a, b);
   }
 
   async validate(plainKey: string): Promise<ApiKeyDocument | null> {
@@ -273,6 +304,8 @@ export class ApiKeysService {
     userId: string,
     updateData: { name?: string; allowedTools?: string[] | null } & ScopeFields,
   ): Promise<ApiKeyDocument> {
+    this.assertUserSession('Updating an API key');
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException(`API Key ${id} not found`);
     const patch: Record<string, unknown> = {};
     const unset: Record<string, unknown> = {};
 
@@ -325,6 +358,8 @@ export class ApiKeysService {
   }
 
   async revoke(keyId: string, userId: string): Promise<void> {
+    this.assertUserSession('Revoking an API key');
+    if (!Types.ObjectId.isValid(keyId)) throw new NotFoundException(`API Key ${keyId} not found`);
     const result = await this.apiKeyModel.findOneAndDelete({
       _id: keyId,
       userId,

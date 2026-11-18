@@ -27,6 +27,32 @@ import { KnowledgeDocument } from '../knowledge/schemas/knowledge.schema';
 import { AuthService } from '../auth/auth.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
+import {
+  assertCustomerInScope,
+  assertOwnerInScope,
+  assertOwnerParamsInScope,
+  assertProjectInScope,
+  scopeFilter,
+} from '../common/scope-guard';
+
+/** Reject non-ObjectId strings before they reach a Mongo filter or cast. */
+function assertOptionalObjectId(value: string | undefined, field: string): void {
+  if (value !== undefined && value !== '' && !Types.ObjectId.isValid(value)) {
+    throw new BadRequestException(`Invalid ${field}: ${value}`);
+  }
+}
+
+/**
+ * Append the actor's scope clause to a question query. `scopeFilter()` returns
+ * an `$and` clause, so it is appended instead of assigned to keep existing
+ * `$and` conditions (findPending uses one for the expiry window).
+ */
+function withScope(q: FilterQuery<QuestionDocument>): FilterQuery<QuestionDocument> {
+  const scope = scopeFilter();
+  if (Object.keys(scope).length === 0) return q;
+  q.$and = [...(Array.isArray(q.$and) ? q.$and : []), scope];
+  return q;
+}
 
 export const QUESTION_CREATED = 'question.created';
 export const QUESTION_ANSWERED = 'question.answered';
@@ -116,11 +142,34 @@ export class QuestionsService implements OnModuleInit {
   ): Promise<QuestionDocument> {
     const direction: QuestionDirection = dto.direction ?? 'agent_to_user';
 
-    let projectId = dto.projectId;
-    if (dto.todoId && !projectId) {
-      const todo = await this.todosService.findById(dto.todoId);
-      projectId = todo.projectId?.toString();
+    for (const field of [
+      'todoId',
+      'projectId',
+      'customerId',
+      'researchSessionId',
+      'chatSessionId',
+      'milestoneId',
+      'targetUserId',
+    ] as const) {
+      assertOptionalObjectId(dto[field], field);
     }
+
+    let projectId = dto.projectId;
+    let customerId = dto.customerId;
+    if (dto.todoId) {
+      // TodosService.findById is scope-checked: a narrowed actor cannot attach
+      // a question (and thereby a comment + notification) to a foreign todo.
+      const todo = await this.todosService.findById(dto.todoId);
+      const todoProjectId = todo.projectId?.toString();
+      if (projectId && todoProjectId && projectId !== todoProjectId) {
+        throw new BadRequestException(`Todo ${dto.todoId} does not belong to project ${projectId}`);
+      }
+      if (!projectId) projectId = todoProjectId;
+      if (!customerId) customerId = todo.customerId?.toString();
+    }
+    // The owner decides who may see and answer the question — a narrowed actor
+    // must not create questions in projects/customers outside its scope.
+    assertOwnerParamsInScope({ projectId, customerId });
 
     const isAgentAsking = direction === 'agent_to_user';
     const timeoutMs = isAgentAsking ? (dto.timeoutSeconds || 300) * 1000 : 0;
@@ -135,7 +184,7 @@ export class QuestionsService implements OnModuleInit {
         targetRole: dto.targetRole,
         broadcast: dto.broadcast,
         projectId,
-        customerId: dto.customerId,
+        customerId,
       });
       // T-461: Eine leere Zielliste heisst in answer()/findPending()
       // „Altbestand bzw. implizite Broadcast — jeder darf". Für eine gezielt
@@ -157,7 +206,7 @@ export class QuestionsService implements OnModuleInit {
       context: dto.context,
       todoId: dto.todoId ? new Types.ObjectId(dto.todoId) : undefined,
       projectId: projectId ? new Types.ObjectId(projectId) : undefined,
-      customerId: dto.customerId ? new Types.ObjectId(dto.customerId) : undefined,
+      customerId: customerId ? new Types.ObjectId(customerId) : undefined,
       researchSessionId: dto.researchSessionId ? new Types.ObjectId(dto.researchSessionId) : undefined,
       chatSessionId: dto.chatSessionId ? new Types.ObjectId(dto.chatSessionId) : undefined,
       milestoneId: dto.milestoneId ? new Types.ObjectId(dto.milestoneId) : undefined,
@@ -241,8 +290,10 @@ export class QuestionsService implements OnModuleInit {
     answer: string,
     options: { userId?: string; byAgent?: boolean } = {},
   ): Promise<QuestionDocument> {
-    const entry = await this.questionModel.findById(id).exec();
-    if (!entry) throw new NotFoundException(`Question ${id} not found`);
+    // Scope first: legacy questions without resolved targets (and every
+    // user_to_agent question) are answerable by anyone who can reach them, so
+    // without this a narrowed actor could steer agents in foreign projects.
+    const entry = await this.findScoped(id);
 
     if (options.byAgent && entry.direction !== 'user_to_agent') {
       // Agents may only answer follow-up questions the user asked them.
@@ -351,10 +402,20 @@ export class QuestionsService implements OnModuleInit {
     return entry;
   }
 
-  async findById(id: string): Promise<QuestionDocument> {
+  /**
+   * Load + 404 + scope check on both axes. Every by-id path (get, answer,
+   * cancel, snooze, convert, follow-up todo, decision) goes through here.
+   */
+  private async findScoped(id: string): Promise<QuestionDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException(`Question ${id} not found`);
     const entry = await this.questionModel.findById(id).exec();
     if (!entry) throw new NotFoundException(`Question ${id} not found`);
+    assertOwnerInScope({ projectId: entry.projectId, customerId: entry.customerId }, `Question ${id}`);
     return entry;
+  }
+
+  async findById(id: string): Promise<QuestionDocument> {
+    return this.findScoped(id);
   }
 
   /**
@@ -370,6 +431,7 @@ export class QuestionsService implements OnModuleInit {
     const filter: FilterQuery<QuestionDocument> = { status: 'pending' };
     if (direction) filter.direction = direction;
     if (userId) {
+      assertOptionalObjectId(userId, 'userId');
       filter.$or = [
         { resolvedTargetUserIds: new Types.ObjectId(userId) },
         { resolvedTargetUserIds: { $size: 0 } },
@@ -383,6 +445,9 @@ export class QuestionsService implements OnModuleInit {
       ...(Array.isArray(filter.$and) ? filter.$and : []),
       { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: now } }] },
     ];
+    // Untargeted legacy/broadcast questions are visible to every user — but
+    // only within the user's project/customer scope.
+    withScope(filter);
     return this.questionModel.find(filter).sort({ createdAt: -1 }).exec();
   }
 
@@ -402,9 +467,15 @@ export class QuestionsService implements OnModuleInit {
     const q: FilterQuery<QuestionDocument> = filter.includeAnswered
       ? {}
       : { status: { $in: ['pending', 'expired'] } };
+    assertOptionalObjectId(filter.projectId, 'projectId');
+    assertOptionalObjectId(filter.todoId, 'todoId');
+    assertProjectInScope(filter.projectId);
     if (filter.projectId) q.projectId = new Types.ObjectId(filter.projectId);
     if (filter.direction) q.direction = filter.direction;
     if (filter.todoId) q.todoId = new Types.ObjectId(filter.todoId);
+    // Always narrow to the actor's scope — also with a projectId, because a
+    // project question may additionally carry a customer outside the scope.
+    withScope(q);
 
     const limit = Math.max(1, Math.min(filter.limit ?? 100, 500));
     const offset = Math.max(0, filter.offset ?? 0);
@@ -440,6 +511,24 @@ export class QuestionsService implements OnModuleInit {
     offset?: number;
   } = {}): Promise<{ items: QuestionDocument[]; total: number }> {
     const q: FilterQuery<QuestionDocument> = {};
+
+    for (const field of [
+      'projectId',
+      'customerId',
+      'todoId',
+      'milestoneId',
+      'researchSessionId',
+      'chatSessionId',
+      'targetUserId',
+      'createdByUserId',
+    ] as const) {
+      assertOptionalObjectId(filter[field], field);
+    }
+    assertProjectInScope(filter.projectId);
+    assertCustomerInScope(filter.customerId);
+    // The full-text search used to run instance-wide; restrict it to the
+    // actor's scope on both axes.
+    withScope(q);
 
     if (filter.statuses && filter.statuses.length > 0) {
       q.status = { $in: filter.statuses };
@@ -494,8 +583,10 @@ export class QuestionsService implements OnModuleInit {
       .map((id) => new Types.ObjectId(id));
     if (objectIds.length === 0) return {};
 
+    // Foreign todos simply yield no counts — the aggregate must not reveal
+    // question activity outside the actor's scope.
     const docs = await this.questionModel
-      .find({ todoId: { $in: objectIds }, status: { $in: ['pending', 'expired'] } })
+      .find(withScope({ todoId: { $in: objectIds }, status: { $in: ['pending', 'expired'] } }))
       .lean()
       .exec();
 
@@ -574,6 +665,7 @@ export class QuestionsService implements OnModuleInit {
     if (!includeAnswered) {
       filter.status = { $in: ['pending', 'expired'] };
     }
+    withScope(filter);
     return this.questionModel.find(filter).sort({ createdAt: -1 }).exec();
   }
 
@@ -627,8 +719,7 @@ export class QuestionsService implements OnModuleInit {
     questionId: string,
     dto: ConvertToKnowledgeDto,
   ): Promise<KnowledgeDocument> {
-    const question = await this.questionModel.findById(questionId).exec();
-    if (!question) throw new NotFoundException(`Question ${questionId} not found`);
+    const question = await this.findScoped(questionId);
 
     if (question.status !== 'answered') {
       throw new BadRequestException(
@@ -681,8 +772,7 @@ export class QuestionsService implements OnModuleInit {
     questionId: string,
     overrides: { title?: string; description?: string; priority?: 'low' | 'medium' | 'high' | 'critical' } = {},
   ): Promise<{ todoId: string; question: QuestionDocument }> {
-    const entry = await this.questionModel.findById(questionId).exec();
-    if (!entry) throw new NotFoundException(`Question ${questionId} not found`);
+    const entry = await this.findScoped(questionId);
     if (entry.status !== 'answered') {
       throw new BadRequestException('Question must be answered before deriving a follow-up todo');
     }
@@ -742,8 +832,7 @@ export class QuestionsService implements OnModuleInit {
       throw new BadRequestException('decision is required');
     }
 
-    const entry = await this.questionModel.findById(questionId).exec();
-    if (!entry) throw new NotFoundException(`Question ${questionId} not found`);
+    const entry = await this.findScoped(questionId);
     if (entry.status !== 'answered') {
       throw new BadRequestException('Question must be answered before being marked as a decision');
     }
@@ -803,8 +892,7 @@ export class QuestionsService implements OnModuleInit {
    * escalation scheduler.
    */
   async cancel(id: string, reason?: string, userId?: string): Promise<QuestionDocument> {
-    const entry = await this.questionModel.findById(id).exec();
-    if (!entry) throw new NotFoundException(`Question ${id} not found`);
+    const entry = await this.findScoped(id);
     if (entry.status === 'answered') {
       throw new BadRequestException('Cannot cancel an already-answered question');
     }
@@ -831,8 +919,7 @@ export class QuestionsService implements OnModuleInit {
     if (!until || isNaN(until.getTime()) || until.getTime() <= Date.now()) {
       throw new BadRequestException('snoozeUntil must be a future date');
     }
-    const entry = await this.questionModel.findById(id).exec();
-    if (!entry) throw new NotFoundException(`Question ${id} not found`);
+    const entry = await this.findScoped(id);
     if (entry.status !== 'pending' && entry.status !== 'expired') {
       throw new BadRequestException(`Cannot snooze a question in status ${entry.status}`);
     }
@@ -858,8 +945,7 @@ export class QuestionsService implements OnModuleInit {
     if (!Types.ObjectId.isValid(supersededByQuestionId)) {
       throw new BadRequestException('Invalid supersededByQuestionId');
     }
-    const entry = await this.questionModel.findById(id).exec();
-    if (!entry) throw new NotFoundException(`Question ${id} not found`);
+    const entry = await this.findScoped(id);
     entry.status = 'superseded';
     entry.supersededByQuestionId = new Types.ObjectId(supersededByQuestionId);
     entry.closeReason = reason;

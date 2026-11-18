@@ -7,6 +7,14 @@ import { UpdateStackDto } from './dto/update-stack.dto';
 import { CreateStackEntryDto } from './dto/create-stack-entry.dto';
 import { UpdateStackEntryDto } from './dto/update-stack-entry.dto';
 import { stackToMarkdown, entryToMarkdown, slugifyFilename } from './stack-markdown';
+import { assertAdmin } from '../common/scope-guard';
+
+/*
+ * Stacks are instance-wide (no owner), so any write changes what every user
+ * sees. Writes require the admin role here in the service — the controller
+ * `@Roles` decorator does not cover the MCP `stack_*` tools. Reads stay open.
+ */
+const WRITE = 'Changing stacks';
 
 
 @Injectable()
@@ -25,6 +33,7 @@ export class StacksService {
   }
 
   async create(dto: CreateStackDto): Promise<StackDocument> {
+    assertAdmin(WRITE);
     return this.stackModel.create({
       name: dto.name,
       description: dto.description,
@@ -51,17 +60,20 @@ export class StacksService {
   }
 
   async update(id: string, dto: UpdateStackDto): Promise<StackDocument> {
+    assertAdmin(WRITE);
     const stack = await this.stackModel.findByIdAndUpdate(id, dto, { new: true }).exec();
     if (!stack) throw new NotFoundException('Stack not found');
     return this.sorted(stack);
   }
 
   async remove(id: string): Promise<void> {
+    assertAdmin(WRITE);
     const res = await this.stackModel.findByIdAndDelete(id).exec();
     if (!res) throw new NotFoundException('Stack not found');
   }
 
   async addEntry(id: string, dto: CreateStackEntryDto): Promise<StackDocument> {
+    assertAdmin(WRITE);
     const stack = await this.stackModel.findById(id).exec();
     if (!stack) throw new NotFoundException('Stack not found');
     const entries = this.entriesOf(stack);
@@ -72,6 +84,7 @@ export class StacksService {
   }
 
   async updateEntry(id: string, entryId: string, dto: UpdateStackEntryDto): Promise<StackDocument> {
+    assertAdmin(WRITE);
     const stack = await this.stackModel.findById(id).exec();
     if (!stack) throw new NotFoundException('Stack not found');
     const entry = this.entriesOf(stack).id(entryId);
@@ -84,6 +97,7 @@ export class StacksService {
   }
 
   async removeEntry(id: string, entryId: string): Promise<StackDocument> {
+    assertAdmin(WRITE);
     const stack = await this.stackModel.findById(id).exec();
     if (!stack) throw new NotFoundException('Stack not found');
     const entries = this.entriesOf(stack);
@@ -95,6 +109,7 @@ export class StacksService {
   }
 
   async reorderEntries(id: string, entryIds: string[]): Promise<StackDocument> {
+    assertAdmin(WRITE);
     const stack = await this.stackModel.findById(id).exec();
     if (!stack) throw new NotFoundException('Stack not found');
     const entries = this.entriesOf(stack);

@@ -1,4 +1,12 @@
-import { BadRequestException, forwardRef, Inject, Injectable, NotFoundException, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  forwardRef,
+  Inject,
+  Injectable,
+  NotFoundException,
+  Logger,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types, isValidObjectId } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -20,7 +28,17 @@ import { WorkflowAgentService } from '../workflows/workflow-agent.service';
 import { redactValue } from '../workflows/workflow-redaction';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
-import { RequestContext } from '../common/request-context';
+import { RequestContext, RequestUser } from '../common/request-context';
+import { actorFromUser } from '../common/actor-scope';
+import { User, UserDocument } from '../auth/schemas/user.schema';
+import {
+  assertAdmin,
+  assertCustomerInScope,
+  assertOwnerInScope,
+  assertOwnerParamsInScope,
+  assertProjectInScope,
+  scopeFilter,
+} from '../common/scope-guard';
 import { errorMessage } from '../common/narrow';
 import { assertSafeCascadeId } from '../common/cascade-guard';
 
@@ -57,6 +75,7 @@ export class RecurringTasksService {
 
   constructor(
     @InjectModel(RecurringTask.name) private recurringTaskModel: Model<RecurringTaskDocument>,
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
     private readonly todosService: TodosService,
     private readonly notificationsService: NotificationsService,
     private readonly customersService: CustomersService,
@@ -81,6 +100,19 @@ export class RecurringTasksService {
     if (dto.projectId && dto.customerId) {
       throw new BadRequestException('Recurring task can have either projectId or customerId, not both');
     }
+    if (dto.projectId && !isValidObjectId(dto.projectId)) {
+      throw new BadRequestException(`Invalid projectId: ${dto.projectId}`);
+    }
+    if (dto.customerId && !isValidObjectId(dto.customerId)) {
+      throw new BadRequestException(`Invalid customerId: ${dto.customerId}`);
+    }
+    // The task later creates todos / chat runs in its owner — a narrowed actor
+    // must not schedule work into foreign projects or customers.
+    assertOwnerParamsInScope({ projectId: dto.projectId, customerId: dto.customerId });
+    if (!dto.projectId && !dto.customerId) {
+      // System tasks broadcast a notification to every user.
+      assertAdmin('System recurring task');
+    }
     if (dto.customerId) {
       await this.customersService.findById(dto.customerId);
     }
@@ -88,10 +120,10 @@ export class RecurringTasksService {
     if (action === RecurringAction.CHAT) {
       this.assertChatConfig(dto);
     }
-    // Chat actions need an owning user — the chat session is per-user. Prefer
-    // the explicit DTO field, fall back to the request context.
-    const requestUserId = RequestContext.getUser()?.userId;
-    const ownerUserId = dto.createdByUserId ?? requestUserId;
+    // The owner is always the calling actor (never a body field): the
+    // scheduler runs the task with this user's scope and, for chat actions,
+    // in this user's chat sessions.
+    const ownerUserId = RequestContext.getUser()?.userId;
     const createdByUserId =
       ownerUserId && isValidObjectId(ownerUserId) ? new Types.ObjectId(ownerUserId) : undefined;
     if (action === RecurringAction.CHAT && !createdByUserId) {
@@ -125,6 +157,17 @@ export class RecurringTasksService {
 
   async findAll(filters?: { projectId?: string; customerId?: string; systemOnly?: boolean; active?: boolean }): Promise<RecurringTaskDocument[]> {
     const query: Record<string, unknown> = {};
+    if (filters?.projectId && !isValidObjectId(filters.projectId)) {
+      throw new BadRequestException(`Invalid projectId: ${filters.projectId}`);
+    }
+    if (filters?.customerId && !isValidObjectId(filters.customerId)) {
+      throw new BadRequestException(`Invalid customerId: ${filters.customerId}`);
+    }
+    assertProjectInScope(filters?.projectId);
+    assertCustomerInScope(filters?.customerId);
+    // Never list every task of the instance for a narrowed actor; tasks
+    // without an owner axis (system tasks) stay visible.
+    Object.assign(query, scopeFilter());
     if (filters?.projectId) query.projectId = projectIdFilter(filters.projectId);
     if (filters?.customerId) query.customerId = projectIdFilter(filters.customerId);
     if (filters?.systemOnly) {
@@ -143,15 +186,44 @@ export class RecurringTasksService {
     return this.findAll({ customerId, active });
   }
 
-  async findById(id: string): Promise<RecurringTaskDocument> {
+  /**
+   * Load + 404 + scope check. Every by-id path (get, update, delete, trigger)
+   * goes through here before anything is mutated or executed.
+   */
+  private async findScoped(id: string): Promise<RecurringTaskDocument> {
+    if (!isValidObjectId(id)) throw new NotFoundException(`RecurringTask ${id} not found`);
     const task = await this.recurringTaskModel.findById(id).exec();
     if (!task) throw new NotFoundException(`RecurringTask ${id} not found`);
+    assertOwnerInScope({ projectId: task.projectId, customerId: task.customerId }, `RecurringTask ${id}`);
     return task;
+  }
+
+  /**
+   * Mutations (update, delete, trigger) on top of the scope check:
+   * - system tasks (no project/customer) notify every user → admin only;
+   * - chat tasks run as their owner, so only the owner (or an admin) may
+   *   change or fire them — otherwise a co-worker in the same project could
+   *   rewrite the prompt/tool allowlist and have it executed with the owner's
+   *   (possibly broader) scope.
+   */
+  private assertMayMutate(task: RecurringTaskDocument, nextAction?: RecurringAction): void {
+    if (!task.projectId && !task.customerId) assertAdmin('System recurring task');
+    const action = nextAction ?? task.action ?? RecurringAction.TODO;
+    const actor = RequestContext.getUser();
+    if (!actor || actor.role === 'admin') return;
+    if (action === RecurringAction.CHAT && task.createdByUserId?.toString() !== actor.userId) {
+      throw new ForbiddenException(`RecurringTask ${task._id.toString()} is a chat task of another user`);
+    }
+  }
+
+  async findById(id: string): Promise<RecurringTaskDocument> {
+    return this.findScoped(id);
   }
 
   async update(id: string, dto: UpdateRecurringTaskDto): Promise<RecurringTaskDocument> {
     // If frequency or scheduling fields changed, recompute nextRun
-    const existing = await this.findById(id);
+    const existing = await this.findScoped(id);
+    this.assertMayMutate(existing, dto.action);
     const frequency = dto.frequency ?? existing.frequency;
     const hour = dto.hour ?? existing.hour;
     const dayOfWeek = dto.dayOfWeek !== undefined ? dto.dayOfWeek : existing.dayOfWeek;
@@ -184,6 +256,11 @@ export class RecurringTasksService {
   }
 
   async remove(id: string): Promise<void> {
+    // Check BEFORE deleting — findByIdAndDelete would already have removed it.
+    const existing = await this.findScoped(id);
+    // Same rule as update/trigger: covers system tasks (admin) and another
+    // user's chat task, which a project colleague must not delete either.
+    this.assertMayMutate(existing);
     const result = await this.recurringTaskModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException(`RecurringTask ${id} not found`);
     this.emit('deleted', result);
@@ -200,7 +277,8 @@ export class RecurringTasksService {
   }
 
   async trigger(id: string): Promise<RecurringTaskDocument> {
-    const task = await this.findById(id);
+    const task = await this.findScoped(id);
+    this.assertMayMutate(task);
     await this.executeTask(task);
     // Vorher `… .exec() as Promise<RecurringTaskDocument>`: die Behauptung hat
     // das `null` weggelogen, das `findById` sehr wohl liefern kann — etwa wenn
@@ -279,12 +357,42 @@ export class RecurringTasksService {
     return count;
   }
 
+  /**
+   * Actor under which a task runs: its owning user. The scheduler has no
+   * request context, and without an actor every `if (actor)` scope check in
+   * TodosService, chat tools etc. is skipped — a task would act with
+   * unrestricted rights. Returns `undefined` only for legacy owner-less todo
+   * tasks (they could only be created by internal callers). Throws when the
+   * owner is required but missing or inactive, so the run is skipped and the
+   * reason lands in `lastRunError`.
+   */
+  private async resolveOwnerActor(task: RecurringTaskDocument): Promise<RequestUser | undefined> {
+    const isChat = (task.action ?? RecurringAction.TODO) === RecurringAction.CHAT;
+    if (!task.createdByUserId) {
+      if (isChat) throw new Error('chat action missing owning user');
+      return undefined;
+    }
+    const owner = await this.userModel.findById(task.createdByUserId).exec();
+    if (!owner || !owner.active) {
+      throw new Error('owning user is missing or inactive — task skipped');
+    }
+    return actorFromUser(owner);
+  }
+
   private async executeTask(task: RecurringTaskDocument): Promise<void> {
     try {
-      if ((task.action ?? RecurringAction.TODO) === RecurringAction.CHAT) {
-        await this.executeChatAction(task);
+      const actor = await this.resolveOwnerActor(task);
+      const run = async (): Promise<void> => {
+        if ((task.action ?? RecurringAction.TODO) === RecurringAction.CHAT) {
+          await this.executeChatAction(task);
+        } else {
+          await this.executeTodoAction(task);
+        }
+      };
+      if (actor) {
+        await RequestContext.run(actor, undefined, run);
       } else {
-        await this.executeTodoAction(task);
+        await run();
       }
       await this.recurringTaskModel
         .findByIdAndUpdate(task._id, {
@@ -327,15 +435,29 @@ export class RecurringTasksService {
 
   private async executeTodoAction(task: RecurringTaskDocument): Promise<void> {
     if (task.projectId) {
-      const todo = await this.todosService.create({
+      const base = {
         projectId: task.projectId.toString(),
         title: task.title,
         description: task.description,
         priority: this.todoPriority(task.priority),
         tags: [...task.tags],
-        milestoneId: task.milestoneId?.toString(),
         repoLabel: task.repoLabel,
-      });
+      };
+      const milestoneId = task.milestoneId?.toString();
+      let todo;
+      try {
+        todo = await this.todosService.create({ ...base, milestoneId });
+      } catch (err: unknown) {
+        // TodosService now rejects a milestone outside the todo's project —
+        // which includes one deleted since the task was configured. Losing
+        // the milestone link is better than the task silently producing
+        // nothing on every run; any other error still propagates.
+        if (!milestoneId || !(err instanceof BadRequestException) || !/Milestone/.test(errorMessage(err))) throw err;
+        this.logger.warn(
+          `Recurring task ${task._id.toString()}: milestone ${milestoneId} is no longer valid — todo created without it`,
+        );
+        todo = await this.todosService.create(base);
+      }
       await this.recurringTaskModel.findByIdAndUpdate(task._id, {
         $push: { createdTodoIds: todo._id },
       }).exec();
@@ -401,8 +523,9 @@ export class RecurringTasksService {
     );
 
     // Run the workflow agent (handles tools allowlist, anthropic/openai split,
-    // timeout, tool-iteration cap). The recurring-task scheduler runs outside
-    // any request context, so we pass scope explicitly.
+    // timeout, tool-iteration cap). executeTask runs this inside the owner's
+    // RequestContext, so tool calls are scope-checked as that user; the
+    // explicit callerScope additionally pins the run to the task's owner.
     const result = await this.workflowAgent.run({
       prompt: chat.prompt,
       systemPrompt: chat.systemPrompt,

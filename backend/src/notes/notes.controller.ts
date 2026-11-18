@@ -105,10 +105,10 @@ export class NotesController {
       if (!res.writableEnded) res.write(': ping\n\n');
     }, 15000);
 
-    // Am `res`, nicht am `req`: dessen 'close' feuert bei einem POST schon,
-    // sobald der Body gelesen ist — der frühere Listener sah es nie, und eine
-    // abgebrochene Analyse lief mit dem LLM bis zum Ende weiter.
-    // `writableFinished` trennt den Verbindungsabbruch vom eigenen res.end().
+    // On `res`, not `req`: for a POST the request's 'close' already fires
+    // once the body has been read — the former listener never saw it, and an
+    // aborted analysis kept running against the LLM to the end.
+    // `writableFinished` tells a dropped connection apart from our own res.end().
     const abort = new AbortController();
     res.on('close', () => { if (!res.writableFinished) abort.abort(); });
 

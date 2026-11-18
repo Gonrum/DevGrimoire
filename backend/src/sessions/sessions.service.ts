@@ -7,6 +7,7 @@ import { CreateSessionDto } from './dto/create-session.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerInScope, assertProjectInScope } from '../common/scope-guard';
 
 @Injectable()
 export class SessionsService {
@@ -16,6 +17,8 @@ export class SessionsService {
   ) {}
 
   async create(dto: CreateSessionDto): Promise<SessionDocument> {
+    // Sessions feed the next agent's context — no writing into foreign projects.
+    assertProjectInScope(dto.projectId);
     const session = await this.sessionModel.create(dto);
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: session.projectId.toString(),
@@ -31,6 +34,7 @@ export class SessionsService {
     projectId: string,
     limit = 10,
   ): Promise<SessionDocument[]> {
+    assertProjectInScope(projectId);
     return this.sessionModel
       .find({ projectId: projectIdFilter(projectId) })
       .sort({ createdAt: -1 })
@@ -39,6 +43,7 @@ export class SessionsService {
   }
 
   async findLatest(projectId: string): Promise<SessionDocument | null> {
+    assertProjectInScope(projectId);
     return this.sessionModel
       .findOne({ projectId: projectIdFilter(projectId) })
       .sort({ createdAt: -1 })
@@ -48,6 +53,8 @@ export class SessionsService {
   async findById(id: string): Promise<SessionDocument> {
     const session = await this.sessionModel.findById(id).exec();
     if (!session) throw new NotFoundException(`Session ${id} not found`);
+    // Sessions are project-bound and have no owner user — the project decides.
+    assertOwnerInScope({ projectId: session.projectId }, `Session ${id}`);
     return session;
   }
 

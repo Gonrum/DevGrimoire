@@ -18,6 +18,8 @@ import { Research, ResearchDocument } from '../research/schemas/research.schema'
 import { RecurringTask, RecurringTaskDocument } from '../recurring-tasks/schemas/recurring-task.schema';
 import { asString, idToString, isUnknownArray, PlainDoc } from '../common/tool-args';
 import { CustomerExport, CustomerImportResult } from './customer-export.interface';
+import { assertUnrestrictedScope, scopeFilter } from '../common/scope-guard';
+import { RequestContext } from '../common/request-context';
 
 const STRIP_BASE = ['__v'];
 const STRIP_OWNER = ['customerId', 'projectId'];
@@ -26,6 +28,42 @@ const STRIP_OWNER = ['customerId', 'projectId'];
 type SectionName = keyof CustomerImportResult['imported'];
 
 const CUSTOMER_STATUSES = Object.values(CustomerStatus);
+
+/*
+ * Per-section import allowlists. Only content fields — never owner fields
+ * (projectId, customerId, scope), ownership/user references (ownedBy*,
+ * createdByUserId, ownerUserId) or references to other entities, which would
+ * point into data the importing actor may not control. Nested subdocuments
+ * (comments, variables, acceptanceCriteria …) are cleaned by their Mongoose
+ * sub-schemas in strict mode.
+ */
+const CONTACT_FIELDS = ['name', 'role', 'email', 'phone', 'notes', 'isPrimary', 'sortOrder'] as const;
+const KNOWLEDGE_FIELDS = ['topic', 'content', 'tags', 'category', 'sensitivity'] as const;
+const TODO_FIELDS = [
+  'title', 'description', 'status', 'priority', 'tags', 'comments', 'repoLabel', 'archived',
+  'userStories', 'acceptanceCriteria', 'outOfScope', 'edgeCases',
+] as const;
+const ENV_FIELDS = ['name', 'description', 'host', 'port', 'user', 'url', 'variables', 'active'] as const;
+const SECRET_FIELDS = ['key', 'encryptedValue', 'description', 'type'] as const;
+const RESEARCH_FIELDS = [
+  'title', 'content', 'sources', 'tags', 'sensitivity', 'focus', 'depth', 'files', 'tasks',
+  'followUps', 'sourceList', 'model', 'roundsDone', 'totalMs', 'startedAt', 'finishedAt',
+] as const;
+const RECURRING_FIELDS = [
+  'title', 'description', 'priority', 'tags', 'repoLabel', 'frequency', 'dayOfWeek', 'dayOfMonth',
+  'month', 'hour', 'active', 'nextRun', 'maxCatchUp', 'action', 'chat',
+] as const;
+
+/** Copies only the allowlisted fields that are present in the source. */
+function pickFields(src: PlainDoc, fields: readonly string[]): PlainDoc {
+  const out: PlainDoc = {};
+  for (const field of fields) {
+    if (Object.prototype.hasOwnProperty.call(src, field) && src[field] !== undefined) {
+      out[field] = src[field];
+    }
+  }
+  return out;
+}
 
 /**
  * Objekt mit String-Keys. Als Prädikat statt als Behauptung: `unknown` zu
@@ -169,16 +207,20 @@ export class CustomerTransferService {
     }
     const customer = await this.customersService.findById(customerId);
     const cid = new Types.ObjectId(customerId);
+    // Relation documents (customerId + projectId) of projects outside the
+    // actor's scope must not leak through the customer export. The customer
+    // axis is already checked by findById; entities without projectId stay.
+    const owned = (): Record<string, unknown> => Object.assign({ customerId: cid }, scopeFilter());
 
     const [contacts, knowledge, todos, environments, secrets, research, recurringTasks] =
       await Promise.all([
-        this.contactModel.find({ customerId: cid }).lean().exec(),
-        this.knowledgeModel.find({ customerId: cid }).lean().exec(),
-        this.todoModel.find({ customerId: cid }).lean().exec(),
-        this.environmentModel.find({ customerId: cid }).lean().exec(),
-        this.secretModel.find({ customerId: cid }).lean().exec(),
-        this.researchModel.find({ customerId: cid }).lean().exec(),
-        this.recurringTaskModel.find({ customerId: cid }).lean().exec(),
+        this.contactModel.find(owned()).lean().exec(),
+        this.knowledgeModel.find(owned()).lean().exec(),
+        this.todoModel.find(owned()).lean().exec(),
+        this.environmentModel.find(owned()).lean().exec(),
+        this.secretModel.find(owned()).lean().exec(),
+        this.researchModel.find(owned()).lean().exec(),
+        this.recurringTaskModel.find(owned()).lean().exec(),
       ]);
 
     const customerObj = this.stripFields(toRawDoc(customer), [...STRIP_BASE, '_id']);
@@ -215,6 +257,11 @@ export class CustomerTransferService {
   }
 
   async importCustomer(data: unknown, nameOverride?: string): Promise<CustomerImportResult> {
+    // The imported entity gets a new id that is not on a narrowed actor's
+    // allowlist, so every follow-up create (environments, todos, knowledge …)
+    // would fail its scope check and leave a half-imported, invisible entity.
+    // Reject up front instead.
+    assertUnrestrictedScope('Customer import');
     const exp = asPlainDoc(data);
     if (!exp) {
       throw new BadRequestException('Invalid customer export payload');
@@ -280,24 +327,39 @@ export class CustomerTransferService {
       recurringTasks: 0,
     };
 
-    // Direct insertMany with rewritten customerId — bypasses service-layer
-    // validation (no projectId-coupling for these), which is intentional for
-    // a bulk import. Service-layer events would fire too eagerly anyway.
-    //
-    // Das Modell kommt als Closure herein statt als `Model<any>`: so bleibt an
-    // jeder Aufrufstelle das konkret typisierte Modell sichtbar und geprüft.
-    const insertOwned = async (
+    // Direct insertMany — bypasses service-layer events, which would fire too
+    // eagerly for a bulk import. Because the service-layer validation is
+    // skipped, every document is REBUILT from an explicit per-section field
+    // allowlist instead of copying the file's object: an uploaded export could
+    // otherwise set `projectId` (planting data into a foreign project),
+    // `scope: 'global'` (instance-wide knowledge), `ownedBy*` (hijacking SSH /
+    // kube credentials), `createdByUserId` (a recurring chat task running as
+    // another user) or references into foreign entities (milestoneId,
+    // blockedBy, sourceQuestionId …). Owner fields are always forced.
+    const actorUserId = RequestContext.getUser()?.userId;
+    const importingUserId =
+      actorUserId && Types.ObjectId.isValid(actorUserId) ? new Types.ObjectId(actorUserId) : undefined;
+
+    // Environments get their new ids up front so secrets can be remapped onto
+    // the imported environments instead of keeping stale source ids.
+    const envIdMap = new Map<string, Types.ObjectId>();
+    const envDocs = sections.environments.map((src) => {
+      const doc = pickFields(src, ENV_FIELDS);
+      const newId = new Types.ObjectId();
+      const sourceId = idToString(src._id);
+      if (sourceId !== undefined) envIdMap.set(sourceId, newId);
+      return { ...doc, _id: newId, customerId: newCustomerId };
+    });
+
+    const owned = (section: SectionName, fields: readonly string[]): PlainDoc[] =>
+      sections[section].map((src) => ({ ...pickFields(src, fields), customerId: newCustomerId }));
+
+    const insertSection = async (
       section: SectionName,
+      docs: PlainDoc[],
       insert: (docs: PlainDoc[]) => Promise<unknown[]>,
     ): Promise<void> => {
-      const items = sections[section];
-      if (items.length === 0) return;
-      const docs = items.map((item) => {
-        const copy = { ...item };
-        delete copy._id; // let Mongo assign new ids
-        copy.customerId = newCustomerId;
-        return copy;
-      });
+      if (docs.length === 0) return;
       try {
         const inserted = await insert(docs);
         counts[section] = inserted.length;
@@ -306,67 +368,90 @@ export class CustomerTransferService {
       }
     };
 
+    const knowledgeDocs = owned('knowledge', KNOWLEDGE_FIELDS).map((doc) => ({
+      ...doc,
+      // Forced: the export only carries customer data; never restore `global`.
+      scope: 'customer',
+    }));
+
+    const researchDocs = owned('research', RESEARCH_FIELDS).map((doc) => ({
+      ...doc,
+      // A queued/running status would hand the entry to the research runner.
+      status: 'done',
+      ownerUserId: importingUserId ?? null,
+    }));
+
+    let chatTasksDowngraded = 0;
+    const recurringDocs = owned('recurringTasks', RECURRING_FIELDS).map((doc) => {
+      // A chat task runs as `createdByUserId` — only ever the importing user.
+      if (doc.action === 'chat' && !importingUserId) {
+        chatTasksDowngraded += 1;
+        const copy: PlainDoc = { ...doc, action: 'todo' };
+        delete copy.chat;
+        return copy;
+      }
+      return importingUserId ? { ...doc, createdByUserId: importingUserId } : doc;
+    });
+    if (chatTasksDowngraded > 0) {
+      warnings.push(
+        `${chatTasksDowngraded} recurring chat task(s) imported as todo tasks (no importing user to run them as).`,
+      );
+    }
+
     await Promise.all([
-      insertOwned('contacts', (docs) => this.contactModel.insertMany(docs, { ordered: false })),
-      insertOwned('knowledge', (docs) => this.knowledgeModel.insertMany(docs, { ordered: false })),
-      insertOwned('environments', (docs) =>
+      insertSection('contacts', owned('contacts', CONTACT_FIELDS), (docs) =>
+        this.contactModel.insertMany(docs, { ordered: false }),
+      ),
+      insertSection('knowledge', knowledgeDocs, (docs) =>
+        this.knowledgeModel.insertMany(docs, { ordered: false }),
+      ),
+      insertSection('environments', envDocs, (docs) =>
         this.environmentModel.insertMany(docs, { ordered: false }),
       ),
-      insertOwned('research', (docs) => this.researchModel.insertMany(docs, { ordered: false })),
-      insertOwned('recurringTasks', (docs) =>
+      insertSection('research', researchDocs, (docs) =>
+        this.researchModel.insertMany(docs, { ordered: false }),
+      ),
+      insertSection('recurringTasks', recurringDocs, (docs) =>
         this.recurringTaskModel.insertMany(docs, { ordered: false }),
       ),
     ]);
 
     // Todos need a fresh number sequence per customer — strip the source
-    // numbers, the count remains. The counter service will re-issue numbers
-    // on next interactive create. Here we keep the imported todos numberless,
-    // which is rare-edge but acceptable for a v1 import.
-    if (sections.todos.length > 0) {
-      const todoDocs = sections.todos.map((todo, index) => {
-        const copy = { ...todo };
-        // `delete` statt `_id: undefined`: eine eigene Property mit `undefined`
-        // hängt davon ab, dass Mongoose sie beim Casten überspringt und den
-        // `_id`-Default nachzieht. Löschen sagt dasselbe ohne die Annahme.
-        delete copy._id;
-        copy.customerId = newCustomerId;
-        // Re-issue number based on import order; collisions later are unlikely
-        // because customer is new and counter starts at 0.
-        copy.number = index + 1;
-        copy.displayNumber = `T-${index + 1}`;
-        return copy;
-      });
-      try {
-        const inserted = await this.todoModel.insertMany(todoDocs, { ordered: false });
-        counts.todos = inserted.length;
-      } catch (err) {
-        warnings.push(`Partial import for todos: ${errorMessage(err)}`);
-      }
-    }
+    // numbers, the count remains. Re-issue numbers based on import order;
+    // collisions later are unlikely because the customer is new.
+    const todoDocs = owned('todos', TODO_FIELDS).map((doc, index) => ({
+      ...doc,
+      number: index + 1,
+      displayNumber: `T-${index + 1}`,
+    }));
+    await insertSection('todos', todoDocs, (docs) =>
+      this.todoModel.insertMany(docs, { ordered: false }),
+    );
 
     // Secrets: only import if encryptedValue present (redacted exports skip).
     if (sections.secrets.length > 0) {
-      const usable = sections.secrets.filter((s) => Boolean(s.encryptedValue) && !s._redacted);
+      const usable = sections.secrets.filter(
+        (s) => typeof s.encryptedValue === 'string' && s.encryptedValue !== '' && !s._redacted,
+      );
       if (usable.length < sections.secrets.length) {
         warnings.push(
           `${sections.secrets.length - usable.length} secret(s) skipped (export was redacted; re-export with includeSecretValues=true to migrate values).`,
         );
       }
-      if (usable.length > 0) {
-        const docs = usable.map((s) => {
-          const copy = { ...s };
-          delete copy._id;
-          delete copy._redacted;
-          copy.customerId = newCustomerId;
-          return copy;
-        });
-        try {
-          const inserted = await this.secretModel.insertMany(docs, { ordered: false });
-          counts.secrets = inserted.length;
-        } catch (err) {
-          warnings.push(`Partial import for secrets: ${errorMessage(err)}`);
-        }
-      }
+      const secretDocs = usable.map((src) => {
+        // Remap onto an imported environment; an unknown id falls back to a
+        // customer-wide secret instead of pointing at a foreign environment.
+        const sourceEnvId = idToString(src.environmentId);
+        const envId = sourceEnvId !== undefined ? envIdMap.get(sourceEnvId) : undefined;
+        return {
+          ...pickFields(src, SECRET_FIELDS),
+          customerId: newCustomerId,
+          environmentId: envId ? envId.toString() : null,
+        };
+      });
+      await insertSection('secrets', secretDocs, (docs) =>
+        this.secretModel.insertMany(docs, { ordered: false }),
+      );
     }
 
     return {

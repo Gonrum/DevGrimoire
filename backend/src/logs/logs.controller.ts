@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { LogsService } from './logs.service';
 import { CreateLogDto } from './dto/create-log.dto';
+import { CreateLogBatchDto } from './dto/create-log-batch.dto';
 import { QueryLogsDto } from './dto/query-logs.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -27,7 +28,7 @@ export class LogsController {
 
   @Post('batch')
   @HttpCode(201)
-  async createBatch(@Body() body: { logs: CreateLogDto[] }) {
+  async createBatch(@Body() body: CreateLogBatchDto) {
     const inserted = await this.logsService.createBatch(body.logs);
     return { inserted };
   }

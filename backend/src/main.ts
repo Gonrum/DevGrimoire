@@ -117,6 +117,9 @@ function createMcpServer(services: McpServices): Server {
  * `any` stattfand — inklusive `req.headers` und `res.status()`, wo Express längst
  * präzise Typen liefert.
  */
+/** How often /messages re-checks the API key behind an open SSE session. */
+const MCP_SESSION_REVALIDATE_MS = 60_000;
+
 interface McpRequest extends Request {
   user?: RequestUser;
   apiKey?: ApiKey;
@@ -310,7 +313,8 @@ async function bootstrap() {
   const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};
   // Cache the user AND api-key for SSE sessions — /messages must restore both
   // to the RequestContext so apiKey.allowedTools is honored on tool calls.
-  const authenticatedSessions = new Map<string, { user: RequestUser; apiKey?: ApiKey }>();
+  // `validatedAt`: last time the key/owner were re-checked (see /messages).
+  const authenticatedSessions = new Map<string, { user: RequestUser; apiKey?: ApiKey; validatedAt: number }>();
   // Track sessions that closed recently so /messages can tell "never heard of
   // this id" from "this session lived but was just torn down" — useful both
   // for diagnostics on the transient 400 path and for a short grace window
@@ -552,7 +556,44 @@ async function bootstrap() {
     // both user AND apiKey so per-key tool allowlists keep being enforced.
     const sessionId = singleValue(req.query?.sessionId);
     const cached = sessionId ? authenticatedSessions.get(sessionId) : undefined;
-    if (cached) {
+    if (cached && sessionId) {
+      const unauthorized = (message: string) => {
+        // Drop the session entirely: without the cache entry a later POST would
+        // fall back to mcpAuthMiddleware and could ride the stream with another key.
+        authenticatedSessions.delete(sessionId);
+        const t = transports[sessionId];
+        if (t) void t.close().catch(() => undefined);
+        res.status(401).json({ jsonrpc: '2.0', error: { code: -32001, message }, id: null });
+      };
+      // A request that presents a key must present the session's key — a
+      // leaked sessionId must not let a different key act as the session owner.
+      let presented: string | undefined;
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith('Bearer cv_')) presented = authHeader.slice(7);
+      else if (req.query?.apiKey) presented = singleValue(req.query.apiKey);
+      if (presented && (!cached.apiKey || !apiKeysService.isSameKey(presented, cached.apiKey))) {
+        res.status(401).json({
+          jsonrpc: '2.0',
+          error: { code: -32001, message: 'Unauthorized: API key does not match this session.' },
+          id: null,
+        });
+        return;
+      }
+      // The /sse stream lives indefinitely. Re-validate key and owner at most
+      // every 60 s, so revocation, expiry, owner deactivation and a narrowed
+      // scope/allowlist take effect on open sessions too.
+      const keyId = cached.user.apiKeyId;
+      if (keyId && Date.now() - cached.validatedAt > MCP_SESSION_REVALIDATE_MS) {
+        const freshKey = await apiKeysService.findActiveById(keyId);
+        if (!freshKey) return unauthorized('Unauthorized: API key revoked or expired.');
+        const owner = await authService.findUserById(freshKey.userId.toString());
+        if (!owner || owner.active === false) {
+          return unauthorized('Unauthorized: API key owner is deactivated or no longer exists.');
+        }
+        cached.user = actorFromApiKey(freshKey, owner);
+        cached.apiKey = freshKey;
+        cached.validatedAt = Date.now();
+      }
       req.user = cached.user;
       req.apiKey = cached.apiKey;
       return next();
@@ -625,6 +666,7 @@ async function bootstrap() {
       authenticatedSessions.set(transport.sessionId, {
         user: req.user,
         apiKey: req.apiKey,
+        validatedAt: Date.now(),
       });
     }
     mcpLogger.log(`sse session opened (${transport.sessionId.slice(0, 8)}…, total=${Object.keys(transports).length})`);

@@ -75,6 +75,7 @@ import type { ParsedTodo, ParsedMilestone } from './milestones/milestones.servic
 import type { CreateKnowledgeDto } from './knowledge/dto/create-knowledge.dto';
 import type { BodyDto } from './http-requests/dto/create-request.dto';
 import { RequestContext } from './common/request-context';
+import { assertAdmin } from './common/scope-guard';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 import { AuthService } from './auth/auth.service';
 import { CustomersService } from './customers/customers.service';
@@ -343,6 +344,26 @@ function requireUserId(): string {
     );
   }
   return userId;
+}
+
+/**
+ * Whether two scope holders can see at least one common project. Used by
+ * `user_list_active` so non-admins only learn about users they could
+ * plausibly address with ask_user. Missing mode = legacy 'all'.
+ */
+function sharesProject(
+  a: { projectScopeMode?: string; allowedProjectIds?: readonly { toString(): string }[] },
+  b: { projectScopeMode?: string; allowedProjectIds?: readonly { toString(): string }[] },
+): boolean {
+  const am = a.projectScopeMode || 'all';
+  const bm = b.projectScopeMode || 'all';
+  if (am === 'none' || bm === 'none') return false;
+  const aIds = (a.allowedProjectIds ?? []).map(String);
+  const bIds = (b.allowedProjectIds ?? []).map(String);
+  if (am === 'all' && bm === 'all') return true;
+  if (am === 'all') return bIds.length > 0;
+  if (bm === 'all') return aIds.length > 0;
+  return aIds.some((id) => bIds.includes(id));
 }
 
 function compactList(items: unknown[], stripFields: string[]): PlainDoc[] {
@@ -5584,7 +5605,26 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'user_list_active': {
           const users = await authService.findActiveUsers(optionalNumber(a, 'windowMinutes') ?? 15);
-          result = { users };
+          // The REST user list is admin-only; this tool returned every active
+          // user's name and role to any key. It is still needed to address
+          // ask_user (targetUsername) from non-admin agents, so instead of
+          // admin-only, non-admins only see users that share a project with
+          // them (plus themselves).
+          const listActor = RequestContext.getUser();
+          if (!listActor || listActor.role === 'admin') {
+            result = { users };
+            break;
+          }
+          const visibleUsers: typeof users = [];
+          for (const u of users) {
+            if (u.userId === listActor.userId) {
+              visibleUsers.push(u);
+              continue;
+            }
+            const full = await authService.findUserById(u.userId);
+            if (full && sharesProject(listActor, full)) visibleUsers.push(u);
+          }
+          result = { users: visibleUsers };
           break;
         }
         case 'ask_user': {
@@ -6297,6 +6337,9 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'system_instructions_set': {
+          // Global setting injected into every agent's instructions; REST
+          // `PUT /settings/:key` is admin-only, so the MCP path must be too.
+          assertAdmin('system_instructions_set');
           await settingsService.set(
             AGENT_INSTRUCTIONS_KEY,
             requireString(a, 'instructions'),
@@ -6682,6 +6725,9 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'rag_reindex': {
+          // REST `POST /rag/reindex` is admin-only (expensive, instance-wide).
+          // The stdio branch goes through REST and is checked there as well.
+          assertAdmin('rag_reindex');
           if (process.env.MCP_STDIO === 'true') {
             const pid = optionalString(a, 'projectId');
             const cid = optionalString(a, 'customerId');
@@ -6923,6 +6969,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           break;
         }
         case 'workspace_exec': {
+          // NOTE (security): a key's `allowedTools` restricts MCP tools only.
+          // Inside the workspace the `dg` CLI talks to the REST API with its own
+          // project-scoped token (DG_* env below), so a key allowed to call
+          // `workspace_exec` can reach whatever that token permits via `dg`,
+          // regardless of which other MCP tools are on its allowlist.
           const id = requireString(a, 'id');
           const command = requireString(a, 'command');
           const timeoutMs = optionalNumber(a, 'timeout');

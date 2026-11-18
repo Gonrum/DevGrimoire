@@ -194,12 +194,12 @@ export class ResearchAgentController {
       if (!res.writableEnded) res.write(': ping\n\n');
     }, 15000);
 
-    // Bewusst KEIN Abbruch bei getrenntem Client: der Lauf soll Tab-Schliessen
-    // und Navigation überleben, man hängt sich über
-    // `GET research-runs/:id/stream` wieder an. Begrenzt wird er durch
-    // `guardrails.timeoutMs`. Der frühere `req.on('close')`-Listener war
-    // ohnehin wirkungslos — bei einem POST feuert 'close' schon, sobald der
-    // Body gelesen ist, also bevor der Listener hier hing.
+    // Deliberately NO cancellation when the client disconnects: the run must
+    // survive closing the tab and navigating away; clients re-attach via
+    // `GET research-runs/:id/stream`. It is bounded by `guardrails.timeoutMs`.
+    // The former `req.on('close')` listener was ineffective anyway — for a
+    // POST, 'close' already fires once the body has been read, i.e. before the
+    // listener was attached here.
     let unsubscribe: (() => void) | undefined;
     let terminalSent = false;
 

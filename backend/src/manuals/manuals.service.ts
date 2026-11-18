@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Manual, ManualDocument } from './schemas/manual.schema';
 import { CreateManualDto } from './dto/create-manual.dto';
 import { UpdateManualDto } from './dto/update-manual.dto';
@@ -9,6 +9,13 @@ import { CustomersService } from '../customers/customers.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import {
+  assertCustomerInScope,
+  assertOwnerInScope,
+  assertOwnerParamsInScope,
+  assertProjectInScope,
+  scopeFilter,
+} from '../common/scope-guard';
 
 @Injectable()
 export class ManualsService {
@@ -26,6 +33,8 @@ export class ManualsService {
     if (dto.projectId && dto.customerId) {
       throw new BadRequestException('projectId and customerId are mutually exclusive');
     }
+    // The create route has no ValidateProjectIdPipe — check both owner params here.
+    assertOwnerParamsInScope(dto);
     if (dto.customerId) {
       await this.customersService.findById(dto.customerId);
     }
@@ -42,7 +51,10 @@ export class ManualsService {
   }
 
   async findByProject(projectId: string, category?: string): Promise<ManualDocument[]> {
+    assertProjectInScope(projectId);
     const filter: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
+    // Relation manuals also carry a customerId that must be in scope.
+    Object.assign(filter, scopeFilter());
     if (category) filter.category = category;
     return this.manualModel
       .find(filter)
@@ -51,7 +63,9 @@ export class ManualsService {
   }
 
   async findByCustomer(customerId: string, category?: string): Promise<ManualDocument[]> {
+    assertCustomerInScope(customerId);
     const filter: Record<string, unknown> = { customerId: projectIdFilter(customerId) };
+    Object.assign(filter, scopeFilter());
     if (category) filter.category = category;
     return this.manualModel
       .find(filter)
@@ -59,13 +73,21 @@ export class ManualsService {
       .exec();
   }
 
-  async findById(id: string): Promise<ManualDocument> {
+  /** Load + 404 + scope check on both axes — every by-id path goes through here before mutating. */
+  private async findScoped(id: string): Promise<ManualDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException('Handbuch-Eintrag nicht gefunden');
     const manual = await this.manualModel.findById(id).exec();
     if (!manual) throw new NotFoundException('Handbuch-Eintrag nicht gefunden');
+    assertOwnerInScope({ projectId: manual.projectId, customerId: manual.customerId }, `Manual ${id}`);
     return manual;
   }
 
+  async findById(id: string): Promise<ManualDocument> {
+    return this.findScoped(id);
+  }
+
   async update(id: string, dto: UpdateManualDto): Promise<ManualDocument> {
+    await this.findScoped(id);
     const manual = await this.manualModel
       .findByIdAndUpdate(id, dto, { new: true })
       .exec();
@@ -82,6 +104,7 @@ export class ManualsService {
   }
 
   async delete(id: string): Promise<void> {
+    await this.findScoped(id);
     const manual = await this.manualModel.findByIdAndDelete(id).exec();
     if (!manual) throw new NotFoundException('Handbuch-Eintrag nicht gefunden');
     this.eventEmitter.emit(PROJECT_CHANGED, {

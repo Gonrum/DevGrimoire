@@ -6,12 +6,15 @@ import {
   ListCustomerTemplatesDto,
   UpdateCustomerTemplateDto,
 } from './dto/customer-template.dto';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../auth/schemas/user.schema';
 
 @Controller('customer-templates')
 export class CustomerTemplatesController {
   constructor(private readonly templates: CustomerTemplatesService) {}
 
   @Post()
+  @Roles(UserRole.ADMIN)
   @HttpCode(201)
   create(@Body() dto: CreateCustomerTemplateDto) {
     return this.templates.create(dto);
@@ -28,11 +31,13 @@ export class CustomerTemplatesController {
   }
 
   @Put(':id')
+  @Roles(UserRole.ADMIN)
   update(@Param('id') id: string, @Body() dto: UpdateCustomerTemplateDto) {
     return this.templates.update(id, dto);
   }
 
   @Delete(':id')
+  @Roles(UserRole.ADMIN)
   @HttpCode(204)
   remove(@Param('id') id: string) {
     return this.templates.remove(id);

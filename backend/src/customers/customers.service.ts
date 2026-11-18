@@ -26,6 +26,7 @@ import {
 import { RequestContext } from '../common/request-context';
 import { actorCanAccessCustomer } from '../common/permissions';
 import { buildScopeFilter } from '../common/scope';
+import { assertOwnerInScope, projectScopeFilter } from '../common/scope-guard';
 
 export interface CustomerListFilters {
   status?: CustomerStatus;
@@ -292,18 +293,44 @@ export class CustomersService {
 
   async findProjectLinks(customerId: string): Promise<CustomerProjectLinkDocument[]> {
     await this.findById(customerId);
+    // A link is a relation entity: the customer check alone would list links
+    // (and their project ids/notes) of projects outside the actor's scope.
     return this.customerProjectLinkModel
-      .find({ customerId: this.objectId(customerId, 'customerId') })
+      .find({ customerId: this.objectId(customerId, 'customerId'), ...projectScopeFilter() })
       .sort({ updatedAt: -1 })
       .exec();
   }
 
   async findLinksByProject(projectId: string): Promise<CustomerProjectLinkDocument[]> {
     await this.projectsService.findById(projectId);
+    // Same as above, other axis: hide links to customers outside the scope.
     return this.customerProjectLinkModel
-      .find({ projectId: this.objectId(projectId, 'projectId') })
+      .find({
+        projectId: this.objectId(projectId, 'projectId'),
+        ...buildScopeFilter(RequestContext.getUser(), { axis: 'customer', field: 'customerId' }),
+      })
       .sort({ updatedAt: -1 })
       .exec();
+  }
+
+  /**
+   * Loads a link of this customer and requires BOTH axes — mutating a link
+   * also changes what the linked project sees, so customer scope alone is
+   * not enough. Runs before any write.
+   */
+  private async findScopedLink(customerId: string, linkId: string): Promise<CustomerProjectLinkDocument> {
+    const link = await this.customerProjectLinkModel
+      .findOne({
+        _id: this.objectId(linkId, 'linkId'),
+        customerId: this.objectId(customerId, 'customerId'),
+      })
+      .exec();
+    if (!link) throw new NotFoundException(`Customer project link ${linkId} not found`);
+    assertOwnerInScope(
+      { projectId: link.projectId, customerId: link.customerId },
+      `Customer project link ${linkId}`,
+    );
+    return link;
   }
 
   async updateProjectLink(
@@ -312,6 +339,7 @@ export class CustomersService {
     dto: UpdateCustomerProjectLinkDto,
   ): Promise<CustomerProjectLinkDocument> {
     const customer = await this.findById(customerId);
+    await this.findScopedLink(customerId, linkId);
     const update: Record<string, unknown> = { ...dto };
     if (dto.environmentIds) {
       update.environmentIds = dto.environmentIds.map((id) => this.objectId(id, 'environmentId'));
@@ -339,6 +367,7 @@ export class CustomersService {
 
   async deleteProjectLink(customerId: string, linkId: string): Promise<void> {
     const customer = await this.findById(customerId);
+    await this.findScopedLink(customerId, linkId);
     const result = await this.customerProjectLinkModel
       .findOneAndDelete({
         _id: this.objectId(linkId, 'linkId'),

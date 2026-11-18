@@ -15,6 +15,7 @@ import { User, UserDocument, UserRole } from '../auth/schemas/user.schema';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { errorMessage } from '../common/narrow';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { assertOwnerInScope, assertOwnerParamsInScope } from '../common/scope-guard';
 
 interface AppendMessageInput {
   role: ChatMessage['role'];
@@ -80,6 +81,9 @@ export class ChatService implements OnModuleInit {
     if (owner.projectId && owner.customerId) {
       throw new BadRequestException('projectId and customerId are mutually exclusive');
     }
+    // A chat session pulls RAG context and runs tools for its owner — a
+    // narrowed actor must not open one on a project/customer outside its scope.
+    assertOwnerParamsInScope(owner);
     const session = await this.chatModel.create({
       projectId: owner.projectId,
       customerId: owner.customerId,
@@ -99,6 +103,7 @@ export class ChatService implements OnModuleInit {
     if (!owner.projectId && !owner.customerId) {
       throw new BadRequestException('projectId or customerId is required');
     }
+    assertOwnerParamsInScope(owner);
     const filter: Record<string, unknown> = { userId };
     if (owner.projectId) filter.projectId = owner.projectId;
     if (owner.customerId) filter.customerId = owner.customerId;
@@ -120,6 +125,9 @@ export class ChatService implements OnModuleInit {
     if (userId && session.userId?.toString() !== userId) {
       throw new NotFoundException(`Chat session ${id} not found`);
     }
+    // The user's own session, but used through a key/scope narrowed below the
+    // session's owner: the RAG context and tools would leave that scope.
+    assertOwnerInScope(session, `Chat session ${id}`);
     return session;
   }
 

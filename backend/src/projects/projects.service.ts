@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -21,6 +22,16 @@ import {
   CustomerProjectLinkDocument,
 } from '../customers/schemas/customer-project-link.schema';
 import { RagService } from '../rag/rag.service';
+import { Secret, SecretDocument } from '../secrets/schemas/secret.schema';
+import { secretBelongsTo } from '../secrets/secret-owner';
+import { assertAdmin, assertCustomerInScope, scopeFilter } from '../common/scope-guard';
+
+/** The git-repository fields this service validates on write. */
+interface GitRepositoryRefs {
+  baseUrl?: string;
+  tokenSecretId?: string;
+  allowPrivateHost?: boolean;
+}
 
 export interface SemanticSearchResult {
   projects: Array<{
@@ -52,6 +63,8 @@ export class ProjectsService {
     private customerProjectLinkModel: Model<CustomerProjectLinkDocument>,
     private eventEmitter: EventEmitter2,
     private moduleRef: ModuleRef,
+    // Last on purpose: check scripts construct this service positionally.
+    @InjectModel(Secret.name) private secretModel: Model<SecretDocument>,
   ) {}
 
   private getRagService(): RagService {
@@ -82,6 +95,9 @@ export class ProjectsService {
     if (active !== undefined) filter.active = active;
     if (favorite !== undefined) filter.favorite = favorite;
 
+    // Without this, `?customerId=<foreign>` reveals which in-scope projects are
+    // linked to a customer outside the actor's scope.
+    if (customerId) assertCustomerInScope(customerId);
     if (customerId && Types.ObjectId.isValid(customerId)) {
       const links = await this.customerProjectLinkModel
         .find({ customerId: new Types.ObjectId(customerId) })
@@ -126,7 +142,86 @@ export class ProjectsService {
   }
 
   async findByName(name: string): Promise<ProjectDocument | null> {
-    return this.projectModel.findOne({ name }).exec();
+    const project = await this.projectModel.findOne({ name }).exec();
+    // MCP `project_get {name}` went through here without any scope check.
+    if (project) this.assertAccess(project._id.toString());
+    return project;
+  }
+
+  /**
+   * Name collision check for imports. `Project.name` is unique instance-wide,
+   * so this must see foreign projects too — it returns only a boolean, never
+   * the foreign document.
+   */
+  async nameExists(name: string): Promise<boolean> {
+    return (await this.projectModel.exists({ name }).exec()) !== null;
+  }
+
+  /** Whether the project is linked to the customer (CustomerProjectLink). */
+  async isLinkedToCustomer(projectId: string, customerId: string): Promise<boolean> {
+    if (!Types.ObjectId.isValid(projectId) || !Types.ObjectId.isValid(customerId)) return false;
+    const link = await this.customerProjectLinkModel
+      .exists({ projectId: new Types.ObjectId(projectId), customerId: new Types.ObjectId(customerId) })
+      .exec();
+    return link !== null;
+  }
+
+  /**
+   * Write-time validation of `gitRepositories` (the commit cron resolves the
+   * token WITHOUT an actor and sends it to `baseUrl`):
+   * - `tokenSecretId` must reference a secret of exactly this project —
+   *   otherwise any secret of the instance could be exfiltrated.
+   * - `allowPrivateHost` lifts the private-address block for the git host; only
+   *   admins may grant it. A non-admin may keep a grant an admin already made
+   *   for the same baseUrl, but not move it to a new host.
+   */
+  async assertGitRepositoriesAllowed(projectId: string, repos: GitRepositoryRefs[] | undefined): Promise<void> {
+    if (!repos || repos.length === 0) return;
+    const current = Types.ObjectId.isValid(projectId)
+      ? await this.projectModel.findById(projectId).select('gitRepositories').lean().exec()
+      : null;
+    const currentRepos = current?.gitRepositories ?? [];
+
+    const ids = [...new Set(repos.map((r) => r.tokenSecretId).filter((v): v is string => !!v))];
+    for (const sid of ids) {
+      if (!Types.ObjectId.isValid(sid)) throw new BadRequestException(`Invalid tokenSecretId ${sid}`);
+    }
+    if (ids.length > 0) {
+      const secrets = await this.secretModel
+        .find({ _id: { $in: ids.map((sid) => new Types.ObjectId(sid)) } })
+        .select('projectId customerId')
+        .lean()
+        .exec();
+      const byId = new Map(secrets.map((sec) => [sec._id.toString(), sec]));
+      const stored = new Set(currentRepos.map((r) => r.tokenSecretId).filter(Boolean));
+      for (const sid of ids) {
+        const sec = byId.get(sid);
+        if (!sec) {
+          // A dangling reference that is already stored (secret deleted later)
+          // is harmless — it resolves to nothing. Rejecting it would block every
+          // save that echoes the repository list back.
+          if (stored.has(sid)) continue;
+          throw new BadRequestException(`Secret ${sid} not found`);
+        }
+        if (!secretBelongsTo(sec, { projectId })) {
+          throw new ForbiddenException(`Secret ${sid} does not belong to this project`);
+        }
+      }
+    }
+
+    if (repos.some((r) => r.allowPrivateHost)) {
+      const actor = RequestContext.getUser();
+      if (actor && actor.role !== 'admin') {
+        const approved = new Set(
+          currentRepos.filter((r) => r.allowPrivateHost).map((r) => r.baseUrl ?? ''),
+        );
+        for (const r of repos) {
+          if (r.allowPrivateHost && !approved.has(r.baseUrl ?? '')) {
+            assertAdmin('allowPrivateHost on a git repository');
+          }
+        }
+      }
+    }
   }
 
   async listTags(): Promise<Array<{ name: string; usageCount: number }>> {
@@ -274,10 +369,9 @@ export class ProjectsService {
     status: string;
     createdAt: string;
   }>> {
-    const scopeFilter = buildScopeFilter(RequestContext.getUser(), {
-      axis: 'project',
-      field: 'projectId',
-    });
+    // Both axes: a link names a customer, and a customer outside the actor's
+    // customer scope must not show up (not even its name).
+    const linkScope = scopeFilter({ projectField: 'projectId', customerField: 'customerId' });
     const rows = await this.customerProjectLinkModel.aggregate<{
       projectId: Types.ObjectId;
       customerId: Types.ObjectId;
@@ -285,7 +379,7 @@ export class ProjectsService {
       createdAt: Date;
       customer: { name: string };
     }>([
-      { $match: scopeFilter },
+      { $match: linkScope },
       {
         $lookup: {
           from: 'customers',
@@ -340,6 +434,7 @@ export class ProjectsService {
 
   async update(id: string, dto: UpdateProjectDto): Promise<ProjectDocument> {
     this.assertAccess(id);
+    await this.assertGitRepositoriesAllowed(id, dto.gitRepositories);
     const project = await this.projectModel
       .findByIdAndUpdate(id, dto, { new: true })
       .exec();
@@ -373,6 +468,7 @@ export class ProjectsService {
     if (!query.trim()) {
       return { projects: [], relatedHits: [] };
     }
+    if (customerId) assertCustomerInScope(customerId);
 
     const ragService = this.getRagService();
     let projectHits: Awaited<ReturnType<RagService['search']>>;

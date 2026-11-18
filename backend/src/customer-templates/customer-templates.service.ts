@@ -33,6 +33,7 @@ import { HealthcheckMethod } from '../monitoring/schemas/healthcheck.schema';
 import { CreateEnvironmentDto } from '../environments/dto/create-environment.dto';
 import { CreateWorkflowDefinitionDto } from '../workflows/dto/workflow.dto';
 import { errorMessage, isRecord, isUnknownArray } from '../common/narrow';
+import { assertAdmin } from '../common/scope-guard';
 import {
   optionalEnum,
   optionalNumber,
@@ -189,6 +190,9 @@ export class CustomerTemplatesService {
   }
 
   async create(dto: CreateCustomerTemplateDto, userId?: string): Promise<CustomerTemplateDocument> {
+    // Templates are instance-wide and get applied into any customer — only
+    // admins may author them (the route decorator does not cover MCP tools).
+    assertAdmin('Changing customer templates');
     if (!dto.slug.match(/^[a-z0-9][a-z0-9-]*$/)) {
       throw new BadRequestException('slug must be lowercase letters, digits, and hyphens only');
     }
@@ -227,6 +231,7 @@ export class CustomerTemplatesService {
     dto: UpdateCustomerTemplateDto,
     userId?: string,
   ): Promise<CustomerTemplateDocument> {
+    assertAdmin('Changing customer templates');
     const existing = await this.findById(id);
     if (dto.items !== undefined) {
       this.assertNoSecretValues(dto.items);
@@ -250,6 +255,7 @@ export class CustomerTemplatesService {
   }
 
   async remove(id: string): Promise<void> {
+    assertAdmin('Changing customer templates');
     const t = await this.findById(id);
     await t.deleteOne();
   }
