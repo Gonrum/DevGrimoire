@@ -92,7 +92,11 @@ function causeErrorCode(err: unknown): string | undefined {
 function isTransportFailure(err: unknown): boolean {
   if (err instanceof TypeError && err.message === 'fetch failed') return true;
   const causeCode = causeErrorCode(err);
-  return causeCode !== undefined && TRANSPORT_CAUSE_CODES.has(causeCode);
+  if (causeCode !== undefined && TRANSPORT_CAUSE_CODES.has(causeCode)) return true;
+  // The outbound guard (M-4) resolves the host BEFORE fetch runs, so a DNS
+  // failure arrives as a plain Node error with its own `code`, not wrapped in
+  // `.cause` — without this an unknown host surfaced as HTTP 500.
+  return isRecord(err) && typeof err.code === 'string' && TRANSPORT_CAUSE_CODES.has(err.code);
 }
 
 /** Gemeinsamer Fehler-Mapper für lesende und schreibende Cluster-Routen (siehe guarded()). */

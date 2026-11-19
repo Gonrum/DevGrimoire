@@ -300,6 +300,21 @@ function makeAuditRecorder() {
   );
 
   await check(
+    'guarded(): DNS error from the outbound guard (code on the error itself) becomes 503',
+    async () => {
+      // The outbound guard resolves the host before fetch runs, so there is no
+      // `fetch failed` wrapper and no `.cause` — the live E2E got HTTP 500 here.
+      const err = Object.assign(new Error('getaddrinfo ENOTFOUND cluster.invalid'), { code: 'ENOTFOUND' });
+      const resources = { async list() { throw err; } };
+      const ctrl = new KubeResourcesController(resources, {}, auditStub, clustersOk);
+      let caught = null;
+      try { await ctrl.list('c1', { kind: 'Pod' }, authReq); } catch (e) { caught = e; }
+      assert.ok(caught instanceof HttpException, 'no HttpException thrown');
+      assert.equal(caught.getStatus(), 503, `status was ${caught.getStatus && caught.getStatus()}`);
+    },
+  );
+
+  await check(
     'guarded(): ein unerkannter Fehler (echter Bug im eigenen Code) läuft UNVERÄNDERT durch, kein 503',
     async () => {
       // Wichtig, weil Nests eingebauter Filter eine HttpException NICHT

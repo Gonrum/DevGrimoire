@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit, OnModuleDestroy, ServiceUnavailableException } from '@nestjs/common';
 import { actorHasOwnerPermission, type PermissionResource } from '../common/scope-guard';
 import { pickAllowed } from '../common/narrow';
 import { OnEvent } from '@nestjs/event-emitter';
@@ -596,6 +596,19 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     this.embeddingUrl = activeEndpoint.url;
     this.embeddingModel = activeEndpoint.model;
     this.dimensions = testEmbedding.length;
+    // Every real embedding goes through the balancer (`getEmbedding`), which
+    // may serve a different model than the legacy endpoint probed above. Its
+    // vector length is the one the table must have — otherwise a full reindex
+    // creates a table the queries cannot match ("No vector column found to
+    // match with the query vector dimension"). Short timeout: at startup the
+    // balancer may not be up yet; the reindex probes again before it builds.
+    const balancerDims = await this.probeBalancerDimensions(15_000);
+    if (balancerDims !== null && balancerDims !== this.dimensions) {
+      this.logger.warn(
+        `Balancer embeddings have ${balancerDims} dimensions, legacy endpoint ${this.dimensions} — using the balancer's`,
+      );
+      this.dimensions = balancerDims;
+    }
     this.logger.log(`Embedding dimensions: ${this.dimensions}`);
 
     // Open LanceDB (file-based, stored next to data)
@@ -805,6 +818,23 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
 
     return chunks;
+  }
+
+  /** Vector length the balancer currently returns, or null when it does not answer in time. */
+  private async probeBalancerDimensions(timeoutMs: number): Promise<number | null> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const vector = await Promise.race([
+        this.gateway.runEmbed({ text: 'dimension probe' }),
+        new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); }),
+      ]);
+      return vector && vector.length > 0 ? vector.length : null;
+    } catch (err) {
+      this.logger.warn(`Balancer embedding probe failed: ${errorMessage(err)}`);
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   /** Get embedding with logging, routed through the balancer queue */
@@ -1112,11 +1142,17 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     customerId?: string,
   ): Promise<Array<{ id: string; projectId: string; customerId: string; entity: string; title: string; content: string; score: number }>> {
     if (!(await this.ensureReady())) {
-      throw new Error('RAG not available. Is the embedding server running?');
+      throw new ServiceUnavailableException('RAG not available. Is the embedding server running?');
     }
-    if (this.indexMismatch) throw new Error(`RAG-Index unbrauchbar: ${this.indexMismatch}`);
+    if (this.indexMismatch) throw new ServiceUnavailableException(`RAG-Index unbrauchbar: ${this.indexMismatch}`);
 
     const vector = await this.getEmbedding(query);
+    const tableDims = await this.tableDimensions();
+    if (tableDims !== null && tableDims !== vector.length) {
+      throw new ServiceUnavailableException(
+        `RAG index has ${tableDims} dimensions, the embedding model returns ${vector.length} — a full rag_reindex is required`,
+      );
+    }
 
     // Overfetch for filtering + dedup
     const results = await this.queryRows(this.table!.search(vector).limit(limit * 5));
@@ -1276,7 +1312,10 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     } else if (customerIdHex) {
       await this.table!.delete(`customerId = "${customerIdHex}"`);
     } else {
-      // Full reindex: drop and recreate table
+      // Full reindex: drop and recreate table. The table gets the vector
+      // length of the path that embeds the documents (the balancer), measured
+      // right now — not the one remembered from startup.
+      this.dimensions = (await this.getEmbedding('dimension probe')).length;
       await this.db!.dropTable('documents');
       const zeroVector = new Array(this.dimensions).fill(0);
       this.table = await this.db!.createTable('documents', [

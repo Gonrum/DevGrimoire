@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Put, Post, Query, HttpCode } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Put, Post, Query, HttpCode } from '@nestjs/common';
 import { RagService, EmbeddingEndpointInput } from './rag.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/schemas/user.schema';
@@ -15,7 +15,7 @@ export class RagController {
     @Query('entity') entity?: string,
     @Query('limit') limit?: string,
   ) {
-    if (!query) throw new Error('Missing required query parameter: query');
+    if (!query) throw new BadRequestException('Missing required query parameter: query');
     const results = await this.ragService.search(
       query,
       projectId || undefined,
