@@ -9,6 +9,7 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
+import { PermissionGate } from '../auth/decorators/permission-gate.decorator';
 import { CustomersService } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
@@ -22,6 +23,8 @@ import { CustomerStatus } from './schemas/customer.schema';
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 
+  // Checked precisely in the service (project/customer write, delete, archive).
+  @PermissionGate('service')
   @Post()
   @HttpCode(201)
   create(@Body() dto: CreateCustomerDto) {
@@ -60,11 +63,15 @@ export class CustomersController {
     return this.customersService.findById(id);
   }
 
+  // Checked precisely in the service (project/customer write, delete, archive).
+  @PermissionGate('service')
   @Put(':id')
   update(@Param('id') id: string, @Body() dto: UpdateCustomerDto) {
     return this.customersService.update(id, dto);
   }
 
+  // Checked precisely in the service (project/customer write, delete, archive).
+  @PermissionGate('service')
   @Delete(':id')
   archive(@Param('id') id: string) {
     return this.customersService.archive(id);

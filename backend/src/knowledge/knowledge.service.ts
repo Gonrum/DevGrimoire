@@ -8,13 +8,13 @@ import { UpdateKnowledgeDto } from './dto/update-knowledge.dto';
 import { CustomersService } from '../customers/customers.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { projectIdFilter } from '../common/project-id-filter';
-import { RequestContext } from '../common/request-context';
-import { buildDualScopeFilter } from '../common/scope';
 import { assertSafeCascadeId } from '../common/cascade-guard';
 import {
   assertOwnerInScope,
   assertOwnerParamsInScope,
+  assertOwnerPermission,
   assertUnrestrictedScope,
+  scopeAndPermissionFilter,
 } from '../common/scope-guard';
 
 @Injectable()
@@ -38,6 +38,7 @@ export class KnowledgeService {
     // recurring tasks call create() directly. Every id that is present is
     // checked — also a customerId riding along on a 'project' entry.
     assertOwnerParamsInScope({ projectId: dto.projectId, customerId: dto.customerId });
+    assertOwnerPermission({ projectId: dto.projectId, customerId: dto.customerId }, 'knowledge', 'write');
     // Global knowledge flows into every project's context and RAG — a narrowed
     // actor must not be able to inject content there.
     if (scope === 'global') assertUnrestrictedScope('Global knowledge');
@@ -82,7 +83,7 @@ export class KnowledgeService {
       // No projectId/customerId, no scope filter: return all
     }
     if (options?.category) filter.category = options.category;
-    Object.assign(filter, buildDualScopeFilter(RequestContext.getUser()));
+    Object.assign(filter, scopeAndPermissionFilter('knowledge'));
     let query = this.knowledgeModel.find(filter).sort({ updatedAt: -1 });
     if (options?.offset) query = query.skip(options.offset);
     if (options?.limit) query = query.limit(options.limit);
@@ -113,7 +114,7 @@ export class KnowledgeService {
       // Project view: project-scoped + global hits
       filter.$or = [{ projectId: projectIdFilter(projectId) }, { scope: 'global' }];
     }
-    Object.assign(filter, buildDualScopeFilter(RequestContext.getUser()));
+    Object.assign(filter, scopeAndPermissionFilter('knowledge'));
     return this.knowledgeModel
       .find(filter, { score: { $meta: 'textScore' } })
       .sort({ score: { $meta: 'textScore' } })
@@ -129,18 +130,17 @@ export class KnowledgeService {
    *
    * `if (actor)` ist die dokumentierte Konvention (siehe AttachmentsService).
    */
-  private assertAccess(entry: KnowledgeDocument): void {
-    assertOwnerInScope(
-      { projectId: entry.projectId, customerId: entry.customerId },
-      `Knowledge ${entry._id.toString()}`,
-    );
+  private assertAccess(entry: KnowledgeDocument, action: 'read' | 'write' = 'read'): void {
+    const owner = { projectId: entry.projectId, customerId: entry.customerId };
+    assertOwnerInScope(owner, `Knowledge ${entry._id.toString()}`);
+    assertOwnerPermission(owner, 'knowledge', action);
   }
 
   /** Lädt, prüft 404 und Scope — die eine Stelle, die jeder Pfad benutzt. */
-  private async findScoped(id: string): Promise<KnowledgeDocument> {
+  private async findScoped(id: string, action: 'read' | 'write' = 'read'): Promise<KnowledgeDocument> {
     const entry = await this.knowledgeModel.findById(id).exec();
     if (!entry) throw new NotFoundException(`Knowledge ${id} not found`);
-    this.assertAccess(entry);
+    this.assertAccess(entry, action);
     return entry;
   }
 
@@ -150,7 +150,7 @@ export class KnowledgeService {
    * Changing or deleting it therefore requires an unrestricted actor.
    */
   private async findScopedForWrite(id: string): Promise<KnowledgeDocument> {
-    const entry = await this.findScoped(id);
+    const entry = await this.findScoped(id, 'write');
     const isGlobal = entry.scope === 'global' || (!entry.projectId && !entry.customerId);
     if (isGlobal) assertUnrestrictedScope('Global knowledge');
     return entry;

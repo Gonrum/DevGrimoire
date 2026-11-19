@@ -18,6 +18,7 @@ import { ActivitiesModule } from './activities/activities.module';
 import { PushModule } from './push/push.module';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { PermissionGateGuard } from './auth/guards/permission-gate.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { EnvironmentsModule } from './environments/environments.module';
 import { SecretsModule } from './secrets/secrets.module';
@@ -150,6 +151,7 @@ if (!MONGODB_URI) {
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: PermissionGateGuard },
     { provide: APP_GUARD, useClass: ReplicationReadonlyGuard },
     { provide: APP_INTERCEPTOR, useClass: RequestContextInterceptor },
   ],

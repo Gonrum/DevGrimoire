@@ -7,7 +7,7 @@ import {
   IsOptional,
   IsString,
 } from 'class-validator';
-import type { ScopeMode } from '../../common/permissions';
+import { ALL_PERMISSIONS, type ScopeMode } from '../../common/permissions';
 
 export class CreateApiKeyDto {
   @IsString()
@@ -25,6 +25,9 @@ export class CreateApiKeyDto {
 
   @IsArray()
   @IsString({ each: true })
+  // Unknown names are rejected: a typo would otherwise silently shrink the
+  // allowlist and lock the key out without any visible reason.
+  @IsIn(ALL_PERMISSIONS, { each: true })
   @ArrayUnique()
   @IsOptional()
   permissions?: string[];

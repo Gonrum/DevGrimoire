@@ -6,10 +6,21 @@
  * needed). The full design rationale lives in the project knowledge entry
  * "Permission-Modell für Customer/Project-Scope (T-210)".
  *
- * IMPORTANT: `role=admin` implicitly receives **all** permissions. Permission
- * checks in the codebase MUST short-circuit on admin role (see
- * `actorHasPermission` below) so existing admin flows keep working without
- * touching every endpoint.
+ * Semantics (enforced, see `actorMay`):
+ * - An EMPTY list means "not restricted": the role decides. Non-admins get
+ *   every `project:*` / `customer:*` permission (data access is then limited
+ *   by scope only), `admin:*` requires the admin role. This keeps every
+ *   existing user and key working unchanged.
+ * - A NON-EMPTY list is an allowlist and applies to admins too — an admin who
+ *   hands out a key limited to `project:todo:read` wants exactly that, the
+ *   same rule as for data scope. An `admin:*` entry on a user's own list
+ *   delegates that one admin capability (only admins can set user lists); a
+ *   key can never hold a permission its owner lacks (`actorFromApiKey`).
+ * - Any `project:*` entry implies `project:read` (the container must be
+ *   visible to reach its todos), likewise for `customer:*`.
+ * - Content outside the catalog (milestones, snippets, workflows, SSH, …):
+ *   reads follow scope, writes need `project:write` or `customer:write`
+ *   (`assertContentWrite`, enforced at the REST/MCP entry).
  */
 export const Permission = {
   // Customer domain
@@ -64,6 +75,8 @@ export type ScopeMode = 'all' | 'allowlist' | 'none';
 export interface ActorScope {
   role?: string;
   permissions?: string[];
+  /** Explicit allowlist flag, see `actorPermissionsRestricted`. */
+  permissionsRestricted?: boolean;
   projectScopeMode?: ScopeMode;
   allowedProjectIds?: string[];
   customerScopeMode?: ScopeMode;
@@ -72,14 +85,42 @@ export interface ActorScope {
 
 const ADMIN_ROLE = 'admin';
 
+const KNOWN_PERMISSIONS: ReadonlySet<string> = new Set(ALL_PERMISSIONS);
+
+export function isKnownPermission(value: string): value is PermissionId {
+  return KNOWN_PERMISSIONS.has(value);
+}
+
 /**
- * Returns true if the actor has the given permission. Admins bypass the check
- * entirely (see knowledge entry T-210 for rationale).
+ * True when the actor carries an explicit permission allowlist. API-key actors
+ * set `permissionsRestricted` explicitly, because the key/owner intersection
+ * can be empty and an empty list alone would read as "unrestricted".
+ */
+export function actorPermissionsRestricted(actor: ActorScope): boolean {
+  if (typeof actor.permissionsRestricted === 'boolean') return actor.permissionsRestricted;
+  return Array.isArray(actor.permissions) && actor.permissions.length > 0;
+}
+
+/** Whether the actor holds `perm` under the semantics documented above. */
+export function actorMay(actor: ActorScope | undefined, perm: PermissionId): boolean {
+  if (!actor) return false;
+  const isAdminPerm = perm.startsWith('admin:');
+  if (!actorPermissionsRestricted(actor)) {
+    return isAdminPerm ? actor.role === ADMIN_ROLE : true;
+  }
+  const list = actor.permissions ?? [];
+  if (list.includes(perm)) return true;
+  if (perm === Permission.PROJECT_READ) return list.some((p) => p.startsWith('project:'));
+  if (perm === Permission.CUSTOMER_READ) return list.some((p) => p.startsWith('customer:'));
+  return false;
+}
+
+/**
+ * Kept for existing callers; same semantics as `actorMay`. Admins only pass
+ * unconditionally while their permission list is unrestricted.
  */
 export function actorHasPermission(actor: ActorScope | undefined, perm: PermissionId): boolean {
-  if (!actor) return false;
-  if (actor.role === ADMIN_ROLE) return true;
-  return Array.isArray(actor.permissions) && actor.permissions.includes(perm);
+  return actorMay(actor, perm);
 }
 
 /**
@@ -88,7 +129,7 @@ export function actorHasPermission(actor: ActorScope | undefined, perm: Permissi
  *
  * NOTE: Admin role does NOT bypass scope. An admin who attaches a narrow-scope
  * API key wants exactly that — narrow scope. The role-based bypass only applies
- * to `actorHasPermission` (permission grants), not to data scope. Default
+ * to unrestricted permission lists (`actorMay`), not to data scope. Default
  * `scopeMode='all'` already gives admins access to everything in normal use.
  */
 export function actorCanAccessProject(actor: ActorScope | undefined, projectId: string | null | undefined): boolean {

@@ -9,10 +9,14 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
+import { PermissionGate } from '../auth/decorators/permission-gate.decorator';
 import { MonitoringService } from './monitoring.service';
 import { CreateHealthcheckDto } from './dto/create-healthcheck.dto';
 import { UpdateHealthcheckDto } from './dto/update-healthcheck.dto';
 
+// Writes here are checked against the precise catalog permission in the
+// service (see `common/permissions.ts`), not by the generic entry gate.
+@PermissionGate('service')
 @Controller()
 export class MonitoringController {
   constructor(private readonly monitoringService: MonitoringService) {}

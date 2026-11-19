@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { assertProjectInScope, scopeFilter } from '../common/scope-guard';
+import { assertProjectInScope, scopeAndPermissionFilter, scopeFilter } from '../common/scope-guard';
 import { Todo, TodoDocument } from '../todos/schemas/todo.schema';
 import { Knowledge, KnowledgeDocument } from '../knowledge/schemas/knowledge.schema';
 import { Changelog, ChangelogDocument } from '../changelog/schemas/changelog.schema';
@@ -57,7 +57,8 @@ export class SearchService {
     const [todos, knowledge, changelogs, research, milestones] = await Promise.all([
       this.todoModel
         .find({
-          ...projectFilter,
+          ...(projectId ? { projectId: new Types.ObjectId(projectId) } : {}),
+          ...scopeAndPermissionFilter('todo'),
           archived: { $ne: true },
           $or: [{ title: regex }, { description: regex }],
         })
@@ -65,7 +66,8 @@ export class SearchService {
         .exec(),
       this.knowledgeModel
         .find({
-          ...projectFilter,
+          ...(projectId ? { projectId: new Types.ObjectId(projectId) } : {}),
+          ...scopeAndPermissionFilter('knowledge'),
           $or: [{ topic: regex }, { content: regex }],
         })
         .limit(limit)

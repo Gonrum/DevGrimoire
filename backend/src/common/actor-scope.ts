@@ -1,4 +1,4 @@
-import type { ScopeMode } from './permissions';
+import { actorMay, isKnownPermission, type ScopeMode } from './permissions';
 import type { RequestUser } from './request-context';
 
 /**
@@ -97,10 +97,11 @@ export function scopeFromUser(user: ScopeSource) {
 /**
  * Voller Actor für einen API-Key-Aufruf: Key-Scope ∩ Besitzer-Scope.
  *
- * Permissions: die Admin-Rolle umgeht die Liste ohnehin
- * (`actorHasPermission`). Für Nicht-Admins ist die wirksame Menge der
- * Schnittmenge aus Key und Besitzer; ein leerer `key.permissions` fällt auf die
- * des Besitzers zurück (Altbestand ohne Permission-Feld).
+ * Permissions: an empty list means "unrestricted" (see `common/permissions.ts`).
+ * A key can only narrow its owner: an empty key list takes the owner's list,
+ * otherwise only the key entries the owner holds remain. `permissionsRestricted` is set explicitly so an
+ * empty intersection stays "nothing allowed" instead of turning into
+ * "unrestricted".
  */
 export function actorFromApiKey(
   apiKey: { _id: IdLike; userId: IdLike } & ScopeSource,
@@ -125,7 +126,12 @@ export function actorFromApiKey(
     username: owner.username,
     role: owner.role,
     apiKeyId: apiKey._id.toString(),
-    permissions: keyPerms.length === 0 ? [...ownerPerms] : intersectIds(keyPerms, ownerPerms),
+    // A key entry survives only if the owner actually holds it — otherwise an
+    // unrestricted non-admin could mint a key listing `admin:*`.
+    permissions:
+      keyPerms.length === 0 ? [...ownerPerms]
+        : keyPerms.filter((p) => isKnownPermission(p) && actorMay({ role: owner.role, permissions: ownerPerms }, p)),
+    permissionsRestricted: keyPerms.length > 0 || ownerPerms.length > 0,
     projectScopeMode: proj.mode,
     allowedProjectIds: proj.ids,
     customerScopeMode: cust.mode,

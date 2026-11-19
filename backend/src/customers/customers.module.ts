@@ -8,6 +8,7 @@ import {
   CustomerProjectLinkSchema,
 } from './schemas/customer-project-link.schema';
 import { Todo, TodoSchema } from '../todos/schemas/todo.schema';
+import { Environment, EnvironmentSchema } from '../environments/schemas/environment.schema';
 
 @Module({
   imports: [
@@ -17,6 +18,8 @@ import { Todo, TodoSchema } from '../todos/schemas/todo.schema';
       // Todo-Schema wird hier mitregistriert, weil der Customer-Dashboard-Endpoint
       // Open-Todo-Counts pro Kunde aggregiert (T-212). Idempotent zu TodosModule.
       { name: Todo.name, schema: TodoSchema },
+      // Validates environmentIds of customer-project links; idempotent to EnvironmentsModule.
+      { name: Environment.name, schema: EnvironmentSchema },
     ]),
   ],
   controllers: [CustomersController],

@@ -17,7 +17,10 @@ import { RolesGuard } from './guards/roles.guard';
 import { UserRole } from './schemas/user.schema';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { AdminPermission } from './decorators/permission-gate.decorator';
+import { Permission } from '../common/permissions';
 
+@AdminPermission(Permission.ADMIN_USER_MANAGE)
 @Controller('users')
 @UseGuards(RolesGuard)
 @Roles(UserRole.ADMIN)

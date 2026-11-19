@@ -7,7 +7,7 @@ import {
 import { errorMessage, streamToBuffer } from '../common/narrow';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { isValidObjectId, Model } from 'mongoose';
+import { isValidObjectId, Model, Types } from 'mongoose';
 import { randomUUID } from 'crypto';
 import { Readable } from 'stream';
 import { Attachment, AttachmentDocument } from './schemas/attachment.schema';
@@ -23,7 +23,16 @@ import {
 } from '../common/permissions';
 import { MAX_ATTACHMENT_SIZE, base64DecodedSize } from './attachment-limits';
 import { assertSafeCascadeId } from '../common/cascade-guard';
-import { assertOwnerParamsInScope } from '../common/scope-guard';
+import { assertOwnerInScope, assertOwnerParamsInScope, assertOwnerPermission } from '../common/scope-guard';
+import { Todo, TodoDocument } from '../todos/schemas/todo.schema';
+import { Knowledge, KnowledgeDocument } from '../knowledge/schemas/knowledge.schema';
+import { Release, ReleaseDocument } from '../releases/schemas/release.schema';
+
+/** Owner fields of an entity an attachment can be linked to. */
+interface LinkTargetOwner {
+  projectId?: Types.ObjectId | null;
+  customerId?: Types.ObjectId | null;
+}
 
 /** Mimetypes treated as extractable text */
 const TEXT_MIMETYPES = new Set([
@@ -70,7 +79,61 @@ export class AttachmentsService {
     private minioService: MinioService,
     private customersService: CustomersService,
     private eventEmitter: EventEmitter2,
+    // Link targets (entityType/entityId). Models instead of the services:
+    // TodosModule already imports CustomersModule, so a service dependency
+    // would add a module cycle for a plain owner lookup.
+    @InjectModel(Todo.name) private todoModel?: Model<TodoDocument>,
+    @InjectModel(Knowledge.name) private knowledgeModel?: Model<KnowledgeDocument>,
+    @InjectModel(Release.name) private releaseModel?: Model<ReleaseDocument>,
   ) {}
+
+  /**
+   * Validates the entity an attachment is linked to. Without this a caller
+   * could attach a file in its own project to a todo of a foreign project
+   * (entityType="todo", entityId=<foreign id>): the file would then surface
+   * in that todo's attachment list and be removed by its cascade.
+   *
+   * The target must exist, belong to the SAME owner as the attachment and be
+   * in the actor's scope. Missing and foreign targets get the same 400 so the
+   * check is not an existence oracle for foreign ids. Unknown entity types
+   * with an entityId are rejected (fail closed) — nothing could validate them.
+   */
+  private async assertLinkTarget(
+    owner: { projectId?: string | null; customerId?: string | null },
+    entityType: string | undefined,
+    entityId: string | undefined,
+  ): Promise<void> {
+    if (!entityId) return;
+    if (!entityType) {
+      throw new BadRequestException('entityType is required when entityId is set');
+    }
+    if (!isValidObjectId(entityId)) {
+      throw new BadRequestException('entityId must be a valid id');
+    }
+    const objectId = new Types.ObjectId(entityId);
+    let target: LinkTargetOwner | null;
+    if (entityType === 'todo' && this.todoModel) {
+      target = await this.todoModel.findById(objectId).select('projectId customerId').lean().exec();
+    } else if (entityType === 'knowledge' && this.knowledgeModel) {
+      target = await this.knowledgeModel.findById(objectId).select('projectId customerId').lean().exec();
+    } else if (entityType === 'release' && this.releaseModel) {
+      // Release artifacts saved from a workspace (`workspace_attachment_save`).
+      target = await this.releaseModel.findById(objectId).select('projectId').lean().exec();
+    } else {
+      throw new BadRequestException(`Unsupported entityType "${entityType}"`);
+    }
+    const targetProject = target?.projectId?.toString() ?? null;
+    const targetCustomer = target?.customerId?.toString() ?? null;
+    const sameOwner = owner.projectId
+      ? targetProject === owner.projectId
+      : !!owner.customerId && targetCustomer === owner.customerId;
+    if (!target || !sameOwner) {
+      throw new BadRequestException(`${entityType} ${entityId} not found for this attachment's owner`);
+    }
+    // A todo may carry a second axis (project todo for a customer); both must
+    // be in scope, not only the one shared with the attachment.
+    assertOwnerInScope({ projectId: target.projectId, customerId: target.customerId }, `${entityType} ${entityId}`);
+  }
 
   async create(
     fields: {
@@ -101,9 +164,12 @@ export class AttachmentsService {
     // BEFORE putObject: a narrowed actor must not store files (which are then
     // text-extracted into the RAG index) in a foreign project or customer.
     assertOwnerParamsInScope({ projectId: fields.projectId, customerId: fields.customerId });
+    assertOwnerPermission({ projectId: fields.projectId, customerId: fields.customerId }, 'file', 'write');
     if (fields.customerId) {
       await this.customersService.findById(fields.customerId);
     }
+    // Also before putObject: no orphaned MinIO object on a rejected link.
+    await this.assertLinkTarget(fields, fields.entityType || undefined, fields.entityId || undefined);
 
     const uuid = randomUUID();
     const safeName = sanitizeFilename(file.originalname);
@@ -154,6 +220,7 @@ export class AttachmentsService {
     if (actor && !actorCanAccessProject(actor, projectId)) {
       throw new ForbiddenException(`Project ${projectId} is not in your scope`);
     }
+    assertOwnerPermission({ projectId }, 'file', 'read');
     const filter: Record<string, unknown> = { projectId: projectIdFilter(projectId) };
     if (entityType) filter.entityType = entityType;
     if (entityId) filter.entityId = entityId;
@@ -173,6 +240,7 @@ export class AttachmentsService {
     if (actor && !actorCanAccessCustomer(actor, customerId)) {
       throw new ForbiddenException(`Customer ${customerId} is not in your scope`);
     }
+    assertOwnerPermission({ customerId }, 'file', 'read');
     const filter: Record<string, unknown> = { customerId: projectIdFilter(customerId) };
     if (entityType) filter.entityType = entityType;
     if (entityId) filter.entityId = entityId;
@@ -200,9 +268,10 @@ export class AttachmentsService {
    * ist ein vertrauenswürdiger interner Aufrufer (Replikation, Migration,
    * stdio-MCP ohne HTTP-Kontext).
    */
-  private assertAccess(attachment: AttachmentDocument): void {
+  private assertAccess(attachment: AttachmentDocument, action: 'read' | 'write' = 'read'): void {
     const actor = RequestContext.getUser();
     if (!actor) return;
+    assertOwnerPermission(attachment, 'file', action);
     const projectId = attachment.projectId?.toString() || null;
     const customerId = attachment.customerId?.toString() || null;
     const projectOk = !projectId || actorCanAccessProject(actor, projectId);
@@ -218,11 +287,15 @@ export class AttachmentsService {
    * `withText` nur für getText(): alle anderen Pfade brauchen den extrahierten
    * Volltext nicht und schleppen ihn sonst unnötig durch den Speicher.
    */
-  private async findScoped(id: string, withText = false): Promise<AttachmentDocument> {
+  private async findScoped(
+    id: string,
+    withText = false,
+    action: 'read' | 'write' = 'read',
+  ): Promise<AttachmentDocument> {
     const query = this.attachmentModel.findById(id);
     const attachment = await (withText ? query : query.select('-textContent')).exec();
     if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
-    this.assertAccess(attachment);
+    this.assertAccess(attachment, action);
     return attachment;
   }
 
@@ -232,7 +305,19 @@ export class AttachmentsService {
 
   async update(id: string, dto: UpdateAttachmentDto): Promise<AttachmentDocument> {
     // VOR der Mutation prüfen: findByIdAndUpdate hätte sonst schon geschrieben.
-    await this.findScoped(id);
+    const existing = await this.findScoped(id, false, 'write');
+    // Validate the resulting link (existing values merged with the change),
+    // so changing only entityId re-targets against the stored entityType.
+    if (dto.entityType !== undefined || dto.entityId !== undefined) {
+      await this.assertLinkTarget(
+        {
+          projectId: existing.projectId?.toString() ?? null,
+          customerId: existing.customerId?.toString() ?? null,
+        },
+        dto.entityType ?? existing.entityType ?? undefined,
+        dto.entityId ?? existing.entityId?.toString() ?? undefined,
+      );
+    }
     const attachment = await this.attachmentModel
       .findByIdAndUpdate(id, dto, { new: true })
       .select('-textContent')
@@ -275,7 +360,7 @@ export class AttachmentsService {
   async remove(id: string): Promise<void> {
     // VOR findByIdAndDelete prüfen — die Methode löscht sonst erst und liefert
     // dann das gelöschte Dokument, und die MinIO-Kaskade ist unwiederbringlich.
-    await this.findScoped(id);
+    await this.findScoped(id, false, 'write');
     const attachment = await this.attachmentModel.findByIdAndDelete(id).exec();
     if (!attachment) throw new NotFoundException(`Attachment ${id} not found`);
     await this.minioService.removeObject(attachment.storageKey).catch((err) =>
@@ -339,6 +424,7 @@ export class AttachmentsService {
   ): Promise<AttachmentDocument> {
     // Scope first, so a foreign upload is not even decoded; create() checks again.
     assertOwnerParamsInScope({ projectId: fields.projectId, customerId: fields.customerId });
+    assertOwnerPermission({ projectId: fields.projectId, customerId: fields.customerId }, 'file', 'write');
     // VOR dem Decodieren prüfen — sonst läge der übergrosse Buffer schon im
     // Speicher, bevor create() ihn ablehnt.
     const decodedSize = base64DecodedSize(base64Content);

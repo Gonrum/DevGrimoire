@@ -8,12 +8,17 @@ import { FormInput, FormTextarea } from '../components/ui/FormField';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { downloadTextFile } from '../lib/download';
 import { errorMessage } from '../lib/narrow';
+import { useAuth } from '../hooks/useAuth';
 
 export default function StackDetailPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { showError, showSuccess } = useToast();
+  // Stack writes are admin-only on the backend (403 otherwise): non-admins get
+  // a read-only view with export, but no edit, reorder or delete controls.
+  const { user, authEnabled } = useAuth();
+  const isAdmin = authEnabled && user?.role === 'admin';
   const [stack, setStack] = useState<Stack | null>(null);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
@@ -131,12 +136,12 @@ export default function StackDetailPage() {
       </button>
 
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 mb-6">
-        <FormInput label={t('stacks.name')} value={name} onChange={(e) => setName(e.target.value)} />
+        <FormInput label={t('stacks.name')} value={name} onChange={(e) => setName(e.target.value)} readOnly={!isAdmin} />
         <div className="mt-3">
-          <FormTextarea label={t('stacks.description')} value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+          <FormTextarea label={t('stacks.description')} value={description} onChange={(e) => setDescription(e.target.value)} rows={3} readOnly={!isAdmin} />
         </div>
         <div className="flex flex-wrap justify-between gap-2 mt-3">
-          <Button variant="primary" onClick={() => { void saveMeta(); }}>{t('common.save')}</Button>
+          {isAdmin ? <Button variant="primary" onClick={() => { void saveMeta(); }}>{t('common.save')}</Button> : <span />}
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => { void exportStack(false); }}>⬇ {t('stacks.exportStack')}</Button>
             <Button variant="ghost" onClick={() => { void exportStack(true); }}>⧉ {t('stacks.copy')}</Button>
@@ -146,21 +151,26 @@ export default function StackDetailPage() {
 
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold">{t('stacks.sections')}</h2>
-        <Button variant="primary" onClick={() => { void addSection(); }}>{t('stacks.addSection')}</Button>
+        {isAdmin && (
+          <Button variant="primary" onClick={() => { void addSection(); }}>{t('stacks.addSection')}</Button>
+        )}
       </div>
 
       <div className="space-y-4">
         {stack.entries.map((entry, index) => (
           <div key={entry._id} className="bg-gray-900 border border-gray-800 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-2">
-              <div className="flex flex-col">
-                <button onClick={() => { void move(index, -1); }} disabled={index === 0} className="text-gray-500 hover:text-gray-200 disabled:opacity-30">↑</button>
-                <button onClick={() => { void move(index, 1); }} disabled={index === stack.entries.length - 1} className="text-gray-500 hover:text-gray-200 disabled:opacity-30">↓</button>
-              </div>
+              {isAdmin && (
+                <div className="flex flex-col">
+                  <button onClick={() => { void move(index, -1); }} disabled={index === 0} className="text-gray-500 hover:text-gray-200 disabled:opacity-30">↑</button>
+                  <button onClick={() => { void move(index, 1); }} disabled={index === stack.entries.length - 1} className="text-gray-500 hover:text-gray-200 disabled:opacity-30">↓</button>
+                </div>
+              )}
               <input
                 className="flex-1 bg-gray-800 border border-gray-700 rounded-sm px-3 py-2 text-gray-100"
                 value={entry.title}
                 onChange={(e) => updateLocalEntry(entry._id, { title: e.target.value })}
+                readOnly={!isAdmin}
               />
             </div>
             <textarea
@@ -168,13 +178,16 @@ export default function StackDetailPage() {
               rows={8}
               value={entry.content}
               onChange={(e) => updateLocalEntry(entry._id, { content: e.target.value })}
+              readOnly={!isAdmin}
             />
             <div className="flex flex-wrap justify-between gap-2 mt-2">
-              <Button variant="primary" onClick={() => { void saveSection(entry); }}>{t('common.save')}</Button>
+              {isAdmin ? <Button variant="primary" onClick={() => { void saveSection(entry); }}>{t('common.save')}</Button> : <span />}
               <div className="flex gap-2">
                 <Button variant="secondary" onClick={() => { void exportSection(entry._id, false); }}>⬇ .md</Button>
                 <Button variant="ghost" onClick={() => { void exportSection(entry._id, true); }}>⧉ {t('stacks.copy')}</Button>
-                <Button variant="danger" onClick={() => { void deleteSection(entry._id); }}>🗑</Button>
+                {isAdmin && (
+                  <Button variant="danger" onClick={() => { void deleteSection(entry._id); }}>🗑</Button>
+                )}
               </div>
             </div>
           </div>

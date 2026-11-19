@@ -16,6 +16,8 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../auth/schemas/user.schema';
 import type { AuthRequest } from '../common/request-context';
+import { AdminPermission } from '../auth/decorators/permission-gate.decorator';
+import { Permission } from '../common/permissions';
 
 /**
  * Alle Routen hier sind nicht `@Public()`, der `JwtAuthGuard` hat also einen
@@ -32,6 +34,7 @@ import type { AuthRequest } from '../common/request-context';
  * dann die Keys **aller** Nutzer liefern und `revoke()` fremde Keys löschen.
  * Der Fehlschlag vor der Query ist also die sichere Variante und bleibt.
  */
+@AdminPermission(Permission.ADMIN_APIKEY_MANAGE)
 @Controller('api-keys')
 export class ApiKeysController {
   constructor(private readonly apiKeysService: ApiKeysService) {}

@@ -4,7 +4,10 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../auth/schemas/user.schema';
 import { BackupsService } from './backups.service';
 import { CreateBackupDto } from './dto/create-backup.dto';
+import { AdminPermission } from '../auth/decorators/permission-gate.decorator';
+import { Permission } from '../common/permissions';
 
+@AdminPermission(Permission.ADMIN_BACKUP_MANAGE)
 @Controller('backups')
 @UseGuards(RolesGuard)
 @Roles(UserRole.ADMIN)

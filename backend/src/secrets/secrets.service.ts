@@ -19,7 +19,7 @@ import {
   actorCanAccessProject,
 } from '../common/permissions';
 import { assertSafeCascadeId } from '../common/cascade-guard';
-import { assertOwnerInScope, assertOwnerParamsInScope } from '../common/scope-guard';
+import { assertOwnerInScope, assertOwnerParamsInScope, assertOwnerPermission } from '../common/scope-guard';
 import { secretBelongsTo, SecretOwnerRef } from './secret-owner';
 
 export interface SecretListItem {
@@ -59,6 +59,7 @@ export class SecretsService {
     // The create is an upsert on (owner, environment, key): without this check a
     // narrowed actor could overwrite secrets of a foreign project or customer.
     assertOwnerParamsInScope(dto);
+    assertOwnerPermission(dto, 'secret', 'write');
     if (dto.customerId) {
       await this.customersService.findById(dto.customerId);
     }
@@ -96,6 +97,7 @@ export class SecretsService {
     // Mongoose *entfernt* `undefined`-Felder aus dem Filter, ein
     // `environmentId: undefined` würde also nicht "kein Environment" heißen,
     // sondern "beliebiges Environment".
+    assertOwnerPermission({ projectId }, 'secret', 'read');
     const filter: FilterQuery<SecretDocument> = { projectId };
     if (environmentId !== undefined) {
       filter.environmentId = environmentId || null;
@@ -109,6 +111,7 @@ export class SecretsService {
     if (actor && !actorCanAccessCustomer(actor, customerId)) {
       throw new ForbiddenException(`Customer ${customerId} is not in your scope`);
     }
+    assertOwnerPermission({ customerId }, 'secret', 'read');
     const filter: FilterQuery<SecretDocument> = { customerId };
     if (environmentId !== undefined) {
       filter.environmentId = environmentId || null;
@@ -133,7 +136,8 @@ export class SecretsService {
    * fehlender Actor ist ein vertrauenswürdiger interner Aufrufer (Replikation,
    * Migration, stdio-MCP ohne HTTP-Kontext).
    */
-  private assertAccess(secret: SecretDocument): void {
+  private assertAccess(secret: SecretDocument, action: 'read' | 'write' = 'read'): void {
+    assertOwnerPermission(secret, 'secret', action);
     const actor = RequestContext.getUser();
     if (!actor) return;
     const projectId = secret.projectId?.toString() || null;
@@ -160,7 +164,7 @@ export class SecretsService {
     // VOR dem Schreiben — und bewusst ohne findById(), weil das den Wert
     // entschlüsseln würde, was für eine reine Metadaten-/Wert-Änderung
     // unnötig ist.
-    this.assertAccess(secret);
+    this.assertAccess(secret, 'write');
 
     if (dto.key !== undefined) secret.key = dto.key;
     if (dto.description !== undefined) secret.description = dto.description;
@@ -181,7 +185,7 @@ export class SecretsService {
     // dann das gelöschte Dokument zurück.
     const existing = await this.secretModel.findById(id).exec();
     if (!existing) throw new NotFoundException('Secret not found');
-    this.assertAccess(existing);
+    this.assertAccess(existing, 'write');
 
     const result = await this.secretModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException('Secret not found');
@@ -221,6 +225,7 @@ export class SecretsService {
     // Decryption path (MCP `environment_export`, HTTP-request templating): a
     // narrowed actor must not export the secrets of a foreign owner.
     assertOwnerParamsInScope(owner);
+    assertOwnerPermission(owner, 'secret', 'read');
 
     const filter: FilterQuery<SecretDocument> = {};
     if (owner.projectId) filter.projectId = owner.projectId;
@@ -261,6 +266,9 @@ export class SecretsService {
         throw new ForbiddenException(`Secret ${id} does not belong to ${what}`);
       }
       assertOwnerInScope(secret, `Secret ${id}`);
+      // A stored reference is decrypted and sent out later by a background
+      // job, so referencing a secret is as good as reading it.
+      assertOwnerPermission(secret, 'secret', 'read');
     }
   }
 

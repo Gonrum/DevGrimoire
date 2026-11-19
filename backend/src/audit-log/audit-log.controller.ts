@@ -8,7 +8,10 @@ import { AuditLogService } from './audit-log.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../auth/schemas/user.schema';
+import { AdminPermission } from '../auth/decorators/permission-gate.decorator';
+import { Permission } from '../common/permissions';
 
+@AdminPermission(Permission.ADMIN_AUDIT_READ)
 @Controller('audit-log')
 @UseGuards(RolesGuard)
 @Roles(UserRole.ADMIN)

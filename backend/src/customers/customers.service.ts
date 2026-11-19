@@ -12,6 +12,7 @@ import { Model, Types } from 'mongoose';
 import { ProjectsService } from '../projects/projects.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { Todo, TodoDocument, TodoStatus } from '../todos/schemas/todo.schema';
+import { Environment, EnvironmentDocument } from '../environments/schemas/environment.schema';
 import { Customer, CustomerDocument, CustomerStatus } from './schemas/customer.schema';
 import {
   CustomerProjectLink,
@@ -24,7 +25,7 @@ import {
   UpdateCustomerProjectLinkDto,
 } from './dto/customer-project-link.dto';
 import { RequestContext } from '../common/request-context';
-import { actorCanAccessCustomer } from '../common/permissions';
+import { actorCanAccessCustomer, actorMay, Permission, PermissionId } from '../common/permissions';
 import { buildScopeFilter } from '../common/scope';
 import { assertOwnerInScope, projectScopeFilter } from '../common/scope-guard';
 
@@ -71,7 +72,64 @@ export class CustomersService {
     @InjectModel(Todo.name) private todoModel: Model<TodoDocument>,
     private readonly projectsService: ProjectsService,
     private eventEmitter: EventEmitter2,
+    // Model instead of EnvironmentsService: EnvironmentsModule imports
+    // CustomersModule, the service would close a module cycle.
+    @InjectModel(Environment.name) private environmentModel?: Model<EnvironmentDocument>,
   ) {}
+
+  /**
+   * Validates the environments a customer-project link references. The UI
+   * offers the linked project's environments; the customer's own ones are
+   * part of the same relation and accepted too. Anything else (a foreign
+   * project's environment) is rejected: consumers resolve these ids later,
+   * possibly without an actor, and would expose a foreign environment's
+   * plaintext variables through the link. Missing and foreign ids get the
+   * same 400 so the check is no existence oracle.
+   */
+  private async resolveLinkEnvironmentIds(
+    ids: string[],
+    projectId: Types.ObjectId,
+    customerId: Types.ObjectId,
+    previouslyStored: ReadonlySet<string> = new Set(),
+  ): Promise<Types.ObjectId[]> {
+    const objectIds = ids.map((id) => this.objectId(id, 'environmentId'));
+    if (objectIds.length === 0) return [];
+    if (!this.environmentModel) {
+      throw new BadRequestException('Environment references cannot be validated');
+    }
+    const unique = [...new Map(objectIds.map((id) => [id.toString(), id])).values()];
+    const found = await this.environmentModel
+      .find({
+        _id: { $in: unique },
+        $or: [{ projectId }, { customerId }],
+      })
+      .select('_id')
+      .lean()
+      .exec();
+    const ok = new Set(found.map((env) => env._id.toString()));
+    let bad = unique.filter((id) => !ok.has(id.toString()));
+    // The edit form sends back the stored list; an environment deleted since
+    // then must not make the link unsavable. Such ids are dropped — but only
+    // when they no longer exist at all, a stored foreign id still fails.
+    const stale = bad.filter((id) => previouslyStored.has(id.toString()));
+    if (stale.length > 0) {
+      const stillThere = await this.environmentModel
+        .find({ _id: { $in: stale } })
+        .select('_id')
+        .lean()
+        .exec();
+      const existing = new Set(stillThere.map((env) => env._id.toString()));
+      const dropped = new Set(stale.filter((id) => !existing.has(id.toString())).map((id) => id.toString()));
+      bad = bad.filter((id) => !dropped.has(id.toString()));
+      if (bad.length === 0) return unique.filter((id) => !dropped.has(id.toString()));
+    }
+    if (bad.length > 0) {
+      throw new BadRequestException(
+        `Environment ${bad[0].toString()} does not belong to the linked project or customer`,
+      );
+    }
+    return unique;
+  }
 
   private objectId(id: string, label = 'id'): Types.ObjectId {
     if (!Types.ObjectId.isValid(id)) {
@@ -81,6 +139,10 @@ export class CustomersService {
   }
 
   async create(dto: CreateCustomerDto): Promise<CustomerDocument> {
+    const actor = RequestContext.getUser();
+    if (actor && !actorMay(actor, Permission.CUSTOMER_WRITE)) {
+      throw new ForbiddenException(`Missing permission ${Permission.CUSTOMER_WRITE}`);
+    }
     try {
       const customer = await this.customerModel.create(dto);
       this.eventEmitter.emit(PROJECT_CHANGED, {
@@ -101,6 +163,9 @@ export class CustomersService {
   }
 
   async findAll(filters: CustomerListFilters = {}): Promise<CustomerDocument[]> {
+    // Without any customer permission the actor may not even see the list.
+    const listActor = RequestContext.getUser();
+    if (listActor && !actorMay(listActor, Permission.CUSTOMER_READ)) return [];
     const query: Record<string, unknown> = {};
     if (filters.status) {
       query.status = filters.status;
@@ -201,10 +266,13 @@ export class CustomersService {
    * ergibt. `if (actor)` ist die dokumentierte Konvention dieses Projekts: ein
    * fehlender Actor ist ein vertrauenswürdiger interner Aufrufer.
    */
-  private assertAccess(id: string): void {
+  private assertAccess(id: string, perm: PermissionId = Permission.CUSTOMER_READ): void {
     const actor = RequestContext.getUser();
     if (actor && !actorCanAccessCustomer(actor, id)) {
       throw new ForbiddenException(`Customer ${id} is not in your scope`);
+    }
+    if (actor && !actorMay(actor, perm)) {
+      throw new ForbiddenException(`Missing permission ${perm}`);
     }
   }
 
@@ -216,7 +284,7 @@ export class CustomersService {
   }
 
   async update(id: string, dto: UpdateCustomerDto): Promise<CustomerDocument> {
-    this.assertAccess(id);
+    this.assertAccess(id, Permission.CUSTOMER_WRITE);
     try {
       const customer = await this.customerModel
         .findByIdAndUpdate(this.objectId(id, 'customerId'), dto, { new: true })
@@ -240,7 +308,7 @@ export class CustomersService {
   }
 
   async archive(id: string): Promise<CustomerDocument> {
-    this.assertAccess(id);
+    this.assertAccess(id, Permission.CUSTOMER_ARCHIVE);
     const customer = await this.customerModel
       .findByIdAndUpdate(
         this.objectId(id, 'customerId'),
@@ -268,12 +336,17 @@ export class CustomersService {
     const project = await this.projectsService.findById(dto.projectId);
     const customerObjectId = this.objectId(customerId, 'customerId');
     const projectObjectId = this.objectId(dto.projectId, 'projectId');
+    const environmentIds = await this.resolveLinkEnvironmentIds(
+      dto.environmentIds ?? [],
+      projectObjectId,
+      customerObjectId,
+    );
     try {
       const link = await this.customerProjectLinkModel.create({
         ...dto,
         customerId: customerObjectId,
         projectId: projectObjectId,
-        environmentIds: dto.environmentIds?.map((id) => this.objectId(id, 'environmentId')) ?? [],
+        environmentIds,
       });
       this.eventEmitter.emit(PROJECT_CHANGED, {
         projectId: project._id.toString(),
@@ -339,10 +412,15 @@ export class CustomersService {
     dto: UpdateCustomerProjectLinkDto,
   ): Promise<CustomerProjectLinkDocument> {
     const customer = await this.findById(customerId);
-    await this.findScopedLink(customerId, linkId);
+    const existing = await this.findScopedLink(customerId, linkId);
     const update: Record<string, unknown> = { ...dto };
     if (dto.environmentIds) {
-      update.environmentIds = dto.environmentIds.map((id) => this.objectId(id, 'environmentId'));
+      update.environmentIds = await this.resolveLinkEnvironmentIds(
+        dto.environmentIds,
+        existing.projectId,
+        existing.customerId,
+        new Set((existing.environmentIds ?? []).map((id) => id.toString())),
+      );
     }
     const link = await this.customerProjectLinkModel
       .findOneAndUpdate(

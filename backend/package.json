@@ -62,6 +62,8 @@
     "check:load-safety": "node scripts/load-safety-check.cjs",
     "check:notifications-user-scope": "node scripts/notifications-user-scope-check.cjs",
     "check:events-scope": "node scripts/events-scope-check.cjs",
+    "check:attachment-link-refs": "node scripts/attachment-link-refs-check.cjs",
+    "check:permission-catalog": "node scripts/permission-catalog-check.cjs",
     "check:i18n-keys": "node scripts/i18n-keys-check.cjs",
     "check:credential-at-rest": "node scripts/credential-at-rest-check.cjs",
     "check:replication-lww": "node scripts/replication-lww-check.cjs",

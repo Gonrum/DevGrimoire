@@ -1,4 +1,5 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
+import { toolAccessClass } from '../common/permission-gate';
 import { TodosService } from '../todos/todos.service';
 import { MilestonesService, type ParsedMilestone, type ParsedTodo } from '../milestones/milestones.service';
 import { ChangelogService } from '../changelog/changelog.service';
@@ -7,7 +8,7 @@ import { ResearchService, researchDetailForTool } from '../research/research.ser
 import { ResearchControlService } from '../research/research-control.service';
 import { readDepth, readTopics } from '../research/research-tool-input';
 import { errorMessage } from '../common/narrow';
-import { assertCustomerInScope, assertProjectInScope } from '../common/scope-guard';
+import { actorMayWriteContent, assertCustomerInScope, assertProjectInScope } from '../common/scope-guard';
 import { RequestContext } from '../common/request-context';
 import { ManualsService } from '../manuals/manuals.service';
 import { SessionsService } from '../sessions/sessions.service';
@@ -1505,6 +1506,10 @@ export class ChatToolsService {
       return { success: false, error: `Tool "${name}" is not in the allowlist` };
     }
     const isWrite = WRITE_TOOL_NAMES.has(name);
+    // Same entry gate as REST and MCP for actors with a permission allowlist.
+    if (toolAccessClass(name) === 'write' && !actorMayWriteContent(RequestContext.getUser())) {
+      return { success: false, error: `Tool "${name}" requires the permission project:write or customer:write` };
+    }
     // Session-projectId overrides any args.projectId for write tools — prevents an
     // LLM from mutating data in projects other than the current chat session.
     // Ein nicht-String in args.projectId zählt wie „nicht gesetzt"; früher wurde er

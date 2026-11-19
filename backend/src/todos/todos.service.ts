@@ -28,7 +28,13 @@ import {
 import { buildDualScopeFilter } from '../common/scope';
 import { isRecord, isUnknownArray } from '../common/narrow';
 import { assertSafeCascadeId } from '../common/cascade-guard';
-import { assertOwnerParamsInScope, assertProjectInScope } from '../common/scope-guard';
+import {
+  assertOwnerParamsInScope,
+  assertOwnerPermission,
+  assertProjectInScope,
+  permissionFilter,
+  scopeAndPermissionFilter,
+} from '../common/scope-guard';
 
 const STATUS_ORDER: TodoStatus[] = [
   TodoStatus.OPEN,
@@ -124,6 +130,7 @@ export class TodosService {
     assertProjectInScope(projectId);
     const todo = await this.todoModel.findOne({ projectId, number }).exec();
     if (!todo) throw new NotFoundException(`Todo #${number} not found in project ${projectId}`);
+    this.assertAccess(todo);
     return todo;
   }
 
@@ -131,6 +138,7 @@ export class TodosService {
     assertProjectInScope(projectId);
     const todo = await this.todoModel.findOne({ projectId, displayNumber }).exec();
     if (!todo) throw new NotFoundException(`Todo "${displayNumber}" not found in project ${projectId}`);
+    this.assertAccess(todo);
     return todo;
   }
 
@@ -159,6 +167,7 @@ export class TodosService {
     // Checked in the service: notes promotion, recurring tasks and the dg CLI
     // call create() directly, without the controller's scope pipe.
     assertOwnerParamsInScope({ projectId: dto.projectId, customerId: dto.customerId });
+    assertOwnerPermission({ projectId: dto.projectId, customerId: dto.customerId }, 'todo', 'write');
     await this.assertReferencesInOwner(
       { projectId: dto.projectId, customerId: dto.customerId },
       { milestoneId: dto.milestoneId, blockedBy: dto.blockedBy },
@@ -213,7 +222,7 @@ export class TodosService {
     if (filters.milestoneId) query.milestoneId = projectIdFilter(filters.milestoneId);
     if (filters.tag) query.tags = filters.tag;
     if (!filters.includeArchived) query.archived = { $ne: true };
-    Object.assign(query, buildDualScopeFilter(RequestContext.getUser()));
+    Object.assign(query, scopeAndPermissionFilter('todo'));
     return this.todoModel.find(query).sort({ priority: 1, createdAt: -1 }).exec();
   }
 
@@ -252,6 +261,8 @@ export class TodosService {
     if (isUnknownArray(actorScope.$and)) {
       for (const clause of actorScope.$and) if (isRecord(clause)) and.push(clause);
     }
+    const permFilter = permissionFilter('todo');
+    if (Object.keys(permFilter).length > 0) and.push(permFilter);
     const base: Record<string, unknown> = {
       $and: and,
       archived: { $ne: true },
@@ -291,9 +302,10 @@ export class TodosService {
    * `if (actor)` ist die dokumentierte Konvention (siehe AttachmentsService):
    * ein fehlender Actor ist ein vertrauenswürdiger interner Aufrufer.
    */
-  private assertAccess(todo: TodoDocument): void {
+  private assertAccess(todo: TodoDocument, action: 'read' | 'write' = 'read'): void {
     const actor = RequestContext.getUser();
     if (!actor) return;
+    assertOwnerPermission(todo, 'todo', action);
     const projectId = todo.projectId?.toString() || null;
     const customerId = todo.customerId?.toString() || null;
     const projectOk = !projectId || actorCanAccessProject(actor, projectId);
@@ -304,10 +316,10 @@ export class TodosService {
   }
 
   /** Lädt, prüft 404 und Scope — die eine Stelle, die jeder Pfad benutzt. */
-  private async findScoped(id: string): Promise<TodoDocument> {
+  private async findScoped(id: string, action: 'read' | 'write' = 'read'): Promise<TodoDocument> {
     const todo = await this.todoModel.findById(id).exec();
     if (!todo) throw new NotFoundException(`Todo ${id} not found`);
-    this.assertAccess(todo);
+    this.assertAccess(todo, action);
     return todo;
   }
 
@@ -319,7 +331,7 @@ export class TodosService {
     // VOR der Mutation prüfen — findByIdAndUpdate hätte sonst schon
     // geschrieben. Derselbe Load liefert den bisherigen Status für die
     // Übergangs-Prüfung und ersetzt damit das separate .select('status').lean().
-    const existing = await this.findScoped(id);
+    const existing = await this.findScoped(id, 'write');
     // Validate only what this update ADDS. The UI always sends the complete
     // blockedBy list, and stored entries can be dangling (blockers are not
     // cleaned up when a todo is deleted) — re-validating them would make the
@@ -375,7 +387,7 @@ export class TodosService {
   async remove(id: string): Promise<void> {
     // VOR dem Löschen prüfen; das geladene Dokument trägt alles, was das Event
     // braucht, also bleibt es bei einem Read plus einem Delete.
-    const existing = await this.findScoped(id);
+    const existing = await this.findScoped(id, 'write');
     await this.todoModel.deleteOne({ _id: existing._id }).exec();
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: existing.projectId?.toString() || null,
@@ -392,7 +404,7 @@ export class TodosService {
     // Aufrufer-String ist und damit fälschbar — das zu ändern heißt, den Autor
     // aus dem Actor abzuleiten, und ist eine Verhaltensänderung über diesen
     // Fix hinaus.
-    await this.findScoped(id);
+    await this.findScoped(id, 'write');
     const todo = await this.todoModel
       .findByIdAndUpdate(
         id,

@@ -1,4 +1,5 @@
 import { StringDecoder } from 'node:string_decoder';
+import { toolAccessClass } from './common/permission-gate';
 import { HttpException, Logger } from '@nestjs/common';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
@@ -75,7 +76,7 @@ import type { ParsedTodo, ParsedMilestone } from './milestones/milestones.servic
 import type { CreateKnowledgeDto } from './knowledge/dto/create-knowledge.dto';
 import type { BodyDto } from './http-requests/dto/create-request.dto';
 import { RequestContext } from './common/request-context';
-import { assertAdmin } from './common/scope-guard';
+import { actorMayWriteContent, assertAdmin } from './common/scope-guard';
 import { AGENT_INSTRUCTIONS_KEY, DEFAULT_AGENT_INSTRUCTIONS } from './settings/default-agent-instructions';
 import { AuthService } from './auth/auth.service';
 import { CustomersService } from './customers/customers.service';
@@ -3205,7 +3206,7 @@ const tools = [
         id: { type: 'string', description: 'Workspace MongoDB ID' },
         path: { type: 'string', description: 'File path relative to the workspace root (e.g. "dist/app.zip")' },
         fileName: { type: 'string', description: 'Optional override for the stored filename (default: basename of path)' },
-        entityType: { type: 'string', description: 'Optional: link to entity type (e.g. "todo", "release")' },
+        entityType: { type: 'string', description: 'Optional: link to entity type: "todo", "knowledge" or "release" (same project as the attachment)' },
         entityId: { type: 'string', description: 'Optional: linked entity MongoDB ID (requires entityType)' },
         description: { type: 'string', description: 'Optional human-readable description' },
         tags: {
@@ -4344,7 +4345,7 @@ const tools = [
         fileName: { type: 'string', description: 'Original filename (e.g. "diagram.png")' },
         content: { type: 'string', description: 'Base64-encoded file content' },
         mimeType: { type: 'string', description: 'MIME type (auto-detected from extension if omitted)' },
-        entityType: { type: 'string', description: 'Entity type to attach to (e.g. "todo", "knowledge")' },
+        entityType: { type: 'string', description: 'Entity type to attach to: "todo", "knowledge" or "release" (must belong to the same project/customer as the attachment)' },
         entityId: { type: 'string', description: 'Entity MongoDB ID to attach to' },
         description: { type: 'string', description: 'Optional description' },
         tags: { type: 'string', description: 'Comma-separated tags' },
@@ -4941,6 +4942,12 @@ export function registerMcpTools(server: Server, services: McpServices): void {
     
     if (!isToolAllowed(name)) {
       return errorResult(`Tool ${name} is not allowed for the current API key.`);
+    }
+    // Same entry gate as `PermissionGateGuard` for REST: with a permission
+    // allowlist, content writes outside the catalog need project:write or
+    // customer:write; catalog tools are checked precisely in their services.
+    if (toolAccessClass(name) === 'write' && !actorMayWriteContent(RequestContext.getUser())) {
+      return errorResult(`Tool ${name} requires the permission project:write or customer:write.`);
     }
 
     const a = args;

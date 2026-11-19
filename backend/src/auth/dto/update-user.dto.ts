@@ -10,7 +10,7 @@ import {
   IsString,
 } from 'class-validator';
 import { UserRole } from '../schemas/user.schema';
-import type { ScopeMode } from '../../common/permissions';
+import { ALL_PERMISSIONS, type ScopeMode } from '../../common/permissions';
 
 export class UpdateUserDto {
   @IsString()
@@ -31,6 +31,9 @@ export class UpdateUserDto {
 
   @IsArray()
   @IsString({ each: true })
+  // Unknown names are rejected: a typo would otherwise silently shrink the
+  // allowlist and lock the key out without any visible reason.
+  @IsIn(ALL_PERMISSIONS, { each: true })
   @ArrayUnique()
   @IsOptional()
   permissions?: string[];

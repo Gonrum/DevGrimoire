@@ -11,6 +11,7 @@ import {
   BadRequestException,
   UseGuards,
 } from '@nestjs/common';
+import { PermissionGate } from '../auth/decorators/permission-gate.decorator';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
@@ -28,6 +29,8 @@ export class ProjectsController {
     private readonly authService: AuthService,
   ) {}
 
+  // Checked precisely in the service (project/customer write, delete, archive).
+  @PermissionGate('service')
   @Post()
   @HttpCode(201)
   create(@Body() dto: CreateProjectDto) {
@@ -115,11 +118,15 @@ export class ProjectsController {
     return this.projectsService.findById(id);
   }
 
+  // Checked precisely in the service (project/customer write, delete, archive).
+  @PermissionGate('service')
   @Put(':id')
   update(@Param('id') id: string, @Body() dto: UpdateProjectDto) {
     return this.projectsService.update(id, dto);
   }
 
+  // Checked precisely in the service (project/customer write, delete, archive).
+  @PermissionGate('service')
   @Delete(':id')
   @HttpCode(204)
   remove(@Param('id') id: string) {

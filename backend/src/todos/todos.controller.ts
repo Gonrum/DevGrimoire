@@ -11,6 +11,7 @@ import {
   HttpCode,
   NotFoundException,
 } from '@nestjs/common';
+import { PermissionGate } from '../auth/decorators/permission-gate.decorator';
 import { isValidObjectId } from 'mongoose';
 import { TodosService } from './todos.service';
 import { QuestionsService } from '../questions/questions.service';
@@ -25,6 +26,9 @@ const TODO_STATUS_BY_VALUE: ReadonlyMap<string, TodoStatus> = new Map(
   Object.values(TodoStatus).map((value) => [String(value), value]),
 );
 
+// Writes here are checked against the precise catalog permission in the
+// service (see `common/permissions.ts`), not by the generic entry gate.
+@PermissionGate('service')
 @Controller('todos')
 export class TodosController {
   constructor(
@@ -93,6 +97,8 @@ export class TodosController {
     return this.todosService.addComment(id, body.text, body.author);
   }
 
+  // Creates a question entity, which is outside the catalog.
+  @PermissionGate('write')
   @Post(':id/questions')
   @HttpCode(201)
   async createQuestion(

@@ -8,10 +8,14 @@ import {
   Post,
   Put,
 } from '@nestjs/common';
+import { PermissionGate } from '../auth/decorators/permission-gate.decorator';
 import { ContactsService } from './contacts.service';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 
+// Writes here are checked against the precise catalog permission in the
+// service (see `common/permissions.ts`), not by the generic entry gate.
+@PermissionGate('service')
 @Controller('customers/:customerId/contacts')
 export class ContactsController {
   constructor(private readonly contactsService: ContactsService) {}

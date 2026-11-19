@@ -28,7 +28,12 @@ import { errorMessage, isDuplicateKeyError, isRecord } from '../common/narrow';
 import { discardBody, readBodyCapped } from '../common/read-body-capped';
 import { assertSafeCascadeId } from '../common/cascade-guard';
 import { guardedFetch } from '../common/guarded-fetch';
-import { assertOwnerInScope, assertOwnerParamsInScope, scopeFilter } from '../common/scope-guard';
+import {
+  assertOwnerInScope,
+  assertOwnerParamsInScope,
+  assertOwnerPermission,
+  scopeFilter,
+} from '../common/scope-guard';
 import type { SecretOwnerRef } from '../secrets/secret-owner';
 
 /**
@@ -122,6 +127,7 @@ export class MonitoringService {
       throw new BadRequestException('customerId is required');
     }
     assertOwnerParamsInScope({ customerId: dto.customerId, projectId: dto.projectId });
+    assertOwnerPermission({ customerId: dto.customerId }, 'monitoring', 'write');
     await this.customersService.findById(dto.customerId);
     // The scheduler resolves secretHeaders without an actor and sends the
     // values to `url` — only secrets of this check's owner may be referenced.
@@ -163,6 +169,7 @@ export class MonitoringService {
     await this.customersService.findById(customerId);
     // Project axis too: a check bound to a project outside the actor's scope
     // must not be listed (findById rejects it as well).
+    assertOwnerPermission({ customerId }, 'monitoring', 'read');
     const filter: Record<string, unknown> = { customerId: this.objectId(customerId, 'customerId') };
     Object.assign(filter, scopeFilter());
     return this.checkModel
@@ -171,17 +178,18 @@ export class MonitoringService {
       .exec();
   }
 
-  async findById(id: string): Promise<HealthcheckDocument> {
+  async findById(id: string, action: 'read' | 'write' = 'read'): Promise<HealthcheckDocument> {
     const check = await this.checkModel.findById(this.objectId(id, 'id')).exec();
     if (!check) throw new NotFoundException(`Healthcheck ${id} not found`);
     // Authorization: piggyback on customer-scope check, plus the project axis.
     await this.customersService.findById(check.customerId.toString());
     assertOwnerInScope({ customerId: check.customerId, projectId: check.projectId }, `Healthcheck ${id}`);
+    assertOwnerPermission({ customerId: check.customerId }, 'monitoring', action);
     return check;
   }
 
   async update(id: string, dto: UpdateHealthcheckDto): Promise<HealthcheckDocument> {
-    const existing = await this.findById(id);
+    const existing = await this.findById(id, 'write');
     const $set: Record<string, unknown> = {};
     const $unset: Record<string, ''> = {};
 
@@ -278,7 +286,7 @@ export class MonitoringService {
   }
 
   async remove(id: string): Promise<void> {
-    const check = await this.findById(id);
+    const check = await this.findById(id, 'write');
     await this.checkModel.findByIdAndDelete(check._id).exec();
     await this.historyModel.deleteMany({ healthcheckId: check._id }).exec();
     this.emit('deleted', check, 'entfernt');
@@ -300,6 +308,7 @@ export class MonitoringService {
 
   async getCustomerSummary(customerId: string): Promise<CustomerHealthSummary> {
     await this.customersService.findById(customerId);
+    assertOwnerPermission({ customerId }, 'monitoring', 'read');
     const checks = await this.checkModel
       .find({ customerId: this.objectId(customerId, 'customerId') })
       .select('lastStatus active')
@@ -347,7 +356,8 @@ export class MonitoringService {
 
   /** Manual run requested by a user. Returns the updated check. */
   async runOnce(id: string): Promise<HealthcheckDocument> {
-    const check = await this.findById(id);
+    // Running sends the stored secret headers to the target, so it is a write.
+    const check = await this.findById(id, 'write');
     await this.executeCheck(check);
     const refreshed = await this.checkModel.findById(check._id).exec();
     if (!refreshed) throw new NotFoundException(`Healthcheck ${id} not found`);

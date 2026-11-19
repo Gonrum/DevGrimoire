@@ -8,11 +8,15 @@ import EmptyState from '../components/ui/EmptyState';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import CreateStackDialog from '../components/stacks/CreateStackDialog';
 import { errorMessage } from '../lib/narrow';
+import { useAuth } from '../hooks/useAuth';
 
 export default function StacksOverview() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { showError, showSuccess } = useToast();
+  // Stack writes are admin-only on the backend (403 otherwise); hide the controls.
+  const { user, authEnabled } = useAuth();
+  const isAdmin = authEnabled && user?.role === 'admin';
   const [stacks, setStacks] = useState<StackListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -57,7 +61,9 @@ export default function StacksOverview() {
     <div className="p-4 sm:p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl sm:text-2xl font-bold font-grimoire">{t('stacks.title')}</h1>
-        <Button variant="primary" onClick={() => setShowCreate(true)}>{t('stacks.new')}</Button>
+        {isAdmin && (
+          <Button variant="primary" onClick={() => setShowCreate(true)}>{t('stacks.new')}</Button>
+        )}
       </div>
 
       {stacks.length === 0 ? (
@@ -72,7 +78,9 @@ export default function StacksOverview() {
             >
               <div className="flex items-start justify-between gap-2">
                 <h2 className="text-lg font-semibold text-gray-100">{s.name}</h2>
-                <Button variant="ghost" onClick={(e) => { void handleDelete(e, s._id); }}>{t('common.delete')}</Button>
+                {isAdmin && (
+                  <Button variant="ghost" onClick={(e) => { void handleDelete(e, s._id); }}>{t('common.delete')}</Button>
+                )}
               </div>
               {s.description && <p className="text-sm text-gray-400 mt-1 line-clamp-2">{s.description}</p>}
               <p className="text-xs text-gray-500 mt-3">{t('stacks.sectionCount', { count: s.entryCount })}</p>
@@ -81,7 +89,7 @@ export default function StacksOverview() {
         </div>
       )}
 
-      {showCreate && (
+      {showCreate && isAdmin && (
         <CreateStackDialog
           onCancel={() => setShowCreate(false)}
           onCreated={(id) => { setShowCreate(false); void navigate(`/stacks/${id}`); }}

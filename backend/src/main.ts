@@ -87,6 +87,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { errorMessage, isRecord } from './common/narrow';
 import { RequestContext, RequestUser } from './common/request-context';
 import { actorFromApiKey, actorFromUser } from './common/actor-scope';
+import { actorMayWriteContent } from './common/scope-guard';
 import { actorCanAccessProject } from './common/permissions';
 import { resolveTrustProxy } from './common/trust-proxy';
 import { EventsBusService, QuestionEvent } from './events/events-bus.service';
@@ -863,6 +864,9 @@ async function bootstrap() {
     const fullUser = await authService.findUserById(userId);
     if (!fullUser || !fullUser.active) return reject(401, 'Unauthorized');
     const actor = actorFromUser(fullUser);
+    // An interactive shell is a content write; a user with a permission
+    // allowlist needs project:write or customer:write for it.
+    if (!actorMayWriteContent(actor)) return reject(403, 'Forbidden');
 
     const workspaceId = match[1];
     let workspace: Awaited<ReturnType<typeof workspacesService.findById>>;
@@ -1027,6 +1031,9 @@ async function bootstrap() {
     const sshUser = await authService.findUserById(userId);
     if (!sshUser || !sshUser.active) return rejectUpgrade(401, 'Unauthorized');
     const actor = actorFromUser(sshUser);
+    // An interactive shell is a content write; a user with a permission
+    // allowlist needs project:write or customer:write for it.
+    if (!actorMayWriteContent(actor)) return rejectUpgrade(403, 'Forbidden');
 
     const connectionId = match[1];
 

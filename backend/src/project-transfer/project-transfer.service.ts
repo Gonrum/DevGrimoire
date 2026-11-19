@@ -37,7 +37,7 @@ import { ALL_SENSITIVITY_LEVELS } from '../common/sensitivity';
 import { asString, isNullaryMethod, isRecord, isUnknownArray, PlainDoc } from '../common/tool-args';
 import { ProjectExport } from './project-export.interface';
 import { RequestContext } from '../common/request-context';
-import { assertUnrestrictedScope } from '../common/scope-guard';
+import { assertOwnerPermission, assertUnrestrictedScope } from '../common/scope-guard';
 
 /*
  * Datentransfer-Pfad. Zwei Regeln gelten hier über allem anderen:
@@ -732,6 +732,11 @@ export class ProjectTransferService {
 
   async exportProject(projectId: string, includeSecretValues = false): Promise<ProjectExport> {
     const project = await this.projectsService.findById(projectId);
+    // The bundle reads the raw collections, bypassing the per-resource checks
+    // of the services — require every catalog read it contains up front.
+    for (const resource of ['secret', 'knowledge', 'todo'] as const) {
+      assertOwnerPermission({ projectId }, resource, 'read');
+    }
 
     const [
       todos, sessions, knowledge, changelog, milestones,

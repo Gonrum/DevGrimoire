@@ -18,7 +18,7 @@ import { Research, ResearchDocument } from '../research/schemas/research.schema'
 import { RecurringTask, RecurringTaskDocument } from '../recurring-tasks/schemas/recurring-task.schema';
 import { asString, idToString, isUnknownArray, PlainDoc } from '../common/tool-args';
 import { CustomerExport, CustomerImportResult } from './customer-export.interface';
-import { assertUnrestrictedScope, scopeFilter } from '../common/scope-guard';
+import { assertOwnerPermission, assertUnrestrictedScope, scopeFilter } from '../common/scope-guard';
 import { RequestContext } from '../common/request-context';
 
 const STRIP_BASE = ['__v'];
@@ -206,6 +206,11 @@ export class CustomerTransferService {
       throw new BadRequestException('Invalid customerId');
     }
     const customer = await this.customersService.findById(customerId);
+    // The bundle reads the raw collections, bypassing the per-resource checks
+    // of the services — require every catalog read it contains up front.
+    for (const resource of ['secret', 'knowledge', 'todo', 'contact'] as const) {
+      assertOwnerPermission({ customerId }, resource, 'read');
+    }
     const cid = new Types.ObjectId(customerId);
     // Relation documents (customerId + projectId) of projects outside the
     // actor's scope must not leak through the customer export. The customer

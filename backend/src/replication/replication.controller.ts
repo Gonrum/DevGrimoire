@@ -40,6 +40,8 @@ import {
 } from './replication-narrow.helpers';
 import { asObjectArray, asString, idToString, isUnknownArray } from '../common/tool-args';
 import { randomUUID } from 'crypto';
+import { AdminPermission } from '../auth/decorators/permission-gate.decorator';
+import { Permission } from '../common/permissions';
 
 
 /** Hard cap on entities per pull response — keeps payloads bounded. The client
@@ -60,6 +62,7 @@ const PULL_MAX_DOCS = 500;
  */
 @Roles(UserRole.ADMIN)
 @UseGuards(UnrestrictedScopeGuard)
+@AdminPermission(Permission.ADMIN_REPLICATION_MANAGE)
 @Controller('replication')
 export class ReplicationController {
   constructor(

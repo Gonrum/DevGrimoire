@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { actorHasOwnerPermission, type PermissionResource } from '../common/scope-guard';
 import { pickAllowed } from '../common/narrow';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectConnection } from '@nestjs/mongoose';
@@ -311,6 +312,14 @@ export interface EmbeddingEndpointTestResult {
   latencyMs?: number;
   error?: string;
 }
+
+
+/** RAG entity types that belong to a permission-catalog resource. */
+const RAG_PERMISSION_RESOURCE: Partial<Record<string, PermissionResource>> = {
+  knowledge: 'knowledge',
+  todo: 'todo',
+  attachment: 'file',
+};
 
 @Injectable()
 export class RagService implements OnModuleInit, OnModuleDestroy {
@@ -1146,6 +1155,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       }
       if (enforceCustomerScope && rowCustomerId && !allowedCustomerIds.has(rowCustomerId)) {
         if (actor.customerScopeMode === 'none') continue;
+        continue;
+      }
+
+      // Catalog permissions: a key limited to e.g. project:todo:read must not
+      // read knowledge or file contents through semantic search.
+      const resource = RAG_PERMISSION_RESOURCE[rowEntity];
+      if (resource && !actorHasOwnerPermission(actor, { projectId: rowProjectId, customerId: rowCustomerId }, resource, 'read')) {
         continue;
       }
 

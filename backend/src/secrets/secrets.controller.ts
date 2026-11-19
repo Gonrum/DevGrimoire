@@ -1,9 +1,13 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { PermissionGate } from '../auth/decorators/permission-gate.decorator';
 import { SecretsService } from './secrets.service';
 import { CreateSecretDto } from './dto/create-secret.dto';
 import { UpdateSecretDto } from './dto/update-secret.dto';
 import { ValidateProjectIdPipe } from '../common/pipes/validate-project-id.pipe';
 
+// Writes here are checked against the precise catalog permission in the
+// service (see `common/permissions.ts`), not by the generic entry gate.
+@PermissionGate('service')
 @Controller('secrets')
 export class SecretsController {
   constructor(private readonly secretsService: SecretsService) {}

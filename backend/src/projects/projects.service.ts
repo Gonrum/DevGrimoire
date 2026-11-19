@@ -15,7 +15,7 @@ import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { RequestContext } from '../common/request-context';
-import { actorCanAccessProject } from '../common/permissions';
+import { actorCanAccessProject, actorMay, Permission, PermissionId } from '../common/permissions';
 import { buildScopeFilter } from '../common/scope';
 import {
   CustomerProjectLink,
@@ -24,7 +24,7 @@ import {
 import { RagService } from '../rag/rag.service';
 import { Secret, SecretDocument } from '../secrets/schemas/secret.schema';
 import { secretBelongsTo } from '../secrets/secret-owner';
-import { assertAdmin, assertCustomerInScope, scopeFilter } from '../common/scope-guard';
+import { assertAdmin, assertCustomerInScope, assertPermission, scopeFilter } from '../common/scope-guard';
 
 /** The git-repository fields this service validates on write. */
 interface GitRepositoryRefs {
@@ -75,6 +75,7 @@ export class ProjectsService {
   }
 
   async create(dto: CreateProjectDto): Promise<ProjectDocument> {
+    assertPermission(Permission.PROJECT_WRITE);
     const project = await this.projectModel.create(dto);
     this.eventEmitter.emit(PROJECT_CHANGED, {
       projectId: project._id.toString(),
@@ -91,6 +92,9 @@ export class ProjectsService {
     favorite?: boolean,
     customerId?: string,
   ): Promise<ProjectDocument[]> {
+    // Without any project permission the actor may not even see the list.
+    const listActor = RequestContext.getUser();
+    if (listActor && !actorMay(listActor, Permission.PROJECT_READ)) return [];
     const filter: Record<string, unknown> = {};
     if (active !== undefined) filter.active = active;
     if (favorite !== undefined) filter.favorite = favorite;
@@ -127,11 +131,12 @@ export class ProjectsService {
    * fehlender Actor ist ein vertrauenswürdiger interner Aufrufer (Replikation,
    * Migration, stdio-MCP ohne HTTP-Kontext).
    */
-  private assertAccess(id: string): void {
+  private assertAccess(id: string, perm: PermissionId = Permission.PROJECT_READ): void {
     const actor = RequestContext.getUser();
     if (actor && !actorCanAccessProject(actor, id)) {
       throw new ForbiddenException(`Project ${id} is not in your scope`);
     }
+    assertPermission(perm);
   }
 
   async findById(id: string): Promise<ProjectDocument> {
@@ -406,6 +411,7 @@ export class ProjectsService {
    * project so the caller can forward the new state to the UI.
    */
   async setReplicationEnabled(id: string, enabled: boolean): Promise<ProjectDocument> {
+    this.assertAccess(id, Permission.PROJECT_WRITE);
     const project = await this.projectModel
       .findByIdAndUpdate(id, { replicationConfig: { enabled } }, { new: true })
       .exec();
@@ -433,7 +439,7 @@ export class ProjectsService {
   }
 
   async update(id: string, dto: UpdateProjectDto): Promise<ProjectDocument> {
-    this.assertAccess(id);
+    this.assertAccess(id, Permission.PROJECT_WRITE);
     await this.assertGitRepositoriesAllowed(id, dto.gitRepositories);
     const project = await this.projectModel
       .findByIdAndUpdate(id, dto, { new: true })
@@ -452,7 +458,7 @@ export class ProjectsService {
   async updateRaw(id: string, update: Record<string, unknown>): Promise<ProjectDocument> {
     // Derselbe Grund wie bei update(): ein roher Update-Record ist der
     // mächtigste Schreibpfad auf ein Projekt und war ungeprüft.
-    this.assertAccess(id);
+    this.assertAccess(id, Permission.PROJECT_WRITE);
     const project = await this.projectModel
       .findByIdAndUpdate(id, update, { new: true })
       .exec();
@@ -542,7 +548,7 @@ export class ProjectsService {
     // VOR findByIdAndDelete: die Methode löschte sonst erst und lieferte dann
     // das gelöschte Dokument. Der PROJECT_CHANGED-Event danach löst die
     // removeByProject-Kaskade über 21 Services aus — unwiederbringlich.
-    this.assertAccess(id);
+    this.assertAccess(id, Permission.PROJECT_DELETE);
     const result = await this.projectModel.findByIdAndDelete(id).exec();
     if (!result) throw new NotFoundException(`Project ${id} not found`);
     this.eventEmitter.emit(PROJECT_CHANGED, {

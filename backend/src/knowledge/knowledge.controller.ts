@@ -10,11 +10,15 @@ import {
   HttpCode,
   BadRequestException,
 } from '@nestjs/common';
+import { PermissionGate } from '../auth/decorators/permission-gate.decorator';
 import { KnowledgeService } from './knowledge.service';
 import { CreateKnowledgeDto } from './dto/create-knowledge.dto';
 import { UpdateKnowledgeDto } from './dto/update-knowledge.dto';
 import { ValidateProjectIdPipe } from '../common/pipes/validate-project-id.pipe';
 
+// Writes here are checked against the precise catalog permission in the
+// service (see `common/permissions.ts`), not by the generic entry gate.
+@PermissionGate('service')
 @Controller('knowledge')
 export class KnowledgeController {
   constructor(private readonly knowledgeService: KnowledgeService) {}

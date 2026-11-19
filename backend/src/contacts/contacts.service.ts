@@ -8,7 +8,7 @@ import { UpdateContactDto } from './dto/update-contact.dto';
 import { CustomersService } from '../customers/customers.service';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { assertSafeCascadeId } from '../common/cascade-guard';
-import { assertOwnerInScope } from '../common/scope-guard';
+import { assertOwnerInScope, assertOwnerPermission } from '../common/scope-guard';
 
 @Injectable()
 export class ContactsService {
@@ -38,6 +38,7 @@ export class ContactsService {
 
   async create(customerId: string, dto: CreateContactDto): Promise<ContactDocument> {
     await this.customersService.findById(customerId);
+    assertOwnerPermission({ customerId }, 'contact', 'write');
     const contact = await this.contactModel.create({
       ...dto,
       customerId: this.objectId(customerId, 'customerId'),
@@ -48,6 +49,7 @@ export class ContactsService {
 
   async findByCustomer(customerId: string): Promise<ContactDocument[]> {
     await this.customersService.findById(customerId);
+    assertOwnerPermission({ customerId }, 'contact', 'read');
     return this.contactModel
       .find({ customerId: this.objectId(customerId, 'customerId') })
       .sort({ isPrimary: -1, sortOrder: 1, _id: 1 })
@@ -61,10 +63,15 @@ export class ContactsService {
    * `:customerId`) must match too, so a contact cannot be addressed through
    * an unrelated customer URL; a mismatch is reported as 404.
    */
-  private async findScoped(id: string, expectedCustomerId?: string): Promise<ContactDocument> {
+  private async findScoped(
+    id: string,
+    expectedCustomerId?: string,
+    action: 'read' | 'write' = 'read',
+  ): Promise<ContactDocument> {
     const contact = await this.contactModel.findById(this.objectId(id, 'contactId')).exec();
     if (!contact) throw new NotFoundException(`Contact ${id} not found`);
     assertOwnerInScope({ customerId: contact.customerId }, `Contact ${id}`);
+    assertOwnerPermission({ customerId: contact.customerId }, 'contact', action);
     if (expectedCustomerId !== undefined && contact.customerId?.toString() !== expectedCustomerId) {
       throw new NotFoundException(`Contact ${id} not found`);
     }
@@ -77,7 +84,7 @@ export class ContactsService {
 
   async update(id: string, dto: UpdateContactDto, expectedCustomerId?: string): Promise<ContactDocument> {
     // Check BEFORE writing; findByIdAndUpdate would already have mutated.
-    await this.findScoped(id, expectedCustomerId);
+    await this.findScoped(id, expectedCustomerId, 'write');
     const contact = await this.contactModel
       .findByIdAndUpdate(this.objectId(id, 'contactId'), dto, { new: true })
       .exec();
@@ -87,7 +94,7 @@ export class ContactsService {
   }
 
   async remove(id: string, expectedCustomerId?: string): Promise<void> {
-    await this.findScoped(id, expectedCustomerId);
+    await this.findScoped(id, expectedCustomerId, 'write');
     const contact = await this.contactModel
       .findByIdAndDelete(this.objectId(id, 'contactId'))
       .exec();

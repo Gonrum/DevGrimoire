@@ -14,6 +14,7 @@ import {
   BadRequestException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { PermissionGate } from '../auth/decorators/permission-gate.decorator';
 import { McpToolEquivalent } from '../auth/decorators/mcp-tool-equivalent.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
@@ -42,6 +43,9 @@ function sendStream(stream: NodeJS.ReadableStream, res: Response): void {
   });
 }
 
+// Writes here are checked against the precise catalog permission in the
+// service (see `common/permissions.ts`), not by the generic entry gate.
+@PermissionGate('service')
 @Controller('attachments')
 export class AttachmentsController {
   constructor(

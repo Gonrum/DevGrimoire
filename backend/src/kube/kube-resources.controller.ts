@@ -1,6 +1,7 @@
 import {
   Controller, Get, HttpException, Logger, Param, Query, Req, Res, ServiceUnavailableException,
 } from '@nestjs/common';
+import { PermissionGate } from '../auth/decorators/permission-gate.decorator';
 import type { Request, Response } from 'express';
 import { KubeResourcesService } from './kube-resources.service';
 import { KubeLogsService } from './kube-logs.service';
@@ -127,6 +128,9 @@ export async function guardClusterErrors<T>(fn: () => Promise<T>, logger: Logger
  * HTTP-MCP-Achse ist geschlossen: main.ts setzt den Actor dort über
  * `actorFromApiKey` samt den Scope-Feldern des API-Keys.
  */
+// Reads expose cluster internals (Secret YAML, pod logs), so actors with a
+// permission allowlist need content-write rights even for GET.
+@PermissionGate('write')
 @Controller('kube-clusters')
 export class KubeResourcesController {
   private readonly logger = new Logger(KubeResourcesController.name);
