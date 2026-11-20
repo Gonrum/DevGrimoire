@@ -15,6 +15,7 @@ import {
   Res,
   UsePipes,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { posix } from 'node:path';
 import { WorkspacesService } from './workspaces.service';
@@ -63,6 +64,10 @@ function plainFileName(value: string | undefined): string {
  */
 @Controller('workspaces/:id/fs')
 @UsePipes(new ScalarQueryPipe())
+// The global 100/min (app.module, unnamed = "default" throttler) is far too
+// low for an interactive IDE: expanding folders and multi-file uploads issue
+// one request each. Raised, not skipped, so a runaway client is still capped.
+@Throttle({ default: { limit: 1200, ttl: 60_000 } })
 export class WorkspaceFsController {
   constructor(
     private readonly workspaces: WorkspacesService,

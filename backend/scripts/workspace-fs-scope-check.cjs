@@ -11,6 +11,8 @@
  *   - tree ordering, upload noOverwrite / fileName validation, search flags
  *   - status without a git repo, parseRipgrepJson / parseGitStatus
  *   - touchThrottled, and no @McpToolEquivalent mapping on any handler
+ *   - own rate limit (1200/min) on the controller, above the global 100/min
+ *   - forwarded sidecar errors carry `message` (what the frontend shows)
  *
  * Loads from dist/; run `npm run build` first.
  */
@@ -42,7 +44,7 @@ const { throwError, of } = require(path.resolve(__dirname, '..', 'node_modules',
 const { AxiosError } = require(path.resolve(__dirname, '..', 'node_modules', 'axios'));
 const mongoose = require(path.resolve(__dirname, '..', 'node_modules', 'mongoose'));
 
-const EXPECTED_CHECKS = 23;
+const EXPECTED_CHECKS = 26;
 
 let failures = 0, total = 0;
 async function check(label, fn) {
@@ -174,6 +176,51 @@ const matchLine = (p, line, text, start = 4) => ({
       { path: 'new.ts', code: 'R ' },
     ]);
     assert.equal(parseGitStatus('## No commits yet on dev\n').branch, 'dev');
+  });
+
+  await check('parseGitStatus: non-ASCII path with a space (core.quotepath=false output)', () => {
+    const out = parseGitStatus('## main\n M src/ä b.txt\n?? "neu ö.md"\n');
+    assert.deepEqual(out.changed, [
+      { path: 'src/ä b.txt', code: ' M' },
+      { path: 'neu ö.md', code: '??' },
+    ]);
+  });
+
+  await check('WorkspaceFsController: own throttle 1200 requests / 60 s for the configured (default) throttler', () => {
+    assert.equal(Reflect.getMetadata('THROTTLER:LIMITdefault', WorkspaceFsController), 1200);
+    assert.equal(Reflect.getMetadata('THROTTLER:TTLdefault', WorkspaceFsController), 60_000);
+    // The global config must still use the unnamed (= "default") throttler,
+    // otherwise the class-level limit above would not apply to it.
+    const appModule = require('node:fs').readFileSync(path.resolve(__dirname, '..', 'src', 'app.module.ts'), 'utf8');
+    const forRoot = /ThrottlerModule\.forRoot\(\[([^\]]*)\]\)/.exec(appModule);
+    assert.ok(forRoot, 'ThrottlerModule.forRoot([...]) not found in app.module.ts');
+    assert.doesNotMatch(forRoot[1], /name\s*:/, 'throttler got a name; adjust @Throttle on WorkspaceFsController');
+    assert.equal(Reflect.getMetadata('THROTTLER:SKIPdefault', WorkspaceFsController), undefined);
+  });
+
+  await check('search: sidecar 400 (rg regex error) reaches the caller with message; legacy search keeps a plain Error', async () => {
+    process.env.WORKSPACE_API_TOKEN = 'tok';
+    const { WorkspaceClient } = loadCompiled('workspaces/workspace-client.service.js');
+    const failing = new WorkspaceClient({
+      post: () => throwError(() => new AxiosError('x', 'ERR', undefined, undefined, {
+        status: 400, statusText: 'Bad Request', data: { error: 'regex parse error: unclosed group' }, headers: {}, config: {},
+      })),
+    });
+    await assert.rejects(
+      () => failing.searchJson('w', { query: 'a(', fixedStrings: false, caseSensitive: false }),
+      (e) => e instanceof HttpException && statusOf(e) === 400
+        && e.getResponse().message === 'regex parse error: unclosed group'
+        && e.getResponse().error === 'regex parse error: unclosed group',
+    );
+    await assert.rejects(
+      () => failing.search('w', 'a('),
+      (e) => !(e instanceof HttpException) && /sidecar 400 \/search: regex parse error/.test(e.message),
+    );
+    const { ctrl } = setup({ client: { searchJson: (...a) => failing.searchJson(...a) } });
+    await assert.rejects(
+      () => RequestContext.run(WRITER, undefined, () => ctrl.search(WS_ID, { query: 'a(', regex: true })),
+      (e) => statusOf(e) === 400 && e.getResponse().message === 'regex parse error: unclosed group',
+    );
   });
 
   await check('every route (GET included): allowlist without project:write/customer:write -> 403, client untouched', async () => {
@@ -343,9 +390,15 @@ const matchLine = (p, line, text, start = 4) => ({
       const body = { error: 'e', currentHash: 'h', size: 7 };
       await assert.rejects(
         () => failWith(status, body).writeText('w', 'a', 'x', { baseHash: null }),
-        (e) => e instanceof HttpException && statusOf(e) === status && e.getResponse().currentHash === 'h',
+        (e) => e instanceof HttpException && statusOf(e) === status && e.getResponse().currentHash === 'h'
+          && e.getResponse().error === 'e' && e.getResponse().message === 'e',
       );
     }
+    // No `currentHash` key unless the sidecar sent one (ide-api's conflict test).
+    await assert.rejects(
+      () => failWith(409, { error: 'already exists' }).mkdir('w', 'd'),
+      (e) => statusOf(e) === 409 && !('currentHash' in e.getResponse()) && e.getResponse().message === 'already exists',
+    );
     await assert.rejects(
       () => failWith(500, { error: 'boom' }).readText('w', 'a'),
       (e) => !(e instanceof HttpException) && /sidecar 500/.test(e.message),
@@ -409,7 +462,9 @@ const matchLine = (p, line, text, start = 4) => ({
           headers: { 'content-type': 'application/octet-stream' },
         });
         assert.equal(r.status, status);
-        assert.equal((await r.json()).error, error);
+        const body = await r.json();
+        assert.equal(body.error, error);
+        assert.equal(body.message, error);
       }
     } finally { front.close(); sidecar.close(); }
   });

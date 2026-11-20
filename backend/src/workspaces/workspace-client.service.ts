@@ -44,6 +44,26 @@ export interface WriteTextResponse { path: string; hash: string; size: number }
 
 /** Sidecar status codes the IDE routes hand through to the browser unchanged. */
 const PASSTHROUGH_STATUSES: ReadonlySet<number> = new Set([400, 404, 409, 413, 415]);
+/**
+ * Body of a forwarded sidecar error. The sidecar answers `{ error: '…' }`;
+ * the frontend reads `message` (Nest's convention), so the error text is
+ * copied there. All sidecar keys (`error`, `currentHash`, …) stay as sent.
+ */
+function forwardedErrorBody(data: unknown, fallback: string): Record<string, unknown> {
+  const body: Record<string, unknown> = isRecord(data) ? { ...data } : { error: fallback };
+  const text = typeof body.error === 'string' && body.error ? body.error : fallback;
+  return { ...body, message: text };
+}
+
+/** Error text of a raw sidecar response body (JSON `{ error }` or plain text). */
+function sidecarErrorText(text: string, fallback: string): string {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (isRecord(parsed) && typeof parsed.error === 'string' && parsed.error) return parsed.error;
+  } catch { /* not JSON */ }
+  return text || fallback;
+}
+
 export interface TreeEntry { path: string; type: 'file' | 'dir' | 'symlink'; size?: number }
 export interface TreeResponse { root: string; depth: number; truncated: boolean; entries: TreeEntry[] }
 export interface SearchResponse { matches: string; truncated: boolean; timedOut: boolean }
@@ -136,7 +156,7 @@ export class WorkspaceClient {
       if (isAxiosError(cause) && cause.response && PASSTHROUGH_STATUSES.has(cause.response.status)) {
         const data: unknown = cause.response.data;
         throw new HttpException(
-          isRecord(data) ? data : { error: cause.response.statusText },
+          forwardedErrorBody(data, cause.response.statusText),
           cause.response.status,
         );
       }
@@ -197,7 +217,10 @@ export class WorkspaceClient {
       const text = await res.text().catch(() => res.statusText);
       // IDE download: let the browser see the sidecar's 400/404 instead of a 500.
       if (opts.httpErrors && PASSTHROUGH_STATUSES.has(res.status)) {
-        throw new HttpException({ error: text || res.statusText }, res.status);
+        throw new HttpException(
+          { error: text || res.statusText, message: sidecarErrorText(text, res.statusText) },
+          res.status,
+        );
       }
       throw new Error(`sidecar ${res.status} /read-stream: ${text}`);
     }
@@ -277,7 +300,7 @@ export class WorkspaceClient {
           try { body = JSON.parse(text); } catch { body = undefined; }
           const status = res.statusCode ?? 0;
           if (opts.httpErrors && PASSTHROUGH_STATUSES.has(status)) {
-            finish(new HttpException(isRecord(body) ? body : { error: text || res.statusMessage }, status), undefined, true);
+            finish(new HttpException(forwardedErrorBody(body, text || res.statusMessage || 'sidecar error'), status), undefined, true);
             return;
           }
           if (opts.noOverwrite && status === 409) {
