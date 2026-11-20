@@ -202,6 +202,7 @@ export class WorkspaceFsController {
       fileName: name,
       size: length,
       noOverwrite: overwrite !== '1',
+      httpErrors: true,
     });
     this.workspaces.touchThrottled(id);
     this.audit(ws, id, `workspace_ide upload: ${result.path}`.slice(0, 500), { path: result.path, size: result.size });

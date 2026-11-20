@@ -42,7 +42,7 @@ const { throwError, of } = require(path.resolve(__dirname, '..', 'node_modules',
 const { AxiosError } = require(path.resolve(__dirname, '..', 'node_modules', 'axios'));
 const mongoose = require(path.resolve(__dirname, '..', 'node_modules', 'mongoose'));
 
-const EXPECTED_CHECKS = 20;
+const EXPECTED_CHECKS = 21;
 
 let failures = 0, total = 0;
 async function check(label, fn) {
@@ -279,7 +279,7 @@ const matchLine = (p, line, text, start = 4) => ({
     const out = await RequestContext.run(WRITER, undefined, () =>
       ctrl.upload(WS_ID, req, fakeUploadRes(), 'sub/dir/', 'a.bin', undefined));
     assert.equal(calls[0].args[2], req, 'the request stream itself is handed on');
-    assert.deepEqual(calls[0].args[3], { fileName: 'a.bin', size: 3, noOverwrite: true });
+    assert.deepEqual(calls[0].args[3], { fileName: 'a.bin', size: 3, noOverwrite: true, httpErrors: true });
     assert.equal(calls[0].args[1], 'sub/dir/');
     assert.deepEqual(out, { path: 'sub/dir/a.bin', size: 3 });
     await RequestContext.run(WRITER, undefined, () =>
@@ -374,6 +374,41 @@ const matchLine = (p, line, text, start = 4) => ({
         (e) => !(e instanceof HttpException) && /sidecar 409/.test(e.message),
       );
     } finally { server.close(); }
+  });
+
+  await check('upload through a real HTTP server: sidecar 409/413 reach the browser as status + body, even for a 32 MB body', async () => {
+    process.env.WORKSPACE_API_TOKEN = 'tok';
+    const { WorkspaceClient } = loadCompiled('workspaces/workspace-client.service.js');
+    let sidecarStatus = 409;
+    const sidecar = http.createServer((req, res) => {
+      // Answers at once, without reading the body (like the early 409).
+      res.writeHead(sidecarStatus, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: sidecarStatus === 409 ? 'target exists' : 'too large' }));
+    });
+    await new Promise((r) => sidecar.listen(0, '127.0.0.1', r));
+    process.env.WORKSPACE_API_URL = `http://127.0.0.1:${sidecar.address().port}`;
+    const client = new WorkspaceClient({});
+    const front = http.createServer(async (req, res) => {
+      try {
+        await client.writeStream('w', './', req, { fileName: 'f', size: Number(req.headers['content-length']), noOverwrite: true, httpErrors: true });
+        res.writeHead(200).end('{}');
+      } catch (e) {
+        res.writeHead(statusOf(e) || 500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(e.getResponse ? e.getResponse() : { error: e.message }));
+      }
+    });
+    await new Promise((r) => front.listen(0, '127.0.0.1', r));
+    try {
+      for (const [status, error] of [[409, 'target exists'], [413, 'too large']]) {
+        sidecarStatus = status;
+        const r = await fetch(`http://127.0.0.1:${front.address().port}/`, {
+          method: 'POST', body: Buffer.alloc(32 * 1024 * 1024, 1),
+          headers: { 'content-type': 'application/octet-stream' },
+        });
+        assert.equal(r.status, status);
+        assert.equal((await r.json()).error, error);
+      }
+    } finally { front.close(); sidecar.close(); }
   });
 
   await check('touchThrottled: two calls within the window -> touch once; swallows errors', async () => {

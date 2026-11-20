@@ -221,7 +221,7 @@ export class WorkspaceClient {
     workspaceId: string,
     path: string,
     source: Readable,
-    opts: { fileName?: string; size?: number; mode?: number; createDirs?: boolean; noOverwrite?: boolean } = {},
+    opts: { fileName?: string; size?: number; mode?: number; createDirs?: boolean; noOverwrite?: boolean; httpErrors?: boolean } = {},
   ): Promise<WriteStreamResponse> {
     if (!this.token) {
       try { source.destroy(); } catch { /* noop */ }
@@ -241,11 +241,21 @@ export class WorkspaceClient {
 
     return new Promise<WriteStreamResponse>((resolve, reject) => {
       let settled = false;
-      const finish = (err: Error | null, value?: WriteStreamResponse) => {
+      // `answered`: the sidecar itself answered with an error (not a transport
+      // failure). With `httpErrors` the source may be a server request whose
+      // socket carries our own HTTP answer; destroying it would reset the
+      // connection instead of letting the 409 through. Stop piping and drain.
+      const finish = (err: Error | null, value?: WriteStreamResponse, answered = false) => {
         if (settled) return;
         settled = true;
         if (err) {
-          try { source.destroy(); } catch { /* noop */ }
+          if (answered && opts.httpErrors) {
+            source.unpipe(req);
+            source.resume();
+            req.destroy();
+          } else {
+            try { source.destroy(); } catch { /* noop */ }
+          }
           reject(err);
         } else if (value) {
           resolve(value);
@@ -266,6 +276,10 @@ export class WorkspaceClient {
           let body: unknown;
           try { body = JSON.parse(text); } catch { body = undefined; }
           const status = res.statusCode ?? 0;
+          if (opts.httpErrors && PASSTHROUGH_STATUSES.has(status)) {
+            finish(new HttpException(isRecord(body) ? body : { error: text || res.statusMessage }, status), undefined, true);
+            return;
+          }
           if (opts.noOverwrite && status === 409) {
             finish(new ConflictException('target exists'));
             return;
