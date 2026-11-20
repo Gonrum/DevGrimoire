@@ -49,6 +49,17 @@ export interface SshTerminalProps {
   hint?: string;
   /** Height classes of the root box; hosts that size the frame pass `h-full`. */
   heightClassName?: string;
+  /**
+   * Text typed into the shell once, right after the first successful connect
+   * (e.g. a `cd` command). Not re-sent on reconnect.
+   */
+  initialInput?: string;
+  /**
+   * Called when the connection closed without ever having opened — the
+   * browser cannot read the HTTP status of a failed WebSocket upgrade, so
+   * hosts use this to hint at likely causes (such as a session limit).
+   */
+  onClosedBeforeOpen?: () => void;
 }
 
 export type TerminalState =
@@ -164,6 +175,8 @@ export default function SshTerminal({
   active = true,
   hint,
   heightClassName = 'h-[80vh] min-h-[480px]',
+  initialInput,
+  onClosedBeforeOpen,
 }: SshTerminalProps) {
   const { t } = useTranslation();
   // Primitive key so the connect-effect only re-runs when the endpoint
@@ -199,6 +212,12 @@ export default function SshTerminal({
   useEffect(() => {
     onStateChangeRef.current = onConnectionStateChange;
   }, [onConnectionStateChange]);
+  const closedBeforeOpenRef = useRef(onClosedBeforeOpen);
+  useEffect(() => {
+    closedBeforeOpenRef.current = onClosedBeforeOpen;
+  }, [onClosedBeforeOpen]);
+  // One-shot: cleared after the first send so a reconnect does not repeat it.
+  const initialInputRef = useRef(initialInput);
 
   // The token is a connect-time input only: the gateway verifies the JWT once
   // during the WS upgrade and never re-checks it, so a rotation mid-session is
@@ -263,8 +282,11 @@ export default function SshTerminal({
     );
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
+    let everOpened = false;
+    let disposed = false;
 
     ws.onopen = () => {
+      everOpened = true;
       notifyState('connected');
       try {
         fit.fit();
@@ -274,6 +296,11 @@ export default function SshTerminal({
       const cols = term.cols;
       const rows = term.rows;
       ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+      const pending = initialInputRef.current;
+      if (pending) {
+        initialInputRef.current = undefined;
+        ws.send(pending);
+      }
       term.focus();
     };
 
@@ -309,6 +336,7 @@ export default function SshTerminal({
         `\r\n\x1b[2m# ${t('ssh.terminal.disconnected')} — ${reason}\x1b[0m\r\n`,
       );
       setCloseInfo({ code: ev.code, reason });
+      if (!everOpened && !disposed) closedBeforeOpenRef.current?.();
       // Distinguish "shell exited cleanly" (already 'exited') from network/
       // auth termination so the header label and the Reconnect button can
       // react accordingly. WS application-error codes start at 4000+ and
@@ -354,6 +382,7 @@ export default function SshTerminal({
     window.addEventListener('resize', sendResize);
 
     return () => {
+      disposed = true;
       window.removeEventListener('resize', sendResize);
       ro.disconnect();
       onData.dispose();

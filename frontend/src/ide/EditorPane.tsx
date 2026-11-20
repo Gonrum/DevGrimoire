@@ -12,6 +12,7 @@ import { IdeConfirmDialog, IdeDialog } from './IdeDialog';
 import { useIdeStore, type BlockedReason, type OpenTab } from './ide-store';
 import { isMarkdownPath, languageFromPath } from './language';
 import { DEVGRIMOIRE_THEME } from './monaco-theme';
+import { TERMINAL_SELECTOR } from './terminal-marker';
 
 type CodeEditorInstance = Parameters<OnMount>[0];
 type Slot = 'main' | 'split';
@@ -166,6 +167,8 @@ export function EditorPane() {
     const onKey = (event: KeyboardEvent): void => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
       if (event.key.toLowerCase() !== 's') return;
+      // Inside a terminal Ctrl+S is XOFF for the shell, not "save".
+      if (event.target instanceof Element && event.target.closest(TERMINAL_SELECTOR)) return;
       event.preventDefault();
       const state = useIdeStore.getState();
       const focused = focusedPath.current;

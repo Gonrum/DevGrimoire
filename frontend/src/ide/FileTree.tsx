@@ -9,11 +9,14 @@ import { ideApi, IdeApiError, type IdeTreeEntry } from './ide-api';
 import { IdeConfirmDialog } from './IdeDialog';
 import { useIdeStore } from './ide-store';
 import { useWorkspaceFileTree } from './useWorkspaceFileTree';
+import type { ChangedMarks } from './useWorkspaceStatus';
 
 interface FileTreeProps {
   workspaceId: string;
   activePath: string | null;
   onOpenFile: (path: string, size?: number) => void;
+  /** Git-changed paths; a dot marks them (and folders containing them). */
+  marks?: ChangedMarks;
 }
 
 interface CreateDraft {
@@ -102,7 +105,7 @@ function collectDroppedFiles(dt: DataTransfer): { files: File[]; hadDirectory: b
   return { files, hadDirectory };
 }
 
-export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps) {
+export function FileTree({ workspaceId, activePath, onOpenFile, marks }: FileTreeProps) {
   const { t } = useTranslation();
   const { showError, showSuccess } = useToast();
   const { byDir, truncatedDirs, expanded, rootError, errors, toggleDir, expandDir, loadDir, refresh } =
@@ -339,6 +342,7 @@ export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps)
               depth={depth}
               expanded={expanded.has(entry.path)}
               active={entry.path === activePath}
+              changed={marks?.has(entry.path) ?? false}
               isDropTarget={dropTarget === entry.path}
               onToggle={() => toggleDir(entry.path)}
               onOpen={() => onOpenFile(entry.path, entry.size)}
@@ -532,6 +536,7 @@ interface RowProps {
   depth: number;
   expanded: boolean;
   active: boolean;
+  changed: boolean;
   isDropTarget: boolean;
   onToggle: () => void;
   onOpen: () => void;
@@ -547,6 +552,7 @@ function Row({
   depth,
   expanded,
   active,
+  changed,
   isDropTarget,
   onToggle,
   onOpen,
@@ -586,6 +592,9 @@ function Row({
         <span className="w-3 shrink-0 text-gray-500">{isDir ? (expanded ? '▾' : '▸') : ''}</span>
         {isDir ? <FolderIcon open={expanded} /> : <FileIcon name={entry.name} />}
         <span className="truncate">{entry.name}</span>
+        {changed && (
+          <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-yellow-400" />
+        )}
       </button>
       {children}
     </>

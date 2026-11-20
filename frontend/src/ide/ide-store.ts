@@ -45,10 +45,12 @@ interface IdeState {
   terminals: number[];
   activeTerminal: number | null;
   /** One-shot command typed into the terminal on next open (e.g. cd from the file tree). */
-  terminalCommand: string | null;
+  terminalInputs: Record<number, string>;
   /** One-shot cursor target the editor applies once the file is shown. */
   reveal: RevealTarget | null;
   blocked: BlockedReason;
+  /** Bumped after every successful write; the git status poll listens to it. */
+  saveTick: number;
 
   setWorkspace: (workspaceId: string) => void;
   openFile: (path: string, sizeHint?: number) => Promise<void>;
@@ -83,11 +85,10 @@ interface IdeState {
   setSidebarWidth: (width: number) => void;
   setTerminalHeight: (height: number) => void;
   setTerminalOpen: (open: boolean) => void;
-  addTerminal: () => void;
+  addTerminal: (initialInput?: string) => void;
   closeTerminal: (id: number) => void;
   setActiveTerminal: (id: number) => void;
   openTerminalAt: (dir: string) => void;
-  consumeTerminalCommand: () => string | null;
   setBlocked: (blocked: BlockedReason) => void;
 }
 
@@ -255,6 +256,7 @@ function applyWritten(
     tabs: get().tabs.map((t) =>
       t.path === path ? { ...t, baseHash: hash, dirty: t.content !== written, conflict: false } : t,
     ),
+    saveTick: get().saveTick + 1,
   });
   const tab = get().tabs.find((t) => t.path === path);
   if (!tab) return;
@@ -271,9 +273,10 @@ export const useIdeStore = create<IdeState>((set, get) => ({
   terminalOpen: false,
   terminals: [],
   activeTerminal: null,
-  terminalCommand: null,
+  terminalInputs: {},
   reveal: null,
   blocked: null,
+  saveTick: 0,
   ...loadLayout(),
 
   setWorkspace: (workspaceId) => {
@@ -535,29 +538,32 @@ export const useIdeStore = create<IdeState>((set, get) => ({
 
   setTerminalOpen: (open) => set({ terminalOpen: open }),
 
-  addTerminal: () => {
+  addTerminal: (initialInput) => {
     const id = nextTerminalId++;
-    set({ terminals: [...get().terminals, id], activeTerminal: id, terminalOpen: true });
+    set({
+      terminals: [...get().terminals, id],
+      activeTerminal: id,
+      terminalOpen: true,
+      terminalInputs: initialInput === undefined ? get().terminalInputs : { ...get().terminalInputs, [id]: initialInput },
+    });
   },
 
   closeTerminal: (id) => {
     const terminals = get().terminals.filter((t) => t !== id);
     const activeTerminal =
       get().activeTerminal === id ? (terminals[terminals.length - 1] ?? null) : get().activeTerminal;
-    set({ terminals, activeTerminal, terminalOpen: terminals.length > 0 ? get().terminalOpen : false });
+    const terminalInputs = Object.fromEntries(
+      Object.entries(get().terminalInputs).filter(([key]) => key !== String(id)),
+    );
+    set({ terminals, activeTerminal, terminalInputs, terminalOpen: terminals.length > 0 ? get().terminalOpen : false });
   },
 
   setActiveTerminal: (id) => set({ activeTerminal: id }),
 
   openTerminalAt: (dir) => {
     // `--` keeps a directory name with a leading dash from being read as an option.
-    set({ terminalOpen: true, terminalCommand: dir === '.' ? null : `cd -- ${shellQuote(dir)}\n` });
-  },
-
-  consumeTerminalCommand: () => {
-    const command = get().terminalCommand;
-    if (command !== null) set({ terminalCommand: null });
-    return command;
+    if (dir === '.') set({ terminalOpen: true });
+    else get().addTerminal(`cd -- ${shellQuote(dir)}\n`);
   },
 
   setBlocked: (blocked) => set({ blocked }),

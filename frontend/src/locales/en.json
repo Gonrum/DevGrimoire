@@ -3308,6 +3308,24 @@
     "download": "Download",
     "downloadFailed": "Download failed",
     "binaryText": "Binary file or not valid UTF-8 — cannot be opened in the editor.",
-    "tooLargeText": "File is larger than 5 MB and is not opened in the editor."
+    "tooLargeText": "File is larger than 5 MB and is not opened in the editor.",
+    "search": "Search",
+    "searchPlaceholder": "Search",
+    "searchRegex": "Regular expression",
+    "searchCase": "Match case",
+    "searchInclude": "Include (comma-separated globs, e.g. *.ts)",
+    "searchExclude": "Exclude (comma-separated globs)",
+    "searchRun": "Search",
+    "searching": "Searching …",
+    "searchNoResults": "No results.",
+    "searchFailed": "Search failed",
+    "searchTruncated": "Only the first 2000 matches are shown. Narrow the search.",
+    "terminal": "Terminal",
+    "terminalTab": "Terminal {{n}}",
+    "terminalNew": "New terminal",
+    "terminalClose": "Close terminal",
+    "terminalHost": "Workspace",
+    "terminalHint": "Ctrl+` toggles the terminal.",
+    "terminalConnectFailed": "The terminal could not connect. There may be too many terminals open for this workspace (max. 8, shared with the dock)."
   }
 }

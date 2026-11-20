@@ -3307,6 +3307,24 @@
     "download": "Herunterladen",
     "downloadFailed": "Download fehlgeschlagen",
     "binaryText": "Binärdatei oder kein gültiges UTF-8 — kann nicht im Editor geöffnet werden.",
-    "tooLargeText": "Datei ist größer als 5 MB und wird nicht im Editor geöffnet."
+    "tooLargeText": "Datei ist größer als 5 MB und wird nicht im Editor geöffnet.",
+    "search": "Suche",
+    "searchPlaceholder": "Suchen",
+    "searchRegex": "Regulärer Ausdruck",
+    "searchCase": "Groß-/Kleinschreibung beachten",
+    "searchInclude": "Einschließen (Globs, kommagetrennt, z. B. *.ts)",
+    "searchExclude": "Ausschließen (Globs, kommagetrennt)",
+    "searchRun": "Suchen",
+    "searching": "Suche läuft …",
+    "searchNoResults": "Keine Treffer.",
+    "searchFailed": "Suche fehlgeschlagen",
+    "searchTruncated": "Nur die ersten 2000 Treffer werden angezeigt. Bitte die Suche eingrenzen.",
+    "terminal": "Terminal",
+    "terminalTab": "Terminal {{n}}",
+    "terminalNew": "Neues Terminal",
+    "terminalClose": "Terminal schließen",
+    "terminalHost": "Werkstatt",
+    "terminalHint": "Strg+` blendet das Terminal ein und aus.",
+    "terminalConnectFailed": "Terminal konnte nicht verbunden werden. Möglicherweise sind zu viele Terminals für diese Werkstatt offen (max. 8, gemeinsam mit dem Dock)."
   }
 }
