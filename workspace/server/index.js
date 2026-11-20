@@ -595,6 +595,7 @@ app.post('/write-stream', async (req, res) => {
     mode = Number(q.mode);
   }
   const createDirs = q.createDirs === '1';
+  const noOverwrite = q.noOverwrite === '1';
 
   if (!await workspaceExists(id)) {
     return res.status(404).json({ error: 'workspace directory does not exist' });
@@ -633,6 +634,16 @@ app.post('/write-stream', async (req, res) => {
   } catch (err) {
     return res.status(err.status || 400).json({ error: err.message });
   }
+  if (noOverwrite) {
+    // Early rejection before the body is consumed; the link() below stays the
+    // authoritative check for races.
+    try {
+      await fsp.lstat(finalPath);
+      return res.status(409).json({ error: 'target exists' });
+    } catch (err) {
+      if (err.code !== 'ENOENT') return res.status(400).json({ error: err.message });
+    }
+  }
   const base = path.basename(finalPath);
   const tmpPath = path.join(parent, `.${base}.${crypto.randomBytes(6).toString('hex')}.part`);
   const out = fs.createWriteStream(tmpPath, { flags: 'wx', mode });
@@ -666,7 +677,19 @@ app.post('/write-stream', async (req, res) => {
     try {
       // `mode` from open() is subject to the umask; chmod sets it exactly.
       await fsp.chmod(tmpPath, mode);
-      await fsp.rename(tmpPath, finalPath);
+      if (noOverwrite) {
+        // link() fails with EEXIST instead of replacing an existing target,
+        // even if it appeared after the early check above.
+        try {
+          await fsp.link(tmpPath, finalPath);
+        } catch (err) {
+          await fsp.rm(tmpPath, { force: true }).catch(() => undefined);
+          return err.code === 'EEXIST' ? fail(409, 'target exists') : fail(500, err.message);
+        }
+        await fsp.unlink(tmpPath);
+      } else {
+        await fsp.rename(tmpPath, finalPath);
+      }
     } catch (err) {
       return fail(500, err.message);
     }
@@ -746,6 +769,142 @@ app.post('/write', async (req, res) => {
   res.json({ ok: true, path: path.relative(root, finalPath), hash: sha256Hex(data), size: data.length });
 });
 
+/** Real path of an existing workspace root, or null (response already sent). */
+async function realWorkspaceRoot(id, res) {
+  if (!await workspaceExists(id)) {
+    res.status(404).json({ error: 'workspace directory does not exist' });
+    return null;
+  }
+  try {
+    return await fsp.realpath(workspaceRoot(id));
+  } catch {
+    res.status(404).json({ error: 'workspace directory does not exist' });
+    return null;
+  }
+}
+
+const isGitPath = (root, absPath) => path.relative(root, absPath).split(path.sep)[0] === '.git';
+
+/**
+ * Resolves an EXISTING entry for delete/move-source without following the
+ * entry itself: only the parent directory is resolved with realpath() and
+ * must stay inside the workspace, so a symlink is addressed as a link and a
+ * path through an outside-pointing symlink directory is rejected. Throws an
+ * Error carrying `.status` (400 invalid/root/.git, 404 missing).
+ */
+async function resolveExistingEntry(root, requested) {
+  const fail = (status, message) => Object.assign(new Error(message), { status });
+  if (typeof requested !== 'string' || !requested || requested.includes('\0')) {
+    throw fail(400, 'path must be a non-empty string');
+  }
+  const target = path.resolve(root, requested);
+  if (!isInside(root, target)) throw fail(400, 'path escapes workspace root');
+  if (target === root) throw fail(400, 'the workspace root cannot be modified');
+  let parent;
+  try {
+    parent = await fsp.realpath(path.dirname(target));
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') throw fail(404, 'not found');
+    throw fail(400, err.message);
+  }
+  if (!isInside(root, parent)) throw fail(400, 'resolved path escapes workspace root');
+  const entryPath = path.join(parent, path.basename(target));
+  if (entryPath === root) throw fail(400, 'the workspace root cannot be modified');
+  if (isGitPath(root, entryPath)) throw fail(400, '.git cannot be modified');
+  let stat;
+  try {
+    stat = await fsp.lstat(entryPath);
+  } catch (err) {
+    if (err.code === 'ENOENT') throw fail(404, 'not found');
+    throw fail(400, err.message);
+  }
+  return { entryPath, stat };
+}
+
+app.post('/mkdir', async (req, res) => {
+  const id = requireWorkspaceId(req, res); if (!id) return;
+  const root = await realWorkspaceRoot(id, res); if (!root) return;
+  try {
+    const { finalPath } = await resolveWriteTarget(root, req.body?.path, { createDirs: true });
+    try {
+      await fsp.mkdir(finalPath);
+    } catch (err) {
+      if (err.code === 'EEXIST') return res.status(409).json({ error: 'already exists' });
+      throw err;
+    }
+    res.json({ ok: true, path: path.relative(root, finalPath) });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message });
+  }
+});
+
+app.post('/move', async (req, res) => {
+  const id = requireWorkspaceId(req, res); if (!id) return;
+  const { from, to } = req.body || {};
+  if (typeof to !== 'string' || !to || to.includes('\0')) {
+    return res.status(400).json({ error: 'to must be a non-empty string' });
+  }
+  const root = await realWorkspaceRoot(id, res); if (!root) return;
+  try {
+    const source = await resolveExistingEntry(root, from);
+    const isDir = source.stat.isDirectory();
+    // Lexical checks first so a rejected request creates no directories.
+    const lexicalTo = path.resolve(root, to);
+    if (isGitPath(root, lexicalTo)) return res.status(400).json({ error: '.git cannot be modified' });
+    const intoSelf = (candidate) => candidate === source.entryPath
+      || candidate.startsWith(source.entryPath + path.sep);
+    if (isDir && intoSelf(lexicalTo)) {
+      return res.status(400).json({ error: 'cannot move a directory into itself' });
+    }
+    let finalPath;
+    try {
+      ({ finalPath } = await resolveWriteTarget(root, to, { createDirs: true }));
+    } catch (err) {
+      if (err.code === 'TARGET_IS_DIR') return res.status(409).json({ error: 'target exists' });
+      throw err;
+    }
+    if (isGitPath(root, finalPath)) return res.status(400).json({ error: '.git cannot be modified' });
+    if (isDir && intoSelf(finalPath)) {
+      return res.status(400).json({ error: 'cannot move a directory into itself' });
+    }
+    try {
+      await fsp.lstat(finalPath);
+      return res.status(409).json({ error: 'target exists' });
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
+    if (isDir) {
+      await fsp.rename(source.entryPath, finalPath);
+    } else {
+      // link() never replaces an existing target (rename() would); a symlink
+      // is linked as a link, not followed.
+      try {
+        await fsp.link(source.entryPath, finalPath);
+      } catch (err) {
+        if (err.code === 'EEXIST') return res.status(409).json({ error: 'target exists' });
+        throw err;
+      }
+      await fsp.unlink(source.entryPath);
+    }
+    res.json({ ok: true, from: path.relative(root, source.entryPath), to: path.relative(root, finalPath) });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message });
+  }
+});
+
+app.post('/delete', async (req, res) => {
+  const id = requireWorkspaceId(req, res); if (!id) return;
+  const root = await realWorkspaceRoot(id, res); if (!root) return;
+  try {
+    const { entryPath } = await resolveExistingEntry(root, req.body?.path);
+    // rm() unlinks a symlink itself and does not descend into its target.
+    await fsp.rm(entryPath, { recursive: true });
+    res.json({ ok: true, path: path.relative(root, entryPath) });
+  } catch (err) {
+    res.status(err.status || (err.code === 'ENOENT' ? 404 : 400)).json({ error: err.message });
+  }
+});
+
 app.post('/tree', async (req, res) => {
   const id = requireWorkspaceId(req, res); if (!id) return;
   const requested = typeof req.body?.path === 'string' ? req.body.path : '.';
@@ -803,7 +962,11 @@ app.post('/search', async (req, res) => {
   if (query.length > 500) return res.status(400).json({ error: 'query too long (max 500)' });
   if (!await workspaceExists(id)) return res.status(404).json({ error: 'workspace not initialised' });
 
-  const args = ['--no-heading', '--line-number', '--max-count', '50', '--max-columns', '300', '--ignore-case'];
+  const { fixedStrings, caseSensitive, json } = req.body || {};
+  const args = json === true ? ['--json'] : ['--no-heading', '--line-number'];
+  args.push('--max-count', '50', '--max-columns', '300');
+  if (caseSensitive !== true) args.push('--ignore-case');
+  if (fixedStrings === true) args.push('--fixed-strings');
   const validGlob = (g) => typeof g === 'string' && g.length < 200 && !/[\n\r]/.test(g);
   const normaliseGlobs = (input) => {
     if (input === undefined) return [];

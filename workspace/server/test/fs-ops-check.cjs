@@ -221,6 +221,181 @@ async function main() {
       assert.equal(second.status, 200);
       assert.equal(readDisk('up.bin'), 'second!');
     });
+
+    const exists = (rel) => fs.existsSync(path.join(ws, rel));
+    const upStream = async (rel, data, extra = {}) => {
+      const q = new URLSearchParams({ workspaceId: 'ws1', path: rel, size: String(data.length), ...extra });
+      const res = await fetch(`${base}/write-stream?${q}`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/octet-stream' },
+        body: data,
+      });
+      return { status: res.status, body: await res.json() };
+    };
+
+    await check('mkdir: creates nested dirs, second call -> 409', async () => {
+      const a = await post('/mkdir', { workspaceId: 'ws1', path: 'm/n/o' });
+      assert.equal(a.status, 200);
+      assert.equal(a.body.ok, true);
+      assert.equal(a.body.path, 'm/n/o');
+      assert.equal(fs.statSync(path.join(ws, 'm/n/o')).isDirectory(), true);
+      assert.equal((await post('/mkdir', { workspaceId: 'ws1', path: 'm/n/o' })).status, 409);
+      assert.equal((await post('/mkdir', { workspaceId: 'ws1', path: '../x' })).status, 400);
+      assert.equal((await post('/mkdir', { workspaceId: 'ws1', path: 'out/viaLink' })).status, 400);
+      assert.deepEqual(fs.readdirSync(outside), []);
+    });
+
+    await check('move: renames a file and moves a dir', async () => {
+      put('mv1.txt', 'one');
+      const a = await post('/move', { workspaceId: 'ws1', from: 'mv1.txt', to: 'mv2.txt' });
+      assert.equal(a.status, 200);
+      assert.deepEqual([a.body.ok, a.body.from, a.body.to], [true, 'mv1.txt', 'mv2.txt']);
+      assert.equal(exists('mv1.txt'), false);
+      assert.equal(readDisk('mv2.txt'), 'one');
+      fs.mkdirSync(path.join(ws, 'srcdir'));
+      fs.writeFileSync(path.join(ws, 'srcdir/f.txt'), 'in dir');
+      const b = await post('/move', { workspaceId: 'ws1', from: 'srcdir', to: 'm/dstdir' });
+      assert.equal(b.status, 200);
+      assert.equal(readDisk('m/dstdir/f.txt'), 'in dir');
+      assert.equal(exists('srcdir'), false);
+    });
+
+    await check('move: target exists -> 409, both files untouched; missing source -> 404', async () => {
+      put('t1.txt', 'T1');
+      put('t2.txt', 'T2');
+      const r = await post('/move', { workspaceId: 'ws1', from: 't1.txt', to: 't2.txt' });
+      assert.equal(r.status, 409);
+      assert.equal(readDisk('t1.txt'), 'T1');
+      assert.equal(readDisk('t2.txt'), 'T2');
+      assert.equal((await post('/move', { workspaceId: 'ws1', from: 'nothing-here', to: 'x1' })).status, 404);
+    });
+
+    await check('move: root, .git and move-into-self -> 400', async () => {
+      fs.mkdirSync(path.join(ws, '.git'), { recursive: true });
+      fs.writeFileSync(path.join(ws, '.git/config'), 'cfg');
+      fs.mkdirSync(path.join(ws, 'a'));
+      put('plain.txt', 'p');
+      for (const [from, to] of [['.', 'zz'], ['plain.txt', '.git/x'], ['.git/config', 'cfg2'], ['a', 'a/b'], ['plain.txt', '.']]) {
+        const r = await post('/move', { workspaceId: 'ws1', from, to });
+        assert.equal(r.status, 400, `${from} -> ${to}`);
+      }
+      assert.equal(readDisk('.git/config'), 'cfg');
+      assert.equal(exists('a/b'), false);
+      assert.equal(exists('plain.txt'), true);
+    });
+
+    await check('move: special file names (space, umlaut, leading dash) work', async () => {
+      put('file with space.txt', 'sp');
+      const r = await post('/move', { workspaceId: 'ws1', from: 'file with space.txt', to: 'ünï/-dash.txt' });
+      assert.equal(r.status, 200);
+      assert.equal(readDisk('ünï/-dash.txt'), 'sp');
+      assert.equal(exists('file with space.txt'), false);
+    });
+
+    await check('delete: removes file and non-empty dir; root and .git -> 400; missing -> 404', async () => {
+      put('del.txt', 'd');
+      fs.mkdirSync(path.join(ws, 'deldir/sub'), { recursive: true });
+      fs.writeFileSync(path.join(ws, 'deldir/sub/f'), 'x');
+      const a = await post('/delete', { workspaceId: 'ws1', path: 'del.txt' });
+      assert.equal(a.status, 200);
+      assert.deepEqual([a.body.ok, a.body.path], [true, 'del.txt']);
+      assert.equal(exists('del.txt'), false);
+      assert.equal((await post('/delete', { workspaceId: 'ws1', path: 'deldir' })).status, 200);
+      assert.equal(exists('deldir'), false);
+      assert.equal((await post('/delete', { workspaceId: 'ws1', path: '.' })).status, 400);
+      assert.equal((await post('/delete', { workspaceId: 'ws1', path: '.git' })).status, 400);
+      assert.equal((await post('/delete', { workspaceId: 'ws1', path: '.git/config' })).status, 400);
+      assert.equal((await post('/delete', { workspaceId: 'ws1', path: '../x' })).status, 400);
+      assert.equal(exists('.git/config'), true);
+      assert.equal((await post('/delete', { workspaceId: 'ws1', path: 'no-such-thing' })).status, 404);
+    });
+
+    await check('delete: a symlink is removed as a link, its outside target survives', async () => {
+      const victim = path.join(outside, 'victim.txt');
+      fs.writeFileSync(victim, 'keep');
+      fs.symlinkSync(victim, path.join(ws, 'link'));
+      const r = await post('/delete', { workspaceId: 'ws1', path: 'link' });
+      assert.equal(r.status, 200);
+      assert.equal(fs.existsSync(victim), true);
+      assert.throws(() => fs.lstatSync(path.join(ws, 'link')));
+      // Parent resolving outside the workspace must never delete anything.
+      const via = await post('/delete', { workspaceId: 'ws1', path: 'out/victim.txt' });
+      assert.equal(via.status, 400);
+      assert.equal(fs.existsSync(victim), true);
+      fs.writeFileSync(path.join(ws, 'mine.txt'), 'm');
+      const mv = await post('/move', { workspaceId: 'ws1', from: 'out/victim.txt', to: 'stolen.txt' });
+      assert.equal(mv.status, 400);
+      assert.equal(fs.existsSync(victim), true);
+      const mv2 = await post('/move', { workspaceId: 'ws1', from: 'mine.txt', to: 'out/placed.txt' });
+      assert.equal(mv2.status, 400);
+      assert.equal(fs.existsSync(path.join(outside, 'placed.txt')), false);
+    });
+
+    await check('write-stream: noOverwrite=1 on existing target -> 409, content unchanged, no .part left', async () => {
+      put('keep.bin', 'original');
+      const r = await upStream('keep.bin', Buffer.from('replacement'), { noOverwrite: '1' });
+      assert.equal(r.status, 409);
+      assert.equal(r.body.error, 'target exists');
+      assert.equal(readDisk('keep.bin'), 'original');
+      assert.deepEqual(fs.readdirSync(ws).filter((n) => n.endsWith('.part')), []);
+      const fresh = await upStream('fresh.bin', Buffer.from('new'), { noOverwrite: '1' });
+      assert.equal(fresh.status, 200);
+      assert.equal(readDisk('fresh.bin'), 'new');
+      assert.deepEqual(fs.readdirSync(ws).filter((n) => n.endsWith('.part')), []);
+    });
+
+    await check('write-stream: concurrent noOverwrite uploads -> exactly one wins', async () => {
+      const results = await Promise.all(
+        Array.from({ length: 6 }, (_, i) => upStream('race.bin', Buffer.from(`writer-${i}`), { noOverwrite: '1' })),
+      );
+      assert.equal(results.filter((r) => r.status === 200).length, 1);
+      assert.equal(results.filter((r) => r.status === 409).length, 5);
+      assert.match(readDisk('race.bin'), /^writer-\d$/);
+      assert.deepEqual(fs.readdirSync(ws).filter((n) => n.endsWith('.part')), []);
+    });
+
+    put('s1.txt', 'x a.b( y\nHello there\nhello again\naXb(\n');
+    const rgLines = (r) => r.body.matches.split('\n').filter(Boolean);
+
+    await check('search: fixedStrings matches literally instead of failing as a regex', async () => {
+      const plain = await post('/search', { workspaceId: 'ws1', query: 'a.b(', include: 's1.txt' });
+      assert.equal(plain.status, 500);
+      const r = await post('/search', { workspaceId: 'ws1', query: 'a.b(', fixedStrings: true, include: 's1.txt' });
+      assert.equal(r.status, 200);
+      const lines = rgLines(r);
+      assert.equal(lines.length, 1);
+      assert.match(lines[0], /a\.b\(/);
+    });
+
+    await check('search: caseSensitive distinguishes Hello from hello', async () => {
+      const ci = await post('/search', { workspaceId: 'ws1', query: 'Hello', include: 's1.txt' });
+      assert.equal(rgLines(ci).length, 2);
+      const cs = await post('/search', { workspaceId: 'ws1', query: 'Hello', caseSensitive: true, include: 's1.txt' });
+      assert.equal(rgLines(cs).length, 1);
+      assert.doesNotMatch(cs.body.matches, /hello again/);
+    });
+
+    await check('search: json returns NDJSON lines with a type field', async () => {
+      const r = await post('/search', { workspaceId: 'ws1', query: 'Hello', json: true, include: 's1.txt' });
+      assert.equal(r.status, 200);
+      const lines = rgLines(r);
+      assert.ok(lines.length > 0);
+      for (const l of lines) assert.equal(typeof JSON.parse(l).type, 'string');
+      assert.ok(lines.some((l) => JSON.parse(l).type === 'match'));
+    });
+
+    await check('search: a leading-dash query is a pattern, not an rg option', async () => {
+      put('dash.txt', 'use -e flag\n');
+      const r = await post('/search', { workspaceId: 'ws1', query: '-e', include: 'dash.txt' });
+      assert.equal(r.status, 200);
+      assert.match(r.body.matches, /use -e flag/);
+    });
+
+    await check('search: default output keeps path:line:text shape', async () => {
+      const r = await post('/search', { workspaceId: 'ws1', query: 'Hello', include: 's1.txt' });
+      assert.equal(r.status, 200);
+      assert.deepEqual(rgLines(r).map((l) => l.replace(/^\.?\//, '')), ['s1.txt:2:Hello there', 's1.txt:3:hello again']);
+    });
   } finally {
     cleanup();
   }
