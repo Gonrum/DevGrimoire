@@ -5,18 +5,13 @@ import { FolderGit2, Minus, Plus, Server, SquareTerminal, X } from 'lucide-react
 import {
   api,
   getCurrentAccessToken,
-  SshConnectionListItem,
   Workspace,
 } from '../../api/client';
 import { safeRandomUUID } from '../../utils/randomId';
 import SshTerminal, { TerminalState, TerminalTarget } from './SshTerminal';
 import { deriveSshStatus } from './sshStatus';
 import { useSshConnections } from './hooks/useSshConnections';
-
-/** What a tab is attached to: a remote host via SSH, or a workspace's bash. */
-type DockSource =
-  | { kind: 'ssh'; connection: SshConnectionListItem }
-  | { kind: 'workspace'; workspace: Workspace };
+import { DockSource, onTerminalDockOpen } from './terminalDockEvents';
 
 interface DockTab {
   key: string;
@@ -155,6 +150,17 @@ export default function SshDock() {
     setActiveKey(key);
     setPickerOpen(false);
   }, []);
+
+  // Open requests from elsewhere in the app (e.g. "Open terminal" in the
+  // workspace list): add the tab and bring the modal to the front.
+  useEffect(
+    () =>
+      onTerminalDockOpen((source) => {
+        openSession(source);
+        setOpen(true);
+      }),
+    [openSession],
+  );
 
   // Latest tab list for callbacks handed to long-lived terminals.
   const tabsRef = useRef(tabs);
