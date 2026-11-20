@@ -11,10 +11,11 @@ interface TabProps {
   label: string;
   active: boolean;
   initialInput?: string;
+  onInputSent: () => void;
   onClose: () => void;
 }
 
-function TerminalTab({ workspaceId, label, active, initialInput, onClose }: TabProps) {
+function TerminalTab({ workspaceId, label, active, initialInput, onInputSent, onClose }: TabProps) {
   const { t } = useTranslation();
   // The id keys the sidecar's PTY; it lives as long as this tab component does.
   const [sessionId] = useState(() => `ide-${safeRandomUUID()}`);
@@ -40,6 +41,7 @@ function TerminalTab({ workspaceId, label, active, initialInput, onClose }: TabP
           hint={t('ide.terminalHint')}
           heightClassName="h-full"
           initialInput={initialInput}
+          onInitialInputSent={onInputSent}
           onClose={onClose}
           onClosedBeforeOpen={() => setClosedEarly(true)}
           onConnectionStateChange={(state) => {
@@ -63,6 +65,7 @@ export function TerminalPanel({ workspaceId }: { workspaceId: string }) {
   const terminalInputs = useIdeStore((s) => s.terminalInputs);
   const addTerminal = useIdeStore((s) => s.addTerminal);
   const closeTerminal = useIdeStore((s) => s.closeTerminal);
+  const clearTerminalInput = useIdeStore((s) => s.clearTerminalInput);
   const setActiveTerminal = useIdeStore((s) => s.setActiveTerminal);
 
   // Opening the panel with no tab yet starts one.
@@ -112,6 +115,7 @@ export function TerminalPanel({ workspaceId }: { workspaceId: string }) {
             label={t('ide.terminalTab', { n: index + 1 })}
             active={open && id === activeTerminal}
             initialInput={terminalInputs[id]}
+            onInputSent={() => clearTerminalInput(id)}
             onClose={() => closeTerminal(id)}
           />
         ))}

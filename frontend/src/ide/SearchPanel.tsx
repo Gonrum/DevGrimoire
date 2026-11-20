@@ -126,7 +126,7 @@ export function SearchPanel({ workspaceId }: { workspaceId: string }) {
         />
         <button
           type="submit"
-          disabled={busy || query === ''}
+          disabled={query === ''}
           className="rounded-sm bg-cyan-400/15 px-2 py-1 text-cyan-400 hover:bg-cyan-400/25 disabled:opacity-50"
         >
           {busy ? t('ide.searching') : t('ide.searchRun')}

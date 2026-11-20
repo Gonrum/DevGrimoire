@@ -60,6 +60,8 @@ export interface SshTerminalProps {
    * hosts use this to hint at likely causes (such as a session limit).
    */
   onClosedBeforeOpen?: () => void;
+  /** Called once `initialInput` has been sent, so the host can forget it. */
+  onInitialInputSent?: () => void;
 }
 
 export type TerminalState =
@@ -177,6 +179,7 @@ export default function SshTerminal({
   heightClassName = 'h-[80vh] min-h-[480px]',
   initialInput,
   onClosedBeforeOpen,
+  onInitialInputSent,
 }: SshTerminalProps) {
   const { t } = useTranslation();
   // Primitive key so the connect-effect only re-runs when the endpoint
@@ -216,6 +219,10 @@ export default function SshTerminal({
   useEffect(() => {
     closedBeforeOpenRef.current = onClosedBeforeOpen;
   }, [onClosedBeforeOpen]);
+  const inputSentRef = useRef(onInitialInputSent);
+  useEffect(() => {
+    inputSentRef.current = onInitialInputSent;
+  }, [onInitialInputSent]);
   // One-shot: cleared after the first send so a reconnect does not repeat it.
   const initialInputRef = useRef(initialInput);
 
@@ -300,6 +307,7 @@ export default function SshTerminal({
       if (pending) {
         initialInputRef.current = undefined;
         ws.send(pending);
+        inputSentRef.current?.();
       }
       term.focus();
     };

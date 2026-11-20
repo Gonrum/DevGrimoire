@@ -88,6 +88,8 @@ interface IdeState {
   addTerminal: (initialInput?: string) => void;
   closeTerminal: (id: number) => void;
   setActiveTerminal: (id: number) => void;
+  /** Drops a tab's pending initial input once it has been typed into the shell. */
+  clearTerminalInput: (id: number) => void;
   openTerminalAt: (dir: string) => void;
   setBlocked: (blocked: BlockedReason) => void;
 }
@@ -288,6 +290,10 @@ export const useIdeStore = create<IdeState>((set, get) => ({
         splitPath: null,
         reveal: null,
         blocked: null,
+        // Terminal tabs belong to one workspace; `terminalOpen` keeps the user's choice.
+        terminals: [],
+        activeTerminal: null,
+        terminalInputs: {},
       });
     }
   },
@@ -559,6 +565,13 @@ export const useIdeStore = create<IdeState>((set, get) => ({
   },
 
   setActiveTerminal: (id) => set({ activeTerminal: id }),
+
+  clearTerminalInput: (id) => {
+    if (!(id in get().terminalInputs)) return;
+    set({
+      terminalInputs: Object.fromEntries(Object.entries(get().terminalInputs).filter(([key]) => key !== String(id))),
+    });
+  },
 
   openTerminalAt: (dir) => {
     // `--` keeps a directory name with a leading dash from being read as an option.
