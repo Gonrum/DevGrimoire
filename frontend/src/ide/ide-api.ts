@@ -11,13 +11,8 @@ import {
   noteUnauthorizedStatus,
   refreshAccessTokenAfter401,
 } from '../api/client';
-import {
-  parseJsonResponse,
-  parseJsonText,
-  readErrorMessage,
-  readErrorMessageFromText,
-} from '../api/http-boundary';
-import { isRecord } from '../lib/narrow';
+import { parseJsonResponse, parseJsonText, readErrorMessageFromText } from '../api/http-boundary';
+import { isRecord, isUnknownArray } from '../lib/narrow';
 
 export interface IdeTreeEntry {
   name: string;
@@ -42,8 +37,21 @@ export interface IdeGitStatus {
   changed: { path: string; code: string }[];
 }
 
+/**
+ * Why a request answered 409. Three different things share the status:
+ * - `conflict`: write conflict, the body carries `currentHash` (see `writeFile`)
+ * - `exists`:   the sidecar refused to overwrite (`target exists` / `already exists`)
+ * - `inactive`: the backend gate's ConflictException — the workspace is not active
+ */
+export type IdeConflictReason = 'conflict' | 'exists' | 'inactive';
+
 export class IdeApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(
+    message: string,
+    readonly status: number,
+    /** Set for status 409 only. */
+    readonly reason?: IdeConflictReason,
+  ) {
     super(message);
     this.name = 'IdeApiError';
   }
@@ -52,9 +60,37 @@ export class IdeApiError extends Error {
 /** Thrown by `writeFile` on 409: the file changed on disk since `baseHash`. */
 export class IdeConflictError extends IdeApiError {
   constructor(message: string, readonly currentHash: string | null) {
-    super(message, 409);
+    super(message, 409, 'conflict');
     this.name = 'IdeConflictError';
   }
+}
+
+/** The one place that tells the three kinds of 409 apart. */
+function conflictReason(body: unknown): IdeConflictReason {
+  if (!isRecord(body)) return 'inactive';
+  if ('currentHash' in body) return 'conflict';
+  if (typeof body.error === 'string' && /\bexists$/.test(body.error)) return 'exists';
+  return 'inactive';
+}
+
+/** Error body as an unknown value; null when it is empty or not JSON. */
+function parseErrorBody(text: string): unknown {
+  try {
+    return parseJsonText<unknown>(text);
+  } catch {
+    return null;
+  }
+}
+
+/** IdeApiError from a failed response's status and body text. */
+function errorFromText(status: number, text: string, fallback: string): IdeApiError {
+  const body = parseErrorBody(text);
+  // Nest reports DTO validation failures as a string array in `message`.
+  const lines = isRecord(body) && isUnknownArray(body.message)
+    ? body.message.filter((m): m is string => typeof m === 'string' && m.length > 0)
+    : [];
+  const message = readErrorMessageFromText(text) ?? (lines.length > 0 ? lines.join('; ') : fallback);
+  return new IdeApiError(message, status, status === 409 ? conflictReason(body) : undefined);
 }
 
 const BASE = '/api/workspaces';
@@ -83,7 +119,8 @@ async function authedFetch(url: string, init: { method: string; headers?: Record
 }
 
 async function failFromResponse(res: Response): Promise<never> {
-  throw new IdeApiError(await readErrorMessage(res), res.status);
+  const text = await res.text().catch(() => '');
+  throw errorFromText(res.status, text, res.statusText);
 }
 
 async function getJson<T>(url: string): Promise<T> {
@@ -115,11 +152,12 @@ async function writeFile(
     body: JSON.stringify({ path, content, baseHash: opts.baseHash, ...(opts.force ? { force: true } : {}) }),
   });
   if (res.status === 409) {
-    const body: unknown = await res.json().catch(() => null);
-    const message = isRecord(body) && typeof body.message === 'string' ? body.message : res.statusText;
+    const text = await res.text().catch(() => '');
+    const body = parseErrorBody(text);
     // A write conflict always carries `currentHash` (null when the file is gone). A 409
     // without it is the gate's "workspace is not active" and must not look like a conflict.
-    if (!isRecord(body) || !('currentHash' in body)) throw new IdeApiError(message, 409);
+    if (!isRecord(body) || conflictReason(body) !== 'conflict') throw errorFromText(409, text, res.statusText);
+    const message = readErrorMessageFromText(text) ?? res.statusText;
     const currentHash = typeof body.currentHash === 'string' ? body.currentHash : null;
     throw new IdeConflictError(message, currentHash);
   }
@@ -173,7 +211,7 @@ async function upload(
     noteUnauthorizedStatus(result.status);
   }
   if (result.status < 200 || result.status >= 300) {
-    throw new IdeApiError(readErrorMessageFromText(result.text) ?? `HTTP ${result.status}`, result.status);
+    throw errorFromText(result.status, result.text, `HTTP ${result.status}`);
   }
   return parseJsonText<{ path: string; size: number }>(result.text);
 }

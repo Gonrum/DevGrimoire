@@ -7,7 +7,9 @@ import { LoadingText } from '../components/ui/LoadingSpinner';
 import { useToast } from '../components/Toast';
 import { errorMessage } from '../lib/narrow';
 import { FileTree } from './FileTree';
+import { ideApi, IdeApiError } from './ide-api';
 import { useIdeStore, type SidePanel } from './ide-store';
+import type { TreeListing } from './useWorkspaceFileTree';
 import { SearchPanel } from './SearchPanel';
 import { TerminalPanel } from './TerminalPanel';
 import { useDivider } from './useIdeDividers';
@@ -18,10 +20,12 @@ const EditorPane = lazy(() => import('./EditorPane').then((m) => ({ default: m.E
 
 type LoadState =
   | { kind: 'loading' }
-  | { kind: 'ready'; workspace: Workspace }
+  | { kind: 'ready'; workspace: Workspace; root?: TreeListing }
   | { kind: 'notFound' }
   | { kind: 'forbidden' }
   | { kind: 'inactive'; workspace: Workspace }
+  /** The record says active, but the IDE gate refused with 409 (status changed meanwhile). */
+  | { kind: 'gateInactive'; workspace: Workspace }
   | { kind: 'error'; message: string };
 
 const getSidebarWidth = (): number => useIdeStore.getState().sidebarWidth;
@@ -71,10 +75,35 @@ export default function IdePage() {
   useEffect(() => {
     if (!workspaceId) return;
     let alive = true;
+    /*
+     * Reading the record only needs read access. The IDE itself needs write access
+     * (every fs route is gated), so probe one gated call before showing the workbench:
+     * a read-only user gets the "no access" page instead of a workbench that fails.
+     * The probe's root listing is handed to the file tree, so it is not fetched twice.
+     */
+    const probe = async (workspace: Workspace): Promise<LoadState> => {
+      try {
+        const root = await ideApi.tree(workspaceId, '.');
+        return { kind: 'ready', workspace, root };
+      } catch (err) {
+        if (err instanceof IdeApiError && err.status === 403) return { kind: 'forbidden' };
+        if (err instanceof IdeApiError && err.status === 409) return { kind: 'gateInactive', workspace };
+        if (err instanceof IdeApiError && err.status === 404) return { kind: 'notFound' };
+        // Anything else (network, 5xx): open the workbench, the tree shows the error and a retry.
+        return { kind: 'ready', workspace };
+      }
+    };
     api.workspaces.get(workspaceId).then(
-      (workspace) => {
+      async (workspace) => {
         if (!alive) return;
-        setState(workspace.status === 'active' ? { kind: 'ready', workspace } : { kind: 'inactive', workspace });
+        if (workspace.status !== 'active') {
+          setState({ kind: 'inactive', workspace });
+          return;
+        }
+        const next = await probe(workspace);
+        if (!alive) return;
+        if (next.kind === 'ready') setWorkspace(workspaceId, workspace.path);
+        setState(next);
       },
       (err: unknown) => {
         if (!alive) return;
@@ -84,9 +113,10 @@ export default function IdePage() {
       },
     );
     return () => { alive = false; };
-  }, [workspaceId, t]);
+  }, [workspaceId, t, setWorkspace]);
 
-  const title = state.kind === 'ready' || state.kind === 'inactive' ? state.workspace.name : null;
+  const title =
+    state.kind === 'ready' || state.kind === 'inactive' || state.kind === 'gateInactive' ? state.workspace.name : null;
   useEffect(() => {
     if (title) document.title = `${title} — IDE`;
   }, [title]);
@@ -117,11 +147,29 @@ export default function IdePage() {
       />
     );
   }
+  if (state.kind === 'gateInactive') {
+    return (
+      <FullPageMessage
+        title={t('ide.inactiveTitle')}
+        text={t('ide.inactiveGateText')}
+        backTo={`/projects/${state.workspace.projectId}`}
+        backLabel={t('ide.backToProject')}
+      />
+    );
+  }
 
-  return <Workbench workspaceId={workspaceId} workspace={state.workspace} />;
+  return <Workbench workspaceId={workspaceId} workspace={state.workspace} initialRoot={state.root} />;
 }
 
-function Workbench({ workspaceId, workspace }: { workspaceId: string; workspace: Workspace }) {
+function Workbench({
+  workspaceId,
+  workspace,
+  initialRoot,
+}: {
+  workspaceId: string;
+  workspace: Workspace;
+  initialRoot?: TreeListing;
+}) {
   const { t } = useTranslation();
   const { showError } = useToast();
   const openFile = useIdeStore((s) => s.openFile);
@@ -182,6 +230,7 @@ function Workbench({ workspaceId, workspace }: { workspaceId: string; workspace:
               workspaceId={workspaceId}
               activePath={activePath}
               marks={marks}
+              initialRoot={initialRoot}
               onOpenFile={(path, size) => {
                 openFile(path, size).catch((err: unknown) => showError(errorMessage(err)));
               }}

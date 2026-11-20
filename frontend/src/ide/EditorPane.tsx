@@ -1,7 +1,7 @@
 import './monaco-setup';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Editor, { DiffEditor, type OnMount } from '@monaco-editor/react';
-import { editor as monacoEditor } from 'monaco-editor';
+import { editor as monacoEditor, Uri } from 'monaco-editor';
 import { useTranslation } from 'react-i18next';
 import Markdown from '../components/Markdown';
 import Button from '../components/ui/Button';
@@ -45,13 +45,30 @@ function baseName(path: string): string {
   return path.split('/').pop() ?? path;
 }
 
+const SLOTS: readonly Slot[] = ['main', 'split'];
+
 /**
  * Model URI per editor slot. The real file name gives the TS worker the right script kind
- * (.tsx → JSX); the slot prefix keeps main and split editor on separate models, because a
- * model is disposed when its editor unmounts.
+ * (.tsx → JSX). The slot prefix keeps main and split editor on separate models: each editor
+ * syncs its model from the store, so two editors on one model would echo each other's edits.
+ * Models outlive tab switches (undo history, cursor, scroll); EditorPane disposes them when
+ * their tab closes or is renamed.
  */
 function modelPath(slot: Slot, path: string): string {
   return `file:///${slot}/${path.split('/').map(encodeURIComponent).join('/')}`;
+}
+
+/** Disposes every slot model whose tab is not among `openPaths`. */
+function disposeModelsExcept(openPaths: readonly string[]): void {
+  const keep = new Set<string>();
+  for (const path of openPaths) {
+    for (const slot of SLOTS) keep.add(Uri.parse(modelPath(slot, path)).toString());
+  }
+  for (const model of monacoEditor.getModels()) {
+    const { scheme, path } = model.uri;
+    if (scheme !== 'file' || !SLOTS.some((slot) => path.startsWith(`/${slot}/`))) continue;
+    if (!keep.has(model.uri.toString())) model.dispose();
+  }
 }
 
 export function EditorPane() {
@@ -84,6 +101,10 @@ export function EditorPane() {
   /** Path of the editor that last had focus — Ctrl+S saves that one. */
   const focusedPath = useRef<string | null>(null);
   const mainEditor = useRef<{ editor: CodeEditorInstance; path: string } | null>(null);
+  const openTextPaths = useMemo(
+    () => tabs.filter((tab) => tab.kind === 'text').map((tab) => tab.path).join('\u0000'),
+    [tabs],
+  );
 
   const active = tabs.find((tab) => tab.path === activePath) ?? null;
   const splitTab = splitPath ? (tabs.find((tab) => tab.path === splitPath) ?? null) : null;
@@ -240,17 +261,32 @@ export function EditorPane() {
     focusedPath.current = path;
   }, []);
 
-  const onMainMounted = useCallback(
+  /** Called on mount and after every model switch of the main editor. */
+  const onMainShown = useCallback(
     (editorInstance: CodeEditorInstance, path: string): void => {
+      const known = mainEditor.current?.editor === editorInstance;
       const target = { editor: editorInstance, path };
       mainEditor.current = target;
-      editorInstance.onDidDispose(() => {
-        if (mainEditor.current === target) mainEditor.current = null;
-      });
+      if (!known) {
+        editorInstance.onDidDispose(() => {
+          if (mainEditor.current?.editor === editorInstance) mainEditor.current = null;
+        });
+      }
       applyReveal(target);
     },
     [applyReveal],
   );
+
+  /*
+   * A model lives as long as its tab: closing or renaming a tab disposes it (a renamed
+   * tab gets a fresh model under the new path). Runs after the editors' own effects, so
+   * an editor has already switched away from a model before it is disposed here.
+   */
+  // Leaving the IDE keeps the models of the still-open tabs: the store keeps those tabs, and
+  // the next mount reuses the models (and disposes any that no longer have a tab).
+  useEffect(() => {
+    disposeModelsExcept(openTextPaths === '' ? [] : openTextPaths.split('\u0000'));
+  }, [openTextPaths]);
 
   const requestClose = (tab: OpenTab): void => {
     if (tab.dirty) {
@@ -290,14 +326,15 @@ export function EditorPane() {
 
   const renderSlot = (tab: OpenTab, slot: Slot) =>
     tab.kind === 'text' ? (
+      // One editor per slot across tab switches: it swaps models instead of remounting.
       <CodeEditor
-        key={`${slot}:${tab.path}`}
+        key={`${slot}:code`}
         tab={tab}
         slot={slot}
         readOnly={readOnly}
         onEdit={onEdit}
         onFocusPath={onFocusPath}
-        onMounted={slot === 'main' ? onMainMounted : undefined}
+        onShown={slot === 'main' ? onMainShown : undefined}
       />
     ) : (
       <NonTextTabView key={`${slot}:${tab.path}`} tab={tab} />
@@ -491,7 +528,8 @@ interface CodeEditorProps {
   readOnly: boolean;
   onEdit: (path: string, value: string) => void;
   onFocusPath: (path: string) => void;
-  onMounted?: (editor: CodeEditorInstance, path: string) => void;
+  /** Called once the editor shows `path`: after mount and after every model switch. */
+  onShown?: (editor: CodeEditorInstance, path: string) => void;
 }
 
 /**
@@ -510,54 +548,119 @@ function pureEol(text: string): monacoEditor.EndOfLineSequence | null {
   return crlf === lf ? monacoEditor.EndOfLineSequence.CRLF : monacoEditor.EndOfLineSequence.LF;
 }
 
-/** One Monaco instance for one text tab; remounted (via `key`) when the tab changes. */
-function CodeEditor({ tab, slot, readOnly, onEdit, onFocusPath, onMounted }: CodeEditorProps) {
+/** baseHash whose content a model's EOL was last matched against (per model, dies with it). */
+const eolSyncedFor = new WeakMap<monacoEditor.ITextModel, string | null>();
+
+/**
+ * Brings a model in line with its tab: external updates (reload from disk, silent
+ * re-check, draft restore, edits in the other slot) and kept models that were not shown
+ * while their tab changed. The comparison ignores line-break style — the model stores one
+ * EOL, the EOL step below handles that — so a mixed-EOL file is not rewritten (and its
+ * cursor reset) on every tab switch.
+ */
+function syncModel(model: monacoEditor.ITextModel, content: string, baseHash: string | null): void {
+  const value = model.getValue();
+  if (value !== content && value !== content.replace(/\r\n|\r|\n/g, model.getEOL())) {
+    // pushEditOperations keeps the undo stack and also works on a read-only editor.
+    model.pushEditOperations([], [{ range: model.getFullModelRange(), text: content }], () => null);
+    model.pushStackElement();
+  }
+  /*
+   * A new disk version reaches the model as an edit, and an edit is converted to the
+   * model's current EOL. If the file's EOL changed on disk, the model would keep the old
+   * one and the next save would rewrite every line ending. Keyed by baseHash so typing
+   * does not rescan the buffer.
+   */
+  const first = !eolSyncedFor.has(model);
+  if (!first && eolSyncedFor.get(model) === baseHash) return;
+  eolSyncedFor.set(model, baseHash);
+  const current = model.getEOL() === '\r\n' ? monacoEditor.EndOfLineSequence.CRLF : monacoEditor.EndOfLineSequence.LF;
+  // A new model detects the EOL from its content and keeps it (CRLF stays CRLF). Content
+  // without any line break has nothing to detect — pin LF there instead of the OS default.
+  const wanted = pureEol(content) ?? (first && !/[\r\n]/.test(content) ? monacoEditor.EndOfLineSequence.LF : null);
+  if (wanted !== null && wanted !== current) model.setEOL(wanted);
+}
+
+/**
+ * One Monaco instance per slot. Switching tabs swaps the model (`path` prop with
+ * `keepCurrentModel`), so undo history, cursor and scroll position survive; the editor
+ * library saves and restores the view state per model path.
+ */
+function CodeEditor({ tab, slot, readOnly, onEdit, onFocusPath, onShown }: CodeEditorProps) {
   const { path, content, baseHash } = tab;
+  const uri = modelPath(slot, path);
   const editorRef = useRef<CodeEditorInstance | null>(null);
-  /** baseHash whose content the model's EOL was last matched against. */
-  const eolSyncedFor = useRef<string | null | undefined>(undefined);
+  /** Set while this component writes into the model itself: no echo into the store. */
+  const syncing = useRef(false);
+  /** Latest props for callbacks Monaco keeps (onMount is captured once by the library). */
+  const latest = useRef({ path, content, baseHash, onFocusPath, onShown });
+  useLayoutEffect(() => {
+    latest.current = { path, content, baseHash, onFocusPath, onShown };
+  });
   const options = useMemo(
     () => ({ fontSize: 13, minimap: { enabled: false }, automaticLayout: true, tabSize: 2, readOnly }),
     [readOnly],
   );
-  const onChange = useCallback((value: string | undefined) => onEdit(path, value ?? ''), [onEdit, path]);
+  const onChange = useCallback(
+    (value: string | undefined) => {
+      if (!syncing.current) onEdit(path, value ?? '');
+    },
+    [onEdit, path],
+  );
+
+  const syncShown = useCallback((editorInstance: CodeEditorInstance): void => {
+    const model = editorInstance.getModel();
+    if (!model) return;
+    // The store, not this render's props: by the time an effect runs the user may already
+    // have typed on (model and store move together), and older props would undo that.
+    const live = useIdeStore.getState().tabs.find((candidate) => candidate.path === latest.current.path);
+    const content = live?.content ?? latest.current.content;
+    const hash = live ? live.baseHash : latest.current.baseHash;
+    syncing.current = true;
+    try {
+      syncModel(model, content, hash);
+    } finally {
+      syncing.current = false;
+    }
+  }, []);
 
   /*
-   * A new disk version (reload, silent re-check) reaches the existing model as an edit, and
-   * an edit is converted to the model's current EOL. If the file's EOL changed on disk, the
-   * model would keep the old one and the next save would rewrite every line ending.
-   * Keyed by baseHash so typing does not rescan the buffer.
+   * The model is fed here instead of through the library's `value` prop: that prop replaces
+   * the whole text on any difference (also a mere EOL normalization) and resets the undo
+   * stack in a read-only editor. Runs after the library's own effects, which have already
+   * swapped the model and restored its view state. While typing, model and store hold the
+   * same text, so this is one string compare per keystroke.
    */
   useEffect(() => {
-    const model = editorRef.current?.getModel();
-    if (!model || eolSyncedFor.current === baseHash) return;
-    eolSyncedFor.current = baseHash;
-    const eol = pureEol(content);
-    const current =
-      model.getEOL() === '\r\n' ? monacoEditor.EndOfLineSequence.CRLF : monacoEditor.EndOfLineSequence.LF;
-    if (eol !== null && eol !== current) model.setEOL(eol);
-  }, [baseHash, content]);
+    const editorInstance = editorRef.current;
+    if (!editorInstance) return;
+    syncShown(editorInstance);
+  }, [uri, baseHash, content, syncShown]);
+
+  useEffect(() => {
+    const editorInstance = editorRef.current;
+    if (editorInstance) latest.current.onShown?.(editorInstance, latest.current.path);
+  }, [uri]);
 
   const onMount: OnMount = (editorInstance) => {
     editorRef.current = editorInstance;
-    eolSyncedFor.current = baseHash;
-    // A new model detects the EOL from its content and keeps it (CRLF stays CRLF). Content
-    // without any line break has nothing to detect — pin LF there instead of the OS default.
-    const model = editorInstance.getModel();
-    if (model && !/[\r\n]/.test(model.getValue())) model.setEOL(monacoEditor.EndOfLineSequence.LF);
-    editorInstance.onDidFocusEditorText(() => onFocusPath(path));
+    // The model may be a kept one from an earlier mount of this slot.
+    syncShown(editorInstance);
+    editorInstance.onDidFocusEditorText(() => latest.current.onFocusPath(latest.current.path));
     editorInstance.onDidDispose(() => {
       if (editorRef.current === editorInstance) editorRef.current = null;
     });
-    onMounted?.(editorInstance, path);
+    latest.current.onShown?.(editorInstance, latest.current.path);
   };
 
   return (
     <Editor
-      path={modelPath(slot, path)}
+      path={uri}
+      keepCurrentModel
       theme={DEVGRIMOIRE_THEME}
       language={languageFromPath(path)}
-      value={content}
+      // Only seeds a model the library creates (new tab, renamed tab); updates go through syncModel.
+      defaultValue={content}
       onChange={onChange}
       onMount={onMount}
       options={options}

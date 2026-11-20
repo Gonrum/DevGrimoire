@@ -8,7 +8,7 @@ import { FileIcon, FolderIcon } from './FileIcon';
 import { ideApi, IdeApiError, type IdeTreeEntry } from './ide-api';
 import { IdeConfirmDialog } from './IdeDialog';
 import { useIdeStore } from './ide-store';
-import { useWorkspaceFileTree } from './useWorkspaceFileTree';
+import { useWorkspaceFileTree, type TreeListing } from './useWorkspaceFileTree';
 import type { ChangedMarks } from './useWorkspaceStatus';
 
 interface FileTreeProps {
@@ -17,6 +17,8 @@ interface FileTreeProps {
   onOpenFile: (path: string, size?: number) => void;
   /** Git-changed paths; a dot marks them (and folders containing them). */
   marks?: ChangedMarks;
+  /** Root listing already loaded by the page (access probe); saves the first request. */
+  initialRoot?: TreeListing;
 }
 
 interface CreateDraft {
@@ -51,6 +53,32 @@ function parentOf(path: string): string {
 
 function joinPath(dir: string, name: string): string {
   return dir === '.' ? name : `${dir}/${name}`;
+}
+
+/** A name typed into the create/rename row must be one path segment. */
+function isValidEntryName(name: string): boolean {
+  return name !== '.' && name !== '..' && !name.includes('/') && !name.includes('\0');
+}
+
+/**
+ * Clipboard fallback for plain-HTTP origins (no `navigator.clipboard` outside a
+ * secure context): a hidden textarea and the legacy copy command.
+ */
+function copyWithTextarea(text: string): boolean {
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.appendChild(area);
+  try {
+    area.select();
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    area.remove();
+  }
 }
 
 const DRAG_TYPE = 'application/x-dg-path';
@@ -105,11 +133,24 @@ function collectDroppedFiles(dt: DataTransfer): { files: File[]; hadDirectory: b
   return { files, hadDirectory };
 }
 
-export function FileTree({ workspaceId, activePath, onOpenFile, marks }: FileTreeProps) {
+export function FileTree({ workspaceId, activePath, onOpenFile, marks, initialRoot }: FileTreeProps) {
   const { t } = useTranslation();
   const { showError, showSuccess } = useToast();
-  const { byDir, truncatedDirs, expanded, rootError, errors, toggleDir, expandDir, loadDir, refresh } =
-    useWorkspaceFileTree(workspaceId);
+  const {
+    byDir,
+    truncatedDirs,
+    expanded,
+    rootError,
+    errors,
+    toggleDir,
+    expandDir,
+    loadDir,
+    refresh,
+    reloadDirs,
+    forgetPath,
+    renamePath,
+  } = useWorkspaceFileTree(workspaceId, initialRoot);
+  const noteApiError = useIdeStore((s) => s.noteApiError);
   const closeTabsUnder = useIdeStore((s) => s.closeTabsUnder);
   const renameTabsUnder = useIdeStore((s) => s.renameTabsUnder);
   const openTerminalAt = useIdeStore((s) => s.openTerminalAt);
@@ -146,9 +187,16 @@ export function FileTree({ workspaceId, activePath, onOpenFile, marks }: FileTre
     persistExpanded(workspaceId, [...expanded].filter((p) => p !== '.'));
   }, [workspaceId, expanded]);
 
-  /** A 409 from move/create means the target name is taken: say so specifically. */
-  const explain = (e: unknown): string =>
-    e instanceof IdeApiError && e.status === 409 ? t('ide.alreadyExists') : errorMessage(e, t('ide.operationFailed'));
+  /**
+   * Message for a failed tree mutation. A 403, the gate's 409 (not active) or a 404 of the
+   * workspace also block the whole IDE; a sidecar 409 "exists" only means the name is taken.
+   */
+  const explain = (e: unknown): string => {
+    noteApiError(e);
+    return e instanceof IdeApiError && e.status === 409 && e.reason === 'exists'
+      ? t('ide.alreadyExists')
+      : errorMessage(e, t('ide.operationFailed'));
+  };
 
   const nameTaken = (dir: string, name: string): boolean =>
     !name.includes('/') && (byDir[dir] ?? []).some((e) => e.name === name);
@@ -178,7 +226,7 @@ export function FileTree({ workspaceId, activePath, onOpenFile, marks }: FileTre
       await ideApi.writeFile(workspaceId, path, '', { baseHash: null });
     }
     setDraft(null);
-    await refresh();
+    await reloadDirs([draft.parentDir]);
     if (draft.type === 'file') onOpenFile(path);
   };
 
@@ -189,7 +237,8 @@ export function FileTree({ workspaceId, activePath, onOpenFile, marks }: FileTre
       if (nameTaken(parent, newName)) throw new Error(t('ide.alreadyExists'));
       await ideApi.move(workspaceId, entry.path, to);
       renameTabsUnder(entry.path, to);
-      await refresh();
+      renamePath(entry.path, to);
+      await reloadDirs([parent]);
     }
     setRenaming(null);
   };
@@ -198,7 +247,8 @@ export function FileTree({ workspaceId, activePath, onOpenFile, marks }: FileTre
     guard(async () => {
       await ideApi.remove(workspaceId, entry.path);
       closeTabsUnder(entry.path);
-      await refresh();
+      forgetPath(entry.path);
+      await reloadDirs([parentOf(entry.path)]);
     });
 
   const move = (from: string, destDir: string): Promise<void> =>
@@ -210,8 +260,10 @@ export function FileTree({ workspaceId, activePath, onOpenFile, marks }: FileTre
       if (nameTaken(destDir, name)) throw new Error(t('ide.alreadyExists'));
       await ideApi.move(workspaceId, from, to);
       renameTabsUnder(from, to);
+      renamePath(from, to);
+      // expandDir loads the target folder itself; the root is always shown.
       if (destDir !== '.') expandDir(destDir);
-      await refresh();
+      await reloadDirs(destDir === '.' ? [parentOf(from), '.'] : [parentOf(from)]);
     });
 
   const startUpload = (dir: string): void => {
@@ -239,24 +291,28 @@ export function FileTree({ workspaceId, activePath, onOpenFile, marks }: FileTre
           try {
             await ideApi.upload(workspaceId, dir, file, { onProgress: progress });
           } catch (e) {
-            if (!(e instanceof IdeApiError) || e.status !== 409) throw e;
+            if (!(e instanceof IdeApiError) || e.status !== 409 || e.reason !== 'exists') throw e;
             if (!(await askOverwrite(file.name))) continue;
             await ideApi.upload(workspaceId, dir, file, { overwrite: true, onProgress: progress });
           }
           done += 1;
         } catch (e) {
+          noteApiError(e);
           if (e instanceof IdeApiError && e.status === 413) {
             showError(t('ide.uploadTooLarge', { name: file.name }));
           } else {
             showError(`${file.name}: ${errorMessage(e, t('ide.operationFailed'))}`);
           }
+          // Blocked (no access, not active, gone): the remaining files would fail the same way.
+          if (useIdeStore.getState().blocked !== null) break;
         }
       }
     } finally {
       uploading.current = false;
       setUpload(null);
+      // expandDir loads the target folder itself; the root is always shown.
       if (dir !== '.') expandDir(dir);
-      await refresh();
+      else await reloadDirs(['.']);
     }
     if (done > 0) showSuccess(t('ide.uploadDone', { count: done }));
   };
@@ -268,9 +324,21 @@ export function FileTree({ workspaceId, activePath, onOpenFile, marks }: FileTre
   };
 
   const copyPath = (path: string): void => {
-    navigator.clipboard.writeText(path).catch(() => {
-      showError(t('ide.copyPathFailed'));
-    });
+    const fallback = (): void => {
+      if (copyWithTextarea(path)) showSuccess(t('ide.copyPathDone'));
+      else showError(t('ide.copyPathFailed'));
+    };
+    // Undefined on plain HTTP outside localhost; writeText may also throw synchronously.
+    const clipboard: Clipboard | undefined = navigator.clipboard;
+    if (!clipboard) {
+      fallback();
+      return;
+    }
+    try {
+      clipboard.writeText(path).then(() => showSuccess(t('ide.copyPathDone')), fallback);
+    } catch {
+      fallback();
+    }
   };
 
   const menuItemsFor = (state: MenuState): MenuItem[] => {
@@ -320,6 +388,7 @@ export function FileTree({ workspaceId, activePath, onOpenFile, marks }: FileTre
             onSubmit={create}
             onCancel={() => setDraft(null)}
             describe={explain}
+            invalidNameText={t('ide.invalidName')}
           />
         )}
         {entries.map((entry) => {
@@ -334,6 +403,7 @@ export function FileTree({ workspaceId, activePath, onOpenFile, marks }: FileTre
               onSubmit={(name) => rename(entry, name)}
               onCancel={() => setRenaming(null)}
               describe={explain}
+              invalidNameText={t('ide.invalidName')}
             />
           ) : (
             <Row
@@ -485,9 +555,11 @@ interface NameRowProps {
   onCancel: () => void;
   /** Turns a thrown error into the (translated) message shown under the input. */
   describe: (e: unknown) => string;
+  /** Shown before any request for a name with `/` or one of `.`/`..`. */
+  invalidNameText: string;
 }
 
-function NameRow({ depth, placeholder, initial, onSubmit, onCancel, describe }: NameRowProps) {
+function NameRow({ depth, placeholder, initial, onSubmit, onCancel, describe, invalidNameText }: NameRowProps) {
   const [name, setName] = useState(initial ?? '');
   const [error, setError] = useState<string | null>(null);
 
@@ -495,6 +567,10 @@ function NameRow({ depth, placeholder, initial, onSubmit, onCancel, describe }: 
     const trimmed = name.trim();
     if (!trimmed || trimmed === initial) {
       onCancel();
+      return;
+    }
+    if (!isValidEntryName(trimmed)) {
+      setError(invalidNameText);
       return;
     }
     try {

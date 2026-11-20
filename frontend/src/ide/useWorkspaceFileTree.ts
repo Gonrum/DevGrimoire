@@ -3,13 +3,40 @@ import { errorMessage } from '../lib/narrow';
 import { ideApi, IdeApiError, type IdeTreeEntry } from './ide-api';
 import { useIdeStore } from './ide-store';
 
+export interface TreeListing {
+  entries: IdeTreeEntry[];
+  truncated: boolean;
+}
+
+function isUnder(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(`${prefix}/`);
+}
+
+function baseName(path: string): string {
+  return path.split('/').pop() ?? path;
+}
+
+/** Copy of `record` with every key at or under `prefix` dropped. */
+function withoutKeysUnder<T>(record: Record<string, T>, prefix: string): Record<string, T> {
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !isUnder(key, prefix)));
+}
+
 /**
- * Lazy directory loading with expand state. No watcher: callers `refresh()` explicitly.
+ * Lazy directory loading with expand state. No watcher: callers reload explicitly —
+ * `reloadDirs()` after a mutation (only the touched parents), `refresh()` for everything.
  * State is not reset when `workspaceId` changes — mount the consumer with `key={workspaceId}`.
+ * `initialRoot`: a root listing the caller already has; the hook then skips its own first load.
  */
-export function useWorkspaceFileTree(workspaceId: string | null) {
-  const [byDir, setByDir] = useState<Record<string, IdeTreeEntry[]>>({});
-  const [truncatedDirs, setTruncatedDirs] = useState<Set<string>>(new Set());
+export function useWorkspaceFileTree(workspaceId: string | null, initialRoot?: TreeListing) {
+  const [byDir, setByDir] = useState<Record<string, IdeTreeEntry[]>>(() => {
+    const seed: Record<string, IdeTreeEntry[]> = {};
+    if (initialRoot) seed['.'] = initialRoot.entries;
+    return seed;
+  });
+  const [truncatedDirs, setTruncatedDirs] = useState<Set<string>>(() =>
+    initialRoot?.truncated ? new Set(['.']) : new Set(),
+  );
+  const [seeded] = useState(() => initialRoot !== undefined);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['.']));
   const [rootError, setRootError] = useState<Error | null>(null);
   /** Per-directory load failures, shown inline under the folder; cleared on a successful load. */
@@ -45,12 +72,13 @@ export function useWorkspaceFileTree(workspaceId: string | null) {
         if (status === 403) useIdeStore.getState().setBlocked('forbidden');
         else if (status === 409) useIdeStore.getState().setBlocked('archived');
         else if (status === 404 && path === '.') useIdeStore.getState().setBlocked('gone');
-        // A subdirectory that vanished (deleted/moved elsewhere) is dropped, not an error.
+        // A subdirectory that vanished (deleted/moved elsewhere) is dropped, not an error,
+        // and no longer counts as expanded (otherwise every refresh asks for it again).
         if (path !== '.' && status === 404) {
-          setByDir((prev) => {
-            const rest = { ...prev };
-            delete rest[path];
-            return rest;
+          setByDir((prev) => withoutKeysUnder(prev, path));
+          setExpanded((prev) => {
+            if (![...prev].some((p) => isUnder(p, path))) return prev;
+            return new Set([...prev].filter((p) => !isUnder(p, path)));
           });
           return;
         }
@@ -93,13 +121,64 @@ export function useWorkspaceFileTree(workspaceId: string | null) {
     await Promise.all([...expanded].map((dir) => loadDir(dir).catch(() => undefined)));
   }, [expanded, loadDir]);
 
+  /**
+   * Reloads only the given directories (the parents a mutation touched), and only
+   * those currently shown: the root or an expanded folder.
+   */
+  const reloadDirs = useCallback(
+    async (dirs: string[]): Promise<void> => {
+      const shown = [...new Set(dirs)].filter((dir) => dir === '.' || expanded.has(dir));
+      await Promise.all(shown.map((dir) => loadDir(dir).catch(() => undefined)));
+    },
+    [expanded, loadDir],
+  );
+
+  /** Forgets everything at or under a deleted path (listing, expand state, errors). */
+  const forgetPath = useCallback((path: string): void => {
+    setByDir((prev) => withoutKeysUnder(prev, path));
+    setErrors((prev) => withoutKeysUnder(prev, path));
+    setTruncatedDirs((prev) => new Set([...prev].filter((p) => !isUnder(p, path))));
+    setExpanded((prev) => new Set([...prev].filter((p) => !isUnder(p, path))));
+  }, []);
+
+  /** Re-maps everything at or under a renamed/moved path to its new prefix. */
+  const renamePath = useCallback((from: string, to: string): void => {
+    const remap = (p: string): string => (isUnder(p, from) ? to + p.slice(from.length) : p);
+    setByDir((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).map(([dir, list]) => [
+          remap(dir),
+          list.map((e) => (isUnder(e.path, from) ? { ...e, path: remap(e.path), name: baseName(remap(e.path)) } : e)),
+        ]),
+      ),
+    );
+    setErrors((prev) => Object.fromEntries(Object.entries(prev).map(([dir, msg]) => [remap(dir), msg])));
+    setTruncatedDirs((prev) => new Set([...prev].map(remap)));
+    setExpanded((prev) => new Set([...prev].map(remap)));
+  }, []);
+
   useEffect(() => {
     currentWorkspace.current = workspaceId;
+    // The caller handed over the root listing for this mount: no second identical request.
+    if (seeded) return;
     // Deferred so the load's state updates never run synchronously inside the effect body.
     void Promise.resolve()
       .then(() => loadDir('.'))
       .catch(() => undefined);
-  }, [workspaceId, loadDir]);
+  }, [workspaceId, loadDir, seeded]);
 
-  return { byDir, truncatedDirs, expanded, rootError, errors, toggleDir, expandDir, loadDir, refresh };
+  return {
+    byDir,
+    truncatedDirs,
+    expanded,
+    rootError,
+    errors,
+    toggleDir,
+    expandDir,
+    loadDir,
+    refresh,
+    reloadDirs,
+    forgetPath,
+    renamePath,
+  };
 }

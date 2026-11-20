@@ -33,6 +33,8 @@ export type BlockedReason = null | 'archived' | 'gone' | 'forbidden';
 
 interface IdeState {
   workspaceId: string | null;
+  /** Absolute workspace directory as the sidecar sees it (`Workspace.path`), once loaded. */
+  workspaceRoot: string | null;
   tabs: OpenTab[];
   activePath: string | null;
   /** Second editor group: file shown to the right of the active editor. */
@@ -52,7 +54,8 @@ interface IdeState {
   /** Bumped after every successful write; the git status poll listens to it. */
   saveTick: number;
 
-  setWorkspace: (workspaceId: string) => void;
+  /** Switches the IDE to a workspace; a call for the current one only updates `rootPath`. */
+  setWorkspace: (workspaceId: string, rootPath?: string) => void;
   openFile: (path: string, sizeHint?: number) => Promise<void>;
   openFileAt: (path: string, line: number, column?: number) => Promise<void>;
   /** Returns the pending reveal for this path (and clears it), or null. */
@@ -268,6 +271,7 @@ function applyWritten(
 
 export const useIdeStore = create<IdeState>((set, get) => ({
   workspaceId: null,
+  workspaceRoot: null,
   tabs: [],
   activePath: null,
   splitPath: null,
@@ -281,10 +285,11 @@ export const useIdeStore = create<IdeState>((set, get) => ({
   saveTick: 0,
   ...loadLayout(),
 
-  setWorkspace: (workspaceId) => {
+  setWorkspace: (workspaceId, rootPath) => {
     if (get().workspaceId !== workspaceId) {
       set({
         workspaceId,
+        workspaceRoot: rootPath ?? null,
         tabs: [],
         activePath: null,
         splitPath: null,
@@ -295,6 +300,8 @@ export const useIdeStore = create<IdeState>((set, get) => ({
         activeTerminal: null,
         terminalInputs: {},
       });
+    } else if (rootPath !== undefined && get().workspaceRoot !== rootPath) {
+      set({ workspaceRoot: rootPath });
     }
   },
 
@@ -506,7 +513,8 @@ export const useIdeStore = create<IdeState>((set, get) => ({
     if (!(error instanceof IdeApiError) || error instanceof IdeConflictError) return;
     const { workspaceId, setBlocked } = get();
     if (error.status === 403) setBlocked('forbidden');
-    else if (error.status === 409) setBlocked('archived');
+    // A 409 "target exists" is about one entry, not about the workspace.
+    else if (error.status === 409 && error.reason === 'inactive') setBlocked('archived');
     else if (error.status === 404 && workspaceId) {
       // A 404 is either a vanished file or a vanished workspace; the root listing tells them apart.
       ideApi.tree(workspaceId, '.').then(
@@ -515,7 +523,7 @@ export const useIdeStore = create<IdeState>((set, get) => ({
           if (get().workspaceId !== workspaceId || !(probe instanceof IdeApiError)) return;
           if (probe.status === 404) setBlocked('gone');
           else if (probe.status === 403) setBlocked('forbidden');
-          else if (probe.status === 409) setBlocked('archived');
+          else if (probe.status === 409 && probe.reason === 'inactive') setBlocked('archived');
         },
       );
     }
@@ -574,9 +582,18 @@ export const useIdeStore = create<IdeState>((set, get) => ({
   },
 
   openTerminalAt: (dir) => {
-    // `--` keeps a directory name with a leading dash from being read as an option.
-    if (dir === '.') set({ terminalOpen: true });
-    else get().addTerminal(`cd -- ${shellQuote(dir)}\n`);
+    // A new PTY starts in the last cwd any /exec left behind, not necessarily the
+    // workspace root: always cd to an absolute path. `--` keeps a directory name
+    // with a leading dash from being read as an option.
+    const root = get().workspaceRoot;
+    if (root === null) {
+      if (dir === '.') set({ terminalOpen: true });
+      else get().addTerminal(`cd -- ${shellQuote(dir)}\n`);
+      return;
+    }
+    const base = root.replace(/\/+$/, '');
+    const target = dir === '.' ? `${base}/` : `${base}/${dir}`;
+    get().addTerminal(`cd -- ${shellQuote(target)}\n`);
   },
 
   setBlocked: (blocked) => set({ blocked }),
