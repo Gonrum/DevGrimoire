@@ -27,9 +27,10 @@ function loadCompiled(rel) {
 
 const { JwtAuthGuard } = loadCompiled('auth/guards/jwt-auth.guard.js');
 const { MCP_TOOL_EQUIVALENT_KEY } = loadCompiled('auth/decorators/mcp-tool-equivalent.decorator.js');
+const { WorkspaceFsController } = loadCompiled('workspaces/workspace-fs.controller.js');
 const { Reflector } = require(path.resolve(__dirname, '..', 'node_modules', '@nestjs/core'));
 
-const EXPECTED_CHECKS = 5;
+const EXPECTED_CHECKS = 6;
 let failures = 0, total = 0;
 async function check(label, fn) {
   total += 1;
@@ -93,6 +94,25 @@ const key = (allowedTools) => ({ _id: 'k1', userId: 'u1', allowedTools });
   await check('empty allowlist blocks mapped routes too', async () => {
     const { context } = ctx('attachment_download');
     await assert.rejects(() => guardFor(key([])).canActivate(context), (e) => statusOf(e) === 403);
+  });
+
+  await check('workspace IDE file routes carry no mapping -> an allowlist key gets 403 on every one', async () => {
+    const proto = WorkspaceFsController.prototype;
+    const handlers = Object.getOwnPropertyNames(proto).filter((n) => n !== 'constructor' && !['gate', 'audit'].includes(n));
+    assert.ok(handlers.length >= 10, 'expected the IDE routes');
+    for (const name of handlers) {
+      const req = { headers: { authorization: 'Bearer cv_test' }, query: {} };
+      const context = {
+        getHandler: () => proto[name],
+        getClass: () => WorkspaceFsController,
+        switchToHttp: () => ({ getRequest: () => req }),
+      };
+      await assert.rejects(
+        () => guardFor(key(['workspace_read'])).canActivate(context),
+        (e) => statusOf(e) === 403,
+        name,
+      );
+    }
   });
 
   console.log(`\n${total - failures}/${total} passed`);

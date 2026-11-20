@@ -5,6 +5,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { Workspace, WorkspaceSchema } from './schemas/workspace.schema';
 import { WorkspacesService } from './workspaces.service';
 import { WorkspacesController } from './workspaces.controller';
+import { WorkspaceFsController } from './workspace-fs.controller';
 import { WorkspaceCliController } from './workspace-cli.controller';
 import { WorkspaceCliKubeController } from './workspace-cli-kube.controller';
 import { WorkspaceCliSshController } from './workspace-cli-ssh.controller';
@@ -57,6 +58,7 @@ import { JWT_ALGORITHM } from '../common/access-token';
   ],
   controllers: [
     WorkspacesController,
+    WorkspaceFsController,
     WorkspaceCliController,
     WorkspaceCliKubeController,
     WorkspaceCliSshController,

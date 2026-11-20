@@ -13,9 +13,12 @@ import { RequestContext } from '../common/request-context';
 import { actorCanAccessProject } from '../common/permissions';
 import { assertSafeCascadeId } from '../common/cascade-guard';
 
+const TOUCH_THROTTLE_MS = 60_000;
+
 @Injectable()
 export class WorkspacesService {
   private readonly logger = new Logger(WorkspacesService.name);
+  private readonly lastTouch = new Map<string, number>();
 
   constructor(
     @InjectModel(Workspace.name) private readonly workspaceModel: Model<WorkspaceDocument>,
@@ -152,6 +155,19 @@ export class WorkspacesService {
     const patch: Record<string, unknown> = { lastActivityAt: new Date() };
     if (typeof sizeBytes === 'number' && sizeBytes >= 0) patch.sizeBytes = sizeBytes;
     await this.workspaceModel.updateOne({ _id: id }, { $set: patch }).exec();
+  }
+
+  /**
+   * `touch` at most once per `TOUCH_THROTTLE_MS` and workspace. The IDE fires
+   * many small file calls; one activity bump a minute is enough for the TTL
+   * collector. Failures are swallowed (best-effort housekeeping).
+   */
+  touchThrottled(id: string): void {
+    const now = Date.now();
+    const last = this.lastTouch.get(id);
+    if (last !== undefined && now - last < TOUCH_THROTTLE_MS) return;
+    this.lastTouch.set(id, now);
+    this.touch(id).catch(() => undefined);
   }
 
   /**

@@ -1,5 +1,5 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { ConflictException, HttpException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { isAxiosError } from 'axios';
 import { firstValueFrom } from 'rxjs';
 import { Readable } from 'node:stream';
@@ -39,7 +39,12 @@ export interface SidecarProcessResult {
 export interface CloneResponse extends SidecarProcessResult { ok: true }
 export interface PullResponse extends SidecarProcessResult { ok: true }
 export interface ReadResponse { size: number; content: string }
-export interface TreeEntry { path: string; type: 'file' | 'dir' | 'symlink' }
+export interface ReadTextResponse { size: number; content: string; hash: string }
+export interface WriteTextResponse { path: string; hash: string; size: number }
+
+/** Sidecar status codes the IDE routes hand through to the browser unchanged. */
+const PASSTHROUGH_STATUSES: ReadonlySet<number> = new Set([400, 404, 409, 413, 415]);
+export interface TreeEntry { path: string; type: 'file' | 'dir' | 'symlink'; size?: number }
 export interface TreeResponse { root: string; depth: number; truncated: boolean; entries: TreeEntry[] }
 export interface SearchResponse { matches: string; truncated: boolean; timedOut: boolean }
 export interface StatusResponse { status: string }
@@ -117,6 +122,28 @@ export class WorkspaceClient {
     }
   }
 
+  /**
+   * Like `post`, but a sidecar 400/404/409/413/415 reaches the caller as an
+   * HttpException with the same status AND the sidecar's JSON body (the IDE
+   * needs `currentHash` from a write conflict). Everything else behaves as in
+   * `post`. Used only by the IDE file operations; older callers keep `post`.
+   */
+  private async postFs<T>(endpoint: string, body: Record<string, unknown>): Promise<T> {
+    try {
+      return await this.post<T>(endpoint, body);
+    } catch (err: unknown) {
+      const cause = isRecord(err) ? err.cause : undefined;
+      if (isAxiosError(cause) && cause.response && PASSTHROUGH_STATUSES.has(cause.response.status)) {
+        const data: unknown = cause.response.data;
+        throw new HttpException(
+          isRecord(data) ? data : { error: cause.response.statusText },
+          cause.response.status,
+        );
+      }
+      throw err;
+    }
+  }
+
   clone(workspaceId: string, repoUrl: string, branch?: string): Promise<CloneResponse> {
     return this.post<CloneResponse>('/clone', { workspaceId, repoUrl, branch }, this.cloneTimeoutMs);
   }
@@ -151,6 +178,7 @@ export class WorkspaceClient {
   async readStream(
     workspaceId: string,
     path: string,
+    opts: { httpErrors?: boolean } = {},
   ): Promise<{ stream: Readable; size: number }> {
     if (!this.token) {
       throw new ServiceUnavailableException(
@@ -167,6 +195,10 @@ export class WorkspaceClient {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => res.statusText);
+      // IDE download: let the browser see the sidecar's 400/404 instead of a 500.
+      if (opts.httpErrors && PASSTHROUGH_STATUSES.has(res.status)) {
+        throw new HttpException({ error: text || res.statusText }, res.status);
+      }
       throw new Error(`sidecar ${res.status} /read-stream: ${text}`);
     }
     if (!res.body) throw new Error('sidecar /read-stream: empty response body');
@@ -189,7 +221,7 @@ export class WorkspaceClient {
     workspaceId: string,
     path: string,
     source: Readable,
-    opts: { fileName?: string; size?: number; mode?: number; createDirs?: boolean } = {},
+    opts: { fileName?: string; size?: number; mode?: number; createDirs?: boolean; noOverwrite?: boolean } = {},
   ): Promise<WriteStreamResponse> {
     if (!this.token) {
       try { source.destroy(); } catch { /* noop */ }
@@ -204,6 +236,7 @@ export class WorkspaceClient {
     if (opts.size !== undefined) url.searchParams.set('size', String(opts.size));
     if (opts.mode !== undefined) url.searchParams.set('mode', String(opts.mode));
     if (opts.createDirs) url.searchParams.set('createDirs', '1');
+    if (opts.noOverwrite) url.searchParams.set('noOverwrite', '1');
     const transport = url.protocol === 'https:' ? https : http;
 
     return new Promise<WriteStreamResponse>((resolve, reject) => {
@@ -233,6 +266,10 @@ export class WorkspaceClient {
           let body: unknown;
           try { body = JSON.parse(text); } catch { body = undefined; }
           const status = res.statusCode ?? 0;
+          if (opts.noOverwrite && status === 409) {
+            finish(new ConflictException('target exists'));
+            return;
+          }
           if (status < 200 || status >= 300) {
             const remote = isRecord(body) && typeof body.error === 'string' ? body.error : text || res.statusMessage;
             finish(new Error(`sidecar ${status} /write-stream: ${remote}`));
@@ -268,6 +305,56 @@ export class WorkspaceClient {
       });
       source.pipe(req);
     });
+  }
+
+  readText(workspaceId: string, path: string): Promise<ReadTextResponse> {
+    return this.postFs<ReadTextResponse>('/read', { workspaceId, path, strictText: true });
+  }
+
+  /** `baseHash` is always sent (string or null): the sidecar rejects an omitted field. */
+  writeText(
+    workspaceId: string,
+    path: string,
+    content: string,
+    opts: { baseHash: string | null; force?: boolean; createDirs?: boolean },
+  ): Promise<WriteTextResponse> {
+    return this.postFs<WriteTextResponse>('/write', {
+      workspaceId,
+      path,
+      content,
+      baseHash: opts.baseHash,
+      force: opts.force,
+      createDirs: opts.createDirs,
+    });
+  }
+
+  listDir(workspaceId: string, path: string): Promise<TreeResponse> {
+    return this.postFs<TreeResponse>('/tree', { workspaceId, path, depth: 1, withSize: true });
+  }
+
+  mkdir(workspaceId: string, path: string): Promise<{ ok: true; path: string }> {
+    return this.postFs<{ ok: true; path: string }>('/mkdir', { workspaceId, path });
+  }
+
+  move(workspaceId: string, from: string, to: string): Promise<{ ok: true; from: string; to: string }> {
+    return this.postFs<{ ok: true; from: string; to: string }>('/move', { workspaceId, from, to });
+  }
+
+  remove(workspaceId: string, path: string): Promise<{ ok: true; path: string }> {
+    return this.postFs<{ ok: true; path: string }>('/delete', { workspaceId, path });
+  }
+
+  /** ripgrep `--json` NDJSON in `matches`; parse with `parseRipgrepJson`. */
+  searchJson(
+    workspaceId: string,
+    q: { query: string; fixedStrings: boolean; caseSensitive: boolean; include?: string[]; exclude?: string[] },
+  ): Promise<SearchResponse> {
+    return this.postFs<SearchResponse>('/search', { workspaceId, ...q, json: true });
+  }
+
+  /** Raw status call for the IDE: a 409 (no git repo) reaches the caller as such. */
+  statusFs(workspaceId: string): Promise<StatusResponse> {
+    return this.postFs<StatusResponse>('/status', { workspaceId });
   }
 
   search(workspaceId: string, query: string, include?: string[], exclude?: string[]): Promise<SearchResponse> {
