@@ -344,6 +344,15 @@ async function main() {
       assert.deepEqual(fs.readdirSync(ws).filter((n) => n.endsWith('.part')), []);
     });
 
+    await check('write-stream: noOverwrite=1 with an 8 MB body on an existing target -> 409 (no connection reset)', async () => {
+      put('big-keep.bin', 'original');
+      const big = Buffer.alloc(8 * 1024 * 1024, 0x61);
+      const r = await upStream('big-keep.bin', big, { noOverwrite: '1' });
+      assert.equal(r.status, 409);
+      assert.equal(r.body.error, 'target exists');
+      assert.equal(readDisk('big-keep.bin'), 'original');
+    });
+
     await check('write-stream: concurrent noOverwrite uploads -> exactly one wins', async () => {
       const results = await Promise.all(
         Array.from({ length: 6 }, (_, i) => upStream('race.bin', Buffer.from(`writer-${i}`), { noOverwrite: '1' })),

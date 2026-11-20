@@ -639,6 +639,8 @@ app.post('/write-stream', async (req, res) => {
     // authoritative check for races.
     try {
       await fsp.lstat(finalPath);
+      // Discard the unread body so the client gets the 409 instead of a reset.
+      req.resume();
       return res.status(409).json({ error: 'target exists' });
     } catch (err) {
       if (err.code !== 'ENOENT') return res.status(400).json({ error: err.message });
