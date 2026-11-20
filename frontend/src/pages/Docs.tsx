@@ -1232,6 +1232,7 @@ function OpsSection() {
           <InfoRow label={isDE ? 'Voraussetzung' : 'Prerequisite'} value={<>WORKSPACE_API_TOKEN (Backend ↔ Sidecar)</>} />
           <InfoRow label={isDE ? 'Wo im UI' : 'Where in UI'} value="Project → Workspaces" />
           <InfoRow label="MCP" value="workspace_*" />
+          <InfoRow label={isDE ? 'Browser-IDE' : 'Browser IDE'} value={isDE ? '/ide/:workspaceId — Editor, Dateibaum, Suche und Terminal; Schreibrecht erforderlich' : '/ide/:workspaceId — editor, file tree, search and terminal; write permission required'} />
         </div>
       </Section>
 
