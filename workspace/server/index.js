@@ -739,18 +739,23 @@ app.post('/write', async (req, res) => {
     return res.status(status).json({ error: err.message });
   }
 
+  // /read follows a symlink, so /write must too: rename() over the link
+  // would turn it into a regular file and never update the real target.
+  // Write to the link's resolved location instead, but only inside the root.
+  let writePath;
+  try {
+    ({ writePath, parent } = await resolveSymlinkWriteTarget(root, finalPath, parent));
+  } catch (err) {
+    return res.status(err.status || 400).json({ error: err.message });
+  }
+
   let currentHash = null;
   let mode = 0o644;
   try {
-    const st = await fsp.stat(finalPath);
+    const st = await fsp.stat(writePath);
     if (!st.isFile()) return res.status(400).json({ error: 'path is not a regular file' });
     mode = st.mode & 0o777;
-    // A symlink at the target is replaced by rename(), but its content is
-    // what the caller saw — only hash it when it resolves inside the workspace.
-    if (!isInside(root, await fsp.realpath(finalPath))) {
-      return res.status(400).json({ error: 'resolved path escapes workspace root' });
-    }
-    currentHash = sha256Hex(await fsp.readFile(finalPath));
+    currentHash = sha256Hex(await fsp.readFile(writePath));
   } catch (err) {
     if (err.code !== 'ENOENT') return res.status(400).json({ error: err.message });
   }
@@ -758,18 +763,70 @@ app.post('/write', async (req, res) => {
     return res.status(409).json({ error: 'conflict', currentHash });
   }
 
-  const tmpPath = path.join(parent, `.${path.basename(finalPath)}.${crypto.randomBytes(6).toString('hex')}.part`);
+  const tmpPath = path.join(parent, `.${path.basename(writePath)}.${crypto.randomBytes(6).toString('hex')}.part`);
   try {
     await fsp.writeFile(tmpPath, data, { flag: 'wx', mode });
     // writeFile's mode is subject to the umask; chmod sets it exactly.
     await fsp.chmod(tmpPath, mode);
-    await fsp.rename(tmpPath, finalPath);
+    await fsp.rename(tmpPath, writePath);
   } catch (err) {
     await fsp.rm(tmpPath, { force: true }).catch(() => {});
     return res.status(500).json({ error: err.message });
   }
   res.json({ ok: true, path: path.relative(root, finalPath), hash: sha256Hex(data), size: data.length });
 });
+
+/**
+ * For /write: if `finalPath` is a symlink, returns the location the link
+ * resolves to (and its real parent directory) so the write updates the
+ * target instead of replacing the link. Throws an Error with `.status` 400
+ * when the target lies outside `root` (also for a dangling link), 404 when a
+ * dangling link points into a missing directory. Non-links pass unchanged.
+ */
+async function resolveSymlinkWriteTarget(root, finalPath, parent) {
+  const fail = (status, message) => Object.assign(new Error(message), { status });
+  let st;
+  try {
+    st = await fsp.lstat(finalPath);
+  } catch (err) {
+    if (err.code === 'ENOENT') return { writePath: finalPath, parent };
+    throw fail(400, err.message);
+  }
+  if (!st.isSymbolicLink()) return { writePath: finalPath, parent };
+  try {
+    const real = await fsp.realpath(finalPath);
+    if (!isInside(root, real) || real === root) throw fail(400, 'resolved path escapes workspace root');
+    return { writePath: real, parent: path.dirname(real) };
+  } catch (err) {
+    if (err.status) throw err;
+    if (err.code !== 'ENOENT') throw fail(400, err.message);
+  }
+  // Dangling link: follow the chain by hand to the first missing component.
+  let cur = finalPath;
+  for (let hops = 0; hops < 40; hops += 1) {
+    const next = path.resolve(path.dirname(cur), await fsp.readlink(cur));
+    let nextStat;
+    try {
+      nextStat = await fsp.lstat(next);
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw fail(400, err.message);
+      let realParent;
+      try {
+        realParent = await fsp.realpath(path.dirname(next));
+      } catch (e) {
+        // A missing directory outside the root is still an escape.
+        if (!isInside(root, path.dirname(next))) throw fail(400, 'resolved path escapes workspace root');
+        if (e.code === 'ENOENT' || e.code === 'ENOTDIR') throw fail(404, 'symlink target directory does not exist');
+        throw fail(400, e.message);
+      }
+      if (!isInside(root, realParent)) throw fail(400, 'resolved path escapes workspace root');
+      return { writePath: path.join(realParent, path.basename(next)), parent: realParent };
+    }
+    if (!nextStat.isSymbolicLink()) throw fail(400, 'cannot resolve symlink');
+    cur = next;
+  }
+  throw fail(400, 'too many levels of symbolic links');
+}
 
 /** Real path of an existing workspace root, or null (response already sent). */
 async function realWorkspaceRoot(id, res) {
@@ -985,6 +1042,12 @@ app.post('/search', async (req, res) => {
     maxOutputBytes: 2 * 1024 * 1024,
   });
   // ripgrep exit 1 means "no match" — surface as success with empty matches.
+  // Exit 2 is an error on rg's side, usually a regex the caller typed wrong:
+  // answer 400 with rg's own first stderr line so the user can fix it.
+  if (result.exitCode === 2 && !result.timedOut) {
+    const firstLine = (result.stderr || '').split('\n').map((l) => l.trim()).find(Boolean) || 'invalid search';
+    return res.status(400).json({ error: firstLine.slice(0, 300) });
+  }
   if (result.exitCode !== 0 && result.exitCode !== 1) {
     return res.status(500).json({ error: 'ripgrep failed', ...result });
   }
@@ -1010,7 +1073,7 @@ app.post('/status', async (req, res) => {
   if (!fs.existsSync(path.join(root, '.git'))) {
     return res.status(409).json({ error: 'workspace contains no git repository' });
   }
-  const result = await runProcess('git', ['status', '--porcelain=v1', '--branch'], { cwd: root, timeoutMs: 30_000 });
+  const result = await runProcess('git', ['-c', 'core.quotepath=false', 'status', '--porcelain=v1', '--branch'], { cwd: root, timeoutMs: 30_000 });
   if (result.exitCode !== 0) return res.status(500).json({ error: 'git status failed', ...result });
   res.json({ status: result.stdout });
 });

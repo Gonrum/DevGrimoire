@@ -193,6 +193,45 @@ async function main() {
       assert.deepEqual(fs.readdirSync(outside), []);
     });
 
+    await check('write: through an in-root symlink updates the target, the link stays a link', async () => {
+      put('real.txt', 'one\n');
+      fs.chmodSync(path.join(ws, 'real.txt'), 0o755);
+      fs.symlinkSync('real.txt', path.join(ws, 'link.txt'));
+      const r = await post('/read', { workspaceId: 'ws1', path: 'link.txt' });
+      assert.equal(r.body.content, 'one\n');
+      const w = await post('/write', { workspaceId: 'ws1', path: 'link.txt', content: 'two\n', baseHash: r.body.hash });
+      assert.equal(w.status, 200);
+      assert.equal(fs.lstatSync(path.join(ws, 'link.txt')).isSymbolicLink(), true);
+      assert.equal(readDisk('real.txt'), 'two\n');
+      assert.equal(fs.statSync(path.join(ws, 'real.txt')).mode & 0o777, 0o755);
+      // Hash compare runs against the target.
+      const stale = await post('/write', { workspaceId: 'ws1', path: 'link.txt', content: 'x', baseHash: r.body.hash });
+      assert.equal(stale.status, 409);
+      assert.equal(stale.body.currentHash, sha256('two\n'));
+      assert.deepEqual(fs.readdirSync(ws).filter((n) => n.endsWith('.part')), []);
+    });
+
+    await check('write: dangling in-root symlink creates the target; outside-pointing links are rejected', async () => {
+      fs.mkdirSync(path.join(ws, 'lsub'));
+      fs.symlinkSync('lsub/made.txt', path.join(ws, 'dangle.txt'));
+      const d = await post('/write', { workspaceId: 'ws1', path: 'dangle.txt', content: 'm', baseHash: null });
+      assert.equal(d.status, 200);
+      assert.equal(readDisk('lsub/made.txt'), 'm');
+      assert.equal(fs.lstatSync(path.join(ws, 'dangle.txt')).isSymbolicLink(), true);
+      fs.writeFileSync(path.join(outside, 'target.txt'), 'outside\n');
+      fs.symlinkSync(path.join(outside, 'target.txt'), path.join(ws, 'outlink.txt'));
+      fs.symlinkSync(path.join(outside, 'nothing.txt'), path.join(ws, 'outdangle.txt'));
+      const o = await post('/write', { workspaceId: 'ws1', path: 'outlink.txt', content: 'x', baseHash: null, force: true });
+      assert.equal(o.status, 400);
+      const od = await post('/write', { workspaceId: 'ws1', path: 'outdangle.txt', content: 'x', baseHash: null });
+      assert.equal(od.status, 400);
+      assert.deepEqual(fs.readdirSync(outside).sort(), ['target.txt']);
+      assert.equal(fs.readFileSync(path.join(outside, 'target.txt'), 'utf8'), 'outside\n');
+      assert.equal(fs.lstatSync(path.join(ws, 'outlink.txt')).isSymbolicLink(), true);
+      for (const n of ['link.txt', 'dangle.txt', 'outlink.txt', 'outdangle.txt']) fs.unlinkSync(path.join(ws, n));
+      fs.unlinkSync(path.join(outside, 'target.txt'));
+    });
+
     await check('write: 6 MB content -> 413', async () => {
       const w = await post('/write', { workspaceId: 'ws1', path: 'big.txt', content: 'a'.repeat(6 * 1024 * 1024), baseHash: null });
       assert.equal(w.status, 413);
@@ -368,7 +407,10 @@ async function main() {
 
     await check('search: fixedStrings matches literally instead of failing as a regex', async () => {
       const plain = await post('/search', { workspaceId: 'ws1', query: 'a.b(', include: 's1.txt' });
-      assert.equal(plain.status, 500);
+      assert.equal(plain.status, 400);
+      assert.equal(typeof plain.body.error, 'string');
+      assert.ok(plain.body.error.trim().length > 0 && plain.body.error.length <= 300);
+      assert.equal((await post('/search', { workspaceId: 'ws1', query: 'a.b(', fixedStrings: false, include: 's1.txt' })).status, 400);
       const r = await post('/search', { workspaceId: 'ws1', query: 'a.b(', fixedStrings: true, include: 's1.txt' });
       assert.equal(r.status, 200);
       const lines = rgLines(r);
@@ -405,6 +447,25 @@ async function main() {
       assert.equal(r.status, 200);
       assert.deepEqual(rgLines(r).map((l) => l.replace(/^\.?\//, '')), ['s1.txt:2:Hello there', 's1.txt:3:hello again']);
     });
+
+    const { spawnSync } = require('node:child_process');
+    const hasGit = spawnSync('git', ['--version']).status === 0;
+    if (!hasGit) {
+      console.log('- status: non-ASCII path appears unescaped (skipped: git not installed)');
+    } else {
+      await check('status: a changed non-ASCII path appears unescaped', async () => {
+        const gws = path.join(root, 'gitws1');
+        fs.mkdirSync(gws);
+        const git = (...args) => spawnSync('git', args, { cwd: gws, encoding: 'utf8' });
+        assert.equal(git('init', '-q').status, 0);
+        fs.writeFileSync(path.join(gws, 'ä b.txt'), 'x\n');
+        const r = await post('/status', { workspaceId: 'gitws1' });
+        assert.equal(r.status, 200);
+        // git still wraps a path with a space in quotes, but must not escape the umlaut.
+        assert.match(r.body.status, /^\?\? "?ä b\.txt"?$/m);
+        assert.doesNotMatch(r.body.status, /\\[0-7]{3}/);
+      });
+    }
 
     await check('ensure: creates a missing workspace dir, idempotent, empty tree afterwards', async () => {
       assert.equal((await post('/tree', { workspaceId: 'fresh1', path: '.' })).status, 404);
