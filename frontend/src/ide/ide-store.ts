@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { isRecord } from '../lib/narrow';
-import { clearDraft, loadDraft, saveDraft } from './drafts';
+import { clearDraft, clearDraftsUnder, loadDraft, moveDraftsUnder, saveDraft } from './drafts';
 import { ideApi, IdeApiError, IdeConflictError, type IdeFile } from './ide-api';
 
 /** POSIX single-quote escaping — workspace shells are always sh-like. */
@@ -343,24 +343,24 @@ export const useIdeStore = create<IdeState>((set, get) => ({
     const activePath = tabs.some((t) => t.path === active) ? active : (tabs[tabs.length - 1]?.path ?? null);
     const splitPath = tabs.some((t) => t.path === get().splitPath) ? get().splitPath : null;
     set({ tabs, activePath, splitPath });
+    // The entry was deleted on purpose: drop its drafts too, also those without an open tab.
+    // Issued after the tabs are gone, so no later draft write for these paths can follow, and
+    // IndexedDB runs it after any draft write issued before.
+    const { workspaceId } = get();
+    if (workspaceId) void clearDraftsUnder(workspaceId, pathPrefix);
   },
 
   renameTabsUnder: (from, to) => {
     const rename = (path: string): string => (isUnder(path, from) ? to + path.slice(from.length) : path);
     const { activePath, splitPath, workspaceId } = get();
-    const moved = get().tabs.filter((t) => isUnder(t.path, from));
     set({
       tabs: get().tabs.map((t) => (isUnder(t.path, from) ? { ...t, path: rename(t.path) } : t)),
       activePath: activePath === null ? null : rename(activePath),
       splitPath: splitPath === null ? null : rename(splitPath),
     });
-    // Drafts are keyed by path: move them along with their tabs (new key first, then drop the old).
-    if (!workspaceId) return;
-    for (const tab of moved) {
-      if (tab.kind !== 'text' || !tab.dirty) continue;
-      const draft = { content: tab.content, baseHash: tab.baseHash, savedAt: Date.now() };
-      void saveDraft(workspaceId, rename(tab.path), draft).then(() => clearDraft(workspaceId, tab.path));
-    }
+    // Drafts are keyed by path: move all of them, also those of closed tabs ("close, keep draft").
+    // An open dirty tab's draft already holds its buffer, since every edit writes it.
+    if (workspaceId) void moveDraftsUnder(workspaceId, from, to);
   },
 
   setActive: (path) => set({ activePath: path }),
