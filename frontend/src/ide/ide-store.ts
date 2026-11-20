@@ -146,6 +146,30 @@ async function readTab(workspaceId: string, path: string, sizeHint: number): Pro
   }
 }
 
+
+type StoreSet = (partial: Partial<IdeState>) => void;
+
+/**
+ * Records a finished write. The tab may have been edited, closed, or the workspace
+ * switched while the request was in flight: it only turns clean if its content is
+ * still exactly what was written; otherwise it stays dirty on top of the new hash.
+ */
+function applyWritten(
+  set: StoreSet,
+  get: () => IdeState,
+  workspaceId: string,
+  path: string,
+  written: string,
+  hash: string,
+): void {
+  if (get().workspaceId !== workspaceId) return;
+  set({
+    tabs: get().tabs.map((t) =>
+      t.path === path ? { ...t, baseHash: hash, dirty: t.content !== written, conflict: false } : t,
+    ),
+  });
+}
+
 export const useIdeStore = create<IdeState>((set, get) => ({
   workspaceId: null,
   tabs: [],
@@ -241,17 +265,16 @@ export const useIdeStore = create<IdeState>((set, get) => ({
     const { workspaceId, tabs } = get();
     const tab = tabs.find((t) => t.path === path);
     if (!workspaceId || !tab || !tab.dirty) return { conflict: false };
+    const written = tab.content;
     try {
-      const result = await ideApi.writeFile(workspaceId, path, tab.content, { baseHash: tab.baseHash });
-      set({
-        tabs: get().tabs.map((t) =>
-          t.path === path ? { ...t, baseHash: result.hash, dirty: false, conflict: false } : t,
-        ),
-      });
+      const result = await ideApi.writeFile(workspaceId, path, written, { baseHash: tab.baseHash });
+      applyWritten(set, get, workspaceId, path, written, result.hash);
       return { conflict: false };
     } catch (error) {
       if (error instanceof IdeConflictError) {
-        set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, conflict: true } : t)) });
+        if (get().workspaceId === workspaceId) {
+          set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, conflict: true } : t)) });
+        }
         return { conflict: true };
       }
       throw error;
@@ -262,12 +285,9 @@ export const useIdeStore = create<IdeState>((set, get) => ({
     const { workspaceId, tabs } = get();
     const tab = tabs.find((t) => t.path === path);
     if (!workspaceId || !tab) return;
-    const result = await ideApi.writeFile(workspaceId, path, tab.content, { baseHash: tab.baseHash, force: true });
-    set({
-      tabs: get().tabs.map((t) =>
-        t.path === path ? { ...t, baseHash: result.hash, dirty: false, conflict: false } : t,
-      ),
-    });
+    const written = tab.content;
+    const result = await ideApi.writeFile(workspaceId, path, written, { baseHash: tab.baseHash, force: true });
+    applyWritten(set, get, workspaceId, path, written, result.hash);
   },
 
   reloadFromDisk: async (path) => {

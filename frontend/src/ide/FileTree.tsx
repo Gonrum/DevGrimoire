@@ -104,7 +104,7 @@ function collectDroppedFiles(dt: DataTransfer): { files: File[]; hadDirectory: b
 export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps) {
   const { t } = useTranslation();
   const { showError, showSuccess } = useToast();
-  const { byDir, truncatedDirs, expanded, rootError, toggleDir, expandDir, refresh } =
+  const { byDir, truncatedDirs, expanded, rootError, errors, toggleDir, expandDir, loadDir, refresh } =
     useWorkspaceFileTree(workspaceId);
   const closeTabsUnder = useIdeStore((s) => s.closeTabsUnder);
   const renameTabsUnder = useIdeStore((s) => s.renameTabsUnder);
@@ -132,12 +132,19 @@ export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps)
     persistExpanded(workspaceId, [...expanded].filter((p) => p !== '.'));
   }, [workspaceId, expanded]);
 
+  /** A 409 from move/create means the target name is taken: say so specifically. */
+  const explain = (e: unknown): string =>
+    e instanceof IdeApiError && e.status === 409 ? t('ide.alreadyExists') : errorMessage(e, t('ide.operationFailed'));
+
+  const nameTaken = (dir: string, name: string): boolean =>
+    !name.includes('/') && (byDir[dir] ?? []).some((e) => e.name === name);
+
   const guard = async (action: () => Promise<void>): Promise<void> => {
     setError(null);
     try {
       await action();
     } catch (e) {
-      setError(errorMessage(e, t('ide.operationFailed')));
+      setError(explain(e));
     }
   };
 
@@ -149,9 +156,7 @@ export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps)
 
   const create = async (name: string): Promise<void> => {
     if (!draft) return;
-    if (!name.includes('/') && (byDir[draft.parentDir] ?? []).some((e) => e.name === name)) {
-      throw new Error(t('ide.alreadyExists'));
-    }
+    if (nameTaken(draft.parentDir, name)) throw new Error(t('ide.alreadyExists'));
     const path = joinPath(draft.parentDir, name);
     if (draft.type === 'dir') {
       await ideApi.mkdir(workspaceId, path);
@@ -164,8 +169,10 @@ export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps)
   };
 
   const rename = async (entry: IdeTreeEntry, newName: string): Promise<void> => {
-    const to = joinPath(parentOf(entry.path), newName);
+    const parent = parentOf(entry.path);
+    const to = joinPath(parent, newName);
     if (to !== entry.path) {
+      if (nameTaken(parent, newName)) throw new Error(t('ide.alreadyExists'));
       await ideApi.move(workspaceId, entry.path, to);
       renameTabsUnder(entry.path, to);
       await refresh();
@@ -186,6 +193,7 @@ export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps)
       if (parentOf(from) === destDir) return;
       const name = from.split('/').pop() ?? from;
       const to = joinPath(destDir, name);
+      if (nameTaken(destDir, name)) throw new Error(t('ide.alreadyExists'));
       await ideApi.move(workspaceId, from, to);
       renameTabsUnder(from, to);
       if (destDir !== '.') expandDir(destDir);
@@ -297,10 +305,13 @@ export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps)
             placeholder={draft.type === 'dir' ? t('ide.newFolder') : t('ide.newFile')}
             onSubmit={create}
             onCancel={() => setDraft(null)}
+            describe={explain}
           />
         )}
-        {entries.map((entry) =>
-          renaming === entry.path ? (
+        {entries.map((entry) => {
+          // Dropping on a file row targets the folder next to it.
+          const dropDir = entry.type === 'dir' ? entry.path : parentOf(entry.path);
+          return renaming === entry.path ? (
             <NameRow
               key={entry.path}
               depth={depth}
@@ -308,6 +319,7 @@ export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps)
               initial={entry.name}
               onSubmit={(name) => rename(entry, name)}
               onCancel={() => setRenaming(null)}
+              describe={explain}
             />
           ) : (
             <Row
@@ -320,19 +332,27 @@ export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps)
               onToggle={() => toggleDir(entry.path)}
               onOpen={() => onOpenFile(entry.path, entry.size)}
               onMenu={(event) => openMenu(event, entry)}
-              onDropPath={(from) => void move(from, entry.path)}
-              onDropData={(dt) => dropFiles(dt, entry.path)}
-              onDropHover={(over) => setDropTarget(over ? entry.path : null)}
+              onDropPath={(from) => void move(from, dropDir)}
+              onDropData={(dt) => dropFiles(dt, dropDir)}
+              onDropHover={(over) => setDropTarget(over ? dropDir : null)}
             >
               {entry.type === 'dir' && expanded.has(entry.path) ? (
                 <>
                   {renderDir(entry.path, depth + 1)}
+                  {errors[entry.path] && (
+                    <DirError
+                      depth={depth + 1}
+                      message={errors[entry.path]}
+                      retryLabel={t('ide.retry')}
+                      onRetry={() => void loadDir(entry.path)}
+                    />
+                  )}
                   {truncatedDirs.has(entry.path) && <TruncatedHint depth={depth + 1} text={t('ide.truncated')} />}
                 </>
               ) : null}
             </Row>
-          ),
-        )}
+          );
+        })}
       </>
     );
   };
@@ -396,6 +416,9 @@ export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps)
         }}
       >
         {renderDir('.', 0)}
+        {errors['.'] && (
+          <DirError depth={0} message={errors['.']} retryLabel={t('ide.retry')} onRetry={() => void loadDir('.')} />
+        )}
         {truncatedDirs.has('.') && <TruncatedHint depth={0} text={t('ide.truncated')} />}
       </div>
       {upload && (
@@ -409,6 +432,15 @@ export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps)
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menuItemsFor(menu)} onClose={() => setMenu(null)} />
       )}
+    </div>
+  );
+}
+
+function DirError({ depth, message, retryLabel, onRetry }: { depth: number; message: string; retryLabel: string; onRetry: () => void }) {
+  return (
+    <div className="flex items-center gap-2 px-2 py-1 text-xs text-red-400" style={{ paddingLeft: `${depth * 12 + 24}px` }}>
+      <span className="truncate" title={message}>{message}</span>
+      <button className="shrink-0 text-cyan-400 hover:text-cyan-300" onClick={onRetry}>{retryLabel}</button>
     </div>
   );
 }
@@ -427,9 +459,11 @@ interface NameRowProps {
   initial?: string;
   onSubmit: (name: string) => Promise<void>;
   onCancel: () => void;
+  /** Turns a thrown error into the (translated) message shown under the input. */
+  describe: (e: unknown) => string;
 }
 
-function NameRow({ depth, placeholder, initial, onSubmit, onCancel }: NameRowProps) {
+function NameRow({ depth, placeholder, initial, onSubmit, onCancel, describe }: NameRowProps) {
   const [name, setName] = useState(initial ?? '');
   const [error, setError] = useState<string | null>(null);
 
@@ -442,7 +476,7 @@ function NameRow({ depth, placeholder, initial, onSubmit, onCancel }: NameRowPro
     try {
       await onSubmit(trimmed);
     } catch (e) {
-      setError(errorMessage(e));
+      setError(describe(e));
     }
   };
 
@@ -514,28 +548,20 @@ function Row({
         onClick={() => (isDir ? onToggle() : onOpen())}
         onContextMenu={onMenu}
         onDragStart={(event) => event.dataTransfer.setData(DRAG_TYPE, entry.path)}
-        onDragOver={
-          isDir
-            ? (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onDropHover(true);
-              }
-            : undefined
-        }
-        onDragLeave={isDir ? () => onDropHover(false) : undefined}
-        onDrop={
-          isDir
-            ? (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onDropHover(false);
-                const from = event.dataTransfer.getData(DRAG_TYPE);
-                if (from) onDropPath(from);
-                else onDropData(event.dataTransfer);
-              }
-            : undefined
-        }
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onDropHover(true);
+        }}
+        onDragLeave={() => onDropHover(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onDropHover(false);
+          const from = event.dataTransfer.getData(DRAG_TYPE);
+          if (from) onDropPath(from);
+          else onDropData(event.dataTransfer);
+        }}
       >
         <span className="w-3 shrink-0 text-gray-500">{isDir ? (expanded ? '▾' : '▸') : ''}</span>
         {isDir ? <FolderIcon open={expanded} /> : <FileIcon name={entry.name} />}

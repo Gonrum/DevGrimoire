@@ -3264,7 +3264,7 @@
     "openInTerminal": "Im Terminal öffnen",
     "openToSide": "Daneben öffnen",
     "refresh": "Aktualisieren",
-    "alreadyExists": "Existiert bereits",
+    "alreadyExists": "Ein Eintrag mit diesem Namen existiert bereits",
     "truncated": "Liste gekürzt",
     "operationFailed": "Vorgang fehlgeschlagen",
     "copyPathFailed": "Pfad konnte nicht kopiert werden",
@@ -3273,6 +3273,7 @@
     "uploadNoDirectories": "Ordner können nicht hochgeladen werden, nur einzelne Dateien.",
     "uploadDone": "{{count}} Datei(en) hochgeladen",
     "uploading": "Lädt hoch: {{name}} ({{index}}/{{total}})",
-    "noFileOpen": "Keine Datei geöffnet."
+    "noFileOpen": "Keine Datei geöffnet.",
+    "retry": "Erneut versuchen"
   }
 }

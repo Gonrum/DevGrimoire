@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { errorMessage } from '../lib/narrow';
 import { ideApi, IdeApiError, type IdeTreeEntry } from './ide-api';
+import { useIdeStore } from './ide-store';
 
 /**
  * Lazy directory loading with expand state. No watcher: callers `refresh()` explicitly.
@@ -10,6 +12,8 @@ export function useWorkspaceFileTree(workspaceId: string | null) {
   const [truncatedDirs, setTruncatedDirs] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['.']));
   const [rootError, setRootError] = useState<Error | null>(null);
+  /** Per-directory load failures, shown inline under the folder; cleared on a successful load. */
+  const [errors, setErrors] = useState<Record<string, string>>({});
   // Guards against responses of a previous workspace landing in the current state.
   const currentWorkspace = useRef(workspaceId);
 
@@ -27,11 +31,22 @@ export function useWorkspaceFileTree(workspaceId: string | null) {
           else next.delete(path);
           return next;
         });
+        setErrors((prev) => {
+          if (!(path in prev)) return prev;
+          const rest = { ...prev };
+          delete rest[path];
+          return rest;
+        });
         if (path === '.') setRootError(null);
       } catch (error) {
         if (currentWorkspace.current !== workspaceId) return;
-        // A directory that vanished (deleted/moved elsewhere) is dropped, not an error.
-        if (path !== '.' && error instanceof IdeApiError && error.status === 404) {
+        const status = error instanceof IdeApiError ? error.status : 0;
+        // These states belong to the whole IDE, not to one folder.
+        if (status === 403) useIdeStore.getState().setBlocked('forbidden');
+        else if (status === 409) useIdeStore.getState().setBlocked('archived');
+        else if (status === 404 && path === '.') useIdeStore.getState().setBlocked('gone');
+        // A subdirectory that vanished (deleted/moved elsewhere) is dropped, not an error.
+        if (path !== '.' && status === 404) {
           setByDir((prev) => {
             const rest = { ...prev };
             delete rest[path];
@@ -39,8 +54,8 @@ export function useWorkspaceFileTree(workspaceId: string | null) {
           });
           return;
         }
+        setErrors((prev) => ({ ...prev, [path]: errorMessage(error) }));
         if (path === '.') setRootError(error instanceof Error ? error : new Error(String(error)));
-        throw error;
       }
     },
     [workspaceId],
@@ -86,5 +101,5 @@ export function useWorkspaceFileTree(workspaceId: string | null) {
       .catch(() => undefined);
   }, [workspaceId, loadDir]);
 
-  return { byDir, truncatedDirs, expanded, rootError, toggleDir, expandDir, loadDir, refresh };
+  return { byDir, truncatedDirs, expanded, rootError, errors, toggleDir, expandDir, loadDir, refresh };
 }

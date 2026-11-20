@@ -3265,7 +3265,7 @@
     "openInTerminal": "Open in terminal",
     "openToSide": "Open to the side",
     "refresh": "Refresh",
-    "alreadyExists": "Already exists",
+    "alreadyExists": "An entry with this name already exists",
     "truncated": "List truncated",
     "operationFailed": "Operation failed",
     "copyPathFailed": "Could not copy the path",
@@ -3274,6 +3274,7 @@
     "uploadNoDirectories": "Folders cannot be uploaded, only individual files.",
     "uploadDone": "{{count}} file(s) uploaded",
     "uploading": "Uploading: {{name}} ({{index}}/{{total}})",
-    "noFileOpen": "No file open."
+    "noFileOpen": "No file open.",
+    "retry": "Retry"
   }
 }
