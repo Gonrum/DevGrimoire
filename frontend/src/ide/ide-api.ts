@@ -117,7 +117,10 @@ async function writeFile(
   if (res.status === 409) {
     const body: unknown = await res.json().catch(() => null);
     const message = isRecord(body) && typeof body.message === 'string' ? body.message : res.statusText;
-    const currentHash = isRecord(body) && typeof body.currentHash === 'string' ? body.currentHash : null;
+    // A write conflict always carries `currentHash` (null when the file is gone). A 409
+    // without it is the gate's "workspace is not active" and must not look like a conflict.
+    if (!isRecord(body) || !('currentHash' in body)) throw new IdeApiError(message, 409);
+    const currentHash = typeof body.currentHash === 'string' ? body.currentHash : null;
     throw new IdeConflictError(message, currentHash);
   }
   if (!res.ok) return failFromResponse(res);

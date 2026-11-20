@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, ApiError, type Workspace } from '../api/client';
@@ -7,6 +7,9 @@ import { useToast } from '../components/Toast';
 import { errorMessage } from '../lib/narrow';
 import { FileTree } from './FileTree';
 import { useIdeStore } from './ide-store';
+
+// Monaco lives in its own chunk: the header and the file tree show up before it has loaded.
+const EditorPane = lazy(() => import('./EditorPane').then((m) => ({ default: m.EditorPane })));
 
 type LoadState =
   | { kind: 'loading' }
@@ -38,7 +41,6 @@ export default function IdePage() {
   const setWorkspace = useIdeStore((s) => s.setWorkspace);
   const openFile = useIdeStore((s) => s.openFile);
   const activePath = useIdeStore((s) => s.activePath);
-  const activeTab = useIdeStore((s) => s.tabs.find((tab) => tab.path === s.activePath));
   const sidebarWidth = useIdeStore((s) => s.sidebarWidth);
 
   useEffect(() => {
@@ -119,18 +121,16 @@ export default function IdePage() {
             }}
           />
         </aside>
-        {/* Placeholder: replaced by the Monaco editor in the next task. */}
-        <main className="flex-1 min-w-0 overflow-auto p-3 text-sm">
-          {activeTab ? (
-            <>
-              <div className="mb-2 font-mono text-xs text-gray-400">{activeTab.path}</div>
-              {activeTab.kind === 'text' && (
-                <pre className="whitespace-pre-wrap font-mono text-xs text-gray-300">{activeTab.content}</pre>
-              )}
-            </>
-          ) : (
-            <p className="text-gray-500">{t('ide.noFileOpen')}</p>
-          )}
+        <main className="flex-1 min-w-0 min-h-0">
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center">
+                <LoadingText text={t('ide.loading')} />
+              </div>
+            }
+          >
+            <EditorPane />
+          </Suspense>
         </main>
       </div>
     </div>

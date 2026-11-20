@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { isRecord } from '../lib/narrow';
-import { ideApi, IdeApiError, IdeConflictError } from './ide-api';
+import { clearDraft, loadDraft, saveDraft } from './drafts';
+import { ideApi, IdeApiError, IdeConflictError, type IdeFile } from './ide-api';
 
 /** POSIX single-quote escaping — workspace shells are always sh-like. */
 function shellQuote(path: string): string {
@@ -17,6 +18,8 @@ export interface OpenTab {
   conflict: boolean;
   kind: 'text' | 'binary' | 'too-large' | 'image';
   size: number;
+  /** `data:` URL of an image tab (the CSP forbids `blob:` images). */
+  previewUrl?: string;
 }
 
 export interface RevealTarget {
@@ -53,6 +56,8 @@ interface IdeState {
   /** Returns the pending reveal for this path (and clears it), or null. */
   consumeReveal: (path: string) => RevealTarget | null;
   closeTab: (path: string) => void;
+  /** Close a tab and drop its draft — the user chose to throw the unsaved edits away. */
+  discardTab: (path: string) => Promise<void>;
   /** Close every tab at or under a path — used after delete in the tree. */
   closeTabsUnder: (pathPrefix: string) => void;
   /** Re-point tabs at or under `from` to `to` — used after rename/move in the tree. */
@@ -63,6 +68,15 @@ interface IdeState {
   /** Conflict resolution "keep mine": overwrite disk regardless of the stale baseHash. */
   forceSave: (path: string) => Promise<void>;
   reloadFromDisk: (path: string) => Promise<void>;
+  /** Current disk version of a file, or null if it no longer exists. */
+  readDisk: (path: string) => Promise<IdeFile | null>;
+  /**
+   * Compares an open text tab with the disk (window regained focus): a clean tab
+   * silently takes the new version, an edited one is flagged as conflict.
+   */
+  recheckFromDisk: (path: string) => Promise<void>;
+  /** Maps 403 / 409 (not active) / 404 (workspace gone) of any IDE call to `blocked`. */
+  noteApiError: (error: unknown) => void;
   openInSplit: (path: string) => Promise<void>;
   closeSplit: () => void;
   setPanel: (panel: SidePanel) => void;
@@ -117,42 +131,116 @@ function isUnder(path: string, prefix: string): boolean {
   return path === prefix || path.startsWith(`${prefix}/`);
 }
 
-/** Reads a file into a tab; 415/413 become placeholder tabs instead of errors. */
-async function readTab(workspaceId: string, path: string, sizeHint: number): Promise<OpenTab> {
-  try {
-    const file = await ideApi.readFile(workspaceId, path);
-    return {
-      path,
-      content: file.content,
-      baseHash: file.hash,
-      dirty: false,
-      conflict: false,
-      kind: 'text',
-      size: file.size,
-    };
-  } catch (error) {
-    if (error instanceof IdeApiError && (error.status === 415 || error.status === 413)) {
-      return {
-        path,
-        content: '',
-        baseHash: null,
-        dirty: false,
-        conflict: false,
-        kind: error.status === 415 ? 'binary' : 'too-large',
-        size: sizeHint,
-      };
-    }
-    throw error;
-  }
+const IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+const IMAGE_MIME = new Map<string, string>([
+  ['png', 'image/png'],
+  ['jpg', 'image/jpeg'],
+  ['jpeg', 'image/jpeg'],
+  ['gif', 'image/gif'],
+  ['webp', 'image/webp'],
+  ['svg', 'image/svg+xml'],
+  ['ico', 'image/x-icon'],
+]);
+
+function imageMime(path: string): string | undefined {
+  return IMAGE_MIME.get(path.split('.').pop()?.toLowerCase() ?? '');
 }
 
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') resolve(reader.result);
+      else reject(new Error('FileReader returned no data URL'));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function placeholderTab(path: string, kind: OpenTab['kind'], size: number): OpenTab {
+  return { path, content: '', baseHash: null, dirty: false, conflict: false, kind, size };
+}
+
+/** 415 tab: an image preview for small images, otherwise a binary card. */
+async function nonTextTab(workspaceId: string, path: string, sizeHint: number): Promise<OpenTab> {
+  const mime = imageMime(path);
+  if (!mime || sizeHint > IMAGE_MAX_BYTES) return placeholderTab(path, 'binary', sizeHint);
+  const blob = await ideApi.rawBlob(workspaceId, path);
+  // The size hint can be missing (0) or stale; the downloaded size is authoritative.
+  if (blob.size > IMAGE_MAX_BYTES) return placeholderTab(path, 'binary', blob.size);
+  const previewUrl = await blobToDataUrl(new Blob([blob], { type: mime }));
+  return { ...placeholderTab(path, 'image', blob.size), previewUrl };
+}
+
+/**
+ * Text tab from the disk version plus a stored draft, if any. A draft is never
+ * dropped unless the disk already holds exactly its content: with a matching hash
+ * it becomes the unsaved buffer, with a different hash it is shown as a conflict.
+ */
+async function textTab(workspaceId: string, path: string, file: IdeFile): Promise<OpenTab> {
+  const clean: OpenTab = {
+    path,
+    content: file.content,
+    baseHash: file.hash,
+    dirty: false,
+    conflict: false,
+    kind: 'text',
+    size: file.size,
+  };
+  const draft = await loadDraft(workspaceId, path);
+  if (!draft) return clean;
+  if (draft.content === file.content) {
+    void clearDraft(workspaceId, path);
+    return clean;
+  }
+  if (draft.baseHash === file.hash) return { ...clean, content: draft.content, dirty: true };
+  // The disk moved on since the draft was taken: keep the draft, let the user decide.
+  return { ...clean, content: draft.content, baseHash: draft.baseHash, dirty: true, conflict: true };
+}
+
+/** Reads a file into a tab; 415/413 become placeholder tabs instead of errors. */
+async function readTab(workspaceId: string, path: string, sizeHint: number): Promise<OpenTab> {
+  let file: IdeFile;
+  try {
+    file = await ideApi.readFile(workspaceId, path);
+  } catch (error) {
+    if (error instanceof IdeApiError && error.status === 415) return nonTextTab(workspaceId, path, sizeHint);
+    if (error instanceof IdeApiError && error.status === 413) return placeholderTab(path, 'too-large', sizeHint);
+    throw error;
+  }
+  return textTab(workspaceId, path, file);
+}
+
+/**
+ * Saves of one file run one after another. A second save started while the first is
+ * in flight would otherwise send the old baseHash and conflict with our own write.
+ */
+const inflight = new Map<string, Promise<unknown>>();
+
+function inflightKey(workspaceId: string, path: string): string {
+  return `${workspaceId}\u0000${path}`;
+}
+
+async function serialized<T>(workspaceId: string, path: string, run: () => Promise<T>): Promise<T> {
+  const k = inflightKey(workspaceId, path);
+  const previous = inflight.get(k) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(run);
+  inflight.set(k, next);
+  try {
+    return await next;
+  } finally {
+    if (inflight.get(k) === next) inflight.delete(k);
+  }
+}
 
 type StoreSet = (partial: Partial<IdeState>) => void;
 
 /**
  * Records a finished write. The tab may have been edited, closed, or the workspace
  * switched while the request was in flight: it only turns clean if its content is
- * still exactly what was written; otherwise it stays dirty on top of the new hash.
+ * still exactly what was written; otherwise it stays dirty on top of the new hash,
+ * and its draft is re-based on that hash so a reload does not report a false conflict.
  */
 function applyWritten(
   set: StoreSet,
@@ -168,6 +256,10 @@ function applyWritten(
       t.path === path ? { ...t, baseHash: hash, dirty: t.content !== written, conflict: false } : t,
     ),
   });
+  const tab = get().tabs.find((t) => t.path === path);
+  if (!tab) return;
+  if (tab.dirty) void saveDraft(workspaceId, path, { content: tab.content, baseHash: hash, savedAt: Date.now() });
+  else void clearDraft(workspaceId, path);
 }
 
 export const useIdeStore = create<IdeState>((set, get) => ({
@@ -204,7 +296,13 @@ export const useIdeStore = create<IdeState>((set, get) => ({
       set({ activePath: path });
       return;
     }
-    const tab = await readTab(workspaceId, path, sizeHint);
+    let tab: OpenTab;
+    try {
+      tab = await readTab(workspaceId, path, sizeHint);
+    } catch (error) {
+      if (get().workspaceId === workspaceId) get().noteApiError(error);
+      throw error;
+    }
     // The workspace may have changed or the tab been opened meanwhile.
     if (get().workspaceId !== workspaceId) return;
     if (get().tabs.some((t) => t.path === path)) {
@@ -233,6 +331,12 @@ export const useIdeStore = create<IdeState>((set, get) => ({
     set({ tabs, activePath, splitPath });
   },
 
+  discardTab: async (path) => {
+    const { workspaceId } = get();
+    get().closeTab(path);
+    if (workspaceId) await clearDraft(workspaceId, path);
+  },
+
   closeTabsUnder: (pathPrefix) => {
     const tabs = get().tabs.filter((t) => !isUnder(t.path, pathPrefix));
     const active = get().activePath;
@@ -243,64 +347,169 @@ export const useIdeStore = create<IdeState>((set, get) => ({
 
   renameTabsUnder: (from, to) => {
     const rename = (path: string): string => (isUnder(path, from) ? to + path.slice(from.length) : path);
-    const { activePath, splitPath } = get();
+    const { activePath, splitPath, workspaceId } = get();
+    const moved = get().tabs.filter((t) => isUnder(t.path, from));
     set({
       tabs: get().tabs.map((t) => (isUnder(t.path, from) ? { ...t, path: rename(t.path) } : t)),
       activePath: activePath === null ? null : rename(activePath),
       splitPath: splitPath === null ? null : rename(splitPath),
     });
+    // Drafts are keyed by path: move them along with their tabs (new key first, then drop the old).
+    if (!workspaceId) return;
+    for (const tab of moved) {
+      if (tab.kind !== 'text' || !tab.dirty) continue;
+      const draft = { content: tab.content, baseHash: tab.baseHash, savedAt: Date.now() };
+      void saveDraft(workspaceId, rename(tab.path), draft).then(() => clearDraft(workspaceId, tab.path));
+    }
   },
 
   setActive: (path) => set({ activePath: path }),
 
   edit: (path, content) => {
+    const { workspaceId } = get();
     set({
       tabs: get().tabs.map((t) =>
         t.path === path && t.kind === 'text' ? { ...t, content, dirty: content !== t.content || t.dirty } : t,
       ),
     });
-  },
-
-  save: async (path) => {
-    const { workspaceId, tabs } = get();
-    const tab = tabs.find((t) => t.path === path);
-    if (!workspaceId || !tab || !tab.dirty) return { conflict: false };
-    const written = tab.content;
-    try {
-      const result = await ideApi.writeFile(workspaceId, path, written, { baseHash: tab.baseHash });
-      applyWritten(set, get, workspaceId, path, written, result.hash);
-      return { conflict: false };
-    } catch (error) {
-      if (error instanceof IdeConflictError) {
-        if (get().workspaceId === workspaceId) {
-          set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, conflict: true } : t)) });
-        }
-        return { conflict: true };
-      }
-      throw error;
+    const tab = get().tabs.find((t) => t.path === path);
+    if (workspaceId && tab?.kind === 'text' && tab.dirty) {
+      void saveDraft(workspaceId, path, { content: tab.content, baseHash: tab.baseHash, savedAt: Date.now() });
     }
   },
 
+  save: async (path) => {
+    const { workspaceId } = get();
+    if (!workspaceId) return { conflict: false };
+    return serialized(workspaceId, path, async () => {
+      // Re-read after waiting: an earlier save may have moved baseHash on.
+      const { blocked, tabs } = get();
+      if (get().workspaceId !== workspaceId || blocked !== null) return { conflict: false };
+      const tab = tabs.find((t) => t.path === path);
+      if (!tab || tab.kind !== 'text' || !tab.dirty) return { conflict: false };
+      // A conflicted tab is only written through the explicit "keep mine" (forceSave).
+      if (tab.conflict) return { conflict: true };
+      const written = tab.content;
+      try {
+        const result = await ideApi.writeFile(workspaceId, path, written, { baseHash: tab.baseHash });
+        applyWritten(set, get, workspaceId, path, written, result.hash);
+        return { conflict: false };
+      } catch (error) {
+        const current = get().workspaceId === workspaceId;
+        if (error instanceof IdeConflictError) {
+          if (current) set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, conflict: true } : t)) });
+          return { conflict: true };
+        }
+        if (current) get().noteApiError(error);
+        throw error;
+      }
+    });
+  },
+
   forceSave: async (path) => {
-    const { workspaceId, tabs } = get();
-    const tab = tabs.find((t) => t.path === path);
-    if (!workspaceId || !tab) return;
-    const written = tab.content;
-    const result = await ideApi.writeFile(workspaceId, path, written, { baseHash: tab.baseHash, force: true });
-    applyWritten(set, get, workspaceId, path, written, result.hash);
+    const { workspaceId } = get();
+    if (!workspaceId) return;
+    await serialized(workspaceId, path, async () => {
+      const tab = get().tabs.find((t) => t.path === path);
+      if (get().workspaceId !== workspaceId || get().blocked !== null || !tab || tab.kind !== 'text') return;
+      const written = tab.content;
+      try {
+        const result = await ideApi.writeFile(workspaceId, path, written, { baseHash: tab.baseHash, force: true });
+        applyWritten(set, get, workspaceId, path, written, result.hash);
+      } catch (error) {
+        if (get().workspaceId === workspaceId) get().noteApiError(error);
+        throw error;
+      }
+    });
   },
 
   reloadFromDisk: async (path) => {
     const { workspaceId } = get();
     if (!workspaceId) return;
-    const file = await ideApi.readFile(workspaceId, path);
-    set({
-      tabs: get().tabs.map((t) =>
-        t.path === path
-          ? { ...t, content: file.content, baseHash: file.hash, size: file.size, dirty: false, conflict: false }
-          : t,
-      ),
+    await serialized(workspaceId, path, async () => {
+      let file: IdeFile;
+      try {
+        file = await ideApi.readFile(workspaceId, path);
+      } catch (error) {
+        if (get().workspaceId === workspaceId) get().noteApiError(error);
+        throw error;
+      }
+      if (get().workspaceId !== workspaceId) return;
+      set({
+        tabs: get().tabs.map((t) =>
+          t.path === path
+            ? { ...t, content: file.content, baseHash: file.hash, size: file.size, dirty: false, conflict: false }
+            : t,
+        ),
+      });
+      // Explicit "load from disk": the unsaved edits are given up on purpose.
+      await clearDraft(workspaceId, path);
     });
+  },
+
+  readDisk: async (path) => {
+    const { workspaceId } = get();
+    if (!workspaceId) return null;
+    try {
+      return await ideApi.readFile(workspaceId, path);
+    } catch (error) {
+      if (get().workspaceId === workspaceId) get().noteApiError(error);
+      if (error instanceof IdeApiError && error.status === 404) return null;
+      throw error;
+    }
+  },
+
+  recheckFromDisk: async (path) => {
+    const { workspaceId, blocked } = get();
+    if (!workspaceId || blocked !== null) return;
+    // A save in flight is about to move baseHash itself; comparing now would misfire.
+    if (inflight.has(inflightKey(workspaceId, path))) return;
+    const before = get().tabs.find((t) => t.path === path);
+    if (!before || before.kind !== 'text') return;
+    let file: IdeFile;
+    try {
+      file = await ideApi.readFile(workspaceId, path);
+    } catch (error) {
+      // A vanished or turned-binary file leaves the tab alone; only IDE-wide states matter here.
+      if (get().workspaceId === workspaceId) get().noteApiError(error);
+      return;
+    }
+    if (get().workspaceId !== workspaceId || inflight.has(inflightKey(workspaceId, path))) return;
+    const tab = get().tabs.find((t) => t.path === path);
+    if (!tab || tab.kind !== 'text' || file.hash === tab.baseHash) return;
+    const untouched = !tab.dirty && tab.content === before.content && tab.baseHash === before.baseHash;
+    if (untouched || tab.content === file.content) {
+      // Clean tab, or the disk already holds exactly this buffer: adopt the disk version.
+      set({
+        tabs: get().tabs.map((t) =>
+          t.path === path
+            ? { ...t, content: file.content, baseHash: file.hash, size: file.size, dirty: false, conflict: false }
+            : t,
+        ),
+      });
+      if (tab.dirty) void clearDraft(workspaceId, path);
+      return;
+    }
+    if (!tab.conflict) set({ tabs: get().tabs.map((t) => (t.path === path ? { ...t, conflict: true } : t)) });
+  },
+
+  noteApiError: (error) => {
+    if (!(error instanceof IdeApiError) || error instanceof IdeConflictError) return;
+    const { workspaceId, setBlocked } = get();
+    if (error.status === 403) setBlocked('forbidden');
+    else if (error.status === 409) setBlocked('archived');
+    else if (error.status === 404 && workspaceId) {
+      // A 404 is either a vanished file or a vanished workspace; the root listing tells them apart.
+      ideApi.tree(workspaceId, '.').then(
+        () => undefined,
+        (probe: unknown) => {
+          if (get().workspaceId !== workspaceId || !(probe instanceof IdeApiError)) return;
+          if (probe.status === 404) setBlocked('gone');
+          else if (probe.status === 403) setBlocked('forbidden');
+          else if (probe.status === 409) setBlocked('archived');
+        },
+      );
+    }
   },
 
   openInSplit: async (path) => {

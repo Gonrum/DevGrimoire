@@ -6,6 +6,7 @@ import { useToast } from '../components/Toast';
 import { errorMessage, isUnknownArray } from '../lib/narrow';
 import { FileIcon, FolderIcon } from './FileIcon';
 import { ideApi, IdeApiError, type IdeTreeEntry } from './ide-api';
+import { IdeConfirmDialog } from './IdeDialog';
 import { useIdeStore } from './ide-store';
 import { useWorkspaceFileTree } from './useWorkspaceFileTree';
 
@@ -116,6 +117,16 @@ export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps)
   const [error, setError] = useState<string | null>(null);
   const [upload, setUpload] = useState<UploadProgress | null>(null);
   const uploading = useRef(false);
+  /** Pending "overwrite?" question of an upload; resolving it lets the upload loop continue. */
+  const [overwriteAsk, setOverwriteAsk] = useState<{ name: string; resolve: (ok: boolean) => void } | null>(null);
+
+  const askOverwrite = (name: string): Promise<boolean> =>
+    new Promise((resolve) => setOverwriteAsk({ name, resolve }));
+
+  const answerOverwrite = (ok: boolean): void => {
+    overwriteAsk?.resolve(ok);
+    setOverwriteAsk(null);
+  };
 
   // Gate persistence until the initial restore has run, so we don't clobber storage with [].
   const restored = useRef<string | null>(null);
@@ -226,7 +237,7 @@ export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps)
             await ideApi.upload(workspaceId, dir, file, { onProgress: progress });
           } catch (e) {
             if (!(e instanceof IdeApiError) || e.status !== 409) throw e;
-            if (!window.confirm(t('ide.overwriteConfirm', { name: file.name }))) continue;
+            if (!(await askOverwrite(file.name))) continue;
             await ideApi.upload(workspaceId, dir, file, { overwrite: true, onProgress: progress });
           }
           done += 1;
@@ -431,6 +442,15 @@ export function FileTree({ workspaceId, activePath, onOpenFile }: FileTreeProps)
       )}
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menuItemsFor(menu)} onClose={() => setMenu(null)} />
+      )}
+      {overwriteAsk && (
+        <IdeConfirmDialog
+          title={t('ide.overwriteTitle')}
+          message={t('ide.overwriteConfirm', { name: overwriteAsk.name })}
+          cancelLabel={t('ide.cancel')}
+          actions={[{ label: t('ide.overwrite'), variant: 'danger', onClick: () => answerOverwrite(true) }]}
+          onCancel={() => answerOverwrite(false)}
+        />
       )}
     </div>
   );
