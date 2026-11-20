@@ -1320,7 +1320,9 @@
     "formGitRepo": "Token repository (optional)",
     "formGitRepoDefault": "Default (first repo per provider)",
     "formGitRepoHint": "For multi-repo projects: which configured repo's token to inject for gh/glab.",
-    "nameHint": "Allowed: a-z, 0-9, '-', '_'. Must start with a letter or digit, max 64 chars."
+    "nameHint": "Allowed: a-z, 0-9, '-', '_'. Must start with a letter or digit, max 64 chars.",
+    "openIde": "IDE",
+    "archivedNoIde": "Archived workspaces have no IDE"
   },
   "terminal": {
     "workspace": "Workspace",
@@ -3242,5 +3244,16 @@
     "tokenPlaceholder": "Token / {{example}}",
     "bodyNone": "No body",
     "contentTypePlaceholder": "Content-Type (e.g. application/json)"
+  },
+  "ide": {
+    "loading": "Loading IDE …",
+    "loadError": "Could not load workspace",
+    "backToProject": "Back to project",
+    "notFoundTitle": "Workspace not found",
+    "notFoundText": "This workspace does not exist (anymore).",
+    "forbiddenTitle": "No access",
+    "forbiddenText": "You do not have access to this workspace.",
+    "inactiveTitle": "IDE unavailable",
+    "inactiveText": "The workspace is \"{{status}}\" and cannot be edited."
   }
 }

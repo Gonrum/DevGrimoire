@@ -1320,7 +1320,9 @@
     "formGitRepo": "Token-Repository (optional)",
     "formGitRepoDefault": "Standard (erstes Repo pro Provider)",
     "formGitRepoHint": "Bei Multi-Repo-Projekten: aus welchem hinterlegten Repo das gh/glab-Token kommt.",
-    "nameHint": "Erlaubt: a-z, 0-9, '-', '_'. Muss mit Buchstabe oder Zahl beginnen, max 64 Zeichen."
+    "nameHint": "Erlaubt: a-z, 0-9, '-', '_'. Muss mit Buchstabe oder Zahl beginnen, max 64 Zeichen.",
+    "openIde": "IDE",
+    "archivedNoIde": "Archivierte Werkstätten haben keine IDE"
   },
   "terminal": {
     "workspace": "Workspace",
@@ -3241,5 +3243,16 @@
     "tokenPlaceholder": "Token / {{example}}",
     "bodyNone": "Kein Body",
     "contentTypePlaceholder": "Content-Type (z.B. application/json)"
+  },
+  "ide": {
+    "loading": "IDE wird geladen …",
+    "loadError": "Werkstatt konnte nicht geladen werden",
+    "backToProject": "Zurück zum Projekt",
+    "notFoundTitle": "Werkstatt nicht gefunden",
+    "notFoundText": "Diese Werkstatt existiert nicht (mehr).",
+    "forbiddenTitle": "Kein Zugriff",
+    "forbiddenText": "Du hast keinen Zugriff auf diese Werkstatt.",
+    "inactiveTitle": "IDE nicht verfügbar",
+    "inactiveText": "Die Werkstatt hat den Status „{{status}}“ und kann nicht bearbeitet werden."
   }
 }

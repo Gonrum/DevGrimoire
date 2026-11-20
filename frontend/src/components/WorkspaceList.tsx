@@ -263,6 +263,15 @@ export default function WorkspaceList({ projectId }: Props) {
                   >
                     {t('workspaces.openTerminal')}
                   </Button>
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    onClick={() => window.open(`/ide/${ws._id}`, '_blank', 'noopener')}
+                    disabled={ws.status !== 'active'}
+                    title={ws.status === 'archived' ? t('workspaces.archivedNoIde') : undefined}
+                  >
+                    {t('workspaces.openIde')}
+                  </Button>
                   {ws.status !== 'archived' && (
                     <ConfirmButton
                       variant="secondary"

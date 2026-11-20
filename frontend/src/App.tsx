@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Dashboard from './pages/Dashboard';
@@ -54,6 +54,8 @@ import QuestionDialog from './components/QuestionDialog';
 import ChatDock from './components/ChatDock';
 import NotepadDock from './notepad/NotepadDock';
 import SshDock from './components/ssh/SshDock';
+
+const IdePage = lazy(() => import('./ide/IdePage'));
 
 function NotFound() {
   const { t } = useTranslation();
@@ -489,12 +491,32 @@ function AppShell() {
   );
 }
 
+/** The IDE gets the whole window: no nav, no docks. It still sits behind the auth gate. */
+function AppRoutes() {
+  const { pathname } = useLocation();
+  if (pathname.startsWith('/ide/')) {
+    return (
+      <Routes>
+        <Route
+          path="/ide/:workspaceId"
+          element={
+            <Suspense fallback={<div className="min-h-screen bg-gray-900" />}>
+              <IdePage />
+            </Suspense>
+          }
+        />
+      </Routes>
+    );
+  }
+  return <AppShell />;
+}
+
 function App() {
   return (
     <AuthProvider>
       <ToastProvider>
         <AuthGate>
-          <AppShell />
+          <AppRoutes />
         </AuthGate>
       </ToastProvider>
     </AuthProvider>

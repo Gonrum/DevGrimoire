@@ -49,7 +49,12 @@ async function apiError(res: Response): Promise<ApiError> {
  * einer Seite, in der jede Aktion nur noch einen Fehler warf.
  */
 function noteUnauthorized(res: Response): void {
-  if (res.status !== 401 || !onSessionExpired) return;
+  noteUnauthorizedStatus(res.status);
+}
+
+/** Status-only variant of the session-expiry check, for transports without a `Response` (XHR). */
+export function noteUnauthorizedStatus(status: number): void {
+  if (status !== 401 || !onSessionExpired) return;
   const token = getAccessToken?.() ?? null;
   if (expiredForToken === token) return;
   expiredForToken = token;
@@ -64,6 +69,14 @@ export function getCurrentAccessToken(): string | null {
   return getAccessToken?.() ?? null;
 }
 
+/**
+ * Runs the registered token refresh after a 401. Resolves `true` only when a
+ * fresh token is available via `getCurrentAccessToken()`; the caller retries once.
+ */
+export async function refreshAccessTokenAfter401(): Promise<boolean> {
+  return onUnauthorized ? onUnauthorized() : false;
+}
+
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = getAccessToken?.();
@@ -76,7 +89,7 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
 
   // Auto-refresh on 401
   if (res.status === 401 && onUnauthorized) {
-    const refreshed = await onUnauthorized();
+    const refreshed = await refreshAccessTokenAfter401();
     if (refreshed) {
       const newToken = getAccessToken?.();
       if (newToken) headers['Authorization'] = `Bearer ${newToken}`;
