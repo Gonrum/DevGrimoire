@@ -102,6 +102,20 @@ function authMiddleware(req, res, next) {
   next();
 }
 
+const sha256Hex = (data) => crypto.createHash('sha256').update(data).digest('hex');
+const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true });
+
+/** No NUL byte in the first 8 KiB and valid UTF-8 throughout. */
+function isStrictUtf8Text(buf) {
+  if (buf.subarray(0, 8192).includes(0)) return false;
+  try {
+    STRICT_UTF8.decode(buf);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function requireWorkspaceId(req, res) {
   const id = req.body?.workspaceId;
   if (typeof id !== 'string' || !WORKSPACE_ID_PATTERN.test(id)) {
@@ -315,6 +329,11 @@ for (const method of ['get', 'post', 'put', 'delete']) {
   };
 }
 
+// /write carries whole file contents (JSON-escaped, so up to ~6x the raw size
+// in the worst case); it gets its own larger parser, behind auth so
+// unauthenticated callers cannot make us buffer 8 MB. The global parser skips
+// bodies that are already parsed.
+app.use('/write', authMiddleware, express.json({ limit: '8mb' }));
 app.use(express.json({ limit: '256kb' }));
 app.use(authMiddleware);
 
@@ -377,7 +396,10 @@ app.post('/read', async (req, res) => {
       return res.status(413).json({ error: `file too large (>${READ_MAX_BYTES} bytes)`, size: stat.size });
     }
     const buf = await fsp.readFile(target);
-    res.json({ size: stat.size, content: buf.toString('utf8') });
+    if (req.body?.strictText === true && !isStrictUtf8Text(buf)) {
+      return res.status(415).json({ error: 'not utf-8 text', size: stat.size });
+    }
+    res.json({ size: stat.size, content: buf.toString('utf8'), hash: sha256Hex(buf) });
   } catch (err) {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'file not found' });
     res.status(400).json({ error: err.message });
@@ -468,6 +490,64 @@ function isInside(root, candidate) {
 }
 
 /**
+ * Resolves the final path of a file about to be written inside `root` (the
+ * realpath of the workspace root) and verifies its parent directory stays
+ * inside it. `requested` is relative to `root` or absolute. Throws an Error
+ * carrying `.status` (400 escape/invalid, 404 missing parent directory,
+ * 409 target is a directory — `.code === 'TARGET_IS_DIR'`).
+ *
+ * Symlinks: the parent is resolved with realpath(); rename() replaces a
+ * symlink at the target itself instead of following it.
+ */
+async function resolveWriteTarget(root, requested, { createDirs = false } = {}) {
+  const fail = (status, message, code) => Object.assign(new Error(message), { status, code });
+  if (typeof requested !== 'string' || !requested || requested.includes('\0')) {
+    throw fail(400, 'path must be a non-empty string');
+  }
+  const target = path.resolve(root, requested);
+  if (!isInside(root, target) || target === root) throw fail(400, 'path escapes workspace root');
+  const base = path.basename(target);
+  let parent = path.dirname(target);
+  try {
+    if (createDirs) {
+      // mkdir -p follows symlinks in intermediate components and thereby
+      // created directories OUTSIDE the workspace (`evil -> /tmp`,
+      // `evil/new/x`) before any later check could catch it. So resolve and
+      // check the deepest existing ancestor first; whatever mkdir creates
+      // below it is created by mkdir itself and cannot be a symlink.
+      let existing = parent;
+      for (;;) {
+        try {
+          await fsp.lstat(existing);
+          break;
+        } catch (err) {
+          if (err.code !== 'ENOENT') throw err;
+          existing = path.dirname(existing);
+        }
+      }
+      if (!isInside(root, await fsp.realpath(existing))) {
+        throw fail(400, 'resolved path escapes workspace root');
+      }
+      await fsp.mkdir(parent, { recursive: true });
+    }
+    parent = await fsp.realpath(parent);
+  } catch (err) {
+    if (err.status) throw err;
+    if (err.code === 'ENOENT') throw fail(404, 'target directory does not exist (use --mkdir)');
+    throw fail(400, err.message);
+  }
+  if (!isInside(root, parent)) throw fail(400, 'resolved path escapes workspace root');
+  const finalPath = path.join(parent, base);
+  try {
+    if ((await fsp.lstat(finalPath)).isDirectory()) throw fail(409, 'target is a directory', 'TARGET_IS_DIR');
+  } catch (err) {
+    if (err.status) throw err;
+    if (err.code !== 'ENOENT') throw fail(400, err.message);
+  }
+  return { finalPath, parent };
+}
+
+/**
  * Counterpart of /read-stream (`dg scp host:… ./…`): the request body is the
  * file itself (application/octet-stream); parameters come via the query
  * because the body is not JSON. The file is written to a temporary file in
@@ -547,47 +627,13 @@ app.post('/write-stream', async (req, res) => {
     return res.status(400).json({ error: err.message });
   }
 
-  const base = path.basename(target);
-  let parent = path.dirname(target);
+  let finalPath, parent;
   try {
-    if (createDirs) {
-      // mkdir -p follows symlinks in intermediate components and thereby
-      // created directories OUTSIDE the workspace (`evil -> /tmp`,
-      // `evil/new/x`) before any later check could catch it. So resolve and
-      // check the deepest existing ancestor first; whatever mkdir creates
-      // below it is created by mkdir itself and cannot be a symlink.
-      let existing = parent;
-      for (;;) {
-        try {
-          await fsp.lstat(existing);
-          break;
-        } catch (err) {
-          if (err.code !== 'ENOENT') throw err;
-          existing = path.dirname(existing);
-        }
-      }
-      if (!isInside(root, await fsp.realpath(existing))) {
-        return res.status(400).json({ error: 'resolved path escapes workspace root' });
-      }
-      await fsp.mkdir(parent, { recursive: true });
-    }
-    parent = await fsp.realpath(parent);
+    ({ finalPath, parent } = await resolveWriteTarget(root, target, { createDirs }));
   } catch (err) {
-    if (err.code === 'ENOENT') return res.status(404).json({ error: 'target directory does not exist (use --mkdir)' });
-    return res.status(400).json({ error: err.message });
+    return res.status(err.status || 400).json({ error: err.message });
   }
-  if (!isInside(root, parent)) {
-    return res.status(400).json({ error: 'resolved path escapes workspace root' });
-  }
-  const finalPath = path.join(parent, base);
-  try {
-    if ((await fsp.lstat(finalPath)).isDirectory()) {
-      return res.status(409).json({ error: 'target is a directory' });
-    }
-  } catch (err) {
-    if (err.code !== 'ENOENT') return res.status(400).json({ error: err.message });
-  }
-
+  const base = path.basename(finalPath);
   const tmpPath = path.join(parent, `.${base}.${crypto.randomBytes(6).toString('hex')}.part`);
   const out = fs.createWriteStream(tmpPath, { flags: 'wx', mode });
   let received = 0;
@@ -629,12 +675,84 @@ app.post('/write-stream', async (req, res) => {
   req.pipe(out);
 });
 
+/**
+ * Text write with optimistic conflict detection. `baseHash` is the sha256 of
+ * the content the caller last saw (`null` = "the file must not exist yet").
+ * A mismatch answers 409 with the current hash unless `force` is set. The
+ * check and the rename are not one atomic step; the window is small and the
+ * temp-file + rename keeps the file itself always consistent.
+ */
+app.post('/write', async (req, res) => {
+  const id = requireWorkspaceId(req, res); if (!id) return;
+  const { path: requested, content, baseHash, force, createDirs } = req.body || {};
+  if (typeof requested !== 'string' || !requested || requested.includes('\0')) {
+    return res.status(400).json({ error: 'path must be a non-empty string' });
+  }
+  if (typeof content !== 'string') return res.status(400).json({ error: 'content must be a string' });
+  if (baseHash !== null && typeof baseHash !== 'string') {
+    return res.status(400).json({ error: 'baseHash must be a string or null' });
+  }
+  const data = Buffer.from(content, 'utf8');
+  if (data.length > READ_MAX_BYTES) {
+    return res.status(413).json({ error: `content too large (>${READ_MAX_BYTES} bytes)`, size: data.length });
+  }
+  if (!await workspaceExists(id)) {
+    return res.status(404).json({ error: 'workspace directory does not exist' });
+  }
+  let root;
+  try {
+    root = await fsp.realpath(workspaceRoot(id));
+  } catch {
+    return res.status(404).json({ error: 'workspace directory does not exist' });
+  }
+
+  let finalPath, parent;
+  try {
+    ({ finalPath, parent } = await resolveWriteTarget(root, requested, { createDirs: createDirs === true }));
+  } catch (err) {
+    const status = err.code === 'TARGET_IS_DIR' ? 400 : (err.status || 400);
+    return res.status(status).json({ error: err.message });
+  }
+
+  let currentHash = null;
+  let mode = 0o644;
+  try {
+    const st = await fsp.stat(finalPath);
+    if (!st.isFile()) return res.status(400).json({ error: 'path is not a regular file' });
+    mode = st.mode & 0o777;
+    // A symlink at the target is replaced by rename(), but its content is
+    // what the caller saw — only hash it when it resolves inside the workspace.
+    if (!isInside(root, await fsp.realpath(finalPath))) {
+      return res.status(400).json({ error: 'resolved path escapes workspace root' });
+    }
+    currentHash = sha256Hex(await fsp.readFile(finalPath));
+  } catch (err) {
+    if (err.code !== 'ENOENT') return res.status(400).json({ error: err.message });
+  }
+  if (force !== true && baseHash !== currentHash) {
+    return res.status(409).json({ error: 'conflict', currentHash });
+  }
+
+  const tmpPath = path.join(parent, `.${path.basename(finalPath)}.${crypto.randomBytes(6).toString('hex')}.part`);
+  try {
+    await fsp.writeFile(tmpPath, data, { flag: 'wx', mode });
+    // writeFile's mode is subject to the umask; chmod sets it exactly.
+    await fsp.chmod(tmpPath, mode);
+    await fsp.rename(tmpPath, finalPath);
+  } catch (err) {
+    await fsp.rm(tmpPath, { force: true }).catch(() => {});
+    return res.status(500).json({ error: err.message });
+  }
+  res.json({ ok: true, path: path.relative(root, finalPath), hash: sha256Hex(data), size: data.length });
+});
+
 app.post('/tree', async (req, res) => {
   const id = requireWorkspaceId(req, res); if (!id) return;
   const requested = typeof req.body?.path === 'string' ? req.body.path : '.';
   const depthInput = Number(req.body?.depth ?? DEFAULT_TREE_DEPTH);
   const depth = Math.min(MAX_TREE_DEPTH, Math.max(1, Number.isFinite(depthInput) ? Math.trunc(depthInput) : DEFAULT_TREE_DEPTH));
 
+  const withSize = req.body?.withSize === true;
   let entries = [];
   let truncated = false;
   try {
@@ -654,7 +772,13 @@ app.post('/tree', async (req, res) => {
         if (entry.name === '.git') continue;
         const full = path.join(dir, entry.name);
         const rel = path.relative(workspaceRoot(id), full);
-        entries.push({ path: rel, type: entry.isDirectory() ? 'dir' : entry.isSymbolicLink() ? 'symlink' : 'file' });
+        const item = { path: rel, type: entry.isDirectory() ? 'dir' : entry.isSymbolicLink() ? 'symlink' : 'file' };
+        if (withSize && item.type === 'file') {
+          try {
+            item.size = (await fsp.stat(full)).size;
+          } catch { /* vanished between readdir and stat */ }
+        }
+        entries.push(item);
         if (entry.isDirectory() && level + 1 < depth) {
           stack.push({ dir: full, level: level + 1 });
         }
