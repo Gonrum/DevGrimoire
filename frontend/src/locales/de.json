@@ -3253,6 +3253,26 @@
     "forbiddenTitle": "Kein Zugriff",
     "forbiddenText": "Du hast keinen Zugriff auf diese Werkstatt.",
     "inactiveTitle": "IDE nicht verfügbar",
-    "inactiveText": "Die Werkstatt hat den Status „{{status}}“ und kann nicht bearbeitet werden."
+    "inactiveText": "Die Werkstatt hat den Status „{{status}}“ und kann nicht bearbeitet werden.",
+    "files": "Dateien",
+    "newFile": "Neue Datei",
+    "newFolder": "Neuer Ordner",
+    "rename": "Umbenennen",
+    "delete": "Löschen",
+    "copyPath": "Pfad kopieren",
+    "upload": "Hochladen",
+    "openInTerminal": "Im Terminal öffnen",
+    "openToSide": "Daneben öffnen",
+    "refresh": "Aktualisieren",
+    "alreadyExists": "Existiert bereits",
+    "truncated": "Liste gekürzt",
+    "operationFailed": "Vorgang fehlgeschlagen",
+    "copyPathFailed": "Pfad konnte nicht kopiert werden",
+    "overwriteConfirm": "„{{name}}“ existiert bereits. Überschreiben?",
+    "uploadTooLarge": "„{{name}}“ ist zu groß. Das Upload-Limit beträgt 100 MB.",
+    "uploadNoDirectories": "Ordner können nicht hochgeladen werden, nur einzelne Dateien.",
+    "uploadDone": "{{count}} Datei(en) hochgeladen",
+    "uploading": "Lädt hoch: {{name}} ({{index}}/{{total}})",
+    "noFileOpen": "Keine Datei geöffnet."
   }
 }

@@ -3,6 +3,10 @@ import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, ApiError, type Workspace } from '../api/client';
 import { LoadingText } from '../components/ui/LoadingSpinner';
+import { useToast } from '../components/Toast';
+import { errorMessage } from '../lib/narrow';
+import { FileTree } from './FileTree';
+import { useIdeStore } from './ide-store';
 
 type LoadState =
   | { kind: 'loading' }
@@ -29,7 +33,17 @@ function FullPageMessage({ title, text, backTo, backLabel }: { title: string; te
 export default function IdePage() {
   const { t } = useTranslation();
   const { workspaceId } = useParams<{ workspaceId: string }>();
+  const { showError } = useToast();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  const setWorkspace = useIdeStore((s) => s.setWorkspace);
+  const openFile = useIdeStore((s) => s.openFile);
+  const activePath = useIdeStore((s) => s.activePath);
+  const activeTab = useIdeStore((s) => s.tabs.find((tab) => tab.path === s.activePath));
+  const sidebarWidth = useIdeStore((s) => s.sidebarWidth);
+
+  useEffect(() => {
+    if (workspaceId) setWorkspace(workspaceId);
+  }, [workspaceId, setWorkspace]);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -91,7 +105,34 @@ export default function IdePage() {
         <span className="font-medium truncate">{workspace.name}</span>
         <span className="text-gray-500 text-xs font-mono truncate">{workspace.branch}</span>
       </header>
-      <main className="flex-1 min-h-0" />
+      <div className="flex flex-1 min-h-0">
+        <aside
+          className="shrink-0 border-r border-gray-700 bg-gray-900 min-h-0"
+          style={{ width: sidebarWidth }}
+        >
+          <FileTree
+            key={workspaceId}
+            workspaceId={workspaceId}
+            activePath={activePath}
+            onOpenFile={(path, size) => {
+              openFile(path, size).catch((err: unknown) => showError(errorMessage(err)));
+            }}
+          />
+        </aside>
+        {/* Placeholder: replaced by the Monaco editor in the next task. */}
+        <main className="flex-1 min-w-0 overflow-auto p-3 text-sm">
+          {activeTab ? (
+            <>
+              <div className="mb-2 font-mono text-xs text-gray-400">{activeTab.path}</div>
+              {activeTab.kind === 'text' && (
+                <pre className="whitespace-pre-wrap font-mono text-xs text-gray-300">{activeTab.content}</pre>
+              )}
+            </>
+          ) : (
+            <p className="text-gray-500">{t('ide.noFileOpen')}</p>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

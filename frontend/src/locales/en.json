@@ -3254,6 +3254,26 @@
     "forbiddenTitle": "No access",
     "forbiddenText": "You do not have access to this workspace.",
     "inactiveTitle": "IDE unavailable",
-    "inactiveText": "The workspace is \"{{status}}\" and cannot be edited."
+    "inactiveText": "The workspace is \"{{status}}\" and cannot be edited.",
+    "files": "Files",
+    "newFile": "New file",
+    "newFolder": "New folder",
+    "rename": "Rename",
+    "delete": "Delete",
+    "copyPath": "Copy path",
+    "upload": "Upload",
+    "openInTerminal": "Open in terminal",
+    "openToSide": "Open to the side",
+    "refresh": "Refresh",
+    "alreadyExists": "Already exists",
+    "truncated": "List truncated",
+    "operationFailed": "Operation failed",
+    "copyPathFailed": "Could not copy the path",
+    "overwriteConfirm": "\"{{name}}\" already exists. Overwrite?",
+    "uploadTooLarge": "\"{{name}}\" is too large. The upload limit is 100 MB.",
+    "uploadNoDirectories": "Folders cannot be uploaded, only individual files.",
+    "uploadDone": "{{count}} file(s) uploaded",
+    "uploading": "Uploading: {{name}} ({{index}}/{{total}})",
+    "noFileOpen": "No file open."
   }
 }
