@@ -42,7 +42,7 @@ const { throwError, of } = require(path.resolve(__dirname, '..', 'node_modules',
 const { AxiosError } = require(path.resolve(__dirname, '..', 'node_modules', 'axios'));
 const mongoose = require(path.resolve(__dirname, '..', 'node_modules', 'mongoose'));
 
-const EXPECTED_CHECKS = 21;
+const EXPECTED_CHECKS = 23;
 
 let failures = 0, total = 0;
 async function check(label, fn) {
@@ -63,6 +63,7 @@ const OTHER_PROJECT_ONLY = { ...ADMIN, projectScopeMode: 'allowlist', allowedPro
 
 function setup({ status = 'active', client = {} } = {}) {
   const calls = [];
+  const ensureCalls = [];
   const rec = (name, result) => async (...args) => {
     calls.push({ name, args });
     const r = typeof result === 'function' ? result(...args) : result;
@@ -70,6 +71,7 @@ function setup({ status = 'active', client = {} } = {}) {
     return r;
   };
   const fakeClient = {
+    ensureDir: async (id) => { ensureCalls.push(id); },
     readText: rec('readText', { size: 3, content: 'abc', hash: 'h1' }),
     writeText: rec('writeText', { path: 'a.txt', hash: 'h2', size: 3 }),
     listDir: rec('listDir', { root: '.', depth: 1, truncated: false, entries: [] }),
@@ -96,7 +98,7 @@ function setup({ status = 'active', client = {} } = {}) {
   );
   const logged = [];
   const ctrl = new WorkspaceFsController(service, fakeClient, { create: async (d) => { logged.push(d); } });
-  return { ctrl, calls, touches, logged, service };
+  return { ctrl, calls, ensureCalls, touches, logged, service };
 }
 
 const fakeRes = () => Object.assign(new PassThrough(), {
@@ -122,13 +124,14 @@ const ROUTES = {
 
 async function expectDenied(label, actor, opts, wanted) {
   for (const [name, run] of Object.entries(ROUTES)) {
-    const { ctrl, calls } = setup(opts);
+    const { ctrl, calls, ensureCalls } = setup(opts);
     await assert.rejects(
       () => RequestContext.run(actor, undefined, () => run(ctrl)),
       (e) => statusOf(e) === wanted,
       `${label}: ${name} must answer ${wanted}`,
     );
-    assert.equal(calls.length, 0, `${label}: ${name} must not reach the sidecar client`);
+    assert.equal(calls.length, 0, `${label}: ${name} must not reach the sidecar client `);
+    assert.equal(ensureCalls.length, 0, `${label}: ${name} must not call ensureDir`);
   }
 }
 
@@ -409,6 +412,34 @@ const matchLine = (p, line, text, start = 4) => ({
         assert.equal((await r.json()).error, error);
       }
     } finally { front.close(); sidecar.close(); }
+  });
+
+  await check('ensureDir: called for an allowed request, never when the gate denies (incl. invalid id)', async () => {
+    const ok = setup();
+    await RequestContext.run(WRITER, undefined, () => ok.ctrl.tree(WS_ID, '.'));
+    assert.deepEqual(ok.ensureCalls, [WS_ID]);
+    assert.deepEqual(ok.calls.map((c) => c.name), ['listDir']);
+    const bad = setup();
+    await assert.rejects(
+      () => RequestContext.run(WRITER, undefined, () => bad.ctrl.tree('not-an-id', '.')),
+      (e) => statusOf(e) === 404,
+    );
+    assert.equal(bad.calls.length + bad.ensureCalls.length, 0);
+    // Denials by permission, scope and status: the per-route loop above
+    // asserts that ensureDir stays untouched.
+  });
+
+  await check('ensureDir: memoised for the window, a failure propagates and is retried', async () => {
+    const { ctrl, ensureCalls } = setup();
+    await RequestContext.run(WRITER, undefined, () => ctrl.tree(WS_ID, '.'));
+    await RequestContext.run(WRITER, undefined, () => ctrl.readFile(WS_ID, 'a'));
+    assert.equal(ensureCalls.length, 1);
+    let attempts = 0;
+    const flaky = setup({ client: { ensureDir: async () => { attempts += 1; if (attempts === 1) throw new HttpException('down', 503); } } });
+    await assert.rejects(() => RequestContext.run(WRITER, undefined, () => flaky.ctrl.tree(WS_ID, '.')), (e) => statusOf(e) === 503);
+    await RequestContext.run(WRITER, undefined, () => flaky.ctrl.tree(WS_ID, '.'));
+    await RequestContext.run(WRITER, undefined, () => flaky.ctrl.tree(WS_ID, '.'));
+    assert.equal(attempts, 2);
   });
 
   await check('touchThrottled: two calls within the window -> touch once; swallows errors', async () => {

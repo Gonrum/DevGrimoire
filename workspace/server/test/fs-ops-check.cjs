@@ -405,6 +405,31 @@ async function main() {
       assert.equal(r.status, 200);
       assert.deepEqual(rgLines(r).map((l) => l.replace(/^\.?\//, '')), ['s1.txt:2:Hello there', 's1.txt:3:hello again']);
     });
+
+    await check('ensure: creates a missing workspace dir, idempotent, empty tree afterwards', async () => {
+      assert.equal((await post('/tree', { workspaceId: 'fresh1', path: '.' })).status, 404);
+      const a = await post('/ensure', { workspaceId: 'fresh1' });
+      assert.equal(a.status, 200);
+      assert.equal(a.body.ok, true);
+      assert.equal(fs.statSync(path.join(root, 'fresh1')).isDirectory(), true);
+      const b = await post('/ensure', { workspaceId: 'fresh1' });
+      assert.equal(b.status, 200);
+      const t = await post('/tree', { workspaceId: 'fresh1', path: '.' });
+      assert.equal(t.status, 200);
+      assert.deepEqual(t.body.entries, []);
+    });
+
+    await check('ensure: invalid workspaceId -> 400, missing auth -> 401/403, nothing created', async () => {
+      assert.equal((await post('/ensure', { workspaceId: '../evil' })).status, 400);
+      assert.equal((await post('/ensure', {})).status, 400);
+      const res = await fetch(`${base}/ensure`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: 'noauth1' }),
+      });
+      assert.ok(res.status === 401 || res.status === 403);
+      assert.equal(fs.existsSync(path.join(root, 'noauth1')), false);
+    });
   } finally {
     cleanup();
   }

@@ -991,6 +991,19 @@ app.post('/search', async (req, res) => {
   res.json({ matches: result.stdout, truncated: result.truncated, timedOut: result.timedOut });
 });
 
+// Creates the (empty) workspace directory if it does not exist yet. A workspace
+// without repoUrl has no directory until the first clone/exec; the IDE routes
+// call this so a fresh workspace opens as an empty tree instead of a 404.
+app.post('/ensure', async (req, res) => {
+  const id = requireWorkspaceId(req, res); if (!id) return;
+  try {
+    await ensureWorkspaceDir(id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/status', async (req, res) => {
   const id = requireWorkspaceId(req, res); if (!id) return;
   const root = workspaceRoot(id);

@@ -72,10 +72,9 @@ WS_ID=$(printf '%s' "$BODY" | jq -r '._id // empty')
 [ -n "$WS_ID" ] && ok "workspace created" || { bad "workspace creation"; exit 1; }
 FS="$API_BASE/workspaces/$WS_ID/fs"
 
-# A fresh repo-less workspace has no directory in the sidecar yet; the first
-# exec creates it lazily (the same thing the terminal tab does). Drain the SSE.
-req "$AUTH" -H 'Content-Type: application/json' --max-time 60 -X POST "$API_BASE/workspaces/$WS_ID/exec/stream" -d '{"command":"true"}'
-[ "$CODE" = 200 ] || [ "$CODE" = 201 ]; check "workspace directory initialised via exec" $?
+echo "== 0. fresh workspace =="
+api "$FS/tree?path=."
+[ "$CODE" = 200 ] && [ "$(printf '%s' "$BODY" | jq -r '.entries | length')" = 0 ]; check "GET tree on a fresh workspace -> 200, entries empty" $?
 
 echo "== 1. write new file =="
 api -X PUT "$FS/file" -d '{"path":"hello.txt","content":"hallo welt\nzweite zeile needle\n","baseHash":null}'

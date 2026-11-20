@@ -321,6 +321,11 @@ export class WorkspaceClient {
     });
   }
 
+  /** Creates the workspace directory in the sidecar if it is missing (idempotent). */
+  async ensureDir(workspaceId: string): Promise<void> {
+    await this.postFs<{ ok: true }>('/ensure', { workspaceId });
+  }
+
   readText(workspaceId: string, path: string): Promise<ReadTextResponse> {
     return this.postFs<ReadTextResponse>('/read', { workspaceId, path, strictText: true });
   }

@@ -29,6 +29,7 @@ import { assertContentWrite } from '../common/scope-guard';
 const SEARCH_LIMIT = 2000;
 const WORKSPACE_ID_PATTERN = /^[a-f0-9]{24}$/;
 const PATH_MAX = 4096;
+const ENSURE_TTL_MS = 60_000;
 
 /**
  * Query-parameter path: same rules as the DTO paths (the ValidationPipe does
@@ -69,6 +70,9 @@ export class WorkspaceFsController {
     private readonly logs: LogsService,
   ) {}
 
+  /** Workspace id -> time of the last successful `ensureDir`. */
+  private readonly ensuredAt = new Map<string, number>();
+
   /** Permission -> load workspace (403/404) -> must be active. One place for all routes. */
   private async gate(id: string): Promise<WorkspaceDocument> {
     assertContentWrite('Workspace IDE');
@@ -76,6 +80,15 @@ export class WorkspaceFsController {
     const ws = await this.workspaces.findById(id);
     if (ws.status !== 'active') {
       throw new ConflictException(`Workspace is ${ws.status}, not active`);
+    }
+    // Only after every check passed: the sidecar must never create a
+    // directory for an unknown, forbidden or inactive workspace. A workspace
+    // without repoUrl has no directory until now. Failures propagate and are
+    // not memoised, so the next request retries.
+    const last = this.ensuredAt.get(id);
+    if (last === undefined || Date.now() - last >= ENSURE_TTL_MS) {
+      await this.client.ensureDir(id);
+      this.ensuredAt.set(id, Date.now());
     }
     return ws;
   }
