@@ -8,6 +8,7 @@ import { WorkspacesController } from './workspaces.controller';
 import { WorkspaceCliController } from './workspace-cli.controller';
 import { WorkspaceCliKubeController } from './workspace-cli-kube.controller';
 import { WorkspaceCliSshController } from './workspace-cli-ssh.controller';
+import { WorkspaceCliReqController } from './workspace-cli-req.controller';
 import { WorkspaceClient } from './workspace-client.service';
 import { WorkspaceTtlScheduler } from './workspace-ttl.scheduler';
 import { WorkspaceGitTokensService } from './workspace-git-tokens.service';
@@ -22,6 +23,8 @@ import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { TodosModule } from '../todos/todos.module';
 import { KubeModule } from '../kube/kube.module';
 import { SshModule } from '../ssh/ssh.module';
+import { HttpRequestsModule } from '../http-requests/http-requests.module';
+import { EnvironmentsModule } from '../environments/environments.module';
 import { resolveJwtSecret } from '../common/jwt-secret';
 import { JWT_ALGORITHM } from '../common/access-token';
 
@@ -48,12 +51,16 @@ import { JWT_ALGORITHM } from '../common/access-token';
     KubeModule,
     // `dg ssh` / `dg scp`: SFTP transfers via the backend, credentials stay there.
     SshModule,
+    // `dg req`: saved workbench requests, sent by the backend (secrets stay there).
+    HttpRequestsModule,
+    EnvironmentsModule,
   ],
   controllers: [
     WorkspacesController,
     WorkspaceCliController,
     WorkspaceCliKubeController,
     WorkspaceCliSshController,
+    WorkspaceCliReqController,
   ],
   providers: [
     WorkspacesService,

@@ -143,6 +143,7 @@
     "check:jwt-token-types": "node scripts/jwt-token-types-check.cjs",
     "check:dg-kube-scope": "node scripts/dg-kube-scope-check.cjs",
     "check:dg-ssh-scope": "node scripts/dg-ssh-scope-check.cjs",
+    "check:dg-req-scope": "node scripts/dg-req-scope-check.cjs",
     "check:secret-refs-scope": "node scripts/secret-refs-scope-check.cjs",
     "check:customers-infra-scope": "node scripts/customers-infra-scope-check.cjs",
     "check:ai-data-scope": "node scripts/ai-data-scope-check.cjs",

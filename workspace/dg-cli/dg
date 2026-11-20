@@ -21,12 +21,13 @@
 #   dg kube clusters|get|describe|logs|events|top   (read-only, see dg kube --help)
 #   dg ssh list
 #   dg scp [--mode=644] [--mkdir] <src> <dst>        (one side is <conn>:<path>)
+#   dg req list|send|history                          (API workbench, see dg req --help)
 #   dg whoami
 #   dg --help | dg --version
 
 set -euo pipefail
 
-DG_VERSION="0.3.0"
+DG_VERSION="0.4.0"
 
 usage() {
     cat <<'EOF'
@@ -44,6 +45,9 @@ dg — DevGrimoire workspace CLI
   dg scp [--mode=644] [--mkdir] <src> <dst>
                                     (one file; one side is <conn>:<path>,
                                      see: dg scp --help)
+  dg req list | send <request> | history <request>
+                                    (saved API-workbench requests, sent by
+                                     the backend, see: dg req --help)
   dg whoami
   dg --help | dg --version
 
@@ -563,6 +567,193 @@ EOF
     esac
 }
 
+req_usage() {
+    cat <<'EOF2'
+dg req — saved requests of this project's API workbench.
+The backend sends the request: {{variables}} and secrets are resolved there
+and never reach this workspace; secret values in the response are masked.
+
+  dg req list [--collection=<name>]       collections, requests, environments
+  dg req send <request> [options]         send a saved request
+  dg req history <request> [--limit=N]    last runs (default 10)
+
+  <request>   request name, collection/name, or id (see dg req list)
+
+Send options:
+  -e, --env=<name>   environment for {{variables}} (this project's own)
+  -i, --include      print status line and response headers before the body
+  -o, --output=<f>   stream the raw body into a workspace file (binary-safe,
+                     not masked, not recorded in the history); ending in /
+                     or an existing directory keeps the server's file name
+  -p, --mkdir        with -o: create missing parent directories
+  --json             print the full result as JSON
+  -q, --quiet        no status line on stderr
+
+Exit code: 0 for 2xx/3xx, 1 for 4xx/5xx or a transport error.
+Response bodies over 1 MB are truncated unless -o is used.
+EOF2
+}
+
+# Shared python helper: renders a send result. Args: mode include quiet tty.
+req_render_send() {
+    python3 -c '
+import json, sys
+mode, include, quiet, tty = sys.argv[1:5]
+d = json.load(sys.stdin)
+if mode == "json":
+    print(json.dumps(d, indent=2, ensure_ascii=False))
+    sys.exit(0 if d.get("ok") else 1)
+def size(n):
+    n = float(n or 0)
+    for u in ("B", "KB", "MB", "GB"):
+        if n < 1024 or u == "GB":
+            return ("%d B" % n) if u == "B" else ("%.1f %s" % (n, u))
+        n /= 1024
+status = d.get("status")
+line = "%s %s" % (status if status is not None else "---", d.get("statusText") or "")
+line = line.strip() + "  ·  %d ms" % (d.get("durationMs") or 0)
+if d.get("environment"):
+    line += "  ·  env " + d["environment"]
+if mode == "file":
+    if d.get("ok"):
+        line += "  ·  %s -> %s" % (size(d.get("bytes")), d.get("output"))
+else:
+    line += "  ·  " + size(d.get("bodySize"))
+    if d.get("truncated"):
+        line += " (truncated to 1 MB)"
+err = d.get("error")
+unresolved = d.get("unresolvedVariables") or []
+if include == "1":
+    print(line)
+    for h in d.get("responseHeaders") or []:
+        print("%s: %s" % (h.get("name"), h.get("value")))
+    print()
+elif quiet != "1":
+    print(line, file=sys.stderr)
+if err:
+    print("error: " + err, file=sys.stderr)
+if unresolved:
+    print("warning: unresolved variables: " + ", ".join(unresolved) + " (try --env)", file=sys.stderr)
+if mode != "file":
+    body = d.get("body") or ""
+    ctype = (d.get("contentType") or "").lower()
+    if tty == "1" and "json" in ctype:
+        try:
+            body = json.dumps(json.loads(body), indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+    sys.stdout.write(body)
+    if body and not body.endswith("\n") and tty == "1":
+        sys.stdout.write("\n")
+sys.exit(0 if d.get("ok") else 1)
+' "$@"
+}
+
+cmd_req() {
+    local sub="${1:-}"
+    [[ $# -gt 0 ]] && shift
+    case "$sub" in
+        -h|--help|help|"") req_usage; return 0 ;;
+    esac
+    local env="" output="" have_output="" mkdir="" include=0 quiet=0 json="" collection="" limit="" args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)        req_usage; return 0 ;;
+            -e|--env)         env="${2:-}"; shift ;;
+            --env=*)          env="${1#*=}" ;;
+            -o|--output)      output="${2:-}"; have_output=1; shift ;;
+            --output=*)       output="${1#*=}"; have_output=1 ;;
+            -p|--mkdir)       mkdir=1 ;;
+            -i|--include)     include=1 ;;
+            -q|--quiet)       quiet=1 ;;
+            --json)           json=1 ;;
+            --collection)     collection="${2:-}"; shift ;;
+            --collection=*)   collection="${1#*=}" ;;
+            --limit)          limit="${2:-}"; shift ;;
+            --limit=*)        limit="${1#*=}" ;;
+            --)               shift; args+=("$@"); break ;;
+            -*)               echo "unknown flag: $1" >&2; exit 2 ;;
+            *)                args+=("$1") ;;
+        esac
+        shift
+    done
+    require_env
+    local payload out
+    case "$sub" in
+        list|ls)
+            payload="{"
+            [[ -n "$collection" ]] && payload+="\"collection\":$(json_encode "$collection")"
+            payload+="}"
+            out="$(api_post req/list "$payload")"
+            if [[ -n "$json" ]]; then pretty_json <<<"$out"; return 0; fi
+            echo "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+cols = d.get("collections") or []
+if not any(c.get("requests") for c in cols):
+    print("no saved requests for this project")
+for c in cols:
+    if not c.get("requests"):
+        continue
+    print("%s/" % c.get("name"))
+    w = max(len(r.get("name") or "") for r in c["requests"])
+    for r in c["requests"]:
+        print("  %-*s  %-6s %s" % (w, r.get("name"), r.get("method"), r.get("url")))
+envs = d.get("environments") or []
+if envs:
+    print()
+    print("environments: " + ", ".join(e.get("name") for e in envs))
+' 2>/dev/null || echo "$out"
+            ;;
+        send)
+            if [[ ${#args[@]} -ne 1 ]]; then
+                echo "usage: dg req send <request> [-e env] [-i] [-o file]   (see: dg req --help)" >&2; exit 2
+            fi
+            payload="{\"request\":$(json_encode "${args[0]}")"
+            [[ -n "$env" ]] && payload+=",\"environment\":$(json_encode "$env")"
+            local mode="body"
+            if [[ -n "$have_output" ]]; then
+                local rel
+                rel="$(scp_local_target "${output:-.}")" || exit 2
+                # An existing directory keeps the server's file name.
+                if [[ -d "${output:-.}" && "$rel" != */ && "$rel" != "." ]]; then rel+="/"; fi
+                payload+=",\"output\":$(json_encode "$rel")"
+                [[ -n "$mkdir" ]] && payload+=",\"createDirs\":true"
+                mode="file"
+            fi
+            payload+="}"
+            [[ -n "$json" ]] && mode="json"
+            out="$(api_post req/send "$payload")"
+            local tty=0
+            [[ -t 1 ]] && tty=1
+            req_render_send "$mode" "$include" "$quiet" "$tty" <<<"$out"
+            ;;
+        history)
+            if [[ ${#args[@]} -ne 1 ]]; then
+                echo "usage: dg req history <request> [--limit=N]" >&2; exit 2
+            fi
+            payload="{\"request\":$(json_encode "${args[0]}")"
+            [[ -n "$limit" ]] && payload+=",\"limit\":$(json_int --limit "$limit")"
+            payload+="}"
+            out="$(api_post req/history "$payload")"
+            if [[ -n "$json" ]]; then pretty_json <<<"$out"; return 0; fi
+            echo "$out" | python3 -c '
+import json, sys
+rows = json.load(sys.stdin)
+if not rows:
+    print("no history for this request")
+for r in rows:
+    st = r.get("status") if r.get("status") is not None else "---"
+    env = (" [%s]" % r["environment"]) if r.get("environment") else ""
+    err = ("  " + r["error"]) if r.get("error") else ""
+    print("%s  %s  %5d ms  %s %s%s%s" % ((r.get("sentAt") or "")[:19].replace("T", " "), st,
+          r.get("durationMs") or 0, r.get("method"), r.get("url"), env, err))
+' 2>/dev/null || echo "$out"
+            ;;
+        *) echo "unknown: dg req $sub" >&2; req_usage >&2; exit 2 ;;
+    esac
+}
+
 cmd_whoami() {
     require_env
     api_post whoami "{}"
@@ -576,6 +767,7 @@ case "${1:-}" in
     kube)        shift; cmd_kube "$@" ;;
     ssh)         shift; cmd_ssh "$@" ;;
     scp)         shift; cmd_scp "$@" ;;
+    req)         shift; cmd_req "$@" ;;
     whoami)      shift; cmd_whoami ;;
     -h|--help|help|"") usage ;;
     -v|--version) echo "dg ${DG_VERSION}" ;;
