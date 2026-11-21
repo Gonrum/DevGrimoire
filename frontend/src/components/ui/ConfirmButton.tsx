@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
 import i18n from '../../i18n';
 import Button from './Button';
 import { useToast } from '../Toast';
@@ -10,10 +10,12 @@ interface ConfirmButtonProps {
   confirmLabel?: string;
   variant?: 'secondary' | 'danger' | 'danger-solid';
   confirmVariant?: 'danger' | 'danger-solid';
-  size?: 'xs' | 'sm' | 'md' | 'lg';
+  size?: 'none' | 'xs' | 'sm' | 'md' | 'lg';
   className?: string;
   disabled?: boolean;
   timeout?: number;
+  /** Shown instead of the label while idle; the label becomes tooltip and accessible name. */
+  icon?: ReactNode;
 }
 
 export default function ConfirmButton({
@@ -26,6 +28,7 @@ export default function ConfirmButton({
   className = '',
   disabled,
   timeout = 3000,
+  icon,
 }: ConfirmButtonProps) {
   const [confirming, setConfirming] = useState(false);
   const mountedRef = useRef(true);
@@ -75,8 +78,10 @@ export default function ConfirmButton({
       onBlur={() => setConfirming(false)}
       className={className}
       disabled={disabled}
+      title={icon && !confirming ? label : undefined}
+      aria-label={icon && !confirming ? label : undefined}
     >
-      {confirming ? confirmLabel : label}
+      {confirming ? confirmLabel : (icon ?? label)}
     </Button>
   );
 }

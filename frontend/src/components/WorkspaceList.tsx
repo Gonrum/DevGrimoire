@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Archive, Code2, Copy, SquareTerminal, Trash2 } from 'lucide-react';
 import { api, Workspace, WorkspaceStatus, GitRepository } from '../api/client';
 import { optionOr } from '../lib/narrow';
 import { useToast } from './Toast';
@@ -11,6 +12,11 @@ import ConfirmButton from './ui/ConfirmButton';
 import { FormInput, FormTextarea } from './ui/FormField';
 import { Dialog, Portal } from './ui/Dialog';
 import { openInTerminalDock } from './ssh/terminalDockEvents';
+
+/** Square icon button of a workspace card. */
+const ICON_BUTTON = 'inline-flex h-8 w-8 items-center justify-center';
+/** Same footprint while idle; grows to fit the confirm text on the second step. */
+const CONFIRM_ICON_BUTTON = 'inline-flex h-8 min-w-8 items-center justify-center px-2 text-xs';
 
 interface CreateForm {
   name: string;
@@ -246,36 +252,44 @@ export default function WorkspaceList({ projectId }: Props) {
                     <button
                       type="button"
                       onClick={() => { void copyPath(ws.path); }}
-                      className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono"
+                      className="inline-flex max-w-full items-center gap-1 text-[10px] text-cyan-400 hover:text-cyan-300 font-mono"
                       title={ws.path}
                     >
-                      {ws.path} ⎘
+                      <span className="truncate">{ws.path}</span>
+                      <Copy className="h-3 w-3 shrink-0" aria-hidden />
                     </button>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2 sm:flex-col sm:items-end">
+                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                   <Button
-                    size="xs"
+                    size="none"
                     variant="secondary"
+                    className={ICON_BUTTON}
                     onClick={() => openInTerminalDock({ kind: 'workspace', workspace: ws })}
                     disabled={ws.status === 'archived'}
-                    title={ws.status === 'archived' ? t('workspaces.archivedNoTerminal') : undefined}
+                    title={ws.status === 'archived' ? t('workspaces.archivedNoTerminal') : t('workspaces.openTerminal')}
+                    aria-label={t('workspaces.openTerminal')}
                   >
-                    {t('workspaces.openTerminal')}
+                    <SquareTerminal className="h-4 w-4" aria-hidden />
                   </Button>
                   <Button
-                    size="xs"
-                    variant="secondary"
+                    size="none"
+                    variant="edit"
+                    className={ICON_BUTTON}
                     onClick={() => window.open(`/ide/${ws._id}`, '_blank', 'noopener')}
                     disabled={ws.status !== 'active'}
-                    title={ws.status === 'archived' ? t('workspaces.archivedNoIde') : undefined}
+                    title={ws.status === 'archived' ? t('workspaces.archivedNoIde') : t('workspaces.openIde')}
+                    aria-label={t('workspaces.openIde')}
                   >
-                    {t('workspaces.openIde')}
+                    <Code2 className="h-4 w-4" aria-hidden />
                   </Button>
+                  <span className="mx-0.5 h-5 w-px bg-gray-800" aria-hidden />
                   {ws.status !== 'archived' && (
                     <ConfirmButton
                       variant="secondary"
-                      size="xs"
+                      size="none"
+                      className={CONFIRM_ICON_BUTTON}
+                      icon={<Archive className="h-4 w-4" aria-hidden />}
                       label={t('workspaces.archive')}
                       confirmLabel={t('workspaces.confirmArchive')}
                       onConfirm={() => handleArchive(ws._id)}
@@ -283,7 +297,9 @@ export default function WorkspaceList({ projectId }: Props) {
                   )}
                   <ConfirmButton
                     variant="danger"
-                    size="xs"
+                    size="none"
+                    className={CONFIRM_ICON_BUTTON}
+                    icon={<Trash2 className="h-4 w-4" aria-hidden />}
                     label={t('workspaces.delete')}
                     confirmLabel={t('workspaces.confirmDelete', { name: ws.name })}
                     onConfirm={() => handleDelete(ws._id)}

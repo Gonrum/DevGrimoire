@@ -1321,7 +1321,7 @@
     "formGitRepoDefault": "Default (first repo per provider)",
     "formGitRepoHint": "For multi-repo projects: which configured repo's token to inject for gh/glab.",
     "nameHint": "Allowed: a-z, 0-9, '-', '_'. Must start with a letter or digit, max 64 chars.",
-    "openIde": "IDE",
+    "openIde": "Open IDE",
     "archivedNoIde": "Archived workspaces have no IDE"
   },
   "terminal": {

@@ -1321,7 +1321,7 @@
     "formGitRepoDefault": "Standard (erstes Repo pro Provider)",
     "formGitRepoHint": "Bei Multi-Repo-Projekten: aus welchem hinterlegten Repo das gh/glab-Token kommt.",
     "nameHint": "Erlaubt: a-z, 0-9, '-', '_'. Muss mit Buchstabe oder Zahl beginnen, max 64 Zeichen.",
-    "openIde": "IDE",
+    "openIde": "IDE öffnen",
     "archivedNoIde": "Archivierte Werkstätten haben keine IDE"
   },
   "terminal": {
