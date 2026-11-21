@@ -51,7 +51,7 @@ interface IdeState {
   /** One-shot cursor target the editor applies once the file is shown. */
   reveal: RevealTarget | null;
   blocked: BlockedReason;
-  /** Bumped after every successful write; the git status poll listens to it. */
+  /** Bumped after every successful write or tree change; the git status fetch listens to it. */
   saveTick: number;
 
   /** Switches the IDE to a workspace; a call for the current one only updates `rootPath`. */

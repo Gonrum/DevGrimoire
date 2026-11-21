@@ -146,11 +146,16 @@ export function FileTree({ workspaceId, activePath, onOpenFile, marks, initialRo
     expandDir,
     loadDir,
     refresh,
-    reloadDirs,
+    reloadDirs: reloadTreeDirs,
     forgetPath,
     renamePath,
   } = useWorkspaceFileTree(workspaceId, initialRoot);
   const noteApiError = useIdeStore((s) => s.noteApiError);
+  // Every tree mutation changes what git reports, so the change markers are refetched with it.
+  const reloadDirs = async (dirs: string[]): Promise<void> => {
+    await reloadTreeDirs(dirs);
+    useIdeStore.setState((s) => ({ saveTick: s.saveTick + 1 }));
+  };
   const closeTabsUnder = useIdeStore((s) => s.closeTabsUnder);
   const renameTabsUnder = useIdeStore((s) => s.renameTabsUnder);
   const openTerminalAt = useIdeStore((s) => s.openTerminalAt);

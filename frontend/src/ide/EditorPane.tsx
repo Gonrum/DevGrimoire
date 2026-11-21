@@ -469,13 +469,7 @@ export function EditorPane() {
             <div className="shrink-0 border-b border-gray-700 px-4 py-2 text-xs text-amber-300">{t('ide.diskMissing')}</div>
           )}
           <div className="min-h-0 flex-1">
-            <DiffEditor
-              theme={DEVGRIMOIRE_THEME}
-              language={languageFromPath(diffTab.path)}
-              original={diff.disk ?? ''}
-              modified={diffTab.content}
-              options={DIFF_OPTIONS}
-            />
+            <ConflictDiff path={diffTab.path} original={diff.disk ?? ''} modified={diffTab.content} />
           </div>
         </IdeDialog>
       )}
@@ -511,6 +505,40 @@ export function EditorPane() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Side-by-side diff of the conflict dialog. The wrapper keeps both models alive past the
+ * widget: letting the library dispose them first makes Monaco throw "TextModel got disposed
+ * before DiffEditorWidget model got reset" when the dialog closes.
+ */
+function ConflictDiff({ path, original, modified }: { path: string; original: string; modified: string }) {
+  const diffEditor = useRef<monacoEditor.IStandaloneDiffEditor | null>(null);
+  useEffect(
+    () => () => {
+      // Runs before the widget is torn down, so the models are still attached here.
+      const models = diffEditor.current?.getModel();
+      setTimeout(() => {
+        models?.original.dispose();
+        models?.modified.dispose();
+      }, 0);
+    },
+    [],
+  );
+  return (
+    <DiffEditor
+      theme={DEVGRIMOIRE_THEME}
+      language={languageFromPath(path)}
+      original={original}
+      modified={modified}
+      options={DIFF_OPTIONS}
+      keepCurrentOriginalModel
+      keepCurrentModifiedModel
+      onMount={(editor) => {
+        diffEditor.current = editor;
+      }}
+    />
   );
 }
 

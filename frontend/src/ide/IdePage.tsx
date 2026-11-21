@@ -118,7 +118,13 @@ export default function IdePage() {
   const title =
     state.kind === 'ready' || state.kind === 'inactive' || state.kind === 'gateInactive' ? state.workspace.name : null;
   useEffect(() => {
-    if (title) document.title = `${title} — IDE`;
+    if (!title) return undefined;
+    const previous = document.title;
+    document.title = `${title} — IDE`;
+    // The rest of the app never sets a title, so leaving the IDE must put the old one back.
+    return () => {
+      document.title = previous;
+    };
   }, [title]);
 
   if (!workspaceId || state.kind === 'notFound') {
