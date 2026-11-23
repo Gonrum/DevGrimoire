@@ -675,11 +675,14 @@ export class SshFsBackend implements WorkspaceFsBackend {
   }
 
   /**
-   * Agent command on the server: `cd -- <root> && <command>`. The command is
-   * a shell command line on purpose and is not quoted; only the root is. No
+   * Agent command on the server: `cd -- <root> && exec /bin/sh -c <command>`.
+   * The command is a shell command line on purpose; it is handed to /bin/sh
+   * as one quoted word, so the remote user's login shell (zsh, fish …) never
+   * interprets it — the agent allow-list reasons about POSIX sh syntax. No
    * env (no DevGrimoire credentials to the server), never retried, and not
    * wrapped in `timeout` (commands may legitimately run up to 600 s): the
-   * exec timeout ends it with TERM, like an abort.
+   * exec timeout ends it with TERM, like an abort. Output beyond the cap is
+   * kept as head + tail; it never stops the command.
    */
   async exec(command: string, opts: FsExecOpts): Promise<FsExecResult> {
     const { timeoutMs, maxOutputBytes, signal } = normaliseExecInput(command, opts);
@@ -688,10 +691,11 @@ export class SshFsBackend implements WorkspaceFsBackend {
     const started = Date.now();
     let result: FsExecResult;
     try {
-      const res = await this.run((s) => s.exec(`cd -- ${shq(this.root)} && ${command}`, {
+      const res = await this.run((s) => s.exec(`cd -- ${shq(this.root)} && exec /bin/sh -c ${shq(command)}`, {
         timeoutMs,
         maxOutputBytes,
         terminateOnTimeout: true,
+        outputMode: 'headTail',
         ...(signal ? { signal } : {}),
       }));
       result = { exitCode: res.code, stdout: res.stdout, stderr: res.stderr, truncated: res.truncated, timedOut: false, aborted: false };

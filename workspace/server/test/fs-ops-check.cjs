@@ -525,6 +525,35 @@ async function main() {
       }
     });
 
+    await check('exec/stream: fullOutput sends all of a 3 MiB output (last line kept, exit 0); default caps at 1 MiB', async () => {
+      const run = async (extra) => {
+        const res = await fetch(`${base}/exec/stream`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            workspaceId: 'ws1',
+            command: "head -c 3145728 /dev/zero | tr '\\0' a; echo; echo LAST-LINE",
+            cwdState: false,
+            ...extra,
+          }),
+        });
+        assert.equal(res.status, 200);
+        return (await res.text()).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+      };
+      const full = await run({ fullOutput: true });
+      const lines = full.filter((e) => e.type === 'stdout').map((e) => e.line);
+      const done = full.find((e) => e.type === 'done');
+      assert.equal(lines[lines.length - 1], 'LAST-LINE');
+      assert.equal(lines.slice(0, -1).join('').length, 3 * 1024 * 1024);
+      assert.ok(lines.every((l) => l.length <= 64 * 1024), 'long lines are sent in pieces');
+      assert.equal(done.exitCode, 0);
+      assert.equal(done.stdoutTruncated, false);
+      const capped = await run({});
+      const cappedLines = capped.filter((e) => e.type === 'stdout').map((e) => e.line);
+      assert.notEqual(cappedLines[cappedLines.length - 1], 'LAST-LINE');
+      assert.equal(capped.find((e) => e.type === 'done').stdoutTruncated, true);
+    });
+
     const MIB = 1024 * 1024;
     await check('maxBytes: /read 413 without it, 200 with 8 MiB (capped at the hard max), limit reported', async () => {
       put('six.txt', 'a'.repeat(6 * MIB));

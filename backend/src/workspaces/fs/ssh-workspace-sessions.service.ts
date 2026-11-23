@@ -356,6 +356,7 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
       const timeoutMs = opts.timeoutMs ?? this.opTimeoutMs;
       const maxOutputBytes = opts.maxOutputBytes ?? SSH_EXEC_MAX_OUTPUT_BYTES;
       const terminateOnTimeout = opts.terminateOnTimeout !== false;
+      const outputMode = opts.outputMode === 'headTail' ? 'headTail' : 'stop';
       const signal = opts.signal;
       const release = this.hold(state);
       try {
@@ -365,7 +366,9 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
           // and keeps the session: a search returning partial results must not
           // kill parallel downloads.
           return await this.guarded(state, 'exec', timeoutMs + this.execGraceMs, () =>
-            driver.exec(command, { timeoutMs, maxOutputBytes, terminateOnTimeout, ...(signal ? { signal } : {}) }),
+            driver.exec(command, {
+              timeoutMs, maxOutputBytes, terminateOnTimeout, outputMode, ...(signal ? { signal } : {}),
+            }),
           false);
         } finally {
           this.releaseExec(state);

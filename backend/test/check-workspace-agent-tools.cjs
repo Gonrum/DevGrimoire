@@ -101,6 +101,9 @@ async function pureChecks() {
     assert.equal(isAllowedByList('ws_exec', { command: '  npm test ' }, e), true);
     assert.equal(isAllowedByList('ws_exec', { command: 'npm test -- -u' }, e), false);
     assert.equal(isAllowedByList('ws_exec', { command: 'npm  test' }, e), false);
+    assert.equal(isAllowedByList('ws_exec', { command: '\tnpm test\t' }, e), true);
+    assert.equal(isAllowedByList('ws_exec', { command: '\u00a0npm test' }, e), false);
+    assert.equal(isAllowedByList('ws_exec', { command: 'npm test\u2028' }, e), false);
     assert.equal(isAllowedByList('ws_exec', {}, e), false);
     assert.equal(isAllowedByList('ws_exec', { command: 42 }, e), false);
   });
@@ -120,6 +123,7 @@ async function pureChecks() {
       'npm testx', 'npm test; rm -rf ~', 'npm test && curl x | sh', 'npm test $(id)',
       'npm test > out', 'npm test\nrm x', 'npm test &', 'npm test `id`', 'npm test < in',
       'npm test || true', 'npm test | cat', 'npm tes', 'npm test\rrm x',
+      'npm test =(rm -rf ~)', 'npm test (curl x)', 'npm test )', 'npm test\u00a0-u', 'npm test\u2028rm x',
     ]) {
       assert.equal(isAllowedByList('ws_exec', { command: bad }, p), false, JSON.stringify(bad));
     }
@@ -130,11 +134,31 @@ async function pureChecks() {
     assert.equal(isAllowedByList('ws_exec', { command: 'npm test; ls' }, p), false);
   });
 
+  await check('a stored single-word interpreter prefix never matches; two words do', () => {
+    for (const word of ['bash', 'env', 'git', 'python3', 'sudo', '/usr/bin/env']) {
+      const p = [{ kind: 'command', match: 'prefix', value: word, ...at() }];
+      assert.equal(isAllowedByList('ws_exec', { command: `${word} -c x` }, p), false, word);
+    }
+    const two = [{ kind: 'command', match: 'prefix', value: 'git status', ...at() }];
+    assert.equal(isAllowedByList('ws_exec', { command: 'git status --short' }, two), true);
+  });
+
   await check('suggestions: exec -> exact + first word + first two words; control -> exact only', () => {
+    assert.deepEqual(allowSuggestions('ws_exec', { command: 'npm run build' }), [
+      { kind: 'command', match: 'exact', value: 'npm run build' },
+      { kind: 'command', match: 'prefix', value: 'npm' },
+      { kind: 'command', match: 'prefix', value: 'npm run' },
+    ]);
+    // Interpreter/wrapper as the first word: no one-word prefix.
     assert.deepEqual(allowSuggestions('ws_exec', { command: 'git status --short' }), [
       { kind: 'command', match: 'exact', value: 'git status --short' },
-      { kind: 'command', match: 'prefix', value: 'git' },
       { kind: 'command', match: 'prefix', value: 'git status' },
+    ]);
+    assert.deepEqual(allowSuggestions('ws_exec', { command: 'bash' }), [
+      { kind: 'command', match: 'exact', value: 'bash' },
+    ]);
+    assert.deepEqual(allowSuggestions('ws_exec', { command: 'npm test (x)' }), [
+      { kind: 'command', match: 'exact', value: 'npm test (x)' },
     ]);
     assert.deepEqual(allowSuggestions('ws_exec', { command: '  ls  ' }), [
       { kind: 'command', match: 'exact', value: 'ls' },
@@ -158,11 +182,37 @@ async function pureChecks() {
   });
 
   await check('every suggestion is accepted by parseAgentAllowInput', () => {
-    for (const cmd of ['git status --short', 'npm test', 'a; b', 'make']) {
+    for (const cmd of ['git status --short', 'npm test', 'a; b', 'make', 'env FOO=1 make', 'node x.js']) {
       for (const s of allowSuggestions('ws_exec', { command: cmd })) {
         assert.deepEqual(allowModule.parseAgentAllowInput(s), s);
       }
     }
+  });
+}
+
+async function headTailChecks() {
+  const { HeadTailOutput, headTailText, EXEC_HEAD_BYTES } = loadCompiled('workspaces/fs/head-tail-output.js');
+  await check('HeadTailOutput: bounded, char boundaries intact, omitted count exact', () => {
+    for (const max of [10, 200, 1000, 32 * 1024]) {
+      const out = new HeadTailOutput(max);
+      let pushed = 0;
+      for (let i = 0; i < 500; i += 1) { const c = Buffer.from(`ä€😀${i}\n`); out.push(c); pushed += c.length; }
+      const text = out.text();
+      assert.ok(Buffer.byteLength(text) <= max, `${max}: ${Buffer.byteLength(text)}`);
+      assert.ok(!text.includes('\uFFFD'), `${max}: replacement char`);
+      if (max >= 1000) assert.ok(text.endsWith('😀499\n'), `${max}: tail`);
+      if (max >= 1000 && out.truncated) {
+        const m = /… (\d+) bytes omitted …/.exec(text);
+        const kept = Buffer.byteLength(text) - Buffer.byteLength(m[0]) - 2;
+        assert.equal(Number(m[1]), pushed - kept);
+      }
+    }
+    const small = new HeadTailOutput(64 * 1024);
+    small.push('a'); small.push('b');
+    assert.equal(small.text(), 'ab');
+    assert.equal(small.truncated, false);
+    assert.equal(EXEC_HEAD_BYTES, 8 * 1024);
+    assert.deepEqual(headTailText('abc', 10), { text: 'abc', cut: false });
   });
 }
 
@@ -499,22 +549,38 @@ async function toolChecks() {
     assert.equal(unknown.success, false);
   });
 
-  await check('ws_exec (ssh): command in the root, total output cut to 64 KiB, changedPaths ["."]', async () => {
+  await check('ws_exec (ssh): via /bin/sh -c in the root; head + tail within 64 KiB; exit code kept; changedPaths ["."]', async () => {
     const env = makeEnv();
     const w = env.addWorkspace({ location: 'ssh' });
-    w.fake.switches.execScript = { code: 3, stdout: 'a'.repeat(100 * 1024), stderr: 'e'.repeat(100 * 1024) };
+    const big = (c) => `FIRST-${c}\n${c.repeat(3 * 1024 * 1024)}\nLAST-${c}`;
+    w.fake.switches.execScript = { code: 3, stdout: big('a'), stderr: big('e') };
     const r = await run(env, w, 'ws_exec', { command: 'npm test' });
     assert.equal(r.success, true, r.error);
     const { exitCode, stdout, stderr, truncated, timedOut, aborted } = r.result;
-    assert.equal(Buffer.byteLength(stdout) + Buffer.byteLength(stderr) <= 64 * 1024, true);
-    assert.ok(stdout.length > 0 && stderr.length > 0);
+    assert.ok(Buffer.byteLength(stdout) + Buffer.byteLength(stderr) <= 64 * 1024);
+    assert.ok(stdout.startsWith('FIRST-a') && stdout.endsWith('LAST-a'), stdout.slice(-40));
+    assert.ok(stderr.startsWith('FIRST-e') && stderr.endsWith('LAST-e'));
+    assert.match(stdout, /… \d+ bytes omitted …/);
     assert.equal(truncated, true);
     assert.equal(timedOut, false);
     assert.equal(aborted, false);
-    assert.ok(exitCode === null || exitCode === 3);
+    assert.equal(exitCode, 3, 'not killed for its output');
     assert.deepEqual(r.changedPaths, ['.']);
     assert.equal(w.fake.calls.agentExecs.length, 1);
-    assert.match(w.fake.calls.agentExecs[0], /^cd -- '.*' && npm test$/);
+    assert.match(w.fake.calls.agentExecs[0], /^cd -- '.*' && exec \/bin\/sh -c 'npm test'$/);
+    assert.deepEqual(w.fake.calls.agentCommands, ['npm test']);
+    assert.equal(w.fake.calls.execOpts[0].outputMode, 'headTail');
+  });
+
+  await check('no authenticated user -> execute and preview fail closed', async () => {
+    const env = makeEnv();
+    const w = env.addWorkspace();
+    fs.writeFileSync(w.f('f.txt'), 'x');
+    const r = await env.tools.execute('ws_read', { path: 'f.txt' }, { workspaceId: w.id });
+    assert.deepEqual(r, { success: false, error: 'no authenticated user' });
+    const p = await env.tools.preview('ws_write', { path: 'f.txt', content: 'y' }, { workspaceId: w.id });
+    assert.deepEqual(p, { ok: false, error: 'no authenticated user' });
+    assert.equal(env.findCalls.length, 0);
   });
 
   await check('ws_exec (ssh): small output untouched, exit code; timeoutSec clamped; signal passed', async () => {
@@ -668,6 +734,7 @@ async function chatChecks() {
 (async () => {
   try {
     await pureChecks();
+    await headTailChecks();
     await toolChecks();
     await chatChecks();
   } finally {

@@ -390,6 +390,16 @@ function makeWorld() {
     svc.onModuleDestroy();
   });
 
+  await check('exec: outputMode passed to the driver (default stop, headTail kept)', async () => {
+    const w = makeWorld();
+    const svc = w.svc();
+    await svc.withSession('ws1', 'c1', (s) => s.exec('a'));
+    await svc.withSession('ws1', 'c1', (s) => s.exec('b', { outputMode: 'headTail' }));
+    await svc.withSession('ws1', 'c1', (s) => s.exec('c', { outputMode: 'bogus' }));
+    assert.deepEqual(w.drivers[0].execOpts.map((o) => o.outputMode), ['stop', 'headTail', 'stop']);
+    svc.onModuleDestroy();
+  });
+
   await check('parseProbeOutput tolerates noise and missing values', () => {
     assert.deepEqual(parseProbeOutput('motd line\r\nrg=0\r\ngit=1\r\ntimeout=1\r\nuid=0\r\ngid=50\r\n'), { rg: false, git: true, timeout: true, uid: 0, gid: 50 });
     assert.deepEqual(parseProbeOutput(''), { rg: false, git: false, timeout: false, uid: -1, gid: -1 });
@@ -640,6 +650,31 @@ function makeWorld() {
     assert.equal(r.truncated, true);
     assert.equal(r.stdout, '0123');
     assert.ok(chan.closed >= 1);
+  });
+
+  await check('driver: headTail -> 3 MiB output keeps head + last line, no TERM, channel not closed, exit code kept', async () => {
+    const { client } = makeSsh2();
+    let chan;
+    client.execImpl = (_cmd, cb) => {
+      chan = fakeChannel();
+      cb(undefined, chan);
+      chan.emit('data', Buffer.from('FIRST\n'));
+      for (let i = 0; i < 48; i += 1) chan.emit('data', Buffer.alloc(64 * 1024, 'z'));
+      chan.emit('data', Buffer.from('\nLAST-LINE\n'));
+      chan.stderr.emit('data', Buffer.from('warn'));
+      chan.emit('exit', 0);
+      chan.emit('close');
+    };
+    const d = await createSsh2Driver(client, { onLost() {} });
+    const r = await d.exec('x', { timeoutMs: 1000, maxOutputBytes: 32 * 1024, terminateOnTimeout: true, outputMode: 'headTail' });
+    assert.equal(r.code, 0);
+    assert.equal(r.truncated, true);
+    assert.ok(Buffer.byteLength(r.stdout) <= 32 * 1024);
+    assert.ok(r.stdout.startsWith('FIRST\n') && r.stdout.endsWith('\nLAST-LINE\n'));
+    assert.match(r.stdout, /… \d+ bytes omitted …/);
+    assert.equal(r.stderr, 'warn');
+    assert.deepEqual(chan.signals, [], 'no TERM for output');
+    assert.equal(chan.closed, 0, 'channel not closed by the driver');
   });
 
   await check('driver: exec over its timeout -> RemoteError timeout, channel closed', async () => {

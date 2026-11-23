@@ -3,6 +3,7 @@ import type { Readable } from 'node:stream';
 import type { WorkspaceClient } from '../workspace-client.service';
 import { parseGitStatus, parseRipgrepJson } from '../workspace-search-parse';
 import { normaliseExecInput } from './workspace-fs-backend';
+import { HeadTailOutput } from './head-tail-output';
 import type {
   FsExecOpts,
   FsExecResult,
@@ -20,34 +21,14 @@ const SEARCH_LIMIT = 2000;
  */
 const EXEC_BACKSTOP_MS = 15_000;
 
-/** Lines of one output stream, capped at `max` bytes (cut on a character boundary). */
-class CappedText {
-  private readonly parts: string[] = [];
-  private bytes = 0;
-  truncated = false;
-
-  constructor(private readonly max: number) {}
+/** Lines of one stream into a head + rolling tail collector (`\n` between lines). */
+class StreamLines {
+  private first = true;
+  constructor(readonly out: HeadTailOutput) {}
 
   add(line: string): void {
-    if (this.truncated) return;
-    const piece = this.parts.length ? `\n${line}` : line;
-    const size = Buffer.byteLength(piece, 'utf8');
-    if (this.bytes + size <= this.max) {
-      this.parts.push(piece);
-      this.bytes += size;
-      return;
-    }
-    this.truncated = true;
-    const room = this.max - this.bytes;
-    if (room <= 0) return;
-    // `toString` would turn a cut multi-byte sequence into U+FFFD; drop it instead.
-    const cut = Buffer.from(piece, 'utf8').subarray(0, room).toString('utf8').replace(/\uFFFD$/, '');
-    this.parts.push(cut);
-    this.bytes += Buffer.byteLength(cut, 'utf8');
-  }
-
-  get text(): string {
-    return this.parts.join('');
+    this.out.push(this.first ? line : `\n${line}`);
+    this.first = false;
   }
 }
 
@@ -152,16 +133,18 @@ export class ContainerFsBackend implements WorkspaceFsBackend {
 
   async exec(command: string, opts: FsExecOpts): Promise<FsExecResult> {
     const { timeoutMs, maxOutputBytes, signal } = normaliseExecInput(command, opts);
-    const stdout = new CappedText(maxOutputBytes);
-    const stderr = new CappedText(maxOutputBytes);
+    // Head + rolling tail per stream; the sidecar sends the whole output
+    // (`fullOutput`), so the end of a long log is kept.
+    const stdout = new StreamLines(new HeadTailOutput(maxOutputBytes));
+    const stderr = new StreamLines(new HeadTailOutput(maxOutputBytes));
     let exitCode: number | null = null;
     let timedOut = false;
     let sidecarTruncated = false;
     const result = (aborted: boolean): FsExecResult => ({
       exitCode: aborted ? null : exitCode,
-      stdout: stdout.text,
-      stderr: stderr.text,
-      truncated: stdout.truncated || stderr.truncated || sidecarTruncated,
+      stdout: stdout.out.text(),
+      stderr: stderr.out.text(),
+      truncated: stdout.out.truncated || stderr.out.truncated || sidecarTruncated,
       timedOut,
       aborted,
     });
@@ -205,7 +188,7 @@ export class ContainerFsBackend implements WorkspaceFsBackend {
           default:
             break;
         }
-      }, { cwdState: false });
+      }, { cwdState: false, fullOutput: true });
     } catch (err: unknown) {
       if (signal?.aborted) return result(true);
       if (backstopHit) {

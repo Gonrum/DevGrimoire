@@ -15,12 +15,16 @@ export interface FsLimits {
   uploadMaxBytes?: number;
 }
 
-/** Result of `exec`; `exitCode` is null after a timeout, an abort or a cut-off output. */
+/**
+ * Result of `exec`; `exitCode` is null after a timeout or an abort. Output
+ * over the cap never stops the command: each stream keeps its head and a
+ * rolling tail (`HeadTailOutput`), joined by an `… N bytes omitted …` marker.
+ */
 export interface FsExecResult {
   exitCode: number | null;
   stdout: string;
   stderr: string;
-  /** stdout or stderr exceeded `maxOutputBytes` (each stream is capped on its own). */
+  /** Bytes were omitted from stdout or stderr (each stream within `maxOutputBytes`, marker included). */
   truncated: boolean;
   timedOut: boolean;
   aborted: boolean;

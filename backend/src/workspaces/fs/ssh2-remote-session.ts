@@ -1,6 +1,7 @@
 import { PassThrough, Readable, Writable } from 'node:stream';
 import type { Client as Ssh2Client, ClientChannel, FileEntryWithStats, SFTPWrapper, Stats } from 'ssh2';
 import { errorMessage, isRecord } from '../../common/narrow';
+import { HeadTailOutput } from './head-tail-output';
 import {
   RemoteDirEntry,
   RemoteDriverContext,
@@ -283,23 +284,26 @@ function wrapWriteStream(open: () => Writable, context: string): Writable {
   return out;
 }
 
-interface OutputSink { chunks: Buffer[]; len: number }
+interface OutputSink { chunks: Buffer[]; len: number; headTail?: HeadTailOutput }
 
 /**
  * One exec channel with an absolute timeout, a per-stream output cap and an
  * optional abort signal. Timeout and abort reject with the output collected
- * so far as `partial`.
+ * so far as `partial`. With `outputMode: 'headTail'` the cap never stops the
+ * command: each stream keeps head + rolling tail.
  */
 function runExec(client: Ssh2Client, command: string, opts: RemoteDriverExecOpts): Promise<RemoteExecResult> {
-  const { timeoutMs, maxOutputBytes, terminateOnTimeout, signal } = opts;
+  const { timeoutMs, maxOutputBytes, terminateOnTimeout, outputMode, signal } = opts;
+  const headTail = outputMode === 'headTail';
   return new Promise<RemoteExecResult>((resolve, reject) => {
     let settled = false;
     let truncated = false;
     let exitCode: number | null = null;
     let channel: ClientChannel | undefined;
-    const out: OutputSink = { chunks: [], len: 0 };
-    const err: OutputSink = { chunks: [], len: 0 };
-    const text = (sink: OutputSink): string => Buffer.concat(sink.chunks, sink.len).toString('utf8');
+    const sink = (): OutputSink => ({ chunks: [], len: 0, ...(headTail ? { headTail: new HeadTailOutput(maxOutputBytes) } : {}) });
+    const out = sink();
+    const err = sink();
+    const text = (s: OutputSink): string => s.headTail?.text() ?? Buffer.concat(s.chunks, s.len).toString('utf8');
     const partial = (): RemoteExecPartial => ({ stdout: text(out), stderr: text(err), ...(truncated ? { truncated } : {}) });
     const closeChannel = (): void => safe(() => channel?.close());
     const timer = setTimeout(() => {
@@ -329,12 +333,17 @@ function runExec(client: Ssh2Client, command: string, opts: RemoteDriverExecOpts
       return;
     }
     signal?.addEventListener('abort', onAbort, { once: true });
-    const take = (sink: OutputSink, chunk: Buffer): void => {
-      const room = maxOutputBytes - sink.len;
+    const take = (s: OutputSink, chunk: Buffer): void => {
+      if (s.headTail) {
+        s.headTail.push(chunk);
+        if (s.headTail.truncated) truncated = true;
+        return;
+      }
+      const room = maxOutputBytes - s.len;
       if (room > 0) {
         const part = chunk.length > room ? chunk.subarray(0, room) : chunk;
-        sink.chunks.push(part);
-        sink.len += part.length;
+        s.chunks.push(part);
+        s.len += part.length;
       }
       if (chunk.length > room) {
         // Like timeout and abort: ask the server to stop the command, then close.
@@ -367,7 +376,8 @@ function runExec(client: Ssh2Client, command: string, opts: RemoteDriverExecOpts
         ch.on('error', (e: Error) => finish(() => reject(toRemoteError(e, 'exec'))));
         ch.on('close', (code: unknown) => {
           if (exitCode === null && typeof code === 'number') exitCode = code;
-          finish(() => resolve({ code: truncated ? null : exitCode, ...partial(), truncated }));
+          // Only `stop` cut the command off; head/tail output keeps its exit code.
+          finish(() => resolve({ code: truncated && !headTail ? null : exitCode, ...partial(), truncated }));
         });
       });
     } catch (e: unknown) {

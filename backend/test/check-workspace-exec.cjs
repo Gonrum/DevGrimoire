@@ -111,8 +111,9 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     assert.equal(client.calls[0].command, 'make test');
     assert.equal(client.calls[0].timeoutMs, 90_000);
     assert.deepEqual(client.calls[0].env, { GH_TOKEN: 'x' });
-    // Agent commands start in the workspace root and never touch the cwd the terminal shares.
-    assert.deepEqual(client.calls[0].opts, { cwdState: false });
+    // Agent commands start in the workspace root and never touch the cwd the terminal
+    // shares; the sidecar sends the whole output (head + tail are kept here).
+    assert.deepEqual(client.calls[0].opts, { cwdState: false, fullOutput: true });
   });
 
   await check('container: unusable timeout -> 60 s, unusable output cap -> 64 KiB', async () => {
@@ -159,6 +160,22 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     });
     const res2 = await new ContainerFsBackend(flagged, 'w1', async () => undefined).exec('x', OPTS);
     assert.equal(res2.truncated, true);
+  });
+
+  await check('container: 3 MiB output -> head + marker + tail, last line kept, exit code kept', async () => {
+    const client = fakeClient(async (emit) => {
+      emit({ type: 'stdout', line: 'FIRST' });
+      for (let i = 0; i < 48; i += 1) emit({ type: 'stdout', line: 'x'.repeat(64 * 1024) });
+      emit({ type: 'stdout', line: 'LAST-LINE' });
+      emit({ type: 'done', exitCode: 0, timedOut: false, stdoutTruncated: false });
+    });
+    const res = await new ContainerFsBackend(client, 'w1', async () => undefined).exec('x', { timeoutMs: 1000, maxOutputBytes: 32 * 1024 });
+    assert.equal(res.exitCode, 0);
+    assert.equal(res.truncated, true);
+    assert.ok(Buffer.byteLength(res.stdout) <= 32 * 1024);
+    assert.ok(res.stdout.startsWith('FIRST\n'));
+    assert.ok(res.stdout.endsWith('\nLAST-LINE'));
+    assert.match(res.stdout, /\n… \d+ bytes omitted …\n/);
   });
 
   await check('container: multi-byte output is cut on a character boundary', async () => {
@@ -244,16 +261,18 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     return { base, root, fake, backend, runs, audits };
   }
 
-  await check('ssh: command is `cd -- <shq(root)> && <command>` (command unquoted); result mapped; not retryable; no env', async () => {
+  await check('ssh: command is `cd -- <shq(root)> && exec /bin/sh -c <shq(command)>`; result mapped; not retryable; no env', async () => {
     const t = setup();
     t.fake.switches.execScript = { code: 2, stdout: 'out\n', stderr: 'err\n' };
     const res = await t.backend.exec('npm test -- --grep "a b"', { timeoutMs: 30_000, maxOutputBytes: 4096 });
     assert.deepEqual(res, { exitCode: 2, stdout: 'out\n', stderr: 'err\n', truncated: false, timedOut: false, aborted: false });
-    assert.deepEqual(t.fake.calls.agentExecs, [`cd -- '${t.root}' && npm test -- --grep "a b"`]);
+    assert.deepEqual(t.fake.calls.agentExecs, [`cd -- '${t.root}' && exec /bin/sh -c 'npm test -- --grep "a b"'`]);
+    assert.deepEqual(t.fake.calls.agentCommands, ['npm test -- --grep "a b"']);
     const opts = t.fake.calls.execOpts[t.fake.calls.execOpts.length - 1];
     assert.equal(opts.timeoutMs, 30_000);
     assert.equal(opts.maxOutputBytes, 4096);
     assert.ok(!('env' in opts), 'no env toward the server');
+    assert.equal(opts.outputMode, 'headTail');
     assert.notEqual(opts.terminateOnTimeout, false);
     assert.ok(t.runs.every((o) => o.retryable !== true), 'exec is not retryable');
   });
@@ -271,7 +290,10 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     await t.backend.exec('ls', OPTS);
     const cmd = t.fake.calls.agentExecs[0];
     assert.ok(cmd.startsWith(`cd -- '${t.root.replace(/'/g, `'\\''`)}' && `), cmd);
-    assert.ok(cmd.endsWith(' && ls'));
+    assert.ok(cmd.endsWith(" && exec /bin/sh -c 'ls'"));
+    // A command with ' is one word for /bin/sh as well.
+    await t.backend.exec("echo 'x'", OPTS);
+    assert.deepEqual(t.fake.calls.agentCommands, ['ls', "echo 'x'"]);
   });
 
   await check('ssh: agent command never runs in the fake (no file created)', async () => {
@@ -314,6 +336,16 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     assert.deepEqual(res, { exitCode: null, stdout: 'begun', stderr: '', truncated: false, timedOut: false, aborted: true });
   });
 
+  await check('ssh: 3 MiB output -> head + marker + tail, last line kept, exit code kept', async () => {
+    const t = setup();
+    t.fake.switches.execScript = { code: 0, stdout: `FIRST\n${'y'.repeat(3 * 1024 * 1024)}\nLAST-LINE` };
+    const res = await t.backend.exec('yes | head', { timeoutMs: 1000, maxOutputBytes: 32 * 1024 });
+    assert.equal(res.exitCode, 0);
+    assert.equal(res.truncated, true);
+    assert.ok(Buffer.byteLength(res.stdout) <= 32 * 1024);
+    assert.ok(res.stdout.startsWith('FIRST\n') && res.stdout.endsWith('\nLAST-LINE'));
+  });
+
   await check('ssh: output over maxOutputBytes -> truncated', async () => {
     const t = setup();
     t.fake.switches.execScript = { stdout: 'y'.repeat(500) };
@@ -351,7 +383,9 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     t.fake.switches.execScript = null;
     await assert.rejects(t.fake.session.exec(`cd -- '${t.root}' && touch x`, {}), /not allowed/);
     t.fake.switches.execScript = {};
-    await assert.rejects(t.fake.session.exec(`cd -- '/etc' && ls`, {}), /outside the temp dir/);
+    await assert.rejects(t.fake.session.exec(`cd -- '/etc' && exec /bin/sh -c 'ls'`, {}), /outside the temp dir/);
+    // The old unwrapped form is no agent shape any more.
+    await assert.rejects(t.fake.session.exec(`cd -- '${t.root}' && ls`, {}), /not allowed/);
     assert.deepEqual(fs.readdirSync(t.root), []);
   });
 

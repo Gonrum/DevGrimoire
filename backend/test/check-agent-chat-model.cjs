@@ -129,7 +129,7 @@ const USER = oid().toString();
     await svc.addAgentAllow(String(ws._id), { kind: 'command', match: 'exact', value: 'c5' });
     assert.equal(ws.agentAllow.length, 100);
   });
-  for (const ctl of [';', '&&', '||', '|', '`', '$(', '>', '<', '&', '\n', '\r']) {
+  for (const ctl of [';', '&&', '||', '|', '`', '$(', '>', '<', '&', '(', ')', '\n', '\r']) {
     await check(`prefix containing ${JSON.stringify(ctl)} -> 400 (exact is allowed)`, async () => {
       const ws = makeWorkspace();
       const svc = wsService([ws]);
@@ -139,6 +139,24 @@ const USER = oid().toString();
       assert.equal(ws.agentAllow.length, 1);
     });
   }
+  await check('prefix: a single interpreter/wrapper word -> 400; two words or exact are fine', async () => {
+    const ws = makeWorkspace();
+    const svc = wsService([ws]);
+    const id = String(ws._id);
+    for (const word of ['bash', 'sh', 'env', 'xargs', 'find', 'node', 'python3', 'npx', 'sudo', 'git', 'eval', ' timeout ', '/usr/bin/env']) {
+      await rejectsWith(() => svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: word }), 400);
+    }
+    await svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: 'git status' });
+    await svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: 'npm' });
+    await svc.addAgentAllow(id, { kind: 'command', match: 'exact', value: 'git' });
+    assert.equal(ws.agentAllow.length, 3);
+  });
+  await check('values are edge-trimmed of spaces/tabs only (NBSP stays)', async () => {
+    const ws = makeWorkspace();
+    const svc = wsService([ws]);
+    await svc.addAgentAllow(String(ws._id), { kind: 'command', match: 'exact', value: '\t npm test \u00a0' });
+    assert.equal(ws.agentAllow[0].value, 'npm test \u00a0');
+  });
   await check('invalid input -> 400 (kind, match, value empty/too long/non-string)', async () => {
     const ws = makeWorkspace();
     const svc = wsService([ws]);

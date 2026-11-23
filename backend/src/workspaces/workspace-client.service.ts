@@ -512,7 +512,7 @@ export class WorkspaceClient {
     env: Record<string, string> | undefined,
     abortSignal: AbortSignal,
     onEvent: (event: Record<string, unknown>) => void,
-    opts: { cwdState?: boolean } = {},
+    opts: { cwdState?: boolean; fullOutput?: boolean } = {},
   ): Promise<void> {
     if (!this.token) {
       throw new ServiceUnavailableException(
@@ -527,6 +527,8 @@ export class WorkspaceClient {
       timeout: limit,
       env,
       ...(opts.cwdState === false ? { cwdState: false } : {}),
+      // No 1 MiB per-stream cap in the sidecar: the caller keeps head + tail itself.
+      ...(opts.fullOutput === true ? { fullOutput: true } : {}),
     });
     const res = await fetch(url, {
       method: 'POST',

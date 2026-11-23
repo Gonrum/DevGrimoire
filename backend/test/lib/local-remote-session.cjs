@@ -27,7 +27,7 @@
  *   denyOpenWrite      Set of paths: opening them for writing (createWriteStream,
  *                      writeFile) -> `denied`, even when the file exists
  *   execScript         null, or the scripted answer for agent commands
- *                      (`cd -- '<root>' && <anything>`, see agentShape):
+ *                      (`cd -- '<root>' && exec /bin/sh -c '<cmd>'`, see agentShape):
  *                      { code = 0, stdout = '', stderr = '', delayMs = 0,
  *                        timeout = false }. Such a command is only recorded
  *                      and answered, NEVER run. `timeout: true` rejects with
@@ -65,7 +65,7 @@ function createLocalRemoteSession(base, RemoteError) {
     denyOpenWrite: new Set(),
     execScript: null,
   };
-  const calls = { readStreams: [], writeStreams: 0, execs: [], execOpts: [], writeFiles: [], agentExecs: [], aborts: 0 };
+  const calls = { readStreams: [], writeStreams: 0, execs: [], execOpts: [], writeFiles: [], agentExecs: [], agentCommands: [], aborts: 0 };
 
   const inside = (root, p) => p === root || p.startsWith(`${root}/`);
   function guard(p) {
@@ -271,21 +271,30 @@ function createLocalRemoteSession(base, RemoteError) {
     return [unquote(m[1])];
   }
   /**
-   * Agent commands (`exec` of the file backend): `cd -- '<root>' && <anything>`.
-   * Only while `switches.execScript` is set — the tail is an arbitrary shell
-   * command line and is never run; the root is guarded like every path.
+   * Agent commands (`exec` of the file backend):
+   * `cd -- '<root>' && exec /bin/sh -c '<command>'`. Only while
+   * `switches.execScript` is set — the command is recorded (unquoted, in
+   * `calls.agentCommands`) and never run; the root is guarded like every path.
    */
   function agentShape(cmd) {
     if (!switches.execScript) return null;
-    const m = /^cd -- ('(?:[^']|'\\'')*') && (.+)$/s.exec(cmd);
+    const m = /^cd -- ('(?:[^']|'\\'')*') && exec \/bin\/sh -c ('(?:[^']|'\\'')*')$/s.exec(cmd);
     return m ? [unquote(m[1])] : null;
   }
   function scriptedExec(command, opts) {
     const sc = { code: 0, stdout: '', stderr: '', delayMs: 0, timeout: false, ...switches.execScript };
     calls.agentExecs.push(command);
+    calls.agentCommands.push(unquote(/ -c ('(?:[^']|'\\'')*')$/s.exec(command)[1]));
     const cap = (text) => {
       const max = opts.maxOutputBytes;
       if (!max || Buffer.byteLength(text) <= max) return { text, cut: false };
+      if (opts.outputMode === 'headTail') {
+        // The real collector (dist/), as the SSH driver uses it.
+        const { HeadTailOutput } = require(path.resolve(__dirname, '..', '..', 'dist', 'workspaces', 'fs', 'head-tail-output.js'));
+        const ht = new HeadTailOutput(max);
+        ht.push(text);
+        return { text: ht.text(), cut: true };
+      }
       return { text: Buffer.from(text).subarray(0, max).toString('utf8'), cut: true };
     };
     const out = cap(sc.stdout);
@@ -305,7 +314,9 @@ function createLocalRemoteSession(base, RemoteError) {
         if (signal) signal.removeEventListener('abort', onAbort);
         if (sc.timeout) { reject(new RemoteError('timeout', 'exec timed out', partial)); return; }
         const truncated = out.cut || err.cut;
-        resolve({ code: truncated ? null : sc.code, stdout: out.text, stderr: err.text, truncated });
+        // `stop` ends the command at the cap; head/tail output keeps the exit code.
+        const code = truncated && opts.outputMode !== 'headTail' ? null : sc.code;
+        resolve({ code, stdout: out.text, stderr: err.text, truncated });
       }, sc.delayMs);
     });
   }

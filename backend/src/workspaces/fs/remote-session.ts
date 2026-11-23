@@ -65,6 +65,13 @@ export interface RemoteExecOpts {
    * exec slot gives up its place without being sent.
    */
   signal?: AbortSignal;
+  /**
+   * `stop` (default): output beyond `maxOutputBytes` ends the command (TERM,
+   * channel closed, code null). `headTail`: the command keeps running; each
+   * stream keeps its head and a rolling tail (`HeadTailOutput`), `truncated`
+   * means bytes were omitted and the exit code is kept.
+   */
+  outputMode?: 'stop' | 'headTail';
 }
 
 /** What the driver receives: every option resolved, `signal` stays optional. */

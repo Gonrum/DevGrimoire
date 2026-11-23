@@ -10,12 +10,16 @@ import { logWorkspaceIde, openWorkspaceFs, type WorkspaceFsGateResult } from '..
 import {
   AGENT_ALLOW_VALUE_MAX,
   hasShellControl,
+  isForbiddenSinglePrefix,
+  trimCommandEdges,
   type AgentAllowEntry,
   type AgentAllowFileKind,
   type AgentAllowInput,
 } from '../workspaces/agent-allow';
 import type { FsLimits } from '../workspaces/fs/workspace-fs-backend';
 import { FS_EXEC_MAX_COMMAND_LENGTH } from '../workspaces/fs/workspace-fs-backend';
+import { headTailText } from '../workspaces/fs/head-tail-output';
+import { RequestContext } from '../common/request-context';
 import { errorMessage, isRecord } from '../common/narrow';
 import { optionalBoolean, optionalNumber, optionalStringArray, type ToolArgs } from '../common/tool-args';
 import type { ToolDefinition, ToolExecutionResult } from './chat-tools';
@@ -45,18 +49,19 @@ const FILE_KIND_OF: Readonly<Record<string, AgentAllowFileKind>> = {
   ws_delete: 'files.delete',
 };
 
-/** `value` followed by whitespace or the end of `command`. */
+/** `value` followed by a space/tab or the end of `command`. */
 function startsWithWord(command: string, value: string): boolean {
   if (!value || !command.startsWith(value)) return false;
-  return command.length === value.length || /\s/.test(command.charAt(value.length));
+  return command.length === value.length || /[ \t]/.test(command.charAt(value.length));
 }
 
 /**
  * Pure; true when `entries` allow this call without asking. Read-only ws_*
  * tools never ask (true); any non-ws_* name is never covered (false).
- * Commands: `exact` compares after trimming edge whitespace; `prefix` needs a
- * word boundary after the prefix and no shell control characters anywhere in
- * the command (nor in the stored prefix).
+ * Commands: `exact` compares after trimming edge spaces/tabs; `prefix` needs a
+ * space/tab boundary after the prefix and no shell control characters anywhere
+ * in the command (nor in the stored prefix); a stored single-word interpreter
+ * prefix (`bash`, `env` …) never matches.
  */
 export function isAllowedByList(
   name: string,
@@ -69,21 +74,23 @@ export function isAllowedByList(
   if (fileKind) return entries.some((e) => e.kind === fileKind);
   // ws_exec
   if (typeof args.command !== 'string') return false;
-  const command = args.command.trim();
+  const command = trimCommandEdges(args.command);
   if (!command) return false;
   const controlled = hasShellControl(command);
   return entries.some((e) => {
     if (e.kind !== 'command') return false;
-    const value = e.value.trim();
+    const value = trimCommandEdges(e.value);
     if (e.match === 'exact') return value === command;
-    return !controlled && !hasShellControl(value) && startsWithWord(command, value);
+    return !controlled && !hasShellControl(value) && !isForbiddenSinglePrefix(value)
+      && startsWithWord(command, value);
   });
 }
 
 /**
  * Suggestions for the confirm card. ws_exec: [exact, prefix(first word),
  * prefix(first two words)], the prefix variants only without control
- * characters; entries over the stored length limit are left out. File tools:
+ * characters, no one-word prefix that is an interpreter/wrapper (`bash`,
+ * `git` …); entries over the stored length limit are left out. File tools:
  * their files.* kind. Anything else: none. `AgentAllowInput` is the entry
  * union without `createdAt` (a plain `Omit` over the union collapses it).
  */
@@ -91,12 +98,12 @@ export function allowSuggestions(name: string, args: Record<string, unknown>): A
   const fileKind = FILE_KIND_OF[name];
   if (fileKind) return [{ kind: fileKind }];
   if (name !== 'ws_exec' || typeof args.command !== 'string') return [];
-  const command = args.command.trim();
+  const command = trimCommandEdges(args.command);
   if (!command || command.length > AGENT_ALLOW_VALUE_MAX) return [];
   const out: AgentAllowInput[] = [{ kind: 'command', match: 'exact', value: command }];
   if (hasShellControl(command)) return out;
-  const words = command.split(/\s+/);
-  out.push({ kind: 'command', match: 'prefix', value: words[0] });
+  const words = command.split(/[ \t]+/);
+  if (!isForbiddenSinglePrefix(words[0])) out.push({ kind: 'command', match: 'prefix', value: words[0] });
   if (words.length >= 2) out.push({ kind: 'command', match: 'prefix', value: `${words[0]} ${words[1]}` });
   return out;
 }
@@ -129,10 +136,10 @@ export type WsPreviewResult = { ok: true; preview: WsPreview } | { ok: false; er
 /** Spec: output (stdout + stderr) handed to the LLM is cut to 64 KiB. */
 export const WS_EXEC_OUTPUT_LIMIT = 64 * 1024;
 /**
- * Per-stream cap for the backend. Larger than what the LLM sees: on SSH an
- * output over the cap ends the command, which a chatty build must not cause.
+ * Per stream: half of the limit, as head + `… N bytes omitted …` + tail (the
+ * backends collect it that way and never stop a command for its output).
  */
-const WS_EXEC_BACKEND_OUTPUT_CAP = 1024 * 1024;
+const WS_EXEC_STREAM_LIMIT = WS_EXEC_OUTPUT_LIMIT / 2;
 const WS_EXEC_DEFAULT_TIMEOUT_SEC = 60;
 const WS_EXEC_MAX_TIMEOUT_SEC = 600;
 const PATH_MAX = 4096;
@@ -234,8 +241,9 @@ export const WORKSPACE_AGENT_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: 'ws_exec',
     description:
-      'Runs a shell command in the workspace root, without a TTY. timeoutSec default 60, max 600. '
-      + 'Returns exitCode, stdout, stderr (together cut to 64 KiB), truncated, timedOut, aborted.',
+      'Runs a shell command line (POSIX sh syntax) in the workspace root, without a TTY. timeoutSec default 60, max 600. '
+      + 'Returns exitCode, stdout, stderr (each at most 32 KiB: start + "… N bytes omitted …" + end), '
+      + 'truncated, timedOut, aborted.',
     parameters: {
       type: 'object',
       properties: { command: { type: 'string' }, timeoutSec: { type: 'number' } },
@@ -369,8 +377,9 @@ function parseInput(name: string, args: ToolArgs): WsInput {
     case 'ws_move':
       return { tool: name, from: workspacePath(args, 'from'), to: workspacePath(args, 'to') };
     case 'ws_exec': {
-      const command = textArg(args, 'command', { nonEmpty: false }).trim();
-      if (!command) throw new ToolInputError('command must not be empty');
+      // Same edge trimming as the allow-list, so what was allowed is what runs.
+      const command = trimCommandEdges(textArg(args, 'command', { nonEmpty: false }));
+      if (!command.trim()) throw new ToolInputError('command must not be empty');
       if (command.length > FS_EXEC_MAX_COMMAND_LENGTH) {
         throw new ToolInputError(`command too long (max ${FS_EXEC_MAX_COMMAND_LENGTH})`);
       }
@@ -400,29 +409,6 @@ function replaceOnce(content: string, oldText: string, newText: string): string 
   return content.slice(0, first) + newText + content.slice(first + oldText.length);
 }
 
-/** Cuts a string to at most `maxBytes` UTF-8 bytes on a character boundary. */
-function cutUtf8(text: string, maxBytes: number): string {
-  const buf = Buffer.from(text, 'utf8');
-  if (buf.length <= maxBytes) return text;
-  let end = Math.max(0, maxBytes);
-  // Step back over continuation bytes (10xxxxxx) to the start of a character.
-  while (end > 0 && (buf[end] & 0xc0) === 0x80) end -= 1;
-  return buf.subarray(0, end).toString('utf8');
-}
-
-/**
- * stdout + stderr together within `limit` bytes; stderr keeps at least half
- * of the budget when both are large (errors are usually what the agent needs).
- */
-function capOutput(stdout: string, stderr: string, limit: number): { stdout: string; stderr: string; cut: boolean } {
-  const outLen = Buffer.byteLength(stdout, 'utf8');
-  const errLen = Buffer.byteLength(stderr, 'utf8');
-  if (outLen + errLen <= limit) return { stdout, stderr, cut: false };
-  const errKeep = Math.min(errLen, Math.max(Math.floor(limit / 2), limit - outLen));
-  const outKeep = Math.min(outLen, limit - errKeep);
-  return { stdout: cutUtf8(stdout, outKeep), stderr: cutUtf8(stderr, errKeep), cut: true };
-}
-
 function httpStatus(err: unknown): number | undefined {
   return err instanceof HttpException ? err.getStatus() : undefined;
 }
@@ -447,6 +433,8 @@ function describeError(err: unknown): string {
   }
   return errorMessage(err);
 }
+
+const NO_USER = 'no authenticated user';
 
 type HashSource = 'pinned' | 'args' | 'fresh';
 const CONFLICT_MESSAGE: Record<HashSource, string> = {
@@ -481,6 +469,8 @@ export class WorkspaceAgentTools {
     ctx: AgentWorkspaceContext,
     pinned?: { baseHash?: string | null },
   ): Promise<WsToolResult> {
+    // Fail closed: every check below is "under the actor"; without one nothing vouches.
+    if (!RequestContext.getUser()) return { success: false, error: NO_USER };
     let input: WsInput;
     try {
       input = parseInput(name, args);
@@ -507,6 +497,7 @@ export class WorkspaceAgentTools {
   }
 
   async preview(name: string, args: Record<string, unknown>, ctx: AgentWorkspaceContext): Promise<WsPreviewResult> {
+    if (!RequestContext.getUser()) return { ok: false, error: NO_USER };
     try {
       const input = parseInput(name, args);
       if (!WORKSPACE_AGENT_WRITE_TOOLS.has(input.tool)) {
@@ -720,15 +711,17 @@ export class WorkspaceAgentTools {
     const startedAt = Date.now();
     const r = await gate.backend.exec(input.command, {
       timeoutMs: input.timeoutSec * 1000,
-      maxOutputBytes: WS_EXEC_BACKEND_OUTPUT_CAP,
+      maxOutputBytes: WS_EXEC_STREAM_LIMIT,
       ...(ctx.signal ? { signal: ctx.signal } : {}),
     });
-    const capped = capOutput(r.stdout, r.stderr, WS_EXEC_OUTPUT_LIMIT);
+    // The backends already keep head + tail within the limit; this only guards it.
+    const stdout = headTailText(r.stdout, WS_EXEC_STREAM_LIMIT);
+    const stderr = headTailText(r.stderr, WS_EXEC_STREAM_LIMIT);
     const result = {
       exitCode: r.exitCode,
-      stdout: capped.stdout,
-      stderr: capped.stderr,
-      truncated: r.truncated || capped.cut,
+      stdout: stdout.text,
+      stderr: stderr.text,
+      truncated: r.truncated || stdout.cut || stderr.cut,
       timedOut: r.timedOut,
       aborted: r.aborted,
     };

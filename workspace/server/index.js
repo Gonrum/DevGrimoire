@@ -3,6 +3,7 @@
 const express = require('express');
 const http = require('http');
 const { spawn } = require('child_process');
+const { StringDecoder } = require('string_decoder');
 const crypto = require('crypto');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -59,6 +60,10 @@ const GIT_TIMEOUT_MS = 5 * 60_000;
 const EXEC_DEFAULT_TIMEOUT_MS = 60_000;
 const EXEC_MAX_TIMEOUT_MS = 600_000; // 10 min ceiling for slow build steps
 const EXEC_OUTPUT_CAP_BYTES = 1 * 1024 * 1024; // 1MB per stream
+// `fullOutput` streaming: pause the child while this much waits for the client.
+const EXEC_STREAM_BUFFER_MAX = 4 * 1024 * 1024;
+// `fullOutput` streaming: longest line event; longer lines go in pieces.
+const EXEC_STREAM_LINE_MAX = 64 * 1024;
 
 // Patterns that are rejected hard at the sidecar before the shell ever sees
 // them. Caught at substring level so they fire even when wrapped in pipes
@@ -1199,8 +1204,14 @@ function runExec({ command, cwd, timeoutMs, env }) {
  * layers as runExec apply: detached process group, SIGTERM→SIGKILL on
  * timeout or upstream abort, 1MB cap per stream. The caller controls
  * cancellation through `abortSignal`.
+ *
+ * `fullOutput: true` drops the per-stream cap (the caller keeps head + tail
+ * itself) and instead applies flow control: while more than
+ * EXEC_STREAM_BUFFER_MAX bytes wait in `writable`, the child's pipes are
+ * paused (the command blocks on output, it is not killed). A line longer than
+ * EXEC_STREAM_LINE_MAX is sent in pieces.
  */
-function runExecStream({ command, cwd, timeoutMs, env, abortSignal }, onEvent) {
+function runExecStream({ command, cwd, timeoutMs, env, abortSignal, fullOutput = false, writable = null }, onEvent) {
   return new Promise((resolve) => {
     const child = spawn('/bin/bash', ['-lc', command], {
       cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
@@ -1219,6 +1230,40 @@ function runExecStream({ command, cwd, timeoutMs, env, abortSignal }, onEvent) {
       try { process.kill(-child.pid, signal); } catch { /* gone */ }
     };
 
+    let paused = false;
+    // Per stream: a multi-byte character split across chunks stays intact.
+    const decoders = { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') };
+    // A paused pipe never ends: let it flow again once the command is being stopped.
+    const releasePause = () => {
+      if (!paused) return;
+      paused = false;
+      child.stdout.resume();
+      child.stderr.resume();
+    };
+    const applyBackpressure = () => {
+      if (paused || !writable || writable.writableLength <= EXEC_STREAM_BUFFER_MAX) return;
+      paused = true;
+      child.stdout.pause();
+      child.stderr.pause();
+      writable.once('drain', releasePause);
+      writable.once('close', releasePause);
+    };
+    const fullEmitter = (stream) => (chunk) => {
+      const text = decoders[stream].write(chunk);
+      if (stream === 'stdout') stdoutBytes += chunk.length; else stderrBytes += chunk.length;
+      let buf = stream === 'stdout' ? stdoutBuf + text : stderrBuf + text;
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        onEvent({ type: stream, line: buf.slice(0, nl) });
+        buf = buf.slice(nl + 1);
+      }
+      while (buf.length > EXEC_STREAM_LINE_MAX) {
+        onEvent({ type: stream, line: buf.slice(0, EXEC_STREAM_LINE_MAX) });
+        buf = buf.slice(EXEC_STREAM_LINE_MAX);
+      }
+      if (stream === 'stdout') stdoutBuf = buf; else stderrBuf = buf;
+      applyBackpressure();
+    };
     const lineEmitter = (stream) => (chunk) => {
       const cap = stream === 'stdout' ? stdoutBytes : stderrBytes;
       if (cap >= EXEC_OUTPUT_CAP_BYTES) {
@@ -1247,12 +1292,14 @@ function runExecStream({ command, cwd, timeoutMs, env, abortSignal }, onEvent) {
         if (stream === 'stdout') stdoutBuf = buf; else stderrBuf = buf;
       }
     };
-    child.stdout.on('data', lineEmitter('stdout'));
-    child.stderr.on('data', lineEmitter('stderr'));
+    const emitter = fullOutput ? fullEmitter : lineEmitter;
+    child.stdout.on('data', emitter('stdout'));
+    child.stderr.on('data', emitter('stderr'));
 
     const softTimer = setTimeout(() => {
       timedOut = true;
       killReason = 'timeout';
+      releasePause();
       killPg('SIGTERM');
     }, timeoutMs);
     const hardTimer = setTimeout(() => killPg('SIGKILL'), timeoutMs + 5_000);
@@ -1260,6 +1307,7 @@ function runExecStream({ command, cwd, timeoutMs, env, abortSignal }, onEvent) {
     const onAbort = () => {
       if (killReason) return;
       killReason = 'abort';
+      releasePause();
       killPg('SIGTERM');
       setTimeout(() => killPg('SIGKILL'), 2_000);
     };
@@ -1395,7 +1443,9 @@ app.post('/exec/stream', async (req, res) => {
   const wrappedCommand = useCwdState ? wrapWithCwdState(command, startCwd, cwdStatePath(id), cwd) : command;
 
   let lastEvent = null;
-  await runExecStream({ command: wrappedCommand, cwd, timeoutMs, env, abortSignal: abort.signal }, (ev) => {
+  // `fullOutput: true` (strict boolean): no 1 MiB cap, flow control instead.
+  const fullOutput = req.body?.fullOutput === true;
+  await runExecStream({ command: wrappedCommand, cwd, timeoutMs, env, abortSignal: abort.signal, fullOutput, writable: res }, (ev) => {
     lastEvent = ev;
     // Inject the resulting cwd into the done event so the frontend can
     // render it in the prompt without an extra round-trip.
