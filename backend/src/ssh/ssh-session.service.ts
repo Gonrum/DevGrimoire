@@ -1282,6 +1282,8 @@ export class SshSessionService {
     exitCode?: number;
     durationMs?: number;
     errorMsg?: string;
+    /** sourceContext='ide' only: the action came from the IDE agent, not a hand action. */
+    agent?: boolean;
   }): Promise<void> {
     // Same guard as SshTestService: 'system' (or any non-ObjectId userId)
     // would blow up Mongoose's required-ObjectId validation on userId.
@@ -1326,6 +1328,7 @@ export class SshSessionService {
     if (entry.bytes !== undefined) doc.bytes = entry.bytes;
     if (entry.exitCode !== undefined) doc.exitCode = entry.exitCode;
     if (entry.errorMsg !== undefined) doc.errorMsg = entry.errorMsg;
+    if (entry.agent === true) doc.agent = true;
     if (entry.workflow) {
       // Run-/Definitions-Id nur als gültige ObjectId; die Node-Id ist frei
       // wählbarer Text aus der Definition.

@@ -1316,6 +1316,8 @@ export interface SshAuditEntry {
   workflowDefinitionId?: string;
   /** Nur gesetzt (true), wenn der Befehl aus einem Workflow-Debug-Lauf kam. */
   workflowDebug?: boolean;
+  /** Only set (true) with sourceContext='ide' when the IDE agent caused the action. */
+  agent?: boolean;
 }
 
 export interface SshAuditResponse {

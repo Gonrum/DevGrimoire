@@ -119,6 +119,10 @@ export class SshAudit {
   // Nur gesetzt (true), wenn der Befehl aus einem Debug-Lauf kam.
   @Prop()
   workflowDebug?: boolean;
+
+  // Only set (true) with sourceContext='ide' when the IDE agent caused the action.
+  @Prop()
+  agent?: boolean;
 }
 
 export const SshAuditSchema = SchemaFactory.createForClass(SshAudit);

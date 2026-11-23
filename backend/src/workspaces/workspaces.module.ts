@@ -92,6 +92,7 @@ import { JWT_ALGORITHM } from '../common/access-token';
     WorkspacesService,
     WorkspaceClient,
     WorkspaceLimitsService,
+    WorkspaceFsBackends,
     SshWorkspaceAccess,
     SshWorkspaceSessions,
     WorkspaceTtlScheduler,

@@ -26,6 +26,7 @@ import { ChatService } from './chat.service';
 import { ChatLlmService, LlmMessageWithTools, LlmImageInput } from './chat-llm.service';
 import { ChatContextService, AttachmentForContext } from './chat-context.service';
 import { ChatToolsService, ALL_TOOL_NAMES, TOOL_GROUPS, WRITE_TOOL_NAMES } from './chat-tools';
+import { isWorkspaceAgentTool } from './workspace-agent-tools';
 import { ChatContextRef } from './schemas/chat-session.schema';
 import { ResumeChatToolDto } from './dto/resume-chat-tool.dto';
 import { ChatActivityService } from './chat-activity.service';
@@ -759,6 +760,12 @@ export class ChatController {
     await this.assertEnabled();
     if (!dto?.name) {
       throw new BadRequestException('name is required');
+    }
+    // The IDE agent's workspace tools never run for a browser-side LLM,
+    // whatever the allowlist says (spec "Festlegungen" 2).
+    if (isWorkspaceAgentTool(dto.name)) {
+      const error = 'ws_* tools cannot run through the browser path';
+      return { success: false, error, result: undefined, content: JSON.stringify({ error }), summary: `error: ${error}` };
     }
     const userId = req.user?.userId;
     const session = await this.chatService.findById(id, userId);

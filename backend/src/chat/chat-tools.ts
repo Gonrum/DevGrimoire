@@ -47,6 +47,14 @@ import { WORKSPACE_STATUSES } from '../workspaces/schemas/workspace.schema';
 import type { QuestionDirection } from '../questions/schemas/question.schema';
 import type { CreateKnowledgeDto } from '../knowledge/dto/create-knowledge.dto';
 import {
+  WORKSPACE_AGENT_TOOLS,
+  WORKSPACE_AGENT_WRITE_TOOLS,
+  WorkspaceAgentTools,
+  isWorkspaceAgentTool,
+  type AgentWorkspaceContext,
+  type WsToolResult,
+} from './workspace-agent-tools';
+import {
   idToString,
   isUnknownArray,
   optionalBoolean,
@@ -91,6 +99,7 @@ export const TOOL_GROUPS: Record<
   | 'customer_write'
   | 'workspace_read'
   | 'workspace_write'
+  | 'workspace_agent'
   | 'external_read'
   | 'stacks_read'
   | 'stacks_write',
@@ -161,6 +170,9 @@ export const TOOL_GROUPS: Record<
     'workspace_create', 'workspace_update', 'workspace_archive', 'workspace_delete',
     'workspace_clone', 'workspace_pull', 'workspace_exec', 'workspace_attachment_save',
   ],
+  // IDE agent only (session bound to a workspace); offered only with
+  // `getToolsForLlm(..., includeAgentTools: true)`.
+  workspace_agent: [...WORKSPACE_AGENT_TOOLS],
   external_read: ['web_search', 'web_fetch'],
   stacks_read: ['stack_list', 'stack_get', 'stack_export_markdown'],
   stacks_write: ['stack_create', 'stack_update', 'stack_entry_add', 'stack_entry_update', 'stack_entry_remove'],
@@ -178,6 +190,7 @@ export const WRITE_TOOL_NAMES: Set<string> = new Set([
   ...TOOL_GROUPS.customer_write,
   ...TOOL_GROUPS.workspace_write,
   ...TOOL_GROUPS.stacks_write,
+  ...WORKSPACE_AGENT_WRITE_TOOLS,
 ]);
 
 /**
@@ -1399,6 +1412,8 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
 
 export interface ToolContext {
   projectId: string | null;
+  /** Set only for the IDE agent: the workspace of the chat session. ws_* need it. */
+  agentWorkspace?: AgentWorkspaceContext;
 }
 
 export interface ToolExecutionResult {
@@ -1441,6 +1456,7 @@ export class ChatToolsService {
     private readonly questions: QuestionsService,
     private readonly stacksService: StacksService,
     private readonly researchControl: ResearchControlService,
+    private readonly workspaceAgentTools: WorkspaceAgentTools,
   ) {}
 
   /**
@@ -1483,12 +1499,23 @@ export class ChatToolsService {
     }
   }
 
-  /** Returns OpenAI-formatted tool list, filtered by allowlist */
-  getToolsForLlm(allowlist: string[]): OpenAiTool[] {
+  /**
+   * Returns OpenAI-formatted tool list, filtered by allowlist. The ws_* tools
+   * are offered only when `includeAgentTools` is set (IDE agent sessions).
+   */
+  getToolsForLlm(allowlist: string[], includeAgentTools = false): OpenAiTool[] {
     const allowed = new Set(allowlist);
+    const agentDefinitions = includeAgentTools
+      ? new Map(this.workspaceAgentTools.definitions().map((d) => [d.name, d]))
+      : undefined;
     const tools: OpenAiTool[] = [];
     for (const name of ALL_TOOL_NAMES) {
       if (!allowed.has(name)) continue;
+      if (isWorkspaceAgentTool(name)) {
+        const agentDefinition = agentDefinitions?.get(name);
+        if (agentDefinition) tools.push({ type: 'function' as const, function: agentDefinition });
+        continue;
+      }
       const definition = TOOL_DEFINITIONS[name];
       // Namen ohne Definition werden übersprungen statt als
       // `{ function: undefined }` ausgeliefert. Der Anthropic-Adapter liest
@@ -1504,18 +1531,30 @@ export class ChatToolsService {
     return tools;
   }
 
-  /** Execute a tool call. Returns success/error wrapper, never throws. */
+  /**
+   * Execute a tool call. Returns success/error wrapper, never throws. ws_*
+   * calls go to `WorkspaceAgentTools` (only with `ctx.agentWorkspace`); they
+   * check permissions and audit themselves. `pinned` carries the hash fixed
+   * when a confirmation was proposed (ws_write/ws_edit).
+   */
   async execute(
     name: string,
     args: Record<string, unknown>,
     ctx: ToolContext,
     allowlist: string[],
-  ): Promise<ToolExecutionResult> {
+    pinned?: { baseHash?: string | null },
+  ): Promise<WsToolResult> {
     if (PERMANENTLY_BLOCKED_TOOLS.has(name)) {
       return { success: false, error: `Tool "${name}" is permanently blocked for chat` };
     }
+    if (isWorkspaceAgentTool(name) && !ctx.agentWorkspace) {
+      return { success: false, error: 'ws_* tools are only available in the IDE agent' };
+    }
     if (!allowlist.includes(name)) {
       return { success: false, error: `Tool "${name}" is not in the allowlist` };
+    }
+    if (ctx.agentWorkspace && isWorkspaceAgentTool(name)) {
+      return this.workspaceAgentTools.execute(name, args, ctx.agentWorkspace, pinned);
     }
     const isWrite = WRITE_TOOL_NAMES.has(name);
     // Same entry gate as REST and MCP for actors with a permission allowlist.

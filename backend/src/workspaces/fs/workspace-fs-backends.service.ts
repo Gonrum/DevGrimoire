@@ -49,10 +49,17 @@ export class WorkspaceFsBackends implements OnModuleInit {
    * Failures propagate and are not memoised, so the next request retries.
    *
    * SSH: `connection` is what `SshWorkspaceAccess.resolve` returned in the
-   * gate; without it the access check runs here.
+   * gate; without it the access check runs here. `opts.agent` marks the SSH
+   * audit rows as caused by the IDE agent.
    */
-  async for(ws: WorkspaceDocument, connection?: SshConnectionDocument): Promise<WorkspaceFsBackend> {
-    if (isSshWorkspace(ws)) return this.forSsh(ws, connection ?? (await this.access.resolve(ws)));
+  async for(
+    ws: WorkspaceDocument,
+    connection?: SshConnectionDocument,
+    opts?: { agent?: boolean },
+  ): Promise<WorkspaceFsBackend> {
+    if (isSshWorkspace(ws)) {
+      return this.forSsh(ws, connection ?? (await this.access.resolve(ws)), opts?.agent === true);
+    }
     const id = ws._id.toString();
     const last = this.ensuredAt.get(id);
     if (last === undefined || Date.now() - last >= ENSURE_TTL_MS) {
@@ -62,7 +69,11 @@ export class WorkspaceFsBackends implements OnModuleInit {
     return new ContainerFsBackend(this.client, id, () => buildWorkspaceExecEnv(this.gitTokens, this.cliToken, ws));
   }
 
-  private async forSsh(ws: WorkspaceDocument, connection: SshConnectionDocument): Promise<WorkspaceFsBackend> {
+  private async forSsh(
+    ws: WorkspaceDocument,
+    connection: SshConnectionDocument,
+    agent: boolean,
+  ): Promise<WorkspaceFsBackend> {
     const root = ws.remotePath;
     if (!root) throw new ConflictException('SSH-Werkstatt ohne Verzeichnis (remotePath fehlt)');
     const workspaceId = ws._id.toString();
@@ -86,6 +97,7 @@ export class WorkspaceFsBackends implements OnModuleInit {
         ...(extra?.command !== undefined ? { command: extra.command } : {}),
         ...(extra?.exitCode !== undefined ? { exitCode: extra.exitCode } : {}),
         ...(extra?.durationMs !== undefined ? { durationMs: extra.durationMs } : {}),
+        ...(agent ? { agent: true } : {}),
       });
     };
     const run: SshFsRun = (fn, opts) =>

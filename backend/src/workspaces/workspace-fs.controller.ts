@@ -1,12 +1,10 @@
 import {
   BadRequestException,
   Body,
-  ConflictException,
   Controller,
   Get,
   HttpCode,
   HttpException,
-  NotFoundException,
   Param,
   Post,
   Put,
@@ -31,11 +29,10 @@ import { DownloadActorService } from './download-actor.service';
 import { AcceptsDownloadTicket } from '../auth/decorators/accepts-download-ticket.decorator';
 import { RequestContext } from '../common/request-context';
 import { ScalarQueryPipe } from '../common/scalar-query.pipe';
-import { assertContentWrite } from '../common/scope-guard';
-import { SshWorkspaceAccess, isSshWorkspace } from './ssh-workspace-access.service';
+import { SshWorkspaceAccess } from './ssh-workspace-access.service';
+import { logWorkspaceIde, openWorkspaceFs } from './workspace-fs-gate';
 import { errorMessage } from '../common/narrow';
 
-const WORKSPACE_ID_PATTERN = /^[a-f0-9]{24}$/;
 const PATH_MAX = 4096;
 
 /**
@@ -88,25 +85,15 @@ export class WorkspaceFsController {
   /**
    * Permission -> load workspace (403/404) -> must be active -> SSH: the
    * connection must still exist, be usable by the actor and for the project
-   * (409/403, on every request) -> file backend (a container gets its
-   * directory ensured only here, after every check). One place for all routes.
+   * (409/403, on every request) -> file backend. Shared with the IDE agent's
+   * ws_* tools (`openWorkspaceFs`). One place for all routes.
    */
   private async gate(id: string): Promise<{ ws: WorkspaceDocument; backend: WorkspaceFsBackend }> {
-    assertContentWrite('Workspace IDE');
-    if (!WORKSPACE_ID_PATTERN.test(id)) throw new NotFoundException(`Workspace ${id} not found`);
-    const ws = await this.workspaces.findById(id);
-    if (ws.status !== 'active') {
-      // `error` is the stable code the IDE classifies on; the text stays as before.
-      throw new ConflictException({
-        error: 'workspace_inactive',
-        message: `Workspace is ${ws.status}, not active`,
-      });
-    }
-    if (isSshWorkspace(ws)) {
-      const connection = await this.sshAccess.resolve(ws);
-      return { ws, backend: await this.backends.for(ws, connection) };
-    }
-    return { ws, backend: await this.backends.for(ws) };
+    const { ws, backend } = await openWorkspaceFs(
+      { workspaces: this.workspaces, backends: this.backends, sshAccess: this.sshAccess },
+      id,
+    );
+    return { ws, backend };
   }
 
   /** Limits in force for this request. Upload cap stays with the sidecar for containers. */
@@ -122,17 +109,7 @@ export class WorkspaceFsController {
     metadata: Record<string, unknown>,
     level: 'info' | 'warn' = 'info',
   ): void {
-    this.logs
-      .create({
-        projectId: ws.projectId.toString(),
-        level,
-        message,
-        service: 'workspaces',
-        area: 'ide',
-        tags: ['workspace_ide', `ws:${id}`],
-        metadata: { workspaceId: id, ...metadata },
-      })
-      .catch(() => undefined);
+    logWorkspaceIde(this.logs, ws, id, message, metadata, level);
   }
 
   @Get('tree')

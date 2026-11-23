@@ -1726,6 +1726,7 @@
     "chatToolsGroup_external_read": "Websuche & Artikel abrufen",
     "chatToolsGroup_workspace_read": "Werkstätten (lesen)",
     "chatToolsGroup_workspace_write": "Werkstätten (schreiben)",
+    "chatToolsGroup_workspace_agent": "Werkstatt-Agent (IDE)",
     "chatToolsWriteBadge": "Schreibend",
     "chatToolsWriteBanner": "Aktive schreibende Tools: {{count}} – der Chat-Assistent kann damit Daten anlegen oder verändern.",
     "chatToolsSelectAllWriteConfirm": "Wirklich {{count}} schreibende Tools aktivieren? Der Chat-Assistent kann dann Daten anlegen, ändern oder Kommentare schreiben.",
@@ -2899,6 +2900,8 @@
       "prev": "Vorherige",
       "next": "Nächste",
       "retry": "Erneut versuchen",
+      "agentChip": "Agent",
+      "agentChipTitle": "Aktion des IDE-Agenten",
       "col": {
         "at": "Datum",
         "source": "Quelle",

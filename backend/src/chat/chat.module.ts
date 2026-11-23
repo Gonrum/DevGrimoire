@@ -7,6 +7,7 @@ import { ChatService } from './chat.service';
 import { ChatLlmService } from './chat-llm.service';
 import { ChatContextService } from './chat-context.service';
 import { ChatToolsService } from './chat-tools';
+import { WorkspaceAgentTools } from './workspace-agent-tools';
 import { ChatActivityService } from './chat-activity.service';
 import { ChatController } from './chat.controller';
 import { ChatActivityController } from './chat-activity.controller';
@@ -79,7 +80,15 @@ import { BalancerModule } from '../balancer/balancer.module';
     StacksModule,
   ],
   controllers: [ChatController, ChatActivityController],
-  providers: [ChatService, ChatLlmService, ChatContextService, ChatToolsService, ChatActivityService, EncryptionService],
+  providers: [
+    ChatService,
+    ChatLlmService,
+    ChatContextService,
+    ChatToolsService,
+    WorkspaceAgentTools,
+    ChatActivityService,
+    EncryptionService,
+  ],
   exports: [ChatService, ChatLlmService, ChatContextService, ChatActivityService, ChatToolsService],
 })
 export class ChatModule {}
