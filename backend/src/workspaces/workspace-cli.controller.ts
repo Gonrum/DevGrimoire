@@ -11,6 +11,7 @@ import type { Request } from 'express';
 import { Public } from '../auth/decorators/public.decorator';
 import { WorkspaceCliAuthGuard } from './workspace-cli.guard';
 import { WorkspacesService } from './workspaces.service';
+import { assertContainerWorkspace } from './container-only';
 import { WorkspaceClient } from './workspace-client.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { LogsService } from '../logs/logs.service';
@@ -109,6 +110,7 @@ export class WorkspaceCliController {
     if (ws.projectId.toString() !== projectId) {
       throw new ForbiddenException('workspace/project mismatch');
     }
+    assertContainerWorkspace(ws);
     const file = await this.workspaceClient.readBase64(workspaceId, dto.path);
     const fileName =
       dto.fileName ||

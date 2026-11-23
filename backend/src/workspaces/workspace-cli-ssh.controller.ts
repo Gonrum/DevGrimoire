@@ -19,6 +19,7 @@ import type { Request } from 'express';
 import { Public } from '../auth/decorators/public.decorator';
 import { WorkspaceCliAuthGuard } from './workspace-cli.guard';
 import { WorkspacesService } from './workspaces.service';
+import { assertContainerWorkspace } from './container-only';
 import { WorkspaceClient } from './workspace-client.service';
 import { WorkspaceCliClaim } from './workspace-cli-token.service';
 import { SshService, SshConnectionWithInheritance } from '../ssh/ssh.service';
@@ -218,6 +219,7 @@ export class WorkspaceCliSshController {
     if (ws.projectId?.toString() !== claim.projectId) {
       throw new ForbiddenException('workspace/project mismatch');
     }
+    assertContainerWorkspace(ws);
     return claim;
   }
 

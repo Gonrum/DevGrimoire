@@ -892,7 +892,7 @@ async function bootstrap() {
     // Cluster aus der Shell ist, braucht auch das Terminal sie. Als Header statt
     // Query-Parameter, damit das Token in keinem Access-Log landet.
     const dgEnv = workspace.projectId
-      ? workspaceCliToken.buildEnvFor(workspaceId, workspace.projectId.toString(), TERMINAL_TOKEN_TTL)
+      ? workspaceCliToken.buildEnvFor(workspace, TERMINAL_TOKEN_TTL)
       : {};
     const upstreamHeaders: Record<string, string> = { Authorization: `Bearer ${SIDECAR_TOKEN}` };
     if (Object.keys(dgEnv).length > 0) {

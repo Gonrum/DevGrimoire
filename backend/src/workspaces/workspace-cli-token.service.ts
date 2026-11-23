@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { errorMessage } from '../common/narrow';
 import { DG_CLI_TOKEN_TYPE } from '../common/access-token';
+import { assertContainerWorkspace } from './container-only';
+import type { WorkspaceDocument } from './schemas/workspace.schema';
 
 const TOKEN_TTL = '1h';
 /**
@@ -44,10 +46,13 @@ export class WorkspaceCliTokenService {
    * value, see common/jwt-secret.ts, and tokens would not survive a restart).
    */
   buildEnvFor(
-    workspaceId: string,
-    projectId: string,
+    ws: Pick<WorkspaceDocument, '_id' | 'projectId' | 'location' | 'name'>,
     ttl: '1h' | '8h' = TOKEN_TTL,
   ): Record<string, string> {
+    // No DevGrimoire credentials toward a remote SSH server.
+    assertContainerWorkspace(ws);
+    const workspaceId = ws._id.toString();
+    const projectId = ws.projectId.toString();
     if (!process.env.JWT_SECRET) return {};
     const token = this.mint(workspaceId, projectId, ttl);
     return {

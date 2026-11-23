@@ -3,6 +3,7 @@ import { ProjectsService } from '../projects/projects.service';
 import { SecretsService } from '../secrets/secrets.service';
 import { WorkspaceDocument } from './schemas/workspace.schema';
 import { errorMessage } from '../common/narrow';
+import { assertContainerWorkspace } from './container-only';
 
 /**
  * Resolves env vars (GH_TOKEN / GITLAB_TOKEN / GITLAB_HOST) for a workspace
@@ -23,6 +24,8 @@ export class WorkspaceGitTokensService {
   ) {}
 
   async resolveForWorkspace(workspace: WorkspaceDocument): Promise<Record<string, string>> {
+    // No DevGrimoire credentials toward a remote SSH server.
+    assertContainerWorkspace(workspace);
     const env: Record<string, string> = {};
     let project;
     try {
@@ -114,6 +117,7 @@ export class WorkspaceGitTokensService {
     workspace: WorkspaceDocument,
     repoUrl: string,
   ): Promise<string> {
+    assertContainerWorkspace(workspace);
     if (!repoUrl) return repoUrl;
     let parsed: URL;
     try {

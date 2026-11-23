@@ -1,4 +1,4 @@
-import { Body, ConflictException, Controller, Delete, Get, HttpCode, Param, ParseEnumPipe, Post, Put, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseEnumPipe, Post, Put, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { WorkspacesService } from './workspaces.service';
 import { WorkspaceClient } from './workspace-client.service';
@@ -12,6 +12,7 @@ import { WORKSPACE_STATUSES, WorkspaceDocument, WorkspaceStatus } from './schema
 import { SshService } from '../ssh/ssh.service';
 import { LogsService } from '../logs/logs.service';
 import { errorMessage } from '../common/narrow';
+import { assertContainerWorkspaceWithSlug } from './container-only';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/schemas/user.schema';
 
@@ -131,9 +132,7 @@ export class WorkspacesController {
     // gets a clean JSON error instead of a half-opened stream.
     const ws = await this.workspacesService.findById(id);
     // No sidecar directory behind an SSH workspace; its terminal is the SSH one.
-    if (ws.location === 'ssh') {
-      throw new ConflictException('SSH workspaces are not available yet');
-    }
+    await assertContainerWorkspaceWithSlug(ws, (connectionId) => this.ssh.findById(connectionId));
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -152,7 +151,7 @@ export class WorkspacesController {
     // so `gh`/`glab` work inside the sidecar without manual auth. Caller env wins.
     const gitEnv = await this.workspaceGitTokens.resolveForWorkspace(ws);
     // Auto-inject DG_* so the in-workspace `dg` CLI works (T-168).
-    const dgEnv = this.workspaceCliToken.buildEnvFor(ws._id.toString(), ws.projectId.toString());
+    const dgEnv = this.workspaceCliToken.buildEnvFor(ws);
     const mergedEnv = Object.keys(gitEnv).length || Object.keys(dgEnv).length || dto.env
       ? { ...gitEnv, ...dgEnv, ...(dto.env ?? {}) }
       : undefined;

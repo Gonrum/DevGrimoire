@@ -84,6 +84,7 @@ import { ContactsService } from './contacts/contacts.service';
 import { MonitoringService } from './monitoring/monitoring.service';
 import { HttpRequestsService } from './http-requests/http-requests.service';
 import { SshService } from './ssh/ssh.service';
+import { assertContainerWorkspaceWithSlug } from './workspaces/container-only';
 import { SshSessionService } from './ssh/ssh-session.service';
 import { SshConnectionDocument } from './ssh/schemas/ssh-connection.schema';
 import type { SshConnectionWithInheritance } from './ssh/ssh.service';
@@ -484,6 +485,21 @@ function serializeSshAuditForMcp(
     exitCode: audit.exitCode,
     errorMsg: audit.errorMsg,
   };
+}
+
+/**
+ * The ONLY way sidecar tools load a workspace: SSH workspaces have no sidecar
+ * directory, so they are refused (409) before any sidecar call. Pure DB tools
+ * keep using `workspacesService.findById` directly.
+ */
+async function loadContainerWorkspace(
+  workspacesService: WorkspacesService,
+  sshService: SshService,
+  id: string,
+) {
+  const ws = await workspacesService.findById(id);
+  await assertContainerWorkspaceWithSlug(ws, (connectionId) => sshService.findById(connectionId));
+  return ws;
 }
 
 /**
@@ -6893,7 +6909,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'workspace_clone': {
           const id = requireString(a, 'id');
-          const ws = await workspacesService.findById(id);
+          const ws = await loadContainerWorkspace(workspacesService, sshService, id);
           assertWorkspaceWithinClientRoots(ws, await getClientRoots(server));
           // Auto-embed the matching git token in the clone URL so private repos
           // work without manual `oauth2:$TOKEN@host` gymnastics. No-op if URL
@@ -6921,7 +6937,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'workspace_pull': {
           const id = requireString(a, 'id');
-          const ws = await workspacesService.findById(id);
+          const ws = await loadContainerWorkspace(workspacesService, sshService, id);
           assertWorkspaceWithinClientRoots(ws, await getClientRoots(server));
           const sidecar = await workspaceClient.pull(ws._id.toString());
           await workspacesService.touch(id);
@@ -6930,7 +6946,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'workspace_tree': {
           const id = requireString(a, 'id');
-          const ws = await workspacesService.findById(id);
+          const ws = await loadContainerWorkspace(workspacesService, sshService, id);
           const path = optionalString(a, 'path');
           assertWorkspaceWithinClientRoots(ws, await getClientRoots(server), { relativePath: path });
           const tree = await workspaceClient.tree(
@@ -6944,7 +6960,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'workspace_read': {
           const id = requireString(a, 'id');
-          const ws = await workspacesService.findById(id);
+          const ws = await loadContainerWorkspace(workspacesService, sshService, id);
           const path = requireString(a, 'path');
           assertWorkspaceWithinClientRoots(ws, await getClientRoots(server), { relativePath: path });
           const file = await workspaceClient.read(ws._id.toString(), path);
@@ -6954,7 +6970,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'workspace_search': {
           const id = requireString(a, 'id');
-          const ws = await workspacesService.findById(id);
+          const ws = await loadContainerWorkspace(workspacesService, sshService, id);
           assertWorkspaceWithinClientRoots(ws, await getClientRoots(server));
           const search = await workspaceClient.search(
             ws._id.toString(),
@@ -6968,7 +6984,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         }
         case 'workspace_status': {
           const id = requireString(a, 'id');
-          const ws = await workspacesService.findById(id);
+          const ws = await loadContainerWorkspace(workspacesService, sshService, id);
           assertWorkspaceWithinClientRoots(ws, await getClientRoots(server));
           const status = await workspaceClient.status(ws._id.toString());
           await workspacesService.touch(id);
@@ -6985,14 +7001,14 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const command = requireString(a, 'command');
           const timeoutMs = optionalNumber(a, 'timeout');
           const callerEnv = optionalObject<Record<string, string>>(a, 'env');
-          const ws = await workspacesService.findById(id);
+          const ws = await loadContainerWorkspace(workspacesService, sshService, id);
           assertWorkspaceWithinClientRoots(ws, await getClientRoots(server));
           // Auto-inject GH_TOKEN/GITLAB_TOKEN/GITLAB_HOST from project.gitRepositories
           // so `gh`/`glab` work inside the sidecar without manual auth. Caller env wins.
           const gitEnv = await workspaceGitTokens.resolveForWorkspace(ws);
           // Auto-inject DG_* so the in-workspace `dg` CLI talks to the backend
           // with a project-scoped token (1h TTL, T-168).
-          const dgEnv = workspaceCliToken.buildEnvFor(ws._id.toString(), ws.projectId.toString());
+          const dgEnv = workspaceCliToken.buildEnvFor(ws);
           const mergedEnv = Object.keys(gitEnv).length || Object.keys(dgEnv).length || callerEnv
             ? { ...gitEnv, ...dgEnv, ...(callerEnv ?? {}) }
             : undefined;
@@ -7032,7 +7048,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
         case 'workspace_attachment_save': {
           const id = requireString(a, 'id');
           const path = requireString(a, 'path');
-          const ws = await workspacesService.findById(id);
+          const ws = await loadContainerWorkspace(workspacesService, sshService, id);
           assertWorkspaceWithinClientRoots(ws, await getClientRoots(server), { relativePath: path });
 
           // Binary-safe read so non-text artefacts (zip/png/apk) round-trip
@@ -7227,7 +7243,7 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const userId = requireUserId();
           // Ownership check against the local DB before hitting the sidecar
           // (the sidecar only enforces format-level path safety).
-          const ws = await workspacesService.findById(workspaceId);
+          const ws = await loadContainerWorkspace(workspacesService, sshService, workspaceId);
           const { stream, size } = await workspaceClient.readStream(
             ws._id.toString(),
             sourcePath,

@@ -22,6 +22,7 @@ import { ReadabilityService } from '../web-search/services/readability.service';
 import { SearchCategory, SearchTimeRange } from '../web-search/dto/web-search.dto';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { WorkspaceClient } from '../workspaces/workspace-client.service';
+import { assertContainerWorkspace } from '../workspaces/container-only';
 import { WorkspaceGitTokensService } from '../workspaces/workspace-git-tokens.service';
 import { WorkspaceCliTokenService } from '../workspaces/workspace-cli-token.service';
 import { SnippetsService } from '../snippets/snippets.service';
@@ -1441,6 +1442,16 @@ export class ChatToolsService {
     private readonly researchControl: ResearchControlService,
   ) {}
 
+  /**
+   * The ONLY way sidecar tools load a workspace: SSH workspaces have no
+   * sidecar directory and are refused (409) before any sidecar call.
+   */
+  private async loadContainerWorkspace(id: string) {
+    const w = await this.workspaces.findById(id);
+    assertContainerWorkspace(w);
+    return w;
+  }
+
   /** Fire-and-forget audit log for a write-tool call. Never throws. */
   private async auditWrite(
     name: string,
@@ -2667,7 +2678,7 @@ export class ChatToolsService {
           return { success: true, result: { deleted: true, id: wsId } };
         }
         case 'workspace_clone': {
-          const w = await this.workspaces.findById(requireString(args, 'id'));
+          const w = await this.loadContainerWorkspace(requireString(args, 'id'));
           const authenticatedUrl = await this.workspaceGitTokens.buildAuthenticatedCloneUrl(
             w,
             requireString(args, 'repoUrl'),
@@ -2687,13 +2698,13 @@ export class ChatToolsService {
           return { success: true, result: { cloned: true, sizeBytes, sidecar } };
         }
         case 'workspace_pull': {
-          const w = await this.workspaces.findById(requireString(args, 'id'));
+          const w = await this.loadContainerWorkspace(requireString(args, 'id'));
           const sidecar = await this.workspaceClient.pull(w._id.toString());
           await this.workspaces.touch(w._id.toString());
           return { success: true, result: { pulled: true, sidecar } };
         }
         case 'workspace_tree': {
-          const w = await this.workspaces.findById(requireString(args, 'id'));
+          const w = await this.loadContainerWorkspace(requireString(args, 'id'));
           const tree = await this.workspaceClient.tree(
             w._id.toString(),
             optionalString(args, 'path'),
@@ -2703,13 +2714,13 @@ export class ChatToolsService {
           return { success: true, result: tree };
         }
         case 'workspace_read': {
-          const w = await this.workspaces.findById(requireString(args, 'id'));
+          const w = await this.loadContainerWorkspace(requireString(args, 'id'));
           const file = await this.workspaceClient.read(w._id.toString(), requireString(args, 'path'));
           await this.workspaces.touch(w._id.toString());
           return { success: true, result: file };
         }
         case 'workspace_search': {
-          const w = await this.workspaces.findById(requireString(args, 'id'));
+          const w = await this.loadContainerWorkspace(requireString(args, 'id'));
           const search = await this.workspaceClient.search(
             w._id.toString(),
             requireString(args, 'query'),
@@ -2720,18 +2731,18 @@ export class ChatToolsService {
           return { success: true, result: search };
         }
         case 'workspace_status': {
-          const w = await this.workspaces.findById(requireString(args, 'id'));
+          const w = await this.loadContainerWorkspace(requireString(args, 'id'));
           const status = await this.workspaceClient.status(w._id.toString());
           await this.workspaces.touch(w._id.toString());
           return { success: true, result: status };
         }
         case 'workspace_exec': {
-          const w = await this.workspaces.findById(requireString(args, 'id'));
+          const w = await this.loadContainerWorkspace(requireString(args, 'id'));
           // Nur die Objekt-Form wird geprüft; die Key/Value-Regeln (Keys [A-Z_]…,
           // Werte <=4KB) erzwingt der Sidecar bzw. ExecWorkspaceDto.
           const callerEnv = optionalObject<Record<string, string>>(args, 'env');
           const gitEnv = await this.workspaceGitTokens.resolveForWorkspace(w);
-          const dgEnv = this.workspaceCliToken.buildEnvFor(w._id.toString(), w.projectId.toString());
+          const dgEnv = this.workspaceCliToken.buildEnvFor(w);
           const mergedEnv = Object.keys(gitEnv).length || Object.keys(dgEnv).length || callerEnv
             ? { ...gitEnv, ...dgEnv, ...(callerEnv ?? {}) }
             : undefined;
@@ -2745,7 +2756,7 @@ export class ChatToolsService {
           return { success: true, result: exec };
         }
         case 'workspace_attachment_save': {
-          const w = await this.workspaces.findById(requireString(args, 'id'));
+          const w = await this.loadContainerWorkspace(requireString(args, 'id'));
           const path = requireString(args, 'path');
           const file = await this.workspaceClient.readBase64(w._id.toString(), path);
           const fileName = optionalString(args, 'fileName')
