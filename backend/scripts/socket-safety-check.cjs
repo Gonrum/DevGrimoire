@@ -132,11 +132,21 @@ function wsStatus(port, query, extraHeaders = {}) {
       const id = 'c'.repeat(24);
       const bad = await wsStatus(sc.port, `workspaceId=${id}&sessionId=a:b`);
       assert.equal(bad.status, 400);
-      const first = await wsStatus(sc.port, `workspaceId=${id}&sessionId=s1`);
-      assert.ok(first.open, `erstes Terminal nicht geöffnet (${first.status})`);
-      const dup = await wsStatus(sc.port, `workspaceId=${id}&sessionId=s1`);
-      assert.equal(dup.status, 409);
-      first.ws.close();
+      // Both upgrades are started at once: the sidecar must reject the second
+      // while the first is still being set up (reservation at upgrade time),
+      // not only after its PTY is registered.
+      const [first, dup] = await Promise.all([
+        wsStatus(sc.port, `workspaceId=${id}&sessionId=s1`),
+        wsStatus(sc.port, `workspaceId=${id}&sessionId=s1`),
+      ]);
+      const opened = [first, dup].filter((r) => r.open);
+      const rejected = [first, dup].filter((r) => !r.open);
+      assert.equal(opened.length, 1, `genau ein Terminal erwartet, geöffnet: ${opened.length}`);
+      assert.equal(rejected[0].status, 409);
+      // After the open one is registered, a third attempt is rejected as well.
+      const late = await wsStatus(sc.port, `workspaceId=${id}&sessionId=s1`);
+      assert.equal(late.status, 409);
+      opened[0].ws.close();
     });
 
     await check('C-3: keine Kube-Sessions mehr im Sidecar (HTTP 404, Terminal 400)', async () => {

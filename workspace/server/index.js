@@ -1521,9 +1521,18 @@ setInterval(() => {
   }
 }, TERMINAL_SWEEP_MS).unref();
 
+// Keys claimed at upgrade time but not yet in activeTerminals: the PTY is
+// spawned only after async setup (ensureWorkspaceDir etc.), so without this a
+// second upgrade with the same sessionId, or one past the per-workspace cap,
+// could slip through in that window.
+const reservedTerminals = new Set();
+
 function countTerminalsFor(workspaceId) {
   let n = 0;
   for (const key of activeTerminals.keys()) {
+    if (key.startsWith(workspaceId + ':')) n += 1;
+  }
+  for (const key of reservedTerminals) {
     if (key.startsWith(workspaceId + ':')) n += 1;
   }
   return n;
@@ -1618,7 +1627,8 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
-  if (activeTerminals.has(`ws:${workspaceId}:${sessionId}`)) {
+  const termKey = `ws:${workspaceId}:${sessionId}`;
+  if (activeTerminals.has(termKey) || reservedTerminals.has(termKey)) {
     socket.write('HTTP/1.1 409 Conflict\r\nContent-Length: 0\r\n\r\n');
     socket.destroy();
     return;
@@ -1633,11 +1643,21 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
+  // Claimed synchronously, released once the PTY is registered (or setup failed).
+  reservedTerminals.add(termKey);
+  // If the handshake dies before the callback runs, ws never calls it: free
+  // the claim from the socket instead. Once the handler owns it, the handler's
+  // `finally` frees it (a late socket close must not drop a newer claim).
+  let handedOver = false;
+  socket.once('close', () => { if (!handedOver) reservedTerminals.delete(termKey); });
   wss.handleUpgrade(req, socket, head, (ws) => {
-    handleTerminalConnection(ws, workspaceId, sessionId, dgEnv, idleMs).catch((err) => {
-      console.error('terminal connection failed', err);
-      try { ws.close(1011, 'internal error'); } catch { /* noop */ }
-    });
+    handedOver = true;
+    handleTerminalConnection(ws, workspaceId, sessionId, dgEnv, idleMs)
+      .catch((err) => {
+        console.error('terminal connection failed', err);
+        try { ws.close(1011, 'internal error'); } catch { /* noop */ }
+      })
+      .finally(() => reservedTerminals.delete(termKey));
   });
 });
 
@@ -1766,6 +1786,7 @@ async function handleTerminalConnection(ws, workspaceId, sessionId, dgEnv = {}, 
   const key = `ws:${workspaceId}:${sessionId}`;
   const state = { pty: term, ws, lastActivity: Date.now(), idleMs };
   activeTerminals.set(key, state);
+  reservedTerminals.delete(key);
 
   console.log(JSON.stringify({
     type: 'pty-open', workspaceId, sessionId, pid: term.pid, cwd: startCwd,
