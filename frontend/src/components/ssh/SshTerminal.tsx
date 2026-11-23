@@ -57,9 +57,10 @@ export interface SshTerminalProps {
   /**
    * Called when the connection closed without ever having opened — the
    * browser cannot read the HTTP status of a failed WebSocket upgrade, so
-   * hosts use this to hint at likely causes (such as a session limit).
+   * hosts use this to hint at likely causes (such as a session limit). `reason`
+   * is set when the gateway closed with a specific code.
    */
-  onClosedBeforeOpen?: () => void;
+  onClosedBeforeOpen?: (reason?: string) => void;
   /** Called once `initialInput` has been sent, so the host can forget it. */
   onInitialInputSent?: () => void;
 }
@@ -353,7 +354,8 @@ export default function SshTerminal({
         `\r\n\x1b[2m# ${t('ssh.terminal.disconnected')} — ${reason}\x1b[0m\r\n`,
       );
       setCloseInfo({ code: ev.code, reason });
-      if (!everOpened && !disposed) closedBeforeOpenRef.current?.();
+      // Only gateway-specific closes carry a meaningful reason; a plain 1006 says nothing.
+      if (!everOpened && !disposed) closedBeforeOpenRef.current?.(ev.code >= 4000 || ev.code === 1011 ? reason : undefined);
       // Distinguish "shell exited cleanly" (already 'exited') from network/
       // auth termination so the header label and the Reconnect button can
       // react accordingly. WS application-error codes start at 4000+ and

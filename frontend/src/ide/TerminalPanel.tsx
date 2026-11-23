@@ -8,6 +8,7 @@ import { useIdeStore } from './ide-store';
 
 interface TabProps {
   workspaceId: string;
+  ssh: boolean;
   label: string;
   active: boolean;
   initialInput?: string;
@@ -15,20 +16,26 @@ interface TabProps {
   onClose: () => void;
 }
 
-function TerminalTab({ workspaceId, label, active, initialInput, onInputSent, onClose }: TabProps) {
+function TerminalTab({ workspaceId, ssh, label, active, initialInput, onInputSent, onClose }: TabProps) {
   const { t } = useTranslation();
   // The id keys the sidecar's PTY; it lives as long as this tab component does.
   const [sessionId] = useState(() => `ide-${safeRandomUUID()}`);
-  const [closedEarly, setClosedEarly] = useState(false);
+  // `null`: connected or connecting; otherwise the close reason (may be empty).
+  const [closedEarly, setClosedEarly] = useState<string | null>(null);
 
   return (
     <div
       role="tabpanel"
       className={`absolute inset-0 flex flex-col ${active ? '' : 'invisible pointer-events-none'}`}
     >
-      {closedEarly && (
+      {closedEarly !== null && (
         <div className="shrink-0 border-b border-gray-700 bg-gray-800 px-3 py-1.5 text-xs text-yellow-400">
-          {t('ide.terminalConnectFailed')}
+          {/* The container sidecar's 8-terminal limit does not exist on an SSH server. */}
+          {!ssh
+            ? t('ide.terminalConnectFailed')
+            : closedEarly !== ''
+              ? t('ide.terminalConnectFailedSshReason', { reason: closedEarly })
+              : t('ide.terminalConnectFailedSsh')}
         </div>
       )}
       <div className="min-h-0 flex-1">
@@ -43,9 +50,9 @@ function TerminalTab({ workspaceId, label, active, initialInput, onInputSent, on
           initialInput={initialInput}
           onInitialInputSent={onInputSent}
           onClose={onClose}
-          onClosedBeforeOpen={() => setClosedEarly(true)}
+          onClosedBeforeOpen={(reason) => setClosedEarly(reason ?? '')}
           onConnectionStateChange={(state) => {
-            if (state === 'connecting' || state === 'connected') setClosedEarly(false);
+            if (state === 'connecting' || state === 'connected') setClosedEarly(null);
           }}
         />
       </div>
@@ -57,7 +64,7 @@ function TerminalTab({ workspaceId, label, active, initialInput, onInputSent, on
  * Terminal tabs under the editor. Hidden tabs (and the whole panel while collapsed) stay
  * mounted, so their sessions keep running; only closing a tab disconnects it.
  */
-export function TerminalPanel({ workspaceId }: { workspaceId: string }) {
+export function TerminalPanel({ workspaceId, ssh }: { workspaceId: string; ssh: boolean }) {
   const { t } = useTranslation();
   const open = useIdeStore((s) => s.terminalOpen);
   const terminals = useIdeStore((s) => s.terminals);
@@ -112,6 +119,7 @@ export function TerminalPanel({ workspaceId }: { workspaceId: string }) {
           <TerminalTab
             key={id}
             workspaceId={workspaceId}
+            ssh={ssh}
             label={t('ide.terminalTab', { n: index + 1 })}
             active={open && id === activeTerminal}
             initialInput={terminalInputs[id]}

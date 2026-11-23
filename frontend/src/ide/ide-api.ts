@@ -42,8 +42,10 @@ export interface IdeGitStatus {
  * - `conflict`: write conflict, the body carries `currentHash` (see `writeFile`)
  * - `exists`:   the sidecar refused to overwrite (`target exists` / `already exists`)
  * - `inactive`: the backend gate's ConflictException — the workspace is not active
+ * - `remote`:   an SSH workspace's server or connection refused (permission, connection gone,
+ *               host key not confirmed); says nothing about the workspace record itself
  */
-export type IdeConflictReason = 'conflict' | 'exists' | 'inactive';
+export type IdeConflictReason = 'conflict' | 'exists' | 'inactive' | 'remote';
 
 export class IdeApiError extends Error {
   constructor(
@@ -53,6 +55,8 @@ export class IdeApiError extends Error {
     readonly reason?: IdeConflictReason,
     /** Set for status 413 when the backend names the limit in force (bytes). */
     readonly limit?: number,
+    /** The body's `error` field (e.g. `tofu_not_accepted`), when the backend sent one. */
+    readonly code?: string,
   ) {
     super(message);
     this.name = 'IdeApiError';
@@ -68,11 +72,12 @@ export class IdeConflictError extends IdeApiError {
 }
 
 /** The one place that tells the three kinds of 409 apart. */
-function conflictReason(body: unknown): IdeConflictReason {
+function conflictReason(body: unknown, message: string): IdeConflictReason {
   if (!isRecord(body)) return 'inactive';
   if ('currentHash' in body) return 'conflict';
   if (typeof body.error === 'string' && /\bexists$/.test(body.error)) return 'exists';
-  return 'inactive';
+  // The gate's own message is "Workspace is <status>, not active"; any other 409 is remote.
+  return /^Workspace is .*not active$/.test(message) ? 'inactive' : 'remote';
 }
 
 /** Error body as an unknown value; null when it is empty or not JSON. */
@@ -93,7 +98,8 @@ function errorFromText(status: number, text: string, fallback: string): IdeApiEr
     : [];
   const message = readErrorMessageFromText(text) ?? (lines.length > 0 ? lines.join('; ') : fallback);
   const limit = status === 413 && isRecord(body) && typeof body.limit === 'number' ? body.limit : undefined;
-  return new IdeApiError(message, status, status === 409 ? conflictReason(body) : undefined, limit);
+  const code = isRecord(body) && typeof body.error === 'string' ? body.error : undefined;
+  return new IdeApiError(message, status, status === 409 ? conflictReason(body, message) : undefined, limit, code);
 }
 
 const BASE = '/api/workspaces';
@@ -159,7 +165,7 @@ async function writeFile(
     const body = parseErrorBody(text);
     // A write conflict always carries `currentHash` (null when the file is gone). A 409
     // without it is the gate's "workspace is not active" and must not look like a conflict.
-    if (!isRecord(body) || conflictReason(body) !== 'conflict') throw errorFromText(409, text, res.statusText);
+    if (!isRecord(body) || conflictReason(body, '') !== 'conflict') throw errorFromText(409, text, res.statusText);
     const message = readErrorMessageFromText(text) ?? res.statusText;
     const currentHash = typeof body.currentHash === 'string' ? body.currentHash : null;
     throw new IdeConflictError(message, currentHash);
@@ -272,7 +278,7 @@ export const ideApi = {
   search: (
     wsId: string,
     q: { query: string; regex: boolean; caseSensitive: boolean; include?: string[]; exclude?: string[] },
-  ): Promise<{ matches: IdeSearchMatch[]; truncated: boolean }> =>
+  ): Promise<{ matches: IdeSearchMatch[]; truncated: boolean; engine?: 'rg' | 'grep' }> =>
     sendJson(fsUrl(wsId, 'search'), 'POST', q),
   status: (wsId: string): Promise<IdeGitStatus> => getJson(fsUrl(wsId, 'status')),
 };

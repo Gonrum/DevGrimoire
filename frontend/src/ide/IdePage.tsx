@@ -6,6 +6,7 @@ import { api, ApiError, type Workspace } from '../api/client';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { useToast } from '../components/Toast';
 import { errorMessage } from '../lib/narrow';
+import { sshTarget } from '../lib/ssh-target';
 import { FileTree } from './FileTree';
 import { ideApi, IdeApiError } from './ide-api';
 import { useIdeStore, type SidePanel } from './ide-store';
@@ -26,7 +27,14 @@ type LoadState =
   | { kind: 'inactive'; workspace: Workspace }
   /** The record says active, but the IDE gate refused with 409 (status changed meanwhile). */
   | { kind: 'gateInactive'; workspace: Workspace }
+  /** SSH workspace whose server or connection refused the first load (409 remote / 502 / 504). */
+  | { kind: 'remoteError'; workspace: Workspace; message: string; code?: string }
   | { kind: 'error'; message: string };
+
+/** Error codes of the backend that mean "confirm the host key on the connection page". */
+const FINGERPRINT_ERRORS: readonly string[] = ['tofu_not_accepted', 'host_key_mismatch'];
+
+const isSshWorkspace = (ws: Workspace): boolean => ws.location === 'ssh';
 
 const getSidebarWidth = (): number => useIdeStore.getState().sidebarWidth;
 const getTerminalHeight = (): number => useIdeStore.getState().terminalHeight;
@@ -48,7 +56,19 @@ function RailButton({ label, pressed, onClick, children }: { label: string; pres
   );
 }
 
-function FullPageMessage({ title, text, backTo, backLabel }: { title: string; text: string; backTo?: string; backLabel?: string }) {
+function FullPageMessage({
+  title,
+  text,
+  backTo,
+  backLabel,
+  children,
+}: {
+  title: string;
+  text: string;
+  backTo?: string;
+  backLabel?: string;
+  children?: React.ReactNode;
+}) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-900 px-4">
       <div className="max-w-md text-center">
@@ -57,6 +77,7 @@ function FullPageMessage({ title, text, backTo, backLabel }: { title: string; te
         {backTo && backLabel && (
           <Link to={backTo} className="text-sm text-cyan-400 hover:text-cyan-300">{backLabel}</Link>
         )}
+        {children}
       </div>
     </div>
   );
@@ -66,6 +87,8 @@ export default function IdePage() {
   const { t } = useTranslation();
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  // Bumped by "try again": reloads the record and the root listing without touching the editor store.
+  const [attempt, setAttempt] = useState(0);
   const setWorkspace = useIdeStore((s) => s.setWorkspace);
 
   useEffect(() => {
@@ -89,6 +112,9 @@ export default function IdePage() {
         if (err instanceof IdeApiError && err.status === 403) return { kind: 'forbidden' };
         if (err instanceof IdeApiError && err.status === 409) return { kind: 'gateInactive', workspace };
         if (err instanceof IdeApiError && err.status === 404) return { kind: 'notFound' };
+        if (isSshWorkspace(workspace) && err instanceof IdeApiError && (err.status === 409 || err.status === 502 || err.status === 504)) {
+          return { kind: 'remoteError', workspace, message: err.message, code: err.code };
+        }
         // Anything else (network, 5xx): open the workbench, the tree shows the error and a retry.
         return { kind: 'ready', workspace };
       }
@@ -113,19 +139,22 @@ export default function IdePage() {
       },
     );
     return () => { alive = false; };
-  }, [workspaceId, t, setWorkspace]);
+  }, [workspaceId, t, setWorkspace, attempt]);
 
   const title =
-    state.kind === 'ready' || state.kind === 'inactive' || state.kind === 'gateInactive' ? state.workspace.name : null;
+    state.kind === 'ready' || state.kind === 'inactive' || state.kind === 'gateInactive' || state.kind === 'remoteError'
+      ? state.workspace.name
+      : null;
+  const host = state.kind === 'ready' ? (state.workspace.ssh?.host ?? null) : null;
   useEffect(() => {
     if (!title) return undefined;
     const previous = document.title;
-    document.title = `${title} — IDE`;
+    document.title = host ? `${title} · ${host} — IDE` : `${title} — IDE`;
     // The rest of the app never sets a title, so leaving the IDE must put the old one back.
     return () => {
       document.title = previous;
     };
-  }, [title]);
+  }, [title, host]);
 
   if (!workspaceId || state.kind === 'notFound') {
     return <FullPageMessage title={t('ide.notFoundTitle')} text={t('ide.notFoundText')} />;
@@ -142,6 +171,34 @@ export default function IdePage() {
   }
   if (state.kind === 'error') {
     return <FullPageMessage title={t('ide.loadError')} text={state.message} />;
+  }
+  if (state.kind === 'remoteError') {
+    return (
+      <FullPageMessage
+        title={t('ide.remoteErrorTitle')}
+        text={state.message}
+        backTo={`/projects/${state.workspace.projectId}`}
+        backLabel={t('ide.backToProject')}
+      >
+        <div className="mt-4 flex flex-col items-center gap-3">
+          <button
+            type="button"
+            className="rounded-sm bg-cyan-400/15 px-3 py-1.5 text-sm text-cyan-400 hover:bg-cyan-400/25"
+            onClick={() => {
+              setState({ kind: 'loading' });
+              setAttempt((n) => n + 1);
+            }}
+          >
+            {t('ide.remoteRetry')}
+          </button>
+          {state.code !== undefined && FINGERPRINT_ERRORS.includes(state.code) && (
+            <Link to={`/projects/${state.workspace.projectId}?tab=ssh`} className="text-sm text-cyan-400 hover:text-cyan-300">
+              {t('ide.remoteFingerprintLink')}
+            </Link>
+          )}
+        </div>
+      </FullPageMessage>
+    );
   }
   if (state.kind === 'inactive') {
     return (
@@ -212,6 +269,14 @@ function Workbench({
           ← {t('ide.backToProject')}
         </Link>
         <span className="font-medium truncate">{workspace.name}</span>
+        {workspace.location === 'ssh' && (
+          <span
+            className="min-w-0 max-w-[50%] truncate rounded-sm border border-amber-700/40 bg-amber-900/40 px-1.5 py-0.5 text-xs text-amber-300"
+            title={sshTarget(workspace)}
+          >
+            {t('ide.sshBadge', { target: sshTarget(workspace) })}
+          </span>
+        )}
         {branch && <span className="text-gray-500 text-xs font-mono truncate">{branch}</span>}
       </header>
       <div className="flex flex-1 min-h-0">
@@ -237,6 +302,7 @@ function Workbench({
               activePath={activePath}
               marks={marks}
               initialRoot={initialRoot}
+              ssh={workspace.location === 'ssh'}
               onOpenFile={(path, size) => {
                 openFile(path, size).catch((err: unknown) => showError(errorMessage(err)));
               }}
@@ -275,7 +341,7 @@ function Workbench({
           )}
           {/* Always mounted: collapsing must not end the shell sessions. */}
           <div className={terminalOpen ? 'shrink-0' : 'hidden'} style={{ height: terminalHeight }}>
-            <TerminalPanel key={workspaceId} workspaceId={workspaceId} />
+            <TerminalPanel key={workspaceId} workspaceId={workspaceId} ssh={workspace.location === 'ssh'} />
           </div>
         </div>
       </div>

@@ -14,6 +14,7 @@ import Button from './ui/Button';
 import ConfirmButton from './ui/ConfirmButton';
 import { FormInput, FormTextarea } from './ui/FormField';
 import { Dialog, Portal } from './ui/Dialog';
+import { sshTarget } from '../lib/ssh-target';
 import { openInTerminalDock } from './ssh/terminalDockEvents';
 
 /** Square icon button of a workspace card. */
@@ -85,14 +86,6 @@ function statusBadgeColor(status: WorkspaceStatus): string {
   if (status === 'active') return 'bg-green-900/40 text-green-300 border border-green-700/40';
   if (status === 'cleaning') return 'bg-amber-900/40 text-amber-300 border border-amber-700/40';
   return 'bg-gray-800 text-gray-400 border border-gray-700/40';
-}
-
-/** `user@host[:port]:/path` — the port only shows when it is not the default. */
-function sshTarget(ws: Workspace): string {
-  const ssh = ws.ssh;
-  if (!ssh) return ws.remotePath ?? '';
-  const port = ssh.port === 22 ? '' : `:${ssh.port}`;
-  return `${ssh.username}@${ssh.host}${port}:${ws.remotePath ?? ''}`;
 }
 
 /** Error codes of the backend that mean "confirm the host key on the connection page". */

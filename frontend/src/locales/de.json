@@ -3363,6 +3363,13 @@
     "terminalClose": "Terminal schließen",
     "terminalHost": "Werkstatt",
     "terminalHint": "Strg+` blendet das Terminal ein und aus.",
-    "terminalConnectFailed": "Terminal konnte nicht verbunden werden. Möglicherweise sind zu viele Terminals für diese Werkstatt offen (max. 8, gemeinsam mit dem Dock)."
+    "terminalConnectFailed": "Terminal konnte nicht verbunden werden. Möglicherweise sind zu viele Terminals für diese Werkstatt offen (max. 8, gemeinsam mit dem Dock).",
+    "terminalConnectFailedSsh": "Verbindung zum Server fehlgeschlagen.",
+    "terminalConnectFailedSshReason": "Verbindung zum Server fehlgeschlagen: {{reason}}",
+    "searchGrepHint": "Suche mit grep — Regex-Syntax kann abweichen",
+    "remoteErrorTitle": "Server nicht erreichbar",
+    "remoteRetry": "Erneut versuchen",
+    "remoteFingerprintLink": "Zu den SSH-Verbindungen des Projekts",
+    "sshBadge": "SSH · {{target}}"
   }
 }

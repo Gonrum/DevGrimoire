@@ -70,7 +70,7 @@ export function useWorkspaceFileTree(workspaceId: string | null, initialRoot?: T
         const status = error instanceof IdeApiError ? error.status : 0;
         // These states belong to the whole IDE, not to one folder.
         if (status === 403) useIdeStore.getState().setBlocked('forbidden');
-        else if (status === 409) useIdeStore.getState().setBlocked('archived');
+        else if (status === 409 && error instanceof IdeApiError && error.reason === 'inactive') useIdeStore.getState().setBlocked('archived');
         else if (status === 404 && path === '.') useIdeStore.getState().setBlocked('gone');
         // A subdirectory that vanished (deleted/moved elsewhere) is dropped, not an error,
         // and no longer counts as expanded (otherwise every refresh asks for it again).

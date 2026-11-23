@@ -6,6 +6,7 @@ import { useToast } from '../components/Toast';
 import { errorMessage, isUnknownArray } from '../lib/narrow';
 import { FileIcon, FolderIcon } from './FileIcon';
 import { ideApi, IdeApiError, type IdeTreeEntry } from './ide-api';
+import { formatLimit } from './limit-message';
 import { IdeConfirmDialog } from './IdeDialog';
 import { useIdeStore } from './ide-store';
 import { useWorkspaceFileTree, type TreeListing } from './useWorkspaceFileTree';
@@ -19,6 +20,8 @@ interface FileTreeProps {
   marks?: ChangedMarks;
   /** Root listing already loaded by the page (access probe); saves the first request. */
   initialRoot?: TreeListing;
+  /** SSH workspace: an upload limit is set on the SSH connection, not in the settings. */
+  ssh?: boolean;
 }
 
 interface CreateDraft {
@@ -133,7 +136,7 @@ function collectDroppedFiles(dt: DataTransfer): { files: File[]; hadDirectory: b
   return { files, hadDirectory };
 }
 
-export function FileTree({ workspaceId, activePath, onOpenFile, marks, initialRoot }: FileTreeProps) {
+export function FileTree({ workspaceId, activePath, onOpenFile, marks, initialRoot, ssh = false }: FileTreeProps) {
   const { t } = useTranslation();
   const { showError, showSuccess } = useToast();
   const {
@@ -304,7 +307,11 @@ export function FileTree({ workspaceId, activePath, onOpenFile, marks, initialRo
         } catch (e) {
           noteApiError(e);
           if (e instanceof IdeApiError && e.status === 413) {
-            showError(t('ide.uploadTooLarge', { name: file.name }));
+            showError(
+              ssh && e.limit !== undefined
+                ? t('ide.uploadTooLargeSsh', { name: file.name, limit: formatLimit(e.limit) })
+                : t('ide.uploadTooLarge', { name: file.name }),
+            );
           } else {
             showError(`${file.name}: ${errorMessage(e, t('ide.operationFailed'))}`);
           }

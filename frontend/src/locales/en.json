@@ -3364,6 +3364,13 @@
     "terminalClose": "Close terminal",
     "terminalHost": "Workspace",
     "terminalHint": "Ctrl+` toggles the terminal.",
-    "terminalConnectFailed": "The terminal could not connect. There may be too many terminals open for this workspace (max. 8, shared with the dock)."
+    "terminalConnectFailed": "The terminal could not connect. There may be too many terminals open for this workspace (max. 8, shared with the dock).",
+    "terminalConnectFailedSsh": "Connection to the server failed.",
+    "terminalConnectFailedSshReason": "Connection to the server failed: {{reason}}",
+    "searchGrepHint": "Searching with grep — regex syntax may differ",
+    "remoteErrorTitle": "Server not reachable",
+    "remoteRetry": "Try again",
+    "remoteFingerprintLink": "Go to the project's SSH connections",
+    "sshBadge": "SSH · {{target}}"
   }
 }

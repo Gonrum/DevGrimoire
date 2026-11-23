@@ -10,6 +10,7 @@ import { useIdeStore } from './ide-store';
 interface SearchResult {
   matches: IdeSearchMatch[];
   truncated: boolean;
+  engine?: 'rg' | 'grep';
 }
 
 function splitGlobs(value: string): string[] | undefined {
@@ -132,6 +133,8 @@ export function SearchPanel({ workspaceId }: { workspaceId: string }) {
           {busy ? t('ide.searching') : t('ide.searchRun')}
         </button>
       </form>
+
+      {result?.engine === 'grep' && <p className="text-gray-500">{t('ide.searchGrepHint')}</p>}
 
       {error && <p className="text-red-400 break-words">{error}</p>}
 
