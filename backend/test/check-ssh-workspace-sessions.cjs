@@ -694,6 +694,31 @@ function makeWorld() {
     assert.ok(chan.closed >= 1);
   });
 
+  await check('driver: output over the cap -> TERM once, then channel closed; timeout partial marks truncated', async () => {
+    const { client } = makeSsh2();
+    let chan;
+    client.execImpl = (_cmd, cb) => { chan = fakeChannel(); cb(undefined, chan); };
+    const d = await createSsh2Driver(client, { onLost() {} });
+    const running = d.exec('yes', { timeoutMs: 10_000, maxOutputBytes: 4, terminateOnTimeout: true });
+    await sleep(5);
+    chan.emit('data', Buffer.from('abcdef'));
+    chan.emit('data', Buffer.from('more'));
+    const res = await running;
+    assert.equal(res.truncated, true);
+    assert.equal(res.code, null);
+    assert.equal(res.stdout, 'abcd');
+    assert.deepEqual(chan.signals, [{ name: 'TERM', closedBefore: 0 }]);
+    // A channel that never closes after the cap: the timeout's partial keeps the flag.
+    let chan2;
+    client.execImpl = (_cmd, cb) => { chan2 = fakeChannel(); chan2.close = () => { chan2.closed += 1; }; cb(undefined, chan2); };
+    const p2 = rejection(() => d.exec('yes', { timeoutMs: 40, maxOutputBytes: 2, terminateOnTimeout: true }));
+    await sleep(5);
+    chan2.emit('data', Buffer.from('xyz'));
+    const err = await p2;
+    assert.equal(err.code, 'timeout');
+    assert.deepEqual(err.partial, { stdout: 'xy', stderr: '', truncated: true });
+  });
+
   await check('driver: timeout carries partial output; already aborted signal -> no channel opened', async () => {
     const { client } = makeSsh2();
     let chan;

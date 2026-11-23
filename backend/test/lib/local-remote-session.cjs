@@ -290,7 +290,7 @@ function createLocalRemoteSession(base, RemoteError) {
     };
     const out = cap(sc.stdout);
     const err = cap(sc.stderr);
-    const partial = { stdout: out.text, stderr: err.text };
+    const partial = { stdout: out.text, stderr: err.text, ...(out.cut || err.cut ? { truncated: true } : {}) };
     return new Promise((resolve, reject) => {
       const signal = opts.signal;
       let timer;

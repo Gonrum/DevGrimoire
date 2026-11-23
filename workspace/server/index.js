@@ -1386,8 +1386,13 @@ app.post('/exec/stream', async (req, res) => {
   const env = buildExecEnv(req.body?.env);
 
   // Wrap the command so cd persists across calls (see wrapWithCwdState).
-  const startCwd = (await readCwdState(id)) || cwd;
-  const wrappedCommand = wrapWithCwdState(command, startCwd, cwdStatePath(id), cwd);
+  // `cwdState: false` (strict boolean; anything else keeps the default) opts
+  // out: the command starts in the workspace root and its cd is not written
+  // back, so a caller (IDE agent) neither inherits nor moves the cwd shared
+  // by the terminal and workspace_exec.
+  const useCwdState = req.body?.cwdState !== false;
+  const startCwd = useCwdState ? ((await readCwdState(id)) || cwd) : cwd;
+  const wrappedCommand = useCwdState ? wrapWithCwdState(command, startCwd, cwdStatePath(id), cwd) : command;
 
   let lastEvent = null;
   await runExecStream({ command: wrappedCommand, cwd, timeoutMs, env, abortSignal: abort.signal }, (ev) => {
@@ -1404,7 +1409,7 @@ app.post('/exec/stream', async (req, res) => {
   });
   // After the stream finished, send a small follow-up event with the new
   // cwd. Done event was already on the wire; this is a sibling event.
-  const newCwd = (await readCwdState(id)) || cwd;
+  const newCwd = useCwdState ? ((await readCwdState(id)) || cwd) : cwd;
   if (!res.writableEnded) res.write(JSON.stringify({ type: 'cwd', cwd: newCwd }) + '\n');
   if (!res.writableEnded) res.end();
 

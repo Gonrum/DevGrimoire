@@ -91,7 +91,12 @@ export type RemoteErrorCode =
   | 'failure';
 
 /** Output an exec had collected before it timed out or was aborted. */
-export interface RemoteExecPartial { stdout: string; stderr: string }
+export interface RemoteExecPartial {
+  stdout: string;
+  stderr: string;
+  /** The output had already hit `maxOutputBytes`. */
+  truncated?: boolean;
+}
 
 /** Error of a remote operation with a stable `code` (see `RemoteErrorCode`). */
 export class RemoteError extends Error {

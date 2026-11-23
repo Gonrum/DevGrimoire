@@ -5,6 +5,7 @@ import {
   RemoteDirEntry,
   RemoteDriverContext,
   RemoteDriverExecOpts,
+  RemoteExecPartial,
   RemoteError,
   RemoteExecResult,
   RemoteFs,
@@ -299,7 +300,7 @@ function runExec(client: Ssh2Client, command: string, opts: RemoteDriverExecOpts
     const out: OutputSink = { chunks: [], len: 0 };
     const err: OutputSink = { chunks: [], len: 0 };
     const text = (sink: OutputSink): string => Buffer.concat(sink.chunks, sink.len).toString('utf8');
-    const partial = (): { stdout: string; stderr: string } => ({ stdout: text(out), stderr: text(err) });
+    const partial = (): RemoteExecPartial => ({ stdout: text(out), stderr: text(err), ...(truncated ? { truncated } : {}) });
     const closeChannel = (): void => safe(() => channel?.close());
     const timer = setTimeout(() => {
       finish(() => reject(new RemoteError('timeout', `exec timed out after ${timeoutMs} ms`, partial())));
@@ -336,6 +337,8 @@ function runExec(client: Ssh2Client, command: string, opts: RemoteDriverExecOpts
         sink.len += part.length;
       }
       if (chunk.length > room) {
+        // Like timeout and abort: ask the server to stop the command, then close.
+        if (!truncated) safe(() => channel?.signal('TERM'));
         truncated = true;
         closeChannel();
       }

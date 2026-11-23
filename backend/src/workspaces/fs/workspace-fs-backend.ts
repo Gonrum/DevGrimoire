@@ -35,12 +35,17 @@ export interface FsExecOpts {
 
 /** Same ceiling as the sidecar's `/exec` (`EXEC_MAX_TIMEOUT_MS`). */
 export const FS_EXEC_MAX_TIMEOUT_MS = 600_000;
+/** Spec default of `ws_exec` when no usable timeout is given. */
+export const FS_EXEC_DEFAULT_TIMEOUT_MS = 60_000;
+/** Fallback output cap per stream when no usable one is given (the LLM sees 64 KiB anyway). */
+export const FS_EXEC_DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
 /** Same command length limit as the sidecar. */
 export const FS_EXEC_MAX_COMMAND_LENGTH = 8 * 1024;
 
 /**
  * Shared input rules of `exec`: a non-empty command without NUL up to 8 KiB
- * (400 otherwise); timeout clamped to 1 ms .. 600 s, output cap to >= 1 byte.
+ * (400 otherwise); timeout clamped to 1 ms .. 600 s (non-finite -> 60 s), output
+ * cap >= 1 byte (non-finite or <= 0 -> 64 KiB).
  */
 export function normaliseExecInput(command: string, opts: FsExecOpts): FsExecOpts {
   const bad = (message: string): HttpException => new HttpException({ error: message, message }, 400);
@@ -49,8 +54,10 @@ export function normaliseExecInput(command: string, opts: FsExecOpts): FsExecOpt
   if (command.length > FS_EXEC_MAX_COMMAND_LENGTH) throw bad(`command too long (max ${FS_EXEC_MAX_COMMAND_LENGTH})`);
   const timeoutMs = Number.isFinite(opts.timeoutMs)
     ? Math.min(Math.max(Math.floor(opts.timeoutMs), 1), FS_EXEC_MAX_TIMEOUT_MS)
-    : FS_EXEC_MAX_TIMEOUT_MS;
-  const maxOutputBytes = Number.isFinite(opts.maxOutputBytes) ? Math.max(Math.floor(opts.maxOutputBytes), 1) : 1;
+    : FS_EXEC_DEFAULT_TIMEOUT_MS;
+  const maxOutputBytes = Number.isFinite(opts.maxOutputBytes) && Math.floor(opts.maxOutputBytes) >= 1
+    ? Math.floor(opts.maxOutputBytes)
+    : FS_EXEC_DEFAULT_MAX_OUTPUT_BYTES;
   return { timeoutMs, maxOutputBytes, ...(opts.signal ? { signal: opts.signal } : {}) };
 }
 

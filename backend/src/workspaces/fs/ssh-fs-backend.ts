@@ -6,8 +6,10 @@ import { pipeline } from 'node:stream/promises';
 import { errorMessage } from '../../common/narrow';
 import { shq } from '../../common/shell-quote';
 import type { SshAuditAction } from '../../ssh/schemas/ssh-audit.schema';
+import { AUDIT_COMMAND_TRUNC } from '../../ssh/ssh-session.service';
 import { parseGitStatus, parseGrepOutput, parseRipgrepJson, relativizeStatus } from '../workspace-search-parse';
 import { RemoteError, RemoteExecResult, RemoteSession, RemoteStat, isRemoteError } from './remote-session';
+import type { RemoteExecPartial } from './remote-session';
 import { normaliseExecInput } from './workspace-fs-backend';
 import type {
   FsEntry,
@@ -40,8 +42,6 @@ const SEARCH_REMOTE_TIMEOUT_S = 18;
 function isWrapperTimeout(code: number | null): boolean {
   return code === 124 || code === 143 || code === null;
 }
-/** Longest command stored in an audit row. */
-const AUDIT_COMMAND_MAX_CHARS = 2000;
 /** A recursive delete of a big tree may take a while; it is never interrupted. */
 const DELETE_TIMEOUT_MS = 120_000;
 const STATUS_TIMEOUT_MS = 30_000;
@@ -683,8 +683,8 @@ export class SshFsBackend implements WorkspaceFsBackend {
    */
   async exec(command: string, opts: FsExecOpts): Promise<FsExecResult> {
     const { timeoutMs, maxOutputBytes, signal } = normaliseExecInput(command, opts);
-    const empty = { stdout: '', stderr: '' };
-    const auditCommand = command.slice(0, AUDIT_COMMAND_MAX_CHARS);
+    const empty: RemoteExecPartial = { stdout: '', stderr: '' };
+    const auditCommand = command.slice(0, AUDIT_COMMAND_TRUNC);
     const started = Date.now();
     let result: FsExecResult;
     try {
@@ -703,7 +703,7 @@ export class SshFsBackend implements WorkspaceFsBackend {
         throw this.toHttp(err, '.', 'single');
       }
       const partial = (isRemoteError(err) && err.partial) || empty;
-      result = { exitCode: null, ...partial, truncated: false, timedOut, aborted };
+      result = { exitCode: null, stdout: partial.stdout, stderr: partial.stderr, truncated: partial.truncated === true, timedOut, aborted };
     }
     this.audit('exec', this.root, {
       command: auditCommand,

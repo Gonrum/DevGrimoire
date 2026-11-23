@@ -492,6 +492,39 @@ async function main() {
       assert.equal(fs.existsSync(path.join(root, 'noauth1')), false);
     });
 
+    await check('exec/stream: cwdState false starts in the root and never touches the shared cwd state', async () => {
+      // Unique id: the sidecar keeps cwd state in /tmp/dg-cwd/<id> (also on the test host).
+      const id = `cwdchk${process.pid}`;
+      const stateFile = `/tmp/dg-cwd/${id}`;
+      const wsDir = path.join(root, id);
+      fs.mkdirSync(path.join(wsDir, 'sub'), { recursive: true });
+      fs.mkdirSync(path.join(wsDir, 'other'), { recursive: true });
+      const run = async (command, extra = {}) => {
+        const res = await fetch(`${base}/exec/stream`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ workspaceId: id, command, ...extra }),
+        });
+        assert.equal(res.status, 200);
+        const events = (await res.text()).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+        return events.filter((e) => e.type === 'stdout').map((e) => e.line).join('\n');
+      };
+      try {
+        // Default: cd persists (terminal / workspace_exec behaviour).
+        await run('cd sub');
+        assert.equal(await run('pwd'), path.join(wsDir, 'sub'));
+        // Opt-out: starts in the root, its cd is not written back.
+        assert.equal(await run('pwd', { cwdState: false }), wsDir);
+        await run('cd other', { cwdState: false });
+        assert.equal(await run('pwd'), path.join(wsDir, 'sub'));
+        // Only a strict boolean false opts out.
+        assert.equal(await run('pwd', { cwdState: 'false' }), path.join(wsDir, 'sub'));
+        assert.equal(await run('pwd', { cwdState: 0 }), path.join(wsDir, 'sub'));
+      } finally {
+        fs.rmSync(stateFile, { force: true });
+      }
+    });
+
     const MIB = 1024 * 1024;
     await check('maxBytes: /read 413 without it, 200 with 8 MiB (capped at the hard max), limit reported', async () => {
       put('six.txt', 'a'.repeat(6 * MIB));

@@ -67,8 +67,8 @@ function fakeClient(script) {
   return {
     calls,
     ensureDir: async () => undefined,
-    execStream: async (workspaceId, command, timeoutMs, env, abortSignal, onEvent) => {
-      const call = { workspaceId, command, timeoutMs, env, abortSignal };
+    execStream: async (workspaceId, command, timeoutMs, env, abortSignal, onEvent, opts) => {
+      const call = { workspaceId, command, timeoutMs, env, abortSignal, opts };
       calls.push(call);
       await script(onEvent, abortSignal, call);
     },
@@ -111,6 +111,20 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     assert.equal(client.calls[0].command, 'make test');
     assert.equal(client.calls[0].timeoutMs, 90_000);
     assert.deepEqual(client.calls[0].env, { GH_TOKEN: 'x' });
+    // Agent commands start in the workspace root and never touch the cwd the terminal shares.
+    assert.deepEqual(client.calls[0].opts, { cwdState: false });
+  });
+
+  await check('container: unusable timeout -> 60 s, unusable output cap -> 64 KiB', async () => {
+    const client = fakeClient(async (emit) => {
+      emit({ type: 'stdout', line: 'z'.repeat(1000) });
+      emit({ type: 'done', exitCode: 0, timedOut: false });
+    });
+    const b = new ContainerFsBackend(client, 'w1', async () => undefined);
+    const res = await b.exec('x', { timeoutMs: Number.NaN, maxOutputBytes: 0 });
+    assert.equal(client.calls[0].timeoutMs, 60_000);
+    assert.equal(res.truncated, false);
+    assert.equal(res.stdout.length, 1000);
   });
 
   await check('container: timeout capped at 600 s; sidecar timeout -> timedOut', async () => {
@@ -189,7 +203,8 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     const spawnErr = fakeClient(async (emit) => { emit({ type: 'error', message: 'spawn failed' }); });
     const res = await new ContainerFsBackend(spawnErr, 'w1', async () => undefined).exec('x', OPTS);
     assert.equal(res.exitCode, null);
-    assert.match(res.stderr, /spawn failed/);
+    // Marked, so it cannot be taken for output of the command.
+    assert.equal(res.stderr, '[sidecar] spawn failed');
   });
 
   await check('container/ssh: empty or NUL command -> 400; nothing runs', async () => {
@@ -243,6 +258,14 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     assert.ok(t.runs.every((o) => o.retryable !== true), 'exec is not retryable');
   });
 
+  await check('ssh: unusable timeout -> 60 s, unusable output cap -> 64 KiB', async () => {
+    const t = setup();
+    await t.backend.exec('x', { timeoutMs: Infinity, maxOutputBytes: -5 });
+    const o = t.fake.calls.execOpts[t.fake.calls.execOpts.length - 1];
+    assert.equal(o.timeoutMs, 60_000);
+    assert.equal(o.maxOutputBytes, 64 * 1024);
+  });
+
   await check("ssh: a root containing ' is quoted as one word", async () => {
     const t = setup("it's here");
     await t.backend.exec('ls', OPTS);
@@ -270,6 +293,12 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     t.fake.switches.execScript = { stdout: 'so far', timeout: true, delayMs: 5 };
     const res = await t.backend.exec('sleep 100', { timeoutMs: 50, maxOutputBytes: 1024 });
     assert.deepEqual(res, { exitCode: null, stdout: 'so far', stderr: '', truncated: false, timedOut: true, aborted: false });
+    // Output that had already hit the cap stays marked as truncated.
+    t.fake.switches.execScript = { stdout: 'q'.repeat(300), timeout: true };
+    const capped = await t.backend.exec('noisy', { timeoutMs: 50, maxOutputBytes: 100 });
+    assert.equal(capped.timedOut, true);
+    assert.equal(capped.truncated, true);
+    assert.equal(capped.stdout.length, 100);
   });
 
   await check('ssh: signal abort -> aborted; signal reached the session exec', async () => {
@@ -306,6 +335,9 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     assert.equal(t.audits[0].exitCode, 1);
     assert.equal(t.audits[1].command, 'make slow');
     assert.match(t.audits[1].errorMsg, /timeout/i);
+    // Same 500-char cap as every other SSH audit row.
+    await t.backend.exec('e'.repeat(2000), OPTS);
+    assert.equal(t.audits[2].command.length, 500);
   });
 
   await check('ssh: remote errors other than timeout/abort -> IDE HttpException (disconnected 502)', async () => {

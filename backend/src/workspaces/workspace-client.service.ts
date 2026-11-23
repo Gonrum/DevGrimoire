@@ -501,6 +501,9 @@ export class WorkspaceClient {
    * Uses native fetch (Node 20+) so we can iterate the response body
    * without buffering. abortSignal cancels the upstream request, which
    * makes the sidecar's req.on('close') fire and SIGKILL the child.
+   *
+   * `opts.cwdState: false` runs the command in the workspace root without
+   * reading or writing the cwd state the terminal and workspace_exec share.
    */
   async execStream(
     workspaceId: string,
@@ -509,6 +512,7 @@ export class WorkspaceClient {
     env: Record<string, string> | undefined,
     abortSignal: AbortSignal,
     onEvent: (event: Record<string, unknown>) => void,
+    opts: { cwdState?: boolean } = {},
   ): Promise<void> {
     if (!this.token) {
       throw new ServiceUnavailableException(
@@ -517,7 +521,13 @@ export class WorkspaceClient {
     }
     const limit = Math.min(timeoutMs ?? 60_000, 600_000);
     const url = `${this.baseUrl}/exec/stream`;
-    const body = JSON.stringify({ workspaceId, command, timeout: limit, env });
+    const body = JSON.stringify({
+      workspaceId,
+      command,
+      timeout: limit,
+      env,
+      ...(opts.cwdState === false ? { cwdState: false } : {}),
+    });
     const res = await fetch(url, {
       method: 'POST',
       headers: {

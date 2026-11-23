@@ -105,7 +105,8 @@ const HARD_MAX_LIST_ENTRIES = 2000;
 const LIST_RECURSE_MAX_DEPTH = 10;
 const CONCURRENCY_LIMIT = 5;
 const CONCURRENCY_WAIT_MS = 30_000;
-const AUDIT_COMMAND_TRUNC = 500;
+/** Longest command text stored in an SSH audit row (also used by the IDE file backend). */
+export const AUDIT_COMMAND_TRUNC = 500;
 // Async exec job table (T-388). Tail buffers keep the *last N bytes* of each
 // stream so a polling agent can see recent output without us holding the full
 // 256 KB stdout buffer per running job. Job state lingers for JOB_TTL_MS after

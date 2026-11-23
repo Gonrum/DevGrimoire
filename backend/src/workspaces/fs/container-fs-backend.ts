@@ -192,7 +192,10 @@ export class ContainerFsBackend implements WorkspaceFsBackend {
             sidecarTruncated = true;
             break;
           case 'error':
-            stderr.add(typeof ev.message === 'string' ? ev.message : 'exec failed');
+            // The sidecar could not start the command (spawn failure): no exit
+            // code; the message goes to stderr with a marker so it cannot be
+            // mistaken for output of the command.
+            stderr.add(`[sidecar] ${typeof ev.message === 'string' ? ev.message : 'exec failed'}`);
             break;
           case 'done':
             exitCode = typeof ev.exitCode === 'number' ? ev.exitCode : null;
@@ -202,7 +205,7 @@ export class ContainerFsBackend implements WorkspaceFsBackend {
           default:
             break;
         }
-      });
+      }, { cwdState: false });
     } catch (err: unknown) {
       if (signal?.aborted) return result(true);
       if (backstopHit) {
