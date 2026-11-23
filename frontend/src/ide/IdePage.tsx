@@ -110,9 +110,13 @@ export default function IdePage() {
         return { kind: 'ready', workspace, root };
       } catch (err) {
         if (err instanceof IdeApiError && err.status === 403) return { kind: 'forbidden' };
-        if (err instanceof IdeApiError && err.status === 409) return { kind: 'gateInactive', workspace };
+        if (err instanceof IdeApiError && err.status === 409 && err.reason === 'inactive') return { kind: 'gateInactive', workspace };
         if (err instanceof IdeApiError && err.status === 404) return { kind: 'notFound' };
-        if (isSshWorkspace(workspace) && err instanceof IdeApiError && (err.status === 409 || err.status === 502 || err.status === 504)) {
+        if (
+          err instanceof IdeApiError
+          && ((err.status === 409 && err.reason === 'remote')
+            || (isSshWorkspace(workspace) && (err.status === 502 || err.status === 504)))
+        ) {
           return { kind: 'remoteError', workspace, message: err.message, code: err.code };
         }
         // Anything else (network, 5xx): open the workbench, the tree shows the error and a retry.
@@ -145,7 +149,7 @@ export default function IdePage() {
     state.kind === 'ready' || state.kind === 'inactive' || state.kind === 'gateInactive' || state.kind === 'remoteError'
       ? state.workspace.name
       : null;
-  const host = state.kind === 'ready' ? (state.workspace.ssh?.host ?? null) : null;
+  const host = state.kind === 'ready' || state.kind === 'remoteError' ? (state.workspace.ssh?.host ?? null) : null;
   useEffect(() => {
     if (!title) return undefined;
     const previous = document.title;
@@ -248,6 +252,7 @@ function Workbench({
   const sidebarDivider = useDivider('x', getSidebarWidth, setSidebarWidth);
   const terminalDivider = useDivider('y', getTerminalHeight, setTerminalHeight, true);
   const { branch, marks } = useWorkspaceStatus(workspaceId);
+  const isSsh = isSshWorkspace(workspace);
 
   // Ctrl/Cmd+` toggles the terminal from anywhere on the page, including from inside the terminal.
   useEffect(() => {
@@ -269,7 +274,7 @@ function Workbench({
           ← {t('ide.backToProject')}
         </Link>
         <span className="font-medium truncate">{workspace.name}</span>
-        {workspace.location === 'ssh' && (
+        {isSsh && (
           <span
             className="min-w-0 max-w-[50%] truncate rounded-sm border border-amber-700/40 bg-amber-900/40 px-1.5 py-0.5 text-xs text-amber-300"
             title={sshTarget(workspace)}
@@ -302,7 +307,7 @@ function Workbench({
               activePath={activePath}
               marks={marks}
               initialRoot={initialRoot}
-              ssh={workspace.location === 'ssh'}
+              ssh={isSsh}
               onOpenFile={(path, size) => {
                 openFile(path, size).catch((err: unknown) => showError(errorMessage(err)));
               }}
@@ -341,7 +346,7 @@ function Workbench({
           )}
           {/* Always mounted: collapsing must not end the shell sessions. */}
           <div className={terminalOpen ? 'shrink-0' : 'hidden'} style={{ height: terminalHeight }}>
-            <TerminalPanel key={workspaceId} workspaceId={workspaceId} ssh={workspace.location === 'ssh'} />
+            <TerminalPanel key={workspaceId} workspaceId={workspaceId} ssh={isSsh} />
           </div>
         </div>
       </div>

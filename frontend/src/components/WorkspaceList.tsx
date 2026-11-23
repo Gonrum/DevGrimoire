@@ -406,7 +406,10 @@ function CreateWorkspaceForm({
   const sshAvailable = connections !== null && connections.length > 0;
   const validSsh = form.sshConnectionId !== '' && form.remotePath.trim().startsWith('/');
 
-  const update = (patch: Partial<CreateForm>) => setForm((f) => ({ ...f, ...patch }));
+  const update = (patch: Partial<CreateForm>) => {
+    setSubmitError(null);
+    setForm((f) => ({ ...f, ...patch }));
+  };
   const validName = NAME_PATTERN.test(form.name);
 
   const submit = async (e: React.FormEvent) => {
