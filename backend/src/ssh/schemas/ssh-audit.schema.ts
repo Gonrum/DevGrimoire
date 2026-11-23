@@ -8,11 +8,40 @@ export type SshAuditAction =
   | 'download'
   | 'list_files'
   | 'terminal_open'
-  | 'terminal_close';
+  | 'terminal_close'
+  // IDE file operations on an SSH workspace (path only, never content).
+  | 'write'
+  | 'mkdir'
+  | 'move'
+  | 'delete';
+
+export const SSH_AUDIT_ACTIONS: readonly SshAuditAction[] = [
+  'connect',
+  'exec',
+  'upload',
+  'download',
+  'list_files',
+  'terminal_open',
+  'terminal_close',
+  'write',
+  'mkdir',
+  'move',
+  'delete',
+];
 
 // 'dg': `dg scp` from a workspace terminal. The token carries no user, only
 // the workspace — userId is omitted, workspaceId is required.
-export type SshAuditSourceContext = 'terminal' | 'mcp' | 'rest' | 'workflow' | 'dg';
+// 'ide': browser IDE on an SSH workspace — userId AND workspaceId are set.
+export type SshAuditSourceContext = 'terminal' | 'mcp' | 'rest' | 'workflow' | 'dg' | 'ide';
+
+export const SSH_AUDIT_SOURCE_CONTEXTS: readonly SshAuditSourceContext[] = [
+  'terminal',
+  'mcp',
+  'rest',
+  'workflow',
+  'dg',
+  'ide',
+];
 
 export type SshAuditDocument = HydratedDocument<SshAudit>;
 
@@ -27,22 +56,14 @@ export class SshAudit {
   @Prop({
     required: true,
     type: String,
-    enum: [
-      'connect',
-      'exec',
-      'upload',
-      'download',
-      'list_files',
-      'terminal_open',
-      'terminal_close',
-    ],
+    enum: [...SSH_AUDIT_ACTIONS],
   })
   action: SshAuditAction;
 
   @Prop({
     required: true,
     type: String,
-    enum: ['terminal', 'mcp', 'rest', 'workflow', 'dg'],
+    enum: [...SSH_AUDIT_SOURCE_CONTEXTS],
   })
   sourceContext: SshAuditSourceContext;
 
@@ -53,11 +74,13 @@ export class SshAudit {
   })
   userId?: Types.ObjectId;
 
-  /** Only with sourceContext='dg': the workspace the transfer came from. */
+  /** With sourceContext='dg' or 'ide': the workspace the action came from. */
   @Prop({
     type: SchemaTypes.ObjectId,
     ref: 'Workspace',
-    required(this: { sourceContext?: string }) { return this.sourceContext === 'dg'; },
+    required(this: { sourceContext?: string }) {
+      return this.sourceContext === 'dg' || this.sourceContext === 'ide';
+    },
   })
   workspaceId?: Types.ObjectId;
 

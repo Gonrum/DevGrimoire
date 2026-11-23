@@ -32,6 +32,7 @@ import { AcceptsDownloadTicket } from '../auth/decorators/accepts-download-ticke
 import { RequestContext } from '../common/request-context';
 import { ScalarQueryPipe } from '../common/scalar-query.pipe';
 import { assertContentWrite } from '../common/scope-guard';
+import { SshWorkspaceAccess, isSshWorkspace } from './ssh-workspace-access.service';
 
 const WORKSPACE_ID_PATTERN = /^[a-f0-9]{24}$/;
 const PATH_MAX = 4096;
@@ -80,12 +81,14 @@ export class WorkspaceFsController {
     private readonly limits: WorkspaceLimitsService,
     private readonly tickets: DownloadTicketService,
     private readonly downloadActors: DownloadActorService,
+    private readonly sshAccess: SshWorkspaceAccess,
   ) {}
 
   /**
-   * Permission -> load workspace (403/404) -> must be active -> file backend
-   * (refuses SSH workspaces for now; a container gets its directory ensured
-   * only here, after every check). One place for all routes.
+   * Permission -> load workspace (403/404) -> must be active -> SSH: the
+   * connection must still exist, be usable by the actor and for the project
+   * (409/403, on every request) -> file backend (a container gets its
+   * directory ensured only here, after every check). One place for all routes.
    */
   private async gate(id: string): Promise<{ ws: WorkspaceDocument; backend: WorkspaceFsBackend }> {
     assertContentWrite('Workspace IDE');
@@ -93,6 +96,10 @@ export class WorkspaceFsController {
     const ws = await this.workspaces.findById(id);
     if (ws.status !== 'active') {
       throw new ConflictException(`Workspace is ${ws.status}, not active`);
+    }
+    if (isSshWorkspace(ws)) {
+      const connection = await this.sshAccess.resolve(ws);
+      return { ws, backend: await this.backends.for(ws, connection) };
     }
     return { ws, backend: await this.backends.for(ws) };
   }

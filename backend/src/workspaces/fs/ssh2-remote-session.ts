@@ -19,6 +19,9 @@ const FX_NO_CONNECTION = 6;
 const FX_CONNECTION_LOST = 7;
 const FX_FILE_ALREADY_EXISTS = 11;
 
+/** Upper bound for waiting on a destroyed SFTP write handle to close. */
+const WRITE_CLOSE_WAIT_MS = 5_000;
+
 const LOST_RE = /No response from server|Not connected|connection lost|channel (is )?closed|socket (is )?closed/i;
 
 /**
@@ -90,10 +93,19 @@ export async function createSsh2Driver(
     toStat(await callValue<Stats>(`stat ${p}`, (cb) => sftp.stat(p, cb)));
   const lstat = async (p: string): Promise<RemoteStat> =>
     toStat(await callValue<Stats>(`lstat ${p}`, (cb) => sftp.lstat(p, cb)));
+  /** Only `not_found` means absent; any other lstat failure propagates. */
   const exists = async (p: string): Promise<boolean> => {
     try {
       await lstat(p);
       return true;
+    } catch (err: unknown) {
+      if (isRemoteError(err) && err.code === 'not_found') return false;
+      throw err;
+    }
+  };
+  const existsQuiet = async (p: string): Promise<boolean> => {
+    try {
+      return await exists(p);
     } catch {
       return false;
     }
@@ -101,7 +113,7 @@ export async function createSsh2Driver(
   /** FAILURE is ambiguous; it means "exists" when the target is there. */
   const refineExists = async (err: unknown, target: string): Promise<never> => {
     const remote = toRemoteError(err, target);
-    if (remote.code === 'failure' && (await exists(target))) {
+    if (remote.code === 'failure' && (await existsQuiet(target))) {
       throw new RemoteError('exists', `${target}: already exists`);
     }
     throw remote;
@@ -215,6 +227,7 @@ function wrapReadStream(open: () => Readable, context: string): Readable {
 function wrapWriteStream(open: () => Writable, context: string): Writable {
   let dst: Writable | undefined;
   let dstError: RemoteError | undefined;
+  let dstClosed = false;
   const out = new Writable({
     write(chunk: Buffer, encoding, cb) {
       if (!dst) {
@@ -231,13 +244,29 @@ function wrapWriteStream(open: () => Writable, context: string): Writable {
       dst.once('close', () => cb(dstError ?? null));
       dst.end();
     },
+    // Calls back once the remote handle is closed (capped), so a caller can
+    // remove a temp file right after without racing a still-pending open.
     destroy(err, cb) {
-      if (dst && !dst.destroyed) safe(() => dst?.destroy());
-      cb(err);
+      const target = dst;
+      if (!target || dstClosed) {
+        cb(err);
+        return;
+      }
+      let done = false;
+      const finish = (): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(cap);
+        cb(err);
+      };
+      const cap = setTimeout(finish, WRITE_CLOSE_WAIT_MS);
+      target.once('close', finish);
+      if (!target.destroyed) safe(() => target.destroy());
     },
   });
   try {
     dst = open();
+    dst.once('close', () => { dstClosed = true; });
     dst.on('error', (err: Error) => {
       dstError = toRemoteError(err, context);
       out.destroy(dstError);

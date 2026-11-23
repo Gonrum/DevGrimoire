@@ -62,6 +62,9 @@ function makeWorld() {
     execMax: 0,
     execOrder: [],
     stat: [], // per driver index: (p) => Promise
+    readFile: [], // per driver index: (p, maxBytes) => Promise
+    execImpl: [], // per driver index: (command, opts) => Promise
+    factoryHang: false,
   };
   w.connector = {
     connect: async (connId) => {
@@ -78,6 +81,7 @@ function makeWorld() {
     },
   };
   w.factory = async (client, ctx) => {
+    if (w.factoryHang) return new Promise(() => {});
     const idx = w.drivers.length;
     const driver = {
       client,
@@ -89,9 +93,11 @@ function makeWorld() {
         stat: (p) => (w.stat[idx] ? w.stat[idx](p) : Promise.resolve({ size: 1, mode: 0o100644, uid: 0, isFile: true, isDirectory: false, isSymlink: false })),
         createReadStream: () => { const s = new PassThrough(); driver.lastStream = s; return s; },
         readdir: async () => [],
+        readFile: (p, max) => (w.readFile[idx] ? w.readFile[idx](p, max) : Promise.resolve(Buffer.from('x'))),
       },
-      exec: async (command) => {
+      exec: async (command, opts) => {
         driver.execs.push(command);
+        if (w.execImpl[idx] && !command.includes('command -v rg')) return w.execImpl[idx](command, opts);
         if (command.includes('command -v rg')) {
           return { code: 0, stdout: 'rg=1\ngit=0\nuid=1001\n', stderr: '', truncated: false };
         }
@@ -343,6 +349,120 @@ function makeWorld() {
     assert.deepEqual(parseProbeOutput('uid=abc\n'), { rg: false, git: false, uid: -1 });
   });
 
+  // ---- R7: timeouts that scale, SFTP-open timeout, exec timeout keeps session --
+
+  await check('readFile timeout scales with the stat size, not with maxBytes', async () => {
+    const w = makeWorld();
+    w.readFile[0] = () => new Promise(() => {});
+    const svc = w.svc();
+    svc.opTimeoutMs = 30;
+    const res = await Promise.race([
+      rejection(() => svc.withSession('ws1', 'c1', (s) => s.fs.readFile('/x', 100 * 1024 * 1024))),
+      sleep(1500).then(() => 'hung'),
+    ]);
+    assert.notEqual(res, 'hung', 'timeout derived from maxBytes (100 MiB) instead of the 1-byte file');
+    assert.equal(res.code, 'timeout');
+    svc.onModuleDestroy();
+  });
+
+  await check('SFTP open (driver factory) never answering -> timeout, client ended', async () => {
+    const w = makeWorld();
+    w.factoryHang = true;
+    const svc = w.svc();
+    svc.opTimeoutMs = 30;
+    const res = await Promise.race([
+      rejection(() => svc.withSession('ws1', 'c1', async () => 1)),
+      sleep(1500).then(() => 'hung'),
+    ]);
+    assert.notEqual(res, 'hung');
+    assert.equal(res.code, 'timeout');
+    assert.ok(w.clients[0].ended >= 1);
+    svc.onModuleDestroy();
+  });
+
+  await check('exec timeout (driver) -> RemoteError timeout; session and parallel stream survive', async () => {
+    const w = makeWorld();
+    w.execImpl[0] = async () => { await sleep(5); throw new RemoteError('timeout', 'exec timed out'); };
+    const svc = w.svc();
+    const stream = await svc.withSession('ws1', 'c1', async (s) => s.fs.createReadStream('/big'));
+    const err = await rejection(() => svc.withSession('ws1', 'c1', (s) => s.exec('slow')));
+    assert.equal(err.code, 'timeout');
+    assert.equal(w.clients[0].ended, 0, 'session kept');
+    assert.equal(stream.destroyed, false, 'parallel download not killed');
+    assert.equal(w.connects, 1);
+    stream.destroy();
+    svc.onModuleDestroy();
+  });
+
+  await check('exec hanging past its timeout + grace -> timeout, session kept, slots freed', async () => {
+    const w = makeWorld();
+    let n = 0;
+    w.execImpl[0] = (command) => { n += 1; return command === 'ok' ? Promise.resolve({ code: 0, stdout: 'ok', stderr: '', truncated: false }) : new Promise(() => {}); };
+    const svc = w.svc();
+    svc.execGraceMs = 10;
+    const errs = await Promise.all(['h1', 'h2'].map((c) => rejection(() => svc.withSession('ws1', 'c1', (s) => s.exec(c, { timeoutMs: 20 })))));
+    assert.ok(errs.every((e) => e.code === 'timeout'));
+    const ok = await Promise.race([svc.withSession('ws1', 'c1', (s) => s.exec('ok')), sleep(500).then(() => 'blocked')]);
+    assert.notEqual(ok, 'blocked', 'exec slots freed after timeouts');
+    assert.equal(ok.stdout, 'ok');
+    assert.equal(w.clients[0].ended, 0);
+    assert.equal(n, 3);
+    svc.onModuleDestroy();
+  });
+
+  await check('SFTP single-op timeout still drops the session', async () => {
+    const w = makeWorld();
+    w.stat[0] = () => new Promise(() => {});
+    const svc = w.svc();
+    svc.opTimeoutMs = 20;
+    await rejection(() => svc.withSession('ws1', 'c1', (s) => s.fs.stat('/x')));
+    assert.ok(w.clients[0].ended >= 1);
+    svc.onModuleDestroy();
+  });
+
+  await check('onConnect fires once per newly opened session, not on reuse or failed connect', async () => {
+    const w = makeWorld();
+    const svc = w.svc();
+    let n = 0;
+    const onConnect = () => { n += 1; };
+    await Promise.all([1, 2, 3].map(() => svc.withSession('ws1', 'c1', async () => 1, { onConnect })));
+    await svc.withSession('ws1', 'c1', async () => 1, { onConnect });
+    assert.equal(n, 1);
+    svc.drop('ws1');
+    await svc.withSession('ws1', 'c1', async () => 1, { onConnect });
+    assert.equal(n, 2);
+    svc.drop('ws1');
+    w.connectError = new Error('tofu_not_accepted');
+    await rejection(() => svc.withSession('ws1', 'c1', async () => 1, { onConnect }));
+    assert.equal(n, 2);
+    svc.onModuleDestroy();
+  });
+
+  await check('drop during connect -> disconnected, client ended', async () => {
+    const w = makeWorld();
+    w.connectDelayMs = 40;
+    const svc = w.svc();
+    const pending = rejection(() => svc.withSession('ws1', 'c1', async () => 1));
+    await sleep(5);
+    svc.drop('ws1');
+    const err = await pending;
+    assert.equal(err.code, 'disconnected');
+    assert.ok(w.clients[0].ended >= 1);
+    svc.onModuleDestroy();
+  });
+
+  await check('stream erroring before close releases its ref (idle close follows)', async () => {
+    const w = makeWorld();
+    const svc = w.svc();
+    svc.idleMs = 30;
+    const stream = await svc.withSession('ws1', 'c1', async (s) => s.fs.createReadStream('/big'));
+    stream.on('error', () => undefined);
+    stream.emit('error', new Error('boom'));
+    await sleep(80);
+    assert.ok(w.clients[0].ended >= 1, 'session idle-closed after the stream error');
+    svc.onModuleDestroy();
+  });
+
   // ---- ssh2 driver (fake ssh2 client, no network) ---------------------------
 
   const sftpErr = (code, msg = 'sftp error') => Object.assign(new Error(msg), { code });
@@ -410,6 +530,17 @@ function makeWorld() {
     assert.equal(renamed, 0);
     await d.fs.rename('/a', '/c');
     assert.equal(renamed, 1);
+  });
+
+  await check('driver: rename pre-check propagates lstat errors other than not_found', async () => {
+    let renamed = 0;
+    const { client } = makeSsh2({
+      rename: (_a, _b, cb) => { renamed += 1; cb(); },
+      lstat: (_p, cb) => cb(sftpErr(3, 'Permission denied')),
+    });
+    const d = await createSsh2Driver(client, { onLost() {} });
+    assert.equal((await rejection(() => d.fs.rename('/a', '/b'))).code, 'denied');
+    assert.equal(renamed, 0);
   });
 
   await check('driver: mkdir FAILURE on an existing path -> exists', async () => {

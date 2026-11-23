@@ -1280,9 +1280,13 @@ export type SshAuditAction =
   | 'download'
   | 'list_files'
   | 'terminal_open'
-  | 'terminal_close';
+  | 'terminal_close'
+  | 'write'
+  | 'mkdir'
+  | 'move'
+  | 'delete';
 
-export type SshAuditSourceContext = 'terminal' | 'mcp' | 'rest' | 'workflow' | 'dg';
+export type SshAuditSourceContext = 'terminal' | 'mcp' | 'rest' | 'workflow' | 'dg' | 'ide';
 
 /** One entry as returned by `GET /api/ssh-connections/:id/audit`. */
 export interface SshAuditEntry {
@@ -1291,7 +1295,7 @@ export interface SshAuditEntry {
   action: SshAuditAction;
   sourceContext: SshAuditSourceContext;
   userId?: string;
-  /** Only with sourceContext='dg' (`dg scp` from a workspace). */
+  /** With sourceContext='dg' (`dg scp` from a workspace) or 'ide' (browser IDE). */
   workspaceId?: string;
   agentRoleId?: string;
   command?: string;

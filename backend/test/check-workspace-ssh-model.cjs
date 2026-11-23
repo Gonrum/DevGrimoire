@@ -268,13 +268,16 @@ const dto = (over = {}) => ({ projectId: PROJECT.toString(), name: 'w1', ...over
   });
 
   // ---- IDE gate
-  await check('fs gate: ssh workspace -> 409, never ensureDir / sidecar', async () => {
+  await check('fs gate: ssh workspace -> connection access check (409 when gone), never ensureDir / sidecar', async () => {
     const ws = { _id: oid(), projectId: PROJECT, status: 'active', location: 'ssh' };
     let sidecar = 0;
+    let resolved = 0;
     const client = new Proxy({}, { get: () => async () => { sidecar += 1; return {}; } });
     const svc = { findById: async () => ws, touchThrottled() {} };
-    const ctrl = new WorkspaceFsController(svc, new WorkspaceFsBackends(client), { create: async () => undefined }, { get: async () => ({ editorMaxBytes: 5 * 1024 * 1024, downloadMaxBytes: 2 * 1024 ** 3 }) }, { issue: () => 't', consume: () => null }, { resolve: async () => undefined });
-    await rejectsWith(() => RequestContext.run({ userId: 'u', username: 'u', role: 'admin' }, undefined, () => ctrl.tree(ws._id.toString(), '.')), 409, /not available yet/);
+    const access = { resolve: async () => { resolved += 1; throw new (nm('@nestjs/common').ConflictException)('SSH-Verbindung dieser Werkstatt existiert nicht mehr'); } };
+    const ctrl = new WorkspaceFsController(svc, new WorkspaceFsBackends(client), { create: async () => undefined }, { get: async () => ({ editorMaxBytes: 5 * 1024 * 1024, downloadMaxBytes: 2 * 1024 ** 3 }) }, { issue: () => 't', consume: () => null }, { resolve: async () => undefined }, access);
+    await rejectsWith(() => RequestContext.run({ userId: 'u', username: 'u', role: 'admin' }, undefined, () => ctrl.tree(ws._id.toString(), '.')), 409, /existiert nicht mehr/);
+    assert.equal(resolved, 1);
     assert.equal(sidecar, 0);
   });
 

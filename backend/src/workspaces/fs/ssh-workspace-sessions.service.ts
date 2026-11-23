@@ -75,6 +75,11 @@ export interface WithSessionOpts {
    * Never set for writes or uploads.
    */
   retryable?: boolean;
+  /**
+   * Called once when this call had to open a new session and it came up
+   * (audit "session opened"). Not called when an existing session was reused.
+   */
+  onConnect?: () => void;
 }
 
 /**
@@ -101,6 +106,7 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
   /** Overridable by checks. */
   idleMs = SSH_SESSION_IDLE_MS;
   opTimeoutMs = SSH_SESSION_OP_TIMEOUT_MS;
+  execGraceMs = EXEC_TIMEOUT_GRACE_MS;
 
   constructor(
     private readonly connector: SshSessionService,
@@ -116,19 +122,22 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
     fn: (s: RemoteSession) => Promise<T>,
     opts: WithSessionOpts = {},
   ): Promise<T> {
-    const first = this.entryFor(workspaceId, connectionId);
+    const first = this.entryFor(workspaceId, connectionId, opts.onConnect);
     try {
       return await this.run(first, fn);
     } catch (err: unknown) {
+      // An exec timeout leaves the session open on purpose: neither drop nor retry.
+      if (isRemoteError(err) && err.code === 'timeout' && !first.closed) throw err;
       if (!this.isTransient(err, first)) throw err;
       this.closeEntry(first);
       if (!opts.retryable) throw this.normalise(err, first);
     }
-    const second = this.entryFor(workspaceId, connectionId);
+    const second = this.entryFor(workspaceId, connectionId, opts.onConnect);
     try {
       return await this.run(second, fn);
     } catch (err: unknown) {
-      if (this.isTransient(err, second)) this.closeEntry(second);
+      const keptOpen = isRemoteError(err) && err.code === 'timeout' && !second.closed;
+      if (!keptOpen && this.isTransient(err, second)) this.closeEntry(second);
       throw this.normalise(err, second);
     }
   }
@@ -154,7 +163,7 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
   // Entry lifecycle
   // -------------------------------------------------------------------------
 
-  private entryFor(workspaceId: string, connectionId: string): Entry {
+  private entryFor(workspaceId: string, connectionId: string, onConnect?: () => void): Entry {
     const existing = this.entries.get(workspaceId);
     if (existing && existing.connectionId === connectionId && !existing.closed) return existing;
     if (existing) this.closeEntry(existing);
@@ -171,6 +180,7 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
     this.entries.set(workspaceId, entry);
     // A failed connect is not memoised: the next call starts over.
     entry.ready.catch(() => this.closeEntry(entry));
+    if (onConnect) entry.ready.then(() => safe(onConnect), () => undefined);
     return entry;
   }
 
@@ -198,10 +208,11 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
 
     let driver: RemoteSessionDriver;
     try {
-      driver = await this.factory(client, { onLost });
+      driver = await this.openDriver(client, onLost);
     } catch (err: unknown) {
       endClient(client);
       if (state.closed) throw new RemoteError('disconnected', 'SSH session was dropped while connecting');
+      if (isRemoteError(err) && err.code === 'timeout') throw err;
       const label = await this.labelOf(state.connectionId);
       throw new HttpException(
         {
@@ -219,6 +230,32 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
     const live: Live = { client, driver, session: this.wrap(state, driver) };
     state.live = live;
     return live;
+  }
+
+  /**
+   * Opens the SFTP channel under the op timeout: a server that never answers
+   * the subsystem request must fail instead of hanging every caller. A driver
+   * arriving after the timeout is closed again.
+   */
+  private openDriver(client: Ssh2Client, onLost: (err?: Error) => void): Promise<RemoteSessionDriver> {
+    return new Promise<RemoteSessionDriver>((resolve, reject) => {
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        reject(new RemoteError('timeout', `SFTP channel did not open within ${this.opTimeoutMs} ms`));
+      }, this.opTimeoutMs);
+      this.factory(client, { onLost }).then(
+        (driver) => {
+          clearTimeout(timer);
+          if (timedOut) safe(() => driver.close());
+          else resolve(driver);
+        },
+        (err: unknown) => {
+          clearTimeout(timer);
+          reject(err instanceof Error ? err : new Error(errorMessage(err)));
+        },
+      );
+    });
   }
 
   private closeEntry(state: EntryState): void {
@@ -289,7 +326,7 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
 
   private wrap(state: EntryState, driver: RemoteSessionDriver): RemoteSession {
     const op = <T>(name: string, work: () => Promise<T>, timeoutMs = this.opTimeoutMs): Promise<T> =>
-      this.guarded(state, name, timeoutMs, work);
+      this.guarded(state, name, timeoutMs, work, true);
     const transferMs = (bytes: number): number =>
       this.opTimeoutMs + Math.ceil((bytes / TRANSFER_BYTES_PER_SECOND) * 1000);
     const raw = driver.fs;
@@ -298,7 +335,12 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
       lstat: (p) => op('lstat', () => raw.lstat(p)),
       realpath: (p) => op('realpath', () => raw.realpath(p)),
       readdir: (p) => op('readdir', () => raw.readdir(p)),
-      readFile: (p, maxBytes) => op('readFile', () => raw.readFile(p, maxBytes), transferMs(maxBytes)),
+      // The timeout follows the actual size (one extra stat), not the cap: a
+      // 100 MiB cap must not give a stalled 1 KiB read seven minutes.
+      readFile: async (p, maxBytes) => {
+        const st = await op('stat', () => raw.stat(p));
+        return op('readFile', () => raw.readFile(p, maxBytes), transferMs(Math.min(st.size, maxBytes)));
+      },
       writeFile: (p, data, mode) => op('writeFile', () => raw.writeFile(p, data, mode), transferMs(data.length)),
       rename: (from, to) => op('rename', () => raw.rename(from, to)),
       posixRename: (from, to) => op('posixRename', () => raw.posixRename(from, to)),
@@ -317,9 +359,12 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
       try {
         await this.acquireExec(state);
         try {
-          return await this.guarded(state, 'exec', timeoutMs + EXEC_TIMEOUT_GRACE_MS, () =>
+          // An exec timeout closes only its own channel (the driver does that)
+          // and keeps the session: a search returning partial results must not
+          // kill parallel downloads.
+          return await this.guarded(state, 'exec', timeoutMs + this.execGraceMs, () =>
             driver.exec(command, { timeoutMs, maxOutputBytes }),
-          );
+          false);
         } finally {
           this.releaseExec(state);
         }
@@ -343,14 +388,15 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
 
   /**
    * Runs one operation with activity, a timeout and error normalisation.
-   * `timeout`/`disconnected` (or any failure after the client was lost)
-   * drop the session.
+   * `disconnected` (or any failure after the client was lost) drops the
+   * session; `timeout` only when `dropOnTimeout` (SFTP single operations).
    */
   private async guarded<T>(
     state: EntryState,
     name: string,
     timeoutMs: number,
     work: () => Promise<T>,
+    dropOnTimeout: boolean,
   ): Promise<T> {
     const release = this.hold(state);
     let timer: NodeJS.Timeout | undefined;
@@ -368,7 +414,8 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
       return await Promise.race([running, timeout]);
     } catch (err: unknown) {
       const normalised = this.normalise(err, state);
-      if (this.isTransient(normalised, state)) this.closeEntry(state);
+      const keep = !dropOnTimeout && isRemoteError(normalised) && normalised.code === 'timeout' && !state.lost;
+      if (!keep && this.isTransient(normalised, state)) this.closeEntry(state);
       throw normalised;
     } finally {
       if (timer) clearTimeout(timer);

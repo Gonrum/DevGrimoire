@@ -1292,6 +1292,12 @@ export class SshSessionService {
         this.logger.warn(`Audit-Write übersprungen: dg-Eintrag ohne gültige workspaceId (action=${entry.action})`);
         return Promise.resolve();
       }
+    } else if (
+      entry.sourceContext === 'ide'
+      && (!entry.workspaceId || !Types.ObjectId.isValid(entry.workspaceId))
+    ) {
+      this.logger.warn(`Audit-Write übersprungen: ide-Eintrag ohne gültige workspaceId (action=${entry.action})`);
+      return Promise.resolve();
     } else if (!entry.userId || !Types.ObjectId.isValid(entry.userId)) {
       this.logger.debug(
         `Audit-Write übersprungen: userId='${entry.userId ?? 'undefined'}' ist kein ObjectId (action=${entry.action}, sourceContext=${entry.sourceContext})`,

@@ -2901,7 +2901,8 @@
         "mcp": "mcp",
         "rest": "rest",
         "workflow": "workflow",
-        "dg": "dg (Workspace)"
+        "dg": "dg (Workspace)",
+        "ide": "IDE (Workspace)"
       },
       "action": {
         "connect": "connect",
@@ -2910,7 +2911,11 @@
         "download": "download",
         "list_files": "list_files",
         "terminal_open": "terminal_open",
-        "terminal_close": "terminal_close"
+        "terminal_close": "terminal_close",
+        "write": "file written",
+        "mkdir": "folder created",
+        "move": "moved",
+        "delete": "deleted"
       }
     },
     "terminal": {
