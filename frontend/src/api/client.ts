@@ -3,6 +3,7 @@ import {
   parseEmptyResponse,
   parseJsonResponse,
   parseJsonText,
+  readErrorCode,
   readErrorMessage,
   readErrorMessageFromText,
 } from './http-boundary';
@@ -33,14 +34,15 @@ export function configureAuth(
  * aber `{message: 'Unauthorized'}`, der Zweig traf nie.
  */
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly code?: string) {
     super(message);
     this.name = 'ApiError';
   }
 }
 
 async function apiError(res: Response): Promise<ApiError> {
-  return new ApiError(await readErrorMessage(res), res.status);
+  const code = await readErrorCode(res.clone());
+  return new ApiError(await readErrorMessage(res), res.status, code);
 }
 
 /**
@@ -1758,8 +1760,24 @@ export interface Workspace {
   lastActivityAt: string;
   createdBySessionId?: string;
   gitRepoId?: string;
+  /** Missing on rows from before SSH workspaces existed; treat as `container`. */
+  location?: WorkspaceLocation;
+  /** Absolute directory on the server (ssh workspaces only). */
+  remotePath?: string;
+  /** Resolved connection of an ssh workspace; `null` when the connection no longer exists. */
+  ssh?: WorkspaceSshInfo | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export type WorkspaceLocation = 'container' | 'ssh';
+
+export interface WorkspaceSshInfo {
+  connectionId: string;
+  label: string;
+  username: string;
+  host: string;
+  port: number;
 }
 
 export interface Snippet {
@@ -3135,7 +3153,10 @@ export const api = {
       return request<Workspace[]>(`/workspaces?${params}`);
     },
     get: (id: string) => request<Workspace>(`/workspaces/${id}`),
-    create: (data: { projectId: string; name: string; description?: string; repoUrl?: string; branch?: string; gitRepoId?: string }) =>
+    create: (data: {
+      projectId: string; name: string; description?: string; repoUrl?: string; branch?: string; gitRepoId?: string;
+      location?: WorkspaceLocation; sshConnectionId?: string; remotePath?: string;
+    }) =>
       request<Workspace>('/workspaces', { method: 'POST', body: JSON.stringify(data) }),
     update: (id: string, data: Partial<Pick<Workspace, 'name' | 'description' | 'repoUrl' | 'branch' | 'gitRepoId'>>) =>
       request<Workspace>(`/workspaces/${id}`, { method: 'PUT', body: JSON.stringify(data) }),

@@ -1322,7 +1322,19 @@
     "formGitRepoHint": "For multi-repo projects: which configured repo's token to inject for gh/glab.",
     "nameHint": "Allowed: a-z, 0-9, '-', '_'. Must start with a letter or digit, max 64 chars.",
     "openIde": "Open IDE",
-    "archivedNoIde": "Archived workspaces have no IDE"
+    "archivedNoIde": "Archived workspaces have no IDE",
+    "sshMissing": "SSH connection missing",
+    "deleteSshEntry": "Delete the entry only — the directory on the server stays",
+    "confirmDeleteSsh": "{{name}}: delete entry? Server directory stays.",
+    "formLocation": "Location",
+    "locationContainer": "Container",
+    "locationSsh": "SSH connection",
+    "noSshConnections": "Create an SSH connection in the project first.",
+    "sshConnectionsLink": "Go to SSH connections",
+    "formSshConnection": "SSH connection",
+    "formSshConnectionPlaceholder": "Select a connection …",
+    "formRemotePath": "Directory (absolute path)",
+    "remotePathHint": "The path must be absolute and start with /."
   },
   "terminal": {
     "workspace": "Workspace",

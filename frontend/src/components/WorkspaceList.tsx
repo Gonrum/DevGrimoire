@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { Archive, Code2, Copy, SquareTerminal, Trash2 } from 'lucide-react';
-import { api, Workspace, WorkspaceStatus, GitRepository } from '../api/client';
+import {
+  api, ApiError, Workspace, WorkspaceLocation, WorkspaceStatus, GitRepository, SshConnectionListItem,
+} from '../api/client';
 import { optionOr } from '../lib/narrow';
 import { useToast } from './Toast';
 import Card from './ui/Card';
@@ -24,6 +27,9 @@ interface CreateForm {
   repoUrl: string;
   branch: string;
   gitRepoId: string;
+  location: WorkspaceLocation;
+  sshConnectionId: string;
+  remotePath: string;
 }
 
 const emptyCreate = (): CreateForm => ({
@@ -32,6 +38,9 @@ const emptyCreate = (): CreateForm => ({
   repoUrl: '',
   branch: '',
   gitRepoId: '',
+  location: 'container',
+  sshConnectionId: '',
+  remotePath: '',
 });
 
 function gitRepoLabel(repo: GitRepository): string {
@@ -77,6 +86,17 @@ function statusBadgeColor(status: WorkspaceStatus): string {
   if (status === 'cleaning') return 'bg-amber-900/40 text-amber-300 border border-amber-700/40';
   return 'bg-gray-800 text-gray-400 border border-gray-700/40';
 }
+
+/** `user@host[:port]:/path` — the port only shows when it is not the default. */
+function sshTarget(ws: Workspace): string {
+  const ssh = ws.ssh;
+  if (!ssh) return ws.remotePath ?? '';
+  const port = ssh.port === 22 ? '' : `:${ssh.port}`;
+  return `${ssh.username}@${ssh.host}${port}:${ws.remotePath ?? ''}`;
+}
+
+/** Error codes of the backend that mean "confirm the host key on the connection page". */
+const FINGERPRINT_ERRORS: readonly string[] = ['tofu_not_accepted', 'host_key_mismatch'];
 
 function shortenRepo(url?: string): string {
   if (!url) return '—';
@@ -219,45 +239,62 @@ export default function WorkspaceList({ projectId }: Props) {
         </EmptyState>
       ) : (
         <div className="space-y-2">
-          {visible.map((ws) => (
+          {visible.map((ws) => {
+            const isSsh = ws.location === 'ssh';
+            const sshMissing = isSsh && !ws.ssh;
+            return (
             <Card key={ws._id} padding="md">
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-sm font-mono text-gray-100 truncate">{ws.name}</span>
                     <Badge color={statusBadgeColor(ws.status)}>{ws.status}</Badge>
+                    {isSsh && (
+                      <Badge color="bg-amber-900/40 text-amber-300 border border-amber-700/40">SSH</Badge>
+                    )}
                   </div>
                   {ws.description && (
                     <p className="text-xs text-gray-400 mb-2">{ws.description}</p>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-1 text-xs text-gray-500">
-                    <div>
-                      <span className="text-gray-600">{t('workspaces.repo')}: </span>
-                      <span className="text-gray-300 font-mono">{shortenRepo(ws.repoUrl)}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">{t('workspaces.branch')}: </span>
-                      <span className="text-gray-300 font-mono">{ws.branch}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">{t('workspaces.size')}: </span>
-                      <span className="text-gray-300">{humanBytes(ws.sizeBytes)}</span>
-                    </div>
+                    {!isSsh && (
+                      <>
+                        <div>
+                          <span className="text-gray-600">{t('workspaces.repo')}: </span>
+                          <span className="text-gray-300 font-mono">{shortenRepo(ws.repoUrl)}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">{t('workspaces.branch')}: </span>
+                          <span className="text-gray-300 font-mono">{ws.branch}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">{t('workspaces.size')}: </span>
+                          <span className="text-gray-300">{humanBytes(ws.sizeBytes)}</span>
+                        </div>
+                      </>
+                    )}
                     <div>
                       <span className="text-gray-600">{t('workspaces.lastActivity')}: </span>
                       <span className="text-gray-300">{relativeTime(ws.lastActivityAt, i18n.language)}</span>
                     </div>
                   </div>
                   <div className="mt-2">
-                    <button
-                      type="button"
-                      onClick={() => { void copyPath(ws.path); }}
-                      className="inline-flex max-w-full items-center gap-1 text-[10px] text-cyan-400 hover:text-cyan-300 font-mono"
-                      title={ws.path}
-                    >
-                      <span className="truncate">{ws.path}</span>
-                      <Copy className="h-3 w-3 shrink-0" aria-hidden />
-                    </button>
+                    {sshMissing ? (
+                      <p className="text-[11px] text-amber-300">
+                        {t('workspaces.sshMissing')}
+                        {ws.remotePath ? <span className="font-mono text-gray-500"> {ws.remotePath}</span> : null}
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => { void copyPath(isSsh ? (ws.remotePath ?? ws.path) : ws.path); }}
+                        className="inline-flex max-w-full items-center gap-1 text-[10px] text-cyan-400 hover:text-cyan-300 font-mono"
+                        title={isSsh ? sshTarget(ws) : ws.path}
+                      >
+                        <span className="truncate">{isSsh ? sshTarget(ws) : ws.path}</span>
+                        <Copy className="h-3 w-3 shrink-0" aria-hidden />
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-1.5">
@@ -266,8 +303,12 @@ export default function WorkspaceList({ projectId }: Props) {
                     variant="secondary"
                     className={ICON_BUTTON}
                     onClick={() => openInTerminalDock({ kind: 'workspace', workspace: ws })}
-                    disabled={ws.status === 'archived'}
-                    title={ws.status === 'archived' ? t('workspaces.archivedNoTerminal') : t('workspaces.openTerminal')}
+                    disabled={ws.status === 'archived' || sshMissing}
+                    title={
+                      sshMissing
+                        ? t('workspaces.sshMissing')
+                        : ws.status === 'archived' ? t('workspaces.archivedNoTerminal') : t('workspaces.openTerminal')
+                    }
                     aria-label={t('workspaces.openTerminal')}
                   >
                     <SquareTerminal className="h-4 w-4" aria-hidden />
@@ -277,8 +318,12 @@ export default function WorkspaceList({ projectId }: Props) {
                     variant="edit"
                     className={ICON_BUTTON}
                     onClick={() => window.open(`/ide/${ws._id}`, '_blank', 'noopener')}
-                    disabled={ws.status !== 'active'}
-                    title={ws.status === 'archived' ? t('workspaces.archivedNoIde') : t('workspaces.openIde')}
+                    disabled={ws.status !== 'active' || sshMissing}
+                    title={
+                      sshMissing
+                        ? t('workspaces.sshMissing')
+                        : ws.status === 'archived' ? t('workspaces.archivedNoIde') : t('workspaces.openIde')
+                    }
                     aria-label={t('workspaces.openIde')}
                   >
                     <Code2 className="h-4 w-4" aria-hidden />
@@ -300,14 +345,19 @@ export default function WorkspaceList({ projectId }: Props) {
                     size="none"
                     className={CONFIRM_ICON_BUTTON}
                     icon={<Trash2 className="h-4 w-4" aria-hidden />}
-                    label={t('workspaces.delete')}
-                    confirmLabel={t('workspaces.confirmDelete', { name: ws.name })}
+                    label={isSsh ? t('workspaces.deleteSshEntry') : t('workspaces.delete')}
+                    confirmLabel={
+                      isSsh
+                        ? t('workspaces.confirmDeleteSsh', { name: ws.name })
+                        : t('workspaces.confirmDelete', { name: ws.name })
+                    }
                     onConfirm={() => handleDelete(ws._id)}
                   />
                 </div>
               </div>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -345,34 +395,68 @@ function CreateWorkspaceForm({
   onCreated: () => void;
 }) {
   const { t } = useTranslation();
-  const { showSuccess, showError } = useToast();
+  const { showSuccess } = useToast();
   const [form, setForm] = useState<CreateForm>(emptyCreate());
   const [saving, setSaving] = useState(false);
+  const [connections, setConnections] = useState<SshConnectionListItem[] | null>(null);
+  const [submitError, setSubmitError] = useState<{ message: string; fingerprint: boolean } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.ssh.listForProject(projectId)
+      .then((list) => { if (!cancelled) setConnections(list); })
+      .catch(() => { if (!cancelled) setConnections([]); });
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  const isSsh = form.location === 'ssh';
+  const sshAvailable = connections !== null && connections.length > 0;
+  const validSsh = form.sshConnectionId !== '' && form.remotePath.trim().startsWith('/');
 
   const update = (patch: Partial<CreateForm>) => setForm((f) => ({ ...f, ...patch }));
   const validName = NAME_PATTERN.test(form.name);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validName) return;
+    if (!validName || (isSsh && !validSsh)) return;
     setSaving(true);
+    setSubmitError(null);
     try {
-      await api.workspaces.create({
-        projectId,
-        name: form.name.trim(),
-        description: form.description.trim() || undefined,
-        repoUrl: form.repoUrl.trim() || undefined,
-        branch: form.branch.trim() || undefined,
-        gitRepoId: form.gitRepoId || undefined,
-      });
+      await api.workspaces.create(
+        isSsh
+          ? {
+              projectId,
+              name: form.name.trim(),
+              description: form.description.trim() || undefined,
+              location: 'ssh',
+              sshConnectionId: form.sshConnectionId,
+              remotePath: form.remotePath.trim(),
+            }
+          : {
+              projectId,
+              name: form.name.trim(),
+              description: form.description.trim() || undefined,
+              repoUrl: form.repoUrl.trim() || undefined,
+              branch: form.branch.trim() || undefined,
+              gitRepoId: form.gitRepoId || undefined,
+            },
+      );
       showSuccess(t('workspaces.created'));
       onCreated();
     } catch (err) {
-      showError(err instanceof Error ? err.message : String(err));
+      setSubmitError({
+        message: err instanceof Error ? err.message : String(err),
+        fingerprint: err instanceof ApiError && err.code !== undefined && FINGERPRINT_ERRORS.includes(err.code),
+      });
     } finally {
       setSaving(false);
     }
   };
+
+  const segmentClass = (active: boolean) =>
+    active
+      ? 'flex-1 px-3 py-1.5 text-sm bg-violet-600 text-white'
+      : 'flex-1 px-3 py-1.5 text-sm bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:hover:bg-gray-800';
 
   return (
     <form onSubmit={(e) => { void submit(e); }} className="space-y-3">
@@ -393,6 +477,77 @@ function CreateWorkspaceForm({
         onChange={(e) => update({ description: e.target.value })}
         rows={2}
       />
+      <div>
+        <span id="ws-location-label" className="block text-xs text-gray-500 mb-1">{t('workspaces.formLocation')}</span>
+        <div
+          role="radiogroup"
+          aria-labelledby="ws-location-label"
+          className="flex overflow-hidden rounded-sm border border-gray-700 divide-x divide-gray-700"
+        >
+          <button
+            type="button"
+            role="radio"
+            aria-checked={!isSsh}
+            className={segmentClass(!isSsh)}
+            onClick={() => update({ location: 'container' })}
+          >
+            {t('workspaces.locationContainer')}
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={isSsh}
+            disabled={!sshAvailable}
+            className={segmentClass(isSsh)}
+            onClick={() => update({ location: 'ssh' })}
+          >
+            {t('workspaces.locationSsh')}
+          </button>
+        </div>
+        {connections !== null && connections.length === 0 && (
+          <p className="text-[11px] text-gray-500 mt-1">
+            {t('workspaces.noSshConnections')}{' '}
+            <Link to={`/projects/${projectId}?tab=ssh`} className="text-cyan-400 hover:text-cyan-300 underline">
+              {t('workspaces.sshConnectionsLink')}
+            </Link>
+          </p>
+        )}
+      </div>
+      {isSsh && connections !== null && (
+        <>
+          <div>
+            <label htmlFor="ws-ssh-connection" className="block text-xs text-gray-500 mb-1">
+              {t('workspaces.formSshConnection')}
+            </label>
+            <select
+              id="ws-ssh-connection"
+              value={form.sshConnectionId}
+              onChange={(e) => update({ sshConnectionId: e.target.value })}
+              required
+              className="w-full bg-gray-800 border border-gray-700 rounded-sm px-3 py-2 text-sm text-gray-200 focus:outline-hidden focus:border-violet-500"
+            >
+              <option value="">{t('workspaces.formSshConnectionPlaceholder')}</option>
+              {connections.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label} ({c.username}@{c.host})
+                </option>
+              ))}
+            </select>
+          </div>
+          <FormInput
+            label={t('workspaces.formRemotePath')}
+            value={form.remotePath}
+            onChange={(e) => update({ remotePath: e.target.value })}
+            placeholder="/srv/app"
+            required
+          />
+          {form.remotePath && !form.remotePath.trim().startsWith('/') && (
+            <p className="text-[11px] text-amber-300">{t('workspaces.remotePathHint')}</p>
+          )}
+        </>
+      )}
+      {!isSsh && (
+      <>
       <FormInput
         label={t('workspaces.formRepoUrl')}
         value={form.repoUrl}
@@ -424,11 +579,23 @@ function CreateWorkspaceForm({
           <p className="text-[11px] text-gray-500 mt-1">{t('workspaces.formGitRepoHint')}</p>
         </div>
       )}
+      </>
+      )}
+      {submitError && (
+        <div role="alert" className="text-sm text-red-400">
+          <p>{submitError.message}</p>
+          {submitError.fingerprint && (
+            <Link to={`/projects/${projectId}?tab=ssh`} className="text-cyan-400 hover:text-cyan-300 underline text-xs">
+              {t('workspaces.sshConnectionsLink')}
+            </Link>
+          )}
+        </div>
+      )}
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="secondary" type="button" onClick={onCancel} disabled={saving}>
           {t('common.cancel')}
         </Button>
-        <Button variant="primary" type="submit" disabled={saving || !validName}>
+        <Button variant="primary" type="submit" disabled={saving || !validName || (isSsh && !validSsh)}>
           {saving ? t('common.saving') : t('common.save')}
         </Button>
       </div>

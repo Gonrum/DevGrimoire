@@ -1322,7 +1322,19 @@
     "formGitRepoHint": "Bei Multi-Repo-Projekten: aus welchem hinterlegten Repo das gh/glab-Token kommt.",
     "nameHint": "Erlaubt: a-z, 0-9, '-', '_'. Muss mit Buchstabe oder Zahl beginnen, max 64 Zeichen.",
     "openIde": "IDE öffnen",
-    "archivedNoIde": "Archivierte Werkstätten haben keine IDE"
+    "archivedNoIde": "Archivierte Werkstätten haben keine IDE",
+    "sshMissing": "SSH-Verbindung fehlt",
+    "deleteSshEntry": "Nur den Eintrag löschen — das Verzeichnis auf dem Server bleibt",
+    "confirmDeleteSsh": "{{name}}: Eintrag löschen? Server-Verzeichnis bleibt.",
+    "formLocation": "Ort",
+    "locationContainer": "Container",
+    "locationSsh": "SSH-Verbindung",
+    "noSshConnections": "Lege zuerst eine SSH-Verbindung im Projekt an.",
+    "sshConnectionsLink": "Zu den SSH-Verbindungen",
+    "formSshConnection": "SSH-Verbindung",
+    "formSshConnectionPlaceholder": "Verbindung wählen …",
+    "formRemotePath": "Verzeichnis (absoluter Pfad)",
+    "remotePathHint": "Der Pfad muss absolut sein und mit / beginnen."
   },
   "terminal": {
     "workspace": "Workspace",

@@ -37,6 +37,16 @@ export async function readErrorMessage(res: Response): Promise<string> {
   return res.statusText;
 }
 
+/** Stable machine-readable `error` code of an error body, if the server sent one. */
+export async function readErrorCode(res: Response): Promise<string | undefined> {
+  const body: unknown = await res.json().catch(() => null);
+  if (body !== null && typeof body === 'object') {
+    const code = (body as { error?: unknown }).error;
+    if (typeof code === 'string' && code.length > 0) return code;
+  }
+  return undefined;
+}
+
 /**
  * Führt `HeadersInit` in ein Plain Object zusammen.
  *
