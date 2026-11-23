@@ -20,10 +20,10 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { posix } from 'node:path';
 import { WorkspacesService } from './workspaces.service';
-import { WorkspaceClient } from './workspace-client.service';
 import { WorkspaceDocument } from './schemas/workspace.schema';
 import { FsMoveDto, FsPathDto, FsSearchDto, FsWriteDto, isRelativeWorkspacePath } from './dto/workspace-fs.dto';
-import { parseGitStatus, parseRipgrepJson } from './workspace-search-parse';
+import { WorkspaceFsBackends } from './fs/workspace-fs-backends.service';
+import type { FsLimits, WorkspaceFsBackend } from './fs/workspace-fs-backend';
 import { LogsService } from '../logs/logs.service';
 import { WorkspaceLimitsService } from './workspace-limits.service';
 import { DownloadTicketService } from '../common/download-ticket.service';
@@ -33,10 +33,8 @@ import { RequestContext } from '../common/request-context';
 import { ScalarQueryPipe } from '../common/scalar-query.pipe';
 import { assertContentWrite } from '../common/scope-guard';
 
-const SEARCH_LIMIT = 2000;
 const WORKSPACE_ID_PATTERN = /^[a-f0-9]{24}$/;
 const PATH_MAX = 4096;
-const ENSURE_TTL_MS = 60_000;
 
 /**
  * Query-parameter path: same rules as the DTO paths (the ValidationPipe does
@@ -77,40 +75,32 @@ function plainFileName(value: string | undefined): string {
 export class WorkspaceFsController {
   constructor(
     private readonly workspaces: WorkspacesService,
-    private readonly client: WorkspaceClient,
+    private readonly backends: WorkspaceFsBackends,
     private readonly logs: LogsService,
     private readonly limits: WorkspaceLimitsService,
     private readonly tickets: DownloadTicketService,
     private readonly downloadActors: DownloadActorService,
   ) {}
 
-  /** Workspace id -> time of the last successful `ensureDir`. */
-  private readonly ensuredAt = new Map<string, number>();
-
-  /** Permission -> load workspace (403/404) -> must be active. One place for all routes. */
-  private async gate(id: string): Promise<WorkspaceDocument> {
+  /**
+   * Permission -> load workspace (403/404) -> must be active -> file backend
+   * (refuses SSH workspaces for now; a container gets its directory ensured
+   * only here, after every check). One place for all routes.
+   */
+  private async gate(id: string): Promise<{ ws: WorkspaceDocument; backend: WorkspaceFsBackend }> {
     assertContentWrite('Workspace IDE');
     if (!WORKSPACE_ID_PATTERN.test(id)) throw new NotFoundException(`Workspace ${id} not found`);
     const ws = await this.workspaces.findById(id);
     if (ws.status !== 'active') {
       throw new ConflictException(`Workspace is ${ws.status}, not active`);
     }
-    // SSH workspaces have no sidecar directory. Until the SSH file backend
-    // exists they are refused here — after the permission/status checks and
-    // before any sidecar call.
-    if (ws.location === 'ssh') {
-      throw new ConflictException('SSH workspaces are not available yet');
-    }
-    // Only after every check passed: the sidecar must never create a
-    // directory for an unknown, forbidden or inactive workspace. A workspace
-    // without repoUrl has no directory until now. Failures propagate and are
-    // not memoised, so the next request retries.
-    const last = this.ensuredAt.get(id);
-    if (last === undefined || Date.now() - last >= ENSURE_TTL_MS) {
-      await this.client.ensureDir(id);
-      this.ensuredAt.set(id, Date.now());
-    }
-    return ws;
+    return { ws, backend: await this.backends.for(ws) };
+  }
+
+  /** Limits in force for this request. Upload cap stays with the sidecar for containers. */
+  private async fsLimits(): Promise<FsLimits> {
+    const { editorMaxBytes, downloadMaxBytes } = await this.limits.get();
+    return { editorMaxBytes, downloadMaxBytes };
   }
 
   private audit(ws: WorkspaceDocument, id: string, message: string, metadata: Record<string, unknown>): void {
@@ -129,8 +119,8 @@ export class WorkspaceFsController {
 
   @Get('tree')
   async tree(@Param('id') id: string, @Query('path') path?: string) {
-    await this.gate(id);
-    const res = await this.client.listDir(id, queryPath(path, 'path', '.'));
+    const { backend } = await this.gate(id);
+    const res = await backend.listDir(queryPath(path, 'path', '.'));
     this.workspaces.touchThrottled(id);
     const entries = res.entries.map((e) => ({
       name: posix.basename(e.path),
@@ -148,10 +138,9 @@ export class WorkspaceFsController {
 
   @Get('file')
   async readFile(@Param('id') id: string, @Query('path') path?: string) {
-    await this.gate(id);
+    const { backend } = await this.gate(id);
     const target = queryPath(path, 'path');
-    const { editorMaxBytes } = await this.limits.get();
-    const res = await this.client.readText(id, target, editorMaxBytes);
+    const res = await backend.readText(target, await this.fsLimits());
     this.workspaces.touchThrottled(id);
     return { path: target, content: res.content, hash: res.hash, size: res.size };
   }
@@ -164,9 +153,8 @@ export class WorkspaceFsController {
   @Post('download-ticket')
   @HttpCode(200)
   async downloadTicket(@Param('id') id: string, @Body() dto: FsPathDto) {
-    await this.gate(id);
-    const { downloadMaxBytes } = await this.limits.get();
-    const { stream } = await this.client.readStream(id, dto.path, { httpErrors: true, maxBytes: downloadMaxBytes });
+    const { backend } = await this.gate(id);
+    const { stream } = await backend.readStream(dto.path, await this.fsLimits());
     stream.destroy();
     const actor = RequestContext.getUser();
     const ticket = this.tickets.issue(
@@ -204,9 +192,8 @@ export class WorkspaceFsController {
   }
 
   private async rawStream(id: string, target: string, res: Response): Promise<void> {
-    await this.gate(id);
-    const { downloadMaxBytes } = await this.limits.get();
-    const { stream, size } = await this.client.readStream(id, target, { httpErrors: true, maxBytes: downloadMaxBytes });
+    const { backend } = await this.gate(id);
+    const { stream, size } = await backend.readStream(target, await this.fsLimits());
     this.workspaces.touchThrottled(id);
     const name = posix.basename(target) || 'download';
     const ascii = name.replace(/[^\x20-\x7e]|["\\;]/g, '_');
@@ -223,8 +210,9 @@ export class WorkspaceFsController {
 
   @Put('file')
   async writeFile(@Param('id') id: string, @Body() dto: FsWriteDto) {
-    await this.gate(id);
-    const { editorMaxBytes } = await this.limits.get();
+    const { backend } = await this.gate(id);
+    const fsLimits = await this.fsLimits();
+    const { editorMaxBytes } = fsLimits;
     // Checked here as well as in the sidecar: an over-limit save never travels
     // to the sidecar, and the answer carries the limit in force.
     const bytes = Buffer.byteLength(dto.content, 'utf8');
@@ -239,11 +227,12 @@ export class WorkspaceFsController {
         413,
       );
     }
-    const res = await this.client.writeText(id, dto.path, dto.content, {
-      baseHash: dto.baseHash,
-      force: dto.force === true,
-      maxBytes: editorMaxBytes,
-    });
+    const res = await backend.writeText(
+      dto.path,
+      dto.content,
+      { baseHash: dto.baseHash, force: dto.force === true },
+      fsLimits,
+    );
     this.workspaces.touchThrottled(id);
     return { hash: res.hash };
   }
@@ -251,8 +240,8 @@ export class WorkspaceFsController {
   @Post('mkdir')
   @HttpCode(200)
   async mkdir(@Param('id') id: string, @Body() dto: FsPathDto) {
-    await this.gate(id);
-    const res = await this.client.mkdir(id, dto.path);
+    const { backend } = await this.gate(id);
+    const res = await backend.mkdir(dto.path);
     this.workspaces.touchThrottled(id);
     return { path: res.path };
   }
@@ -260,8 +249,8 @@ export class WorkspaceFsController {
   @Post('move')
   @HttpCode(200)
   async move(@Param('id') id: string, @Body() dto: FsMoveDto) {
-    const ws = await this.gate(id);
-    const res = await this.client.move(id, dto.from, dto.to);
+    const { ws, backend } = await this.gate(id);
+    const res = await backend.move(dto.from, dto.to);
     this.workspaces.touchThrottled(id);
     this.audit(ws, id, `workspace_ide move: ${dto.from} -> ${dto.to}`.slice(0, 500), { from: dto.from, to: dto.to });
     return { from: res.from, to: res.to };
@@ -270,8 +259,8 @@ export class WorkspaceFsController {
   @Post('delete')
   @HttpCode(204)
   async remove(@Param('id') id: string, @Body() dto: FsPathDto): Promise<void> {
-    const ws = await this.gate(id);
-    await this.client.remove(id, dto.path);
+    const { ws, backend } = await this.gate(id);
+    await backend.remove(dto.path);
     this.workspaces.touchThrottled(id);
     this.audit(ws, id, `workspace_ide delete: ${dto.path}`.slice(0, 500), { path: dto.path });
   }
@@ -286,20 +275,13 @@ export class WorkspaceFsController {
     @Query('fileName') fileName?: string,
     @Query('overwrite') overwrite?: string,
   ) {
-    const ws = await this.gate(id);
+    const { ws, backend } = await this.gate(id);
     const targetDir = queryPath(dir, 'dir', '.');
     const name = plainFileName(fileName);
-    // A trailing slash makes the sidecar treat the path as a directory target.
-    const dirTarget = `${targetDir.replace(/\/+$/, '') || '.'}/`;
     const length = /^\d+$/.test(req.headers['content-length'] ?? '') ? Number(req.headers['content-length']) : undefined;
     // Client aborted mid-upload: drop the source so the sidecar discards the partial file.
     res.on('close', () => { if (!res.writableFinished) req.destroy(); });
-    const result = await this.client.writeStream(id, dirTarget, req, {
-      fileName: name,
-      size: length,
-      noOverwrite: overwrite !== '1',
-      httpErrors: true,
-    });
+    const result = await backend.upload(targetDir, name, req, { size: length, overwrite: overwrite === '1' });
     this.workspaces.touchThrottled(id);
     this.audit(ws, id, `workspace_ide upload: ${result.path}`.slice(0, 500), { path: result.path, size: result.size });
     return { path: result.path, size: result.size };
@@ -308,30 +290,23 @@ export class WorkspaceFsController {
   @Post('search')
   @HttpCode(200)
   async search(@Param('id') id: string, @Body() dto: FsSearchDto) {
-    await this.gate(id);
-    const res = await this.client.searchJson(id, {
+    const { backend } = await this.gate(id);
+    const res = await backend.search({
       query: dto.query,
-      fixedStrings: dto.regex !== true,
+      regex: dto.regex === true,
       caseSensitive: dto.caseSensitive === true,
       include: dto.include,
       exclude: dto.exclude,
     });
     this.workspaces.touchThrottled(id);
-    const parsed = parseRipgrepJson(res.matches, SEARCH_LIMIT);
-    return { matches: parsed.matches, truncated: parsed.truncated || res.truncated === true };
+    return res;
   }
 
   @Get('status')
   async status(@Param('id') id: string) {
-    await this.gate(id);
-    try {
-      const res = await this.client.statusFs(id);
-      this.workspaces.touchThrottled(id);
-      return parseGitStatus(res.status);
-    } catch (err: unknown) {
-      // The sidecar answers 409 for a workspace without a git repository.
-      if (err instanceof HttpException && err.getStatus() === 409) return { branch: null, changed: [] };
-      throw err;
-    }
+    const { backend } = await this.gate(id);
+    const res = await backend.status();
+    this.workspaces.touchThrottled(id);
+    return res;
   }
 }

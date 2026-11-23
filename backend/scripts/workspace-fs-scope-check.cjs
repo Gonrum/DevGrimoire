@@ -32,6 +32,7 @@ function loadCompiled(rel) {
 
 const { WorkspaceFsController } = loadCompiled('workspaces/workspace-fs.controller.js');
 const { WorkspacesService } = loadCompiled('workspaces/workspaces.service.js');
+const { WorkspaceFsBackends } = loadCompiled('workspaces/fs/workspace-fs-backends.service.js');
 const { parseRipgrepJson, parseGitStatus } = loadCompiled('workspaces/workspace-search-parse.js');
 const dtos = loadCompiled('workspaces/dto/workspace-fs.dto.js');
 const { RequestContext } = loadCompiled('common/request-context.js');
@@ -94,7 +95,7 @@ function setup({ status = 'active', client = {} } = {}) {
     ...client,
   };
   const touches = { n: 0 };
-  const workspace = { _id: oid(), projectId: PROJECT, status };
+  const workspace = { _id: new mongoose.Types.ObjectId(WS_ID), projectId: PROJECT, status };
   const service = new WorkspacesService(
     {
       findById: () => ({ exec: async () => workspace }),
@@ -103,7 +104,7 @@ function setup({ status = 'active', client = {} } = {}) {
     { emit() {} },
   );
   const logged = [];
-  const ctrl = new WorkspaceFsController(service, fakeClient, { create: async (d) => { logged.push(d); } }, FAKE_LIMITS, FAKE_TICKETS, FAKE_ACTORS);
+  const ctrl = new WorkspaceFsController(service, new WorkspaceFsBackends(fakeClient), { create: async (d) => { logged.push(d); } }, FAKE_LIMITS, FAKE_TICKETS, FAKE_ACTORS);
   return { ctrl, calls, ensureCalls, touches, logged, service };
 }
 
@@ -371,7 +372,7 @@ const matchLine = (p, line, text, start = 4) => ({
     await RequestContext.run(WRITER, undefined, () => ctrl.search(WS_ID, { query: 'q', regex: true, caseSensitive: true }));
     assert.deepEqual([calls[0].fixedStrings, calls[0].caseSensitive], [true, false]);
     assert.deepEqual([calls[1].fixedStrings, calls[1].caseSensitive], [false, true]);
-    assert.deepEqual(a, { matches: [{ path: 's.ts', line: 2, column: 5, text: 'hit' }], truncated: false });
+    assert.deepEqual(a, { matches: [{ path: 's.ts', line: 2, column: 5, text: 'hit' }], truncated: false, engine: 'rg' });
   });
 
   await check('GET status: no repo (sidecar 409) -> empty; porcelain parsed otherwise', async () => {

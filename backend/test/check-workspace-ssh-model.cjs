@@ -23,6 +23,7 @@ const { SshWorkspaceAccess } = loadCompiled('workspaces/ssh-workspace-access.ser
 const { WorkspacesService } = loadCompiled('workspaces/workspaces.service.js');
 const { WorkspacesController } = loadCompiled('workspaces/workspaces.controller.js');
 const { WorkspaceFsController } = loadCompiled('workspaces/workspace-fs.controller.js');
+const { WorkspaceFsBackends } = loadCompiled('workspaces/fs/workspace-fs-backends.service.js');
 const { WorkspaceTtlScheduler } = loadCompiled('workspaces/workspace-ttl.scheduler.js');
 const { RequestContext } = loadCompiled('common/request-context.js');
 const { CreateWorkspaceDto } = loadCompiled('workspaces/dto/create-workspace.dto.js');
@@ -272,7 +273,7 @@ const dto = (over = {}) => ({ projectId: PROJECT.toString(), name: 'w1', ...over
     let sidecar = 0;
     const client = new Proxy({}, { get: () => async () => { sidecar += 1; return {}; } });
     const svc = { findById: async () => ws, touchThrottled() {} };
-    const ctrl = new WorkspaceFsController(svc, client, { create: async () => undefined }, { get: async () => ({ editorMaxBytes: 5 * 1024 * 1024, downloadMaxBytes: 2 * 1024 ** 3 }) }, { issue: () => 't', consume: () => null }, { resolve: async () => undefined });
+    const ctrl = new WorkspaceFsController(svc, new WorkspaceFsBackends(client), { create: async () => undefined }, { get: async () => ({ editorMaxBytes: 5 * 1024 * 1024, downloadMaxBytes: 2 * 1024 ** 3 }) }, { issue: () => 't', consume: () => null }, { resolve: async () => undefined });
     await rejectsWith(() => RequestContext.run({ userId: 'u', username: 'u', role: 'admin' }, undefined, () => ctrl.tree(ws._id.toString(), '.')), 409, /not available yet/);
     assert.equal(sidecar, 0);
   });

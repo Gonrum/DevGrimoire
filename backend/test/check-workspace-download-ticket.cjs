@@ -27,6 +27,7 @@ const { DownloadTicketService } = load('common/download-ticket.service.js');
 const { JwtAuthGuard } = load('auth/guards/jwt-auth.guard.js');
 const { ACCEPTS_DOWNLOAD_TICKET_KEY } = load('auth/decorators/accepts-download-ticket.decorator.js');
 const { WorkspaceFsController } = load('workspaces/workspace-fs.controller.js');
+const { WorkspaceFsBackends } = load('workspaces/fs/workspace-fs-backends.service.js');
 const { WorkspacesService } = load('workspaces/workspaces.service.js');
 const { DownloadActorService } = load('workspaces/download-actor.service.js');
 const { RequestContext } = load('common/request-context.js');
@@ -137,7 +138,7 @@ const B = { workspaceId: WS, path: 'logs/app.log' };
     const resolved = [];
     const actors = { resolve: async (identity) => { resolved.push(identity); return WRITER; } };
     const ctrl = new WorkspaceFsController(
-      service, client, { create: async () => undefined },
+      service, new WorkspaceFsBackends(client), { create: async () => undefined },
       { get: async () => ({ editorMaxBytes: 5, downloadMaxBytes: 777 }) }, tickets, actors,
     );
     return { ctrl, calls, tickets, resolved };
