@@ -675,10 +675,12 @@ export class SshFsBackend implements WorkspaceFsBackend {
   }
 
   /**
-   * Agent command on the server: `cd -- <root> && exec /bin/sh -c <command>`.
-   * The command is a shell command line on purpose; it is handed to /bin/sh
-   * as one quoted word, so the remote user's login shell (zsh, fish …) never
-   * interprets it — the agent allow-list reasons about POSIX sh syntax. No
+   * Agent command on the server. The script `cd -- <root> && <command>` (the
+   * command is a shell command line on purpose) travels base64-encoded inside
+   * a fixed wrapper, `agentExecWrapper`: the remote user's login shell (zsh,
+   * fish, csh …) only ever sees `[A-Za-z0-9+/=]` inside single quotes, so its
+   * own quoting rules cannot change the command; /bin/sh decodes and runs it.
+   * Needs `base64` on the server (probed; missing -> 409). No
    * env (no DevGrimoire credentials to the server), never retried, and not
    * wrapped in `timeout` (commands may legitimately run up to 600 s): the
    * exec timeout ends it with TERM, like an abort. Output beyond the cap is
@@ -691,13 +693,16 @@ export class SshFsBackend implements WorkspaceFsBackend {
     const started = Date.now();
     let result: FsExecResult;
     try {
-      const res = await this.run((s) => s.exec(`cd -- ${shq(this.root)} && exec /bin/sh -c ${shq(command)}`, {
-        timeoutMs,
-        maxOutputBytes,
-        terminateOnTimeout: true,
-        outputMode: 'headTail',
-        ...(signal ? { signal } : {}),
-      }));
+      const res = await this.run(async (s) => {
+        if (!(await s.probe()).base64) throw fail(409, 'base64 not available on server');
+        return s.exec(agentExecWrapper(`cd -- ${shq(this.root)} && ${command}`), {
+          timeoutMs,
+          maxOutputBytes,
+          terminateOnTimeout: true,
+          outputMode: 'headTail',
+          ...(signal ? { signal } : {}),
+        });
+      });
       result = { exitCode: res.code, stdout: res.stdout, stderr: res.stderr, truncated: res.truncated, timedOut: false, aborted: false };
     } catch (err: unknown) {
       const timedOut = isCode(err, 'timeout');
@@ -740,6 +745,16 @@ export class SshFsBackend implements WorkspaceFsBackend {
       throw this.toHttp(err, '.', 'list');
     }
   }
+}
+
+/**
+ * The only text the login shell sees for an agent command: a fixed command
+ * whose single-quoted part holds base64 (`[A-Za-z0-9+/=]`: no backslash, no quote).
+ * /bin/sh decodes the script and evaluates it.
+ */
+export function agentExecWrapper(script: string): string {
+  const b64 = Buffer.from(script, 'utf8').toString('base64');
+  return `exec /bin/sh -c 'eval "$(printf %s ${b64} | base64 -d)"'`;
 }
 
 /** Same filter as the sidecar: strings below 200 chars without line breaks, at most 20. */

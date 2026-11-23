@@ -21,14 +21,17 @@ const SEARCH_LIMIT = 2000;
  */
 const EXEC_BACKSTOP_MS = 15_000;
 
-/** Lines of one stream into a head + rolling tail collector (`\n` between lines). */
+/**
+ * Lines of one stream into a head + rolling tail collector: `\n` between
+ * lines, none after a `partial` piece (the sidecar splits long lines).
+ */
 class StreamLines {
-  private first = true;
+  private joinNext = false;
   constructor(readonly out: HeadTailOutput) {}
 
-  add(line: string): void {
-    this.out.push(this.first ? line : `\n${line}`);
-    this.first = false;
+  add(line: string, partial = false): void {
+    this.out.push(this.joinNext ? `\n${line}` : line);
+    this.joinNext = !partial;
   }
 }
 
@@ -166,10 +169,10 @@ export class ContainerFsBackend implements WorkspaceFsBackend {
       await this.client.execStream(this.workspaceId, command, timeoutMs, env, upstream.signal, (ev) => {
         switch (ev.type) {
           case 'stdout':
-            if (typeof ev.line === 'string') stdout.add(ev.line);
+            if (typeof ev.line === 'string') stdout.add(ev.line, ev.partial === true);
             break;
           case 'stderr':
-            if (typeof ev.line === 'string') stderr.add(ev.line);
+            if (typeof ev.line === 'string') stderr.add(ev.line, ev.partial === true);
             break;
           case 'truncated':
             sidecarTruncated = true;

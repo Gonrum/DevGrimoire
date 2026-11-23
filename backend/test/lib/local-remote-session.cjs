@@ -21,13 +21,14 @@
  *   stallRead          createReadStream() returns a stream that never emits
  *   probeRg            rg reported by probe() (default: false -> grep path)
  *   probeGit           git reported by probe() (default: true)
+ *   probeBase64        `base64` reported by probe() (default: true)
  *   probeTimeout       `timeout` reported by probe() (default: true; search
  *                      commands then carry a `timeout -s TERM <n>` prefix)
  *   execTimeout        exec() rejects with RemoteError('timeout')
  *   denyOpenWrite      Set of paths: opening them for writing (createWriteStream,
  *                      writeFile) -> `denied`, even when the file exists
  *   execScript         null, or the scripted answer for agent commands
- *                      (`cd -- '<root>' && exec /bin/sh -c '<cmd>'`, see agentShape):
+ *                      (base64 wrapper around `cd -- '<root>' && <cmd>`, see agentShape):
  *                      { code = 0, stdout = '', stderr = '', delayMs = 0,
  *                        timeout = false }. Such a command is only recorded
  *                      and answered, NEVER run. `timeout: true` rejects with
@@ -61,6 +62,7 @@ function createLocalRemoteSession(base, RemoteError) {
     probeRg: false,
     probeGit: true,
     probeTimeout: true,
+    probeBase64: true,
     execTimeout: false,
     denyOpenWrite: new Set(),
     execScript: null,
@@ -272,19 +274,29 @@ function createLocalRemoteSession(base, RemoteError) {
   }
   /**
    * Agent commands (`exec` of the file backend):
-   * `cd -- '<root>' && exec /bin/sh -c '<command>'`. Only while
-   * `switches.execScript` is set — the command is recorded (unquoted, in
+   * `exec /bin/sh -c 'eval "$(printf %s <base64> | base64 -d)"'`, the decoded
+   * script being `cd -- '<root>' && <command>`. Only while
+   * `switches.execScript` is set — the command is recorded (decoded, in
    * `calls.agentCommands`) and never run; the root is guarded like every path.
    */
+  const AGENT_WRAPPER = /^exec \/bin\/sh -c 'eval "\$\(printf %s ([A-Za-z0-9+/=]+) \| base64 -d\)"'$/;
+  function agentScript(cmd) {
+    const w = AGENT_WRAPPER.exec(cmd);
+    if (!w) return null;
+    const script = Buffer.from(w[1], 'base64').toString('utf8');
+    const m = /^cd -- ('(?:[^']|'\\'')*') && (.+)$/s.exec(script);
+    if (!m) throw new Error(`fake: decoded agent script has no cd prefix: ${script}`);
+    return { root: unquote(m[1]), command: m[2] };
+  }
   function agentShape(cmd) {
     if (!switches.execScript) return null;
-    const m = /^cd -- ('(?:[^']|'\\'')*') && exec \/bin\/sh -c ('(?:[^']|'\\'')*')$/s.exec(cmd);
-    return m ? [unquote(m[1])] : null;
+    const a = agentScript(cmd);
+    return a ? [a.root] : null;
   }
   function scriptedExec(command, opts) {
     const sc = { code: 0, stdout: '', stderr: '', delayMs: 0, timeout: false, ...switches.execScript };
     calls.agentExecs.push(command);
-    calls.agentCommands.push(unquote(/ -c ('(?:[^']|'\\'')*')$/s.exec(command)[1]));
+    calls.agentCommands.push(agentScript(command).command);
     const cap = (text) => {
       const max = opts.maxOutputBytes;
       if (!max || Buffer.byteLength(text) <= max) return { text, cut: false };
@@ -363,6 +375,7 @@ function createLocalRemoteSession(base, RemoteError) {
       rg: switches.probeRg,
       git: switches.probeGit,
       timeout: switches.probeTimeout,
+      base64: switches.probeBase64,
       uid: switches.probeUid,
       gid: switches.probeGid,
     }),

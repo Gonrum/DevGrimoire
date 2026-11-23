@@ -151,7 +151,9 @@ const USER = oid().toString();
       await rejectsWith(() => svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value }), 400);
     }
     await svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: 'git status' });
-    await svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: 'npm' });
+    await rejectsWith(() => svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: 'npm' }), 400);
+    await rejectsWith(() => svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: "\\bash -c" }), 400);
+    await svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: 'make' });
     await svc.addAgentAllow(id, { kind: 'command', match: 'exact', value: 'git' });
     await svc.addAgentAllow(id, { kind: 'command', match: 'exact', value: "bash -c 'x'" });
     assert.equal(ws.agentAllow.length, 4);

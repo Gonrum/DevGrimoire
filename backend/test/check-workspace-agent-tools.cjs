@@ -90,7 +90,7 @@ async function pureChecks() {
   });
 
   await check('non-ws tools are never allowed by the list', () => {
-    const all = [{ kind: 'files.write', ...at() }, { kind: 'command', match: 'prefix', value: 'npm', ...at() }];
+    const all = [{ kind: 'files.write', ...at() }, { kind: 'command', match: 'prefix', value: 'npm test', ...at() }];
     assert.equal(isAllowedByList('todo_create', {}, all), false);
     assert.equal(isAllowedByList('workspace_exec', { command: 'npm test' }, all), false);
   });
@@ -143,6 +143,31 @@ async function pureChecks() {
     assert.equal(isAllowedByList('ws_exec', { command: 'git status --short' }, two), true);
   });
 
+  // Every bypass form from the review: quoting/escaping, relatives, versions, runners, assignments.
+  const BYPASS_PREFIXES = [
+    '\\bash -c', "'bash' -c", '"env" rm', "b''ash -c", 'ba\\sh -c', '\\git', 'command bash', 'builtin cd',
+    'nice bash', 'stdbuf -o0', 'setsid bash', 'doas sh', 'busybox sh', 'python3.12 -c', 'node22 -e', 'awk BEGIN',
+    'bunx x', 'pnpm dlx', 'npm exec', 'yarn dlx', 'npm x', 'npm --yes', 'git -c', 'git', 'npm', 'FOO=1 bash',
+    'Bash -c', '/usr/bin/env', 'time make', 'ionice -c3', 'chroot /', 'unshare -r', 'nsenter -t', 'script -c',
+    'gawk x', 'deno run', 'bun run', 'lua5.4 x', '$HOME/x', '~/bin/x', 'x*', 'make{,}', 'a!b', '#x',
+  ];
+  await check('plain-word rule: every bypass form refused as prefix, not suggested, not matched', () => {
+    for (const value of BYPASS_PREFIXES) {
+      assert.equal(allowModule.isForbiddenPrefix(value), true, value);
+      assert.throws(() => allowModule.parseAgentAllowInput({ kind: 'command', match: 'prefix', value }), /prefix rule/, value);
+      // Still allowed exactly.
+      assert.deepEqual(allowModule.parseAgentAllowInput({ kind: 'command', match: 'exact', value }), { kind: 'command', match: 'exact', value });
+      const stored = [{ kind: 'command', match: 'prefix', value, ...at() }];
+      assert.equal(isAllowedByList('ws_exec', { command: `${value} y` }, stored), false, value);
+      const sugg = allowSuggestions('ws_exec', { command: `${value} y` }).filter((x) => x.match === 'prefix');
+      assert.ok(sugg.every((x) => !allowModule.isForbiddenPrefix(x.value)), `${value}: ${JSON.stringify(sugg)}`);
+      assert.ok(!sugg.some((x) => x.value === value), `${value} suggested`);
+    }
+    for (const ok of ['git status', 'npm test', 'npm run', 'pnpm install', 'yarn build', 'make', 'cargo test', 'go test', './gradlew build']) {
+      assert.equal(allowModule.isForbiddenPrefix(ok), false, ok);
+    }
+  });
+
   await check('legacy stored interpreter prefixes of any length never match', () => {
     for (const [value, command] of [
       ['bash -c', "bash -c 'x'"], ['env FOO=1', 'env FOO=1 rm x'], ['find .', 'find . -exec rm {} +'],
@@ -157,9 +182,14 @@ async function pureChecks() {
   });
 
   await check('suggestions: exec -> exact + first word + first two words; control -> exact only', () => {
+    assert.deepEqual(allowSuggestions('ws_exec', { command: 'make test -j4' }), [
+      { kind: 'command', match: 'exact', value: 'make test -j4' },
+      { kind: 'command', match: 'prefix', value: 'make' },
+      { kind: 'command', match: 'prefix', value: 'make test' },
+    ]);
+    // npm needs a subcommand: no one-word prefix.
     assert.deepEqual(allowSuggestions('ws_exec', { command: 'npm run build' }), [
       { kind: 'command', match: 'exact', value: 'npm run build' },
-      { kind: 'command', match: 'prefix', value: 'npm' },
       { kind: 'command', match: 'prefix', value: 'npm run' },
     ]);
     // Interpreter/wrapper as the first word: no one-word prefix.
@@ -583,7 +613,7 @@ async function toolChecks() {
     assert.equal(exitCode, 3, 'not killed for its output');
     assert.deepEqual(r.changedPaths, ['.']);
     assert.equal(w.fake.calls.agentExecs.length, 1);
-    assert.match(w.fake.calls.agentExecs[0], /^cd -- '.*' && exec \/bin\/sh -c 'npm test'$/);
+    assert.match(w.fake.calls.agentExecs[0], /^exec \/bin\/sh -c 'eval "\$\(printf %s [A-Za-z0-9+/=]+ \| base64 -d\)"'$/);
     assert.deepEqual(w.fake.calls.agentCommands, ['npm test']);
     assert.equal(w.fake.calls.execOpts[0].outputMode, 'headTail');
   });

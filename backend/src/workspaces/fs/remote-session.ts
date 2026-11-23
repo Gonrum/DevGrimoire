@@ -78,7 +78,7 @@ export interface RemoteExecOpts {
 export type RemoteDriverExecOpts = Required<Omit<RemoteExecOpts, 'signal'>> & Pick<RemoteExecOpts, 'signal'>;
 
 /** `timeout`: a usable `timeout SECS CMD` exists, so a long command can be bounded on the server. */
-export interface RemoteProbe { rg: boolean; git: boolean; timeout: boolean; uid: number; gid: number }
+export interface RemoteProbe { rg: boolean; git: boolean; timeout: boolean; base64: boolean; uid: number; gid: number }
 
 export interface RemoteSession {
   fs: RemoteFs;
@@ -146,7 +146,7 @@ export type RemoteDriverFactory<C = unknown> = (
 ) => Promise<RemoteSessionDriver>;
 
 /**
- * One exec: which of rg/git exist, whether `timeout` is usable, and the remote
+ * One exec: which of rg/git/base64 exist, whether `timeout` is usable, and the remote
  * uid/gid. Parsed by `parseProbeOutput`. `timeout` is tested by running it:
  * old busybox builds only accept `timeout -t SECS`, so their `timeout 1 true`
  * fails just like `timeout -s TERM 18 rg …` would.
@@ -155,6 +155,7 @@ export const PROBE_COMMAND =
   'command -v rg >/dev/null 2>&1 && echo rg=1 || echo rg=0; '
   + 'command -v git >/dev/null 2>&1 && echo git=1 || echo git=0; '
   + 'timeout 1 true >/dev/null 2>&1 && echo timeout=1 || echo timeout=0; '
+  + 'command -v base64 >/dev/null 2>&1 && echo base64=1 || echo base64=0; '
   + 'echo "uid=$(id -u 2>/dev/null)"; '
   + 'echo "gid=$(id -g 2>/dev/null)"';
 
@@ -166,5 +167,12 @@ export function parseProbeOutput(stdout: string): RemoteProbe {
     const v = m ? Number(m[1]) : -1;
     return Number.isSafeInteger(v) ? v : -1;
   };
-  return { rg: flag('rg'), git: flag('git'), timeout: flag('timeout'), uid: id('uid'), gid: id('gid') };
+  return {
+    rg: flag('rg'),
+    git: flag('git'),
+    timeout: flag('timeout'),
+    base64: flag('base64'),
+    uid: id('uid'),
+    gid: id('gid'),
+  };
 }

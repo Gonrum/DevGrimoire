@@ -546,6 +546,12 @@ async function main() {
       assert.equal(lines[lines.length - 1], 'LAST-LINE');
       assert.equal(lines.slice(0, -1).join('').length, 3 * 1024 * 1024);
       assert.ok(lines.every((l) => l.length <= 64 * 1024), 'long lines are sent in pieces');
+      // Pieces of the one long line are marked partial; joining without them restores it.
+      const out = full.filter((e) => e.type === 'stdout');
+      const joined = out.map((e) => e.line + (e.partial ? '' : '\n')).join('');
+      assert.equal(joined, `${'a'.repeat(3 * 1024 * 1024)}\nLAST-LINE\n`);
+      assert.ok(out.filter((e) => e.partial).length >= 47);
+      assert.ok(!out[out.length - 1].partial);
       assert.equal(done.exitCode, 0);
       assert.equal(done.stdoutTruncated, false);
       const capped = await run({});

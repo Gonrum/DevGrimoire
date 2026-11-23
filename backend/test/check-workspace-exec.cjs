@@ -14,6 +14,7 @@ const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 
 function loadCompiled(rel) {
@@ -178,6 +179,18 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     assert.match(res.stdout, /\n… \d+ bytes omitted …\n/);
   });
 
+  await check('container: partial pieces of a long line are joined without an invented newline', async () => {
+    const client = fakeClient(async (emit) => {
+      emit({ type: 'stdout', line: 'aaa', partial: true });
+      emit({ type: 'stdout', line: 'bbb', partial: true });
+      emit({ type: 'stdout', line: 'ccc' });
+      emit({ type: 'stdout', line: 'next' });
+      emit({ type: 'done', exitCode: 0, timedOut: false });
+    });
+    const res = await new ContainerFsBackend(client, 'w1', async () => undefined).exec('x', OPTS);
+    assert.equal(res.stdout, 'aaabbbccc\nnext');
+  });
+
   await check('container: multi-byte output is cut on a character boundary', async () => {
     const client = fakeClient(async (emit) => {
       emit({ type: 'stdout', line: 'ä'.repeat(20) });
@@ -261,12 +274,17 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     return { base, root, fake, backend, runs, audits };
   }
 
-  await check('ssh: command is `cd -- <shq(root)> && exec /bin/sh -c <shq(command)>`; result mapped; not retryable; no env', async () => {
+  const WRAPPER = /^exec \/bin\/sh -c 'eval "\$\(printf %s ([A-Za-z0-9+/=]+) \| base64 -d\)"'$/;
+  const decoded = (cmd) => Buffer.from(WRAPPER.exec(cmd)[1], 'base64').toString('utf8');
+
+  await check('ssh: base64 wrapper around `cd -- <shq(root)> && <command>`; result mapped; not retryable; no env', async () => {
     const t = setup();
     t.fake.switches.execScript = { code: 2, stdout: 'out\n', stderr: 'err\n' };
     const res = await t.backend.exec('npm test -- --grep "a b"', { timeoutMs: 30_000, maxOutputBytes: 4096 });
     assert.deepEqual(res, { exitCode: 2, stdout: 'out\n', stderr: 'err\n', truncated: false, timedOut: false, aborted: false });
-    assert.deepEqual(t.fake.calls.agentExecs, [`cd -- '${t.root}' && exec /bin/sh -c 'npm test -- --grep "a b"'`]);
+    assert.equal(t.fake.calls.agentExecs.length, 1);
+    assert.match(t.fake.calls.agentExecs[0], WRAPPER);
+    assert.equal(decoded(t.fake.calls.agentExecs[0]), `cd -- '${t.root}' && npm test -- --grep "a b"`);
     assert.deepEqual(t.fake.calls.agentCommands, ['npm test -- --grep "a b"']);
     const opts = t.fake.calls.execOpts[t.fake.calls.execOpts.length - 1];
     assert.equal(opts.timeoutMs, 30_000);
@@ -288,12 +306,33 @@ const untilAborted = (signal) => new Promise((_, reject) => {
   await check("ssh: a root containing ' is quoted as one word", async () => {
     const t = setup("it's here");
     await t.backend.exec('ls', OPTS);
-    const cmd = t.fake.calls.agentExecs[0];
-    assert.ok(cmd.startsWith(`cd -- '${t.root.replace(/'/g, `'\\''`)}' && `), cmd);
-    assert.ok(cmd.endsWith(" && exec /bin/sh -c 'ls'"));
+    const script = decoded(t.fake.calls.agentExecs[0]);
+    assert.equal(script, `cd -- '${t.root.replace(/'/g, `'\\''`)}' && ls`);
     // A command with ' is one word for /bin/sh as well.
     await t.backend.exec("echo 'x'", OPTS);
     assert.deepEqual(t.fake.calls.agentCommands, ['ls', "echo 'x'"]);
+  });
+
+  await check('ssh: fish-style payload: the login shell only sees base64 in single quotes; real sh decodes it', async () => {
+    const t = setup();
+    const payload = `printf '%s|' "$PWD"; echo "\\' (echo FISH) '\\\\"`;
+    await t.backend.exec(payload, OPTS);
+    const wrapper = t.fake.calls.agentExecs[0];
+    assert.match(wrapper, WRAPPER);
+    const quoted = /-c '(.*)'$/.exec(wrapper)[1];
+    assert.ok(!/[\\']/.test(quoted), 'no backslash or quote inside the single-quoted part');
+    assert.deepEqual(t.fake.calls.agentCommands, [payload]);
+    // A real /bin/sh runs the wrapper as the server would (here: local, harmless payload).
+    const out = execFileSync('/bin/sh', ['-c', wrapper], { encoding: 'utf8' });
+    assert.equal(out, `${t.root}|\\' (echo FISH) '\\\n`);
+  });
+
+  await check('ssh: no base64 on the server -> 409 "base64 not available on server", nothing sent', async () => {
+    const t = setup();
+    t.fake.switches.probeBase64 = false;
+    await rejectsStatus(() => t.backend.exec('ls', OPTS), 409);
+    try { await t.backend.exec('ls', OPTS); } catch (e) { assert.match(e.message, /base64 not available on server/); }
+    assert.equal(t.fake.calls.agentExecs.length, 0);
   });
 
   await check('ssh: agent command never runs in the fake (no file created)', async () => {
@@ -383,9 +422,11 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     t.fake.switches.execScript = null;
     await assert.rejects(t.fake.session.exec(`cd -- '${t.root}' && touch x`, {}), /not allowed/);
     t.fake.switches.execScript = {};
-    await assert.rejects(t.fake.session.exec(`cd -- '/etc' && exec /bin/sh -c 'ls'`, {}), /outside the temp dir/);
-    // The old unwrapped form is no agent shape any more.
+    const wrap = (script) => `exec /bin/sh -c 'eval "$(printf %s ${Buffer.from(script).toString('base64')} | base64 -d)"'`;
+    await assert.rejects(t.fake.session.exec(wrap(`cd -- '/etc' && ls`), {}), /outside the temp dir/);
+    // Older forms are no agent shape any more.
     await assert.rejects(t.fake.session.exec(`cd -- '${t.root}' && ls`, {}), /not allowed/);
+    await assert.rejects(t.fake.session.exec(`cd -- '${t.root}' && exec /bin/sh -c 'ls'`, {}), /not allowed/);
     assert.deepEqual(fs.readdirSync(t.root), []);
   });
 

@@ -104,7 +104,7 @@ function makeWorld() {
         driver.execOpts.push(opts);
         if (w.execImpl[idx] && !command.includes('command -v rg')) return w.execImpl[idx](command, opts);
         if (command.includes('command -v rg')) {
-          return { code: 0, stdout: 'rg=1\ngit=0\ntimeout=1\nuid=1001\ngid=1002\n', stderr: '', truncated: false };
+          return { code: 0, stdout: 'rg=1\ngit=0\ntimeout=1\nbase64=1\nuid=1001\ngid=1002\n', stderr: '', truncated: false };
         }
         w.execActive += 1;
         w.execMax = Math.max(w.execMax, w.execActive);
@@ -342,7 +342,7 @@ function makeWorld() {
     const svc = w.svc();
     const a = await svc.withSession('ws1', 'c1', (s) => s.probe());
     const b = await svc.withSession('ws1', 'c1', (s) => s.probe());
-    assert.deepEqual(a, { rg: true, git: false, timeout: true, uid: 1001, gid: 1002 });
+    assert.deepEqual(a, { rg: true, git: false, timeout: true, base64: true, uid: 1001, gid: 1002 });
     assert.deepEqual(b, a);
     assert.equal(w.drivers[0].execs.filter((c) => c.includes('command -v rg')).length, 1);
     svc.onModuleDestroy();
@@ -359,6 +359,9 @@ function makeWorld() {
     assert.equal(p.timeout, true);
     const noTimeout = execFileSync('/bin/sh', ['-c', PROBE_COMMAND], { encoding: 'utf8', env: { PATH: '/nonexistent' } });
     assert.equal(parseProbeOutput(noTimeout).timeout, false);
+    // base64 (coreutils) is found locally; without PATH it is not.
+    assert.equal(p.base64, true);
+    assert.equal(parseProbeOutput(noTimeout).base64, false);
   });
 
   await check('PROBE_COMMAND: old busybox `timeout` (-t SECS syntax) -> timeout=0; a working one -> timeout=1', () => {
@@ -401,9 +404,9 @@ function makeWorld() {
   });
 
   await check('parseProbeOutput tolerates noise and missing values', () => {
-    assert.deepEqual(parseProbeOutput('motd line\r\nrg=0\r\ngit=1\r\ntimeout=1\r\nuid=0\r\ngid=50\r\n'), { rg: false, git: true, timeout: true, uid: 0, gid: 50 });
-    assert.deepEqual(parseProbeOutput(''), { rg: false, git: false, timeout: false, uid: -1, gid: -1 });
-    assert.deepEqual(parseProbeOutput('uid=abc\ntimeout=yes\n'), { rg: false, git: false, timeout: false, uid: -1, gid: -1 });
+    assert.deepEqual(parseProbeOutput('motd line\r\nrg=0\r\ngit=1\r\ntimeout=1\r\nbase64=1\r\nuid=0\r\ngid=50\r\n'), { rg: false, git: true, timeout: true, base64: true, uid: 0, gid: 50 });
+    assert.deepEqual(parseProbeOutput(''), { rg: false, git: false, timeout: false, base64: false, uid: -1, gid: -1 });
+    assert.deepEqual(parseProbeOutput('uid=abc\ntimeout=yes\n'), { rg: false, git: false, timeout: false, base64: false, uid: -1, gid: -1 });
   });
 
   // ---- R7: timeouts that scale, SFTP-open timeout, exec timeout keeps session --

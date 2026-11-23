@@ -1209,7 +1209,8 @@ function runExec({ command, cwd, timeoutMs, env }) {
  * itself) and instead applies flow control: while more than
  * EXEC_STREAM_BUFFER_MAX bytes wait in `writable`, the child's pipes are
  * paused (the command blocks on output, it is not killed). A line longer than
- * EXEC_STREAM_LINE_MAX is sent in pieces.
+ * EXEC_STREAM_LINE_MAX is sent in pieces; every piece but the last carries
+ * `partial: true` (no newline follows it).
  */
 function runExecStream({ command, cwd, timeoutMs, env, abortSignal, fullOutput = false, writable = null }, onEvent) {
   return new Promise((resolve) => {
@@ -1246,8 +1247,9 @@ function runExecStream({ command, cwd, timeoutMs, env, abortSignal, fullOutput =
       child.stdout.pause();
       child.stderr.pause();
       writable.once('drain', releasePause);
-      writable.once('close', releasePause);
     };
+    // Registered once per request (not per pause): a client gone mid-pause lets the pipes drain.
+    if (fullOutput && writable) writable.once('close', releasePause);
     const fullEmitter = (stream) => (chunk) => {
       const text = decoders[stream].write(chunk);
       if (stream === 'stdout') stdoutBytes += chunk.length; else stderrBytes += chunk.length;
@@ -1258,7 +1260,8 @@ function runExecStream({ command, cwd, timeoutMs, env, abortSignal, fullOutput =
         buf = buf.slice(nl + 1);
       }
       while (buf.length > EXEC_STREAM_LINE_MAX) {
-        onEvent({ type: stream, line: buf.slice(0, EXEC_STREAM_LINE_MAX) });
+        // `partial`: a piece of a longer line, no newline follows it.
+        onEvent({ type: stream, line: buf.slice(0, EXEC_STREAM_LINE_MAX), partial: true });
         buf = buf.slice(EXEC_STREAM_LINE_MAX);
       }
       if (stream === 'stdout') stdoutBuf = buf; else stderrBuf = buf;
@@ -1323,6 +1326,7 @@ function runExecStream({ command, cwd, timeoutMs, env, abortSignal, fullOutput =
     });
     child.on('close', (code, signal) => {
       clearTimeout(softTimer); clearTimeout(hardTimer);
+      if (writable) writable.off('close', releasePause);
       // Flush trailing partial lines (no terminating newline).
       if (stdoutBuf) onEvent({ type: 'stdout', line: stdoutBuf });
       if (stderrBuf) onEvent({ type: 'stderr', line: stderrBuf });
