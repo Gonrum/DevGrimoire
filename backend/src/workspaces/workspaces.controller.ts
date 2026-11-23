@@ -7,6 +7,7 @@ import { WorkspaceGitTokensService } from './workspace-git-tokens.service';
 import { WorkspaceCliTokenService } from './workspace-cli-token.service';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
+import { AddAgentAllowDto } from './dto/agent-allow.dto';
 import { ExecWorkspaceDto } from './dto/exec-workspace.dto';
 import { WORKSPACE_STATUSES, WorkspaceDocument, WorkspaceStatus } from './schemas/workspace.schema';
 import { SshService } from '../ssh/ssh.service';
@@ -42,10 +43,16 @@ export class WorkspacesController {
       (ids.length ? await this.ssh.findManyByIds(ids) : []).map((c) => [String(c._id), c]),
     );
     return docs.map((doc) => {
-      if (doc.location !== 'ssh') return doc;
+      // Legacy documents carry neither field: report the defaults.
+      const base = {
+        ...doc.toJSON(),
+        agentMode: doc.agentMode ?? 'confirm',
+        agentAllow: doc.agentAllow ?? [],
+      };
+      if (doc.location !== 'ssh') return base;
       const c = byId.get(String(doc.sshConnectionId));
       return {
-        ...doc.toJSON(),
+        ...base,
         ssh: c
           ? {
               connectionId: String(c._id),
@@ -95,6 +102,18 @@ export class WorkspacesController {
   @Put(':id')
   async update(@Param('id') id: string, @Body() dto: UpdateWorkspaceDto) {
     return (await this.withSsh([await this.workspacesService.update(id, dto)]))[0];
+  }
+
+  @Post(':id/agent-allow')
+  @HttpCode(201)
+  async addAgentAllow(@Param('id') id: string, @Body() dto: AddAgentAllowDto) {
+    return (await this.withSsh([await this.workspacesService.addAgentAllow(id, dto)]))[0];
+  }
+
+  @Delete(':id/agent-allow/:entryId')
+  @HttpCode(204)
+  removeAgentAllow(@Param('id') id: string, @Param('entryId') entryId: string) {
+    return this.workspacesService.removeAgentAllow(id, entryId);
   }
 
   @Post(':id/archive')

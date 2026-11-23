@@ -469,6 +469,7 @@ export class ChatController {
       { projectId: dto.projectId, customerId: dto.customerId },
       userId,
       dto.title,
+      { workspaceId: dto.workspaceId, ideAgent: dto.ideAgent },
     );
   }
 
@@ -477,6 +478,7 @@ export class ChatController {
     @Req() req: ChatRequest,
     @Query('projectId') projectId?: string,
     @Query('customerId') customerId?: string,
+    @Query('workspaceId') workspaceId?: string,
     @Query('includeArchived') includeArchived?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
@@ -491,6 +493,7 @@ export class ChatController {
     const userId = req.user?.userId;
     if (!userId) throw new BadRequestException('Authentication required');
     return this.chatService.listSessions({ projectId, customerId }, userId, {
+      workspaceId: workspaceId || undefined,
       includeArchived: includeArchived === 'true',
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,

@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
+import { AGENT_ALLOW_KINDS, AGENT_ALLOW_MATCHES, AgentAllowEntry } from '../agent-allow';
 
 export type WorkspaceDocument = HydratedDocument<Workspace>;
 
@@ -11,6 +12,11 @@ export const WORKSPACE_STATUSES: WorkspaceStatus[] = ['active', 'archived', 'cle
 export type WorkspaceLocation = 'container' | 'ssh';
 
 export const WORKSPACE_LOCATIONS: WorkspaceLocation[] = ['container', 'ssh'];
+
+/** IDE agent: ask before each write/command (`confirm`) or run directly. */
+export type WorkspaceAgentMode = 'confirm' | 'direct';
+
+export const WORKSPACE_AGENT_MODES: WorkspaceAgentMode[] = ['confirm', 'direct'];
 
 /**
  * Slug-style names: alphanumeric start, then alphanumerics/dash/underscore. Used
@@ -50,6 +56,24 @@ export class Workspace {
   /** Only for `location: 'ssh'`: absolute, normalised; `path` mirrors it. */
   @Prop()
   remotePath?: string;
+
+  /** Documents without the field (legacy) count as `confirm`. */
+  @Prop({ type: String, enum: WORKSPACE_AGENT_MODES, default: 'confirm' })
+  agentMode: WorkspaceAgentMode;
+
+  /** "Always allow" rules of the IDE agent; at most 100, see agent-allow.ts. */
+  @Prop({
+    type: [
+      {
+        kind: { type: String, enum: AGENT_ALLOW_KINDS, required: true },
+        match: { type: String, enum: AGENT_ALLOW_MATCHES },
+        value: { type: String },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    default: [],
+  })
+  agentAllow: AgentAllowEntry[];
 
   @Prop({ required: true, enum: WORKSPACE_STATUSES, default: 'active' })
   status: WorkspaceStatus;

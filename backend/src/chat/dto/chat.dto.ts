@@ -24,6 +24,15 @@ export class CreateChatSessionDto {
   @IsOptional()
   @IsString()
   title?: string;
+
+  /** IDE agent session: bound to this workspace (requires `ideAgent` and `projectId`). */
+  @IsMongoId()
+  @IsOptional()
+  workspaceId?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  ideAgent?: boolean;
 }
 
 export class UpdateChatSessionDto {

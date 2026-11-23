@@ -16,6 +16,11 @@ import { assertSafeCascadeId } from '../common/cascade-guard';
 import { SshService } from '../ssh/ssh.service';
 import { SshConnectionDocument } from '../ssh/schemas/ssh-connection.schema';
 import { normalizeRemotePath } from './remote-path';
+import {
+  AGENT_ALLOW_MAX_ENTRIES,
+  AgentAllowInput,
+  parseAgentAllowInput,
+} from './agent-allow';
 import { SshWorkspaceSessions } from './fs/ssh-workspace-sessions.service';
 
 const TOUCH_THROTTLE_MS = 60_000;
@@ -188,6 +193,52 @@ export class WorkspacesService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Adds an "always allow" rule. Duplicates (same kind, and for commands the
+   * same match + value) are not stored twice; the 101st distinct rule is a 400.
+   * The push is one atomic update guarded by the same conditions, so parallel
+   * requests cannot exceed the cap or double an entry.
+   */
+  async addAgentAllow(id: string, raw: Parameters<typeof parseAgentAllowInput>[0]): Promise<WorkspaceDocument> {
+    const input: AgentAllowInput = parseAgentAllowInput(raw);
+    const current = await this.findById(id);
+    const same = input.kind === 'command'
+      ? { kind: 'command', match: input.match, value: input.value }
+      : { kind: input.kind };
+    const exists = (ws: WorkspaceDocument) =>
+      (ws.agentAllow ?? []).some((e) =>
+        e.kind === input.kind
+        && (input.kind !== 'command' || (e.kind === 'command' && e.match === input.match && e.value === input.value)));
+    if (exists(current)) return current;
+    const updated = await this.workspaceModel
+      .findOneAndUpdate(
+        {
+          _id: current._id,
+          [`agentAllow.${AGENT_ALLOW_MAX_ENTRIES - 1}`]: { $exists: false },
+          agentAllow: { $not: { $elemMatch: same } },
+        },
+        { $push: { agentAllow: { ...same, createdAt: new Date() } } },
+        { new: true },
+      )
+      .exec();
+    if (updated) return updated;
+    const fresh = await this.findById(id);
+    if (exists(fresh)) return fresh;
+    throw new BadRequestException(`At most ${AGENT_ALLOW_MAX_ENTRIES} agent-allow rules per workspace`);
+  }
+
+  async removeAgentAllow(id: string, entryId: string): Promise<void> {
+    await this.findById(id);
+    if (!/^[0-9a-f]{24}$/i.test(entryId)) throw new NotFoundException('Agent-allow entry not found');
+    const res = await this.workspaceModel
+      .updateOne(
+        { _id: new Types.ObjectId(id), 'agentAllow._id': new Types.ObjectId(entryId) },
+        { $pull: { agentAllow: { _id: new Types.ObjectId(entryId) } } },
+      )
+      .exec();
+    if (res.modifiedCount === 0) throw new NotFoundException('Agent-allow entry not found');
   }
 
   async archive(id: string): Promise<WorkspaceDocument> {

@@ -1,7 +1,7 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import {
   ChatSession,
   ChatSessionDocument,
@@ -15,6 +15,7 @@ import { User, UserDocument, UserRole } from '../auth/schemas/user.schema';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { errorMessage } from '../common/narrow';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { WorkspacesService } from '../workspaces/workspaces.service';
 import { assertOwnerInScope, assertOwnerParamsInScope } from '../common/scope-guard';
 
 interface AppendMessageInput {
@@ -36,6 +37,8 @@ export class ChatService implements OnModuleInit {
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
     private readonly eventEmitter: EventEmitter2,
+    // Optional so checks can build the service without the workspaces module.
+    @Optional() private readonly workspaces?: WorkspacesService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -74,6 +77,7 @@ export class ChatService implements OnModuleInit {
     owner: { projectId?: string; customerId?: string },
     userId: string,
     title?: string,
+    binding: { workspaceId?: string; ideAgent?: boolean } = {},
   ): Promise<ChatSessionDocument> {
     if (!owner.projectId && !owner.customerId) {
       throw new BadRequestException('projectId or customerId is required');
@@ -84,7 +88,24 @@ export class ChatService implements OnModuleInit {
     // A chat session pulls RAG context and runs tools for its owner — a
     // narrowed actor must not open one on a project/customer outside its scope.
     assertOwnerParamsInScope(owner);
+    const ideAgent = binding.ideAgent === true;
+    let workspaceId: Types.ObjectId | undefined;
+    if (ideAgent) {
+      if (!binding.workspaceId || !owner.projectId) {
+        throw new BadRequestException('ideAgent requires workspaceId and projectId');
+      }
+      if (!this.workspaces) throw new BadRequestException('Workspaces are not available');
+      // findById enforces the caller's project access (403) and 404 for unknown ids.
+      const ws = await this.workspaces.findById(binding.workspaceId);
+      if (ws.projectId.toString() !== owner.projectId) {
+        throw new BadRequestException('Workspace does not belong to this project');
+      }
+      workspaceId = ws._id;
+    } else if (binding.workspaceId) {
+      throw new BadRequestException('workspaceId requires ideAgent');
+    }
     const session = await this.chatModel.create({
+      ...(ideAgent ? { workspaceId, ideAgent: true } : {}),
       projectId: owner.projectId,
       customerId: owner.customerId,
       userId,
@@ -98,7 +119,7 @@ export class ChatService implements OnModuleInit {
   async listSessions(
     owner: { projectId?: string; customerId?: string },
     userId: string,
-    options: { includeArchived?: boolean; limit?: number; offset?: number } = {},
+    options: { includeArchived?: boolean; limit?: number; offset?: number; workspaceId?: string } = {},
   ): Promise<ChatSessionDocument[]> {
     if (!owner.projectId && !owner.customerId) {
       throw new BadRequestException('projectId or customerId is required');
@@ -107,6 +128,16 @@ export class ChatService implements OnModuleInit {
     const filter: Record<string, unknown> = { userId };
     if (owner.projectId) filter.projectId = owner.projectId;
     if (owner.customerId) filter.customerId = owner.customerId;
+    if (options.workspaceId !== undefined) {
+      if (!owner.projectId || !/^[0-9a-f]{24}$/i.test(options.workspaceId)) {
+        throw new BadRequestException('workspaceId must be a valid id and requires projectId');
+      }
+      filter.workspaceId = new Types.ObjectId(options.workspaceId);
+      filter.ideAgent = true;
+    } else {
+      // IDE agent sessions belong to their workspace, not to the ChatDock.
+      filter.ideAgent = { $ne: true };
+    }
     if (!options.includeArchived) filter.archived = { $ne: true };
     let query = this.chatModel.find(filter).sort({ updatedAt: -1 });
     if (options.offset) query = query.skip(options.offset);

@@ -1,5 +1,5 @@
-import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
-import { WORKSPACE_NAME_PATTERN } from '../schemas/workspace.schema';
+import { IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { WORKSPACE_AGENT_MODES, WORKSPACE_NAME_PATTERN, WorkspaceAgentMode } from '../schemas/workspace.schema';
 
 export class UpdateWorkspaceDto {
   @IsOptional()
@@ -30,4 +30,8 @@ export class UpdateWorkspaceDto {
   @IsString()
   @MaxLength(48)
   gitRepoId?: string;
+
+  @IsOptional()
+  @IsIn(WORKSPACE_AGENT_MODES)
+  agentMode?: WorkspaceAgentMode;
 }

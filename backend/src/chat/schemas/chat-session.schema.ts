@@ -122,6 +122,14 @@ export class ChatSession {
   @Prop({ type: SchemaTypes.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
+  /** Set only for IDE agent sessions; never changed after creation. */
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Workspace' })
+  workspaceId?: Types.ObjectId;
+
+  /** True for the workspace agent chat of the browser IDE (hidden from the ChatDock). */
+  @Prop({ type: Boolean, default: false })
+  ideAgent: boolean;
+
   @Prop({ type: SchemaTypes.ObjectId, ref: 'Customer' })
   customerId?: Types.ObjectId;
 
@@ -149,6 +157,7 @@ export class ChatSession {
 
 export const ChatSessionSchema = SchemaFactory.createForClass(ChatSession);
 ChatSessionSchema.index({ userId: 1, projectId: 1, updatedAt: -1 });
+ChatSessionSchema.index({ userId: 1, workspaceId: 1, updatedAt: -1 });
 ChatSessionSchema.index({ projectId: 1, updatedAt: -1 });
 ChatSessionSchema.index({ userId: 1, customerId: 1, updatedAt: -1 });
 ChatSessionSchema.index({ customerId: 1, updatedAt: -1 });
