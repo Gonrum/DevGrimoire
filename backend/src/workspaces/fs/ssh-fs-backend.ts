@@ -171,15 +171,17 @@ export class SshFsBackend implements WorkspaceFsBackend {
   }
 
   /**
-   * uid of the SSH user, -1 when unknown (probe failed, e.g. an SFTP-only
-   * account without exec). Unknown never matches a file owner, so such a
-   * save goes "in place" and keeps owner and group.
+   * True when a replace by the SSH user would change the file's owner or
+   * group (a new inode gets the user's uid and primary gid). An unknown
+   * uid/gid (-1: probe failed, e.g. an SFTP-only account without exec)
+   * counts as different, so such a save goes "in place".
    */
-  private static async remoteUid(s: RemoteSession): Promise<number> {
+  private static async ownedByOther(s: RemoteSession, st: RemoteStat): Promise<boolean> {
     try {
-      return (await s.probe()).uid;
+      const probe = await s.probe();
+      return st.uid !== probe.uid || st.gid !== probe.gid;
     } catch {
-      return -1;
+      return true;
     }
   }
 
@@ -196,18 +198,35 @@ export class SshFsBackend implements WorkspaceFsBackend {
     }
   }
 
+  /** Path for messages: workspace-relative inside the root, absolute otherwise (symlink targets). */
+  private shown(abs: string): string {
+    return abs === this.root || abs.startsWith(`${this.root}/`) ? this.rel(abs) : abs;
+  }
+
   /**
    * Moves `tmp` onto `target`, replacing it: posix-rename where offered,
    * otherwise remove the target first (non-atomic, as the spec allows).
+   * Once the target is gone the temp file is the only copy: `state.keepTmp`
+   * tells the caller not to delete it, and a failing rename names it.
    */
-  private static async replace(s: RemoteSession, tmp: string, target: string): Promise<void> {
+  private async replace(
+    s: RemoteSession,
+    tmp: string,
+    target: string,
+    state: { keepTmp: boolean },
+  ): Promise<void> {
     if (await s.fs.posixRename(tmp, target)) return;
     try {
       await s.fs.unlink(target);
     } catch (err: unknown) {
       if (!isCode(err, 'not_found')) throw err;
     }
-    await s.fs.rename(tmp, target);
+    state.keepTmp = true;
+    try {
+      await s.fs.rename(tmp, target);
+    } catch (err: unknown) {
+      throw fail(500, `Ersetzen fehlgeschlagen; neuer Inhalt liegt in ${this.shown(tmp)} (${errorMessage(err)})`);
+    }
   }
 
   /** Creates missing directories between the root and `dir` (inclusive). */
@@ -352,9 +371,9 @@ export class SshFsBackend implements WorkspaceFsBackend {
       }
 
       const mode = current ? current.mode & 0o777 : NEW_FILE_MODE;
-      // Fallback "in place": another owner (a rename would make the file
-      // ours) — only for an existing file.
-      if (current && current.uid !== (await SshFsBackend.remoteUid(s))) {
+      // Fallback "in place": another owner or group (a rename would give the
+      // file our uid and primary gid) — only for an existing file.
+      if (current && (await SshFsBackend.ownedByOther(s, current))) {
         await s.fs.writeFile(writePath, data, mode);
         return writePath;
       }
@@ -362,6 +381,7 @@ export class SshFsBackend implements WorkspaceFsBackend {
       // Unless creating it was refused, a failed write may have left a partial temp file.
       let tmpMayExist = true;
       let done = false;
+      const keep = { keepTmp: false };
       try {
         try {
           await s.fs.writeFile(tmp, data, mode);
@@ -376,11 +396,11 @@ export class SshFsBackend implements WorkspaceFsBackend {
         }
         // The open mode is subject to the umask; chmod sets it exactly.
         await s.fs.chmod(tmp, mode);
-        await SshFsBackend.replace(s, tmp, writePath);
+        await this.replace(s, tmp, writePath, keep);
         done = true;
         return writePath;
       } finally {
-        if (!done && tmpMayExist) await SshFsBackend.unlinkQuiet(s, tmp);
+        if (!done && tmpMayExist && !keep.keepTmp) await SshFsBackend.unlinkQuiet(s, tmp);
       }
     }));
     this.audit('write', written, { bytes: data.length });
@@ -476,6 +496,7 @@ export class SshFsBackend implements WorkspaceFsBackend {
       const mode = existing?.isFile ? existing.mode & 0o777 : NEW_FILE_MODE;
       const tmp = SshFsBackend.tempPath(target);
       let done = false;
+      const keep = { keepTmp: false };
       let bytes = 0;
       const out = s.fs.createWriteStream(tmp, mode);
       try {
@@ -494,12 +515,12 @@ export class SshFsBackend implements WorkspaceFsBackend {
           throw fail(400, `incomplete transfer: received ${bytes} of ${opts.size} bytes`);
         }
         await s.fs.chmod(tmp, mode);
-        if (opts.overwrite) await SshFsBackend.replace(s, tmp, target);
+        if (opts.overwrite) await this.replace(s, tmp, target, keep);
         else await s.fs.rename(tmp, target);
         done = true;
         return bytes;
       } finally {
-        if (!done) {
+        if (!done && !keep.keepTmp) {
           await waitClosed(out);
           await SshFsBackend.unlinkQuiet(s, tmp);
         }
@@ -535,8 +556,10 @@ function waitClosed(w: Writable): Promise<void> {
 /**
  * Download stream over an SFTP read: passes at most `size` bytes (a growing
  * log is sent as it was at the start, matching Content-Length), errors with
- * `RemoteError('timeout')` when no byte flowed for `idleMs`, has no absolute
- * limit, and destroys the SFTP read when it is destroyed itself (client abort).
+ * `RemoteError('timeout')` when the server sent no byte for `idleMs` while
+ * the consumer was ready for data (a slow or paused consumer is not idle:
+ * the timer is stopped while waiting for 'drain'), has no absolute limit,
+ * and destroys the SFTP read when it is destroyed itself (client abort).
  */
 function boundedDownload(src: Readable, size: number, idleMs: number, rel: string): Readable {
   const out = new PassThrough();
@@ -571,9 +594,17 @@ function boundedDownload(src: Readable, size: number, idleMs: number, rel: strin
       return;
     }
     sent += chunk.length;
-    if (!out.write(chunk)) src.pause();
+    if (!out.write(chunk)) {
+      // Backpressure: waiting for the consumer, not for the server.
+      stop();
+      src.pause();
+    }
   });
-  out.on('drain', () => { if (!finished) src.resume(); });
+  out.on('drain', () => {
+    if (finished) return;
+    arm();
+    src.resume();
+  });
   src.on('end', end);
   src.on('error', (err: Error) => {
     stop();

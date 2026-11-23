@@ -13,6 +13,7 @@ export interface RemoteStat {
   size: number;
   mode: number;
   uid: number;
+  gid: number;
   isFile: boolean;
   isDirectory: boolean;
   isSymlink: boolean;
@@ -50,7 +51,7 @@ export interface RemoteExecResult {
 
 export interface RemoteExecOpts { timeoutMs?: number; maxOutputBytes?: number }
 
-export interface RemoteProbe { rg: boolean; git: boolean; uid: number }
+export interface RemoteProbe { rg: boolean; git: boolean; uid: number; gid: number }
 
 export interface RemoteSession {
   fs: RemoteFs;
@@ -103,16 +104,20 @@ export type RemoteDriverFactory<C = unknown> = (
   ctx: RemoteDriverContext,
 ) => Promise<RemoteSessionDriver>;
 
-/** One exec: which of rg/git exist, and the remote uid. Parsed by `parseProbeOutput`. */
+/** One exec: which of rg/git exist, and the remote uid/gid. Parsed by `parseProbeOutput`. */
 export const PROBE_COMMAND =
   'command -v rg >/dev/null 2>&1 && echo rg=1 || echo rg=0; '
   + 'command -v git >/dev/null 2>&1 && echo git=1 || echo git=0; '
-  + 'echo "uid=$(id -u 2>/dev/null)"';
+  + 'echo "uid=$(id -u 2>/dev/null)"; '
+  + 'echo "gid=$(id -g 2>/dev/null)"';
 
 /** Tolerates shell noise (motd, CRLF); unknown values fall back to false / -1. */
 export function parseProbeOutput(stdout: string): RemoteProbe {
   const flag = (name: string): boolean => new RegExp(`^${name}=1\\s*$`, 'm').test(stdout);
-  const uidMatch = /^uid=(\d+)\s*$/m.exec(stdout);
-  const uid = uidMatch ? Number(uidMatch[1]) : -1;
-  return { rg: flag('rg'), git: flag('git'), uid: Number.isSafeInteger(uid) ? uid : -1 };
+  const id = (name: string): number => {
+    const m = new RegExp(`^${name}=(\\d+)\\s*$`, 'm').exec(stdout);
+    const v = m ? Number(m[1]) : -1;
+    return Number.isSafeInteger(v) ? v : -1;
+  };
+  return { rg: flag('rg'), git: flag('git'), uid: id('uid'), gid: id('gid') };
 }

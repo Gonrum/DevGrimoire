@@ -46,6 +46,7 @@ function toStat(s: Stats): RemoteStat {
     size: s.size,
     mode: s.mode,
     uid: s.uid,
+    gid: s.gid,
     isFile: s.isFile(),
     isDirectory: s.isDirectory(),
     isSymlink: s.isSymbolicLink(),

@@ -32,7 +32,8 @@ const { WorkspaceFsBackends } = loadCompiled('workspaces/fs/workspace-fs-backend
 const { WorkspaceFsController } = loadCompiled('workspaces/workspace-fs.controller.js');
 const { RequestContext } = loadCompiled('common/request-context.js');
 const { SshAuditSchema } = loadCompiled('ssh/schemas/ssh-audit.schema.js');
-const { createLocalRemoteSession } = require('./lib/local-remote-session.cjs');
+const { createLocalRemoteSession, unquote } = require('./lib/local-remote-session.cjs');
+const { shq } = loadCompiled('common/shell-quote.js');
 const mongoose = nm('mongoose');
 const { HttpException } = nm('@nestjs/common');
 
@@ -87,6 +88,16 @@ const collect = (stream) => new Promise((resolve, reject) => {
   stream.on('data', (c) => chunks.push(c));
   stream.on('end', () => resolve(Buffer.concat(chunks)));
   stream.on('error', reject);
+});
+
+// A check that hangs on a promise with no timer left would otherwise end the
+// process with exit code 0 and no summary.
+let finishedRun = false;
+process.on('exit', (code) => {
+  if (!finishedRun && code === 0) {
+    console.error('FAIL check run ended early (a pending promise never settled)');
+    process.exitCode = 1;
+  }
 });
 
 (async () => {
@@ -285,6 +296,43 @@ const collect = (stream) => new Promise((resolve, reject) => {
     assert.equal(fs.readFileSync(t.f('.env'), 'utf8'), 'A=7\n');
   });
 
+  await check('write fallback: same uid, other group -> written in place (group kept, same inode)', async () => {
+    const t = setup();
+    fs.writeFileSync(t.f('.env'), 'A=1\n');
+    t.fake.switches.probeGid = fs.statSync(t.f('.env')).gid + 1;
+    const ino = fs.statSync(t.f('.env')).ino;
+    await t.backend.writeText('.env', 'A=8\n', { baseHash: sha('A=1\n'), force: false }, LIMITS);
+    assert.equal(fs.statSync(t.f('.env')).ino, ino);
+    assert.equal(fs.readFileSync(t.f('.env'), 'utf8'), 'A=8\n');
+    assert.deepEqual(t.tmpLeft(), []);
+  });
+
+  await check('replace fallback: target removed, rename fails -> temp file kept and named in the error', async () => {
+    const t = setup();
+    fs.writeFileSync(t.f('.env'), 'A=1\n');
+    t.fake.switches.noPosixRename = true;
+    t.fake.switches.failRename = true;
+    const e = await rejectsStatus(() => t.backend.writeText('.env', 'A=NEW\n', { baseHash: sha('A=1\n'), force: false }, LIMITS), 500, /Ersetzen fehlgeschlagen; neuer Inhalt liegt in \.\.env\.dg-tmp-[0-9a-f]{8}/);
+    const left = t.tmpLeft();
+    assert.equal(left.length, 1, 'temp file is the only copy and must stay');
+    assert.equal(fs.readFileSync(t.f(left[0]), 'utf8'), 'A=NEW\n');
+    assert.ok(bodyOf(e).message.includes(left[0]));
+    // Same for an upload with overwrite.
+    fs.writeFileSync(t.f('u.bin'), 'old');
+    await rejectsStatus(() => t.backend.upload('.', 'u.bin', Readable.from([Buffer.from('fresh')]), { overwrite: true }), 500, /neuer Inhalt liegt in \.u\.bin\.dg-tmp-/);
+    const upLeft = t.tmpLeft().filter((n) => n.startsWith('.u.bin.'));
+    assert.equal(upLeft.length, 1);
+    assert.equal(fs.readFileSync(t.f(upLeft[0]), 'utf8'), 'fresh');
+  });
+
+  await check('replace: a failing rename BEFORE the target is removed still cleans the temp file', async () => {
+    const t = setup();
+    t.fake.switches.noPosixRename = true;
+    t.fake.switches.failRename = true;
+    await rejection(() => t.backend.upload('.', 'n.bin', Readable.from([Buffer.from('x')]), { overwrite: false }));
+    assert.deepEqual(t.tmpLeft(), []);
+  });
+
   await check('write: posixRename unsupported -> replace still works', async () => {
     const t = setup();
     fs.writeFileSync(t.f('.env'), 'A=1\n');
@@ -469,6 +517,24 @@ const collect = (stream) => new Promise((resolve, reject) => {
     assert.equal(got.length, 1000);
   });
 
+  await check('download: a consumer pausing longer than the idle limit is not idle; full file arrives', async () => {
+    const t = setup({ downloadIdleMs: 40 });
+    const data = crypto.randomBytes(400 * 1024);
+    fs.writeFileSync(t.f('slow.log'), data);
+    const { stream } = await t.backend.readStream('slow.log', LIMITS);
+    const chunks = [];
+    let errored = null;
+    stream.on('error', (e) => { errored = e; });
+    await new Promise((resolve) => stream.once('data', (c) => { chunks.push(c); resolve(); }));
+    stream.pause();
+    await sleep(200);
+    assert.equal(errored, null, 'backpressure must not trip the idle timer');
+    const restP = collect(stream);
+    stream.resume();
+    const rest = await restP;
+    assert.ok(Buffer.concat([...chunks, rest]).equals(data));
+  });
+
   await check('download: no bytes for the idle limit -> stream errors with timeout, source destroyed', async () => {
     const t = setup({ downloadIdleMs: 40 });
     fs.writeFileSync(t.f('stall'), 'x'.repeat(10));
@@ -477,6 +543,25 @@ const collect = (stream) => new Promise((resolve, reject) => {
     const err = await new Promise((resolve) => { stream.on('error', resolve); stream.resume(); });
     assert.equal(err.code, 'timeout');
     assert.equal(t.fake.calls.readStreams.at(-1).destroyed, true);
+  });
+
+  // ---- the fake itself --------------------------------------------------------
+  await check('fake exec: unknown command and rm outside the temp dir both throw, nothing runs', async () => {
+    const t = setup();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'dg-sshfs-outside-'));
+    fs.writeFileSync(path.join(outside, 'keep'), 'k');
+    try {
+      await assert.rejects(() => t.fake.session.exec('echo hi'), /command not allowed/);
+      await assert.rejects(() => t.fake.session.exec(`rm -rf -- ${shq(outside)}`), /outside the temp dir/);
+      await assert.rejects(() => t.fake.session.exec(`rm -rf -- ${shq(t.root + '/../../x')}`), /outside the temp dir/);
+      await assert.rejects(() => t.fake.session.exec(`rm -rf -- ${shq(t.f('a'))} ${shq(outside)}`), /command not allowed/);
+      await assert.rejects(() => t.fake.session.exec(`rm -rf -- ${shq(t.f('a'))}; rm -rf ${shq(outside)}`), /command not allowed/);
+      assert.ok(fs.existsSync(path.join(outside, 'keep')));
+      assert.equal(unquote(shq(`it's a "dir"`)), `it's a "dir"`);
+      assert.equal(t.fake.calls.execs.length, 0);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   // ---- audit ------------------------------------------------------------------
@@ -637,6 +722,7 @@ const collect = (stream) => new Promise((resolve, reject) => {
   });
 
   for (const dir of tmpRoots) fs.rmSync(dir, { recursive: true, force: true });
+  finishedRun = true;
   console.log(`\n${total - failures}/${total} checks passed`);
   process.exit(failures ? 1 : 0);
 })();

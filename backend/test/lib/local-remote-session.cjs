@@ -6,12 +6,16 @@
  *
  * Every path argument must lie inside `base` (lexically and after resolving
  * links); anything else throws, so a bug in the code under test cannot touch
- * the rest of the machine.
+ * the rest of the machine. `exec` only runs commands matching one of the
+ * shapes in EXEC_SHAPES, with every path in them guarded the same way; any
+ * other command throws.
  *
  * Switches (mutable on the returned `switches` object):
  *   probeUid           uid reported by probe() (default: own uid)
+ *   probeGid           gid reported by probe() (default: own gid)
  *   noPosixRename      posixRename() answers false (extension missing)
  *   failPosixRename    posixRename() rejects with code `failure`
+ *   failRename         rename() rejects with code `failure`
  *   denyCreateIn       Set of directories: creating a NEW file there -> `denied`
  *   deny               Set of paths: stat/lstat/readdir/readFile -> `denied`
  *   stallRead          createReadStream() returns a stream that never emits
@@ -22,10 +26,18 @@ const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { PassThrough, Writable } = require('node:stream');
 
+/** Inverse of shq(): one single-quoted shell word -> its value. */
+function unquote(word) {
+  if (!/^'(?:[^']|'\\'')*'$/.test(word)) throw new Error(`fake: not a single-quoted word: ${word}`);
+  return word.slice(1, -1).replace(/'\\''/g, "'");
+}
+
 function createLocalRemoteSession(base, RemoteError) {
   const realBase = fs.realpathSync(base);
   const switches = {
     probeUid: typeof process.getuid === 'function' ? process.getuid() : 0,
+    probeGid: typeof process.getgid === 'function' ? process.getgid() : 0,
+    failRename: false,
     noPosixRename: false,
     failPosixRename: false,
     denyCreateIn: new Set(),
@@ -54,7 +66,7 @@ function createLocalRemoteSession(base, RemoteError) {
     try { return await fn(...args); } catch (err) { throw map(err, ctx); }
   };
   const toStat = (s) => ({
-    size: s.size, mode: s.mode, uid: s.uid,
+    size: s.size, mode: s.mode, uid: s.uid, gid: s.gid,
     isFile: s.isFile(), isDirectory: s.isDirectory(), isSymlink: s.isSymbolicLink(),
   });
   const denied = (p) => {
@@ -146,6 +158,7 @@ function createLocalRemoteSession(base, RemoteError) {
     rename: wrap('rename', async (from, to) => {
       const f = guard(from); const t = guard(to);
       if (await exists(t)) throw new RemoteError('exists', `${to}: exists`);
+      if (switches.failRename) throw new RemoteError('failure', 'rename failed');
       await fsp.rename(f, t);
     }),
     posixRename: wrap('posixRename', async (from, to) => {
@@ -164,9 +177,32 @@ function createLocalRemoteSession(base, RemoteError) {
     chmod: wrap('chmod', async (p, mode) => { await fsp.chmod(guard(p), mode); }),
   };
 
+  /**
+   * Allowlist of command shapes. Each entry parses a command and returns the
+   * paths it touches (all guarded before anything runs), or null if the
+   * command does not have this shape. Task 7 adds its `cd -- '<root>' && …`
+   * shapes here the same way.
+   */
+  const EXEC_SHAPES = [
+    // remove(): rm -rf -- '<abs>'
+    (cmd) => {
+      const m = /^rm -rf -- ('(?:[^']|'\\'')*')$/.exec(cmd);
+      return m ? [unquote(m[1])] : null;
+    },
+  ];
+  function execPaths(command) {
+    for (const shape of EXEC_SHAPES) {
+      const paths = shape(command);
+      if (paths) return paths;
+    }
+    throw new Error(`fake: command not allowed: ${command}`);
+  }
+
   const session = {
     fs: rfs,
-    exec: (command, opts = {}) => {
+    exec: async (command, opts = {}) => {
+      // Throws (before running anything) for unknown shapes and outside paths.
+      for (const p of execPaths(command)) guard(p);
       calls.execs.push(command);
       return new Promise((resolve) => {
         execFile('sh', ['-c', command], { cwd: base, timeout: opts.timeoutMs ?? 20_000 }, (err, stdout, stderr) => {
@@ -175,9 +211,9 @@ function createLocalRemoteSession(base, RemoteError) {
         });
       });
     },
-    probe: async () => ({ rg: false, git: false, uid: switches.probeUid }),
+    probe: async () => ({ rg: false, git: false, uid: switches.probeUid, gid: switches.probeGid }),
   };
   return { session, switches, calls };
 }
 
-module.exports = { createLocalRemoteSession };
+module.exports = { createLocalRemoteSession, unquote };

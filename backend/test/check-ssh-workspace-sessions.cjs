@@ -99,7 +99,7 @@ function makeWorld() {
         driver.execs.push(command);
         if (w.execImpl[idx] && !command.includes('command -v rg')) return w.execImpl[idx](command, opts);
         if (command.includes('command -v rg')) {
-          return { code: 0, stdout: 'rg=1\ngit=0\nuid=1001\n', stderr: '', truncated: false };
+          return { code: 0, stdout: 'rg=1\ngit=0\nuid=1001\ngid=1002\n', stderr: '', truncated: false };
         }
         w.execActive += 1;
         w.execMax = Math.max(w.execMax, w.execActive);
@@ -337,16 +337,16 @@ function makeWorld() {
     const svc = w.svc();
     const a = await svc.withSession('ws1', 'c1', (s) => s.probe());
     const b = await svc.withSession('ws1', 'c1', (s) => s.probe());
-    assert.deepEqual(a, { rg: true, git: false, uid: 1001 });
+    assert.deepEqual(a, { rg: true, git: false, uid: 1001, gid: 1002 });
     assert.deepEqual(b, a);
     assert.equal(w.drivers[0].execs.filter((c) => c.includes('command -v rg')).length, 1);
     svc.onModuleDestroy();
   });
 
   await check('parseProbeOutput tolerates noise and missing values', () => {
-    assert.deepEqual(parseProbeOutput('motd line\r\nrg=0\r\ngit=1\r\nuid=0\r\n'), { rg: false, git: true, uid: 0 });
-    assert.deepEqual(parseProbeOutput(''), { rg: false, git: false, uid: -1 });
-    assert.deepEqual(parseProbeOutput('uid=abc\n'), { rg: false, git: false, uid: -1 });
+    assert.deepEqual(parseProbeOutput('motd line\r\nrg=0\r\ngit=1\r\nuid=0\r\ngid=50\r\n'), { rg: false, git: true, uid: 0, gid: 50 });
+    assert.deepEqual(parseProbeOutput(''), { rg: false, git: false, uid: -1, gid: -1 });
+    assert.deepEqual(parseProbeOutput('uid=abc\n'), { rg: false, git: false, uid: -1, gid: -1 });
   });
 
   // ---- R7: timeouts that scale, SFTP-open timeout, exec timeout keeps session --
@@ -467,7 +467,7 @@ function makeWorld() {
 
   const sftpErr = (code, msg = 'sftp error') => Object.assign(new Error(msg), { code });
   const fakeStats = (over = {}) => ({
-    size: 3, mode: 0o100644, uid: 7,
+    size: 3, mode: 0o100644, uid: 7, gid: 8,
     isFile: () => true, isDirectory: () => false, isSymbolicLink: () => false,
     ...over,
   });
@@ -508,7 +508,7 @@ function makeWorld() {
     const { client, sftp } = makeSsh2();
     sftp.existing.add('/a');
     const d = await createSsh2Driver(client, { onLost() {} });
-    assert.deepEqual(await d.fs.stat('/a'), { size: 3, mode: 0o100644, uid: 7, isFile: true, isDirectory: false, isSymlink: false });
+    assert.deepEqual(await d.fs.stat('/a'), { size: 3, mode: 0o100644, uid: 7, gid: 8, isFile: true, isDirectory: false, isSymlink: false });
     assert.equal((await rejection(() => d.fs.stat('/nope'))).code, 'not_found');
   });
 
