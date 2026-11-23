@@ -61,6 +61,14 @@ export class Workspace {
   @Prop({ type: String, enum: WORKSPACE_AGENT_MODES, default: 'confirm' })
   agentMode: WorkspaceAgentMode;
 
+  /**
+   * Container only: the IDE agent's ws_exec gets the workspace_exec env (git
+   * tokens, DG_*) only when true. Legacy documents without the field: false.
+   * SSH workspaces never get credentials.
+   */
+  @Prop({ type: Boolean, default: false })
+  agentCredentials: boolean;
+
   /** "Always allow" rules of the IDE agent; at most 100, see agent-allow.ts. */
   @Prop({
     type: [

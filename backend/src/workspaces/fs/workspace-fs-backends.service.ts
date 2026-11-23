@@ -50,7 +50,8 @@ export class WorkspaceFsBackends implements OnModuleInit {
    *
    * SSH: `connection` is what `SshWorkspaceAccess.resolve` returned in the
    * gate; without it the access check runs here. `opts.agent` marks the SSH
-   * audit rows as caused by the IDE agent.
+   * audit rows as caused by the IDE agent and, for a container, withholds the
+   * credential env from `exec` unless `ws.agentCredentials` is true.
    */
   async for(
     ws: WorkspaceDocument,
@@ -66,7 +67,15 @@ export class WorkspaceFsBackends implements OnModuleInit {
       await this.client.ensureDir(id);
       this.ensuredAt.set(id, Date.now());
     }
-    return new ContainerFsBackend(this.client, id, () => buildWorkspaceExecEnv(this.gitTokens, this.cliToken, ws));
+    // IDE agent: git tokens / DG_* only when the workspace opted in
+    // (`agentCredentials`, from the document loaded for this very call).
+    // Without them the sidecar's whitelisted base env holds no credentials.
+    const withCredentials = opts?.agent !== true || ws.agentCredentials === true;
+    return new ContainerFsBackend(
+      this.client,
+      id,
+      withCredentials ? () => buildWorkspaceExecEnv(this.gitTokens, this.cliToken, ws) : () => Promise.resolve(undefined),
+    );
   }
 
   private async forSsh(

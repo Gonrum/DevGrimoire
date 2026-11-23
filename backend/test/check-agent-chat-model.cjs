@@ -139,17 +139,22 @@ const USER = oid().toString();
       assert.equal(ws.agentAllow.length, 1);
     });
   }
-  await check('prefix: a single interpreter/wrapper word -> 400; two words or exact are fine', async () => {
+  await check('prefix: interpreter/wrapper first word -> 400 at any length; git only single; exact always fine', async () => {
     const ws = makeWorkspace();
     const svc = wsService([ws]);
     const id = String(ws._id);
     for (const word of ['bash', 'sh', 'env', 'xargs', 'find', 'node', 'python3', 'npx', 'sudo', 'git', 'eval', ' timeout ', '/usr/bin/env']) {
       await rejectsWith(() => svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: word }), 400);
     }
+    // Interpreters/wrappers at any word count; git only as a single word.
+    for (const value of ['bash -c', 'env FOO=1', 'find . -name', 'npx tsc', 'sudo apt update', '/usr/bin/env node']) {
+      await rejectsWith(() => svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value }), 400);
+    }
     await svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: 'git status' });
     await svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: 'npm' });
     await svc.addAgentAllow(id, { kind: 'command', match: 'exact', value: 'git' });
-    assert.equal(ws.agentAllow.length, 3);
+    await svc.addAgentAllow(id, { kind: 'command', match: 'exact', value: "bash -c 'x'" });
+    assert.equal(ws.agentAllow.length, 4);
   });
   await check('values are edge-trimmed of spaces/tabs only (NBSP stays)', async () => {
     const ws = makeWorkspace();
@@ -200,6 +205,12 @@ const USER = oid().toString();
     await svc.update(String(ws._id), { agentMode: 'direct' });
     assert.equal(ws.agentMode, 'direct');
   });
+  await check('update with agentCredentials true is stored', async () => {
+    const ws = makeWorkspace();
+    const svc = wsService([ws]);
+    await svc.update(String(ws._id), { agentCredentials: true });
+    assert.equal(ws.agentCredentials, true);
+  });
   await check('schema defaults: agentMode confirm, agentAllow []; chat ideAgent false', () => {
     assert.equal(WorkspaceSchema.path('agentMode').options.default, 'confirm');
     assert.equal(WorkspaceSchema.path('agentAllow').options.default.length, 0);
@@ -216,6 +227,9 @@ const USER = oid().toString();
     assert.equal(list[0].agentMode, 'confirm');
     assert.deepEqual(list[0].agentAllow, []);
     assert.equal(list[1].agentMode, 'direct');
+    assert.equal(list[0].agentCredentials, false, 'legacy -> false');
+    assert.equal(list[1].agentCredentials, false);
+    assert.equal((await ctrl.update(String(ws._id), { agentCredentials: true })).agentCredentials, true);
     const out = await ctrl.addAgentAllow(String(ws._id), { kind: 'files.write' });
     assert.equal(out.agentAllow.length, 1);
     await ctrl.removeAgentAllow(String(ws._id), String(out.agentAllow[0]._id));

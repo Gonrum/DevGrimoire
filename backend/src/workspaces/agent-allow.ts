@@ -42,21 +42,33 @@ export function trimCommandEdges(text: string): string {
 }
 
 /**
- * Interpreters and wrappers: as a one-word prefix they would allow any
- * command (`bash -c …`, `env rm …`, `git -c core.pager=… …`). Two-word
- * prefixes such as `git status` stay allowed.
+ * Interpreters and wrappers: a prefix starting with one of them allows
+ * arbitrary code at any length (`bash -c …`, `env rm …`, `find . -exec …`),
+ * so such commands can only be allowed exactly.
  */
-export const AGENT_PREFIX_FORBIDDEN_WORDS: ReadonlySet<string> = new Set([
+export const AGENT_PREFIX_INTERPRETERS: ReadonlySet<string> = new Set([
   'bash', 'sh', 'zsh', 'fish', 'dash', 'ksh', 'env', 'xargs', 'find', 'node', 'python', 'python3', 'perl',
-  'ruby', 'php', 'npx', 'sudo', 'su', 'ssh', 'git', 'eval', 'exec', 'nohup', 'timeout', 'watch',
+  'ruby', 'php', 'npx', 'sudo', 'su', 'ssh', 'eval', 'exec', 'nohup', 'timeout', 'watch',
 ]);
+/** Refused only as a one-word prefix (`git -c core.pager=…`); `git status` stays allowed. */
+const AGENT_PREFIX_SINGLE_WORD_ONLY: ReadonlySet<string> = new Set(['git']);
 
-/** True for a single-word prefix value that names an interpreter/wrapper (also as a path, `/usr/bin/env`). */
-export function isForbiddenSinglePrefix(value: string): boolean {
-  const v = trimCommandEdges(value);
-  if (!v || /[ \t]/.test(v)) return false;
-  const base = v.slice(v.lastIndexOf('/') + 1);
-  return AGENT_PREFIX_FORBIDDEN_WORDS.has(v) || AGENT_PREFIX_FORBIDDEN_WORDS.has(base);
+/** First word, also given as a path (`/usr/bin/env` -> `env`). */
+function commandWord(word: string): string {
+  return word.slice(word.lastIndexOf('/') + 1);
+}
+
+/**
+ * True when `value` must not be stored or matched as a `prefix` rule: its
+ * first word is an interpreter/wrapper (any word count), or it is the single
+ * word `git`.
+ */
+export function isForbiddenPrefix(value: string): boolean {
+  const words = trimCommandEdges(value).split(/[ \t]+/).filter(Boolean);
+  if (words.length === 0) return false;
+  const first = commandWord(words[0]);
+  if (AGENT_PREFIX_INTERPRETERS.has(first)) return true;
+  return words.length === 1 && AGENT_PREFIX_SINGLE_WORD_ONLY.has(first);
 }
 
 /** Validates and normalises an agent-allow request body. Throws 400. */
@@ -78,8 +90,11 @@ export function parseAgentAllowInput(raw: {
   if (match === 'prefix' && hasShellControl(value)) {
     throw new BadRequestException('a prefix rule must not contain shell control characters');
   }
-  if (match === 'prefix' && isForbiddenSinglePrefix(value)) {
-    throw new BadRequestException('a prefix rule must not be a single interpreter or wrapper word (use e.g. "git status")');
+  if (match === 'prefix' && isForbiddenPrefix(value)) {
+    throw new BadRequestException(
+      'a prefix rule must not start with an interpreter or wrapper (allow the exact command instead); '
+        + 'git needs a second word, e.g. "git status"',
+    );
   }
   return { kind, match, value };
 }

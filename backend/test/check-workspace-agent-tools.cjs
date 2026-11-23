@@ -143,6 +143,19 @@ async function pureChecks() {
     assert.equal(isAllowedByList('ws_exec', { command: 'git status --short' }, two), true);
   });
 
+  await check('legacy stored interpreter prefixes of any length never match', () => {
+    for (const [value, command] of [
+      ['bash -c', "bash -c 'x'"], ['env FOO=1', 'env FOO=1 rm x'], ['find .', 'find . -exec rm {} +'],
+      ['python3 -m', 'python3 -m http.server'], ['/usr/bin/env node', '/usr/bin/env node x.js'], ['sudo apt', 'sudo apt install x'],
+    ]) {
+      const p = [{ kind: 'command', match: 'prefix', value, ...at() }];
+      assert.equal(isAllowedByList('ws_exec', { command }, p), false, value);
+    }
+    // Exact entries for such commands stay valid.
+    const e = [{ kind: 'command', match: 'exact', value: "bash -c 'x'", ...at() }];
+    assert.equal(isAllowedByList('ws_exec', { command: "bash -c 'x'" }, e), true);
+  });
+
   await check('suggestions: exec -> exact + first word + first two words; control -> exact only', () => {
     assert.deepEqual(allowSuggestions('ws_exec', { command: 'npm run build' }), [
       { kind: 'command', match: 'exact', value: 'npm run build' },
@@ -157,6 +170,9 @@ async function pureChecks() {
     assert.deepEqual(allowSuggestions('ws_exec', { command: 'bash' }), [
       { kind: 'command', match: 'exact', value: 'bash' },
     ]);
+    for (const cmd of ["bash -c 'x'", 'env FOO=1 make', 'find . -name x', 'npx tsc --noEmit', 'sudo apt update']) {
+      assert.deepEqual(allowSuggestions('ws_exec', { command: cmd }), [{ kind: 'command', match: 'exact', value: cmd }], cmd);
+    }
     assert.deepEqual(allowSuggestions('ws_exec', { command: 'npm test (x)' }), [
       { kind: 'command', match: 'exact', value: 'npm test (x)' },
     ]);
@@ -642,7 +658,11 @@ async function toolChecks() {
     assert.deepEqual(await prev(env, w, 'ws_delete', { path: 'f.txt' }), { ok: true, preview: { kind: 'paths', path: 'f.txt' } });
     assert.deepEqual(await prev(env, w, 'ws_mkdir', { path: 'd' }), { ok: true, preview: { kind: 'paths', path: 'd' } });
     const c = await prev(env, w, 'ws_exec', { command: ' npm test ' });
-    assert.deepEqual(c, { ok: true, preview: { kind: 'command', command: 'npm test', timeoutSec: 60, cwd: `/workspaces/${w.id}` } });
+    assert.deepEqual(c, { ok: true, preview: { kind: 'command', command: 'npm test', timeoutSec: 60, cwd: `/workspaces/${w.id}`, credentials: false } });
+    w.ws.agentCredentials = true;
+    const cc = await prev(env, w, 'ws_exec', { command: 'npm test' });
+    assert.equal(cc.preview.credentials, true);
+    w.ws.agentCredentials = false;
     const c2 = await prev(env, w, 'ws_exec', { command: 'x', timeoutSec: 0 });
     assert.equal(c2.preview.timeoutSec, 1);
     const outside = await prev(env, w, 'ws_delete', { path: '../x' });
@@ -657,7 +677,9 @@ async function toolChecks() {
     const env = makeEnv({ limits: { editorMaxBytes: 8 } });
     const w = env.addWorkspace({ location: 'ssh' });
     const c = await prev(env, w, 'ws_exec', { command: 'ls', timeoutSec: 30 });
-    assert.deepEqual(c, { ok: true, preview: { kind: 'command', command: 'ls', timeoutSec: 30, cwd: `deploy@srv.example:${w.root}` } });
+    assert.deepEqual(c, { ok: true, preview: { kind: 'command', command: 'ls', timeoutSec: 30, cwd: `deploy@srv.example:${w.root}`, credentials: false } });
+    w.ws.agentCredentials = true;
+    assert.equal((await prev(env, w, 'ws_exec', { command: 'ls' })).preview.credentials, false, 'SSH never gets credentials');
     fs.writeFileSync(w.f('big.txt'), 'x'.repeat(9));
     const big = await prev(env, w, 'ws_write', { path: 'big.txt', content: 'y' });
     assert.equal(big.ok, false);
@@ -665,6 +687,73 @@ async function toolChecks() {
     const bigAfter = await prev(env, w, 'ws_write', { path: 'n.txt', content: 'y'.repeat(9) });
     assert.equal(bigAfter.ok, false);
     assert.match(bigAfter.error, /too large/);
+  });
+}
+
+// ---- credentials of container agent commands ----------------------------------------
+
+async function credentialChecks() {
+  const { ContainerFsBackend } = loadCompiled('workspaces/fs/container-fs-backend.js');
+  const { UpdateWorkspaceDto } = loadCompiled('workspaces/dto/update-workspace.dto.js');
+  const { WorkspaceSchema } = loadCompiled('workspaces/schemas/workspace.schema.js');
+  const { validate } = nm('class-validator');
+  const { plainToInstance } = nm('class-transformer');
+
+  function containerEnv() {
+    const sent = [];
+    const client = {
+      ensureDir: async () => undefined,
+      execStream: async (id, command, timeoutMs, env, signal, onEvent) => {
+        sent.push({ id, command, env });
+        onEvent({ type: 'stdout', line: 'ok' });
+        onEvent({ type: 'done', exitCode: 0, timedOut: false });
+      },
+    };
+    const git = { resolveForWorkspace: async () => ({ GH_TOKEN: 'ghp_secret', GITLAB_TOKEN: 'glpat_secret' }) };
+    const cli = { buildEnvFor: () => ({ DG_API_URL: 'http://backend', DG_TOKEN: 'dg_secret' }) };
+    const backends = new WorkspaceFsBackends(client, {}, {}, {}, {}, git, cli);
+    const doc = { _id: oid(), projectId: oid(), status: 'active', location: 'container' };
+    const workspaces = { findById: async () => doc, touchThrottled() {} };
+    const tools = new WorkspaceAgentTools(workspaces, backends, {}, { get: async () => LIMITS }, { create: async () => undefined });
+    return { sent, doc, tools, backends };
+  }
+  const exec = (e) => asUser(() => e.tools.execute('ws_exec', { command: 'env' }, { workspaceId: String(e.doc._id) }));
+
+  await check('container ws_exec: no git/DG env without agentCredentials (legacy doc and false)', async () => {
+    const e = containerEnv();
+    const r1 = await exec(e);
+    assert.equal(r1.success, true, r1.error);
+    e.doc.agentCredentials = false;
+    await exec(e);
+    for (const call of e.sent) assert.equal(call.env, undefined, JSON.stringify(call.env));
+  });
+
+  await check('container ws_exec: git/DG env with agentCredentials true, read per call', async () => {
+    const e = containerEnv();
+    e.doc.agentCredentials = true;
+    await exec(e);
+    assert.deepEqual(e.sent[0].env, { GH_TOKEN: 'ghp_secret', GITLAB_TOKEN: 'glpat_secret', DG_API_URL: 'http://backend', DG_TOKEN: 'dg_secret' });
+    e.doc.agentCredentials = false;
+    await exec(e);
+    assert.equal(e.sent[1].env, undefined, 'switching off takes effect on the next call');
+  });
+
+  await check('non-agent backends keep the workspace_exec env (unchanged)', async () => {
+    const e = containerEnv();
+    const backend = await asUser(() => e.backends.for(e.doc));
+    assert.ok(backend instanceof ContainerFsBackend);
+    await backend.exec('env', { timeoutMs: 1000, maxOutputBytes: 1024 });
+    assert.equal(e.sent[0].env.GH_TOKEN, 'ghp_secret');
+  });
+
+  await check('agentCredentials: PUT DTO boolean only; schema default false', async () => {
+    for (const v of [true, false]) assert.equal((await validate(plainToInstance(UpdateWorkspaceDto, { agentCredentials: v }))).length, 0);
+    for (const v of ['true', 1, 'yes']) {
+      assert.ok((await validate(plainToInstance(UpdateWorkspaceDto, { agentCredentials: v }))).length >= 1, String(v));
+    }
+    assert.equal((await validate(plainToInstance(UpdateWorkspaceDto, {}))).length, 0);
+    const Model = mongoose.models.WsCredCheck || mongoose.model('WsCredCheck', WorkspaceSchema);
+    assert.equal(new Model({}).agentCredentials, false);
   });
 }
 
@@ -736,6 +825,7 @@ async function chatChecks() {
     await pureChecks();
     await headTailChecks();
     await toolChecks();
+    await credentialChecks();
     await chatChecks();
   } finally {
     for (const r of tmpRoots) fs.rmSync(r, { recursive: true, force: true });

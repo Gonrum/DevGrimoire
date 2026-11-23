@@ -10,7 +10,7 @@ import { logWorkspaceIde, openWorkspaceFs, type WorkspaceFsGateResult } from '..
 import {
   AGENT_ALLOW_VALUE_MAX,
   hasShellControl,
-  isForbiddenSinglePrefix,
+  isForbiddenPrefix,
   trimCommandEdges,
   type AgentAllowEntry,
   type AgentAllowFileKind,
@@ -60,8 +60,8 @@ function startsWithWord(command: string, value: string): boolean {
  * tools never ask (true); any non-ws_* name is never covered (false).
  * Commands: `exact` compares after trimming edge spaces/tabs; `prefix` needs a
  * space/tab boundary after the prefix and no shell control characters anywhere
- * in the command (nor in the stored prefix); a stored single-word interpreter
- * prefix (`bash`, `env` …) never matches.
+ * in the command (nor in the stored prefix); a stored prefix starting with an
+ * interpreter/wrapper (`bash -c`, `env` …, or the single word `git`) never matches.
  */
 export function isAllowedByList(
   name: string,
@@ -81,7 +81,7 @@ export function isAllowedByList(
     if (e.kind !== 'command') return false;
     const value = trimCommandEdges(e.value);
     if (e.match === 'exact') return value === command;
-    return !controlled && !hasShellControl(value) && !isForbiddenSinglePrefix(value)
+    return !controlled && !hasShellControl(value) && !isForbiddenPrefix(value)
       && startsWithWord(command, value);
   });
 }
@@ -89,8 +89,8 @@ export function isAllowedByList(
 /**
  * Suggestions for the confirm card. ws_exec: [exact, prefix(first word),
  * prefix(first two words)], the prefix variants only without control
- * characters, no one-word prefix that is an interpreter/wrapper (`bash`,
- * `git` …); entries over the stored length limit are left out. File tools:
+ * characters, none starting with an interpreter/wrapper (`bash -c` …) and
+ * not the single word `git`; entries over the stored length limit are left out. File tools:
  * their files.* kind. Anything else: none. `AgentAllowInput` is the entry
  * union without `createdAt` (a plain `Omit` over the union collapses it).
  */
@@ -103,8 +103,10 @@ export function allowSuggestions(name: string, args: Record<string, unknown>): A
   const out: AgentAllowInput[] = [{ kind: 'command', match: 'exact', value: command }];
   if (hasShellControl(command)) return out;
   const words = command.split(/[ \t]+/);
-  if (!isForbiddenSinglePrefix(words[0])) out.push({ kind: 'command', match: 'prefix', value: words[0] });
-  if (words.length >= 2) out.push({ kind: 'command', match: 'prefix', value: `${words[0]} ${words[1]}` });
+  const candidates = [words[0], ...(words.length >= 2 ? [`${words[0]} ${words[1]}`] : [])];
+  for (const value of candidates) {
+    if (!isForbiddenPrefix(value)) out.push({ kind: 'command', match: 'prefix', value });
+  }
   return out;
 }
 
@@ -128,6 +130,8 @@ export interface WsPreview {
   command?: string;
   timeoutSec?: number;
   cwd?: string;
+  /** The command gets git tokens / DG_* (container with `agentCredentials`; never SSH). */
+  credentials?: boolean;
 }
 
 export type WsToolResult = ToolExecutionResult & { changedPaths?: string[] };
@@ -769,7 +773,8 @@ export class WorkspaceAgentTools {
         const cwd = conn
           ? `${conn.username}@${conn.host}:${gate.ws.remotePath ?? ''}`
           : `/workspaces/${gate.ws._id.toString()}`;
-        return { kind: 'command', command: input.command, timeoutSec: input.timeoutSec, cwd };
+        const credentials = !conn && gate.ws.agentCredentials === true;
+        return { kind: 'command', command: input.command, timeoutSec: input.timeoutSec, cwd, credentials };
       }
       default:
         throw new ToolInputError(`${input.tool} is read-only and needs no preview`);

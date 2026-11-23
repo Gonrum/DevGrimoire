@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { WORKSPACE_AGENT_MODES, WORKSPACE_NAME_PATTERN, WorkspaceAgentMode } from '../schemas/workspace.schema';
 
 export class UpdateWorkspaceDto {
@@ -34,4 +34,9 @@ export class UpdateWorkspaceDto {
   @IsOptional()
   @IsIn(WORKSPACE_AGENT_MODES)
   agentMode?: WorkspaceAgentMode;
+
+  /** Container only: pass git tokens / DG_* to the IDE agent's commands. */
+  @IsOptional()
+  @IsBoolean()
+  agentCredentials?: boolean;
 }

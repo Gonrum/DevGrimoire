@@ -48,6 +48,7 @@ export class WorkspacesController {
       const base = {
         ...doc.toJSON(),
         agentMode: doc.agentMode ?? 'confirm',
+        agentCredentials: doc.agentCredentials === true,
         agentAllow: doc.agentAllow ?? [],
       };
       if (doc.location !== 'ssh') return base;
