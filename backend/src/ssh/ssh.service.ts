@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { SSH_CONNECTION_CHANGED, SshConnectionChangedEvent } from './ssh-events';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
@@ -95,6 +96,12 @@ export class SshService {
       entityId: doc._id.toString(),
       summary,
     });
+  }
+
+  /** Tells session holders to drop sessions of this connection (see ssh-events). */
+  private emitSessionInvalidation(id: string): void {
+    const event: SshConnectionChangedEvent = { connectionId: id };
+    this.eventEmitter.emit(SSH_CONNECTION_CHANGED, event);
   }
 
   // -------------------------------------------------------------------------
@@ -604,6 +611,7 @@ export class SshService {
         }
 
         this.emitConnectionChange(updated, 'updated', `SSH-Verbindung "${updated.label}" rotiert`);
+        this.emitSessionInvalidation(updated._id.toString());
         return updated;
       } catch (err: unknown) {
         // Rollback new secrets we just created so we don't leak orphans.
@@ -696,6 +704,7 @@ export class SshService {
         );
       }
       this.emitConnectionChange(updated, 'updated', `SSH-Verbindung "${updated.label}" rotiert`);
+      this.emitSessionInvalidation(updated._id.toString());
       return updated;
     }
 
@@ -717,6 +726,7 @@ export class SshService {
       );
     }
     this.emitConnectionChange(updated, 'updated', `SSH-Verbindung "${updated.label}" aktualisiert`);
+    this.emitSessionInvalidation(updated._id.toString());
     return updated;
   }
 
@@ -737,6 +747,7 @@ export class SshService {
 
     await this.sshModel.deleteOne({ _id: doc._id }).exec();
     this.emitConnectionChange(doc, 'deleted', `SSH-Verbindung "${doc.label}" gelöscht`);
+    this.emitSessionInvalidation(doc._id.toString());
   }
 
   async setKnownHostFingerprint(id: string, fingerprint: string): Promise<SshConnectionDocument> {
@@ -746,6 +757,7 @@ export class SshService {
     // Status change (TOFU accept) → re-emit so the UI flips from
     // 🔒 fingerprint_pending to ✅ ok without a manual refresh.
     this.emitConnectionChange(doc, 'updated', `SSH-Fingerprint für "${doc.label}" akzeptiert`);
+    this.emitSessionInvalidation(doc._id.toString());
     return doc;
   }
 

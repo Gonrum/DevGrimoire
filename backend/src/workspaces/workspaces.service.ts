@@ -1,5 +1,6 @@
 import {
   BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -15,6 +16,7 @@ import { assertSafeCascadeId } from '../common/cascade-guard';
 import { SshService } from '../ssh/ssh.service';
 import { SshConnectionDocument } from '../ssh/schemas/ssh-connection.schema';
 import { normalizeRemotePath } from './remote-path';
+import { SshWorkspaceSessions } from './fs/ssh-workspace-sessions.service';
 
 const TOUCH_THROTTLE_MS = 60_000;
 
@@ -27,6 +29,8 @@ export class WorkspacesService {
     @InjectModel(Workspace.name) private readonly workspaceModel: Model<WorkspaceDocument>,
     private readonly eventEmitter: EventEmitter2,
     private readonly ssh: SshService,
+    // Optional so checks can build the service without the session holder.
+    @Optional() private readonly sessions?: SshWorkspaceSessions,
   ) {}
 
   /**
@@ -185,6 +189,7 @@ export class WorkspacesService {
       .findByIdAndUpdate(id, { status: 'archived', lastActivityAt: new Date() }, { new: true })
       .exec();
     if (!ws) throw new NotFoundException(`Workspace ${id} not found`);
+    this.sessions?.drop(ws._id.toString());
     this.emit(ws, 'updated', `Workspace "${ws.name}" archiviert`);
     return ws;
   }
@@ -193,6 +198,7 @@ export class WorkspacesService {
     await this.findById(id);
     const ws = await this.workspaceModel.findByIdAndDelete(id).exec();
     if (!ws) throw new NotFoundException(`Workspace ${id} not found`);
+    this.sessions?.drop(ws._id.toString());
     this.emit(ws, 'deleted', `Workspace "${ws.name}" gelöscht`);
   }
 

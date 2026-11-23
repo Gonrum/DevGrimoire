@@ -16,6 +16,8 @@ import { WorkspaceCliReqController } from './workspace-cli-req.controller';
 import { WorkspaceClient } from './workspace-client.service';
 import { WorkspaceFsBackends } from './fs/workspace-fs-backends.service';
 import { SshWorkspaceAccess } from './ssh-workspace-access.service';
+import { SshWorkspaceSessions } from './fs/ssh-workspace-sessions.service';
+import { SshConnectionChangeListener } from './ssh-connection-change.listener';
 import { WorkspaceTtlScheduler } from './workspace-ttl.scheduler';
 import { WorkspaceGitTokensService } from './workspace-git-tokens.service';
 import { WorkspaceCliTokenService } from './workspace-cli-token.service';
@@ -79,6 +81,8 @@ import { JWT_ALGORITHM } from '../common/access-token';
     WorkspaceFsBackends,
     DownloadActorService,
     SshWorkspaceAccess,
+    SshWorkspaceSessions,
+    SshConnectionChangeListener,
     WorkspaceTtlScheduler,
     WorkspaceGitTokensService,
     WorkspaceCliTokenService,
@@ -89,6 +93,7 @@ import { JWT_ALGORITHM } from '../common/access-token';
     WorkspaceClient,
     WorkspaceLimitsService,
     SshWorkspaceAccess,
+    SshWorkspaceSessions,
     WorkspaceTtlScheduler,
     WorkspaceGitTokensService,
     WorkspaceCliTokenService,
