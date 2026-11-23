@@ -21,9 +21,10 @@ interface UsableEntry {
  * Per-request access resolution for SSH workspaces: the connection must still
  * exist, the actor must be allowed to use it, and it must still be usable for
  * the workspace's project (own or inherited customer connection). The
- * project-level result is cached for at most 60 s, per project and actor (the
- * connection list is filtered by what the actor may see); the actor check
- * itself runs on every call.
+ * project-level result is cached for at most 60 s, per project, user and API
+ * key (the connection list is filtered by the actor's scope, and two keys of
+ * one user can have different scopes); the actor check itself runs on every
+ * call.
  */
 @Injectable()
 export class SshWorkspaceAccess {
@@ -54,7 +55,7 @@ export class SshWorkspaceAccess {
     const actor = RequestContext.getUser();
     if (actor) assertConnectionAccess(connection, actor);
 
-    const ids = await this.usableIds(projectId, actor?.userId);
+    const ids = await this.usableIds(projectId, actor?.userId, actor?.apiKeyId);
     if (!ids.has(String(connection._id))) {
       throw new ConflictException(
         'SSH-Verbindung ist für das Projekt dieser Werkstatt nicht mehr nutzbar '
@@ -65,17 +66,20 @@ export class SshWorkspaceAccess {
   }
 
   /**
-   * Drops the cached project results (a connection or link changed). The id
-   * is accepted for call-site clarity, but a new link can make a connection
-   * usable for projects whose entry did not contain it, so everything goes.
+   * Drops all cached project results (a connection or link changed). Not per
+   * connection: a new link can make a connection usable for projects whose
+   * entry did not contain it.
    */
-  invalidate(connectionId?: string): void {
-    void connectionId;
+  invalidate(): void {
     this.usable.clear();
   }
 
-  private async usableIds(projectId: string, userId: string | undefined): Promise<Set<string>> {
-    const key = `${projectId}:${userId ?? ''}`;
+  private async usableIds(
+    projectId: string,
+    userId: string | undefined,
+    apiKeyId: string | undefined,
+  ): Promise<Set<string>> {
+    const key = `${projectId}:${userId ?? ''}:${apiKeyId ?? ''}`;
     const hit = this.usable.get(key);
     if (hit && Date.now() - hit.at < USABLE_TTL_MS) return hit.ids;
     const list = await this.ssh.findByProjectId(projectId);

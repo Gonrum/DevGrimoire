@@ -64,7 +64,11 @@ export class WorkspaceFsBackends implements OnModuleInit {
     const connectionId = String(connection._id);
     // Captured in the request: audit rows name the user who caused them.
     const userId = RequestContext.getUser()?.userId;
-    const audit = (action: SshAuditAction, remotePath: string, extra?: { bytes?: number }): void => {
+    const audit = (
+      action: SshAuditAction,
+      remotePath: string,
+      extra?: { bytes?: number; errorMsg?: string },
+    ): void => {
       void this.connector.writeAudit({
         connectionId: connection._id,
         action,
@@ -73,6 +77,7 @@ export class WorkspaceFsBackends implements OnModuleInit {
         workspaceId,
         remotePath,
         ...(extra?.bytes !== undefined ? { bytes: extra.bytes } : {}),
+        ...(extra?.errorMsg !== undefined ? { errorMsg: extra.errorMsg } : {}),
       });
     };
     const run: SshFsRun = (fn, opts) =>

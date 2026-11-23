@@ -72,6 +72,7 @@ function seed(t) {
   fs.writeFileSync(t.f('src/x.ts'), 'const needle = 1;\n');
   fs.writeFileSync(t.f('src/y.js'), 'needle();\n');
   fs.writeFileSync(t.f('c:d.txt'), 'x needle\n');
+  fs.writeFileSync(t.f('.env'), 'TOKEN=needle\n');
   fs.writeFileSync(t.f('bin.dat'), Buffer.from([0, 1, 2, 110, 101, 101, 100, 108, 101]));
 }
 
@@ -123,7 +124,7 @@ function seed(t) {
     const t = setup(); seed(t);
     const res = await t.backend.search(q('needle'));
     assert.equal(res.engine, 'grep');
-    assert.deepEqual(hits(res), ["a b/it's.txt:2", 'c:d.txt:1', 'src/x.ts:1', 'src/y.js:1']);
+    assert.deepEqual(hits(res), ['.env:1', "a b/it's.txt:2", 'c:d.txt:1', 'src/x.ts:1', 'src/y.js:1']);
     const m = res.matches.find((x) => x.path === "a b/it's.txt");
     assert.equal(m.column, 5);
     assert.equal(res.truncated, false);
@@ -133,7 +134,7 @@ function seed(t) {
     const t = setup(); seed(t);
     assert.deepEqual(hits(await t.backend.search(q('Needle', { caseSensitive: true }))), ["a b/it's.txt:2"]);
     assert.deepEqual(hits(await t.backend.search(q('needle', { include: ['*.ts'] }))), ['src/x.ts:1']);
-    assert.deepEqual(hits(await t.backend.search(q('needle', { exclude: ['*.ts', '*.js', '*.txt'] }))), []);
+    assert.deepEqual(hits(await t.backend.search(q('needle', { exclude: ['*.ts', '*.js', '*.txt', '.env'] }))), []);
     assert.deepEqual(hits(await t.backend.search(q('ne+dle\\(\\)', { regex: true }))), ['src/y.js:1']);
   });
   await check('grep: no match -> empty; invalid regex -> 400 with grep message', async () => {
@@ -180,6 +181,40 @@ function seed(t) {
     assert.equal(res.truncated, true);
     for (const m of res.matches) assert.ok(m.path && m.line > 0 && /needle/i.test(m.text));
   });
+  await check('search command: bounded by `timeout -s TERM 18` when the server has it, bare otherwise', async () => {
+    const t = setup(); seed(t);
+    const cd = `cd -- '${t.root}' && `;
+    for (const rg of [false, true]) {
+      if (rg && !hasRg) continue;
+      t.fake.switches.probeRg = rg;
+      t.fake.switches.probeTimeout = true;
+      const withT = await t.backend.search(q('needle'));
+      assert.ok(withT.matches.length > 0);
+      const last = t.fake.calls.execs[t.fake.calls.execs.length - 1];
+      assert.ok(last.startsWith(`${cd}timeout -s TERM 18 ${rg ? 'rg ' : 'grep '}`), last);
+      t.fake.switches.probeTimeout = false;
+      const without = await t.backend.search(q('needle'));
+      assert.deepEqual(hits(without), hits(withT));
+      const bare = t.fake.calls.execs[t.fake.calls.execs.length - 1];
+      assert.ok(bare.startsWith(`${cd}${rg ? 'rg ' : 'grep '}`), bare);
+    }
+  });
+  await check('rg command on SSH: --hidden with .git excluded', async () => {
+    const t = setup(); seed(t);
+    t.fake.switches.probeRg = true;
+    t.fake.switches.probeTimeout = false;
+    // The fake only checks the shape; without rg installed the command may fail, the string is what counts.
+    try { await t.backend.search(q('needle')); } catch { /* rg missing locally */ }
+    const cmd = t.fake.calls.execs[t.fake.calls.execs.length - 1];
+    assert.ok(cmd.includes(" rg --json --max-count 50 --max-columns 300 --hidden --glob '!.git' "), cmd);
+  });
+  await check('exit 124 (server-side timeout) -> empty, truncated; without the wrapper 124 is a failure', async () => {
+    const t = setup(); seed(t);
+    t.fake.session.exec = async () => ({ code: 124, stdout: './a\0' + '1:needle\n', stderr: '', truncated: false });
+    assert.deepEqual(await t.backend.search(q('needle')), { matches: [], truncated: true, engine: 'grep' });
+    t.fake.switches.probeTimeout = false;
+    await rejectsStatus(() => t.backend.search(q('needle')), 500, /exit 124/);
+  });
   await check('2000 match cap -> truncated', async () => {
     const t = setup();
     fs.mkdirSync(t.f('many'));
@@ -201,15 +236,17 @@ function seed(t) {
       t.fake.switches.probeRg = true;
       const r = await t.backend.search(q('needle'));
       assert.equal(r.engine, 'rg');
-      // rg skips hidden dirs and binaries too; the dataset has none of the differences.
+      // rg on SSH searches hidden files (.env) and still skips .git and binaries, like grep.
       assert.deepEqual(hits(r), hits(g));
+      assert.ok(hits(r).includes('.env:1'), 'dotfile found by rg');
+      assert.ok(!hits(r).some((h) => h.startsWith('.git/')), '.git skipped by rg');
     });
     await check('rg: include/exclude/case, invalid regex -> 400', async () => {
       const t = setup(); seed(t);
       t.fake.switches.probeRg = true;
       assert.deepEqual(hits(await t.backend.search(q('needle', { include: ['*.ts'] }))), ['src/x.ts:1']);
       assert.deepEqual(hits(await t.backend.search(q('Needle', { caseSensitive: true }))), ["a b/it's.txt:2"]);
-      assert.deepEqual(hits(await t.backend.search(q('needle', { exclude: ['*.ts', '*.js', '*.txt'] }))), []);
+      assert.deepEqual(hits(await t.backend.search(q('needle', { exclude: ['*.ts', '*.js', '*.txt', '.env'] }))), []);
       await rejectsStatus(() => t.backend.search(q('(unclosed', { regex: true })), 400, /\S/);
     });
   }
@@ -246,6 +283,25 @@ function seed(t) {
     const sub = new SshFsBackend(t.f('proj'), (fn) => fn(t.fake.session), () => undefined, { uploadMaxBytes: 1 });
     const res = await sub.status();
     assert.deepEqual(res.changed.map((c) => c.path), ['new.txt']);
+  });
+  await check('status: git runs with --no-optional-locks (no .git/index refresh), quotepath off', async () => {
+    const t = setup();
+    git(t.root, 'init', '-q', '-b', 'main');
+    fs.writeFileSync(t.f('a.txt'), '1\n');
+    git(t.root, 'add', '.');
+    git(t.root, 'commit', '-qm', 'init');
+    // A newer mtime with unchanged content: a plain `git status` would rewrite the index.
+    const later = new Date(Date.now() + 5000);
+    fs.utimesSync(t.f('a.txt'), later, later);
+    const before = fs.statSync(t.f('.git/index')).mtimeMs;
+    const res = await t.backend.status();
+    assert.deepEqual(res, { branch: 'main', changed: [] });
+    assert.equal(fs.statSync(t.f('.git/index')).mtimeMs, before, '.git/index untouched');
+    const cd = `cd -- '${t.root}' && `;
+    assert.deepEqual(t.fake.calls.execs, [
+      `${cd}git --no-optional-locks rev-parse --show-prefix`,
+      `${cd}git --no-optional-locks -c core.quotepath=false status --porcelain=v1 --branch`,
+    ]);
   });
   await check('status: no repo -> branch null; git missing -> branch null; retryable', async () => {
     const t = setup();

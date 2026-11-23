@@ -22,6 +22,6 @@ export class SshConnectionChangeListener {
       ? payload.connectionId
       : undefined;
     if (id) this.sessions.dropByConnection(id);
-    this.access.invalidate(id);
+    this.access.invalidate();
   }
 }

@@ -2952,6 +2952,7 @@
         "auth_failed": "Authentifizierung fehlgeschlagen (4004)",
         "timeout": "Timeout oder Netzwerkfehler (4008)",
         "idle": "Terminal wegen Inaktivität geschlossen",
+        "early_input_overflow": "Zu viel Eingabe, bevor die Shell bereit war; nichts davon wurde gesendet (1009)",
         "internal": "Interner Server-Fehler (1011)",
         "normal": "Verbindung beendet"
       }

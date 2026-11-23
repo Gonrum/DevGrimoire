@@ -195,7 +195,8 @@ export async function createSsh2Driver(
 
   return {
     fs,
-    exec: (command, opts) => runExec(client, command, opts.timeoutMs, opts.maxOutputBytes),
+    exec: (command, opts) =>
+      runExec(client, command, opts.timeoutMs, opts.maxOutputBytes, opts.terminateOnTimeout),
     close: () => safe(() => sftp.end()),
   };
 }
@@ -287,6 +288,7 @@ function runExec(
   command: string,
   timeoutMs: number,
   maxOutputBytes: number,
+  terminateOnTimeout: boolean,
 ): Promise<RemoteExecResult> {
   return new Promise<RemoteExecResult>((resolve, reject) => {
     let settled = false;
@@ -298,6 +300,10 @@ function runExec(
     const closeChannel = (): void => safe(() => channel?.close());
     const timer = setTimeout(() => {
       finish(() => reject(new RemoteError('timeout', `exec timed out after ${timeoutMs} ms`)));
+      // Closing the channel alone leaves the remote command running. Ask the
+      // server to terminate it first; many sshd builds ignore the request,
+      // which is harmless.
+      if (terminateOnTimeout) safe(() => channel?.signal('TERM'));
       closeChannel();
     }, timeoutMs);
     function finish(fn: () => void): void {

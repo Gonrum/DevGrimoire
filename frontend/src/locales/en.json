@@ -2953,6 +2953,7 @@
         "auth_failed": "Authentication failed (4004)",
         "timeout": "Timeout or network error (4008)",
         "idle": "Terminal closed due to inactivity",
+        "early_input_overflow": "Too much input before the shell was ready; nothing was sent (1009)",
         "internal": "Internal server error (1011)",
         "normal": "Connection closed"
       }

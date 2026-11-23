@@ -21,6 +21,8 @@
  *   stallRead          createReadStream() returns a stream that never emits
  *   probeRg            rg reported by probe() (default: false -> grep path)
  *   probeGit           git reported by probe() (default: true)
+ *   probeTimeout       `timeout` reported by probe() (default: true; search
+ *                      commands then carry a `timeout -s TERM <n>` prefix)
  *   execTimeout        exec() rejects with RemoteError('timeout')
  */
 const fs = require('node:fs');
@@ -48,9 +50,10 @@ function createLocalRemoteSession(base, RemoteError) {
     stallRead: false,
     probeRg: false,
     probeGit: true,
+    probeTimeout: true,
     execTimeout: false,
   };
-  const calls = { readStreams: [], writeStreams: 0, execs: [], writeFiles: [] };
+  const calls = { readStreams: [], writeStreams: 0, execs: [], execOpts: [], writeFiles: [] };
 
   const inside = (root, p) => p === root || p.startsWith(`${root}/`);
   function guard(p) {
@@ -196,9 +199,9 @@ function createLocalRemoteSession(base, RemoteError) {
   // flag) makes the shape fail, so the fake throws instead of running it.
   const BARE_OK = new Set([
     'rg', '--json', '--max-count', '50', '--max-columns', '300', '--ignore-case',
-    '--fixed-strings', '--glob', '--', '.',
+    '--fixed-strings', '--glob', '--hidden', '--', '.',
     'grep', '-rnIZ', '-F', '-E', '-i', '-m', '--exclude-dir=.git', '-e',
-    'git', 'rev-parse', '--show-prefix', '-c', 'core.quotepath=false', 'status',
+    'git', '--no-optional-locks', 'rev-parse', '--show-prefix', '-c', 'core.quotepath=false', 'status',
     '--porcelain=v1', '--branch',
   ]);
   const QUOTED = /^(?:--include=|--exclude=)?'(?:[^']|'\\'')*'$/;
@@ -230,7 +233,14 @@ function createLocalRemoteSession(base, RemoteError) {
   function toolShape(cmd) {
     const m = /^cd -- ('(?:[^']|'\\'')*') && (.*)$/s.exec(cmd);
     if (!m) return null;
-    const ws = words(m[2]);
+    let ws = words(m[2]);
+    // Optional server-side bound: exactly `timeout -s TERM <seconds>`, then the tool.
+    if (ws[0] === 'timeout') {
+      if (ws[1] !== '-s' || ws[2] !== 'TERM' || !/^\d{1,3}$/.test(ws[3] || '')) {
+        throw new Error(`fake: malformed timeout prefix: ${cmd}`);
+      }
+      ws = ws.slice(4);
+    }
     if (!['rg', 'grep', 'git'].includes(ws[0])) return null;
     let prevOpt = null;
     for (const w of ws) {
@@ -266,6 +276,7 @@ function createLocalRemoteSession(base, RemoteError) {
       // Throws (before running anything) for unknown shapes and outside paths.
       for (const p of execPaths(command)) guard(p);
       calls.execs.push(command);
+      calls.execOpts.push(opts);
       if (switches.execTimeout) throw new RemoteError('timeout', 'exec timed out');
       return new Promise((resolve) => {
         execFile('sh', ['-c', command], { cwd: base, timeout: opts.timeoutMs ?? 20_000, maxBuffer: 256 * 1024 * 1024 }, (err, stdout, stderr) => {
@@ -280,7 +291,13 @@ function createLocalRemoteSession(base, RemoteError) {
         });
       });
     },
-    probe: async () => ({ rg: switches.probeRg, git: switches.probeGit, uid: switches.probeUid, gid: switches.probeGid }),
+    probe: async () => ({
+      rg: switches.probeRg,
+      git: switches.probeGit,
+      timeout: switches.probeTimeout,
+      uid: switches.probeUid,
+      gid: switches.probeGid,
+    }),
   };
   return { session, switches, calls };
 }

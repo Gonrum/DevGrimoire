@@ -355,6 +355,7 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
     const exec: RemoteSession['exec'] = async (command, opts = {}) => {
       const timeoutMs = opts.timeoutMs ?? this.opTimeoutMs;
       const maxOutputBytes = opts.maxOutputBytes ?? SSH_EXEC_MAX_OUTPUT_BYTES;
+      const terminateOnTimeout = opts.terminateOnTimeout !== false;
       const release = this.hold(state);
       try {
         await this.acquireExec(state);
@@ -363,7 +364,7 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
           // and keeps the session: a search returning partial results must not
           // kill parallel downloads.
           return await this.guarded(state, 'exec', timeoutMs + this.execGraceMs, () =>
-            driver.exec(command, { timeoutMs, maxOutputBytes }),
+            driver.exec(command, { timeoutMs, maxOutputBytes, terminateOnTimeout }),
           false);
         } finally {
           this.releaseExec(state);

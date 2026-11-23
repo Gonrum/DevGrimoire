@@ -75,8 +75,10 @@ export class IdeConflictError extends IdeApiError {
 function conflictReason(body: unknown, message: string): IdeConflictReason {
   if (!isRecord(body)) return 'inactive';
   if ('currentHash' in body) return 'conflict';
+  if (body.error === 'workspace_inactive') return 'inactive';
   if (typeof body.error === 'string' && /\bexists$/.test(body.error)) return 'exists';
-  // The gate's own message is "Workspace is <status>, not active"; any other 409 is remote.
+  // Fallback for older backends without the code: the gate's message is
+  // "Workspace is <status>, not active"; any other 409 is remote.
   return /^Workspace is .*not active$/.test(message) ? 'inactive' : 'remote';
 }
 

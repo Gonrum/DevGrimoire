@@ -33,6 +33,7 @@ import { RequestContext } from '../common/request-context';
 import { ScalarQueryPipe } from '../common/scalar-query.pipe';
 import { assertContentWrite } from '../common/scope-guard';
 import { SshWorkspaceAccess, isSshWorkspace } from './ssh-workspace-access.service';
+import { errorMessage } from '../common/narrow';
 
 const WORKSPACE_ID_PATTERN = /^[a-f0-9]{24}$/;
 const PATH_MAX = 4096;
@@ -95,7 +96,11 @@ export class WorkspaceFsController {
     if (!WORKSPACE_ID_PATTERN.test(id)) throw new NotFoundException(`Workspace ${id} not found`);
     const ws = await this.workspaces.findById(id);
     if (ws.status !== 'active') {
-      throw new ConflictException(`Workspace is ${ws.status}, not active`);
+      // `error` is the stable code the IDE classifies on; the text stays as before.
+      throw new ConflictException({
+        error: 'workspace_inactive',
+        message: `Workspace is ${ws.status}, not active`,
+      });
     }
     if (isSshWorkspace(ws)) {
       const connection = await this.sshAccess.resolve(ws);
@@ -110,11 +115,17 @@ export class WorkspaceFsController {
     return { editorMaxBytes, downloadMaxBytes };
   }
 
-  private audit(ws: WorkspaceDocument, id: string, message: string, metadata: Record<string, unknown>): void {
+  private audit(
+    ws: WorkspaceDocument,
+    id: string,
+    message: string,
+    metadata: Record<string, unknown>,
+    level: 'info' | 'warn' = 'info',
+  ): void {
     this.logs
       .create({
         projectId: ws.projectId.toString(),
-        level: 'info',
+        level,
         message,
         service: 'workspaces',
         area: 'ide',
@@ -267,7 +278,19 @@ export class WorkspaceFsController {
   @HttpCode(204)
   async remove(@Param('id') id: string, @Body() dto: FsPathDto): Promise<void> {
     const { ws, backend } = await this.gate(id);
-    await backend.remove(dto.path);
+    try {
+      await backend.remove(dto.path);
+    } catch (err: unknown) {
+      // A failed or timed-out recursive delete may have removed part of the
+      // tree (or still be running on an SSH server): it is logged as well.
+      const status = err instanceof HttpException ? err.getStatus() : 500;
+      this.audit(ws, id, `workspace_ide delete failed (${status}): ${dto.path}`.slice(0, 500), {
+        path: dto.path,
+        status,
+        error: errorMessage(err).slice(0, 500),
+      }, 'warn');
+      throw err;
+    }
     this.workspaces.touchThrottled(id);
     this.audit(ws, id, `workspace_ide delete: ${dto.path}`.slice(0, 500), { path: dto.path });
   }

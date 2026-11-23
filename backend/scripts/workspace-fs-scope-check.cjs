@@ -45,7 +45,7 @@ const { throwError, of } = require(path.resolve(__dirname, '..', 'node_modules',
 const { AxiosError } = require(path.resolve(__dirname, '..', 'node_modules', 'axios'));
 const mongoose = require(path.resolve(__dirname, '..', 'node_modules', 'mongoose'));
 
-const EXPECTED_CHECKS = 26;
+const EXPECTED_CHECKS = 27;
 
 let failures = 0, total = 0;
 async function check(label, fn) {
@@ -239,6 +239,14 @@ const matchLine = (p, line, text, start = 4) => ({
   await check('every route: workspace archived or cleaning -> 409, client untouched', async () => {
     await expectDenied('archived', WRITER, { status: 'archived' }, 409);
     await expectDenied('cleaning', WRITER, { status: 'cleaning' }, 409);
+    // The IDE classifies this 409 by the stable code, not by the text.
+    const { ctrl } = setup({ status: 'archived' });
+    await assert.rejects(
+      () => RequestContext.run(WRITER, undefined, () => ROUTES['GET tree'](ctrl)),
+      (e) => statusOf(e) === 409
+        && e.getResponse().error === 'workspace_inactive'
+        && e.getResponse().message === 'Workspace is archived, not active',
+    );
   });
 
   await check('actor with project:write passes the gate on every route', async () => {
@@ -345,6 +353,25 @@ const matchLine = (p, line, text, start = 4) => ({
     await new Promise((r) => setImmediate(r));
     assert.equal(logged.length, 2);
     assert.deepEqual([logged[0].service, logged[0].area, logged[0].tags[0]], ['workspaces', 'ide', 'workspace_ide']);
+  });
+
+  await check('POST delete: failure is logged (warn, status, error) and rethrown; success logged as info', async () => {
+    const failing = setup({ client: { remove: async () => { throw new HttpException({ error: 'x', message: 'rm timed out' }, 504); } } });
+    await assert.rejects(
+      () => RequestContext.run(WRITER, undefined, () => failing.ctrl.remove(WS_ID, { path: 'big' })),
+      (e) => statusOf(e) === 504,
+    );
+    await new Promise((r) => setImmediate(r));
+    assert.equal(failing.logged.length, 1);
+    assert.equal(failing.logged[0].level, 'warn');
+    assert.equal(failing.logged[0].tags[0], 'workspace_ide');
+    assert.match(failing.logged[0].message, /^workspace_ide delete failed \(504\): big$/);
+    assert.deepEqual([failing.logged[0].metadata.status, failing.logged[0].metadata.error], [504, 'rm timed out']);
+    const ok = setup();
+    await RequestContext.run(WRITER, undefined, () => ok.ctrl.remove(WS_ID, { path: 'a' }));
+    await new Promise((r) => setImmediate(r));
+    assert.equal(ok.logged.length, 1);
+    assert.equal(ok.logged[0].level, 'info');
   });
 
   await check('POST upload: target exists -> 409; fileName a/b, .., empty -> 400', async () => {

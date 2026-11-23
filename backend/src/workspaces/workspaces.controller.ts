@@ -93,13 +93,13 @@ export class WorkspacesController {
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateWorkspaceDto) {
-    return this.workspacesService.update(id, dto);
+  async update(@Param('id') id: string, @Body() dto: UpdateWorkspaceDto) {
+    return (await this.withSsh([await this.workspacesService.update(id, dto)]))[0];
   }
 
   @Post(':id/archive')
-  archive(@Param('id') id: string) {
-    return this.workspacesService.archive(id);
+  async archive(@Param('id') id: string) {
+    return (await this.withSsh([await this.workspacesService.archive(id)]))[0];
   }
 
   @Delete(':id')

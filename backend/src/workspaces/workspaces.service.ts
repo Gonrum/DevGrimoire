@@ -165,7 +165,14 @@ export class WorkspacesService {
 
   async update(id: string, dto: UpdateWorkspaceDto): Promise<WorkspaceDocument> {
     // Laden und prüfen VOR findByIdAndUpdate — sonst wäre erst geschrieben.
-    await this.findById(id);
+    const current = await this.findById(id);
+    // Same rule as at create: an SSH workspace has no repository fields.
+    if (
+      current.location === 'ssh'
+      && (dto.repoUrl !== undefined || dto.branch !== undefined || dto.gitRepoId !== undefined)
+    ) {
+      throw new BadRequestException('repoUrl, branch and gitRepoId are not allowed for SSH workspaces');
+    }
     try {
       const ws = await this.workspaceModel
         .findByIdAndUpdate(id, { ...dto, lastActivityAt: new Date() }, { new: true })

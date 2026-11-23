@@ -14,7 +14,14 @@ export const TERMINAL_IDLE_CLOSE_CODE = 4010;
 export const TERMINAL_IDLE_CLOSE_REASON = 'idle_timeout';
 
 /** Stdin typed before the channel exists is buffered up to this many bytes. */
-const EARLY_STDIN_MAX_BYTES = 64 * 1024;
+export const EARLY_STDIN_MAX_BYTES = 64 * 1024;
+/**
+ * Close code and reason when more stdin arrived before the shell was ready
+ * than fits the buffer. 1009 = "message too big". The whole early input is
+ * discarded: running a paste with a hole in it would be worse than nothing.
+ */
+export const EARLY_INPUT_OVERFLOW_CLOSE_CODE = 1009;
+export const EARLY_INPUT_OVERFLOW_REASON = 'early_input_overflow';
 
 /**
  * `ws` delivers messages as `RawData` (`Buffer | ArrayBuffer | Buffer[]`). A
@@ -169,16 +176,26 @@ export async function bridgeSshTerminal(opts: BridgeSshTerminalOpts): Promise<vo
   // size feeds the channel once it opens.
   let ptySize = { ...opts.initial };
   // Stdin typed before the channel exists (e.g. the IDE's "open in terminal"
-  // `cd`, sent right on WS-open). Bounded; overflow is dropped.
+  // `cd`, sent right on WS-open). Bounded: on overflow everything buffered
+  // and everything after it is discarded and the terminal is closed, so no
+  // part of it ever reaches the shell.
   const early: Buffer[] = [];
   let earlyBytes = 0;
+  let earlyOverflow = false;
   const writeStdin = (data: string | Buffer) => {
+    if (closed || earlyOverflow) return;
     if (channel) {
       try { channel.write(data); } catch { /* noop */ }
       return;
     }
     const buf = typeof data === 'string' ? Buffer.from(data, 'utf8') : data;
-    if (earlyBytes + buf.length > EARLY_STDIN_MAX_BYTES) return;
+    if (earlyBytes + buf.length > EARLY_STDIN_MAX_BYTES) {
+      earlyOverflow = true;
+      early.length = 0;
+      earlyBytes = 0;
+      closeAll(EARLY_INPUT_OVERFLOW_CLOSE_CODE, EARLY_INPUT_OVERFLOW_REASON);
+      return;
+    }
     early.push(buf);
     earlyBytes += buf.length;
   };

@@ -25,6 +25,15 @@ const STDERR_MAX_CHARS = 1000;
 const NEW_FILE_MODE = 0o644;
 const SEARCH_LIMIT = 2000;
 const SEARCH_TIMEOUT_MS = 20_000;
+/**
+ * Server-side bound for rg/grep (`timeout -s TERM`), below the exec timeout so
+ * the search ends on the server before the channel gives up on it.
+ */
+const SEARCH_REMOTE_TIMEOUT_S = 18;
+/** Exit code of coreutils `timeout` when it had to stop the command. */
+const TIMEOUT_EXIT_CODE = 124;
+/** A recursive delete of a big tree may take a while; it is never interrupted. */
+const DELETE_TIMEOUT_MS = 120_000;
 const STATUS_TIMEOUT_MS = 30_000;
 /** Room for 2000 matches with 300-char texts in rg's JSON framing, plus slack. */
 const SEARCH_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -34,7 +43,11 @@ export type SshFsRun = <T>(
   fn: (s: RemoteSession) => Promise<T>,
   opts?: { retryable?: boolean },
 ) => Promise<T>;
-export type SshFsAudit = (action: SshAuditAction, path: string, extra?: { bytes?: number }) => void;
+export type SshFsAudit = (
+  action: SshAuditAction,
+  path: string,
+  extra?: { bytes?: number; errorMsg?: string },
+) => void;
 export interface SshFsBackendOpts {
   /** Upload cap of the connection (`SshSessionService.resolveUploadLimit`). */
   uploadMaxBytes: number;
@@ -232,6 +245,26 @@ export class SshFsBackend implements WorkspaceFsBackend {
       await s.fs.rename(tmp, target);
     } catch (err: unknown) {
       throw fail(500, `Ersetzen fehlgeschlagen; neuer Inhalt liegt in ${this.shown(tmp)} (${errorMessage(err)})`);
+    }
+  }
+
+  /**
+   * Overwrites `target`'s content with `tmp`'s, keeping the target's inode
+   * (owner, group, mode). Once the target is being written the temp file is
+   * the only complete copy: on failure it is kept and named in the error.
+   */
+  private async copyInto(
+    s: RemoteSession,
+    tmp: string,
+    target: string,
+    state: { keepTmp: boolean },
+  ): Promise<void> {
+    state.keepTmp = true;
+    try {
+      // The mode only applies to a newly created file; the target exists.
+      await pipeline(s.fs.createReadStream(tmp), s.fs.createWriteStream(target, NEW_FILE_MODE));
+    } catch (err: unknown) {
+      throw fail(500, `Überschreiben fehlgeschlagen; neuer Inhalt liegt in ${this.shown(tmp)} (${errorMessage(err)})`);
     }
   }
 
@@ -452,21 +485,46 @@ export class SshFsBackend implements WorkspaceFsBackend {
   async remove(path: string): Promise<void> {
     const target = this.abs(path);
     this.notRoot(target);
-    await this.guard(path, 'single', () => this.run(async (s) => {
-      // lstat: a symlink is removed as a link, never followed.
-      const st = await SshFsBackend.lstatOrNull(s, target);
-      if (!st) throw fail(404, 'not found');
-      if (!st.isDirectory) {
-        await s.fs.unlink(target);
-        return;
-      }
-      // `target` is absolute (starts with "/"), and `--` ends option parsing.
-      const res = await s.exec(`rm -rf -- ${shq(target)}`);
-      if (res.code !== 0) {
-        const stderr = res.stderr.trim().slice(0, STDERR_MAX_CHARS);
-        throw fail(500, `rm failed (exit ${res.code ?? 'unknown'}): ${stderr}`);
-      }
-    }));
+    // Once `rm -rf` was sent, the server may have changed even when the call
+    // fails: such a failure is audited too.
+    let rmSent = false;
+    try {
+      await this.guard(path, 'single', () => this.run(async (s) => {
+        // lstat: a symlink is removed as a link, never followed.
+        const st = await SshFsBackend.lstatOrNull(s, target);
+        if (!st) throw fail(404, 'not found');
+        if (!st.isDirectory) {
+          await s.fs.unlink(target);
+          return;
+        }
+        rmSent = true;
+        let res: RemoteExecResult;
+        try {
+          // `target` is absolute (starts with "/"), and `--` ends option parsing.
+          // A running rm is never terminated: half a tree is worse than none.
+          res = await s.exec(`rm -rf -- ${shq(target)}`, {
+            timeoutMs: DELETE_TIMEOUT_MS,
+            terminateOnTimeout: false,
+          });
+        } catch (err: unknown) {
+          if (isCode(err, 'timeout')) {
+            throw fail(
+              504,
+              `Zeitüberschreitung beim Löschen von ${path} nach ${DELETE_TIMEOUT_MS / 1000} s: `
+              + 'der Löschvorgang läuft auf dem Server möglicherweise noch weiter',
+            );
+          }
+          throw err;
+        }
+        if (res.code !== 0) {
+          const stderr = res.stderr.trim().slice(0, STDERR_MAX_CHARS);
+          throw fail(500, `rm failed (exit ${res.code ?? 'unknown'}): ${stderr}`);
+        }
+      }));
+    } catch (err: unknown) {
+      if (rmSent) this.audit('delete', target, { errorMsg: errorMessage(err).slice(0, 500) });
+      throw err;
+    }
     this.audit('delete', target);
   }
 
@@ -500,6 +558,11 @@ export class SshFsBackend implements WorkspaceFsBackend {
         throw fail(409, 'target exists');
       }
       const mode = existing?.isFile ? existing.mode & 0o777 : NEW_FILE_MODE;
+      // Same rule as save: a rename would give a file of another owner or
+      // group our uid/gid, so such a file keeps its inode. The body still goes
+      // to a temp file first; the target is only touched once all of it arrived.
+      const inPlace = opts.overwrite && existing?.isFile === true
+        && (await SshFsBackend.ownedByOther(s, existing));
       const tmp = SshFsBackend.tempPath(target);
       let done = false;
       const keep = { keepTmp: false };
@@ -519,6 +582,12 @@ export class SshFsBackend implements WorkspaceFsBackend {
         await pipeline(source, counter, out);
         if (opts.size !== undefined && bytes !== opts.size) {
           throw fail(400, `incomplete transfer: received ${bytes} of ${opts.size} bytes`);
+        }
+        if (inPlace) {
+          await this.copyInto(s, tmp, target, keep);
+          await SshFsBackend.unlinkQuiet(s, tmp);
+          done = true;
+          return bytes;
         }
         await s.fs.chmod(tmp, mode);
         if (opts.overwrite) await this.replace(s, tmp, target, keep);
@@ -554,9 +623,13 @@ export class SshFsBackend implements WorkspaceFsBackend {
     const cd = `cd -- ${shq(this.root)} && `;
     try {
       return await this.run(async (s) => {
-        const useRg = (await s.probe()).rg;
+        const probe = await s.probe();
+        const useRg = probe.rg;
         const engine: 'rg' | 'grep' = useRg ? 'rg' : 'grep';
-        const command = cd + (useRg ? rgCommand(q, include, exclude) : grepCommand(q, include, exclude));
+        const tool = useRg ? rgCommand(q, include, exclude) : grepCommand(q, include, exclude);
+        // With `timeout` on the server the search stops there as well, instead
+        // of running on after the exec channel was given up.
+        const command = cd + (probe.timeout ? `timeout -s TERM ${SEARCH_REMOTE_TIMEOUT_S} ${tool}` : tool);
         let res: RemoteExecResult;
         try {
           res = await s.exec(command, { timeoutMs: SEARCH_TIMEOUT_MS, maxOutputBytes: SEARCH_MAX_OUTPUT_BYTES });
@@ -565,6 +638,7 @@ export class SshFsBackend implements WorkspaceFsBackend {
           if (isCode(err, 'timeout')) return { matches: [], truncated: true, engine };
           throw err;
         }
+        if (probe.timeout && res.code === TIMEOUT_EXIT_CODE) return { matches: [], truncated: true, engine };
         let stdout = res.stdout;
         if (res.truncated) stdout = stdout.slice(0, stdout.lastIndexOf('\n') + 1);
         if (!res.truncated && res.code !== 0 && res.code !== 1) {
@@ -588,11 +662,12 @@ export class SshFsBackend implements WorkspaceFsBackend {
     try {
       return await this.run(async (s) => {
         if (!(await s.probe()).git) return none;
-        const prefixRes = await s.exec(`${cd}git rev-parse --show-prefix`, { timeoutMs: STATUS_TIMEOUT_MS });
+        const prefixRes = await s.exec(`${cd}git --no-optional-locks rev-parse --show-prefix`, { timeoutMs: STATUS_TIMEOUT_MS });
         if (prefixRes.code !== 0) return none;
         const prefix = prefixRes.stdout.replace(/\r?\n$/, '');
         const res = await s.exec(
-          `${cd}git -c core.quotepath=false status --porcelain=v1 --branch`,
+          // --no-optional-locks: a status must not refresh (write) .git/index.
+          `${cd}git --no-optional-locks -c core.quotepath=false status --porcelain=v1 --branch`,
           { timeoutMs: STATUS_TIMEOUT_MS },
         );
         if (res.code !== 0) throw fail(500, `git status failed: ${res.stderr.trim().slice(0, STDERR_MAX_CHARS)}`);
@@ -612,13 +687,17 @@ function normaliseGlobs(input: string[] | undefined): string[] {
     .slice(0, 20);
 }
 
-/** Switches 1:1 from the sidecar's `/search` with `json: true`. */
+/**
+ * Switches 1:1 from the sidecar's `/search` with `json: true`, plus hidden
+ * files (dotfiles such as `.env` are what one searches a server for) with
+ * `.git` still excluded, like grep's `--exclude-dir=.git`.
+ */
 function rgCommand(
   q: { query: string; regex: boolean; caseSensitive: boolean },
   include: string[],
   exclude: string[],
 ): string {
-  const args = ['rg', '--json', '--max-count', '50', '--max-columns', '300'];
+  const args = ['rg', '--json', '--max-count', '50', '--max-columns', '300', '--hidden', '--glob', shq('!.git')];
   if (!q.caseSensitive) args.push('--ignore-case');
   if (!q.regex) args.push('--fixed-strings');
   for (const g of include) args.push('--glob', shq(g));

@@ -9,7 +9,8 @@
  *   resize -> setWindow, stdin (also typed before the channel exists),
  *   stdout/stderr -> binary frames, exit -> JSON frame, WS close -> client.end
  *   + terminal_close audit, connect error -> mapped close code, idle close
- *   with the dedicated code, input and output resetting the idle timer.
+ *   with the dedicated code, input and output resetting the idle timer,
+ *   early-input overflow -> nothing reaches the shell, WS closed with 1009.
  * - sshConnectErrorToCloseCode keeps its mapping.
  *
  * Loads from dist/; run `npm run build` first.
@@ -27,7 +28,10 @@ try { mod = require(abs); } catch (err) {
   console.error(`Failed to load ${abs}. Run \`npm run build\` first.\n${err.message}`);
   process.exit(2);
 }
-const { bridgeSshTerminal, cwdShellCommand, sshConnectErrorToCloseCode, TERMINAL_IDLE_CLOSE_CODE } = mod;
+const {
+  bridgeSshTerminal, cwdShellCommand, sshConnectErrorToCloseCode, TERMINAL_IDLE_CLOSE_CODE,
+  EARLY_STDIN_MAX_BYTES, EARLY_INPUT_OVERFLOW_CLOSE_CODE, EARLY_INPUT_OVERFLOW_REASON,
+} = mod;
 
 let failures = 0, total = 0;
 async function check(label, fn) {
@@ -203,6 +207,41 @@ function setup({ start = { kind: 'shell' }, idleMs = 60_000, connect, initial = 
     assert.ok(client.ended >= 1);
     assert.equal(client.calls.length, 0);
     assert.deepEqual(audits, []);
+  });
+
+  await check('early input over the buffer: all of it discarded, later input too, WS closed 1009, no shell', async () => {
+    assert.equal(EARLY_INPUT_OVERFLOW_CLOSE_CODE, 1009);
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const client = new FakeClient();
+    const { ws, audits, p } = setup({ connect: async () => { await gate; return client; } });
+    ws.input('echo first\n');
+    ws.input('x'.repeat(EARLY_STDIN_MAX_BYTES), true); // overflows the buffer
+    ws.input('echo after\n');
+    assert.deepEqual(ws.closedWith, { code: 1009, reason: EARLY_INPUT_OVERFLOW_REASON });
+    release();
+    await p;
+    await tick(); await tick();
+    assert.equal(client.calls.length, 0, 'no shell/exec started');
+    assert.equal(client.channel, null, 'nothing written anywhere');
+    assert.ok(client.ended >= 1, 'fresh client released');
+    assert.deepEqual(audits, []);
+  });
+
+  await check('early input exactly at the buffer limit is delivered in full', async () => {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const client = new FakeClient();
+    const { ws, p } = setup({ connect: async () => { await gate; return client; } });
+    ws.input('a'.repeat(EARLY_STDIN_MAX_BYTES - 1), true);
+    ws.input('b', true);
+    release();
+    await p;
+    await tick(); await tick();
+    assert.equal(ws.closedWith, null);
+    assert.equal(client.channel.writes.join('').length, EARLY_STDIN_MAX_BYTES);
+    ws.close(1000, '');
+    await tick(); await tick();
   });
 
   await check('idle: closed with the dedicated code after the limit', async () => {

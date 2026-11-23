@@ -101,6 +101,12 @@ function buildWsUrl(
 const TERMINAL_IDLE_CLOSE_CODE = 4010;
 
 /**
+ * Close code (1009, "message too big") of the SSH bridge when more input
+ * arrived before the shell was ready than it buffers; none of it was sent.
+ */
+const EARLY_INPUT_OVERFLOW_CLOSE_CODE = 1009;
+
+/**
  * Map close codes from the backend SSH WS gateway (T-380) to a
  * user-readable reason. Falls back to the raw code/reason when unknown.
  *
@@ -111,6 +117,7 @@ const TERMINAL_IDLE_CLOSE_CODE = 4010;
  *   4004 auth_failed
  *   4008 timeout / network
  *   4010 closed after the idle limit (SSH bridge and workspace sidecar)
+ *   1009 too much input before the shell was ready (SSH bridge)
  *   1011 internal
  */
 function describeCloseCode(
@@ -131,6 +138,8 @@ function describeCloseCode(
       return t('ssh.terminal.closeReason.timeout');
     case TERMINAL_IDLE_CLOSE_CODE:
       return t('ssh.terminal.closeReason.idle');
+    case EARLY_INPUT_OVERFLOW_CLOSE_CODE:
+      return t('ssh.terminal.closeReason.early_input_overflow');
     case 1011:
       return t('ssh.terminal.closeReason.internal');
     case 1000:
@@ -367,7 +376,8 @@ export default function SshTerminal({
       if (stateRef.current === 'exited') return;
       const isError =
         ((ev.code >= 4000 && ev.code <= 4999) && ev.code !== TERMINAL_IDLE_CLOSE_CODE) ||
-        ev.code === 1011;
+        ev.code === 1011 ||
+        ev.code === EARLY_INPUT_OVERFLOW_CLOSE_CODE;
       notifyState(isError ? 'error' : 'disconnected');
     };
 

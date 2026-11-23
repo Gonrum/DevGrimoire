@@ -1,5 +1,4 @@
 import { ConflictException } from '@nestjs/common';
-import { errorMessage } from '../common/narrow';
 import { isSshWorkspace } from './ssh-workspace-access.service';
 import type { WorkspaceDocument } from './schemas/workspace.schema';
 
@@ -33,8 +32,7 @@ export async function assertContainerWorkspaceWithSlug(
   if (lookup && ws.sshConnectionId) {
     try {
       slug = (await lookup(String(ws.sshConnectionId)))?.slug || undefined;
-    } catch (err: unknown) {
-      void errorMessage(err);
+    } catch {
       slug = undefined;
     }
   }

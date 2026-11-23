@@ -234,6 +234,35 @@ const dto = (over = {}) => ({ projectId: PROJECT.toString(), name: 'w1', ...over
     await acc.resolve(wsRef);
     assert.equal(ssh.calls.byProject, 2);
   });
+  await check('access: cache keyed per API key too (same user, two keys -> two lookups)', async () => {
+    const ssh = makeSsh([makeConn()], [String(CONN)]);
+    const acc = new SshWorkspaceAccess(ssh);
+    const base = { userId: 'u1', username: 'u', role: 'admin' };
+    await RequestContext.run({ ...base, apiKeyId: 'k1' }, undefined, () => acc.resolve(wsRef));
+    await RequestContext.run({ ...base, apiKeyId: 'k1' }, undefined, () => acc.resolve(wsRef));
+    assert.equal(ssh.calls.byProject, 1);
+    await RequestContext.run({ ...base, apiKeyId: 'k2' }, undefined, () => acc.resolve(wsRef));
+    assert.equal(ssh.calls.byProject, 2);
+    await RequestContext.run(base, undefined, () => acc.resolve(wsRef));
+    assert.equal(ssh.calls.byProject, 3);
+  });
+  await check('update: repoUrl/branch/gitRepoId on an ssh workspace -> 400, nothing written; container ok', async () => {
+    let written = 0;
+    const sshDoc = { _id: oid(), projectId: PROJECT, name: 's', location: 'ssh' };
+    const contDoc = { _id: oid(), projectId: PROJECT, name: 'c', location: 'container' };
+    const model = {
+      findById: (id) => ({ exec: async () => (String(id) === String(sshDoc._id) ? sshDoc : contDoc) }),
+      findByIdAndUpdate: () => { written += 1; return { exec: async () => contDoc }; },
+    };
+    const svc = new WorkspacesService(model, events, makeSsh([], []));
+    for (const extra of [{ repoUrl: 'https://x/y.git' }, { branch: 'dev' }, { gitRepoId: 'abc' }]) {
+      await rejectsWith(() => svc.update(String(sshDoc._id), extra), 400);
+    }
+    assert.equal(written, 0);
+    await svc.update(String(sshDoc._id), { description: 'ok' });
+    await svc.update(String(contDoc._id), { repoUrl: 'https://x/y.git' });
+    assert.equal(written, 2);
+  });
   await check('access: actor without access -> 403 (checked on every call, cache or not)', async () => {
     const ssh = makeSsh([makeConn()], [String(CONN)]);
     const acc = new SshWorkspaceAccess(ssh);
@@ -246,7 +275,13 @@ const dto = (over = {}) => ({ projectId: PROJECT.toString(), name: 'w1', ...over
   const sshWs = () => ({ _id: oid(), projectId: PROJECT, name: 's', location: 'ssh', sshConnectionId: CONN, remotePath: '/srv/app', path: '/srv/app', toJSON() { return { _id: this._id, name: this.name, location: 'ssh', sshConnectionId: CONN, remotePath: '/srv/app' }; } });
   const contWs = () => ({ _id: oid(), projectId: PROJECT, name: 'c', location: 'container', toJSON() { return { _id: this._id, name: 'c', location: 'container' }; } });
   const makeCtrl = (list, ssh) => {
-    const svc = { findByProject: async () => list, findById: async () => list[0], create: async () => list[0] };
+    const svc = {
+      findByProject: async () => list,
+      findById: async () => list[0],
+      create: async () => list[0],
+      update: async () => list[0],
+      archive: async () => list[0],
+    };
     return new WorkspacesController(svc, {}, {}, {}, {}, {}, ssh);
   };
   await check('controller list: ssh enrichment, one batch lookup, no secrets, containers untouched', async () => {
@@ -265,6 +300,14 @@ const dto = (over = {}) => ({ projectId: PROJECT.toString(), name: 'w1', ...over
     const ctrl2 = makeCtrl([sshWs()], makeSsh([makeConn()], []));
     assert.equal((await ctrl2.findOne('x')).ssh.label, 'prod');
     assert.equal((await ctrl2.create({})).ssh.host, 'h.example');
+  });
+  await check('controller update/archive: ssh enrichment like get', async () => {
+    const ctrl = makeCtrl([sshWs()], makeSsh([makeConn()], []));
+    assert.equal((await ctrl.update('x', { description: 'd' })).ssh.label, 'prod');
+    assert.equal((await ctrl.archive('x')).ssh.host, 'h.example');
+    const plain = makeCtrl([contWs()], makeSsh([], []));
+    assert.ok(!('ssh' in (await plain.update('x', {}))));
+    assert.ok(!('ssh' in (await plain.archive('x'))));
   });
 
   // ---- IDE gate

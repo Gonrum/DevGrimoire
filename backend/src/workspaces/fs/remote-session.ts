@@ -49,9 +49,19 @@ export interface RemoteExecResult {
   truncated: boolean;
 }
 
-export interface RemoteExecOpts { timeoutMs?: number; maxOutputBytes?: number }
+export interface RemoteExecOpts {
+  timeoutMs?: number;
+  maxOutputBytes?: number;
+  /**
+   * On timeout, ask the server to send SIGTERM to the command before the
+   * channel is closed (default true). `false` for commands that must not be
+   * interrupted halfway, e.g. a recursive delete.
+   */
+  terminateOnTimeout?: boolean;
+}
 
-export interface RemoteProbe { rg: boolean; git: boolean; uid: number; gid: number }
+/** `timeout`: coreutils `timeout` exists, so a long command can be bounded on the server. */
+export interface RemoteProbe { rg: boolean; git: boolean; timeout: boolean; uid: number; gid: number }
 
 export interface RemoteSession {
   fs: RemoteFs;
@@ -104,10 +114,11 @@ export type RemoteDriverFactory<C = unknown> = (
   ctx: RemoteDriverContext,
 ) => Promise<RemoteSessionDriver>;
 
-/** One exec: which of rg/git exist, and the remote uid/gid. Parsed by `parseProbeOutput`. */
+/** One exec: which of rg/git/timeout exist, and the remote uid/gid. Parsed by `parseProbeOutput`. */
 export const PROBE_COMMAND =
   'command -v rg >/dev/null 2>&1 && echo rg=1 || echo rg=0; '
   + 'command -v git >/dev/null 2>&1 && echo git=1 || echo git=0; '
+  + 'command -v timeout >/dev/null 2>&1 && echo timeout=1 || echo timeout=0; '
   + 'echo "uid=$(id -u 2>/dev/null)"; '
   + 'echo "gid=$(id -g 2>/dev/null)"';
 
@@ -119,5 +130,5 @@ export function parseProbeOutput(stdout: string): RemoteProbe {
     const v = m ? Number(m[1]) : -1;
     return Number.isSafeInteger(v) ? v : -1;
   };
-  return { rg: flag('rg'), git: flag('git'), uid: id('uid'), gid: id('gid') };
+  return { rg: flag('rg'), git: flag('git'), timeout: flag('timeout'), uid: id('uid'), gid: id('gid') };
 }

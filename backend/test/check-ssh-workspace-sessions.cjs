@@ -10,6 +10,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
+const { execFileSync } = require('node:child_process');
 
 function loadCompiled(rel) {
   const abs = path.resolve(__dirname, '..', 'dist', rel);
@@ -21,7 +22,7 @@ function loadCompiled(rel) {
 }
 const nm = (m) => require(path.resolve(__dirname, '..', 'node_modules', m));
 
-const { RemoteError, parseProbeOutput } = loadCompiled('workspaces/fs/remote-session.js');
+const { RemoteError, parseProbeOutput, PROBE_COMMAND } = loadCompiled('workspaces/fs/remote-session.js');
 const { SshWorkspaceSessions } = loadCompiled('workspaces/fs/ssh-workspace-sessions.service.js');
 const { createSsh2Driver, toRemoteError } = loadCompiled('workspaces/fs/ssh2-remote-session.js');
 const { SshConnectionChangeListener } =loadCompiled('workspaces/ssh-connection-change.listener.js');
@@ -95,11 +96,13 @@ function makeWorld() {
         readdir: async () => [],
         readFile: (p, max) => (w.readFile[idx] ? w.readFile[idx](p, max) : Promise.resolve(Buffer.from('x'))),
       },
+      execOpts: [],
       exec: async (command, opts) => {
         driver.execs.push(command);
+        driver.execOpts.push(opts);
         if (w.execImpl[idx] && !command.includes('command -v rg')) return w.execImpl[idx](command, opts);
         if (command.includes('command -v rg')) {
-          return { code: 0, stdout: 'rg=1\ngit=0\nuid=1001\ngid=1002\n', stderr: '', truncated: false };
+          return { code: 0, stdout: 'rg=1\ngit=0\ntimeout=1\nuid=1001\ngid=1002\n', stderr: '', truncated: false };
         }
         w.execActive += 1;
         w.execMax = Math.max(w.execMax, w.execActive);
@@ -337,16 +340,39 @@ function makeWorld() {
     const svc = w.svc();
     const a = await svc.withSession('ws1', 'c1', (s) => s.probe());
     const b = await svc.withSession('ws1', 'c1', (s) => s.probe());
-    assert.deepEqual(a, { rg: true, git: false, uid: 1001, gid: 1002 });
+    assert.deepEqual(a, { rg: true, git: false, timeout: true, uid: 1001, gid: 1002 });
     assert.deepEqual(b, a);
     assert.equal(w.drivers[0].execs.filter((c) => c.includes('command -v rg')).length, 1);
     svc.onModuleDestroy();
   });
 
+  await check('PROBE_COMMAND: one exec; probes timeout too; runs in a real sh and parses', () => {
+    assert.ok(PROBE_COMMAND.includes('command -v timeout >/dev/null 2>&1 && echo timeout=1 || echo timeout=0'));
+    const out = execFileSync('sh', ['-c', PROBE_COMMAND], { encoding: 'utf8' });
+    const p = parseProbeOutput(out);
+    assert.equal(typeof p.timeout, 'boolean');
+    assert.equal(p.uid, process.getuid());
+    // Same PATH as above: `timeout` is coreutils and present locally.
+    assert.equal(p.timeout, true);
+    const noTimeout = execFileSync('/bin/sh', ['-c', PROBE_COMMAND], { encoding: 'utf8', env: { PATH: '/nonexistent' } });
+    assert.equal(parseProbeOutput(noTimeout).timeout, false);
+  });
+
+  await check('exec: terminateOnTimeout passed to the driver (default true, false kept)', async () => {
+    const w = makeWorld();
+    const svc = w.svc();
+    await svc.withSession('ws1', 'c1', (s) => s.exec('a'));
+    await svc.withSession('ws1', 'c1', (s) => s.exec('b', { terminateOnTimeout: false }));
+    const opts = w.drivers[0].execOpts;
+    assert.equal(opts[0].terminateOnTimeout, true);
+    assert.equal(opts[1].terminateOnTimeout, false);
+    svc.onModuleDestroy();
+  });
+
   await check('parseProbeOutput tolerates noise and missing values', () => {
-    assert.deepEqual(parseProbeOutput('motd line\r\nrg=0\r\ngit=1\r\nuid=0\r\ngid=50\r\n'), { rg: false, git: true, uid: 0, gid: 50 });
-    assert.deepEqual(parseProbeOutput(''), { rg: false, git: false, uid: -1, gid: -1 });
-    assert.deepEqual(parseProbeOutput('uid=abc\n'), { rg: false, git: false, uid: -1, gid: -1 });
+    assert.deepEqual(parseProbeOutput('motd line\r\nrg=0\r\ngit=1\r\ntimeout=1\r\nuid=0\r\ngid=50\r\n'), { rg: false, git: true, timeout: true, uid: 0, gid: 50 });
+    assert.deepEqual(parseProbeOutput(''), { rg: false, git: false, timeout: false, uid: -1, gid: -1 });
+    assert.deepEqual(parseProbeOutput('uid=abc\ntimeout=yes\n'), { rg: false, git: false, timeout: false, uid: -1, gid: -1 });
   });
 
   // ---- R7: timeouts that scale, SFTP-open timeout, exec timeout keeps session --
@@ -493,6 +519,8 @@ function makeWorld() {
     ch.stderr = new EventEmitter();
     ch.closed = 0;
     ch.close = () => { ch.closed += 1; setImmediate(() => ch.emit('close')); };
+    ch.signals = [];
+    ch.signal = (name) => { ch.signals.push({ name, closedBefore: ch.closed }); return true; };
     return ch;
   }
 
@@ -598,7 +626,29 @@ function makeWorld() {
     let chan;
     client.execImpl = (_cmd, cb) => { chan = fakeChannel(); cb(undefined, chan); };
     const d = await createSsh2Driver(client, { onLost() {} });
-    const err = await rejection(() => d.exec('x', { timeoutMs: 20, maxOutputBytes: 4 }));
+    const err = await rejection(() => d.exec('x', { timeoutMs: 20, maxOutputBytes: 4, terminateOnTimeout: true }));
+    assert.equal(err.code, 'timeout');
+    assert.ok(chan.closed >= 1);
+    assert.deepEqual(chan.signals, [{ name: 'TERM', closedBefore: 0 }], 'TERM sent before the channel closes');
+  });
+
+  await check('driver: exec timeout with terminateOnTimeout false -> no signal, channel closed', async () => {
+    const { client } = makeSsh2();
+    let chan;
+    client.execImpl = (_cmd, cb) => { chan = fakeChannel(); cb(undefined, chan); };
+    const d = await createSsh2Driver(client, { onLost() {} });
+    const err = await rejection(() => d.exec('rm', { timeoutMs: 20, maxOutputBytes: 4, terminateOnTimeout: false }));
+    assert.equal(err.code, 'timeout');
+    assert.ok(chan.closed >= 1);
+    assert.deepEqual(chan.signals, []);
+  });
+
+  await check('driver: a server without signal support (throws) still closes the channel', async () => {
+    const { client } = makeSsh2();
+    let chan;
+    client.execImpl = (_cmd, cb) => { chan = fakeChannel(); chan.signal = () => { throw new Error('nope'); }; cb(undefined, chan); };
+    const d = await createSsh2Driver(client, { onLost() {} });
+    const err = await rejection(() => d.exec('x', { timeoutMs: 20, maxOutputBytes: 4, terminateOnTimeout: true }));
     assert.equal(err.code, 'timeout');
     assert.ok(chan.closed >= 1);
   });
@@ -608,12 +658,12 @@ function makeWorld() {
   await check('listener: ssh.connection.changed -> dropByConnection + invalidate', async () => {
     const calls = [];
     const sessions = { dropByConnection: (id) => calls.push(['drop', id]) };
-    const access = { invalidate: (id) => calls.push(['inv', id]) };
+    const access = { invalidate: (...args) => calls.push(['inv', ...args]) };
     const l = new SshConnectionChangeListener(sessions, access);
     l.onConnectionChanged({ connectionId: 'c9' });
-    assert.deepEqual(calls, [['drop', 'c9'], ['inv', 'c9']]);
+    assert.deepEqual(calls, [['drop', 'c9'], ['inv']]);
     l.onConnectionChanged({});
-    assert.deepEqual(calls.slice(2), [['inv', undefined]]);
+    assert.deepEqual(calls.slice(2), [['inv']]);
     const meta = Reflect.getMetadata(EVENT_LISTENER_METADATA, SshConnectionChangeListener.prototype.onConnectionChanged);
     assert.ok(JSON.stringify(meta).includes(SSH_CONNECTION_CHANGED), 'decorated with @OnEvent');
   });

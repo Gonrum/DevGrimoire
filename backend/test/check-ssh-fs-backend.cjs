@@ -419,6 +419,34 @@ process.on('exit', (code) => {
     t.fake.session.exec = realExec;
   });
 
+  await check('remove dir: own 120 s timeout, never terminated; timeout -> 504 "may still be running" + audit row with errorMsg', async () => {
+    const t = setup();
+    fs.mkdirSync(t.f('big'));
+    fs.writeFileSync(t.f('big/x'), 'x');
+    await t.backend.remove('big');
+    assert.deepEqual(t.fake.calls.execOpts[0], { timeoutMs: 120_000, terminateOnTimeout: false });
+    assert.deepEqual(t.audits.map((a) => [a.action, a.errorMsg]), [['delete', undefined]]);
+    fs.mkdirSync(t.f('slow'));
+    t.fake.switches.execTimeout = true;
+    const e = await rejectsStatus(() => t.backend.remove('slow'), 504, /möglicherweise noch weiter/);
+    assert.match(bodyOf(e).message, /slow/);
+    assert.equal(t.audits.length, 2, 'failed delete audited');
+    assert.equal(t.audits[1].action, 'delete');
+    assert.equal(t.audits[1].path, t.f('slow'));
+    assert.match(t.audits[1].errorMsg, /möglicherweise noch weiter/);
+  });
+
+  await check('remove dir: rm exit != 0 -> 500 and an audit row with errorMsg; 404 before rm -> no row', async () => {
+    const t = setup();
+    fs.mkdirSync(t.f('stuck'));
+    t.fake.session.exec = async () => ({ code: 1, stdout: '', stderr: 'rm: Operation not permitted', truncated: false });
+    await rejectsStatus(() => t.backend.remove('stuck'), 500);
+    assert.equal(t.audits.length, 1);
+    assert.match(t.audits[0].errorMsg, /rm failed \(exit 1\)/);
+    await rejectsStatus(() => t.backend.remove('missing'), 404);
+    assert.equal(t.audits.length, 1, 'nothing was sent: no audit row');
+  });
+
   // ---- upload -----------------------------------------------------------------
   await check('upload: writes via temp file; returns path/size; mode 0644', async () => {
     const t = setup();
@@ -440,6 +468,43 @@ process.on('exit', (code) => {
     t.fake.switches.noPosixRename = true;
     await t.backend.upload('.', 'x.txt', Readable.from([Buffer.from('new')]), { overwrite: true });
     assert.equal(fs.readFileSync(t.f('x.txt'), 'utf8'), 'new');
+    assert.deepEqual(t.tmpLeft(), []);
+  });
+
+  await check('upload overwrite: file of another owner keeps its inode (in place); own file is replaced', async () => {
+    const t = setup();
+    fs.writeFileSync(t.f('o.txt'), 'old content');
+    fs.chmodSync(t.f('o.txt'), 0o640);
+    const ino = fs.statSync(t.f('o.txt')).ino;
+    t.fake.switches.probeUid += 1; // the file now "belongs" to someone else
+    await t.backend.upload('.', 'o.txt', Readable.from([Buffer.from('new')]), { size: 3, overwrite: true });
+    assert.equal(fs.readFileSync(t.f('o.txt'), 'utf8'), 'new');
+    assert.equal(fs.statSync(t.f('o.txt')).ino, ino, 'inode unchanged');
+    assert.equal(fs.statSync(t.f('o.txt')).mode & 0o777, 0o640, 'mode unchanged');
+    assert.deepEqual(t.tmpLeft(), []);
+    // Probe failure counts as "other owner" as well.
+    t.fake.switches.probeUid -= 1;
+    const realProbe = t.fake.session.probe;
+    t.fake.session.probe = async () => { throw new RemoteError('failure', 'no exec'); };
+    await t.backend.upload('.', 'o.txt', Readable.from([Buffer.from('again')]), { overwrite: true });
+    assert.equal(fs.statSync(t.f('o.txt')).ino, ino, 'inode unchanged on probe failure');
+    assert.equal(fs.readFileSync(t.f('o.txt'), 'utf8'), 'again');
+    t.fake.session.probe = realProbe;
+    // Same owner: temp + rename as before (new inode).
+    await t.backend.upload('.', 'o.txt', Readable.from([Buffer.from('mine')]), { overwrite: true });
+    assert.notEqual(fs.statSync(t.f('o.txt')).ino, ino);
+    assert.equal(fs.readFileSync(t.f('o.txt'), 'utf8'), 'mine');
+    assert.deepEqual(t.tmpLeft(), []);
+  });
+
+  await check('upload overwrite in place: body over the limit -> 413, target untouched', async () => {
+    const t = setup({ uploadMaxBytes: 10 });
+    fs.writeFileSync(t.f('o.txt'), 'keep');
+    t.fake.switches.probeUid += 1;
+    async function* gen() { for (let i = 0; i < 5; i += 1) yield Buffer.alloc(4, 0x61); }
+    await rejectsStatus(() => t.backend.upload('.', 'o.txt', Readable.from(gen()), { overwrite: true }), 413);
+    await sleep(20);
+    assert.equal(fs.readFileSync(t.f('o.txt'), 'utf8'), 'keep');
     assert.deepEqual(t.tmpLeft(), []);
   });
 
