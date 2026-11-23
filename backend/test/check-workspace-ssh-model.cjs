@@ -272,7 +272,7 @@ const dto = (over = {}) => ({ projectId: PROJECT.toString(), name: 'w1', ...over
     let sidecar = 0;
     const client = new Proxy({}, { get: () => async () => { sidecar += 1; return {}; } });
     const svc = { findById: async () => ws, touchThrottled() {} };
-    const ctrl = new WorkspaceFsController(svc, client, { create: async () => undefined }, { get: async () => ({ editorMaxBytes: 5 * 1024 * 1024, downloadMaxBytes: 2 * 1024 ** 3 }) });
+    const ctrl = new WorkspaceFsController(svc, client, { create: async () => undefined }, { get: async () => ({ editorMaxBytes: 5 * 1024 * 1024, downloadMaxBytes: 2 * 1024 ** 3 }) }, { issue: () => 't', consume: () => null }, { resolve: async () => undefined });
     await rejectsWith(() => RequestContext.run({ userId: 'u', username: 'u', role: 'admin' }, undefined, () => ctrl.tree(ws._id.toString(), '.')), 409, /not available yet/);
     assert.equal(sidecar, 0);
   });

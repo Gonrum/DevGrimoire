@@ -17,6 +17,7 @@ import { EventsModule } from './events/events.module';
 import { ActivitiesModule } from './activities/activities.module';
 import { PushModule } from './push/push.module';
 import { AuthModule } from './auth/auth.module';
+import { DownloadTicketModule } from './common/download-ticket.service';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionGateGuard } from './auth/guards/permission-gate.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
@@ -99,6 +100,7 @@ if (!MONGODB_URI) {
     ActivitiesModule,
     PushModule,
     AuthModule,
+    DownloadTicketModule,
     EnvironmentsModule,
     SecretsModule,
     ManualsModule,

@@ -1453,7 +1453,12 @@ app.post('/size', async (req, res) => {
 
 app.use((err, _req, res, _next) => {
   if (err && err.type === 'entity.too.large' && !res.headersSent) {
-    return res.status(413).json({ error: 'request body too large', limit: err.limit });
+    // The parser cap, not the effective editor limit (the backend enforces that one first).
+    return res.status(413).json({
+      error: 'request body too large',
+      message: `request body too large (>${err.limit} bytes)`,
+      limit: err.limit,
+    });
   }
   console.error(JSON.stringify({ type: 'route-error', error: String(err && err.stack ? err.stack : err) }));
   if (res.headersSent) {

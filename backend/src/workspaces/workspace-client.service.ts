@@ -250,8 +250,10 @@ export class WorkspaceClient {
       throw err;
     }
     if (!res.ok) {
-      disarmIdle();
+      // Keep the idle timer armed while the error body is read: a sidecar that
+      // sends headers and then stalls must not hang this call forever.
       const text = await res.text().catch(() => res.statusText);
+      disarmIdle();
       // IDE download: let the browser see the sidecar's 400/404/413 instead of a 500.
       if (opts.httpErrors && PASSTHROUGH_STATUSES.has(res.status)) {
         let parsed: unknown;

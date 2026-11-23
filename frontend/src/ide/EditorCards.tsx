@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Button from '../components/ui/Button';
 import { useToast } from '../components/Toast';
-import { downloadBlob } from '../lib/download';
 import { errorMessage } from '../lib/narrow';
 import { ideApi, IdeApiError } from './ide-api';
 import { formatLimit, limitAwareMessage } from './limit-message';
@@ -31,8 +30,7 @@ export function NonTextTabView({ tab }: { tab: OpenTab }) {
     if (!workspaceId) return;
     setBusy(true);
     ideApi
-      .rawBlob(workspaceId, tab.path)
-      .then((blob) => downloadBlob(name, blob))
+      .startDownload(workspaceId, tab.path, name)
       .catch((error: unknown) => {
         noteApiError(error);
         showError(

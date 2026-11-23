@@ -174,7 +174,9 @@ function placeholderTab(path: string, kind: OpenTab['kind'], size: number): Open
 async function nonTextTab(workspaceId: string, path: string, sizeHint: number): Promise<OpenTab> {
   const mime = imageMime(path);
   if (!mime || sizeHint > IMAGE_MAX_BYTES) return placeholderTab(path, 'binary', sizeHint);
-  const blob = await ideApi.rawBlob(workspaceId, path);
+  const blob = await ideApi.previewBlob(workspaceId, path, IMAGE_MAX_BYTES);
+  // Larger than the preview cap (or no size announced): binary card, nothing loaded.
+  if (!blob) return placeholderTab(path, 'binary', sizeHint);
   // The size hint can be missing (0) or stale; the downloaded size is authoritative.
   if (blob.size > IMAGE_MAX_BYTES) return placeholderTab(path, 'binary', blob.size);
   const previewUrl = await blobToDataUrl(new Blob([blob], { type: mime }));

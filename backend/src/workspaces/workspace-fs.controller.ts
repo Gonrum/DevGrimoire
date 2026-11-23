@@ -13,6 +13,7 @@ import {
   Query,
   Req,
   Res,
+  UnauthorizedException,
   UsePipes,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
@@ -25,6 +26,10 @@ import { FsMoveDto, FsPathDto, FsSearchDto, FsWriteDto, isRelativeWorkspacePath 
 import { parseGitStatus, parseRipgrepJson } from './workspace-search-parse';
 import { LogsService } from '../logs/logs.service';
 import { WorkspaceLimitsService } from './workspace-limits.service';
+import { DownloadTicketService } from '../common/download-ticket.service';
+import { DownloadActorService } from './download-actor.service';
+import { AcceptsDownloadTicket } from '../auth/decorators/accepts-download-ticket.decorator';
+import { RequestContext } from '../common/request-context';
 import { ScalarQueryPipe } from '../common/scalar-query.pipe';
 import { assertContentWrite } from '../common/scope-guard';
 
@@ -75,6 +80,8 @@ export class WorkspaceFsController {
     private readonly client: WorkspaceClient,
     private readonly logs: LogsService,
     private readonly limits: WorkspaceLimitsService,
+    private readonly tickets: DownloadTicketService,
+    private readonly downloadActors: DownloadActorService,
   ) {}
 
   /** Workspace id -> time of the last successful `ensureDir`. */
@@ -149,10 +156,55 @@ export class WorkspaceFsController {
     return { path: target, content: res.content, hash: res.hash, size: res.size };
   }
 
-  @Get('raw')
-  async raw(@Param('id') id: string, @Res() res: Response, @Query('path') path?: string): Promise<void> {
+  /**
+   * Starts a browser download: checks the file the same way the download will
+   * (so 404/413 surface here, in the IDE) and hands out a one-time URL. The
+   * browser then downloads natively, without buffering the file in the page.
+   */
+  @Post('download-ticket')
+  @HttpCode(200)
+  async downloadTicket(@Param('id') id: string, @Body() dto: FsPathDto) {
     await this.gate(id);
+    const { downloadMaxBytes } = await this.limits.get();
+    const { stream } = await this.client.readStream(id, dto.path, { httpErrors: true, maxBytes: downloadMaxBytes });
+    stream.destroy();
+    const actor = RequestContext.getUser();
+    const ticket = this.tickets.issue(
+      { workspaceId: id, path: dto.path },
+      { userId: actor?.userId ?? null, ...(actor?.apiKeyId ? { apiKeyId: actor.apiKeyId } : {}) },
+    );
+    return {
+      url: `/api/workspaces/${id}/fs/raw?path=${encodeURIComponent(dto.path)}&ticket=${ticket}`,
+    };
+  }
+
+  /**
+   * Download. Normal Bearer auth, or `?ticket=` from `download-ticket` (the
+   * guard let the request through only for a valid ticket; here it is used up
+   * and the user is re-checked, then the rest runs as that user).
+   */
+  @Get('raw')
+  @AcceptsDownloadTicket()
+  async raw(
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query('path') path?: string,
+    @Query('ticket') ticket?: string,
+  ): Promise<void> {
     const target = queryPath(path, 'path');
+    if (ticket === undefined || req.headers.authorization) {
+      await this.rawStream(id, target, res);
+      return;
+    }
+    const identity = this.tickets.consume(ticket, { workspaceId: id, path: target });
+    if (!identity) throw new UnauthorizedException('Invalid or expired download ticket');
+    const actor = await this.downloadActors.resolve(identity);
+    await RequestContext.run(actor, undefined, () => this.rawStream(id, target, res));
+  }
+
+  private async rawStream(id: string, target: string, res: Response): Promise<void> {
+    await this.gate(id);
     const { downloadMaxBytes } = await this.limits.get();
     const { stream, size } = await this.client.readStream(id, target, { httpErrors: true, maxBytes: downloadMaxBytes });
     this.workspaces.touchThrottled(id);

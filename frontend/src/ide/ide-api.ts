@@ -219,10 +219,38 @@ async function upload(
   return parseJsonText<{ path: string; size: number }>(result.text);
 }
 
-async function rawBlob(wsId: string, path: string): Promise<Blob> {
+/**
+ * Preview only (image tabs): loads a file into memory, but only when the
+ * server announces a size within `maxBytes`. Anything else resolves to
+ * `null` without reading the body, so a stale size hint can never pull a
+ * huge file into the page. Real downloads use `startDownload`.
+ */
+async function previewBlob(wsId: string, path: string, maxBytes: number): Promise<Blob | null> {
   const res = await authedFetch(fsUrl(wsId, 'raw', { path }), { method: 'GET' });
   if (!res.ok) return failFromResponse(res);
+  const length = Number(res.headers.get('content-length'));
+  if (!Number.isFinite(length) || length <= 0 || length > maxBytes) {
+    await res.body?.cancel().catch(() => undefined);
+    return null;
+  }
   return res.blob();
+}
+
+/**
+ * Download without buffering in the page: asks for a one-time URL (this
+ * request is authenticated and fails with 404/413 like any other), then lets
+ * the browser fetch it natively. The response is `Content-Disposition:
+ * attachment`, so the IDE page stays and the browser streams the file to disk.
+ */
+async function startDownload(wsId: string, path: string, fileName: string): Promise<void> {
+  const { url } = await sendJson<{ url: string }>(fsUrl(wsId, 'download-ticket'), 'POST', { path });
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 export const ideApi = {
@@ -239,7 +267,8 @@ export const ideApi = {
   },
   remove,
   upload,
-  rawBlob,
+  previewBlob,
+  startDownload,
   search: (
     wsId: string,
     q: { query: string; regex: boolean; caseSensitive: boolean; include?: string[]; exclude?: string[] },

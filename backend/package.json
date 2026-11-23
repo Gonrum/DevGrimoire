@@ -19,6 +19,8 @@
     "check:workspace-ssh-model": "node test/check-workspace-ssh-model.cjs",
     "check:workspace-container-only": "node test/check-workspace-container-only.cjs",
     "check:workspace-limits": "node test/check-workspace-limits.cjs",
+    "check:workspace-fs-body": "node test/check-workspace-fs-body.cjs",
+    "check:workspace-download-ticket": "node test/check-workspace-download-ticket.cjs",
     "check:workspace-roots-guard": "node scripts/workspace-roots-guard-check.cjs",
     "check:workflow-runner-units": "node scripts/workflow-runner-units-check.cjs",
     "check:workflow-nodes-units": "node scripts/workflow-nodes-units-check.cjs",

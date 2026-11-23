@@ -63,6 +63,8 @@ const READ_ONLY = { ...ADMIN, permissions: ['project:read', 'todo:read'], permis
 const WRITER = { ...ADMIN, permissions: ['project:write'], permissionsRestricted: true };
 const OTHER_PROJECT_ONLY = { ...ADMIN, projectScopeMode: 'allowlist', allowedProjectIds: [oid().toString()] };
 
+const FAKE_TICKETS = { issue: () => 't', consume: () => null };
+const FAKE_ACTORS = { resolve: async () => undefined };
 const FAKE_LIMITS = { get: async () => ({ editorMaxBytes: 5 * 1024 * 1024, downloadMaxBytes: 2 * 1024 ** 3 }) };
 
 function setup({ status = 'active', client = {} } = {}) {
@@ -101,7 +103,7 @@ function setup({ status = 'active', client = {} } = {}) {
     { emit() {} },
   );
   const logged = [];
-  const ctrl = new WorkspaceFsController(service, fakeClient, { create: async (d) => { logged.push(d); } }, FAKE_LIMITS);
+  const ctrl = new WorkspaceFsController(service, fakeClient, { create: async (d) => { logged.push(d); } }, FAKE_LIMITS, FAKE_TICKETS, FAKE_ACTORS);
   return { ctrl, calls, ensureCalls, touches, logged, service };
 }
 
@@ -116,7 +118,7 @@ const fakeUploadRes = () => Object.assign(new EventEmitter(), { writableFinished
 const ROUTES = {
   'GET tree': (c) => c.tree(WS_ID, 'src'),
   'GET file': (c) => c.readFile(WS_ID, 'a.txt'),
-  'GET raw': (c) => c.raw(WS_ID, fakeRes(), 'a.txt'),
+  'GET raw': (c) => c.raw(WS_ID, { headers: {} }, fakeRes(), 'a.txt'),
   'PUT file': (c) => c.writeFile(WS_ID, { path: 'a.txt', content: 'x', baseHash: null }),
   'POST mkdir': (c) => c.mkdir(WS_ID, { path: 'd' }),
   'POST move': (c) => c.move(WS_ID, { from: 'a', to: 'b' }),
@@ -318,7 +320,7 @@ const matchLine = (p, line, text, start = 4) => ({
     const chunks = [];
     res.on('data', (c) => chunks.push(c));
     const done = new Promise((r) => res.on('end', r));
-    await RequestContext.run(WRITER, undefined, () => ctrl.raw(WS_ID, res, 'dir/na"me.bin'));
+    await RequestContext.run(WRITER, undefined, () => ctrl.raw(WS_ID, { headers: {} }, res, 'dir/na"me.bin'));
     await done;
     assert.equal(res.headers['Content-Type'], 'application/octet-stream');
     assert.match(res.headers['Content-Disposition'], /^attachment; filename="na_me\.bin"/);

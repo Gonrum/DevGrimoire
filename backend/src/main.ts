@@ -63,6 +63,7 @@ import { WorkspacesService } from './workspaces/workspaces.service';
 import { TERMINAL_TOKEN_TTL, WorkspaceCliTokenService } from './workspaces/workspace-cli-token.service';
 import { WorkspaceClient } from './workspaces/workspace-client.service';
 import { FS_FILE_BODY_LIMIT_BYTES, WorkspaceLimitsService } from './workspaces/workspace-limits.service';
+import { createFsFileBodyMiddleware } from './workspaces/fs-file-body.middleware';
 import { WorkspaceGitTokensService } from './workspaces/workspace-git-tokens.service';
 import { SshService } from './ssh/ssh.service';
 import { SshSessionService } from './ssh/ssh-session.service';
@@ -241,33 +242,40 @@ async function bootstrap() {
   );
 
   // The IDE save route carries a whole file as JSON (editor hard max, escaped),
-  // which is more than the global limit below. Only this route gets the larger
-  // parser; it runs first and the global one skips an already parsed body. An
-  // oversized body answers 413 JSON with the limit in force, never a reset.
-  const fsFileBody = json({ limit: FS_FILE_BODY_LIMIT_BYTES });
-  const workspaceLimits = app.get(WorkspaceLimitsService);
-  expressApp.use((req: Request, res: Response, next: NextFunction) => {
-    if (req.method !== 'PUT' || !/^\/api\/workspaces\/[^/]+\/fs\/file\/?$/.test(req.path)) {
-      next();
-      return;
-    }
-    fsFileBody(req, res, (err?: unknown) => {
-      if (!isRecord(err) || err.type !== 'entity.too.large') {
-        next(err);
-        return;
+  // which is more than the global limit below. The raised limit applies to that
+  // route only and only to an authenticated caller (this runs before the Nest
+  // guards): see fs-file-body.middleware.ts.
+  const fsAuthService = app.get(AuthService);
+  const fsApiKeys = app.get(ApiKeysService);
+  const fsJwt = app.get(JwtService);
+  const fsLimits = app.get(WorkspaceLimitsService);
+  expressApp.use(createFsFileBodyMiddleware({
+    authenticate: async (req: Request) => {
+      if (!fsAuthService.isAuthEnabled()) return true;
+      const header = req.headers.authorization;
+      if (!header?.startsWith('Bearer ')) return false;
+      const token = header.slice(7);
+      if (token.startsWith('cv_')) {
+        const key = await fsApiKeys.validate(token);
+        // A key with a tool allowlist is MCP-only and gets no REST access.
+        if (!key || Array.isArray(key.allowedTools)) return false;
+        const owner = await fsAuthService.findUserById(key.userId.toString());
+        return !!owner && owner.active !== false;
       }
-      workspaceLimits.get().then(
-        ({ editorMaxBytes }) => {
-          res.status(413).json({
-            error: 'request body too large',
-            message: `content too large (>${editorMaxBytes} bytes)`,
-            limit: editorMaxBytes,
-          });
-        },
-        (e: unknown) => next(e),
-      );
-    });
-  });
+      let userId: string | null;
+      try {
+        userId = accessTokenUserId(fsJwt.verify<object>(token));
+      } catch {
+        return false;
+      }
+      if (!userId) return false;
+      const user = await fsAuthService.findUserById(userId);
+      return !!user && user.active !== false;
+    },
+    editorLimit: async () => (await fsLimits.get()).editorMaxBytes,
+    bigLimitBytes: FS_FILE_BODY_LIMIT_BYTES,
+    parser: json({ limit: FS_FILE_BODY_LIMIT_BYTES }),
+  }));
 
   // JSON body parser for all routes (100MB limit for MCP + replication payloads with attachments)
   expressApp.use(json({ limit: '100mb' }));

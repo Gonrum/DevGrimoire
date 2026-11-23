@@ -8,6 +8,7 @@ import { WorkspacesController } from './workspaces.controller';
 import { WorkspaceFsController } from './workspace-fs.controller';
 import { WorkspaceConfigController } from './workspace-config.controller';
 import { WorkspaceLimitsService } from './workspace-limits.service';
+import { DownloadActorService } from './download-actor.service';
 import { WorkspaceCliController } from './workspace-cli.controller';
 import { WorkspaceCliKubeController } from './workspace-cli-kube.controller';
 import { WorkspaceCliSshController } from './workspace-cli-ssh.controller';
@@ -20,6 +21,7 @@ import { WorkspaceCliTokenService } from './workspace-cli-token.service';
 import { WorkspaceCliAuthGuard } from './workspace-cli.guard';
 import { LogsModule } from '../logs/logs.module';
 import { SettingsModule } from '../settings/settings.module';
+import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SecretsModule } from '../secrets/secrets.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
@@ -46,6 +48,7 @@ import { JWT_ALGORITHM } from '../common/access-token';
     }),
     LogsModule,
     SettingsModule,
+    ApiKeysModule,
     NotificationsModule,
     SecretsModule,
     AttachmentsModule,
@@ -72,6 +75,7 @@ import { JWT_ALGORITHM } from '../common/access-token';
     WorkspacesService,
     WorkspaceClient,
     WorkspaceLimitsService,
+    DownloadActorService,
     SshWorkspaceAccess,
     WorkspaceTtlScheduler,
     WorkspaceGitTokensService,

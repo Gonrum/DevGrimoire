@@ -46,6 +46,7 @@ function guardFor(apiKey) {
     new Reflector(),
     { isAuthEnabled: () => true, findUserById: async () => OWNER },
     { validate: async (plain) => (plain === 'cv_test' ? apiKey : null) },
+    { peek: () => false },
   );
 }
 

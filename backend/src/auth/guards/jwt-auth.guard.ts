@@ -4,10 +4,13 @@ import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { firstValueFrom, isObservable } from 'rxjs';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { ACCEPTS_DOWNLOAD_TICKET_KEY } from '../decorators/accepts-download-ticket.decorator';
+import { DownloadTicketService } from '../../common/download-ticket.service';
 import { MCP_TOOL_EQUIVALENT_KEY } from '../decorators/mcp-tool-equivalent.decorator';
 import { AuthService } from '../auth.service';
 import { ApiKeysService } from '../../api-keys/api-keys.service';
 import { actorFromApiKey, scopeFromUser } from '../../common/actor-scope';
+import { isRecord } from '../../common/narrow';
 import type { AuthRequest, RequestUser } from '../../common/request-context';
 
 /**
@@ -27,6 +30,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     private reflector: Reflector,
     private authService: AuthService,
     private apiKeysService: ApiKeysService,
+    private downloadTickets: DownloadTicketService,
   ) {
     super();
   }
@@ -47,6 +51,28 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     }
 
     const request = context.switchToHttp().getRequest<GuardRequest>();
+
+    // Browser download: no Bearer header is possible on a navigation. A route
+    // that opted in (`@AcceptsDownloadTicket`) is reachable without credentials
+    // only with a ticket that is valid and bound to this workspace and path.
+    // The route consumes the ticket and re-resolves the user.
+    const acceptsTicket = this.reflector.getAllAndOverride<boolean>(ACCEPTS_DOWNLOAD_TICKET_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    const ticket: unknown = request.query?.ticket;
+    if (acceptsTicket && request.method === 'GET' && !request.headers.authorization && typeof ticket === 'string') {
+      const params: unknown = request.params;
+      const workspaceId = isRecord(params) ? params.id : undefined;
+      const path: unknown = request.query?.path;
+      if (
+        typeof workspaceId === 'string' && typeof path === 'string'
+        && this.downloadTickets.peek(ticket, { workspaceId, path })
+      ) {
+        return true;
+      }
+      throw new UnauthorizedException('Invalid or expired download ticket');
+    }
 
     // API Key auth: Bearer cv_... header or ?apiKey= query param
     const authHeader = request.headers.authorization;
