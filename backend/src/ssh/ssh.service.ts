@@ -266,6 +266,17 @@ export class SshService {
   }
 
   /**
+   * Batch lookup for list enrichment: the connections among `ids` the actor
+   * may see. Invalid ids are dropped; no per-id round trip.
+   */
+  async findManyByIds(ids: string[]): Promise<SshConnectionDocument[]> {
+    const valid = ids.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id));
+    if (valid.length === 0) return [];
+    const docs = await this.sshModel.find({ _id: { $in: valid } }).exec();
+    return this.visibleToActor(docs);
+  }
+
+  /**
    * Filtert eine Verbindungsliste auf das, was der Actor sehen darf. Nötig,
    * weil projectId/customerId der List-Pfade aus Query-String bzw.
    * Tool-Argument kommen — ohne Filter beantworten sie „welche Server hat

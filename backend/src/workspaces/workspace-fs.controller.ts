@@ -86,6 +86,12 @@ export class WorkspaceFsController {
     if (ws.status !== 'active') {
       throw new ConflictException(`Workspace is ${ws.status}, not active`);
     }
+    // SSH workspaces have no sidecar directory. Until the SSH file backend
+    // exists they are refused here — after the permission/status checks and
+    // before any sidecar call.
+    if (ws.location === 'ssh') {
+      throw new ConflictException('SSH workspaces are not available yet');
+    }
     // Only after every check passed: the sidecar must never create a
     // directory for an unknown, forbidden or inactive workspace. A workspace
     // without repoUrl has no directory until now. Failures propagate and are

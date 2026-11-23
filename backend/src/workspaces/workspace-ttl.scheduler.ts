@@ -75,6 +75,9 @@ export class WorkspaceTtlScheduler {
     // even when the DB delete fails afterwards.
     const toDelete = await this.workspaces.findInactive('archived', deleteBefore);
     for (const ws of toDelete) {
+      // Defensive: findInactive already excludes SSH workspaces, and nothing
+      // may ever be cleaned up on a remote server from here.
+      if (ws.location === 'ssh') continue;
       try {
         if (this.workspaceClient.isConfigured()) {
           await this.workspaceClient.cleanup(ws._id.toString()).catch((err: unknown) => {

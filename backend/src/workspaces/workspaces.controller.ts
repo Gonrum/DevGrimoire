@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseEnumPipe, Post, Put, Query, Res } from '@nestjs/common';
+import { Body, ConflictException, Controller, Delete, Get, HttpCode, Param, ParseEnumPipe, Post, Put, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { WorkspacesService } from './workspaces.service';
 import { WorkspaceClient } from './workspace-client.service';
@@ -8,7 +8,8 @@ import { WorkspaceCliTokenService } from './workspace-cli-token.service';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { ExecWorkspaceDto } from './dto/exec-workspace.dto';
-import { WORKSPACE_STATUSES, WorkspaceStatus } from './schemas/workspace.schema';
+import { WORKSPACE_STATUSES, WorkspaceDocument, WorkspaceStatus } from './schemas/workspace.schema';
+import { SshService } from '../ssh/ssh.service';
 import { LogsService } from '../logs/logs.service';
 import { errorMessage } from '../common/narrow';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -23,7 +24,39 @@ export class WorkspacesController {
     private readonly ttl: WorkspaceTtlScheduler,
     private readonly workspaceGitTokens: WorkspaceGitTokensService,
     private readonly workspaceCliToken: WorkspaceCliTokenService,
+    private readonly ssh: SshService,
   ) {}
+
+  /**
+   * Adds `ssh: { connectionId, label, username, host, port } | null` to SSH
+   * workspaces (null when the connection is gone or not visible to the
+   * caller). One batched connection lookup for the whole list; never exposes
+   * secret ids. Container workspaces are returned unchanged.
+   */
+  private async withSsh(docs: WorkspaceDocument[]) {
+    const ids = [
+      ...new Set(docs.filter((d) => d.location === 'ssh').map((d) => String(d.sshConnectionId))),
+    ];
+    const byId = new Map(
+      (ids.length ? await this.ssh.findManyByIds(ids) : []).map((c) => [String(c._id), c]),
+    );
+    return docs.map((doc) => {
+      if (doc.location !== 'ssh') return doc;
+      const c = byId.get(String(doc.sshConnectionId));
+      return {
+        ...doc.toJSON(),
+        ssh: c
+          ? {
+              connectionId: String(c._id),
+              label: c.label,
+              username: c.username,
+              host: c.host,
+              port: c.port,
+            }
+          : null,
+      };
+    });
+  }
 
   /**
    * Manually triggers a TTL sweep — useful for tests and for the admin
@@ -39,22 +72,23 @@ export class WorkspacesController {
 
   @Post()
   @HttpCode(201)
-  create(@Body() dto: CreateWorkspaceDto) {
-    return this.workspacesService.create(dto);
+  async create(@Body() dto: CreateWorkspaceDto) {
+    const ws = await this.workspacesService.create(dto);
+    return (await this.withSsh([ws]))[0];
   }
 
   @Get()
-  findAll(
+  async findAll(
     @Query('projectId') projectId: string,
     @Query('status', new ParseEnumPipe(WORKSPACE_STATUSES, { optional: true }))
     status?: WorkspaceStatus,
   ) {
-    return this.workspacesService.findByProject(projectId, status);
+    return this.withSsh(await this.workspacesService.findByProject(projectId, status));
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.workspacesService.findById(id);
+  async findOne(@Param('id') id: string) {
+    return (await this.withSsh([await this.workspacesService.findById(id)]))[0];
   }
 
   @Put(':id')
@@ -96,6 +130,10 @@ export class WorkspacesController {
     // findById throws 404 BEFORE we open the SSE channel — the browser then
     // gets a clean JSON error instead of a half-opened stream.
     const ws = await this.workspacesService.findById(id);
+    // No sidecar directory behind an SSH workspace; its terminal is the SSH one.
+    if (ws.location === 'ssh') {
+      throw new ConflictException('SSH workspaces are not available yet');
+    }
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');

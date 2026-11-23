@@ -1,5 +1,5 @@
-import { IsMongoId, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
-import { WORKSPACE_NAME_PATTERN } from '../schemas/workspace.schema';
+import { IsIn, IsMongoId, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { WORKSPACE_LOCATIONS, WORKSPACE_NAME_PATTERN, WorkspaceLocation } from '../schemas/workspace.schema';
 
 export class CreateWorkspaceDto {
   @IsMongoId()
@@ -37,4 +37,17 @@ export class CreateWorkspaceDto {
   @IsString()
   @MaxLength(48)
   gitRepoId?: string;
+
+  @IsOptional()
+  @IsIn(WORKSPACE_LOCATIONS)
+  location?: WorkspaceLocation;
+
+  @IsOptional()
+  @IsMongoId()
+  sshConnectionId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4096)
+  remotePath?: string;
 }

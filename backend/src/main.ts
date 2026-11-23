@@ -879,6 +879,9 @@ async function bootstrap() {
       return reject(403, 'Forbidden');
     }
 
+    // SSH workspaces have no sidecar directory; never proxy them to the PTY.
+    if (workspace.location === 'ssh') return reject(409, 'Conflict');
+
     const sessionId = url.searchParams.get('sessionId') || '';
     const upstreamUrl = new URL(SIDECAR_WS_URL);
     upstreamUrl.searchParams.set('workspaceId', workspaceId);

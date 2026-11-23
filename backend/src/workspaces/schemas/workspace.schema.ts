@@ -7,6 +7,11 @@ export type WorkspaceStatus = 'active' | 'archived' | 'cleaning';
 
 export const WORKSPACE_STATUSES: WorkspaceStatus[] = ['active', 'archived', 'cleaning'];
 
+/** Where the working directory lives: sidecar container or a server over SSH. */
+export type WorkspaceLocation = 'container' | 'ssh';
+
+export const WORKSPACE_LOCATIONS: WorkspaceLocation[] = ['container', 'ssh'];
+
 /**
  * Slug-style names: alphanumeric start, then alphanumerics/dash/underscore. Used
  * verbatim as a path segment under /workspaces/{name}/, so anything that could
@@ -33,6 +38,18 @@ export class Workspace {
 
   @Prop({ required: true })
   path: string;
+
+  /** Documents without the field (legacy) count as `container`. */
+  @Prop({ type: String, enum: WORKSPACE_LOCATIONS, default: 'container' })
+  location: WorkspaceLocation;
+
+  /** Only for `location: 'ssh'`; immutable after creation. */
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'SshConnection' })
+  sshConnectionId?: Types.ObjectId;
+
+  /** Only for `location: 'ssh'`: absolute, normalised; `path` mirrors it. */
+  @Prop()
+  remotePath?: string;
 
   @Prop({ required: true, enum: WORKSPACE_STATUSES, default: 'active' })
   status: WorkspaceStatus;

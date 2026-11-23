@@ -1,5 +1,5 @@
 import {
-  ConflictException, ForbiddenException, Injectable, Logger, NotFoundException,
+  BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -12,6 +12,9 @@ import { PROJECT_CHANGED } from '../events/project-event';
 import { RequestContext } from '../common/request-context';
 import { actorCanAccessProject } from '../common/permissions';
 import { assertSafeCascadeId } from '../common/cascade-guard';
+import { SshService } from '../ssh/ssh.service';
+import { SshConnectionDocument } from '../ssh/schemas/ssh-connection.schema';
+import { normalizeRemotePath } from './remote-path';
 
 const TOUCH_THROTTLE_MS = 60_000;
 
@@ -23,7 +26,15 @@ export class WorkspacesService {
   constructor(
     @InjectModel(Workspace.name) private readonly workspaceModel: Model<WorkspaceDocument>,
     private readonly eventEmitter: EventEmitter2,
+    private readonly ssh: SshService,
   ) {}
+
+  /**
+   * Hook for the "directory exists" check of an SSH workspace (SFTP stat).
+   * Unset until the SSH file backend registers it; when unset the check is
+   * skipped. Called last, after every other validation passed.
+   */
+  verifyRemoteDir?: (connection: SshConnectionDocument, remotePath: string) => Promise<void>;
 
   /**
    * Projekt-Scope (C-10). Ein Workspace ist ein Shell-fähiger Container mit
@@ -43,24 +54,70 @@ export class WorkspacesService {
     }
   }
 
+  /**
+   * Validates the SSH part of a create request (spec "Anlegen" 1-4, errors are
+   * 400 except the connection access denial, 403) and returns the normalised
+   * remote path plus the connection.
+   */
+  private async validateSsh(
+    dto: CreateWorkspaceDto,
+  ): Promise<{ connection: SshConnectionDocument; remotePath: string }> {
+    if (dto.repoUrl !== undefined || dto.branch !== undefined || dto.gitRepoId !== undefined) {
+      throw new BadRequestException('repoUrl, branch and gitRepoId are not allowed for SSH workspaces');
+    }
+    if (!dto.sshConnectionId) {
+      throw new BadRequestException('sshConnectionId is required for SSH workspaces');
+    }
+    if (dto.remotePath === undefined) {
+      throw new BadRequestException('remotePath is required for SSH workspaces');
+    }
+    const remotePath = normalizeRemotePath(dto.remotePath);
+    let connection: SshConnectionDocument;
+    try {
+      // Enforces the actor's scope on the connection (403).
+      connection = await this.ssh.findById(dto.sshConnectionId);
+    } catch (err: unknown) {
+      if (err instanceof NotFoundException) {
+        throw new BadRequestException('SSH connection does not exist');
+      }
+      throw err;
+    }
+    const usable = await this.ssh.findByProjectId(dto.projectId);
+    if (!usable.some((c) => String(c._id) === String(connection._id))) {
+      throw new BadRequestException('SSH connection is not usable for this project');
+    }
+    return { connection, remotePath };
+  }
+
   async create(dto: CreateWorkspaceDto): Promise<WorkspaceDocument> {
     this.assertProjectAccess(dto.projectId);
     const _id = new Types.ObjectId();
-    const path = `/workspaces/${_id.toHexString()}/`;
+    let path = `/workspaces/${_id.toHexString()}/`;
+    let sshFields: { sshConnectionId: Types.ObjectId; remotePath: string } | undefined;
+    if (dto.location === 'ssh') {
+      const { connection, remotePath } = await this.validateSsh(dto);
+      if (this.verifyRemoteDir) await this.verifyRemoteDir(connection, remotePath);
+      path = remotePath;
+      sshFields = { sshConnectionId: connection._id, remotePath };
+    } else if (dto.sshConnectionId !== undefined || dto.remotePath !== undefined) {
+      throw new BadRequestException('sshConnectionId and remotePath require location "ssh"');
+    }
     try {
       const ws = await this.workspaceModel.create({
         _id,
         projectId: new Types.ObjectId(dto.projectId),
         name: dto.name,
         description: dto.description,
-        repoUrl: dto.repoUrl,
-        branch: dto.branch ?? 'main',
+        location: sshFields ? 'ssh' : 'container',
+        ...(sshFields ?? {}),
+        ...(sshFields
+          ? {}
+          : { repoUrl: dto.repoUrl, branch: dto.branch ?? 'main', gitRepoId: dto.gitRepoId }),
         path,
         status: 'active',
         sizeBytes: 0,
         lastActivityAt: new Date(),
         createdBySessionId: dto.createdBySessionId,
-        gitRepoId: dto.gitRepoId,
       });
       this.emit(ws, 'created', `Workspace "${ws.name}" erstellt`);
       return ws;
@@ -173,11 +230,13 @@ export class WorkspacesService {
   /**
    * Returns workspaces in `status` whose `lastActivityAt` is older than
    * `threshold`. Used by the TTL garbage-collector to pick candidates for
-   * archive/delete. Sorted oldest-first so logs stay deterministic.
+   * archive/delete. Sorted oldest-first so logs stay deterministic. SSH
+   * workspaces are never candidates (their directory is not ours to reap);
+   * `$ne` also keeps legacy documents without a `location`.
    */
   async findInactive(status: WorkspaceStatus, threshold: Date): Promise<WorkspaceDocument[]> {
     return this.workspaceModel
-      .find({ status, lastActivityAt: { $lt: threshold } })
+      .find({ status, location: { $ne: 'ssh' }, lastActivityAt: { $lt: threshold } })
       .sort({ lastActivityAt: 1 })
       .exec();
   }
