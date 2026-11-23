@@ -94,6 +94,12 @@ function buildWsUrl(
 }
 
 /**
+ * Close code of a terminal closed after its idle limit. Not an error: the
+ * header shows the notice and the user may reconnect by hand.
+ */
+const TERMINAL_IDLE_CLOSE_CODE = 4010;
+
+/**
  * Map close codes from the backend SSH WS gateway (T-380) to a
  * user-readable reason. Falls back to the raw code/reason when unknown.
  *
@@ -103,6 +109,7 @@ function buildWsUrl(
  *   4003 credential_missing
  *   4004 auth_failed
  *   4008 timeout / network
+ *   4010 closed after the idle limit (SSH bridge and workspace sidecar)
  *   1011 internal
  */
 function describeCloseCode(
@@ -121,6 +128,8 @@ function describeCloseCode(
       return t('ssh.terminal.closeReason.auth_failed');
     case 4008:
       return t('ssh.terminal.closeReason.timeout');
+    case TERMINAL_IDLE_CLOSE_CODE:
+      return t('ssh.terminal.closeReason.idle');
     case 1011:
       return t('ssh.terminal.closeReason.internal');
     case 1000:
@@ -355,7 +364,8 @@ export default function SshTerminal({
       // React StrictMode.
       if (stateRef.current === 'exited') return;
       const isError =
-        (ev.code >= 4000 && ev.code <= 4999) || ev.code === 1011;
+        ((ev.code >= 4000 && ev.code <= 4999) && ev.code !== TERMINAL_IDLE_CLOSE_CODE) ||
+        ev.code === 1011;
       notifyState(isError ? 'error' : 'disconnected');
     };
 
@@ -457,7 +467,9 @@ export default function SshTerminal({
       case 'exited':
         return `⚪ ${t('ssh.terminal.statusExited')}`;
       case 'disconnected':
-        return `🔴 ${t('ssh.terminal.statusDisconnected')}`;
+        return closeInfo?.code === TERMINAL_IDLE_CLOSE_CODE
+          ? `⚪ ${closeInfo.reason}`
+          : `🔴 ${t('ssh.terminal.statusDisconnected')}`;
       case 'error':
         return `❌ ${closeInfo ? closeInfo.reason : t('ssh.terminal.statusError')}`;
     }

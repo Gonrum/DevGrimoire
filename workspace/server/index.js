@@ -1481,19 +1481,40 @@ app.use((err, _req, res, _next) => {
  * accidental WS close (browser tab refresh, transient network drop) gives the
  * user a few seconds to reconnect before we kill bash.
  */
-const TERMINAL_IDLE_MS = 30 * 60_000;
+// Idle limit (no input and no output). The backend passes the admin setting
+// per terminal in `X-Dg-Idle-Ms`; TERMINAL_IDLE_MS is the fallback when the
+// header is missing or outside TERMINAL_IDLE_HEADER_MIN_MS..MAX_MS.
+const TERMINAL_IDLE_MS = positiveIntEnv('TERMINAL_IDLE_MS', 30 * 60_000);
+const TERMINAL_IDLE_HEADER_MIN_MS = 5 * 60_000;
+const TERMINAL_IDLE_HEADER_MAX_MS = 24 * 3600_000;
+const TERMINAL_SWEEP_MS = positiveIntEnv('TERMINAL_SWEEP_MS', 60_000);
+// Same close code/reason as the backend's SSH terminal bridge; the frontend
+// shows "closed due to inactivity" for it.
+const TERMINAL_IDLE_CLOSE_CODE = 4010;
+const TERMINAL_IDLE_CLOSE_REASON = 'idle_timeout';
 const TERMINAL_MAX_PER_WORKSPACE = 8;
 const activeTerminals = new Map();
+
+/** Per-terminal idle limit from `X-Dg-Idle-Ms`, else the TERMINAL_IDLE_MS fallback. */
+function parseIdleHeader(raw) {
+  if (typeof raw !== 'string' || !/^\d{1,9}$/.test(raw)) return TERMINAL_IDLE_MS;
+  const ms = Number(raw);
+  if (ms < TERMINAL_IDLE_HEADER_MIN_MS || ms > TERMINAL_IDLE_HEADER_MAX_MS) return TERMINAL_IDLE_MS;
+  return ms;
+}
 
 setInterval(() => {
   const now = Date.now();
   for (const [key, term] of activeTerminals) {
-    if (now - term.lastActivity > TERMINAL_IDLE_MS) {
+    if (now - term.lastActivity > term.idleMs) {
+      // Close the socket first with the idle code: the pty's onExit then
+      // sees a socket that is no longer OPEN and sends no `exit` frame.
+      try { term.ws.close(TERMINAL_IDLE_CLOSE_CODE, TERMINAL_IDLE_CLOSE_REASON); } catch { /* socket dying */ }
       try { term.pty.kill(); } catch { /* already dead */ }
       activeTerminals.delete(key);
     }
   }
-}, 60_000);
+}, TERMINAL_SWEEP_MS).unref();
 
 function countTerminalsFor(workspaceId) {
   let n = 0;
@@ -1598,6 +1619,7 @@ server.on('upgrade', (req, socket, head) => {
     return;
   }
   const dgEnv = parseDgEnvHeader(req.headers['x-dg-env'], workspaceId);
+  const idleMs = parseIdleHeader(req.headers['x-dg-idle-ms']);
 
   // Key-Präfix `ws:` (M-23) — stammt aus der Zeit der Kube-Terminals, bleibt
   // als Namensraum für die Bookkeeping-Keys erhalten.
@@ -1607,7 +1629,7 @@ server.on('upgrade', (req, socket, head) => {
     return;
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
-    handleTerminalConnection(ws, workspaceId, sessionId, dgEnv).catch((err) => {
+    handleTerminalConnection(ws, workspaceId, sessionId, dgEnv, idleMs).catch((err) => {
       console.error('terminal connection failed', err);
       try { ws.close(1011, 'internal error'); } catch { /* noop */ }
     });
@@ -1714,7 +1736,7 @@ function wireTerminal(ws, term, state, key) {
   });
 }
 
-async function handleTerminalConnection(ws, workspaceId, sessionId, dgEnv = {}) {
+async function handleTerminalConnection(ws, workspaceId, sessionId, dgEnv = {}, idleMs = TERMINAL_IDLE_MS) {
   await ensureWorkspaceDir(workspaceId);
   await ensureCwdStateDir();
   const startCwd = (await readCwdState(workspaceId)) || workspaceRoot(workspaceId);
@@ -1737,7 +1759,7 @@ async function handleTerminalConnection(ws, workspaceId, sessionId, dgEnv = {}) 
   });
 
   const key = `ws:${workspaceId}:${sessionId}`;
-  const state = { pty: term, ws, lastActivity: Date.now() };
+  const state = { pty: term, ws, lastActivity: Date.now(), idleMs };
   activeTerminals.set(key, state);
 
   console.log(JSON.stringify({

@@ -2939,6 +2939,7 @@
         "credential_missing": "Credentials fehlen (4003)",
         "auth_failed": "Authentifizierung fehlgeschlagen (4004)",
         "timeout": "Timeout oder Netzwerkfehler (4008)",
+        "idle": "Terminal wegen Inaktivität geschlossen",
         "internal": "Interner Server-Fehler (1011)",
         "normal": "Verbindung beendet"
       }
@@ -3258,6 +3259,9 @@
     "downloadLabel": "Download: max. Dateigröße (MB)",
     "downloadHint": "Standard: {{def}} MB, absolute Obergrenze: {{max}} MB. Downloads werden gestreamt, die Grenze ist nur ein Schutz.",
     "invalid": "Bitte eine Zahl zwischen 1 und {{max}} MB angeben.",
+    "idleLabel": "Terminal: schließen nach Inaktivität (Minuten)",
+    "idleHint": "Gilt für alle Terminals (Container- und SSH-Werkstätten, SSH-Verbindungen) ab dem Öffnen. Standard: {{def}} Minuten, erlaubt {{min}}–{{max}}.",
+    "idleInvalid": "Bitte eine Zahl zwischen {{min}} und {{max}} Minuten angeben.",
     "saved": "Werkstatt-Grenzen gespeichert."
   },
   "ide": {

@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { HttpException, Logger, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { randomUUID } from 'node:crypto';
 import helmet from 'helmet';
@@ -67,6 +67,8 @@ import { createFsFileBodyMiddleware } from './workspaces/fs-file-body.middleware
 import { WorkspaceGitTokensService } from './workspaces/workspace-git-tokens.service';
 import { SshService } from './ssh/ssh.service';
 import { SshSessionService } from './ssh/ssh-session.service';
+import { bridgeSshTerminal, rawDataToString, toPtySize } from './ssh/ssh-terminal-bridge';
+import { SshWorkspaceAccess, isSshWorkspace } from './workspaces/ssh-workspace-access.service';
 import { StacksService } from './stacks/stacks.service';
 import { KubeClustersService } from './kube/kube-clusters.service';
 import { KubeResourcesService } from './kube/kube-resources.service';
@@ -86,7 +88,7 @@ import { AuthService } from './auth/auth.service';
 import { isProjectEventVisible, isQuestionEventVisible } from './events/event-visibility';
 import { JwtService } from '@nestjs/jwt';
 import WebSocket, { WebSocketServer } from 'ws';
-import { errorMessage, isRecord } from './common/narrow';
+import { isRecord } from './common/narrow';
 import { RequestContext, RequestUser } from './common/request-context';
 import { actorFromApiKey, actorFromUser } from './common/actor-scope';
 import { actorMayWriteContent } from './common/scope-guard';
@@ -126,40 +128,6 @@ const MCP_SESSION_REVALIDATE_MS = 60_000;
 interface McpRequest extends Request {
   user?: RequestUser;
   apiKey?: ApiKey;
-}
-
-/**
- * `ws` liefert Nachrichten als `RawData` — das ist `Buffer | ArrayBuffer | Buffer[]`.
- *
- * Ein blankes `data.toString()` war stillschweigend falsch: bei einem
- * fragmentierten Frame (`Buffer[]`) kommt eine komma-verbundene Liste heraus, bei
- * einem `ArrayBuffer` wörtlich `[object ArrayBuffer]`. Beides fällt nicht auf,
- * weil nichts abstürzt — die Terminal-Eingabe wird nur stillschweigend Müll.
- */
-function rawDataToString(data: WebSocket.RawData): string {
-  if (Buffer.isBuffer(data)) return data.toString('utf8');
-  if (Array.isArray(data)) return Buffer.concat(data).toString('utf8');
-  return Buffer.from(data).toString('utf8');
-}
-
-/**
- * PTY-Größe aus einem `resize`-Frame. Nur ganze, positive Werte in einem
- * plausiblen Bereich — ein kaputter Frame darf das PTY nicht auf 0 oder auf
- * Millionen Spalten setzen.
- */
-function toPtySize(cols: unknown, rows: unknown): { cols: number; rows: number } | undefined {
-  const c = Number(cols);
-  const r = Number(rows);
-  if (!Number.isInteger(c) || !Number.isInteger(r)) return undefined;
-  if (c < 1 || r < 1 || c > 1000 || r > 1000) return undefined;
-  return { cols: c, rows: r };
-}
-
-/** Vom Client geschickte Resize-Nachricht — ungeprüftes JSON, deshalb alles `unknown`. */
-function asResizeMessage(value: unknown): { cols: unknown; rows: unknown } | undefined {
-  if (value === null || typeof value !== 'object') return undefined;
-  const msg = value as { type?: unknown; cols?: unknown; rows?: unknown };
-  return msg.type === 'resize' ? { cols: msg.cols, rows: msg.rows } : undefined;
 }
 
 /**
@@ -848,18 +816,29 @@ async function bootstrap() {
   // ─── WebSocket terminal proxy ────────────────────────────────────────
   // Browsers can't set Authorization headers on the WS upgrade, so the JWT
   // arrives in the ?token= query param. We validate, look up the workspace,
-  // then open an upstream WS to the sidecar (using the shared bearer that
-  // never leaves the server-to-server hop) and pipe frames in both
-  // directions. /api/workspaces/:id/exec/stream stays for one-shot agent
-  // calls — this WS is for the interactive PTY only.
+  // then either (container workspace) open an upstream WS to the sidecar
+  // (using the shared bearer that never leaves the server-to-server hop) and
+  // pipe frames in both directions, or (SSH workspace) open a login shell on
+  // the server over SSH, starting in the workspace directory.
+  // /api/workspaces/:id/exec/stream stays for one-shot agent calls — this WS
+  // is for the interactive PTY only.
   const jwt = app.get(JwtService);
   const workspacesService = app.get(WorkspacesService);
   const workspaceCliToken = app.get(WorkspaceCliTokenService);
+  const sshWorkspaceAccess = app.get(SshWorkspaceAccess);
+  const sshSessionService = app.get(SshSessionService);
   const SIDECAR_URL = (process.env.WORKSPACE_API_URL || 'http://workspace:9000').replace(/\/$/, '');
   const SIDECAR_TOKEN = process.env.WORKSPACE_API_TOKEN || '';
   const SIDECAR_WS_URL = SIDECAR_URL.replace(/^http/i, 'ws') + '/term';
   const proxyWss = new WebSocketServer({ noServer: true });
+  // Shared by the SSH-workspace branch below and the SSH connection terminal.
+  const sshTerminalWss = new WebSocketServer({ noServer: true });
   const TERMINAL_ROUTE = /^\/api\/workspaces\/([a-f0-9]{24})\/terminal\/?$/i;
+
+  /** Initial PTY size from `?cols=&rows=`; 80×24 when missing or invalid. */
+  const initialPtySize = (url: URL): { cols: number; rows: number } =>
+    toPtySize(url.searchParams.get('cols') ?? undefined, url.searchParams.get('rows') ?? undefined)
+      ?? { cols: 80, rows: 24 };
 
   const httpServer = app.getHttpServer();
   httpServer.on('upgrade', onUpgradeAsync(async (req: import('http').IncomingMessage, socket: import('net').Socket, head: Buffer) => {
@@ -872,7 +851,6 @@ async function bootstrap() {
       socket.destroy();
     };
 
-    if (!SIDECAR_TOKEN) return reject(503, 'Sidecar Not Configured');
     const token = url.searchParams.get('token');
     if (!token) return reject(401, 'Unauthorized');
 
@@ -917,8 +895,55 @@ async function bootstrap() {
       return reject(403, 'Forbidden');
     }
 
-    // SSH workspaces have no sidecar directory; never proxy them to the PTY.
-    if (workspace.location === 'ssh') return reject(409, 'Conflict');
+    // Read at open: an open terminal keeps the limit it started with.
+    const idleMs = await fsLimits.terminalIdleMs();
+
+    if (isSshWorkspace(workspace)) {
+      // SSH workspace: no sidecar, no X-Dg-Env, no CLI or git token (no
+      // DevGrimoire credentials go to the target server); `sessionId` is
+      // ignored (the shell ends with the socket, no re-attach).
+      if (workspace.status !== 'active') return reject(409, 'Conflict');
+      const remotePath = workspace.remotePath;
+      if (!remotePath) return reject(409, 'Conflict');
+      let connection: Awaited<ReturnType<typeof sshWorkspaceAccess.resolve>>;
+      try {
+        connection = await RequestContext.run(actor, undefined, () => sshWorkspaceAccess.resolve(workspace));
+      } catch (err: unknown) {
+        // Access errors go out as an HTTP status before the upgrade.
+        if (err instanceof HttpException) {
+          const status = err.getStatus();
+          const labels: Record<number, string> = { 403: 'Forbidden', 404: 'Not Found', 409: 'Conflict' };
+          return reject(status, labels[status] ?? 'Error');
+        }
+        throw err;
+      }
+      const connectionId = String(connection._id);
+      const size = initialPtySize(url);
+      const audit = (action: 'terminal_open' | 'terminal_close', durationMs?: number) => {
+        void sshSessionService.writeAudit({
+          connectionId: connection._id,
+          action,
+          sourceContext: 'ide',
+          userId,
+          workspaceId,
+          remotePath,
+          ...(durationMs !== undefined ? { durationMs } : {}),
+        });
+      };
+      RequestContext.run(actor, undefined, () => {
+        sshTerminalWss.handleUpgrade(req, socket, head, voidAsync((clientWs: WebSocket) => bridgeSshTerminal({
+          clientWs,
+          connect: () => sshSessionService.connect(connectionId, { ptyCols: size.cols, ptyRows: size.rows }),
+          start: { kind: 'cwd', path: remotePath },
+          initial: size,
+          idleMs,
+          audit,
+        })));
+      });
+      return;
+    }
+
+    if (!SIDECAR_TOKEN) return reject(503, 'Sidecar Not Configured');
 
     const sessionId = url.searchParams.get('sessionId') || '';
     const upstreamUrl = new URL(SIDECAR_WS_URL);
@@ -932,7 +957,12 @@ async function bootstrap() {
     const dgEnv = workspace.projectId
       ? workspaceCliToken.buildEnvFor(workspace, TERMINAL_TOKEN_TTL)
       : {};
-    const upstreamHeaders: Record<string, string> = { Authorization: `Bearer ${SIDECAR_TOKEN}` };
+    const upstreamHeaders: Record<string, string> = {
+      Authorization: `Bearer ${SIDECAR_TOKEN}`,
+      // Per-terminal idle limit; the sidecar validates it and falls back to
+      // its TERMINAL_IDLE_MS when the value is missing or out of range.
+      'X-Dg-Idle-Ms': String(idleMs),
+    };
     if (Object.keys(dgEnv).length > 0) {
       upstreamHeaders['X-Dg-Env'] = Buffer.from(JSON.stringify(dgEnv)).toString('base64');
     }
@@ -980,8 +1010,10 @@ async function bootstrap() {
             try { clientWs.send(data, { binary: isBinary }); } catch { /* noop */ }
           }
         });
-        clientWs.on('close', (code) => close(code));
-        upstream.on('close', (code) => close(code));
+        // The reason travels along: the sidecar's idle close (4010
+        // `idle_timeout`) must reach the browser intact.
+        clientWs.on('close', (code, reason) => close(code, reason.toString()));
+        upstream.on('close', (code, reason) => close(code, reason.toString()));
         clientWs.on('error', () => close(1011, 'client error'));
         upstream.on('error', () => close(1011, 'upstream error'));
       }));
@@ -992,50 +1024,9 @@ async function bootstrap() {
   // Same JWT-via-query-param pattern as the workspace terminal above. We
   // diverge only at the upstream end: instead of proxying to a sidecar WS
   // we open an ssh2 client locally via SshSessionService.connect(), then
-  // request an interactive shell channel and pipe both directions on it.
-  //
-  // Control-frame protocol mirrors the workspace terminal exactly so the
-  // frontend can share a hook (planned, Schritt 5/8): JSON `{type:'resize',
-  // cols, rows}` from client → server, JSON `{type:'exit', exitCode}` from
-  // server → client. All other frames are stdin/stdout bytes.
-  //
-  // Close-code mapping for SSH connect/auth failures (Spec §4.3):
-  //   host_key_mismatch    → 4001 (spec-mandated)
-  //   tofu_not_accepted    → 4002
-  //   credential_missing   → 4003
-  //   auth_failed          → 4004
-  //   timeout / network    → 4008
-  //   anything else        → 1011 (internal server error)
-  // The reason string is the raw error code so the frontend can also
-  // disambiguate without depending on the numeric mapping.
-  const sshConnectErrorToCloseCode = (reason: string): number => {
-    // Match prefix-style (some errors include extra context after the code,
-    // e.g. "upload_too_large: 12345 > 10485760").
-    const head = reason.split(/[:\s]/, 1)[0] || reason;
-    switch (head) {
-      case 'host_key_mismatch':
-        return 4001;
-      case 'tofu_not_accepted':
-        return 4002;
-      case 'credential_missing':
-        return 4003;
-      case 'auth_failed':
-        return 4004;
-      case 'timeout':
-      case 'ETIMEDOUT':
-      case 'ECONNREFUSED':
-      case 'ENOTFOUND':
-      case 'EHOSTUNREACH':
-      case 'ENETUNREACH':
-      case 'ECONNRESET':
-        return 4008;
-      default:
-        return 1011;
-    }
-  };
-
-  const sshSessionService = app.get(SshSessionService);
-  const sshTerminalWss = new WebSocketServer({ noServer: true });
+  // request an interactive shell channel and pipe both directions on it
+  // (`bridgeSshTerminal`, shared with the SSH-workspace branch above; the
+  // close-code mapping lives next to it).
   const SSH_TERMINAL_ROUTE = /^\/api\/ssh\/([a-f0-9]{24})\/terminal\/?$/i;
 
   httpServer.on('upgrade', onUpgradeAsync(async (req: import('http').IncomingMessage, socket: import('net').Socket, head: Buffer) => {
@@ -1077,187 +1068,37 @@ async function bootstrap() {
     if (!actorMayWriteContent(actor)) return rejectUpgrade(403, 'Forbidden');
 
     const connectionId = match[1];
+    // The route regex guarantees 24 hex chars, so this is a valid ObjectId.
+    const connectionObjectId = new MongoTypes.ObjectId(connectionId);
 
-    // Parse optional initial PTY size from query string for the very first
-    // shell allocation; the frontend will follow up with explicit resize
-    // frames anyway, but starting with the right viewport avoids a flash
-    // of misformatted output.
-    const initialSize = toPtySize(
-      url.searchParams.get('cols') ?? undefined,
-      url.searchParams.get('rows') ?? undefined,
-    );
-    const initialCols = initialSize?.cols ?? 80;
-    const initialRows = initialSize?.rows ?? 24;
+    // Initial PTY size for the very first shell allocation; the frontend
+    // follows up with explicit resize frames anyway, but starting with the
+    // right viewport avoids a flash of misformatted output.
+    const size = initialPtySize(url);
+    // Read at open: an open terminal keeps the limit it started with.
+    const idleMs = await fsLimits.terminalIdleMs();
 
     // ssh2 client setup happens AFTER the WS upgrade so we can surface
     // ssh errors as close-frames (with a reason the UI can render),
     // rather than as raw HTTP rejects with cryptic codes.
     RequestContext.run(actor, undefined, () => {
-    sshTerminalWss.handleUpgrade(req, socket, head, voidAsync(async (clientWs: WebSocket) => {
-      const startedAt = Date.now();
-      let sshClient: import('ssh2').Client | null = null;
-      let channel: import('ssh2').ClientChannel | null = null;
-      let closed = false;
-      let connectionObjectId: MongoTypes.ObjectId | null = null;
-
-      const closeAll = (code = 1000, reason = '') => {
-        if (closed) return;
-        closed = true;
-        try { clientWs.close(code, reason); } catch { /* noop */ }
-        try { channel?.close(); } catch { /* noop */ }
-        try { sshClient?.end(); } catch { /* noop */ }
-        try { sshClient?.destroy(); } catch { /* noop */ }
-        if (connectionObjectId && userId) {
-          // Fire-and-forget audit close row. Duration is end-to-end WS
-          // lifetime, which is the only "session duration" the user
-          // cares about — channel-only timing would be misleading.
+      sshTerminalWss.handleUpgrade(req, socket, head, voidAsync((clientWs: WebSocket) => bridgeSshTerminal({
+        clientWs,
+        connect: () => sshSessionService.connect(connectionId, { ptyCols: size.cols, ptyRows: size.rows }),
+        start: { kind: 'shell' },
+        initial: size,
+        idleMs,
+        // Best-effort audit rows; never block the user-facing data path.
+        audit: (action, durationMs) => {
           void sshSessionService.writeAudit({
             connectionId: connectionObjectId,
-            action: 'terminal_close',
+            action,
             sourceContext: 'terminal',
             userId,
-            durationMs: Date.now() - startedAt,
+            ...(durationMs !== undefined ? { durationMs } : {}),
           });
-        }
-      };
-
-      // Latest PTY size the browser asked for. The frontend sends its first
-      // `resize` frame on WS-open — i.e. while `connect()` below is still
-      // negotiating. That frame used to arrive before any 'message' listener
-      // existed and was dropped, so every shell started at 80×24 and full-
-      // screen tools (btop, htop, vim) only used a corner of the terminal
-      // until the browser window happened to be resized. The handler is
-      // therefore registered right here, and the remembered size feeds
-      // `client.shell()` once the channel opens.
-      let ptySize = { cols: initialCols, rows: initialRows };
-
-      clientWs.on('message', (data, isBinary) => {
-        if (!isBinary) {
-          const text = rawDataToString(data);
-          // Tolerate either a stringified Buffer or a real text frame.
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(text);
-          } catch {
-            parsed = undefined; // Not JSON — treated as stdin below.
-          }
-          const resize = asResizeMessage(parsed);
-          if (resize) {
-            const size = toPtySize(resize.cols, resize.rows);
-            if (size) {
-              ptySize = size;
-              if (channel) {
-                try { channel.setWindow(size.rows, size.cols, 0, 0); } catch { /* noop */ }
-              }
-            }
-            return;
-          }
-          // Pre-shell stdin gets dropped; the user is typing before the
-          // channel is alive. Cheaper than buffering.
-          if (!channel) return;
-          try { channel.write(text); } catch { /* noop */ }
-          return;
-        }
-        if (!channel) return;
-        try { channel.write(data); } catch { /* noop */ }
-      });
-
-      // Also before `connect()`: a browser that gives up while the SSH
-      // handshake is still running (tab closed, Reconnect clicked) must mark
-      // the session closed — otherwise the shell below was opened anyway and
-      // the ssh2 client lived on with nobody attached.
-      clientWs.on('close', () => closeAll());
-      clientWs.on('error', () => closeAll(1011, 'ws_error'));
-
-      try {
-        sshClient = await sshSessionService.connect(connectionId, {
-          ptyCols: initialCols,
-          ptyRows: initialRows,
-        });
-      } catch (err) {
-        const reason = errorMessage(err) || 'ssh_connect_failed';
-        // WS close codes 4000-4999 are reserved for application-defined
-        // semantics. The spec (§4.3) mandates 4001 for host_key_mismatch;
-        // we extend the mapping so the frontend can distinguish the
-        // different SSH failure modes without parsing reason strings.
-        // Anything we don't recognise falls back to 1011 (internal err).
-        const code = sshConnectErrorToCloseCode(reason);
-        try { clientWs.close(code, reason); } catch { /* noop */ }
-        return;
-      }
-
-      if (closed) {
-        // WS went away during the handshake — `closeAll()` already ran with
-        // `sshClient === null`, so the fresh client is ours to release.
-        // An 'error' without a listener would take the whole process down.
-        sshClient.on('error', () => { /* already closing */ });
-        try { sshClient.end(); } catch { /* noop */ }
-        try { sshClient.destroy(); } catch { /* noop */ }
-        return;
-      }
-
-      // We have a ready client → log the open. Best-effort; never block
-      // the user-facing data path.
-      if (MongoTypes.ObjectId.isValid(connectionId)) {
-        connectionObjectId = new MongoTypes.ObjectId(connectionId);
-        void sshSessionService.writeAudit({
-          connectionId: connectionObjectId,
-          action: 'terminal_open',
-          sourceContext: 'terminal',
-          userId,
-        });
-      }
-
-      sshClient.shell(
-        { term: 'xterm-256color', cols: ptySize.cols, rows: ptySize.rows },
-        (err, stream) => {
-          if (err) {
-            // Post-connect failure → 1011 (internal). Spec §4.3's 4xxx codes
-            // are reserved for connect/auth-phase errors; future work could
-            // extend the mapping if shell-open distinguishes further.
-            closeAll(1011, `shell_failed: ${err.message}`);
-            return;
-          }
-          channel = stream;
-          // A resize may have landed between `shell()` and this callback.
-          try { stream.setWindow(ptySize.rows, ptySize.cols, 0, 0); } catch { /* noop */ }
-
-          // SSH → WS: ship both stdout and stderr as binary frames. ssh2
-          // separates them on the channel but xterm-js handles ANSI on a
-          // single byte stream just fine.
-          stream.on('data', (chunk: Buffer) => {
-            if (clientWs.readyState === WebSocket.OPEN) {
-              try { clientWs.send(chunk, { binary: true }); } catch { /* noop */ }
-            }
-          });
-          stream.stderr.on('data', (chunk: Buffer) => {
-            if (clientWs.readyState === WebSocket.OPEN) {
-              try { clientWs.send(chunk, { binary: true }); } catch { /* noop */ }
-            }
-          });
-
-          // Mirror the workspace-terminal protocol on exit so the frontend
-          // can share a single hook later: JSON text-frame, NOT binary.
-          stream.on('exit', (code: number | null) => {
-            if (clientWs.readyState === WebSocket.OPEN) {
-              try {
-                clientWs.send(
-                  JSON.stringify({ type: 'exit', exitCode: code ?? null }),
-                );
-              } catch { /* noop */ }
-            }
-          });
-          stream.on('close', () => closeAll());
         },
-      );
-
-      // WS → SSH: handled by the 'message' listener registered before
-      // `connect()` above (text JSON `resize` = control, everything else stdin).
-
-      sshClient.on('end', () => closeAll());
-      sshClient.on('close', () => closeAll());
-      sshClient.on('error', (err) => closeAll(1011, err.message || 'ssh_error'));
-    }));
+      })));
     });
   }));
 

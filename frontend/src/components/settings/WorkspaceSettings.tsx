@@ -10,19 +10,21 @@ const MB = 1024 * 1024;
 
 const toMb = (bytes: number): string => String(Math.round((bytes / MB) * 100) / 100);
 
-/** Editor and download limits of the browser IDE (global, admin only). */
+/** Editor and download limits of the browser IDE and the terminal idle limit (global, admin only). */
 export default function WorkspaceSettings() {
   const { t } = useTranslation();
   const { showError, showSuccess } = useToast();
   const [config, setConfig] = useState<WorkspaceLimitsConfig | null>(null);
   const [editorMb, setEditorMb] = useState('');
   const [downloadMb, setDownloadMb] = useState('');
+  const [idleMinutes, setIdleMinutes] = useState('');
   const [saving, setSaving] = useState(false);
 
   const apply = (c: WorkspaceLimitsConfig) => {
     setConfig(c);
     setEditorMb(toMb(c.editorMaxBytes));
     setDownloadMb(toMb(c.downloadMaxBytes));
+    setIdleMinutes(String(c.terminalIdleMinutes));
   };
 
   useEffect(() => {
@@ -34,6 +36,8 @@ export default function WorkspaceSettings() {
 
   const editorHardMb = config ? Math.round(config.editorHardMaxBytes / MB) : 100;
   const downloadHardMb = config ? Math.round(config.downloadHardMaxBytes / MB) : 51200;
+  const idleMin = config?.terminalIdleMinMinutes ?? 5;
+  const idleMax = config?.terminalIdleMaxMinutes ?? 1440;
 
   const save = async () => {
     const editor = Number(editorMb);
@@ -46,11 +50,17 @@ export default function WorkspaceSettings() {
       showError(t('workspaceSettings.invalid', { max: downloadHardMb }));
       return;
     }
+    const idle = Number(idleMinutes);
+    if (!Number.isInteger(idle) || idle < idleMin || idle > idleMax) {
+      showError(t('workspaceSettings.idleInvalid', { min: idleMin, max: idleMax }));
+      return;
+    }
     setSaving(true);
     try {
       apply(await api.workspaceConfig.set({
         editorMaxBytes: Math.round(editor * MB),
         downloadMaxBytes: Math.round(download * MB),
+        terminalIdleMinutes: idle,
       }));
       showSuccess(t('workspaceSettings.saved'));
     } catch (e) {
@@ -87,6 +97,20 @@ export default function WorkspaceSettings() {
         helpText={t('workspaceSettings.downloadHint', {
           def: config ? toMb(config.downloadDefaultBytes) : '2048',
           max: downloadHardMb,
+        })}
+      />
+      <FormInput
+        label={t('workspaceSettings.idleLabel')}
+        type="number"
+        min={idleMin}
+        max={idleMax}
+        step={1}
+        value={idleMinutes}
+        onChange={(e) => setIdleMinutes(e.target.value)}
+        helpText={t('workspaceSettings.idleHint', {
+          def: config?.terminalIdleDefaultMinutes ?? 30,
+          min: idleMin,
+          max: idleMax,
         })}
       />
       <SettingsActions>

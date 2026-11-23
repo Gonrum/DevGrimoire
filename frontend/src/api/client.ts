@@ -1271,6 +1271,11 @@ export interface WorkspaceLimitsConfig {
   editorHardMaxBytes: number;
   downloadDefaultBytes: number;
   downloadHardMaxBytes: number;
+  /** Idle limit of all terminals, read when a terminal opens. */
+  terminalIdleMinutes: number;
+  terminalIdleDefaultMinutes: number;
+  terminalIdleMinMinutes: number;
+  terminalIdleMaxMinutes: number;
 }
 
 export type SshAuditAction =
@@ -2631,7 +2636,7 @@ export const api = {
   },
   workspaceConfig: {
     get: () => request<WorkspaceLimitsConfig>('/workspace-config'),
-    set: (limits: { editorMaxBytes?: number; downloadMaxBytes?: number }) =>
+    set: (limits: { editorMaxBytes?: number; downloadMaxBytes?: number; terminalIdleMinutes?: number }) =>
       request<WorkspaceLimitsConfig>('/workspace-config', {
         method: 'PUT',
         body: JSON.stringify(limits),

@@ -26,7 +26,7 @@ function load(rel) {
 const limits = load('workspaces/workspace-limits.service.js');
 const { WorkspaceConfigController } = load('workspaces/workspace-config.controller.js');
 const { WorkspaceClient } = load('workspaces/workspace-client.service.js');
-const { clampLimit, WorkspaceLimitsService } = limits;
+const { clampLimit, clampRange, WorkspaceLimitsService } = limits;
 
 let failures = 0, total = 0;
 async function check(label, fn) {
@@ -72,10 +72,10 @@ async function badRequest(fn) {
 
   await check('service: defaults, stored values, clamping', async () => {
     assert.deepEqual(await new WorkspaceLimitsService(fakeSettings()).get(),
-      { editorMaxBytes: 5 * MIB, downloadMaxBytes: 2 * GIB });
-    const s = fakeSettings({ 'workspaces.editorMaxBytes': String(8 * MIB), 'workspaces.downloadMaxBytes': String(999 * GIB) });
+      { editorMaxBytes: 5 * MIB, downloadMaxBytes: 2 * GIB, terminalIdleMinutes: 30 });
+    const s = fakeSettings({ 'workspaces.editorMaxBytes': String(8 * MIB), 'workspaces.downloadMaxBytes': String(999 * GIB), 'terminals.idleMinutes': '2' });
     assert.deepEqual(await new WorkspaceLimitsService(s).get(),
-      { editorMaxBytes: 8 * MIB, downloadMaxBytes: 50 * GIB });
+      { editorMaxBytes: 8 * MIB, downloadMaxBytes: 50 * GIB, terminalIdleMinutes: 5 });
   });
 
   await check('controller: GET shape', async () => {
@@ -84,7 +84,43 @@ async function badRequest(fn) {
       editorMaxBytes: 5 * MIB, downloadMaxBytes: 2 * GIB,
       editorDefaultBytes: 5 * MIB, editorHardMaxBytes: 100 * MIB,
       downloadDefaultBytes: 2 * GIB, downloadHardMaxBytes: 50 * GIB,
+      terminalIdleMinutes: 30, terminalIdleDefaultMinutes: 30,
+      terminalIdleMinMinutes: 5, terminalIdleMaxMinutes: 1440,
     });
+  });
+
+  await check('terminal idle: constants, clampRange, service', async () => {
+    assert.equal(limits.TERMINAL_IDLE_KEY, 'terminals.idleMinutes');
+    assert.equal(limits.TERMINAL_IDLE_DEFAULT_MINUTES, 30);
+    assert.equal(limits.TERMINAL_IDLE_MIN_MINUTES, 5);
+    assert.equal(limits.TERMINAL_IDLE_MAX_MINUTES, 1440);
+    assert.equal(clampRange(null, 30, 5, 1440), 30);
+    assert.equal(clampRange('', 30, 5, 1440), 30);
+    assert.equal(clampRange('abc', 30, 5, 1440), 30);
+    assert.equal(clampRange('Infinity', 30, 5, 1440), 30);
+    assert.equal(clampRange('1', 30, 5, 1440), 5);
+    assert.equal(clampRange('-7', 30, 5, 1440), 5);
+    assert.equal(clampRange('99999', 30, 5, 1440), 1440);
+    assert.equal(clampRange('45.8', 30, 5, 1440), 45);
+    const svc = new WorkspaceLimitsService(fakeSettings({ 'terminals.idleMinutes': '60' }));
+    assert.equal(await svc.terminalIdleMs(), 60 * 60_000);
+    assert.equal(await new WorkspaceLimitsService(fakeSettings()).terminalIdleMs(), 30 * 60_000);
+  });
+
+  await check('terminal idle: PUT validates the range', async () => {
+    const settings = fakeSettings();
+    const ctrl = new WorkspaceConfigController(new WorkspaceLimitsService(settings), settings);
+    for (const bad of [{ terminalIdleMinutes: 4 }, { terminalIdleMinutes: 1441 }, { terminalIdleMinutes: 'x' },
+      { terminalIdleMinutes: NaN }, { terminalIdleMinutes: null }, { terminalIdleMinutes: 30, editorMaxBytes: 0 }]) {
+      await badRequest(() => ctrl.setConfig(bad));
+    }
+    assert.deepEqual(settings.store, {});
+    const res = await ctrl.setConfig({ terminalIdleMinutes: 90 });
+    assert.equal(res.terminalIdleMinutes, 90);
+    assert.equal(settings.store['terminals.idleMinutes'], '90');
+    assert.equal('workspaces.editorMaxBytes' in settings.store, false);
+    assert.equal((await ctrl.setConfig({ terminalIdleMinutes: 5 })).terminalIdleMinutes, 5);
+    assert.equal((await ctrl.setConfig({ terminalIdleMinutes: 1440 })).terminalIdleMinutes, 1440);
   });
 
   await check('controller: PUT validates and stores only valid values', async () => {
