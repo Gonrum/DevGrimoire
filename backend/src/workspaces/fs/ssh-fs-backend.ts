@@ -8,8 +8,11 @@ import { shq } from '../../common/shell-quote';
 import type { SshAuditAction } from '../../ssh/schemas/ssh-audit.schema';
 import { parseGitStatus, parseGrepOutput, parseRipgrepJson, relativizeStatus } from '../workspace-search-parse';
 import { RemoteError, RemoteExecResult, RemoteSession, RemoteStat, isRemoteError } from './remote-session';
+import { normaliseExecInput } from './workspace-fs-backend';
 import type {
   FsEntry,
+  FsExecOpts,
+  FsExecResult,
   FsLimits,
   FsSearchResult,
   FsStatusResult,
@@ -30,8 +33,15 @@ const SEARCH_TIMEOUT_MS = 20_000;
  * the search ends on the server before the channel gives up on it.
  */
 const SEARCH_REMOTE_TIMEOUT_S = 18;
-/** Exit code of coreutils `timeout` when it had to stop the command. */
-const TIMEOUT_EXIT_CODE = 124;
+/**
+ * The search wrapper stopped the command: coreutils `timeout` exits 124,
+ * busybox `timeout` passes on the TERM death (143, or no exit status at all).
+ */
+function isWrapperTimeout(code: number | null): boolean {
+  return code === 124 || code === 143 || code === null;
+}
+/** Longest command stored in an audit row. */
+const AUDIT_COMMAND_MAX_CHARS = 2000;
 /** A recursive delete of a big tree may take a while; it is never interrupted. */
 const DELETE_TIMEOUT_MS = 120_000;
 const STATUS_TIMEOUT_MS = 30_000;
@@ -43,11 +53,14 @@ export type SshFsRun = <T>(
   fn: (s: RemoteSession) => Promise<T>,
   opts?: { retryable?: boolean },
 ) => Promise<T>;
-export type SshFsAudit = (
-  action: SshAuditAction,
-  path: string,
-  extra?: { bytes?: number; errorMsg?: string },
-) => void;
+export interface SshFsAuditExtra {
+  bytes?: number;
+  errorMsg?: string;
+  command?: string;
+  exitCode?: number;
+  durationMs?: number;
+}
+export type SshFsAudit = (action: SshAuditAction, path: string, extra?: SshFsAuditExtra) => void;
 export interface SshFsBackendOpts {
   /** Upload cap of the connection (`SshSessionService.resolveUploadLimit`). */
   uploadMaxBytes: number;
@@ -250,8 +263,10 @@ export class SshFsBackend implements WorkspaceFsBackend {
 
   /**
    * Overwrites `target`'s content with `tmp`'s, keeping the target's inode
-   * (owner, group, mode). Once the target is being written the temp file is
-   * the only complete copy: on failure it is kept and named in the error.
+   * (owner, group, mode). Once the target is open (and thus truncated) the
+   * temp file is the only complete copy: on failure it is kept and named in
+   * the error. A refused open leaves the target untouched; that error
+   * propagates as is (denied -> 403 like save) and the temp file goes.
    */
   private async copyInto(
     s: RemoteSession,
@@ -259,11 +274,13 @@ export class SshFsBackend implements WorkspaceFsBackend {
     target: string,
     state: { keepTmp: boolean },
   ): Promise<void> {
-    state.keepTmp = true;
+    // The mode only applies to a newly created file; the target exists.
+    const dst = s.fs.createWriteStream(target, NEW_FILE_MODE);
+    dst.once('open', () => { state.keepTmp = true; });
     try {
-      // The mode only applies to a newly created file; the target exists.
-      await pipeline(s.fs.createReadStream(tmp), s.fs.createWriteStream(target, NEW_FILE_MODE));
+      await pipeline(s.fs.createReadStream(tmp), dst);
     } catch (err: unknown) {
+      if (!state.keepTmp) throw err;
       throw fail(500, `Überschreiben fehlgeschlagen; neuer Inhalt liegt in ${this.shown(tmp)} (${errorMessage(err)})`);
     }
   }
@@ -638,7 +655,8 @@ export class SshFsBackend implements WorkspaceFsBackend {
           if (isCode(err, 'timeout')) return { matches: [], truncated: true, engine };
           throw err;
         }
-        if (probe.timeout && res.code === TIMEOUT_EXIT_CODE) return { matches: [], truncated: true, engine };
+        // A cut-off output (exit null, truncated) is a partial result, not a timeout.
+        if (probe.timeout && !res.truncated && isWrapperTimeout(res.code)) return { matches: [], truncated: true, engine };
         let stdout = res.stdout;
         if (res.truncated) stdout = stdout.slice(0, stdout.lastIndexOf('\n') + 1);
         if (!res.truncated && res.code !== 0 && res.code !== 1) {
@@ -654,6 +672,47 @@ export class SshFsBackend implements WorkspaceFsBackend {
     } catch (err: unknown) {
       throw this.toHttp(err, '.', 'list');
     }
+  }
+
+  /**
+   * Agent command on the server: `cd -- <root> && <command>`. The command is
+   * a shell command line on purpose and is not quoted; only the root is. No
+   * env (no DevGrimoire credentials to the server), never retried, and not
+   * wrapped in `timeout` (commands may legitimately run up to 600 s): the
+   * exec timeout ends it with TERM, like an abort.
+   */
+  async exec(command: string, opts: FsExecOpts): Promise<FsExecResult> {
+    const { timeoutMs, maxOutputBytes, signal } = normaliseExecInput(command, opts);
+    const empty = { stdout: '', stderr: '' };
+    const auditCommand = command.slice(0, AUDIT_COMMAND_MAX_CHARS);
+    const started = Date.now();
+    let result: FsExecResult;
+    try {
+      const res = await this.run((s) => s.exec(`cd -- ${shq(this.root)} && ${command}`, {
+        timeoutMs,
+        maxOutputBytes,
+        terminateOnTimeout: true,
+        ...(signal ? { signal } : {}),
+      }));
+      result = { exitCode: res.code, stdout: res.stdout, stderr: res.stderr, truncated: res.truncated, timedOut: false, aborted: false };
+    } catch (err: unknown) {
+      const timedOut = isCode(err, 'timeout');
+      const aborted = isCode(err, 'aborted');
+      if (!timedOut && !aborted) {
+        this.audit('exec', this.root, { command: auditCommand, errorMsg: errorMessage(err).slice(0, 500) });
+        throw this.toHttp(err, '.', 'single');
+      }
+      const partial = (isRemoteError(err) && err.partial) || empty;
+      result = { exitCode: null, ...partial, truncated: false, timedOut, aborted };
+    }
+    this.audit('exec', this.root, {
+      command: auditCommand,
+      durationMs: Date.now() - started,
+      ...(result.exitCode !== null ? { exitCode: result.exitCode } : {}),
+      ...(result.timedOut ? { errorMsg: `timeout after ${timeoutMs} ms` } : {}),
+      ...(result.aborted ? { errorMsg: 'aborted' } : {}),
+    });
+    return result;
   }
 
   async status(): Promise<FsStatusResult> {

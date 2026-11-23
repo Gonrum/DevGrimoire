@@ -8,6 +8,8 @@
  */
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { execFileSync } = require('node:child_process');
@@ -347,7 +349,8 @@ function makeWorld() {
   });
 
   await check('PROBE_COMMAND: one exec; probes timeout too; runs in a real sh and parses', () => {
-    assert.ok(PROBE_COMMAND.includes('command -v timeout >/dev/null 2>&1 && echo timeout=1 || echo timeout=0'));
+    // Usability, not presence: old busybox `timeout` wants `-t SECS` and fails here.
+    assert.ok(PROBE_COMMAND.includes('timeout 1 true >/dev/null 2>&1 && echo timeout=1 || echo timeout=0'));
     const out = execFileSync('sh', ['-c', PROBE_COMMAND], { encoding: 'utf8' });
     const p = parseProbeOutput(out);
     assert.equal(typeof p.timeout, 'boolean');
@@ -356,6 +359,24 @@ function makeWorld() {
     assert.equal(p.timeout, true);
     const noTimeout = execFileSync('/bin/sh', ['-c', PROBE_COMMAND], { encoding: 'utf8', env: { PATH: '/nonexistent' } });
     assert.equal(parseProbeOutput(noTimeout).timeout, false);
+  });
+
+  await check('PROBE_COMMAND: old busybox `timeout` (-t SECS syntax) -> timeout=0; a working one -> timeout=1', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dg-probe-'));
+    try {
+      const sh = execFileSync('sh', ['-c', 'command -v sh'], { encoding: 'utf8' }).trim();
+      // Old busybox: `timeout [-t SECS] [-s SIG] PROG ARGS` — `timeout 1 true` runs "1".
+      fs.writeFileSync(path.join(dir, 'timeout'), `#!${sh}\nwhile [ "$#" -gt 0 ]; do case "$1" in -t|-s) shift 2;; *) break;; esac; done\nexec "$@"\n`, { mode: 0o755 });
+      const env = { PATH: `${dir}:/usr/bin:/bin` };
+      const old = parseProbeOutput(execFileSync(sh, ['-c', PROBE_COMMAND], { encoding: 'utf8', env }));
+      assert.equal(old.timeout, false, 'unusable busybox timeout');
+      fs.writeFileSync(path.join(dir, 'timeout'), `#!${sh}\nshift\nexec "$@"\n`, { mode: 0o755 });
+      const ok = parseProbeOutput(execFileSync(sh, ['-c', PROBE_COMMAND], { encoding: 'utf8', env }));
+      assert.equal(ok.timeout, true, 'usable timeout');
+      assert.equal(ok.uid, process.getuid());
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   await check('exec: terminateOnTimeout passed to the driver (default true, false kept)', async () => {
@@ -630,6 +651,63 @@ function makeWorld() {
     assert.equal(err.code, 'timeout');
     assert.ok(chan.closed >= 1);
     assert.deepEqual(chan.signals, [{ name: 'TERM', closedBefore: 0 }], 'TERM sent before the channel closes');
+  });
+
+  await check('driver: write stream emits open once the SFTP handle is open; a denied open errors without open', async () => {
+    const make = (fail) => () => {
+      const w = new EventEmitter();
+      w.write = (_c, _e, cb) => cb();
+      w.end = () => setImmediate(() => w.emit('close'));
+      w.destroy = () => { w.destroyed = true; setImmediate(() => w.emit('close')); };
+      setImmediate(() => (fail ? w.emit('error', sftpErr(3, 'Permission denied')) : w.emit('open', Buffer.from('h'))));
+      return w;
+    };
+    for (const fail of [false, true]) {
+      const { client } = makeSsh2({ createWriteStream: make(fail) });
+      const d = await createSsh2Driver(client, { onLost() {} });
+      const out = d.fs.createWriteStream('/t', 0o644);
+      let opened = false;
+      out.once('open', () => { opened = true; });
+      const err = await new Promise((resolve) => { out.once('error', resolve); setTimeout(() => resolve(null), 30); });
+      assert.equal(opened, !fail);
+      if (fail) assert.equal(err.code, 'denied');
+      else assert.equal(err, null);
+      out.destroy();
+    }
+  });
+
+  await check('driver: abort signal -> TERM, channel closed, RemoteError aborted with partial output', async () => {
+    const { client } = makeSsh2();
+    let chan;
+    client.execImpl = (_cmd, cb) => { chan = fakeChannel(); cb(undefined, chan); };
+    const d = await createSsh2Driver(client, { onLost() {} });
+    const ac = new AbortController();
+    const running = rejection(() => d.exec('x', { timeoutMs: 10_000, maxOutputBytes: 100, terminateOnTimeout: true, signal: ac.signal }));
+    await sleep(5);
+    chan.emit('data', Buffer.from('so far'));
+    chan.stderr.emit('data', Buffer.from('warn'));
+    ac.abort();
+    const err = await running;
+    assert.equal(err.code, 'aborted');
+    assert.deepEqual(err.partial, { stdout: 'so far', stderr: 'warn' });
+    assert.deepEqual(chan.signals, [{ name: 'TERM', closedBefore: 0 }]);
+    assert.ok(chan.closed >= 1);
+  });
+
+  await check('driver: timeout carries partial output; already aborted signal -> no channel opened', async () => {
+    const { client } = makeSsh2();
+    let chan;
+    let opened = 0;
+    client.execImpl = (_cmd, cb) => { opened += 1; chan = fakeChannel(); cb(undefined, chan); setImmediate(() => chan.emit('data', Buffer.from('abc'))); };
+    const d = await createSsh2Driver(client, { onLost() {} });
+    const err = await rejection(() => d.exec('x', { timeoutMs: 30, maxOutputBytes: 100, terminateOnTimeout: true }));
+    assert.equal(err.code, 'timeout');
+    assert.deepEqual(err.partial, { stdout: 'abc', stderr: '' });
+    const ac = new AbortController();
+    ac.abort();
+    const err2 = await rejection(() => d.exec('y', { timeoutMs: 1000, maxOutputBytes: 100, terminateOnTimeout: true, signal: ac.signal }));
+    assert.equal(err2.code, 'aborted');
+    assert.equal(opened, 1);
   });
 
   await check('driver: exec timeout with terminateOnTimeout false -> no signal, channel closed', async () => {

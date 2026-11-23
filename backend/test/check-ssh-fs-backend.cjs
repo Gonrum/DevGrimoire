@@ -508,6 +508,27 @@ process.on('exit', (code) => {
     assert.deepEqual(t.tmpLeft(), []);
   });
 
+  await check('upload overwrite in place: target not writable for us -> 403 like save, temp removed, target untouched', async () => {
+    const t = setup();
+    fs.writeFileSync(t.f('o.txt'), 'theirs');
+    t.fake.switches.probeUid += 1; // foreign owner -> in place
+    t.fake.switches.denyOpenWrite.add(t.f('o.txt'));
+    await rejectsStatus(
+      () => t.backend.upload('.', 'o.txt', Readable.from([Buffer.from('mine')]), { size: 4, overwrite: true }),
+      403,
+      /^keine Berechtigung auf dem Server: o\.txt$/,
+    );
+    await sleep(20);
+    assert.equal(fs.readFileSync(t.f('o.txt'), 'utf8'), 'theirs');
+    assert.deepEqual(t.tmpLeft(), []);
+    // Save on the same file answers the same way.
+    await rejectsStatus(
+      () => t.backend.writeText('o.txt', 'mine', { baseHash: null, force: true }, LIMITS),
+      403,
+      /^keine Berechtigung auf dem Server: o\.txt$/,
+    );
+  });
+
   await check('upload: known size over the limit -> 413 {limit} before writing', async () => {
     const t = setup({ uploadMaxBytes: 10 });
     const e = await rejectsStatus(() => t.backend.upload('.', 'big', Readable.from([Buffer.alloc(11)]), { size: 11, overwrite: false }), 413);

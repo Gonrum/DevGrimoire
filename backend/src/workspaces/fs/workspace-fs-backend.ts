@@ -1,3 +1,4 @@
+import { HttpException } from '@nestjs/common';
 import type { Readable } from 'node:stream';
 import type { parseGitStatus, parseRipgrepJson } from '../workspace-search-parse';
 
@@ -12,6 +13,45 @@ export interface FsLimits {
   downloadMaxBytes: number;
   /** Unset for containers: the sidecar keeps its own upload cap. */
   uploadMaxBytes?: number;
+}
+
+/** Result of `exec`; `exitCode` is null after a timeout, an abort or a cut-off output. */
+export interface FsExecResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  /** stdout or stderr exceeded `maxOutputBytes` (each stream is capped on its own). */
+  truncated: boolean;
+  timedOut: boolean;
+  aborted: boolean;
+}
+
+export interface FsExecOpts {
+  timeoutMs: number;
+  /** Aborting ends the running command (container: upstream abort; SSH: TERM + channel close). */
+  signal?: AbortSignal;
+  maxOutputBytes: number;
+}
+
+/** Same ceiling as the sidecar's `/exec` (`EXEC_MAX_TIMEOUT_MS`). */
+export const FS_EXEC_MAX_TIMEOUT_MS = 600_000;
+/** Same command length limit as the sidecar. */
+export const FS_EXEC_MAX_COMMAND_LENGTH = 8 * 1024;
+
+/**
+ * Shared input rules of `exec`: a non-empty command without NUL up to 8 KiB
+ * (400 otherwise); timeout clamped to 1 ms .. 600 s, output cap to >= 1 byte.
+ */
+export function normaliseExecInput(command: string, opts: FsExecOpts): FsExecOpts {
+  const bad = (message: string): HttpException => new HttpException({ error: message, message }, 400);
+  if (typeof command !== 'string' || !command.trim()) throw bad('command must be a non-empty string');
+  if (command.includes('\0')) throw bad('command must not contain NUL');
+  if (command.length > FS_EXEC_MAX_COMMAND_LENGTH) throw bad(`command too long (max ${FS_EXEC_MAX_COMMAND_LENGTH})`);
+  const timeoutMs = Number.isFinite(opts.timeoutMs)
+    ? Math.min(Math.max(Math.floor(opts.timeoutMs), 1), FS_EXEC_MAX_TIMEOUT_MS)
+    : FS_EXEC_MAX_TIMEOUT_MS;
+  const maxOutputBytes = Number.isFinite(opts.maxOutputBytes) ? Math.max(Math.floor(opts.maxOutputBytes), 1) : 1;
+  return { timeoutMs, maxOutputBytes, ...(opts.signal ? { signal: opts.signal } : {}) };
 }
 
 /**
@@ -46,4 +86,10 @@ export interface WorkspaceFsBackend {
     exclude?: string[];
   }): Promise<FsSearchResult>;
   status(): Promise<FsStatusResult>;
+  /**
+   * Runs a shell command line in the workspace directory, without a PTY.
+   * Container: sidecar `/exec/stream` with the same env as `workspace_exec`;
+   * SSH: the held session, no env, never retried.
+   */
+  exec(command: string, opts: FsExecOpts): Promise<FsExecResult>;
 }

@@ -215,6 +215,25 @@ function seed(t) {
     t.fake.switches.probeTimeout = false;
     await rejectsStatus(() => t.backend.search(q('needle')), 500, /exit 124/);
   });
+  await check('busybox timeout: exit 143 or no exit status (null) with the wrapper -> empty, truncated', async () => {
+    const t = setup(); seed(t);
+    for (const code of [143, null]) {
+      t.fake.switches.probeTimeout = true;
+      t.fake.session.exec = async () => ({ code, stdout: './a\0' + '1:needle\n', stderr: '', truncated: false });
+      assert.deepEqual(await t.backend.search(q('needle')), { matches: [], truncated: true, engine: 'grep' }, `code ${code}`);
+      // Without the wrapper such an exit is a failure, as before.
+      t.fake.switches.probeTimeout = false;
+      await rejectsStatus(() => t.backend.search(q('needle')), 500);
+    }
+  });
+  await check('output cap (exit null, truncated) with the wrapper still returns the partial matches', async () => {
+    const t = setup(); seed(t);
+    t.fake.switches.probeTimeout = true;
+    t.fake.session.exec = async () => ({ code: null, stdout: './a\0' + '1:needle\n' + './b\0' + '2:nee', stderr: '', truncated: true });
+    const res = await t.backend.search(q('needle'));
+    assert.equal(res.truncated, true);
+    assert.deepEqual(res.matches.map((m) => [m.path, m.line]), [['a', 1]]);
+  });
   await check('2000 match cap -> truncated', async () => {
     const t = setup();
     fs.mkdirSync(t.f('many'));

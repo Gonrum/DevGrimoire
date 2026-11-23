@@ -59,6 +59,7 @@ import { SnippetsService } from './snippets/snippets.service';
 import { WorkspacesService } from './workspaces/workspaces.service';
 import { WorkspaceClient } from './workspaces/workspace-client.service';
 import { WorkspaceGitTokensService } from './workspaces/workspace-git-tokens.service';
+import { buildWorkspaceExecEnv } from './workspaces/workspace-exec-env';
 import { WorkspaceCliTokenService } from './workspaces/workspace-cli-token.service';
 import { assertWorkspaceWithinClientRoots, McpRootLike } from './workspaces/workspace-roots.guard';
 import { AttachmentsService } from './attachments/attachments.service';
@@ -7003,15 +7004,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const callerEnv = optionalObject<Record<string, string>>(a, 'env');
           const ws = await loadContainerWorkspace(workspacesService, sshService, id);
           assertWorkspaceWithinClientRoots(ws, await getClientRoots(server));
-          // Auto-inject GH_TOKEN/GITLAB_TOKEN/GITLAB_HOST from project.gitRepositories
-          // so `gh`/`glab` work inside the sidecar without manual auth. Caller env wins.
-          const gitEnv = await workspaceGitTokens.resolveForWorkspace(ws);
-          // Auto-inject DG_* so the in-workspace `dg` CLI talks to the backend
-          // with a project-scoped token (1h TTL, T-168).
-          const dgEnv = workspaceCliToken.buildEnvFor(ws);
-          const mergedEnv = Object.keys(gitEnv).length || Object.keys(dgEnv).length || callerEnv
-            ? { ...gitEnv, ...dgEnv, ...(callerEnv ?? {}) }
-            : undefined;
+          // Git tokens + DG_* (1h TTL, T-168) auto-injected; caller env wins.
+          const mergedEnv = await buildWorkspaceExecEnv(workspaceGitTokens, workspaceCliToken, ws, callerEnv);
           const exec = await workspaceClient.exec(ws._id.toString(), command, timeoutMs, mergedEnv);
           await workspacesService.touch(id);
 

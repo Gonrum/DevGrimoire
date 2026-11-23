@@ -11,7 +11,10 @@ import { RequestContext } from '../../common/request-context';
 import { errorMessage } from '../../common/narrow';
 import { ContainerFsBackend } from './container-fs-backend';
 import { SshFsBackend } from './ssh-fs-backend';
-import type { SshFsRun } from './ssh-fs-backend';
+import type { SshFsAuditExtra, SshFsRun } from './ssh-fs-backend';
+import { WorkspaceGitTokensService } from '../workspace-git-tokens.service';
+import { WorkspaceCliTokenService } from '../workspace-cli-token.service';
+import { buildWorkspaceExecEnv } from '../workspace-exec-env';
 import { SshWorkspaceSessions } from './ssh-workspace-sessions.service';
 import { isRemoteError } from './remote-session';
 import type { WorkspaceFsBackend } from './workspace-fs-backend';
@@ -30,6 +33,8 @@ export class WorkspaceFsBackends implements OnModuleInit {
     private readonly connector: SshSessionService,
     private readonly access: SshWorkspaceAccess,
     private readonly workspaces: WorkspacesService,
+    private readonly gitTokens: WorkspaceGitTokensService,
+    private readonly cliToken: WorkspaceCliTokenService,
   ) {}
 
   /** Registers the "directory exists" check used when an SSH workspace is created. */
@@ -54,7 +59,7 @@ export class WorkspaceFsBackends implements OnModuleInit {
       await this.client.ensureDir(id);
       this.ensuredAt.set(id, Date.now());
     }
-    return new ContainerFsBackend(this.client, id);
+    return new ContainerFsBackend(this.client, id, () => buildWorkspaceExecEnv(this.gitTokens, this.cliToken, ws));
   }
 
   private async forSsh(ws: WorkspaceDocument, connection: SshConnectionDocument): Promise<WorkspaceFsBackend> {
@@ -67,7 +72,7 @@ export class WorkspaceFsBackends implements OnModuleInit {
     const audit = (
       action: SshAuditAction,
       remotePath: string,
-      extra?: { bytes?: number; errorMsg?: string },
+      extra?: SshFsAuditExtra,
     ): void => {
       void this.connector.writeAudit({
         connectionId: connection._id,
@@ -78,6 +83,9 @@ export class WorkspaceFsBackends implements OnModuleInit {
         remotePath,
         ...(extra?.bytes !== undefined ? { bytes: extra.bytes } : {}),
         ...(extra?.errorMsg !== undefined ? { errorMsg: extra.errorMsg } : {}),
+        ...(extra?.command !== undefined ? { command: extra.command } : {}),
+        ...(extra?.exitCode !== undefined ? { exitCode: extra.exitCode } : {}),
+        ...(extra?.durationMs !== undefined ? { durationMs: extra.durationMs } : {}),
       });
     };
     const run: SshFsRun = (fn, opts) =>

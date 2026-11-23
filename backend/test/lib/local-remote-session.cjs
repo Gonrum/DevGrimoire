@@ -24,6 +24,16 @@
  *   probeTimeout       `timeout` reported by probe() (default: true; search
  *                      commands then carry a `timeout -s TERM <n>` prefix)
  *   execTimeout        exec() rejects with RemoteError('timeout')
+ *   denyOpenWrite      Set of paths: opening them for writing (createWriteStream,
+ *                      writeFile) -> `denied`, even when the file exists
+ *   execScript         null, or the scripted answer for agent commands
+ *                      (`cd -- '<root>' && <anything>`, see agentShape):
+ *                      { code = 0, stdout = '', stderr = '', delayMs = 0,
+ *                        timeout = false }. Such a command is only recorded
+ *                      and answered, NEVER run. `timeout: true` rejects with
+ *                      RemoteError('timeout') after `delayMs`; an aborted
+ *                      `opts.signal` rejects with RemoteError('aborted').
+ *                      Both carry the scripted output as `partial`.
  */
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
@@ -52,8 +62,10 @@ function createLocalRemoteSession(base, RemoteError) {
     probeGit: true,
     probeTimeout: true,
     execTimeout: false,
+    denyOpenWrite: new Set(),
+    execScript: null,
   };
-  const calls = { readStreams: [], writeStreams: 0, execs: [], execOpts: [], writeFiles: [] };
+  const calls = { readStreams: [], writeStreams: 0, execs: [], execOpts: [], writeFiles: [], agentExecs: [], aborts: 0 };
 
   const inside = (root, p) => p === root || p.startsWith(`${root}/`);
   function guard(p) {
@@ -83,6 +95,7 @@ function createLocalRemoteSession(base, RemoteError) {
   };
   const exists = async (p) => { try { await fsp.lstat(p); return true; } catch { return false; } };
   async function assertCreate(p) {
+    if (switches.denyOpenWrite.has(p)) throw new RemoteError('denied', `${p}: permission denied`);
     if (switches.denyCreateIn.has(path.dirname(p)) && !(await exists(p))) {
       throw new RemoteError('denied', `${p}: permission denied`);
     }
@@ -144,7 +157,7 @@ function createLocalRemoteSession(base, RemoteError) {
         await new Promise((res, rej) => { dst.once('open', res); dst.once('error', rej); });
       })();
       ready.catch(() => undefined);
-      return new Writable({
+      const w = new Writable({
         write(chunk, enc, cb) {
           ready.then(() => dst.write(chunk, enc, (e) => cb(e ? map(e, 'write') : null)), (e) => cb(map(e, 'write')));
         },
@@ -163,6 +176,9 @@ function createLocalRemoteSession(base, RemoteError) {
             .then(() => cb(err));
         },
       });
+      // Like the ssh2 wrapper: `open` once the remote file is open.
+      ready.then(() => w.emit('open'), () => undefined);
+      return w;
     },
     rename: wrap('rename', async (from, to) => {
       const f = guard(from); const t = guard(to);
@@ -254,7 +270,47 @@ function createLocalRemoteSession(base, RemoteError) {
     }
     return [unquote(m[1])];
   }
+  /**
+   * Agent commands (`exec` of the file backend): `cd -- '<root>' && <anything>`.
+   * Only while `switches.execScript` is set — the tail is an arbitrary shell
+   * command line and is never run; the root is guarded like every path.
+   */
+  function agentShape(cmd) {
+    if (!switches.execScript) return null;
+    const m = /^cd -- ('(?:[^']|'\\'')*') && (.+)$/s.exec(cmd);
+    return m ? [unquote(m[1])] : null;
+  }
+  function scriptedExec(command, opts) {
+    const sc = { code: 0, stdout: '', stderr: '', delayMs: 0, timeout: false, ...switches.execScript };
+    calls.agentExecs.push(command);
+    const cap = (text) => {
+      const max = opts.maxOutputBytes;
+      if (!max || Buffer.byteLength(text) <= max) return { text, cut: false };
+      return { text: Buffer.from(text).subarray(0, max).toString('utf8'), cut: true };
+    };
+    const out = cap(sc.stdout);
+    const err = cap(sc.stderr);
+    const partial = { stdout: out.text, stderr: err.text };
+    return new Promise((resolve, reject) => {
+      const signal = opts.signal;
+      let timer;
+      const onAbort = () => {
+        clearTimeout(timer);
+        calls.aborts += 1;
+        reject(new RemoteError('aborted', 'exec aborted', partial));
+      };
+      if (signal && signal.aborted) { onAbort(); return; }
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
+      timer = setTimeout(() => {
+        if (signal) signal.removeEventListener('abort', onAbort);
+        if (sc.timeout) { reject(new RemoteError('timeout', 'exec timed out', partial)); return; }
+        const truncated = out.cut || err.cut;
+        resolve({ code: truncated ? null : sc.code, stdout: out.text, stderr: err.text, truncated });
+      }, sc.delayMs);
+    });
+  }
   const EXEC_SHAPES = [
+    agentShape,
     // remove(): rm -rf -- '<abs>'
     (cmd) => {
       const m = /^rm -rf -- ('(?:[^']|'\\'')*')$/.exec(cmd);
@@ -277,6 +333,7 @@ function createLocalRemoteSession(base, RemoteError) {
       for (const p of execPaths(command)) guard(p);
       calls.execs.push(command);
       calls.execOpts.push(opts);
+      if (agentShape(command)) return scriptedExec(command, opts);
       if (switches.execTimeout) throw new RemoteError('timeout', 'exec timed out');
       return new Promise((resolve) => {
         execFile('sh', ['-c', command], { cwd: base, timeout: opts.timeoutMs ?? 20_000, maxBuffer: 256 * 1024 * 1024 }, (err, stdout, stderr) => {

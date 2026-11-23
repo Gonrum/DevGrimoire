@@ -32,6 +32,7 @@ export interface RemoteFs {
   readFile(p: string, maxBytes: number): Promise<Buffer>;
   createReadStream(p: string): Readable;
   writeFile(p: string, data: Buffer, mode: number): Promise<void>;
+  /** Emits `open` once the remote file is open (and thus truncated); a refused open errors instead. */
   createWriteStream(p: string, mode: number): Writable;
   /** Fails with code `exists` if the target exists. */
   rename(from: string, to: string): Promise<void>;
@@ -58,9 +59,18 @@ export interface RemoteExecOpts {
    * interrupted halfway, e.g. a recursive delete.
    */
   terminateOnTimeout?: boolean;
+  /**
+   * Aborting it asks the server to send SIGTERM to the command and closes the
+   * channel; the exec rejects with code `aborted`. A call still waiting for an
+   * exec slot gives up its place without being sent.
+   */
+  signal?: AbortSignal;
 }
 
-/** `timeout`: coreutils `timeout` exists, so a long command can be bounded on the server. */
+/** What the driver receives: every option resolved, `signal` stays optional. */
+export type RemoteDriverExecOpts = Required<Omit<RemoteExecOpts, 'signal'>> & Pick<RemoteExecOpts, 'signal'>;
+
+/** `timeout`: a usable `timeout SECS CMD` exists, so a long command can be bounded on the server. */
 export interface RemoteProbe { rg: boolean; git: boolean; timeout: boolean; uid: number; gid: number }
 
 export interface RemoteSession {
@@ -76,12 +86,21 @@ export type RemoteErrorCode =
   | 'denied'
   | 'too_large'
   | 'timeout'
+  | 'aborted'
   | 'disconnected'
   | 'failure';
 
+/** Output an exec had collected before it timed out or was aborted. */
+export interface RemoteExecPartial { stdout: string; stderr: string }
+
 /** Error of a remote operation with a stable `code` (see `RemoteErrorCode`). */
 export class RemoteError extends Error {
-  constructor(public readonly code: RemoteErrorCode, message: string) {
+  constructor(
+    public readonly code: RemoteErrorCode,
+    message: string,
+    /** Set by exec on `timeout` / `aborted`. */
+    public readonly partial?: RemoteExecPartial,
+  ) {
     super(message);
     this.name = 'RemoteError';
   }
@@ -98,7 +117,7 @@ export function isRemoteError(err: unknown): err is RemoteError {
  */
 export interface RemoteSessionDriver {
   fs: RemoteFs;
-  exec(command: string, opts: Required<RemoteExecOpts>): Promise<RemoteExecResult>;
+  exec(command: string, opts: RemoteDriverExecOpts): Promise<RemoteExecResult>;
   /** Closes the driver's channels; the client itself is closed by the caller. */
   close(): void;
 }
@@ -114,11 +133,16 @@ export type RemoteDriverFactory<C = unknown> = (
   ctx: RemoteDriverContext,
 ) => Promise<RemoteSessionDriver>;
 
-/** One exec: which of rg/git/timeout exist, and the remote uid/gid. Parsed by `parseProbeOutput`. */
+/**
+ * One exec: which of rg/git exist, whether `timeout` is usable, and the remote
+ * uid/gid. Parsed by `parseProbeOutput`. `timeout` is tested by running it:
+ * old busybox builds only accept `timeout -t SECS`, so their `timeout 1 true`
+ * fails just like `timeout -s TERM 18 rg …` would.
+ */
 export const PROBE_COMMAND =
   'command -v rg >/dev/null 2>&1 && echo rg=1 || echo rg=0; '
   + 'command -v git >/dev/null 2>&1 && echo git=1 || echo git=0; '
-  + 'command -v timeout >/dev/null 2>&1 && echo timeout=1 || echo timeout=0; '
+  + 'timeout 1 true >/dev/null 2>&1 && echo timeout=1 || echo timeout=0; '
   + 'echo "uid=$(id -u 2>/dev/null)"; '
   + 'echo "gid=$(id -g 2>/dev/null)"';
 

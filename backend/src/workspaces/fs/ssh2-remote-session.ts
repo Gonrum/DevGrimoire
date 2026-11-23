@@ -4,6 +4,7 @@ import { errorMessage, isRecord } from '../../common/narrow';
 import {
   RemoteDirEntry,
   RemoteDriverContext,
+  RemoteDriverExecOpts,
   RemoteError,
   RemoteExecResult,
   RemoteFs,
@@ -195,8 +196,7 @@ export async function createSsh2Driver(
 
   return {
     fs,
-    exec: (command, opts) =>
-      runExec(client, command, opts.timeoutMs, opts.maxOutputBytes, opts.terminateOnTimeout),
+    exec: (command, opts) => runExec(client, command, opts),
     close: () => safe(() => sftp.end()),
   };
 }
@@ -269,6 +269,8 @@ function wrapWriteStream(open: () => Writable, context: string): Writable {
   try {
     dst = open();
     dst.once('close', () => { dstClosed = true; });
+    // The SFTP handle is open (target truncated): callers keep their temp copy from here on.
+    dst.once('open', () => out.emit('open'));
     dst.on('error', (err: Error) => {
       dstError = toRemoteError(err, context);
       out.destroy(dstError);
@@ -282,14 +284,13 @@ function wrapWriteStream(open: () => Writable, context: string): Writable {
 
 interface OutputSink { chunks: Buffer[]; len: number }
 
-/** One exec channel with an absolute timeout and a per-stream output cap. */
-function runExec(
-  client: Ssh2Client,
-  command: string,
-  timeoutMs: number,
-  maxOutputBytes: number,
-  terminateOnTimeout: boolean,
-): Promise<RemoteExecResult> {
+/**
+ * One exec channel with an absolute timeout, a per-stream output cap and an
+ * optional abort signal. Timeout and abort reject with the output collected
+ * so far as `partial`.
+ */
+function runExec(client: Ssh2Client, command: string, opts: RemoteDriverExecOpts): Promise<RemoteExecResult> {
+  const { timeoutMs, maxOutputBytes, terminateOnTimeout, signal } = opts;
   return new Promise<RemoteExecResult>((resolve, reject) => {
     let settled = false;
     let truncated = false;
@@ -297,21 +298,36 @@ function runExec(
     let channel: ClientChannel | undefined;
     const out: OutputSink = { chunks: [], len: 0 };
     const err: OutputSink = { chunks: [], len: 0 };
+    const text = (sink: OutputSink): string => Buffer.concat(sink.chunks, sink.len).toString('utf8');
+    const partial = (): { stdout: string; stderr: string } => ({ stdout: text(out), stderr: text(err) });
     const closeChannel = (): void => safe(() => channel?.close());
     const timer = setTimeout(() => {
-      finish(() => reject(new RemoteError('timeout', `exec timed out after ${timeoutMs} ms`)));
+      finish(() => reject(new RemoteError('timeout', `exec timed out after ${timeoutMs} ms`, partial())));
       // Closing the channel alone leaves the remote command running. Ask the
       // server to terminate it first; many sshd builds ignore the request,
       // which is harmless.
       if (terminateOnTimeout) safe(() => channel?.signal('TERM'));
       closeChannel();
     }, timeoutMs);
+    let aborted = false;
+    const onAbort = (): void => {
+      aborted = true;
+      finish(() => reject(new RemoteError('aborted', 'exec aborted', partial())));
+      safe(() => channel?.signal('TERM'));
+      closeChannel();
+    };
     function finish(fn: () => void): void {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
       fn();
     }
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
     const take = (sink: OutputSink, chunk: Buffer): void => {
       const room = maxOutputBytes - sink.len;
       if (room > 0) {
@@ -331,10 +347,15 @@ function runExec(
           return;
         }
         if (settled) {
+          // Aborted while the channel was opening: the command may already run.
+          if (aborted) safe(() => ch.signal('TERM'));
           safe(() => ch.close());
           return;
         }
         channel = ch;
+        // No PTY, no input: EOF on stdin, so a command waiting for input ends
+        // instead of hanging until its timeout (the sidecar does the same).
+        safe(() => ch.end());
         ch.on('data', (d: Buffer) => take(out, d));
         ch.stderr.on('data', (d: Buffer) => take(err, d));
         ch.on('exit', (code: unknown) => {
@@ -343,12 +364,7 @@ function runExec(
         ch.on('error', (e: Error) => finish(() => reject(toRemoteError(e, 'exec'))));
         ch.on('close', (code: unknown) => {
           if (exitCode === null && typeof code === 'number') exitCode = code;
-          finish(() => resolve({
-            code: truncated ? null : exitCode,
-            stdout: Buffer.concat(out.chunks, out.len).toString('utf8'),
-            stderr: Buffer.concat(err.chunks, err.len).toString('utf8'),
-            truncated,
-          }));
+          finish(() => resolve({ code: truncated ? null : exitCode, ...partial(), truncated }));
         });
       });
     } catch (e: unknown) {

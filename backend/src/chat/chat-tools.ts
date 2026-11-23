@@ -24,6 +24,7 @@ import { WorkspacesService } from '../workspaces/workspaces.service';
 import { WorkspaceClient } from '../workspaces/workspace-client.service';
 import { assertContainerWorkspace } from '../workspaces/container-only';
 import { WorkspaceGitTokensService } from '../workspaces/workspace-git-tokens.service';
+import { buildWorkspaceExecEnv } from '../workspaces/workspace-exec-env';
 import { WorkspaceCliTokenService } from '../workspaces/workspace-cli-token.service';
 import { SnippetsService } from '../snippets/snippets.service';
 import { AttachmentsService } from '../attachments/attachments.service';
@@ -2741,11 +2742,7 @@ export class ChatToolsService {
           // Nur die Objekt-Form wird geprüft; die Key/Value-Regeln (Keys [A-Z_]…,
           // Werte <=4KB) erzwingt der Sidecar bzw. ExecWorkspaceDto.
           const callerEnv = optionalObject<Record<string, string>>(args, 'env');
-          const gitEnv = await this.workspaceGitTokens.resolveForWorkspace(w);
-          const dgEnv = this.workspaceCliToken.buildEnvFor(w);
-          const mergedEnv = Object.keys(gitEnv).length || Object.keys(dgEnv).length || callerEnv
-            ? { ...gitEnv, ...dgEnv, ...(callerEnv ?? {}) }
-            : undefined;
+          const mergedEnv = await buildWorkspaceExecEnv(this.workspaceGitTokens, this.workspaceCliToken, w, callerEnv);
           const exec = await this.workspaceClient.exec(
             w._id.toString(),
             requireString(args, 'command'),

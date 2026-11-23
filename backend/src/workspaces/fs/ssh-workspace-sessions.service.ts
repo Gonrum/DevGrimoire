@@ -356,15 +356,16 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
       const timeoutMs = opts.timeoutMs ?? this.opTimeoutMs;
       const maxOutputBytes = opts.maxOutputBytes ?? SSH_EXEC_MAX_OUTPUT_BYTES;
       const terminateOnTimeout = opts.terminateOnTimeout !== false;
+      const signal = opts.signal;
       const release = this.hold(state);
       try {
-        await this.acquireExec(state);
+        await this.acquireExec(state, signal);
         try {
           // An exec timeout closes only its own channel (the driver does that)
           // and keeps the session: a search returning partial results must not
           // kill parallel downloads.
           return await this.guarded(state, 'exec', timeoutMs + this.execGraceMs, () =>
-            driver.exec(command, { timeoutMs, maxOutputBytes, terminateOnTimeout }),
+            driver.exec(command, { timeoutMs, maxOutputBytes, terminateOnTimeout, ...(signal ? { signal } : {}) }),
           false);
         } finally {
           this.releaseExec(state);
@@ -431,14 +432,33 @@ export class SshWorkspaceSessions implements OnModuleDestroy {
     return stream;
   }
 
-  private async acquireExec(state: EntryState): Promise<void> {
+  /** An aborted `signal` rejects with `aborted`; a queued waiter then leaves the queue. */
+  private async acquireExec(state: EntryState, signal?: AbortSignal): Promise<void> {
     if (state.closed) throw new RemoteError('disconnected', 'exec: SSH session closed');
+    if (signal?.aborted) throw new RemoteError('aborted', 'exec aborted');
     if (state.execActive < SSH_SESSION_MAX_EXEC) {
       state.execActive += 1;
       return;
     }
-    const granted = await new Promise<boolean>((resolve) => state.execQueue.push(resolve));
-    if (!granted) throw new RemoteError('disconnected', 'exec: SSH session closed');
+    let onAbort: (() => void) | undefined;
+    const outcome = await new Promise<'granted' | 'closed' | 'aborted'>((resolve) => {
+      const waiter = (granted: boolean): void => resolve(granted ? 'granted' : 'closed');
+      state.execQueue.push(waiter);
+      if (signal) {
+        onAbort = () => {
+          const i = state.execQueue.indexOf(waiter);
+          // Already handed a slot: the grant wins and the driver sees the abort.
+          if (i >= 0) {
+            state.execQueue.splice(i, 1);
+            resolve('aborted');
+          }
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+    });
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+    if (outcome === 'closed') throw new RemoteError('disconnected', 'exec: SSH session closed');
+    if (outcome === 'aborted') throw new RemoteError('aborted', 'exec aborted');
   }
 
   private releaseExec(state: EntryState): void {
