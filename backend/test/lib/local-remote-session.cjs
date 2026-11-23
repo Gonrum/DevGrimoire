@@ -19,6 +19,9 @@
  *   denyCreateIn       Set of directories: creating a NEW file there -> `denied`
  *   deny               Set of paths: stat/lstat/readdir/readFile -> `denied`
  *   stallRead          createReadStream() returns a stream that never emits
+ *   probeRg            rg reported by probe() (default: false -> grep path)
+ *   probeGit           git reported by probe() (default: true)
+ *   execTimeout        exec() rejects with RemoteError('timeout')
  */
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
@@ -43,6 +46,9 @@ function createLocalRemoteSession(base, RemoteError) {
     denyCreateIn: new Set(),
     deny: new Set(),
     stallRead: false,
+    probeRg: false,
+    probeGit: true,
+    execTimeout: false,
   };
   const calls = { readStreams: [], writeStreams: 0, execs: [], writeFiles: [] };
 
@@ -183,12 +189,68 @@ function createLocalRemoteSession(base, RemoteError) {
    * command does not have this shape. Task 7 adds its `cd -- '<root>' && …`
    * shapes here the same way.
    */
+  // Search / status commands: `cd -- '<root>' && <tool> <args>`. The command is
+  // split into shell words; a bare word must be on the fixed allowlist, a
+  // quoted word is only accepted as the value of a known option (or as the
+  // root of the `cd`). Anything else (an unquoted metacharacter, an unknown
+  // flag) makes the shape fail, so the fake throws instead of running it.
+  const BARE_OK = new Set([
+    'rg', '--json', '--max-count', '50', '--max-columns', '300', '--ignore-case',
+    '--fixed-strings', '--glob', '--', '.',
+    'grep', '-rnIZ', '-F', '-E', '-i', '-m', '--exclude-dir=.git', '-e',
+    'git', 'rev-parse', '--show-prefix', '-c', 'core.quotepath=false', 'status',
+    '--porcelain=v1', '--branch',
+  ]);
+  const QUOTED = /^(?:--include=|--exclude=)?'(?:[^']|'\\'')*'$/;
+  function words(cmd) {
+    const out = [];
+    let i = 0;
+    while (i < cmd.length) {
+      if (cmd[i] === ' ') { i += 1; continue; }
+      let j = i;
+      while (j < cmd.length && cmd[j] !== ' ') {
+        if (cmd[j] === "'") {
+          j += 1;
+          for (;;) {
+            if (j >= cmd.length) throw new Error(`fake: unterminated quote: ${cmd}`);
+            if (cmd[j] === "'") {
+              if (cmd.slice(j, j + 4) === "'\\''") { j += 4; continue; }
+              j += 1;
+              break;
+            }
+            j += 1;
+          }
+        } else j += 1;
+      }
+      out.push(cmd.slice(i, j));
+      i = j;
+    }
+    return out;
+  }
+  function toolShape(cmd) {
+    const m = /^cd -- ('(?:[^']|'\\'')*') && (.*)$/s.exec(cmd);
+    if (!m) return null;
+    const ws = words(m[2]);
+    if (!['rg', 'grep', 'git'].includes(ws[0])) return null;
+    let prevOpt = null;
+    for (const w of ws) {
+      if (QUOTED.test(w)) {
+        const ok = /^--(?:include|exclude)=/.test(w) || ['--glob', '-e', '--'].includes(prevOpt);
+        if (!ok) throw new Error(`fake: quoted word in a wrong place: ${w}`);
+      } else if (!BARE_OK.has(w)) {
+        throw new Error(`fake: bare word not allowed: ${w}`);
+      }
+      prevOpt = w;
+    }
+    return [unquote(m[1])];
+  }
   const EXEC_SHAPES = [
     // remove(): rm -rf -- '<abs>'
     (cmd) => {
       const m = /^rm -rf -- ('(?:[^']|'\\'')*')$/.exec(cmd);
       return m ? [unquote(m[1])] : null;
     },
+    toolShape,
   ];
   function execPaths(command) {
     for (const shape of EXEC_SHAPES) {
@@ -204,14 +266,21 @@ function createLocalRemoteSession(base, RemoteError) {
       // Throws (before running anything) for unknown shapes and outside paths.
       for (const p of execPaths(command)) guard(p);
       calls.execs.push(command);
+      if (switches.execTimeout) throw new RemoteError('timeout', 'exec timed out');
       return new Promise((resolve) => {
-        execFile('sh', ['-c', command], { cwd: base, timeout: opts.timeoutMs ?? 20_000 }, (err, stdout, stderr) => {
+        execFile('sh', ['-c', command], { cwd: base, timeout: opts.timeoutMs ?? 20_000, maxBuffer: 256 * 1024 * 1024 }, (err, stdout, stderr) => {
           const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0;
-          resolve({ code, stdout: String(stdout), stderr: String(stderr), truncated: false });
+          let out = String(stdout);
+          let truncated = false;
+          if (opts.maxOutputBytes && Buffer.byteLength(out) > opts.maxOutputBytes) {
+            out = Buffer.from(out).subarray(0, opts.maxOutputBytes).toString('utf8');
+            truncated = true;
+          }
+          resolve({ code, stdout: out, stderr: String(stderr), truncated });
         });
       });
     },
-    probe: async () => ({ rg: false, git: false, uid: switches.probeUid, gid: switches.probeGid }),
+    probe: async () => ({ rg: switches.probeRg, git: switches.probeGit, uid: switches.probeUid, gid: switches.probeGid }),
   };
   return { session, switches, calls };
 }

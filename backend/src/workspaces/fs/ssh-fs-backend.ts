@@ -6,7 +6,8 @@ import { pipeline } from 'node:stream/promises';
 import { errorMessage } from '../../common/narrow';
 import { shq } from '../../common/shell-quote';
 import type { SshAuditAction } from '../../ssh/schemas/ssh-audit.schema';
-import { RemoteError, RemoteSession, RemoteStat, isRemoteError } from './remote-session';
+import { parseGitStatus, parseGrepOutput, parseRipgrepJson, relativizeStatus } from '../workspace-search-parse';
+import { RemoteError, RemoteExecResult, RemoteSession, RemoteStat, isRemoteError } from './remote-session';
 import type {
   FsEntry,
   FsLimits,
@@ -22,6 +23,11 @@ export const SSH_DOWNLOAD_IDLE_MS = 60_000;
 /** Longest stderr excerpt carried in an error answer. */
 const STDERR_MAX_CHARS = 1000;
 const NEW_FILE_MODE = 0o644;
+const SEARCH_LIMIT = 2000;
+const SEARCH_TIMEOUT_MS = 20_000;
+const STATUS_TIMEOUT_MS = 30_000;
+/** Room for 2000 matches with 300-char texts in rg's JSON framing, plus slack. */
+const SEARCH_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const DENIED_TEXT = 'keine Berechtigung auf dem Server';
 
 export type SshFsRun = <T>(
@@ -531,17 +537,121 @@ export class SshFsBackend implements WorkspaceFsBackend {
   }
 
   // -------------------------------------------------------------------------
-  // Follows in Task 7
+  // Search and git status (commands over the held session)
   // -------------------------------------------------------------------------
 
-  search(): Promise<FsSearchResult> {
-    return Promise.reject(fail(501, 'Suche in SSH-Werkstätten ist noch nicht verfügbar'));
+  async search(q: {
+    query: string;
+    regex: boolean;
+    caseSensitive: boolean;
+    include?: string[];
+    exclude?: string[];
+  }): Promise<FsSearchResult> {
+    if (typeof q.query !== 'string' || !q.query.length) throw fail(400, 'query must be a non-empty string');
+    if (q.query.length > 500) throw fail(400, 'query too long (max 500)');
+    const include = normaliseGlobs(q.include);
+    const exclude = normaliseGlobs(q.exclude);
+    const cd = `cd -- ${shq(this.root)} && `;
+    try {
+      return await this.run(async (s) => {
+        const useRg = (await s.probe()).rg;
+        const engine: 'rg' | 'grep' = useRg ? 'rg' : 'grep';
+        const command = cd + (useRg ? rgCommand(q, include, exclude) : grepCommand(q, include, exclude));
+        let res: RemoteExecResult;
+        try {
+          res = await s.exec(command, { timeoutMs: SEARCH_TIMEOUT_MS, maxOutputBytes: SEARCH_MAX_OUTPUT_BYTES });
+        } catch (err: unknown) {
+          // The channel is closed on a timeout and no partial output survives.
+          if (isCode(err, 'timeout')) return { matches: [], truncated: true, engine };
+          throw err;
+        }
+        let stdout = res.stdout;
+        if (res.truncated) stdout = stdout.slice(0, stdout.lastIndexOf('\n') + 1);
+        if (!res.truncated && res.code !== 0 && res.code !== 1) {
+          // Exit 2 can also mean "some files unreadable" next to real matches.
+          const partial = res.code === 2 && stdout.length > 0;
+          if (!partial) throw searchFailure(res, useRg, q.regex);
+        }
+        const parsed = useRg
+          ? parseRipgrepJson(stdout, SEARCH_LIMIT)
+          : parseGrepOutput(stdout, q, SEARCH_LIMIT);
+        return { ...parsed, truncated: parsed.truncated || res.truncated, engine };
+      }, { retryable: true });
+    } catch (err: unknown) {
+      throw this.toHttp(err, '.', 'list');
+    }
   }
 
-  status(): Promise<FsStatusResult> {
-    return Promise.reject(fail(501, 'Git-Status in SSH-Werkstätten ist noch nicht verfügbar'));
+  async status(): Promise<FsStatusResult> {
+    const none: FsStatusResult = { branch: null, changed: [] };
+    const cd = `cd -- ${shq(this.root)} && `;
+    try {
+      return await this.run(async (s) => {
+        if (!(await s.probe()).git) return none;
+        const prefixRes = await s.exec(`${cd}git rev-parse --show-prefix`, { timeoutMs: STATUS_TIMEOUT_MS });
+        if (prefixRes.code !== 0) return none;
+        const prefix = prefixRes.stdout.replace(/\r?\n$/, '');
+        const res = await s.exec(
+          `${cd}git -c core.quotepath=false status --porcelain=v1 --branch`,
+          { timeoutMs: STATUS_TIMEOUT_MS },
+        );
+        if (res.code !== 0) throw fail(500, `git status failed: ${res.stderr.trim().slice(0, STDERR_MAX_CHARS)}`);
+        return relativizeStatus(parseGitStatus(res.stdout), prefix);
+      }, { retryable: true });
+    } catch (err: unknown) {
+      throw this.toHttp(err, '.', 'list');
+    }
   }
 }
+
+/** Same filter as the sidecar: strings below 200 chars without line breaks, at most 20. */
+function normaliseGlobs(input: string[] | undefined): string[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .filter((g) => typeof g === 'string' && g.length > 0 && g.length < 200 && !/[\n\r\0]/.test(g))
+    .slice(0, 20);
+}
+
+/** Switches 1:1 from the sidecar's `/search` with `json: true`. */
+function rgCommand(
+  q: { query: string; regex: boolean; caseSensitive: boolean },
+  include: string[],
+  exclude: string[],
+): string {
+  const args = ['rg', '--json', '--max-count', '50', '--max-columns', '300'];
+  if (!q.caseSensitive) args.push('--ignore-case');
+  if (!q.regex) args.push('--fixed-strings');
+  for (const g of include) args.push('--glob', shq(g));
+  for (const g of exclude) args.push('--glob', shq(`!${g}`));
+  args.push('--', shq(q.query), '.');
+  return args.join(' ');
+}
+
+function grepCommand(
+  q: { query: string; regex: boolean; caseSensitive: boolean },
+  include: string[],
+  exclude: string[],
+): string {
+  const args = ['grep', '-rnIZ', q.regex ? '-E' : '-F', '-m', '50'];
+  if (!q.caseSensitive) args.push('-i');
+  for (const g of include) args.push(`--include=${shq(g)}`);
+  for (const g of exclude) args.push(`--exclude=${shq(g)}`);
+  args.push('--exclude-dir=.git', '-e', shq(q.query), '--', '.');
+  return args.join(' ');
+}
+
+/**
+ * Exit 2 without any match is the user's 400 (as the sidecar) when a regex
+ * was typed: rg always, grep unless the complaint is about unreadable files
+ * (the message text is locale-dependent, so only the error class is tested).
+ */
+function searchFailure(res: RemoteExecResult, rg: boolean, regex: boolean): HttpException {
+  const first = res.stderr.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+  if (res.code === 2 && rg) return fail(400, (first || 'invalid search').slice(0, 300));
+  if (res.code === 2 && regex && !/permission|denied|no such file|berechtigung|datei/i.test(first)) return fail(400, first.slice(0, 300));
+  return fail(500, `search failed (exit ${String(res.code)}): ${res.stderr.trim().slice(0, STDERR_MAX_CHARS)}`);
+}
+
 
 /** Resolves once a (possibly destroyed) writable has emitted `close`. */
 function waitClosed(w: Writable): Promise<void> {

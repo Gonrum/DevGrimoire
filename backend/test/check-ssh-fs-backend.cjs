@@ -585,12 +585,6 @@ process.on('exit', (code) => {
     assert.ok(!JSON.stringify(t.audits).includes('payload'));
   });
 
-  await check('search/status -> 501 for now', async () => {
-    const t = setup();
-    await rejectsStatus(() => t.backend.search({ query: 'x', regex: false, caseSensitive: false }), 501);
-    await rejectsStatus(() => t.backend.status(), 501);
-  });
-
   await check('remote error codes -> HTTP: timeout 504, disconnected 502, failure 500', async () => {
     for (const [code, status] of [['timeout', 504], ['disconnected', 502], ['failure', 500], ['exists', 409], ['too_large', 413]]) {
       const run = async () => { throw new RemoteError(code, 'boom'); };
