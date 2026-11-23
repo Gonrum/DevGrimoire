@@ -1940,6 +1940,7 @@
     "pushCategory_recurring": "Wiederkehrende Aufgaben",
     "pushCategory_recurring_desc": "Wenn eine Rite eine Notification-Action ausführt.",
     "tabSsh": "SSH",
+    "tabWorkspaces": "Werkstatt",
     "tabHarness": "Harness (global)",
     "harnessTitle": "Globaler Harness",
     "harnessHint": "Die oberste Ebene. Jede Kunden- und Projektebene erbt diese Abschnitte und kann sie ergänzen oder überschreiben.",
@@ -3244,6 +3245,16 @@
     "bodyNone": "Kein Body",
     "contentTypePlaceholder": "Content-Type (z.B. application/json)"
   },
+  "workspaceSettings": {
+    "title": "Werkstatt-Grenzen",
+    "subtitle": "Gelten für die Browser-IDE aller Werkstätten (global).",
+    "editorLabel": "Editor: max. Dateigröße zum Öffnen und Speichern (MB)",
+    "editorHint": "Standard: {{def}} MB, absolute Obergrenze: {{max}} MB.",
+    "downloadLabel": "Download: max. Dateigröße (MB)",
+    "downloadHint": "Standard: {{def}} MB, absolute Obergrenze: {{max}} MB. Downloads werden gestreamt, die Grenze ist nur ein Schutz.",
+    "invalid": "Bitte eine Zahl zwischen 1 und {{max}} MB angeben.",
+    "saved": "Werkstatt-Grenzen gespeichert."
+  },
   "ide": {
     "loading": "IDE wird geladen …",
     "loadError": "Werkstatt konnte nicht geladen werden",
@@ -3310,7 +3321,10 @@
     "download": "Herunterladen",
     "downloadFailed": "Download fehlgeschlagen",
     "binaryText": "Binärdatei oder kein gültiges UTF-8 — kann nicht im Editor geöffnet werden.",
-    "tooLargeText": "Datei ist größer als 5 MB und wird nicht im Editor geöffnet.",
+    "tooLargeText": "Datei ist größer als {{limit}} und wird nicht im Editor geöffnet. Das Limit ist unter Einstellungen → Werkstatt änderbar.",
+    "editorLimitExceeded": "Die Datei ist größer als das Editor-Limit von {{limit}} (änderbar unter Einstellungen → Werkstatt).",
+    "downloadLimitExceeded": "Die Datei ist größer als das Download-Limit von {{limit}} (änderbar unter Einstellungen → Werkstatt).",
+    "uploadTooLargeSsh": "„{{name}}“ ist zu groß. Das Upload-Limit dieser Verbindung beträgt {{limit}} (änderbar an der SSH-Verbindung).",
     "search": "Suche",
     "searchPlaceholder": "Suchen",
     "searchRegex": "Regulärer Ausdruck",

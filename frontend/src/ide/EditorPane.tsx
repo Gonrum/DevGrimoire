@@ -8,6 +8,7 @@ import Button from '../components/ui/Button';
 import { useToast } from '../components/Toast';
 import { errorMessage } from '../lib/narrow';
 import { NonTextTabView } from './EditorCards';
+import { limitAwareMessage } from './limit-message';
 import { IdeConfirmDialog, IdeDialog } from './IdeDialog';
 import { useIdeStore, type BlockedReason, type OpenTab } from './ide-store';
 import { isMarkdownPath, languageFromPath } from './language';
@@ -144,7 +145,7 @@ export function EditorPane() {
       const tab = state.tabs.find((candidate) => candidate.path === path);
       if (state.blocked !== null || !tab || tab.kind !== 'text' || !tab.dirty || tab.conflict) return;
       state.save(path).catch((error: unknown) => {
-        showError(t('ide.autoSaveFailed', { name: baseName(path), message: errorMessage(error) }));
+        showError(t('ide.autoSaveFailed', { name: baseName(path), message: limitAwareMessage(error, 'editor', t) }));
       });
     },
     [showError, t],
@@ -177,7 +178,7 @@ export function EditorPane() {
           if (result.conflict) void openDiff(path);
         })
         .catch((error: unknown) => {
-          showError(t('ide.saveFailed', { name: baseName(path), message: errorMessage(error) }));
+          showError(t('ide.saveFailed', { name: baseName(path), message: limitAwareMessage(error, 'editor', t) }));
         });
     },
     [cancelAutoSave, openDiff, save, showError, t],
@@ -310,7 +311,7 @@ export function EditorPane() {
         if (useIdeStore.getState().tabs.find((tab) => tab.path === path)?.dirty === false) closeTab(path);
       })
       .catch((error: unknown) => {
-        showError(t('ide.saveFailed', { name: baseName(path), message: errorMessage(error) }));
+        showError(t('ide.saveFailed', { name: baseName(path), message: limitAwareMessage(error, 'editor', t) }));
       });
   };
 

@@ -63,6 +63,8 @@ const READ_ONLY = { ...ADMIN, permissions: ['project:read', 'todo:read'], permis
 const WRITER = { ...ADMIN, permissions: ['project:write'], permissionsRestricted: true };
 const OTHER_PROJECT_ONLY = { ...ADMIN, projectScopeMode: 'allowlist', allowedProjectIds: [oid().toString()] };
 
+const FAKE_LIMITS = { get: async () => ({ editorMaxBytes: 5 * 1024 * 1024, downloadMaxBytes: 2 * 1024 ** 3 }) };
+
 function setup({ status = 'active', client = {} } = {}) {
   const calls = [];
   const ensureCalls = [];
@@ -99,7 +101,7 @@ function setup({ status = 'active', client = {} } = {}) {
     { emit() {} },
   );
   const logged = [];
-  const ctrl = new WorkspaceFsController(service, fakeClient, { create: async (d) => { logged.push(d); } });
+  const ctrl = new WorkspaceFsController(service, fakeClient, { create: async (d) => { logged.push(d); } }, FAKE_LIMITS);
   return { ctrl, calls, ensureCalls, touches, logged, service };
 }
 

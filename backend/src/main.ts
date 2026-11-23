@@ -62,6 +62,7 @@ import { ReadabilityService } from './web-search/services/readability.service';
 import { WorkspacesService } from './workspaces/workspaces.service';
 import { TERMINAL_TOKEN_TTL, WorkspaceCliTokenService } from './workspaces/workspace-cli-token.service';
 import { WorkspaceClient } from './workspaces/workspace-client.service';
+import { FS_FILE_BODY_LIMIT_BYTES, WorkspaceLimitsService } from './workspaces/workspace-limits.service';
 import { WorkspaceGitTokensService } from './workspaces/workspace-git-tokens.service';
 import { SshService } from './ssh/ssh.service';
 import { SshSessionService } from './ssh/ssh-session.service';
@@ -238,6 +239,35 @@ async function bootstrap() {
   new Logger('Bootstrap').log(
     `trust proxy = ${JSON.stringify(trustProxy)} (TRUST_PROXY=${process.env.TRUST_PROXY ?? 'unset → Default'})`,
   );
+
+  // The IDE save route carries a whole file as JSON (editor hard max, escaped),
+  // which is more than the global limit below. Only this route gets the larger
+  // parser; it runs first and the global one skips an already parsed body. An
+  // oversized body answers 413 JSON with the limit in force, never a reset.
+  const fsFileBody = json({ limit: FS_FILE_BODY_LIMIT_BYTES });
+  const workspaceLimits = app.get(WorkspaceLimitsService);
+  expressApp.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.method !== 'PUT' || !/^\/api\/workspaces\/[^/]+\/fs\/file\/?$/.test(req.path)) {
+      next();
+      return;
+    }
+    fsFileBody(req, res, (err?: unknown) => {
+      if (!isRecord(err) || err.type !== 'entity.too.large') {
+        next(err);
+        return;
+      }
+      workspaceLimits.get().then(
+        ({ editorMaxBytes }) => {
+          res.status(413).json({
+            error: 'request body too large',
+            message: `content too large (>${editorMaxBytes} bytes)`,
+            limit: editorMaxBytes,
+          });
+        },
+        (e: unknown) => next(e),
+      );
+    });
+  });
 
   // JSON body parser for all routes (100MB limit for MCP + replication payloads with attachments)
   expressApp.use(json({ limit: '100mb' }));

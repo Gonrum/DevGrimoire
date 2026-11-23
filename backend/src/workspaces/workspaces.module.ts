@@ -6,6 +6,8 @@ import { Workspace, WorkspaceSchema } from './schemas/workspace.schema';
 import { WorkspacesService } from './workspaces.service';
 import { WorkspacesController } from './workspaces.controller';
 import { WorkspaceFsController } from './workspace-fs.controller';
+import { WorkspaceConfigController } from './workspace-config.controller';
+import { WorkspaceLimitsService } from './workspace-limits.service';
 import { WorkspaceCliController } from './workspace-cli.controller';
 import { WorkspaceCliKubeController } from './workspace-cli-kube.controller';
 import { WorkspaceCliSshController } from './workspace-cli-ssh.controller';
@@ -60,6 +62,7 @@ import { JWT_ALGORITHM } from '../common/access-token';
   controllers: [
     WorkspacesController,
     WorkspaceFsController,
+    WorkspaceConfigController,
     WorkspaceCliController,
     WorkspaceCliKubeController,
     WorkspaceCliSshController,
@@ -68,6 +71,7 @@ import { JWT_ALGORITHM } from '../common/access-token';
   providers: [
     WorkspacesService,
     WorkspaceClient,
+    WorkspaceLimitsService,
     SshWorkspaceAccess,
     WorkspaceTtlScheduler,
     WorkspaceGitTokensService,
@@ -77,6 +81,7 @@ import { JWT_ALGORITHM } from '../common/access-token';
   exports: [
     WorkspacesService,
     WorkspaceClient,
+    WorkspaceLimitsService,
     SshWorkspaceAccess,
     WorkspaceTtlScheduler,
     WorkspaceGitTokensService,

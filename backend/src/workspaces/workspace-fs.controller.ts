@@ -24,6 +24,7 @@ import { WorkspaceDocument } from './schemas/workspace.schema';
 import { FsMoveDto, FsPathDto, FsSearchDto, FsWriteDto, isRelativeWorkspacePath } from './dto/workspace-fs.dto';
 import { parseGitStatus, parseRipgrepJson } from './workspace-search-parse';
 import { LogsService } from '../logs/logs.service';
+import { WorkspaceLimitsService } from './workspace-limits.service';
 import { ScalarQueryPipe } from '../common/scalar-query.pipe';
 import { assertContentWrite } from '../common/scope-guard';
 
@@ -73,6 +74,7 @@ export class WorkspaceFsController {
     private readonly workspaces: WorkspacesService,
     private readonly client: WorkspaceClient,
     private readonly logs: LogsService,
+    private readonly limits: WorkspaceLimitsService,
   ) {}
 
   /** Workspace id -> time of the last successful `ensureDir`. */
@@ -141,7 +143,8 @@ export class WorkspaceFsController {
   async readFile(@Param('id') id: string, @Query('path') path?: string) {
     await this.gate(id);
     const target = queryPath(path, 'path');
-    const res = await this.client.readText(id, target);
+    const { editorMaxBytes } = await this.limits.get();
+    const res = await this.client.readText(id, target, editorMaxBytes);
     this.workspaces.touchThrottled(id);
     return { path: target, content: res.content, hash: res.hash, size: res.size };
   }
@@ -150,7 +153,8 @@ export class WorkspaceFsController {
   async raw(@Param('id') id: string, @Res() res: Response, @Query('path') path?: string): Promise<void> {
     await this.gate(id);
     const target = queryPath(path, 'path');
-    const { stream, size } = await this.client.readStream(id, target, { httpErrors: true });
+    const { downloadMaxBytes } = await this.limits.get();
+    const { stream, size } = await this.client.readStream(id, target, { httpErrors: true, maxBytes: downloadMaxBytes });
     this.workspaces.touchThrottled(id);
     const name = posix.basename(target) || 'download';
     const ascii = name.replace(/[^\x20-\x7e]|["\\;]/g, '_');
@@ -168,9 +172,25 @@ export class WorkspaceFsController {
   @Put('file')
   async writeFile(@Param('id') id: string, @Body() dto: FsWriteDto) {
     await this.gate(id);
+    const { editorMaxBytes } = await this.limits.get();
+    // Checked here as well as in the sidecar: an over-limit save never travels
+    // to the sidecar, and the answer carries the limit in force.
+    const bytes = Buffer.byteLength(dto.content, 'utf8');
+    if (bytes > editorMaxBytes) {
+      throw new HttpException(
+        {
+          error: `content too large (>${editorMaxBytes} bytes)`,
+          message: `content too large (>${editorMaxBytes} bytes)`,
+          size: bytes,
+          limit: editorMaxBytes,
+        },
+        413,
+      );
+    }
     const res = await this.client.writeText(id, dto.path, dto.content, {
       baseHash: dto.baseHash,
       force: dto.force === true,
+      maxBytes: editorMaxBytes,
     });
     this.workspaces.touchThrottled(id);
     return { hash: res.hash };

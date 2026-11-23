@@ -51,6 +51,8 @@ export class IdeApiError extends Error {
     readonly status: number,
     /** Set for status 409 only. */
     readonly reason?: IdeConflictReason,
+    /** Set for status 413 when the backend names the limit in force (bytes). */
+    readonly limit?: number,
   ) {
     super(message);
     this.name = 'IdeApiError';
@@ -90,7 +92,8 @@ function errorFromText(status: number, text: string, fallback: string): IdeApiEr
     ? body.message.filter((m): m is string => typeof m === 'string' && m.length > 0)
     : [];
   const message = readErrorMessageFromText(text) ?? (lines.length > 0 ? lines.join('; ') : fallback);
-  return new IdeApiError(message, status, status === 409 ? conflictReason(body) : undefined);
+  const limit = status === 413 && isRecord(body) && typeof body.limit === 'number' ? body.limit : undefined;
+  return new IdeApiError(message, status, status === 409 ? conflictReason(body) : undefined, limit);
 }
 
 const BASE = '/api/workspaces';

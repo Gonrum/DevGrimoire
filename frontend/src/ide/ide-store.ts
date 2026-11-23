@@ -20,6 +20,8 @@ export interface OpenTab {
   size: number;
   /** `data:` URL of an image tab (the CSP forbids `blob:` images). */
   previewUrl?: string;
+  /** Editor limit in bytes that made a `too-large` tab (when the backend said so). */
+  limit?: number;
 }
 
 export interface RevealTarget {
@@ -212,7 +214,9 @@ async function readTab(workspaceId: string, path: string, sizeHint: number): Pro
     file = await ideApi.readFile(workspaceId, path);
   } catch (error) {
     if (error instanceof IdeApiError && error.status === 415) return nonTextTab(workspaceId, path, sizeHint);
-    if (error instanceof IdeApiError && error.status === 413) return placeholderTab(path, 'too-large', sizeHint);
+    if (error instanceof IdeApiError && error.status === 413) {
+      return { ...placeholderTab(path, 'too-large', sizeHint), limit: error.limit };
+    }
     throw error;
   }
   return textTab(workspaceId, path, file);

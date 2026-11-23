@@ -32,6 +32,25 @@ const ROOT = process.env.WORKSPACE_ROOT || '/workspaces';
 const TOKEN = process.env.WORKSPACE_API_TOKEN || '';
 const READ_MAX_BYTES = positiveIntEnv('READ_MAX_BYTES', 5 * 1024 * 1024);
 const STREAM_MAX_BYTES = positiveIntEnv('STREAM_MAX_BYTES', 500 * 1024 * 1024);
+// Ceilings for a caller-supplied `maxBytes` (the backend passes the admin
+// setting). Without `maxBytes` the READ_/STREAM_MAX_BYTES values above apply.
+const READ_HARD_MAX_BYTES = positiveIntEnv('READ_HARD_MAX_BYTES', 100 * 1024 * 1024);
+const STREAM_HARD_MAX_BYTES = positiveIntEnv('STREAM_HARD_MAX_BYTES', 50 * 1024 * 1024 * 1024);
+// JSON body of /write: content up to the hard max, escaped (worst case about
+// 2.2x for typical source text) plus headroom for the other fields.
+const WRITE_BODY_LIMIT_BYTES = Math.ceil(READ_HARD_MAX_BYTES * 2.3) + 1024 * 1024;
+
+/**
+ * Effective byte limit of a request: `min(maxBytes, hard)` when the caller
+ * sent one, else `base`. Returns `{ error }` for an invalid `maxBytes`.
+ */
+function effectiveLimit(maxBytes, base, hard) {
+  if (maxBytes === undefined || maxBytes === null) return { limit: base };
+  if (typeof maxBytes !== 'number' || !Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    return { error: 'maxBytes must be a positive integer' };
+  }
+  return { limit: Math.min(maxBytes, hard) };
+}
 const DEFAULT_TREE_DEPTH = 3;
 const MAX_TREE_DEPTH = 8;
 const MAX_TREE_ENTRIES = 5000;
@@ -331,9 +350,9 @@ for (const method of ['get', 'post', 'put', 'delete']) {
 
 // /write carries whole file contents (JSON-escaped, so up to ~6x the raw size
 // in the worst case); it gets its own larger parser, behind auth so
-// unauthenticated callers cannot make us buffer 8 MB. The global parser skips
+// unauthenticated callers cannot make us buffer that much. The global parser skips
 // bodies that are already parsed.
-app.use('/write', authMiddleware, express.json({ limit: '8mb' }));
+app.use('/write', authMiddleware, express.json({ limit: WRITE_BODY_LIMIT_BYTES }));
 app.use(express.json({ limit: '256kb' }));
 app.use(authMiddleware);
 
@@ -388,12 +407,14 @@ app.post('/read', async (req, res) => {
   if (typeof requested !== 'string' || !requested) {
     return res.status(400).json({ error: 'path must be a non-empty string' });
   }
+  const { limit, error: limitError } = effectiveLimit(req.body?.maxBytes, READ_MAX_BYTES, READ_HARD_MAX_BYTES);
+  if (limitError) return res.status(400).json({ error: limitError });
   try {
     const target = await resolveInsideWorkspace(id, requested);
     const stat = await fsp.stat(target);
     if (!stat.isFile()) return res.status(400).json({ error: 'path is not a regular file' });
-    if (stat.size > READ_MAX_BYTES) {
-      return res.status(413).json({ error: `file too large (>${READ_MAX_BYTES} bytes)`, size: stat.size });
+    if (stat.size > limit) {
+      return res.status(413).json({ error: `file too large (>${limit} bytes)`, size: stat.size, limit });
     }
     const buf = await fsp.readFile(target);
     if (req.body?.strictText === true && !isStrictUtf8Text(buf)) {
@@ -445,13 +466,15 @@ app.post('/read-stream', async (req, res) => {
   if (typeof requested !== 'string' || !requested) {
     return res.status(400).json({ error: 'path must be a non-empty string' });
   }
+  const { limit, error: limitError } = effectiveLimit(req.body?.maxBytes, STREAM_MAX_BYTES, STREAM_HARD_MAX_BYTES);
+  if (limitError) return res.status(400).json({ error: limitError });
   let target;
   try {
     target = await resolveInsideWorkspace(id, requested);
     const stat = await fsp.stat(target);
     if (!stat.isFile()) return res.status(400).json({ error: 'path is not a regular file' });
-    if (stat.size > STREAM_MAX_BYTES) {
-      return res.status(413).json({ error: `file too large (>${STREAM_MAX_BYTES} bytes)`, size: stat.size });
+    if (stat.size > limit) {
+      return res.status(413).json({ error: `file too large (>${limit} bytes)`, size: stat.size, limit });
     }
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Length', String(stat.size));
@@ -717,9 +740,11 @@ app.post('/write', async (req, res) => {
   if (baseHash !== null && typeof baseHash !== 'string') {
     return res.status(400).json({ error: 'baseHash must be a string or null' });
   }
+  const { limit, error: limitError } = effectiveLimit(req.body?.maxBytes, READ_MAX_BYTES, READ_HARD_MAX_BYTES);
+  if (limitError) return res.status(400).json({ error: limitError });
   const data = Buffer.from(content, 'utf8');
-  if (data.length > READ_MAX_BYTES) {
-    return res.status(413).json({ error: `content too large (>${READ_MAX_BYTES} bytes)`, size: data.length });
+  if (data.length > limit) {
+    return res.status(413).json({ error: `content too large (>${limit} bytes)`, size: data.length, limit });
   }
   if (!await workspaceExists(id)) {
     return res.status(404).json({ error: 'workspace directory does not exist' });
@@ -1427,6 +1452,9 @@ app.post('/size', async (req, res) => {
 // Credentials verlassen das Backend nicht.
 
 app.use((err, _req, res, _next) => {
+  if (err && err.type === 'entity.too.large' && !res.headersSent) {
+    return res.status(413).json({ error: 'request body too large', limit: err.limit });
+  }
   console.error(JSON.stringify({ type: 'route-error', error: String(err && err.stack ? err.stack : err) }));
   if (res.headersSent) {
     // Streaming-Route mitten in der Antwort: nur noch beenden.

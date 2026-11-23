@@ -16,6 +16,7 @@ import MyLlmSettings from '../components/settings/MyLlmSettings';
 import LlmEndpointsSettings from '../components/settings/LlmEndpointsSettings';
 import OnboardingBanner from '../components/settings/OnboardingBanner';
 import SshSettings from '../components/settings/SshSettings';
+import WorkspaceSettings from '../components/settings/WorkspaceSettings';
 import { SettingsShell } from '../components/ui/SettingsShell';
 import { matchOption } from '../lib/narrow';
 
@@ -28,7 +29,7 @@ import { matchOption } from '../lib/narrow';
  */
 const SETTINGS_TABS = [
   'instructions', 'harness', 'apikeys', 'notifications', 'myllm', 'llmEndpoints', 'chatlog',
-  'websearch', 'users', 'auditlog', 'replication', 'backups', 'customerTemplates', 'ssh',
+  'websearch', 'users', 'auditlog', 'replication', 'backups', 'customerTemplates', 'ssh', 'workspaces',
 ] as const;
 
 type SettingsTab = (typeof SETTINGS_TABS)[number];
@@ -56,6 +57,7 @@ export default function Settings() {
     { key: 'backups', label: t('settings.tabBackups'), group: t('settings.groupInfra'), adminOnly: true },
     { key: 'replication', label: t('settings.tabReplication'), group: t('settings.groupInfra'), adminOnly: true },
     { key: 'ssh', label: t('settings.tabSsh'), group: t('settings.groupInfra'), adminOnly: true },
+    { key: 'workspaces', label: t('settings.tabWorkspaces'), group: t('settings.groupInfra'), adminOnly: true },
     { key: 'customerTemplates', label: t('settings.tabCustomerTemplates'), group: t('settings.groupInfra'), adminOnly: true },
 
     { key: 'notifications', label: t('settings.tabNotifications'), group: t('settings.groupObserve') },
@@ -89,6 +91,7 @@ export default function Settings() {
       {tab === 'customerTemplates' && isAdmin && <CustomerTemplatesSettings />}
       {tab === 'replication' && isAdmin && <ReplicationSettings />}
       {tab === 'ssh' && isAdmin && <SshSettings />}
+      {tab === 'workspaces' && isAdmin && <WorkspaceSettings />}
     </SettingsShell>
   );
 }

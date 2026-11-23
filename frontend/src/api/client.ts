@@ -1263,6 +1263,16 @@ export interface SshUploadConfig {
   defaultBytes: number;
 }
 
+/** Global IDE limits from `GET/PUT /api/workspace-config` (bytes). */
+export interface WorkspaceLimitsConfig {
+  editorMaxBytes: number;
+  downloadMaxBytes: number;
+  editorDefaultBytes: number;
+  editorHardMaxBytes: number;
+  downloadDefaultBytes: number;
+  downloadHardMaxBytes: number;
+}
+
 export type SshAuditAction =
   | 'connect'
   | 'exec'
@@ -2614,6 +2624,14 @@ export const api = {
     if (params.involvedName) q.set('involvedName', params.involvedName);
     if (params.limit) q.set('limit', String(params.limit));
     return request<KubeEventRow[]>(`/kube-clusters/${clusterId}/events?${q.toString()}`);
+  },
+  workspaceConfig: {
+    get: () => request<WorkspaceLimitsConfig>('/workspace-config'),
+    set: (limits: { editorMaxBytes?: number; downloadMaxBytes?: number }) =>
+      request<WorkspaceLimitsConfig>('/workspace-config', {
+        method: 'PUT',
+        body: JSON.stringify(limits),
+      }),
   },
   ssh: {
     listForCustomer: (customerId: string) =>

@@ -1940,6 +1940,7 @@
     "pushCategory_recurring": "Recurring tasks",
     "pushCategory_recurring_desc": "When a recurring task fires a notification action.",
     "tabSsh": "SSH",
+    "tabWorkspaces": "Workspaces",
     "tabHarness": "Harness (global)",
     "harnessTitle": "Global harness",
     "harnessHint": "The top level. Every customer and project level inherits these sections and can extend or override them.",
@@ -3245,6 +3246,16 @@
     "bodyNone": "No body",
     "contentTypePlaceholder": "Content-Type (e.g. application/json)"
   },
+  "workspaceSettings": {
+    "title": "Workspace limits",
+    "subtitle": "Apply to the browser IDE of all workspaces (global).",
+    "editorLabel": "Editor: max. file size for opening and saving (MB)",
+    "editorHint": "Default: {{def}} MB, hard ceiling: {{max}} MB.",
+    "downloadLabel": "Download: max. file size (MB)",
+    "downloadHint": "Default: {{def}} MB, hard ceiling: {{max}} MB. Downloads are streamed; the limit is only a guard.",
+    "invalid": "Please enter a number between 1 and {{max}} MB.",
+    "saved": "Workspace limits saved."
+  },
   "ide": {
     "loading": "Loading IDE …",
     "loadError": "Could not load workspace",
@@ -3311,7 +3322,10 @@
     "download": "Download",
     "downloadFailed": "Download failed",
     "binaryText": "Binary file or not valid UTF-8 — cannot be opened in the editor.",
-    "tooLargeText": "File is larger than 5 MB and is not opened in the editor.",
+    "tooLargeText": "File is larger than {{limit}} and is not opened in the editor. The limit can be changed under Settings → Workspaces.",
+    "editorLimitExceeded": "The file is larger than the editor limit of {{limit}} (changeable under Settings → Workspaces).",
+    "downloadLimitExceeded": "The file is larger than the download limit of {{limit}} (changeable under Settings → Workspaces).",
+    "uploadTooLargeSsh": "\"{{name}}\" is too large. The upload limit of this connection is {{limit}} (changeable on the SSH connection).",
     "search": "Search",
     "searchPlaceholder": "Search",
     "searchRegex": "Regular expression",

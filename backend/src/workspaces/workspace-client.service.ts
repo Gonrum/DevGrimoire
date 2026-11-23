@@ -2,7 +2,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConflictException, HttpException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { isAxiosError } from 'axios';
 import { firstValueFrom } from 'rxjs';
-import { Readable } from 'node:stream';
+import { pipeline, Readable, Transform } from 'node:stream';
 import * as http from 'node:http';
 import * as https from 'node:https';
 import { errorMessage, errorWithCause, isNullaryMethod, isRecord } from '../common/narrow';
@@ -43,6 +43,9 @@ export interface ReadTextResponse { size: number; content: string; hash: string 
 export interface WriteTextResponse { path: string; hash: string; size: number }
 
 /** Sidecar status codes the IDE routes hand through to the browser unchanged. */
+/** A download is aborted when no byte flowed for this long (no absolute limit). */
+export const DOWNLOAD_IDLE_TIMEOUT_MS = 60_000;
+
 const PASSTHROUGH_STATUSES: ReadonlySet<number> = new Set([400, 404, 409, 413, 415]);
 /**
  * Body of a forwarded sidecar error. The sidecar answers `{ error: '…' }`;
@@ -194,43 +197,101 @@ export class WorkspaceClient {
    * so the body is not buffered; returns a Node Readable plus the declared
    * size from Content-Length. Throws ServiceUnavailable if the sidecar is
    * unconfigured, Error on non-2xx.
+   *
+   * There is no absolute timeout: a log of several GB may take as long as the
+   * link needs. Instead the transfer is aborted once no byte has flowed for
+   * `DOWNLOAD_IDLE_TIMEOUT_MS`, and destroying the returned stream aborts the
+   * upstream request. `maxBytes` (download limit) is optional; without it the
+   * sidecar's STREAM_MAX_BYTES applies.
    */
   async readStream(
     workspaceId: string,
     path: string,
-    opts: { httpErrors?: boolean } = {},
+    opts: { httpErrors?: boolean; maxBytes?: number } = {},
   ): Promise<{ stream: Readable; size: number }> {
     if (!this.token) {
       throw new ServiceUnavailableException(
         'Workspace sidecar is not configured — set WORKSPACE_API_TOKEN to enable workspace_* tools',
       );
     }
-    const res = await fetch(`${this.baseUrl}/read-stream`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ workspaceId, path }),
-    });
+    const abort = new AbortController();
+    // Idle watchdog: armed while waiting for the response headers, re-armed on
+    // every chunk, cleared when the stream ends or is destroyed.
+    let idleFired = false;
+    let idleTimer: NodeJS.Timeout | undefined;
+    const armIdle = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        idleFired = true;
+        abort.abort();
+        ref.stream?.destroy(new Error(`sidecar download idle for ${DOWNLOAD_IDLE_TIMEOUT_MS / 1000}s`));
+      }, DOWNLOAD_IDLE_TIMEOUT_MS);
+    };
+    const disarmIdle = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = undefined;
+    };
+    const ref: { stream?: Readable } = {};
+    armIdle();
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/read-stream`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ workspaceId, path, maxBytes: opts.maxBytes }),
+        signal: abort.signal,
+      });
+    } catch (err: unknown) {
+      disarmIdle();
+      if (idleFired) throw errorWithCause('sidecar /read-stream: no response (idle timeout)', err);
+      throw err;
+    }
     if (!res.ok) {
+      disarmIdle();
       const text = await res.text().catch(() => res.statusText);
-      // IDE download: let the browser see the sidecar's 400/404 instead of a 500.
+      // IDE download: let the browser see the sidecar's 400/404/413 instead of a 500.
       if (opts.httpErrors && PASSTHROUGH_STATUSES.has(res.status)) {
+        let parsed: unknown;
+        try { parsed = JSON.parse(text); } catch { parsed = undefined; }
         throw new HttpException(
-          { error: text || res.statusText, message: sidecarErrorText(text, res.statusText) },
+          isRecord(parsed)
+            ? forwardedErrorBody(parsed, res.statusText)
+            : { error: text || res.statusText, message: sidecarErrorText(text, res.statusText) },
           res.status,
         );
       }
       throw new Error(`sidecar ${res.status} /read-stream: ${text}`);
     }
-    if (!res.body) throw new Error('sidecar /read-stream: empty response body');
+    if (!res.body) {
+      disarmIdle();
+      throw new Error('sidecar /read-stream: empty response body');
+    }
     if (!isWebReadableStream(res.body)) {
+      disarmIdle();
       throw new Error('sidecar /read-stream: response body is not a web stream');
     }
     const size = Number.parseInt(res.headers.get('content-length') ?? '0', 10);
-    const stream = Readable.fromWeb(res.body);
-    return { stream, size: Number.isNaN(size) ? 0 : size };
+    // A pass-through (not a 'data' listener, which would start flowing before
+    // the consumer is attached) re-arms the idle timer per chunk and keeps
+    // backpressure intact. pipeline() forwards a destroy upstream.
+    const source = Readable.fromWeb(res.body);
+    const watched = new Transform({
+      transform(chunk, _enc, cb) {
+        armIdle();
+        cb(null, chunk);
+      },
+    });
+    pipeline(source, watched, () => undefined);
+    ref.stream = watched;
+    // Closing the stream (client left, idle timeout, end) cancels the upstream request.
+    watched.on('close', () => {
+      disarmIdle();
+      abort.abort();
+    });
+    return { stream: watched, size: Number.isNaN(size) ? 0 : size };
   }
 
   /**
@@ -349,8 +410,9 @@ export class WorkspaceClient {
     await this.postFs<{ ok: true }>('/ensure', { workspaceId });
   }
 
-  readText(workspaceId: string, path: string): Promise<ReadTextResponse> {
-    return this.postFs<ReadTextResponse>('/read', { workspaceId, path, strictText: true });
+  /** `maxBytes` (editor limit) is optional: without it the sidecar's own READ_MAX_BYTES applies. */
+  readText(workspaceId: string, path: string, maxBytes?: number): Promise<ReadTextResponse> {
+    return this.postFs<ReadTextResponse>('/read', { workspaceId, path, strictText: true, maxBytes });
   }
 
   /** `baseHash` is always sent (string or null): the sidecar rejects an omitted field. */
@@ -358,7 +420,7 @@ export class WorkspaceClient {
     workspaceId: string,
     path: string,
     content: string,
-    opts: { baseHash: string | null; force?: boolean; createDirs?: boolean },
+    opts: { baseHash: string | null; force?: boolean; createDirs?: boolean; maxBytes?: number },
   ): Promise<WriteTextResponse> {
     return this.postFs<WriteTextResponse>('/write', {
       workspaceId,
@@ -367,6 +429,7 @@ export class WorkspaceClient {
       baseHash: opts.baseHash,
       force: opts.force,
       createDirs: opts.createDirs,
+      maxBytes: opts.maxBytes,
     });
   }
 

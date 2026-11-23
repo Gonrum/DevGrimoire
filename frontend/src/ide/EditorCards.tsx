@@ -4,8 +4,11 @@ import Button from '../components/ui/Button';
 import { useToast } from '../components/Toast';
 import { downloadBlob } from '../lib/download';
 import { errorMessage } from '../lib/narrow';
-import { ideApi } from './ide-api';
+import { ideApi, IdeApiError } from './ide-api';
+import { formatLimit, limitAwareMessage } from './limit-message';
 import { useIdeStore, type OpenTab } from './ide-store';
+
+const DEFAULT_EDITOR_LIMIT = 5 * 1024 * 1024;
 
 function formatSize(bytes: number): string | null {
   if (bytes <= 0) return null;
@@ -32,7 +35,11 @@ export function NonTextTabView({ tab }: { tab: OpenTab }) {
       .then((blob) => downloadBlob(name, blob))
       .catch((error: unknown) => {
         noteApiError(error);
-        showError(errorMessage(error, t('ide.downloadFailed')));
+        showError(
+          error instanceof IdeApiError && error.status === 413
+            ? limitAwareMessage(error, 'download', t)
+            : errorMessage(error, t('ide.downloadFailed')),
+        );
       })
       .finally(() => setBusy(false));
   };
@@ -63,7 +70,7 @@ export function NonTextTabView({ tab }: { tab: OpenTab }) {
           {name}
         </div>
         <div className="mb-3 text-xs text-gray-500">{size}</div>
-        <p className="mb-4 text-sm text-gray-400">{tooLarge ? t('ide.tooLargeText') : t('ide.binaryText')}</p>
+        <p className="mb-4 text-sm text-gray-400">{tooLarge ? t('ide.tooLargeText', { limit: formatLimit(tab.limit ?? DEFAULT_EDITOR_LIMIT) }) : t('ide.binaryText')}</p>
         {downloadButton}
       </div>
     </div>

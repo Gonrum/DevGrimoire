@@ -46,7 +46,7 @@ async function main() {
   const base = `http://127.0.0.1:${port}`;
 
   const child = spawn(process.execPath, [path.join(__dirname, '..', 'index.js')], {
-    env: { ...process.env, WORKSPACE_ROOT: root, WORKSPACE_API_TOKEN: TOKEN, PORT: String(port) },
+    env: { ...process.env, WORKSPACE_ROOT: root, WORKSPACE_API_TOKEN: TOKEN, PORT: String(port), READ_HARD_MAX_BYTES: String(7 * 1024 * 1024) },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   const cleanup = () => {
@@ -490,6 +490,47 @@ async function main() {
       });
       assert.ok(res.status === 401 || res.status === 403);
       assert.equal(fs.existsSync(path.join(root, 'noauth1')), false);
+    });
+
+    const MIB = 1024 * 1024;
+    await check('maxBytes: /read 413 without it, 200 with 8 MiB (capped at the hard max), limit reported', async () => {
+      put('six.txt', 'a'.repeat(6 * MIB));
+      const no = await post('/read', { workspaceId: 'ws1', path: 'six.txt', strictText: true });
+      assert.equal(no.status, 413);
+      assert.equal(no.body.limit, 5 * MIB);
+      const yes = await post('/read', { workspaceId: 'ws1', path: 'six.txt', strictText: true, maxBytes: 8 * MIB });
+      assert.equal(yes.status, 200);
+      put('big.txt', 'a'.repeat(7 * MIB + 10));
+      const over = await post('/read', { workspaceId: 'ws1', path: 'big.txt', strictText: true, maxBytes: 100 * MIB });
+      assert.equal(over.status, 413);
+      assert.equal(over.body.limit, 7 * MIB);
+      const bad = await post('/read', { workspaceId: 'ws1', path: 'six.txt', maxBytes: 'x' });
+      assert.equal(bad.status, 400);
+    });
+
+    await check('maxBytes: /write 413 without it, 200 with 8 MiB, capped at the hard max', async () => {
+      const content = 'b'.repeat(6 * MIB);
+      const no = await post('/write', { workspaceId: 'ws1', path: 'w6.txt', content, baseHash: null });
+      assert.equal(no.status, 413);
+      assert.equal(no.body.limit, 5 * MIB);
+      const yes = await post('/write', { workspaceId: 'ws1', path: 'w6.txt', content, baseHash: null, maxBytes: 8 * MIB });
+      assert.equal(yes.status, 200);
+      const over = await post('/write', { workspaceId: 'ws1', path: 'w8.txt', content: 'c'.repeat(7 * MIB + 1), baseHash: null, maxBytes: 100 * MIB });
+      assert.equal(over.status, 413);
+      assert.equal(over.body.limit, 7 * MIB);
+    });
+
+    await check('maxBytes: /read-stream honours the limit and keeps the old default without it', async () => {
+      const small = await post('/read-stream', { workspaceId: 'ws1', path: 'six.txt', maxBytes: MIB });
+      assert.equal(small.status, 413);
+      assert.equal(small.body.limit, MIB);
+      const res = await fetch(`${base}/read-stream`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: 'ws1', path: 'six.txt' }),
+      });
+      assert.equal(res.status, 200);
+      assert.equal((await res.arrayBuffer()).byteLength, 6 * MIB);
     });
   } finally {
     cleanup();
