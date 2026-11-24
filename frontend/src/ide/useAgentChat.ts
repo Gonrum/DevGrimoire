@@ -80,7 +80,31 @@ function toRecords(calls: AgentToolCall[]): ChatToolCallRecord[] | undefined {
     arguments: tc.arguments,
     success: tc.success ?? false,
     error: tc.success === false ? tc.summary : undefined,
+    ...(tc.result !== undefined ? { result: tc.result } : {}),
   }));
+}
+
+/*
+ * Stored messages carry no id. A client key per message object keeps list items (and an
+ * opened command output) in place; the swap to the stored copy hands the keys over.
+ */
+const messageKeys = new WeakMap<ChatMessage, string>();
+let nextMessageKey = 1;
+
+export function messageKey(message: ChatMessage): string {
+  let key = messageKeys.get(message);
+  if (!key) {
+    key = `m${nextMessageKey++}`;
+    messageKeys.set(message, key);
+  }
+  return key;
+}
+
+function adoptKeys(from: ChatMessage[], to: ChatMessage[]): void {
+  to.forEach((m, i) => {
+    const previous = from[i];
+    if (previous && !messageKeys.has(m)) messageKeys.set(m, messageKey(previous));
+  });
 }
 
 /**
@@ -105,9 +129,15 @@ export function useAgentChat(context: AgentChatContext, hooks: AgentChatHooks = 
   /** The assistant message of a turn that just finished, to swap for the stored one. */
   const finishedRef = useRef<{ sessionId: string; message: ChatMessage } | null>(null);
   const hooksRef = useRef(hooks);
+  // Read by the session-resume effect, which must not rerun on a language switch.
+  const tRef = useRef(t);
   useEffect(() => {
     hooksRef.current = hooks;
+    tRef.current = t;
   });
+  /** Id of the decision being sent (0 = none): a double submit must not send two resumes. */
+  const decidingRef = useRef(0);
+  const decisionSeq = useRef(0);
 
   const setStreaming = useCallback((next: AgentStreaming | null | ((s: AgentStreaming) => AgentStreaming)) => {
     const value = typeof next === 'function' ? (streamRef.current ? next(streamRef.current) : null) : next;
@@ -125,7 +155,7 @@ export function useAgentChat(context: AgentChatContext, hooks: AgentChatHooks = 
         const full = last ? await api.chat.getSession(last._id) : null;
         if (alive) setSession(full);
       } catch (err) {
-        if (alive) setError(errorMessage(err, t('common.error')));
+        if (alive) setError(errorMessage(err, tRef.current('common.error')));
       } finally {
         if (alive) setLoading(false);
       }
@@ -133,7 +163,7 @@ export function useAgentChat(context: AgentChatContext, hooks: AgentChatHooks = 
     return () => {
       alive = false;
     };
-  }, [projectId, workspaceId, t]);
+  }, [projectId, workspaceId]);
 
   // Closing the IDE ends a running turn (and with it a running ws_exec).
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -149,7 +179,9 @@ export function useAgentChat(context: AgentChatContext, hooks: AgentChatHooks = 
       setSession((prev) => {
         // Nothing happened locally meanwhile, and the server holds the same number of messages.
         if (!prev || prev._id !== sessionId || prev.messages[prev.messages.length - 1] !== last) return prev;
-        return stored.messages.length === prev.messages.length ? stored : prev;
+        if (stored.messages.length !== prev.messages.length) return prev;
+        adoptKeys(prev.messages, stored.messages);
+        return stored;
       });
     } catch {
       /* the local copy stays */
@@ -215,13 +247,17 @@ export function useAgentChat(context: AgentChatContext, hooks: AgentChatHooks = 
         setStreaming((s) => ({
           ...s,
           toolCalls: s.toolCalls.map((tc) =>
-            tc.id === result.id ? { ...tc, success: result.success, summary: result.summary } : tc,
+            tc.id === result.id
+              ? { ...tc, success: result.success, summary: result.summary, ...(result.result !== undefined ? { result: result.result } : {}) }
+              : tc,
           ),
         }));
       },
       onToolConfirm: (call) => {
         touch();
         pausedRef.current = true;
+        // A new card can be answered even before this stream has closed.
+        decidingRef.current = 0;
         // Listed right away: a rejection only sends the result, no `tool_call`.
         setStreaming((s) => ({
           ...s,
@@ -312,7 +348,9 @@ export function useAgentChat(context: AgentChatContext, hooks: AgentChatHooks = 
   /** Answers the open proposal; `alwaysAllow` must be one of its `allowSuggestions`. */
   const decide = useCallback(async (approved: boolean, alwaysAllow?: AgentAllowSuggestion): Promise<void> => {
     const p = proposal;
-    if (!p) return;
+    if (!p || decidingRef.current !== 0) return;
+    const decision = ++decisionSeq.current;
+    decidingRef.current = decision;
     setProposal(null);
     pausedRef.current = false;
     setError(null);
@@ -320,14 +358,18 @@ export function useAgentChat(context: AgentChatContext, hooks: AgentChatHooks = 
     abortRef.current = abort;
     setStreaming((s) => ({ ...s, phase: 'tool_call', activeToolName: p.name }));
     const onFirst = alwaysAllow ? () => hooksRef.current.onAllowListChanged?.() : undefined;
-    await runStream(p.sessionId, abort, () =>
-      api.chat.resumeTool(
-        p.sessionId,
-        { callId: p.callId, approved, ...(approved && alwaysAllow ? { alwaysAllow } : {}) },
-        handlers(p.sessionId, onFirst),
-        abort.signal,
-      ),
-    );
+    try {
+      await runStream(p.sessionId, abort, () =>
+        api.chat.resumeTool(
+          p.sessionId,
+          { callId: p.callId, approved, ...(approved && alwaysAllow ? { alwaysAllow } : {}) },
+          handlers(p.sessionId, onFirst),
+          abort.signal,
+        ),
+      );
+    } finally {
+      if (decidingRef.current === decision) decidingRef.current = 0;
+    }
   }, [proposal, handlers, runStream, setStreaming]);
 
   const stop = useCallback(() => {

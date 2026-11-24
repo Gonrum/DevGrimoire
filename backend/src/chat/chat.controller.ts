@@ -1154,7 +1154,9 @@ export class ChatController {
       send({ type: 'done', ...(pendingDoneReason ? { reason: pendingDoneReason } : {}) });
     }
 
-    if (!errored && fullResponse.trim()) {
+    // IDE agent turns are stored even without text: their tool calls (and command output) are the answer.
+    const keepToolOnlyTurn = agentWorkspaceId !== undefined && persistedToolCalls.length > 0;
+    if (!errored && (fullResponse.trim() || keepToolOnlyTurn)) {
       try {
         await this.chatService.appendMessage(id, {
           role: 'assistant',
@@ -1388,7 +1390,8 @@ export class ChatController {
       send({ type: 'done', ...(pendingDoneReason ? { reason: pendingDoneReason } : {}) });
     }
 
-    if (!errored && fullResponse.trim()) {
+    const keepToolOnlyTurn = pending.agent !== undefined && pending.persisted.length > 0;
+    if (!errored && (fullResponse.trim() || keepToolOnlyTurn)) {
       try {
         await this.chatService.appendMessage(id, {
           role: 'assistant',
@@ -1701,7 +1704,25 @@ export class ChatController {
     const summary = result.success
       ? this.summarizeResult(tc.name, result.result)
       : `error: ${result.error}`;
-    p.send({ type: 'tool_result', id: tc.id, success: result.success, summary });
+    // M-9: gespeichert wird die geschwärzte Fassung; das LLM unten bekommt
+    // weiter den Originalwert.
+    p.persisted.push(redactToolRecord({
+      id: tc.id,
+      name: tc.name,
+      arguments: persistedArguments(tc.name, tc.arguments),
+      result: truncated,
+      success: result.success,
+      error: result.error,
+    }));
+    const record = p.persisted[p.persisted.length - 1];
+    // IDE agent calls show their result live (command output, exit code): the stored, redacted form.
+    p.send({
+      type: 'tool_result',
+      id: tc.id,
+      success: result.success,
+      summary,
+      ...(agentCall && typeof record.result === 'string' ? { result: record.result } : {}),
+    });
     // The IDE reloads tree, git status and clean tabs for these paths.
     if (result.success && result.changedPaths && result.changedPaths.length > 0) {
       p.send({ type: 'workspace_changed', paths: result.changedPaths });
@@ -1714,17 +1735,6 @@ export class ChatController {
       name: tc.name,
       content: truncated,
     });
-
-    // M-9: gespeichert wird die geschwärzte Fassung; das LLM oben bekommt
-    // weiter den Originalwert.
-    p.persisted.push(redactToolRecord({
-      id: tc.id,
-      name: tc.name,
-      arguments: persistedArguments(tc.name, tc.arguments),
-      result: truncated,
-      success: result.success,
-      error: result.error,
-    }));
   }
 
   /** Short human-readable summary of a tool result for SSE/UI display */

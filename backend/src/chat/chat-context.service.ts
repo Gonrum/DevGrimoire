@@ -205,7 +205,8 @@ ${contextSection}${attachmentSection}`;
 
     const historyMessages: LlmMessage[] = history
       .slice(-historyLimit)
-      .filter((m) => m.role !== 'system')
+      // A stored tool-only turn (IDE agent) has no text; providers refuse empty messages.
+      .filter((m) => m.role !== 'system' && (m.role !== 'assistant' || m.content.trim() !== ''))
       .map((m) => ({ role: m.role, content: m.content }));
 
     // Prepend the workspace context line to THIS turn's user message only —
@@ -336,7 +337,8 @@ ${contextSection}`;
 
     const historyMessages: LlmMessage[] = history
       .slice(-historyLimit)
-      .filter((m) => m.role !== 'system')
+      // A stored tool-only turn (IDE agent) has no text; providers refuse empty messages.
+      .filter((m) => m.role !== 'system' && (m.role !== 'assistant' || m.content.trim() !== ''))
       .map((m) => ({ role: m.role, content: m.content }));
 
     const messages: LlmMessage[] = [

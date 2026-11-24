@@ -446,6 +446,56 @@ async function main() {
     );
     assert.ok(!fs.existsSync(env.f('a.txt')));
   });
+
+  const silentEnd = [{ type: 'finish', reason: 'stop' }];
+
+  await check('ws_* tool_result carries the stored result live (exec output + exit code)', async () => {
+    const env = makeEnv({ agentMode: 'direct', rounds: [round(tc('x1', 'ws_exec', { command: 'npm test' }))] });
+    env.fake.switches.execScript = { code: 3, stdout: 'hello out', stderr: 'bad' };
+    const res = await send(env);
+    const [result] = ofType(res, 'tool_result').filter((e) => e.id === 'x1');
+    assert.ok(result && typeof result.result === 'string', JSON.stringify(res.events));
+    const parsed = JSON.parse(result.result);
+    assert.equal(parsed.exitCode, 3);
+    assert.equal(parsed.stdout, 'hello out');
+    assert.equal(parsed.stderr, 'bad');
+    const stored = env.appended.find((m) => m.role === 'assistant').toolCalls.find((t) => t.id === 'x1');
+    assert.equal(result.result, stored.result);
+  });
+
+  await check('non-ws tool_result carries no result field (main chat unchanged)', async () => {
+    const env = makeEnv({ agentMode: 'direct', rounds: [round(tc('l1', 'todo_list', {}))] });
+    const res = await send(env);
+    const [result] = ofType(res, 'tool_result').filter((e) => e.id === 'l1');
+    assert.ok(result);
+    assert.equal('result' in result, false);
+  });
+
+  await check('IDE turn with tool calls but no text is stored (send)', async () => {
+    const env = makeEnv({ agentMode: 'direct', rounds: [round(tc('w1', 'ws_write', { path: 'a.txt', content: 'x' })), silentEnd] });
+    await send(env);
+    const assistant = env.appended.find((m) => m.role === 'assistant');
+    assert.ok(assistant, JSON.stringify(env.appended));
+    assert.equal(assistant.content, '');
+    assert.deepEqual(assistant.toolCalls.map((t) => t.id), ['w1']);
+  });
+
+  await check('IDE turn with tool calls but no text is stored (resume)', async () => {
+    const env = makeEnv({ rounds: [round(tc('w1', 'ws_write', { path: 'a.txt', content: 'x' })), silentEnd] });
+    await send(env);
+    assert.equal(env.appended.filter((m) => m.role === 'assistant').length, 0);
+    await resume(env, { callId: 'w1', approved: true });
+    const assistant = env.appended.find((m) => m.role === 'assistant');
+    assert.ok(assistant, JSON.stringify(env.appended));
+    assert.equal(assistant.content, '');
+    assert.deepEqual(assistant.toolCalls.map((t) => t.id), ['w1']);
+  });
+
+  await check('non-IDE turn with tool calls but no text stays unstored (unchanged)', async () => {
+    const env = makeEnv({ ide: false, rounds: [round(tc('l1', 'todo_list', {})), silentEnd] });
+    await send(env);
+    assert.equal(env.appended.filter((m) => m.role === 'assistant').length, 0);
+  });
 }
 
 (async () => {

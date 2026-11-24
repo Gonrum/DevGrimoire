@@ -2165,7 +2165,8 @@ export interface ChatStreamHandlers {
   onContext?: (refs: ChatContextRef[]) => void;
   onToken?: (token: string) => void;
   onToolCall?: (call: { id: string; name: string; arguments: string }) => void;
-  onToolResult?: (result: { id: string; success: boolean; summary: string }) => void;
+  /** `result`: IDE agent calls only — the stored (redacted, truncated) JSON result. */
+  onToolResult?: (result: { id: string; success: boolean; summary: string; result?: string }) => void;
   /**
    * Der Server hat vor einem schreibenden Tool angehalten. Der Stream endet
    * danach; Fortsetzung über `api.chat.resumeTool`. IDE agent calls (ws_*)
@@ -2236,7 +2237,14 @@ async function consumeChatStream(res: Response, handlers: ChatStreamHandlers): P
           if (event.type === 'context') handlers.onContext?.(event.refs);
           else if (event.type === 'token') handlers.onToken?.(event.content);
           else if (event.type === 'tool_call') handlers.onToolCall?.({ id: event.id, name: event.name, arguments: event.arguments });
-          else if (event.type === 'tool_result') handlers.onToolResult?.({ id: event.id, success: event.success, summary: event.summary });
+          else if (event.type === 'tool_result') {
+            handlers.onToolResult?.({
+              id: event.id,
+              success: event.success,
+              summary: event.summary,
+              ...(typeof event.result === 'string' ? { result: event.result } : {}),
+            });
+          }
           else if (event.type === 'tool_confirm') {
             handlers.onToolConfirm?.({
               id: event.id,
@@ -4226,7 +4234,7 @@ export type ChatStreamEvent =
   | { type: 'context'; refs: ChatContextRef[] }
   | { type: 'token'; content: string }
   | { type: 'tool_call'; id: string; name: string; arguments: string }
-  | { type: 'tool_result'; id: string; success: boolean; summary: string }
+  | { type: 'tool_result'; id: string; success: boolean; summary: string; result?: string }
   /** Server hält vor einem schreibenden Tool an und beendet den Stream (T-415). */
   | {
       type: 'tool_confirm';

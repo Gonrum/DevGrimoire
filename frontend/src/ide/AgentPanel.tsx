@@ -30,7 +30,7 @@ import Switch from '../components/ui/Switch';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { errorMessage, isRecord } from '../lib/narrow';
 import { AgentConfirmCard } from './AgentConfirmCard';
-import { useAgentChat, type AgentToolCall } from './useAgentChat';
+import { messageKey, useAgentChat, type AgentToolCall } from './useAgentChat';
 
 const MODE_BUTTON = {
   on: 'bg-cyan-400/15 text-cyan-300',
@@ -71,8 +71,10 @@ interface ExecOutput {
 }
 
 function execOutput(result: string | undefined): ExecOutput | null {
+  if (!result) return null;
   const r = parseJson(result);
-  if (!r) return null;
+  // Cut at the result limit, the JSON no longer parses: show the text as it is.
+  if (!r) return { stdout: result, stderr: '', timedOut: false, truncated: true, aborted: false };
   return {
     exitCode: typeof r.exitCode === 'number' ? r.exitCode : undefined,
     stdout: str(r.stdout) ?? '',
@@ -467,8 +469,8 @@ export function AgentPanel({ workspace: initial }: { workspace: Workspace }) {
         {!chat.loading && messageCount === 0 && !chat.streaming && (
           <p className="text-xs text-gray-500">{t('ide.agent.empty')}</p>
         )}
-        {chat.messages.map((m, i) => (
-          <AgentMessage key={`${i}-${m.timestamp}`} message={m} />
+        {chat.messages.map((m) => (
+          <AgentMessage key={messageKey(m)} message={m} />
         ))}
         {chat.streaming && (
           <div className="space-y-1">
