@@ -52,6 +52,7 @@ import {
   WorkspaceAgentTools,
   isWorkspaceAgentTool,
   type AgentWorkspaceContext,
+  type WsPreviewResult,
   type WsToolResult,
 } from './workspace-agent-tools';
 import {
@@ -1529,6 +1530,22 @@ export class ChatToolsService {
       tools.push({ type: 'function' as const, function: definition });
     }
     return tools;
+  }
+
+  /**
+   * Server-side preview of a writing ws_* call for the confirm card (IDE agent
+   * only). Same allowlist rule as `execute`; never throws.
+   */
+  previewAgentTool(
+    name: string,
+    args: Record<string, unknown>,
+    ctx: AgentWorkspaceContext,
+    allowlist: string[],
+  ): Promise<WsPreviewResult> {
+    if (!isWorkspaceAgentTool(name) || !allowlist.includes(name)) {
+      return Promise.resolve({ ok: false, error: `Tool "${name}" is not in the allowlist` });
+    }
+    return this.workspaceAgentTools.preview(name, args, ctx);
   }
 
   /**

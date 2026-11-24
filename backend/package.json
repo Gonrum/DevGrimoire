@@ -24,6 +24,7 @@
     "check:workspace-exec": "node test/check-workspace-exec.cjs",
     "check:workspace-agent-tools": "node test/check-workspace-agent-tools.cjs",
     "check:agent-chat-model": "node test/check-agent-chat-model.cjs",
+    "check:agent-chat-loop": "node test/check-agent-chat-loop.cjs",
     "check:workspace-ssh-model": "node test/check-workspace-ssh-model.cjs",
     "check:workspace-container-only": "node test/check-workspace-container-only.cjs",
     "check:workspace-limits": "node test/check-workspace-limits.cjs",

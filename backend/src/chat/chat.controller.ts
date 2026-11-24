@@ -20,13 +20,21 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
-import type { AuthRequest } from '../common/request-context';
+import { RequestContext, type AuthRequest } from '../common/request-context';
 import { errorMessage, isRecord, isUnknownArray } from '../common/narrow';
+import { assertContentWrite } from '../common/scope-guard';
 import { ChatService } from './chat.service';
 import { ChatLlmService, LlmMessageWithTools, LlmImageInput } from './chat-llm.service';
 import { ChatContextService, AttachmentForContext } from './chat-context.service';
 import { ChatToolsService, ALL_TOOL_NAMES, TOOL_GROUPS, WRITE_TOOL_NAMES } from './chat-tools';
-import { isWorkspaceAgentTool } from './workspace-agent-tools';
+import {
+  allowSuggestions,
+  isAllowedByList,
+  isWorkspaceAgentTool,
+  type WsPreview,
+} from './workspace-agent-tools';
+import { parseAgentAllowInput, type AgentAllowEntry, type AgentAllowInput } from '../workspaces/agent-allow';
+import type { ToolContext } from './chat-tools';
 import { ChatContextRef } from './schemas/chat-session.schema';
 import { ResumeChatToolDto } from './dto/resume-chat-tool.dto';
 import { ChatActivityService } from './chat-activity.service';
@@ -169,6 +177,103 @@ interface PendingToolCall {
 }
 
 /**
+ * The IDE agent's part of a turn: the session's workspace and the agent mode
+ * read once at turn start (it holds until the turn ends, resumes included).
+ */
+interface AgentTurn {
+  workspaceId: string;
+  mode: 'confirm' | 'direct';
+}
+
+/** The actor ws_* calls run under (they fail closed without one). */
+type ToolActor = Pick<AuthRequest, 'user' | 'apiKey'>;
+
+/** Hash fixed by the preview; the confirmed write must still match it. */
+type PinnedHash = { baseHash?: string | null };
+
+/** Everything one tool call needs; shared by the loop and the resume. */
+interface ToolCallParams {
+  send: (event: Record<string, unknown>) => void;
+  projectId: string | null;
+  customerId?: string;
+  effectiveAllowlist: string[];
+  conversation: LlmMessageWithTools[];
+  persisted: ChatToolCallRecord[];
+  agent?: AgentTurn;
+  actor?: ToolActor;
+  /** Ends a running ws_exec when the turn is aborted. */
+  signal?: AbortSignal;
+}
+
+type ConfirmDecision =
+  | { kind: 'run' }
+  | { kind: 'error'; error: string }
+  | { kind: 'pause'; preview?: WsPreview; pinned?: PinnedHash; allowSuggestions?: AgentAllowInput[] };
+
+const PROPOSAL_EXPIRED = { error: 'proposal_expired', message: 'Vorschlag verfallen — bitte erneut anfragen' };
+
+/** Persisted history keeps at most this much of a ws_write/ws_edit text argument. */
+const PERSISTED_AGENT_TEXT_BYTES = 4 * 1024;
+const AGENT_TEXT_ARGS: Readonly<Record<string, readonly string[]>> = {
+  ws_write: ['content'],
+  ws_edit: ['oldText', 'newText'],
+};
+
+/** Cuts to `maxBytes` of UTF-8 without splitting a character. */
+function cutUtf8(text: string, maxBytes: number): string {
+  const buf = Buffer.from(text, 'utf8');
+  if (buf.length <= maxBytes) return text;
+  const head = buf.subarray(0, maxBytes).toString('utf8').replace(/\uFFFD$/, '');
+  return `${head}…[truncated ${buf.length - Buffer.byteLength(head, 'utf8')} bytes]`;
+}
+
+/**
+ * The arguments as they are stored in the session: file contents of
+ * ws_write/ws_edit cut to 4 KiB. The live conversation keeps them whole.
+ */
+function persistedArguments(name: string, raw: string): string {
+  const fields = AGENT_TEXT_ARGS[name];
+  if (!fields) return raw;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+  if (!isRecord(parsed)) return raw;
+  const out: Record<string, unknown> = { ...parsed };
+  for (const field of fields) {
+    const v = out[field];
+    if (typeof v === 'string') out[field] = cutUtf8(v, PERSISTED_AGENT_TEXT_BYTES);
+  }
+  return JSON.stringify(out);
+}
+
+/** Parsed call arguments with the owner ids pinned from the session (never from the LLM). */
+function callArguments(
+  tc: PendingToolCall,
+  owner: { projectId: string | null; customerId?: string },
+): { ok: true; args: Record<string, unknown> } | { ok: false; error: string } {
+  let parsed: unknown;
+  try {
+    // Ein geparster Nicht-Objekt-Wert (Array, Skalar) gilt als ungültige
+    // Argumentliste — dieselbe Antwort wie kaputtes JSON.
+    parsed = tc.arguments ? JSON.parse(tc.arguments) : {};
+    if (!isRecord(parsed)) throw new Error('arguments must be a JSON object');
+  } catch (err: unknown) {
+    return { ok: false, error: `Invalid JSON arguments: ${errorMessage(err)}` };
+  }
+  return {
+    ok: true,
+    args: {
+      ...parsed,
+      ...(owner.projectId ? { projectId: owner.projectId } : {}),
+      ...(owner.customerId ? { customerId: owner.customerId } : {}),
+    },
+  };
+}
+
+/**
  * Ein Turn, der auf eine Bestätigung wartet (T-415).
  *
  * Bewusst im Speicher und nicht in der Session: der Zustand lebt Sekunden bis
@@ -193,6 +298,10 @@ interface PendingConfirmation {
   firstTokenMs: number | null;
   userMessageLength: number;
   createdAtMs: number;
+  /** IDE agent turns only. */
+  agent?: AgentTurn;
+  /** Hash from the preview of the paused ws_write/ws_edit. */
+  pinned?: PinnedHash;
 }
 
 interface ToolLoopResult {
@@ -201,7 +310,7 @@ interface ToolLoopResult {
   pendingDone: boolean;
   pendingDoneReason?: string;
   /** Gesetzt, wenn vor einem schreibenden Tool angehalten wurde. */
-  paused?: { call: PendingToolCall; queue: PendingToolCall[]; iter: number };
+  paused?: { call: PendingToolCall; queue: PendingToolCall[]; iter: number; pinned?: PinnedHash };
 }
 
 @Controller('chat')
@@ -313,6 +422,31 @@ export class ChatController {
       return ws;
     } catch {
       return null;
+    }
+  }
+
+  /** The session's own workspace for IDE agent sessions; otherwise none. */
+  private static agentWorkspaceId(session: { ideAgent?: boolean; workspaceId?: { toString(): string } }, projectId?: string): string | undefined {
+    return projectId && session.ideAgent === true && session.workspaceId ? session.workspaceId.toString() : undefined;
+  }
+
+  /**
+   * Runs `fn` under the request's actor. The SSE handlers stream long after
+   * the guard ran; ws_* fail closed without an actor in `RequestContext`, so
+   * the actor is set explicitly instead of relying on the interceptor's store.
+   */
+  private withActor<T>(actor: ToolActor | undefined, fn: () => T): T {
+    return actor ? RequestContext.run(actor.user, actor.apiKey, fn) : fn();
+  }
+
+  /** The workspace's allow list as stored now (re-read for every call). */
+  private async currentAgentAllow(workspaceId: string, actor: ToolActor | undefined): Promise<AgentAllowEntry[]> {
+    try {
+      const ws = await this.withActor(actor, () => this.workspaces.findById(workspaceId));
+      return ws.agentAllow ?? [];
+    } catch {
+      // Unreachable workspace: nothing is allowed; the preview reports the error.
+      return [];
     }
   }
 
@@ -621,8 +755,9 @@ export class ChatController {
     if (!projectId && dto.attachmentIds && dto.attachmentIds.length > 0) {
       throw new BadRequestException('Attachments are not supported in customer-scoped chat sessions');
     }
+    const boundWorkspaceId = ChatController.agentWorkspaceId(session, projectId);
     const activeWorkspace = projectId
-      ? await this.resolveActiveWorkspace(dto.workspaceId, projectId)
+      ? await this.resolveActiveWorkspace(boundWorkspaceId ?? dto.workspaceId, projectId)
       : null;
     const built = await this.context.build({ projectId, customerId }, dto.content, session.messages, {
       topK: opts.topK,
@@ -838,9 +973,19 @@ export class ChatController {
     const afterUser = await this.chatService.findById(id, userId);
     const historyWithoutCurrent = afterUser.messages.slice(0, -1);
     const opts = await this.llm.getOptions();
-    const activeWorkspace = projectId
-      ? await this.resolveActiveWorkspace(dto.workspaceId, projectId)
-      : null;
+    const actor: ToolActor = { user: req.user, apiKey: req.apiKey };
+    // IDE agent sessions: the workspace comes from the session, never from the message.
+    const agentWorkspaceId = ChatController.agentWorkspaceId(session, projectId);
+    let activeWorkspace: WorkspaceDocument | null = null;
+    if (projectId && agentWorkspaceId) {
+      activeWorkspace = await this.withActor(actor, () => this.resolveActiveWorkspace(agentWorkspaceId, projectId));
+    } else if (projectId) {
+      activeWorkspace = await this.resolveActiveWorkspace(dto.workspaceId, projectId);
+    }
+    // Read once per turn; an unreadable workspace falls back to asking.
+    const agent: AgentTurn | undefined = agentWorkspaceId
+      ? { workspaceId: agentWorkspaceId, mode: activeWorkspace?.agentMode === 'direct' ? 'direct' : 'confirm' }
+      : undefined;
     const built = await this.context.build({ projectId, customerId }, dto.content, historyWithoutCurrent, {
       topK: opts.topK,
       historyLimit: opts.historyLimit,
@@ -940,6 +1085,8 @@ export class ChatController {
           maxIter: opts.toolsMaxIterations,
           onEndpointSelected,
           confirmWrites: true,
+          agent,
+          actor,
         });
         fullResponse += loop.fullResponse;
         if (loop.firstTokenMs !== null && firstTokenMs === null) firstTokenMs = loop.firstTokenMs;
@@ -970,6 +1117,8 @@ export class ChatController {
             firstTokenMs,
             userMessageLength: dto.content.length,
             createdAtMs: Date.now(),
+            agent,
+            pinned: loop.paused.pinned,
           });
           clearInterval(heartbeat);
           req.off('close', onClose);
@@ -1082,19 +1231,37 @@ export class ChatController {
     if (!pending) {
       // Kein offener Turn: Backend neu gestartet, TTL abgelaufen oder der
       // Client ist zweimal losgelaufen.
-      throw new NotFoundException('No tool call is awaiting confirmation for this session');
+      throw new NotFoundException(PROPOSAL_EXPIRED);
     }
     const userId = req.user?.userId;
     if (pending.userId !== userId) {
       // Die Session gehört jemand anderem — nicht bestätigbar.
-      throw new NotFoundException('No tool call is awaiting confirmation for this session');
+      throw new NotFoundException(PROPOSAL_EXPIRED);
     }
     if (dto.callId !== pending.call.id) {
       throw new BadRequestException(
         `Stale confirmation: expected call ${pending.call.id}, got ${dto.callId}`,
       );
     }
+    // Validated before anything changes: a 400 leaves the proposal open.
+    const alwaysAllow = dto.alwaysAllow !== undefined ? ChatController.checkAlwaysAllow(pending, dto) : undefined;
     this.pendingConfirmations.delete(id);
+    // The actor of THIS request: rights and workspace state are checked anew.
+    const actor: ToolActor = { user: req.user, apiKey: req.apiKey };
+    if (alwaysAllow && pending.agent) {
+      const workspaceId = pending.agent.workspaceId;
+      try {
+        // Same right and same service path as POST /workspaces/:id/agent-allow.
+        await this.withActor(actor, async () => {
+          assertContentWrite('Changing the agent allow list');
+          await this.workspaces.addAgentAllow(workspaceId, alwaysAllow);
+        });
+      } catch (err: unknown) {
+        // Nothing was executed: keep the proposal answerable.
+        if (!this.pendingConfirmations.has(id)) this.pendingConfirmations.set(id, pending);
+        throw err;
+      }
+    }
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -1137,7 +1304,10 @@ export class ChatController {
           effectiveAllowlist: pending.effectiveAllowlist,
           conversation: pending.conversation,
           persisted: pending.persisted,
-        });
+          agent: pending.agent,
+          actor,
+          signal: abort.signal,
+        }, pending.pinned);
       } else {
         const rejection = 'Rejected by the user — not executed.';
         send({ type: 'tool_result', id: pending.call.id, success: false, summary: rejection });
@@ -1150,7 +1320,7 @@ export class ChatController {
         pending.persisted.push(redactToolRecord({
           id: pending.call.id,
           name: pending.call.name,
-          arguments: pending.call.arguments,
+          arguments: persistedArguments(pending.call.name, pending.call.arguments),
           success: false,
           error: rejection,
         }));
@@ -1170,6 +1340,8 @@ export class ChatController {
         onEndpointSelected,
         confirmWrites: true,
         initialQueue: pending.queue,
+        agent: pending.agent,
+        actor,
       });
       fullResponse += loop.fullResponse;
       if (loop.firstTokenMs !== null && firstTokenMs === null) firstTokenMs = loop.firstTokenMs;
@@ -1183,6 +1355,7 @@ export class ChatController {
           call: loop.paused.call,
           queue: loop.paused.queue,
           iter: loop.paused.iter,
+          pinned: loop.paused.pinned,
           fullResponse,
           firstTokenMs,
           createdAtMs: Date.now(),
@@ -1292,8 +1465,12 @@ export class ChatController {
      * Reihenfolge der Tool-Calls verloren.
      */
     initialQueue?: PendingToolCall[];
+    /** IDE agent turn: ws_* offered and bound to its workspace. */
+    agent?: AgentTurn;
+    actor?: ToolActor;
   }): Promise<ToolLoopResult> {
-    const tools = this.tools.getToolsForLlm(p.effectiveAllowlist);
+    const tools = this.tools.getToolsForLlm(p.effectiveAllowlist, p.agent !== undefined);
+    const callParams: ToolCallParams = { ...p, signal: p.abort.signal };
     const conversation = p.conversation;
     let fullResponse = '';
     let firstTokenMs: number | null = null;
@@ -1372,17 +1549,35 @@ export class ChatController {
          * gemerkten Zustand — sonst ginge ihre Reihenfolge verloren.
          */
         if (p.confirmWrites && WRITE_TOOL_NAMES.has(tc.name)) {
-          p.send({ type: 'tool_confirm', id: tc.id, name: tc.name, arguments: tc.arguments });
-          return {
-            fullResponse,
-            firstTokenMs,
-            pendingDone: false,
-            paused: { call: tc, queue: queue.slice(1), iter },
-          };
+          // ws_* decide per call (mode + allow list + preview); all others ask as before.
+          const decision: ConfirmDecision = isWorkspaceAgentTool(tc.name)
+            ? await this.agentConfirmDecision(tc, callParams)
+            : { kind: 'pause' };
+          if (decision.kind === 'pause') {
+            p.send({
+              type: 'tool_confirm',
+              id: tc.id,
+              name: tc.name,
+              arguments: tc.arguments,
+              ...(decision.preview ? { preview: decision.preview, allowSuggestions: decision.allowSuggestions ?? [] } : {}),
+            });
+            return {
+              fullResponse,
+              firstTokenMs,
+              pendingDone: false,
+              paused: { call: tc, queue: queue.slice(1), iter, ...(decision.pinned ? { pinned: decision.pinned } : {}) },
+            };
+          }
+          if (decision.kind === 'error') {
+            // Unworkable already in the preview: the LLM learns why, the user is not asked.
+            queue = queue.slice(1);
+            this.recordToolError(tc, decision.error, callParams);
+            continue;
+          }
         }
 
         queue = queue.slice(1);
-        await this.executeToolCall(tc, p);
+        await this.executeToolCall(tc, callParams);
       }
 
       if (iter === p.maxIter - 1) {
@@ -1398,34 +1593,87 @@ export class ChatController {
   }
 
   /**
+   * Whether a writing ws_* call must be confirmed (spec "Festlegungen" 5/6):
+   * not in mode `direct`, not when the stored allow list (read now) covers it.
+   * Otherwise the server builds the preview; a preview error goes to the LLM
+   * instead of the user. Errors the execution itself reports (not in the
+   * allowlist, not an IDE session, bad JSON) run straight into `execute`.
+   */
+  private async agentConfirmDecision(tc: PendingToolCall, p: ToolCallParams): Promise<ConfirmDecision> {
+    const agent = p.agent;
+    if (!agent || !p.effectiveAllowlist.includes(tc.name)) return { kind: 'run' };
+    if (agent.mode === 'direct') return { kind: 'run' };
+    // The same parsed arguments `execute` gets: what was allowed is what runs.
+    const parsed = callArguments(tc, p);
+    if (!parsed.ok) return { kind: 'run' };
+    const entries = await this.currentAgentAllow(agent.workspaceId, p.actor);
+    if (isAllowedByList(tc.name, parsed.args, entries)) return { kind: 'run' };
+    const preview = await this.withActor(p.actor, () =>
+      this.tools.previewAgentTool(tc.name, parsed.args, { workspaceId: agent.workspaceId }, p.effectiveAllowlist));
+    if (!preview.ok) return { kind: 'error', error: preview.error };
+    return {
+      kind: 'pause',
+      preview: preview.preview,
+      allowSuggestions: allowSuggestions(tc.name, parsed.args),
+      ...(preview.preview.kind === 'file' ? { pinned: { baseHash: preview.preview.baseHash ?? null } } : {}),
+    };
+  }
+
+  /**
+   * Validates `alwaysAllow` of a resume (throws 400): only with an approval,
+   * only for a writing ws_* call of an IDE turn, same rules as
+   * `POST agent-allow`, and the entry must allow exactly the paused call — a
+   * click must not unlock anything other than what the card showed.
+   */
+  private static checkAlwaysAllow(pending: PendingConfirmation, dto: ResumeChatToolDto): AgentAllowInput {
+    if (!dto.approved) throw new BadRequestException('alwaysAllow requires approved: true');
+    const name = pending.call.name;
+    if (!pending.agent || !isWorkspaceAgentTool(name) || !WRITE_TOOL_NAMES.has(name)) {
+      throw new BadRequestException('alwaysAllow is only available for writing workspace agent tools');
+    }
+    const input = parseAgentAllowInput(dto.alwaysAllow ?? {});
+    const parsed = callArguments(pending.call, pending);
+    const entry: AgentAllowEntry = { ...input, createdAt: new Date() };
+    if (!parsed.ok || !isAllowedByList(name, parsed.args, [entry])) {
+      throw new BadRequestException('alwaysAllow does not cover this call');
+    }
+    return input;
+  }
+
+  /** A call that ends before it runs: error to the client, the LLM and the history. */
+  private recordToolError(tc: PendingToolCall, error: string, p: ToolCallParams): void {
+    p.send({ type: 'tool_call', id: tc.id, name: tc.name, arguments: tc.arguments });
+    p.send({ type: 'tool_result', id: tc.id, success: false, summary: `error: ${error}` });
+    p.conversation.push({
+      role: 'tool',
+      tool_call_id: tc.id,
+      name: tc.name,
+      content: JSON.stringify({ error }),
+    });
+    p.persisted.push(redactToolRecord({
+      id: tc.id,
+      name: tc.name,
+      arguments: persistedArguments(tc.name, tc.arguments),
+      success: false,
+      error,
+    }));
+  }
+
+  /**
    * Führt einen einzelnen Tool-Aufruf aus und schreibt Ergebnis, Konversation
    * und Persistenz fort. Herausgezogen, weil der Resume denselben Schritt für
-   * den bestätigten Aufruf braucht.
+   * den bestätigten Aufruf braucht. ws_* run under the actor, bound to the
+   * turn's workspace; `pinned` is the hash of a confirmed preview.
    */
-  private async executeToolCall(
-    tc: PendingToolCall,
-    p: {
-      send: (event: Record<string, unknown>) => void;
-      projectId: string | null;
-      customerId?: string;
-      effectiveAllowlist: string[];
-      conversation: LlmMessageWithTools[];
-      persisted: ChatToolCallRecord[];
-    },
-  ): Promise<void> {
+  private async executeToolCall(tc: PendingToolCall, p: ToolCallParams, pinned?: PinnedHash): Promise<void> {
     p.send({ type: 'tool_status', phase: 'tool_call', name: tc.name, state: 'running' });
     p.send({ type: 'tool_call', id: tc.id, name: tc.name, arguments: tc.arguments });
 
-    let parsedArgs: Record<string, unknown>;
-    try {
-      // Ein geparster Nicht-Objekt-Wert (Array, Skalar) lief vorher als
-      // `Record<string, unknown>` in den Dispatcher; jetzt gilt er als
-      // ungültige Argumentliste — dieselbe Antwort wie kaputtes JSON.
-      const parsed: unknown = tc.arguments ? JSON.parse(tc.arguments) : {};
-      if (!isRecord(parsed)) throw new Error('arguments must be a JSON object');
-      parsedArgs = parsed;
-    } catch (err: unknown) {
-      const error = `Invalid JSON arguments: ${errorMessage(err)}`;
+    // Same pinning as the browser path (executeTool): the owner ids always come
+    // from the session, never from LLM-generated arguments.
+    const parsed = callArguments(tc, p);
+    if (!parsed.ok) {
+      const error = parsed.error;
       p.send({ type: 'tool_result', id: tc.id, success: false, summary: error });
       p.conversation.push({
         role: 'tool',
@@ -1436,15 +1684,15 @@ export class ChatController {
       p.persisted.push(redactToolRecord({ id: tc.id, name: tc.name, arguments: tc.arguments, success: false, error }));
       return;
     }
+    const args = parsed.args;
 
-    // Same pinning as the browser path (executeTool): the owner ids always come
-    // from the session, never from LLM-generated arguments.
-    const args = {
-      ...parsedArgs,
-      ...(p.projectId ? { projectId: p.projectId } : {}),
-      ...(p.customerId ? { customerId: p.customerId } : {}),
-    };
-    const result = await this.tools.execute(tc.name, args, { projectId: p.projectId }, p.effectiveAllowlist);
+    const agentCall = p.agent !== undefined && isWorkspaceAgentTool(tc.name);
+    const ctx: ToolContext = agentCall && p.agent
+      ? { projectId: p.projectId, agentWorkspace: { workspaceId: p.agent.workspaceId, ...(p.signal ? { signal: p.signal } : {}) } }
+      : { projectId: p.projectId };
+    const result = agentCall
+      ? await this.withActor(p.actor, () => this.tools.execute(tc.name, args, ctx, p.effectiveAllowlist, pinned))
+      : await this.tools.execute(tc.name, args, ctx, p.effectiveAllowlist);
     const resultJson = JSON.stringify(result.success ? result.result : { error: result.error });
     const truncated = resultJson.length > MAX_TOOL_RESULT_CHARS
       ? resultJson.slice(0, MAX_TOOL_RESULT_CHARS) + '…[truncated]'
@@ -1454,6 +1702,10 @@ export class ChatController {
       ? this.summarizeResult(tc.name, result.result)
       : `error: ${result.error}`;
     p.send({ type: 'tool_result', id: tc.id, success: result.success, summary });
+    // The IDE reloads tree, git status and clean tabs for these paths.
+    if (result.success && result.changedPaths && result.changedPaths.length > 0) {
+      p.send({ type: 'workspace_changed', paths: result.changedPaths });
+    }
     p.send({ type: 'status', phase: 'responding' });
 
     p.conversation.push({
@@ -1468,7 +1720,7 @@ export class ChatController {
     p.persisted.push(redactToolRecord({
       id: tc.id,
       name: tc.name,
-      arguments: tc.arguments,
+      arguments: persistedArguments(tc.name, tc.arguments),
       result: truncated,
       success: result.success,
       error: result.error,

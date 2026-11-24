@@ -1,4 +1,15 @@
-import { IsBoolean, IsString } from 'class-validator';
+import { IsBoolean, IsObject, IsOptional, IsString } from 'class-validator';
+
+/**
+ * "Always allow" sent with an approval (IDE agent, ws_* only). Deliberately a
+ * loose shape: `parseAgentAllowInput` validates it exactly like
+ * `POST /workspaces/:id/agent-allow` and answers with a precise 400.
+ */
+export interface ResumeAlwaysAllowInput {
+  kind?: unknown;
+  match?: unknown;
+  value?: unknown;
+}
 
 /**
  * Antwort auf eine Bestätigungsanfrage (T-415).
@@ -13,4 +24,9 @@ export class ResumeChatToolDto {
 
   @IsBoolean()
   approved: boolean;
+
+  /** Only with `approved: true` and only for ws_* calls; must cover the paused call. */
+  @IsOptional()
+  @IsObject()
+  alwaysAllow?: ResumeAlwaysAllowInput;
 }
