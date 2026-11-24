@@ -251,6 +251,10 @@ function AllowList({
       </button>
       {open && (
         <div className="space-y-2 px-2 pb-2">
+          <p className="flex items-start gap-1 text-[11px] text-amber-300">
+            <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+            {t('ide.agent.allowEscalationHint')}
+          </p>
           {entries.length === 0 && <p className="text-gray-500">{t('ide.agent.allowedEmpty')}</p>}
           {entries.length > 0 && (
             <ul className="space-y-1">
@@ -490,8 +494,8 @@ export function AgentPanel({ workspace: initial, onCollapse }: { workspace: Work
             </button>
           </div>
         </div>
-        {isSsh && (
-          <p className={`flex items-start gap-1 text-[11px] ${mode === 'direct' ? 'text-amber-300' : 'text-gray-500'}`}>
+        {isSsh && mode === 'direct' && (
+          <p className="flex items-start gap-1 text-[11px] text-amber-300">
             <AlertTriangle size={12} className="mt-0.5 shrink-0" />
             {t('ide.agent.sshDirectWarning')}
           </p>

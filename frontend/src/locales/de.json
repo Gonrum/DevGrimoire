@@ -3392,6 +3392,7 @@
       "roleNone": "Keine Rolle",
       "allowed": "Erlaubt ({{count}})",
       "allowedEmpty": "Noch keine dauerhaften Erlaubnisse.",
+      "allowEscalationHint": "Achtung: Datei-Änderungen erlauben + ein erlaubter Build-/Testbefehl (z. B. npm test, make) erlaubt dem Agenten faktisch beliebige Befehle, weil er die Build-Dateien ändern kann.",
       "kindFiles": "Dateien",
       "kindFilesWrite": "Datei-Änderungen",
       "kindFilesStructure": "Anlegen/Verschieben",

@@ -3393,6 +3393,7 @@
       "roleNone": "No role",
       "allowed": "Allowed ({{count}})",
       "allowedEmpty": "No permanent permissions yet.",
+      "allowEscalationHint": "Caution: allowing file changes plus an allowed build/test command (e.g. npm test, make) lets the agent run practically any command, because it can change the build files.",
       "kindFiles": "Files",
       "kindFilesWrite": "File changes",
       "kindFilesStructure": "Create/move",

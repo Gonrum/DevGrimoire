@@ -413,6 +413,84 @@ async function toolChecks() {
     assert.match(r.error, /too large/);
   });
 
+  await check('I1: ws_read of a 50 KB file -> valid JSON within budget, metadata, whole lines, hint', async () => {
+    const env = makeEnv();
+    const w = env.addWorkspace();
+    const lines = Array.from({ length: 2000 }, (_, i) => `line ${String(i + 1).padStart(5, '0')} ${'äöü"\\<'.repeat(3)}`);
+    const text = lines.join('\n') + '\n';
+    assert.ok(Buffer.byteLength(text) > 50 * 1024);
+    fs.writeFileSync(w.f('big.txt'), text);
+    const r = await run(env, w, 'ws_read', { path: 'big.txt' });
+    assert.equal(r.success, true, r.error);
+    const json = JSON.stringify(r.result);
+    assert.ok(json.length <= 8000, String(json.length));
+    assert.ok(!json.includes('…[truncated]'));
+    assert.deepEqual(Object.keys(r.result).slice(0, 6), ['path', 'hash', 'totalLines', 'startLine', 'endLine', 'truncated']);
+    assert.equal(r.result.hash, sha(text));
+    assert.equal(r.result.totalLines, 2000);
+    assert.equal(r.result.truncated, true);
+    assert.equal(r.result.startLine, 1);
+    assert.match(r.result.hint, /startLine/);
+    const got = r.result.content.split('\n');
+    assert.equal(got.length, r.result.endLine);
+    assert.deepEqual(got, lines.slice(0, r.result.endLine), 'whole lines only');
+    // Room is used well: the next line would not have fitted.
+    assert.ok(json.length > 8000 - 200, String(json.length));
+    // The tail by range: complete, not truncated.
+    const tail = await run(env, w, 'ws_read', { path: 'big.txt', startLine: 1990, endLine: 2000 });
+    assert.equal(tail.success, true, tail.error);
+    assert.equal(tail.result.truncated, false);
+    assert.equal(tail.result.content, lines.slice(1989).join('\n'));
+    assert.equal(tail.result.endLine, 2000);
+    // Reading on from where the first call stopped continues seamlessly.
+    const next = await run(env, w, 'ws_read', { path: 'big.txt', startLine: r.result.endLine + 1 });
+    assert.equal(next.result.content.split('\n')[0], lines[r.result.endLine]);
+    assert.ok(JSON.stringify(next.result).length <= 8000);
+  });
+
+  await check('I1: fitReadResult: one line over budget -> its start, lineCut, still valid and bounded', () => {
+    const line = '😀'.repeat(10000);
+    const out = agent.fitReadResult({ path: 'x', hash: 'h', totalLines: 1, lines: [line], startLine: 1, wholeContent: line }, 2000);
+    const json = JSON.stringify(out);
+    assert.ok(json.length <= 2000, String(json.length));
+    assert.equal(out.lineCut, true);
+    assert.equal(out.truncated, true);
+    assert.ok(out.content.length > 1000 && line.startsWith(out.content));
+    assert.ok(!/[\ud800-\udbff]$/.test(out.content), 'no lone high surrogate');
+    // Small: unchanged shape (no range fields for a whole-file read).
+    const small = agent.fitReadResult({ path: 'x', hash: 'h', totalLines: 1, lines: ['a'], startLine: 1, wholeContent: 'a\n' });
+    assert.deepEqual(small, { path: 'x', hash: 'h', totalLines: 1, truncated: false, content: 'a\n' });
+  });
+
+  await check('I1: fitListResult caps ws_tree / ws_search / ws_status lists with truncated, shown/total', async () => {
+    const items = Array.from({ length: 3000 }, (_, i) => ({ path: `src/file-${i}.ts`, line: i, column: 1, text: 'needle '.repeat(10) }));
+    const out = agent.fitListResult({ truncated: false, engine: 'rg' }, 'matches', items, 'narrow it');
+    const json = JSON.stringify(out);
+    assert.ok(json.length <= 8000, String(json.length));
+    assert.equal(out.truncated, true);
+    assert.equal(out.total, 3000);
+    assert.equal(out.shown, out.matches.length);
+    assert.ok(out.shown > 10);
+    assert.equal(out.engine, 'rg');
+    assert.deepEqual(out.matches, items.slice(0, out.shown));
+    const few = agent.fitListResult({ truncated: false }, 'entries', items.slice(0, 2), 'h');
+    assert.deepEqual(few, { truncated: false, entries: items.slice(0, 2) });
+
+    const env = makeEnv();
+    const w = env.addWorkspace();
+    for (let i = 0; i < 400; i += 1) fs.writeFileSync(w.f(`f-with-a-long-name-${String(i).padStart(4, '0')}.txt`), 'needle\n');
+    const t = await run(env, w, 'ws_tree', {});
+    assert.equal(t.success, true, t.error);
+    assert.ok(JSON.stringify(t.result).length <= 8000);
+    assert.equal(t.result.truncated, true);
+    assert.equal(t.result.total, 400);
+    const sr = await run(env, w, 'ws_search', { query: 'needle' });
+    assert.equal(sr.success, true, sr.error);
+    assert.ok(JSON.stringify(sr.result).length <= 8000);
+    assert.equal(sr.result.truncated, true);
+    assert.ok(sr.result.matches.length > 0 && sr.result.matches.length < 400);
+  });
+
   await check('ws_tree / ws_search / ws_status: like the /fs routes', async () => {
     const env = makeEnv();
     const w = env.addWorkspace();

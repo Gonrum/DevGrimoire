@@ -22,7 +22,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { RequestContext, type AuthRequest } from '../common/request-context';
 import { errorMessage, isRecord, isUnknownArray } from '../common/narrow';
-import { assertContentWrite } from '../common/scope-guard';
+import { actorMayWriteContent, assertContentWrite } from '../common/scope-guard';
 import { ChatService } from './chat.service';
 import { ChatLlmService, LlmMessageWithTools, LlmImageInput } from './chat-llm.service';
 import { ChatContextService, AttachmentForContext } from './chat-context.service';
@@ -952,6 +952,9 @@ export class ChatController {
 
     const userId = req.user?.userId;
     const session = await this.chatService.findById(id, userId);
+    // A new message abandons a turn still waiting for a confirmation: its
+    // proposal must not be resumable alongside (or after) this turn.
+    this.pendingConfirmations.delete(id);
     const projectId = session.projectId?.toString();
     const customerId = session.customerId?.toString();
     if (!projectId && !customerId) {
@@ -1017,6 +1020,10 @@ export class ChatController {
         activeWorkspace ? agentToolSetsOf(activeWorkspace) : [],
         isWorkspaceAgentTool,
       );
+      // Acceptance 6: an actor without content-write does not get the ws_* tools at all.
+      if (!this.withActor(actor, () => actorMayWriteContent(RequestContext.getUser()))) {
+        effectiveAllowlist = effectiveAllowlist.filter((name) => !isWorkspaceAgentTool(name));
+      }
     }
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -1105,7 +1112,8 @@ export class ChatController {
         pendingDone = loop.pendingDone;
         pendingDoneReason = loop.pendingDoneReason;
 
-        if (loop.paused) {
+        // Stopped while pausing: nobody can confirm; the turn ends below like any stopped turn.
+        if (loop.paused && !abort.signal.aborted) {
           /*
            * Angehalten vor einem schreibenden Tool. Der Turn ist NICHT fertig:
            * weder wird die Assistenten-Nachricht persistiert (sie wäre halb)
@@ -1362,7 +1370,7 @@ export class ChatController {
       pendingDone = loop.pendingDone;
       pendingDoneReason = loop.pendingDoneReason;
 
-      if (loop.paused) {
+      if (loop.paused && !abort.signal.aborted) {
         // Noch ein schreibendes Tool im selben Turn — erneut anhalten.
         this.pendingConfirmations.set(id, {
           ...pending,
@@ -1571,6 +1579,8 @@ export class ChatController {
           const decision: ConfirmDecision = isWorkspaceAgentTool(tc.name)
             ? await this.agentConfirmDecision(tc, callParams)
             : { kind: 'pause' };
+          // The preview may have awaited: a stopped turn proposes nothing.
+          if (p.abort.signal.aborted) break;
           if (decision.kind === 'pause') {
             p.send({
               type: 'tool_confirm',
@@ -1703,7 +1713,9 @@ export class ChatController {
         name: tc.name,
         content: JSON.stringify({ error }),
       });
-      p.persisted.push(redactToolRecord({ id: tc.id, name: tc.name, arguments: tc.arguments, success: false, error }));
+      // Unparsable ws_write/ws_edit arguments are stored cut like their content would be.
+      const stored = AGENT_TEXT_ARGS[tc.name] ? cutUtf8(tc.arguments, PERSISTED_AGENT_TEXT_BYTES) : tc.arguments;
+      p.persisted.push(redactToolRecord({ id: tc.id, name: tc.name, arguments: stored, success: false, error }));
       return;
     }
     const args = parsed.args;

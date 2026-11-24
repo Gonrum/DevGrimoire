@@ -341,6 +341,41 @@ const USER = oid().toString();
     await rejectsWith(() => svc.listSessions({ customerId: String(oid()) }, USER, { workspaceId: String(wsA._id) }), 400);
   });
 
+  await check('M5: history user -> tool-only assistant -> user replays alternating roles with a tool summary', async () => {
+    const { ChatContextService } = loadCompiled('chat/chat-context.service.js');
+    const { summarizeToolCalls, TOOL_SUMMARY_MAX_CHARS } = loadCompiled('chat/chat-history-replay.js');
+    const ctx = new ChatContextService(
+      { findById: async () => ({ name: 'P', techStack: [], description: '' }) },
+      {},
+      { search: async () => [] },
+      { buildRolePromptBlock: () => '' },
+    );
+    const history = [
+      { role: 'user', content: 'Mach greet freundlicher' },
+      {
+        role: 'assistant', content: '', toolCalls: [
+          { id: 'a', name: 'ws_read', arguments: '{"path":"greet.js"}', success: true },
+          { id: 'b', name: 'ws_edit', arguments: '{"path":"greet.js","oldText":"x","newText":"y"}', success: true },
+          { id: 'c', name: 'ws_exec', arguments: '{"command":"npm test"}', success: false },
+        ],
+      },
+      { role: 'user', content: 'Und jetzt?' },
+      { role: 'assistant', content: 'Fertig.' },
+      { role: 'system', content: 'ignored' },
+    ];
+    const built = await ctx.build({ projectId: String(PROJECT) }, 'weiter', history, { historyLimit: 10 });
+    const roles = built.messages.map((m) => m.role);
+    assert.deepEqual(roles, ['system', 'user', 'assistant', 'user', 'assistant', 'user']);
+    assert.equal(built.messages[2].content, '[Werkzeuge: ws_read greet.js ✓, ws_edit greet.js ✓, ws_exec npm test ✗]');
+    // An assistant turn with neither text nor tool calls is still dropped (providers refuse empty messages).
+    const { historyToLlmMessages } = loadCompiled('chat/chat-history-replay.js');
+    assert.deepEqual(historyToLlmMessages([{ role: 'user', content: 'a' }, { role: 'assistant', content: ' ' }], 10), [{ role: 'user', content: 'a' }]);
+    // Bounded, whatever the number of calls.
+    const many = summarizeToolCalls(Array.from({ length: 200 }, (_, i) => ({ name: 'ws_read', arguments: JSON.stringify({ path: `dir/${'x'.repeat(80)}-${i}` }), success: true })));
+    assert.ok(many.length <= TOOL_SUMMARY_MAX_CHARS, String(many.length));
+    assert.match(many, /… \+\d+\]$/);
+  });
+
   console.log(`\n${total - failures}/${total} checks passed`);
   process.exit(failures ? 1 : 0);
 })();

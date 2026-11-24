@@ -7,6 +7,7 @@ import { LlmMessage, LlmImageInput } from './chat-llm.service';
 import { WorkspaceDocument } from '../workspaces/schemas/workspace.schema';
 import { AgentRolesService } from '../agent-roles/agent-roles.service';
 import { errorMessage } from '../common/narrow';
+import { historyToLlmMessages } from './chat-history-replay';
 
 function shortenRepo(url?: string): string {
   if (!url) return '';
@@ -203,11 +204,8 @@ Verweise nach Möglichkeit auf konkrete Einträge (z.B. "laut (2) im Kontext").$
 # Relevanter Kontext
 ${contextSection}${attachmentSection}`;
 
-    const historyMessages: LlmMessage[] = history
-      .slice(-historyLimit)
-      // A stored tool-only turn (IDE agent) has no text; providers refuse empty messages.
-      .filter((m) => m.role !== 'system' && (m.role !== 'assistant' || m.content.trim() !== ''))
-      .map((m) => ({ role: m.role, content: m.content }));
+    // Tool-only turns (IDE agent) come back as a short summary of their calls.
+    const historyMessages: LlmMessage[] = historyToLlmMessages(history, historyLimit);
 
     // Prepend the workspace context line to THIS turn's user message only —
     // we deliberately don't rewrite history so older turns reflect what was
@@ -335,11 +333,8 @@ ${projectList}
 # Relevanter Kontext
 ${contextSection}`;
 
-    const historyMessages: LlmMessage[] = history
-      .slice(-historyLimit)
-      // A stored tool-only turn (IDE agent) has no text; providers refuse empty messages.
-      .filter((m) => m.role !== 'system' && (m.role !== 'assistant' || m.content.trim() !== ''))
-      .map((m) => ({ role: m.role, content: m.content }));
+    // Tool-only turns (IDE agent) come back as a short summary of their calls.
+    const historyMessages: LlmMessage[] = historyToLlmMessages(history, historyLimit);
 
     const messages: LlmMessage[] = [
       { role: 'system', content: systemPrompt },

@@ -180,6 +180,114 @@ export function fitExecResult(
   }
   return build(...split(Math.floor(room / 6)));
 }
+/** JSON characters one string takes inside a JSON document, without its quotes. */
+function jsonStringChars(text: string): number {
+  return JSON.stringify(text).length - 2;
+}
+
+export interface WsReadSlice {
+  path: string;
+  hash: string;
+  totalLines: number;
+  /** Lines of the requested range (1-based `startLine`); `content` is set for a whole-file read that fits. */
+  lines: string[];
+  startLine: number;
+  /** Whole-file read without a range: content as is (keeps the trailing newline). */
+  wholeContent?: string;
+}
+
+/**
+ * Shapes a ws_read result so its JSON stays within `maxChars` (the chat loop's
+ * generic cut would leave broken JSON without hash/totalLines). Metadata comes
+ * first; when the range does not fit, `content` holds the first whole lines of
+ * the range that do, `endLine` says where it stopped, `truncated` is true and
+ * `hint` tells the LLM how to read on. A single line longer than the budget
+ * is cut by characters (`lineCut: true`).
+ */
+export function fitReadResult(r: WsReadSlice, maxChars: number = MAX_TOOL_RESULT_CHARS): Record<string, unknown> {
+  const endOfRange = r.startLine + r.lines.length - 1;
+  if (r.wholeContent !== undefined) {
+    const whole = { path: r.path, hash: r.hash, totalLines: r.totalLines, truncated: false, content: r.wholeContent };
+    if (JSON.stringify(whole).length <= maxChars) return whole;
+  } else {
+    const ranged = {
+      path: r.path, hash: r.hash, totalLines: r.totalLines,
+      startLine: r.startLine, endLine: endOfRange, truncated: false, content: r.lines.join('\n'),
+    };
+    if (JSON.stringify(ranged).length <= maxChars) return ranged;
+  }
+  const shell = (endLine: number, lineCut = false): Record<string, unknown> => ({
+    path: r.path,
+    hash: r.hash,
+    totalLines: r.totalLines,
+    startLine: r.startLine,
+    endLine,
+    truncated: true,
+    ...(lineCut ? { lineCut: true } : {}),
+    hint: !lineCut
+      ? `Result shortened to fit the tool result budget: lines ${r.startLine}-${endLine} of ${r.totalLines}. `
+        + `Call ws_read again with startLine ${endLine + 1} (and endLine) to read further.`
+      : `Line ${r.startLine} alone is longer than the tool result budget; only its start is shown. `
+        + 'Use ws_search or ws_exec (e.g. cut, head -c) to look at parts of it.',
+    content: '',
+  });
+  // Exact accounting: JSON escaping is per character, lines are joined by "\n" (2 JSON chars).
+  const room = maxChars - JSON.stringify(shell(endOfRange)).length;
+  let used = 0;
+  let count = 0;
+  for (const line of r.lines) {
+    const cost = jsonStringChars(line) + (count > 0 ? 2 : 0);
+    if (used + cost > room) break;
+    used += cost;
+    count += 1;
+  }
+  if (count > 0) return { ...shell(r.startLine + count - 1), content: r.lines.slice(0, count).join('\n') };
+  // Not even the first line fits: its start, cut by characters (no lone surrogate at the cut).
+  const first = r.lines[0] ?? '';
+  const base = shell(r.startLine, true);
+  const free = maxChars - JSON.stringify(base).length;
+  let lo = 0;
+  let hi = Math.min(first.length, Math.max(0, free));
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (jsonStringChars(first.slice(0, mid)) <= free) lo = mid; else hi = mid - 1;
+  }
+  let cut = lo;
+  const code = first.charCodeAt(cut - 1);
+  if (cut > 0 && code >= 0xd800 && code <= 0xdbff) cut -= 1;
+  return { ...base, content: first.slice(0, cut) };
+}
+
+/**
+ * Shapes a list result (`ws_tree` entries, `ws_search` matches, `ws_status`
+ * changed files) so its JSON stays within `maxChars`: the longest prefix of
+ * `items` that fits, `truncated: true` plus `shown`/`total` and a `hint` when
+ * items were left out. `base` holds the other fields (kept as is).
+ */
+export function fitListResult(
+  base: Record<string, unknown>,
+  key: string,
+  items: readonly unknown[],
+  hint: string,
+  maxChars: number = MAX_TOOL_RESULT_CHARS,
+): Record<string, unknown> {
+  const full = { ...base, [key]: items };
+  if (JSON.stringify(full).length <= maxChars) return full;
+  const shell = (shown: number): Record<string, unknown> => ({
+    ...base, truncated: true, shown, total: items.length, hint, [key]: [],
+  });
+  const room = maxChars - JSON.stringify(shell(items.length)).length;
+  let used = 0;
+  let count = 0;
+  for (const item of items) {
+    const cost = JSON.stringify(item).length + (count > 0 ? 1 : 0);
+    if (used + cost > room) break;
+    used += cost;
+    count += 1;
+  }
+  return { ...shell(count), [key]: items.slice(0, count) };
+}
+
 const WS_EXEC_DEFAULT_TIMEOUT_SEC = 60;
 const WS_EXEC_MAX_TIMEOUT_SEC = 600;
 const PATH_MAX = 4096;
@@ -196,14 +304,18 @@ const BASE_HASH_PROP = {
 export const WORKSPACE_AGENT_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: 'ws_tree',
-    description: 'Lists one directory level of the workspace (dirs first). Default path ".".',
+    description:
+      'Lists one directory level of the workspace (dirs first). Default path ".". A long listing is shortened '
+      + '(truncated: true, shown/total).',
     parameters: { type: 'object', properties: { path: PATH_PROP } },
   },
   {
     name: 'ws_read',
     description:
-      'Reads a UTF-8 text file of the workspace. Optional 1-based inclusive line range. Returns content, '
-      + 'hash (of the whole file) and totalLines.',
+      'Reads a UTF-8 text file of the workspace. Optional 1-based inclusive line range. Returns path, '
+      + 'hash (of the whole file), totalLines, truncated and content. The result holds about 7,000 characters: '
+      + 'a longer file or range comes back as its first whole lines with truncated: true and startLine/endLine '
+      + 'of what was returned; call again with startLine/endLine to read further.',
     parameters: {
       type: 'object',
       properties: {
@@ -216,7 +328,9 @@ export const WORKSPACE_AGENT_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   },
   {
     name: 'ws_search',
-    description: 'Searches file contents of the workspace (ripgrep/grep). Optional include/exclude globs.',
+    description:
+      'Searches file contents of the workspace (ripgrep/grep). Optional include/exclude globs. Many matches '
+      + 'are shortened (truncated: true, shown/total): narrow the query then.',
     parameters: {
       type: 'object',
       properties: {
@@ -231,7 +345,7 @@ export const WORKSPACE_AGENT_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   },
   {
     name: 'ws_status',
-    description: 'git status of the workspace (branch, changed files).',
+    description: 'git status of the workspace (branch, changed files; a long list is shortened, truncated: true).',
     parameters: { type: 'object', properties: {} },
   },
   {
@@ -617,22 +731,45 @@ export class WorkspaceAgentTools {
           const db = b.type === 'dir' ? 0 : 1;
           return da - db || a.name.localeCompare(b.name);
         });
-        return { result: { entries, truncated: res.truncated } };
+        return {
+          result: fitListResult(
+            { truncated: res.truncated },
+            'entries',
+            entries,
+            'Directory listing shortened to fit the tool result budget; list a subdirectory or use ws_search.',
+          ),
+        };
       }
       case 'ws_read':
         return { result: await this.read(input, gate) };
-      case 'ws_search':
+      case 'ws_search': {
+        const { matches, ...rest } = await backend.search({
+          query: input.query,
+          regex: input.regex,
+          caseSensitive: input.caseSensitive,
+          include: input.include,
+          exclude: input.exclude,
+        });
         return {
-          result: await backend.search({
-            query: input.query,
-            regex: input.regex,
-            caseSensitive: input.caseSensitive,
-            include: input.include,
-            exclude: input.exclude,
-          }),
+          result: fitListResult(
+            rest,
+            'matches',
+            matches,
+            'Matches shortened to fit the tool result budget; narrow the query or use include/exclude globs.',
+          ),
         };
-      case 'ws_status':
-        return { result: await backend.status() };
+      }
+      case 'ws_status': {
+        const { changed, ...rest } = await backend.status();
+        return {
+          result: fitListResult(
+            { ...rest, truncated: false },
+            'changed',
+            changed,
+            'Changed files shortened to fit the tool result budget; run ws_exec "git status --short <dir>" for a part.',
+          ),
+        };
+      }
       case 'ws_write':
         return this.write(input, gate, pinned);
       case 'ws_edit':
@@ -663,22 +800,16 @@ export class WorkspaceAgentTools {
     const res = await gate.backend.readText(input.path, await this.fsLimits());
     const lines = splitLines(res.content);
     const totalLines = lines.length;
+    const meta = { path: input.path, hash: res.hash, totalLines };
     if (input.startLine === undefined && input.endLine === undefined) {
-      return { path: input.path, content: res.content, hash: res.hash, totalLines };
+      return fitReadResult({ ...meta, lines, startLine: 1, wholeContent: res.content });
     }
     const startLine = input.startLine ?? 1;
     if (startLine > totalLines) {
       throw new ToolInputError(`startLine ${startLine} is beyond the end of the file (${totalLines} lines)`);
     }
     const endLine = Math.min(input.endLine ?? totalLines, totalLines);
-    return {
-      path: input.path,
-      content: lines.slice(startLine - 1, endLine).join('\n'),
-      hash: res.hash,
-      totalLines,
-      startLine,
-      endLine,
-    };
+    return fitReadResult({ ...meta, lines: lines.slice(startLine - 1, endLine), startLine });
   }
 
   private async write(

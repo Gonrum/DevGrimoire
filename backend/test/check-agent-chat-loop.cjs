@@ -736,6 +736,83 @@ async function main() {
     assert.equal(fs.readFileSync(env.f('greet.js'), 'utf8'), GREET, 'ws_edit must not run after Stop');
     assert.ok(!storedCalls(env).includes('e1'), JSON.stringify(storedCalls(env)));
   });
+
+  // ---- final review round -------------------------------------------------------
+
+  await check('M9: actor without content-write gets no ws_* in an IDE turn', async () => {
+    const env = makeEnv({ rounds: [[{ type: 'content', delta: 'hi' }, { type: 'finish', reason: 'stop' }]] });
+    const readOnly = { ...ADMIN, permissions: ['project:read', 'todo:read'], permissionsRestricted: true };
+    await send(env, 'go', fakeReq(readOnly));
+    const offered = env.llmCalls[0].tools;
+    assert.ok(!offered.some((n) => n.startsWith('ws_')), offered.join(','));
+    assert.ok(offered.includes('todo_list'), offered.join(','));
+    // A writer still gets them.
+    const env2 = makeEnv({ rounds: [[{ type: 'content', delta: 'hi' }, { type: 'finish', reason: 'stop' }]] });
+    const writer = { ...ADMIN, permissions: ['project:read', 'project:write'], permissionsRestricted: true };
+    await send(env2, 'go', fakeReq(writer));
+    for (const t of WORKSPACE_AGENT_TOOLS) assert.ok(env2.llmCalls[0].tools.includes(t), t);
+  });
+
+  await check('M2: a new message drops the open proposal; resuming it -> proposal_expired', async () => {
+    const env = makeEnv({
+      rounds: [round(tc('w1', 'ws_write', { path: 'a.txt', content: 'neu' })), [{ type: 'content', delta: 'ok' }, { type: 'finish', reason: 'stop' }]],
+    });
+    const first = await send(env);
+    assert.equal(ofType(first, 'tool_confirm').length, 1);
+    assert.ok(env.c.pendingConfirmations.has(String(env.session._id)));
+    await send(env, 'etwas anderes');
+    assert.ok(!env.c.pendingConfirmations.has(String(env.session._id)));
+    await assert.rejects(() => resume(env, { callId: 'w1', approved: true }), (err) => {
+      assert.equal(err.getStatus(), 404);
+      assert.equal(err.getResponse().error, 'proposal_expired');
+      return true;
+    });
+    assert.ok(!fs.existsSync(env.f('a.txt')));
+  });
+
+  await check('M2: Stop while the preview is built -> no proposal stored, no tool_confirm', async () => {
+    const env = makeEnv({ rounds: [round(tc('w1', 'ws_write', { path: 'a.txt', content: 'neu' }))] });
+    const realPreview = env.c.tools.previewAgentTool.bind(env.c.tools);
+    env.c.tools.previewAgentTool = async (...a) => { await sleep(300); return realPreview(...a); };
+    const events = await overHttp(
+      (req, res) => env.c.sendMessage(String(env.session._id), { content: 'go' }, req, res),
+      { content: 'go' },
+      { abortAfterMs: 100 },
+    );
+    assert.equal(events.filter((e) => e.type === 'tool_confirm').length, 0);
+    assert.ok(!env.c.pendingConfirmations.has(String(env.session._id)));
+    assert.ok(!fs.existsSync(env.f('a.txt')));
+  });
+
+  await check('M3: unparsable ws_write arguments are stored cut to 4 KiB', async () => {
+    const big = '{"path":"a.txt","content":"' + 'x'.repeat(20000);
+    const env = makeEnv({
+      agentMode: 'direct',
+      rounds: [[{ type: 'tool_call', id: 'b1', name: 'ws_write', arguments: big }, { type: 'finish', reason: 'tool_calls' }]],
+    });
+    await send(env);
+    const stored = env.appended.filter((m) => m.role === 'assistant').flatMap((m) => m.toolCalls ?? []).find((t) => t.id === 'b1');
+    assert.ok(stored, JSON.stringify(env.appended));
+    assert.equal(stored.success, false);
+    assert.ok(Buffer.byteLength(stored.arguments, 'utf8') < 4 * 1024 + 64, String(stored.arguments.length));
+    assert.match(stored.arguments, /…\[truncated \d+ bytes\]$/);
+  });
+
+  await check('I1: ws_read of a 50 KB file in the loop -> valid JSON, no generic cut marker', async () => {
+    const env = makeEnv({ agentMode: 'direct', rounds: [round(tc('r1', 'ws_read', { path: 'big.txt' }))] });
+    const lines = Array.from({ length: 2000 }, (_, i) => `line ${String(i + 1).padStart(5, '0')} ${'abcdefghij'.repeat(2)}`);
+    fs.writeFileSync(env.f('big.txt'), lines.join('\n') + '\n');
+    await send(env);
+    const msg = toolMessage(env, 'r1');
+    assert.ok(msg.content.length <= 8000, String(msg.content.length));
+    assert.ok(!msg.content.includes('…[truncated]'));
+    const parsed = JSON.parse(msg.content);
+    assert.equal(parsed.truncated, true);
+    assert.equal(parsed.totalLines, 2000);
+    assert.match(parsed.hash, /^[0-9a-f]{64}$/);
+    const stored = env.appended.flatMap((m) => m.toolCalls ?? []).find((t) => t.id === 'r1');
+    assert.doesNotThrow(() => JSON.parse(stored.result));
+  });
 }
 
 (async () => {
