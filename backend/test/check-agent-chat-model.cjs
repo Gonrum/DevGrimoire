@@ -24,7 +24,6 @@ const { plainToInstance } = nm('class-transformer');
 const { WorkspacesService } = loadCompiled('workspaces/workspaces.service.js');
 const { WorkspacesController } = loadCompiled('workspaces/workspaces.controller.js');
 const { UpdateWorkspaceDto } = loadCompiled('workspaces/dto/update-workspace.dto.js');
-const { SHELL_CONTROL_PATTERN, hasShellControl } = loadCompiled('workspaces/agent-allow.js');
 const { WorkspaceSchema } = loadCompiled('workspaces/schemas/workspace.schema.js');
 const { ChatSessionSchema } = loadCompiled('chat/schemas/chat-session.schema.js');
 const { CreateChatSessionDto } = loadCompiled('chat/dto/chat.dto.js');
@@ -111,14 +110,20 @@ const USER = oid().toString();
     assert.equal(ws.agentAllow.length, 2);
     assert.ok(ws.agentAllow[0]._id && ws.agentAllow[0].createdAt instanceof Date);
   });
-  await check('command rules: trimmed; same kind+match+value is a duplicate, other match is not', async () => {
+  await check('command rules: trimmed; the same exact value is a duplicate', async () => {
     const ws = makeWorkspace();
     const svc = wsService([ws]);
     await svc.addAgentAllow(String(ws._id), { kind: 'command', match: 'exact', value: '  npm test ' });
     await svc.addAgentAllow(String(ws._id), { kind: 'command', match: 'exact', value: 'npm test' });
-    await svc.addAgentAllow(String(ws._id), { kind: 'command', match: 'prefix', value: 'npm test' });
+    await svc.addAgentAllow(String(ws._id), { kind: 'command', match: 'exact', value: 'npm test -- -u' });
     assert.equal(ws.agentAllow.length, 2);
     assert.equal(ws.agentAllow[0].value, 'npm test');
+  });
+  await check('a stored prefix entry is no duplicate of the exact rule with the same value', async () => {
+    const ws = makeWorkspace({ agentAllow: [{ _id: oid(), kind: 'command', match: 'prefix', value: 'npm test', createdAt: new Date() }] });
+    const svc = wsService([ws]);
+    await svc.addAgentAllow(String(ws._id), { kind: 'command', match: 'exact', value: 'npm test' });
+    assert.deepEqual(ws.agentAllow.map((e) => e.match), ['prefix', 'exact']);
   });
   await check('101st distinct rule -> 400, a duplicate at the cap is still fine', async () => {
     const ws = makeWorkspace();
@@ -129,34 +134,21 @@ const USER = oid().toString();
     await svc.addAgentAllow(String(ws._id), { kind: 'command', match: 'exact', value: 'c5' });
     assert.equal(ws.agentAllow.length, 100);
   });
-  for (const ctl of [';', '&&', '||', '|', '`', '$(', '>', '<', '&', '(', ')', '\n', '\r']) {
-    await check(`prefix containing ${JSON.stringify(ctl)} -> 400 (exact is allowed)`, async () => {
-      const ws = makeWorkspace();
-      const svc = wsService([ws]);
-      assert.ok(SHELL_CONTROL_PATTERN.test(`a${ctl}b`) && hasShellControl(`a${ctl}b`));
-      await rejectsWith(() => svc.addAgentAllow(String(ws._id), { kind: 'command', match: 'prefix', value: `echo a${ctl}b` }), 400);
-      await svc.addAgentAllow(String(ws._id), { kind: 'command', match: 'exact', value: `echo a${ctl}b` });
-      assert.equal(ws.agentAllow.length, 1);
-    });
-  }
-  await check('prefix: interpreter/wrapper first word -> 400 at any length; git only single; exact always fine', async () => {
+  await check('match prefix -> 400 "prefix rules are no longer supported" for any value; exact stores the same value', async () => {
     const ws = makeWorkspace();
     const svc = wsService([ws]);
     const id = String(ws._id);
-    for (const word of ['bash', 'sh', 'env', 'xargs', 'find', 'node', 'python3', 'npx', 'sudo', 'git', 'eval', ' timeout ', '/usr/bin/env']) {
-      await rejectsWith(() => svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: word }), 400);
-    }
-    // Interpreters/wrappers at any word count; git only as a single word.
-    for (const value of ['bash -c', 'env FOO=1', 'find . -name', 'npx tsc', 'sudo apt update', '/usr/bin/env node']) {
+    const values = ['git status', 'make', 'npm test', 'ls', 'bash -c', 'echo a;b', 'echo a\nb', "sed -n '1e id'"];
+    for (const value of values) {
       await rejectsWith(() => svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value }), 400);
+      try { await svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value }); } catch (e) {
+        assert.match(e.message, /prefix rules are no longer supported; allow the exact command/);
+      }
     }
-    await svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: 'git status' });
-    await rejectsWith(() => svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: 'npm' }), 400);
-    await rejectsWith(() => svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: "\\bash -c" }), 400);
-    await svc.addAgentAllow(id, { kind: 'command', match: 'prefix', value: 'make' });
-    await svc.addAgentAllow(id, { kind: 'command', match: 'exact', value: 'git' });
-    await svc.addAgentAllow(id, { kind: 'command', match: 'exact', value: "bash -c 'x'" });
-    assert.equal(ws.agentAllow.length, 4);
+    assert.equal(ws.agentAllow.length, 0);
+    for (const value of values) await svc.addAgentAllow(id, { kind: 'command', match: 'exact', value });
+    assert.equal(ws.agentAllow.length, values.length);
+    assert.ok(ws.agentAllow.every((e) => e.match === 'exact'));
   });
   await check('values are edge-trimmed of spaces/tabs only (NBSP stays)', async () => {
     const ws = makeWorkspace();
@@ -236,6 +228,22 @@ const USER = oid().toString();
     assert.equal(out.agentAllow.length, 1);
     await ctrl.removeAgentAllow(String(ws._id), String(out.agentAllow[0]._id));
     assert.equal(ws.agentAllow.length, 0);
+    assert.ok(!('inactive' in out.agentAllow[0]), 'active entries carry no flag');
+    // Stored prefix entries (legacy): marked inactive in responses only, still deletable.
+    const prefixId = oid();
+    ws.agentAllow = [
+      { _id: prefixId, kind: 'command', match: 'prefix', value: 'npm test', createdAt: new Date() },
+      { _id: oid(), kind: 'command', match: 'exact', value: 'npm test', createdAt: new Date() },
+      { _id: oid(), kind: 'files.write', createdAt: new Date() },
+    ];
+    const shown = (await ctrl.findOne(String(ws._id))).agentAllow;
+    assert.deepEqual(shown.map((e) => e.inactive === true), [true, false, false]);
+    assert.ok(!('inactive' in shown[1]) && !('inactive' in shown[2]));
+    assert.equal(shown[0].value, 'npm test');
+    assert.ok(ws.agentAllow.every((e) => !('inactive' in e)), 'computed, not stored');
+    await ctrl.removeAgentAllow(String(ws._id), String(prefixId));
+    assert.deepEqual(ws.agentAllow.map((e) => e.match), ['exact', undefined]);
+    ws.agentAllow = [];
     assert.equal((await ctrl.update(String(ws._id), { agentMode: 'confirm' })).agentMode, 'confirm');
   });
 

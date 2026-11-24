@@ -9,6 +9,7 @@ import { WorkspaceCliTokenService } from './workspace-cli-token.service';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { AddAgentAllowDto } from './dto/agent-allow.dto';
+import { isInactiveAllowEntry } from './agent-allow';
 import { ExecWorkspaceDto } from './dto/exec-workspace.dto';
 import { WORKSPACE_STATUSES, WorkspaceDocument, WorkspaceStatus } from './schemas/workspace.schema';
 import { SshService } from '../ssh/ssh.service';
@@ -45,11 +46,13 @@ export class WorkspacesController {
     );
     return docs.map((doc) => {
       // Legacy documents carry neither field: report the defaults.
+      const json = doc.toJSON();
       const base = {
-        ...doc.toJSON(),
+        ...json,
         agentMode: doc.agentMode ?? 'confirm',
         agentCredentials: doc.agentCredentials === true,
-        agentAllow: doc.agentAllow ?? [],
+        // `inactive` is computed here, never stored: legacy prefix rules no longer apply.
+        agentAllow: (json.agentAllow ?? []).map((e) => (isInactiveAllowEntry(e) ? { ...e, inactive: true } : e)),
       };
       if (doc.location !== 'ssh') return base;
       const c = byId.get(String(doc.sshConnectionId));

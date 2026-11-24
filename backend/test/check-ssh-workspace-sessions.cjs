@@ -382,6 +382,29 @@ function makeWorld() {
     }
   });
 
+  await check('PROBE_COMMAND: a base64 that does not decode with -d (old macOS: -D) -> base64=0; a decoding one -> base64=1', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dg-probe-'));
+    try {
+      const sh = execFileSync('sh', ['-c', 'command -v sh'], { encoding: 'utf8' }).trim();
+      const env = { PATH: `${dir}:/usr/bin:/bin` };
+      const probe = () => parseProbeOutput(execFileSync(sh, ['-c', PROBE_COMMAND], { encoding: 'utf8', env }));
+      // Present, but `-d` is an error.
+      fs.writeFileSync(path.join(dir, 'base64'), `#!${sh}\necho "base64: invalid option -- d" >&2\nexit 64\n`, { mode: 0o755 });
+      assert.equal(probe().base64, false, 'base64 without -d');
+      // Present, exits 0, but does not decode (prints its input).
+      fs.writeFileSync(path.join(dir, 'base64'), `#!${sh}\ncat\n`, { mode: 0o755 });
+      assert.equal(probe().base64, false, 'base64 that does not decode');
+      // A decoding one.
+      fs.writeFileSync(path.join(dir, 'base64'), `#!${sh}\ncat >/dev/null\nprintf x\n`, { mode: 0o755 });
+      const ok = probe();
+      assert.equal(ok.base64, true);
+      assert.equal(ok.uid, process.getuid());
+      assert.equal(typeof ok.rg, 'boolean');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   await check('exec: terminateOnTimeout passed to the driver (default true, false kept)', async () => {
     const w = makeWorld();
     const svc = w.svc();

@@ -9,8 +9,6 @@ import { isRelativeWorkspacePath } from '../workspaces/dto/workspace-fs.dto';
 import { logWorkspaceIde, openWorkspaceFs, type WorkspaceFsGateResult } from '../workspaces/workspace-fs-gate';
 import {
   AGENT_ALLOW_VALUE_MAX,
-  hasShellControl,
-  isForbiddenPrefix,
   trimCommandEdges,
   type AgentAllowEntry,
   type AgentAllowFileKind,
@@ -23,9 +21,6 @@ import { RequestContext } from '../common/request-context';
 import { errorMessage, isRecord } from '../common/narrow';
 import { optionalBoolean, optionalNumber, optionalStringArray, type ToolArgs } from '../common/tool-args';
 import type { ToolDefinition, ToolExecutionResult } from './chat-tools';
-
-// One definition of the control set: agent-allow.ts.
-export { SHELL_CONTROL_PATTERN } from '../workspaces/agent-allow';
 
 export const WORKSPACE_AGENT_TOOLS: readonly string[] = [
   'ws_tree', 'ws_read', 'ws_search', 'ws_status',
@@ -49,19 +44,11 @@ const FILE_KIND_OF: Readonly<Record<string, AgentAllowFileKind>> = {
   ws_delete: 'files.delete',
 };
 
-/** `value` followed by a space/tab or the end of `command`. */
-function startsWithWord(command: string, value: string): boolean {
-  if (!value || !command.startsWith(value)) return false;
-  return command.length === value.length || /[ \t]/.test(command.charAt(value.length));
-}
-
 /**
  * Pure; true when `entries` allow this call without asking. Read-only ws_*
  * tools never ask (true); any non-ws_* name is never covered (false).
- * Commands: `exact` compares after trimming edge spaces/tabs; `prefix` needs a
- * space/tab boundary after the prefix and no shell control characters anywhere
- * in the command (nor in the stored prefix); a stored prefix starting with an
- * interpreter/wrapper (`bash -c`, `env` …, or the single word `git`) never matches.
+ * Commands: only an `exact` entry whose value equals the command, both
+ * trimmed of edge spaces/tabs. Stored prefix entries (legacy) are ignored.
  */
 export function isAllowedByList(
   name: string,
@@ -76,23 +63,14 @@ export function isAllowedByList(
   if (typeof args.command !== 'string') return false;
   const command = trimCommandEdges(args.command);
   if (!command) return false;
-  const controlled = hasShellControl(command);
-  return entries.some((e) => {
-    if (e.kind !== 'command') return false;
-    const value = trimCommandEdges(e.value);
-    if (e.match === 'exact') return value === command;
-    return !controlled && !hasShellControl(value) && !isForbiddenPrefix(value)
-      && startsWithWord(command, value);
-  });
+  return entries.some((e) => e.kind === 'command' && e.match === 'exact' && trimCommandEdges(e.value) === command);
 }
 
 /**
- * Suggestions for the confirm card. ws_exec: [exact, prefix(first word),
- * prefix(first two words)], the prefix variants only without control
- * characters, none starting with an interpreter/wrapper (`bash -c` …) and
- * not the single word `git`; entries over the stored length limit are left out. File tools:
- * their files.* kind. Anything else: none. `AgentAllowInput` is the entry
- * union without `createdAt` (a plain `Omit` over the union collapses it).
+ * Suggestions for the confirm card. ws_exec: the exact command (what the user
+ * saw), left out when over the stored length limit. File tools: their files.*
+ * kind. Anything else: none. `AgentAllowInput` is the entry union without
+ * `createdAt` (a plain `Omit` over the union collapses it).
  */
 export function allowSuggestions(name: string, args: Record<string, unknown>): AgentAllowInput[] {
   const fileKind = FILE_KIND_OF[name];
@@ -100,14 +78,7 @@ export function allowSuggestions(name: string, args: Record<string, unknown>): A
   if (name !== 'ws_exec' || typeof args.command !== 'string') return [];
   const command = trimCommandEdges(args.command);
   if (!command || command.length > AGENT_ALLOW_VALUE_MAX) return [];
-  const out: AgentAllowInput[] = [{ kind: 'command', match: 'exact', value: command }];
-  if (hasShellControl(command)) return out;
-  const words = command.split(/[ \t]+/);
-  const candidates = [words[0], ...(words.length >= 2 ? [`${words[0]} ${words[1]}`] : [])];
-  for (const value of candidates) {
-    if (!isForbiddenPrefix(value)) out.push({ kind: 'command', match: 'prefix', value });
-  }
-  return out;
+  return [{ kind: 'command', match: 'exact', value: command }];
 }
 
 export interface AgentWorkspaceContext {

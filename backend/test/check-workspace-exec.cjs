@@ -14,7 +14,7 @@ const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 
 function loadCompiled(rel) {
@@ -277,14 +277,14 @@ const untilAborted = (signal) => new Promise((_, reject) => {
   const WRAPPER = /^exec \/bin\/sh -c 'eval "\$\(printf %s ([A-Za-z0-9+/=]+) \| base64 -d\)"'$/;
   const decoded = (cmd) => Buffer.from(WRAPPER.exec(cmd)[1], 'base64').toString('utf8');
 
-  await check('ssh: base64 wrapper around `cd -- <shq(root)> && <command>`; result mapped; not retryable; no env', async () => {
+  await check('ssh: base64 wrapper around `cd -- <shq(root)> || exit 1` + LF + `<command>`; result mapped; not retryable; no env', async () => {
     const t = setup();
     t.fake.switches.execScript = { code: 2, stdout: 'out\n', stderr: 'err\n' };
     const res = await t.backend.exec('npm test -- --grep "a b"', { timeoutMs: 30_000, maxOutputBytes: 4096 });
     assert.deepEqual(res, { exitCode: 2, stdout: 'out\n', stderr: 'err\n', truncated: false, timedOut: false, aborted: false });
     assert.equal(t.fake.calls.agentExecs.length, 1);
     assert.match(t.fake.calls.agentExecs[0], WRAPPER);
-    assert.equal(decoded(t.fake.calls.agentExecs[0]), `cd -- '${t.root}' && npm test -- --grep "a b"`);
+    assert.equal(decoded(t.fake.calls.agentExecs[0]), `cd -- '${t.root}' || exit 1\nnpm test -- --grep "a b"`);
     assert.deepEqual(t.fake.calls.agentCommands, ['npm test -- --grep "a b"']);
     const opts = t.fake.calls.execOpts[t.fake.calls.execOpts.length - 1];
     assert.equal(opts.timeoutMs, 30_000);
@@ -307,7 +307,7 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     const t = setup("it's here");
     await t.backend.exec('ls', OPTS);
     const script = decoded(t.fake.calls.agentExecs[0]);
-    assert.equal(script, `cd -- '${t.root.replace(/'/g, `'\\''`)}' && ls`);
+    assert.equal(script, `cd -- '${t.root.replace(/'/g, `'\\''`)}' || exit 1\nls`);
     // A command with ' is one word for /bin/sh as well.
     await t.backend.exec("echo 'x'", OPTS);
     assert.deepEqual(t.fake.calls.agentCommands, ['ls', "echo 'x'"]);
@@ -325,6 +325,24 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     // A real /bin/sh runs the wrapper as the server would (here: local, harmless payload).
     const out = execFileSync('/bin/sh', ['-c', wrapper], { encoding: 'utf8' });
     assert.equal(out, `${t.root}|\\' (echo FISH) '\\\n`);
+  });
+
+  await check('ssh: a failed cd ends the script: nothing of `a; b`, `a || b`, `a<LF>b`, `a && b` runs (real sh, missing root)', async () => {
+    for (const command of [
+      'echo RAN-A; echo RAN-B', 'false || echo RAN-B', 'echo RAN-A\necho RAN-B', 'echo RAN-A && echo RAN-B',
+      'echo RAN-A | cat; echo RAN-B', 'echo RAN-A & wait; echo RAN-B',
+    ]) {
+      const t = setup();
+      await t.backend.exec(command, OPTS);
+      const wrapper = t.fake.calls.agentExecs[0];
+      // With the root in place the command runs there (harmless echo only).
+      assert.match(execFileSync('/bin/sh', ['-c', wrapper], { encoding: 'utf8', cwd: os.tmpdir() }), /RAN-B/, command);
+      fs.rmSync(t.root, { recursive: true, force: true });
+      const r = spawnSync('/bin/sh', ['-c', wrapper], { encoding: 'utf8', cwd: os.tmpdir() });
+      assert.equal(r.status, 1, `${JSON.stringify(command)}: exit ${r.status}`);
+      assert.equal(r.stdout, '', `${JSON.stringify(command)} ran after a failed cd: ${r.stdout}`);
+      assert.match(r.stderr, /cd/);
+    }
   });
 
   await check('ssh: no base64 on the server -> 409 "base64 not available on server", nothing sent', async () => {
@@ -423,7 +441,12 @@ const untilAborted = (signal) => new Promise((_, reject) => {
     await assert.rejects(t.fake.session.exec(`cd -- '${t.root}' && touch x`, {}), /not allowed/);
     t.fake.switches.execScript = {};
     const wrap = (script) => `exec /bin/sh -c 'eval "$(printf %s ${Buffer.from(script).toString('base64')} | base64 -d)"'`;
-    await assert.rejects(t.fake.session.exec(wrap(`cd -- '/etc' && ls`), {}), /outside the temp dir/);
+    await assert.rejects(t.fake.session.exec(wrap(`cd -- '/etc' || exit 1\nls`), {}), /outside the temp dir/);
+    // Only the exact script shape is an agent command; the `&&` form of fix round 3 is refused.
+    for (const script of [`cd -- '${t.root}' && ls`, `cd -- '${t.root}' || exit 1; ls`, `cd -- '${t.root}' || true\nls`, `cd -- '${t.root}'\nls`, `ls`]) {
+      await assert.rejects(t.fake.session.exec(wrap(script), {}), /decoded agent script is not/, script);
+    }
+    assert.deepEqual(t.fake.calls.agentCommands, []);
     // Older forms are no agent shape any more.
     await assert.rejects(t.fake.session.exec(`cd -- '${t.root}' && ls`, {}), /not allowed/);
     await assert.rejects(t.fake.session.exec(`cd -- '${t.root}' && exec /bin/sh -c 'ls'`, {}), /not allowed/);

@@ -28,7 +28,7 @@
  *   denyOpenWrite      Set of paths: opening them for writing (createWriteStream,
  *                      writeFile) -> `denied`, even when the file exists
  *   execScript         null, or the scripted answer for agent commands
- *                      (base64 wrapper around `cd -- '<root>' && <cmd>`, see agentShape):
+ *                      (base64 wrapper around `cd -- '<root>' || exit 1` + LF + `<cmd>`, see agentShape):
  *                      { code = 0, stdout = '', stderr = '', delayMs = 0,
  *                        timeout = false }. Such a command is only recorded
  *                      and answered, NEVER run. `timeout: true` rejects with
@@ -275,7 +275,9 @@ function createLocalRemoteSession(base, RemoteError) {
   /**
    * Agent commands (`exec` of the file backend):
    * `exec /bin/sh -c 'eval "$(printf %s <base64> | base64 -d)"'`, the decoded
-   * script being `cd -- '<root>' && <command>`. Only while
+   * script being exactly `cd -- '<root>' || exit 1` + LF + `<command>` (a
+   * failed cd ends the script; `&&` would only guard the first list element
+   * of the command). Only while
    * `switches.execScript` is set — the command is recorded (decoded, in
    * `calls.agentCommands`) and never run; the root is guarded like every path.
    */
@@ -284,8 +286,8 @@ function createLocalRemoteSession(base, RemoteError) {
     const w = AGENT_WRAPPER.exec(cmd);
     if (!w) return null;
     const script = Buffer.from(w[1], 'base64').toString('utf8');
-    const m = /^cd -- ('(?:[^']|'\\'')*') && (.+)$/s.exec(script);
-    if (!m) throw new Error(`fake: decoded agent script has no cd prefix: ${script}`);
+    const m = /^cd -- ('(?:[^']|'\\'')*') \|\| exit 1\n(.+)$/s.exec(script);
+    if (!m) throw new Error(`fake: decoded agent script is not \`cd -- <root> || exit 1\` + LF + command: ${script}`);
     return { root: unquote(m[1]), command: m[2] };
   }
   function agentShape(cmd) {

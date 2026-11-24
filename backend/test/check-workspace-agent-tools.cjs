@@ -29,7 +29,7 @@ require(path.resolve(__dirname, '..', 'node_modules', 'reflect-metadata'));
 
 const agent = loadCompiled('chat/workspace-agent-tools.js');
 const {
-  WORKSPACE_AGENT_TOOLS, WORKSPACE_AGENT_WRITE_TOOLS, SHELL_CONTROL_PATTERN,
+  WORKSPACE_AGENT_TOOLS, WORKSPACE_AGENT_WRITE_TOOLS,
   isAllowedByList, allowSuggestions, WorkspaceAgentTools,
 } = agent;
 const allowModule = loadCompiled('workspaces/agent-allow.js');
@@ -68,25 +68,11 @@ async function pureChecks() {
       ['ws_delete', 'ws_edit', 'ws_exec', 'ws_mkdir', 'ws_move', 'ws_write']);
   });
 
-  await check('SHELL_CONTROL_PATTERN is the one from agent-allow', () => {
-    assert.equal(SHELL_CONTROL_PATTERN, allowModule.SHELL_CONTROL_PATTERN);
-  });
-
-  await check('files.* kinds: write -> ws_write/ws_edit, structure -> mkdir/move, delete -> ws_delete', () => {
-    const w = [{ kind: 'files.write', ...at() }];
-    assert.equal(isAllowedByList('ws_write', { path: 'a' }, w), true);
-    assert.equal(isAllowedByList('ws_edit', { path: 'a' }, w), true);
-    assert.equal(isAllowedByList('ws_delete', { path: 'a' }, w), false);
-    assert.equal(isAllowedByList('ws_mkdir', { path: 'a' }, w), false);
-    assert.equal(isAllowedByList('ws_exec', { command: 'ls' }, w), false);
-    const s = [{ kind: 'files.structure', ...at() }];
-    assert.equal(isAllowedByList('ws_mkdir', { path: 'a' }, s), true);
-    assert.equal(isAllowedByList('ws_move', { from: 'a', to: 'b' }, s), true);
-    assert.equal(isAllowedByList('ws_delete', { path: 'a' }, s), false);
-    const d = [{ kind: 'files.delete', ...at() }];
-    assert.equal(isAllowedByList('ws_delete', { path: 'a' }, d), true);
-    assert.equal(isAllowedByList('ws_write', { path: 'a' }, d), false);
-    assert.equal(isAllowedByList('ws_write', { path: 'a' }, []), false);
+  await check('the prefix machinery is gone (no control set, no interpreter list)', () => {
+    for (const name of ['SHELL_CONTROL_PATTERN', 'hasShellControl', 'isForbiddenPrefix', 'AGENT_PREFIX_INTERPRETERS']) {
+      assert.equal(name in allowModule, false, name);
+      assert.equal(name in agent, false, name);
+    }
   });
 
   await check('non-ws tools are never allowed by the list', () => {
@@ -114,106 +100,59 @@ async function pureChecks() {
     assert.equal(isAllowedByList('ws_exec', { command: 'npm test && npm run lint; rm x' }, e), false);
   });
 
-  await check('prefix command: word boundary, no control characters', () => {
-    const p = [{ kind: 'command', match: 'prefix', value: 'npm test', ...at() }];
-    assert.equal(isAllowedByList('ws_exec', { command: 'npm test' }, p), true);
-    assert.equal(isAllowedByList('ws_exec', { command: 'npm test -- -u' }, p), true);
-    assert.equal(isAllowedByList('ws_exec', { command: ' npm test -- -u ' }, p), true);
-    for (const bad of [
-      'npm testx', 'npm test; rm -rf ~', 'npm test && curl x | sh', 'npm test $(id)',
-      'npm test > out', 'npm test\nrm x', 'npm test &', 'npm test `id`', 'npm test < in',
-      'npm test || true', 'npm test | cat', 'npm tes', 'npm test\rrm x',
-      'npm test =(rm -rf ~)', 'npm test (curl x)', 'npm test )', 'npm test\u00a0-u', 'npm test\u2028rm x',
-    ]) {
-      assert.equal(isAllowedByList('ws_exec', { command: bad }, p), false, JSON.stringify(bad));
-    }
-  });
-
-  await check('a stored prefix with control characters never matches', () => {
-    const p = [{ kind: 'command', match: 'prefix', value: 'npm test;', ...at() }];
-    assert.equal(isAllowedByList('ws_exec', { command: 'npm test; ls' }, p), false);
-  });
-
-  await check('a stored single-word interpreter prefix never matches; two words do', () => {
-    for (const word of ['bash', 'env', 'git', 'python3', 'sudo', '/usr/bin/env']) {
-      const p = [{ kind: 'command', match: 'prefix', value: word, ...at() }];
-      assert.equal(isAllowedByList('ws_exec', { command: `${word} -c x` }, p), false, word);
-    }
-    const two = [{ kind: 'command', match: 'prefix', value: 'git status', ...at() }];
-    assert.equal(isAllowedByList('ws_exec', { command: 'git status --short' }, two), true);
-  });
-
-  // Every bypass form from the review: quoting/escaping, relatives, versions, runners, assignments.
-  const BYPASS_PREFIXES = [
-    '\\bash -c', "'bash' -c", '"env" rm', "b''ash -c", 'ba\\sh -c', '\\git', 'command bash', 'builtin cd',
-    'nice bash', 'stdbuf -o0', 'setsid bash', 'doas sh', 'busybox sh', 'python3.12 -c', 'node22 -e', 'awk BEGIN',
-    'bunx x', 'pnpm dlx', 'npm exec', 'yarn dlx', 'npm x', 'npm --yes', 'git -c', 'git', 'npm', 'FOO=1 bash',
-    'Bash -c', '/usr/bin/env', 'time make', 'ionice -c3', 'chroot /', 'unshare -r', 'nsenter -t', 'script -c',
-    'gawk x', 'deno run', 'bun run', 'lua5.4 x', '$HOME/x', '~/bin/x', 'x*', 'make{,}', 'a!b', '#x',
+  // Commands that a prefix rule used to cover, plus the option-level code-execution forms of the review.
+  const FORMER_PREFIX_CASES = [
+    ['npm test', 'npm test -- -u'], ['npm test', ' npm test -- -u '], ['git status', 'git status --short'],
+    ['make', "make 'X:=${shell id}'"], ['sed -n', "sed -n '1e id' x"], ['tar cf', 'tar cf x.tar --checkpoint-action=exec=id .'],
+    ['git grep', 'git grep --open-files-in-pager=id x'], ['rsync -a', 'rsync -a -e id a b'], ['npm init', 'npm init evil'],
+    ['bash -c', "bash -c 'x'"], ['ls', 'ls -la'], ['npm test;', 'npm test; ls'],
   ];
-  await check('plain-word rule: every bypass form refused as prefix, not suggested, not matched', () => {
-    for (const value of BYPASS_PREFIXES) {
-      assert.equal(allowModule.isForbiddenPrefix(value), true, value);
-      assert.throws(() => allowModule.parseAgentAllowInput({ kind: 'command', match: 'prefix', value }), /prefix rule/, value);
-      // Still allowed exactly.
-      assert.deepEqual(allowModule.parseAgentAllowInput({ kind: 'command', match: 'exact', value }), { kind: 'command', match: 'exact', value });
-      const stored = [{ kind: 'command', match: 'prefix', value, ...at() }];
-      assert.equal(isAllowedByList('ws_exec', { command: `${value} y` }, stored), false, value);
-      const sugg = allowSuggestions('ws_exec', { command: `${value} y` }).filter((x) => x.match === 'prefix');
-      assert.ok(sugg.every((x) => !allowModule.isForbiddenPrefix(x.value)), `${value}: ${JSON.stringify(sugg)}`);
-      assert.ok(!sugg.some((x) => x.value === value), `${value} suggested`);
-    }
-    for (const ok of ['git status', 'npm test', 'npm run', 'pnpm install', 'yarn build', 'make', 'cargo test', 'go test', './gradlew build']) {
-      assert.equal(allowModule.isForbiddenPrefix(ok), false, ok);
-    }
-  });
-
-  await check('legacy stored interpreter prefixes of any length never match', () => {
-    for (const [value, command] of [
-      ['bash -c', "bash -c 'x'"], ['env FOO=1', 'env FOO=1 rm x'], ['find .', 'find . -exec rm {} +'],
-      ['python3 -m', 'python3 -m http.server'], ['/usr/bin/env node', '/usr/bin/env node x.js'], ['sudo apt', 'sudo apt install x'],
-    ]) {
+  await check('stored prefix entries are ignored: they allow nothing, not even the identical command', () => {
+    for (const [value, command] of FORMER_PREFIX_CASES) {
       const p = [{ kind: 'command', match: 'prefix', value, ...at() }];
-      assert.equal(isAllowedByList('ws_exec', { command }, p), false, value);
+      assert.equal(isAllowedByList('ws_exec', { command }, p), false, command);
+      assert.equal(isAllowedByList('ws_exec', { command: value }, p), false, value);
     }
-    // Exact entries for such commands stay valid.
-    const e = [{ kind: 'command', match: 'exact', value: "bash -c 'x'", ...at() }];
-    assert.equal(isAllowedByList('ws_exec', { command: "bash -c 'x'" }, e), true);
+    // An entry without / with an unknown match is no exact entry either.
+    assert.equal(isAllowedByList('ws_exec', { command: 'ls' }, [{ kind: 'command', value: 'ls', ...at() }]), false);
+    assert.equal(isAllowedByList('ws_exec', { command: 'ls' }, [{ kind: 'command', match: 'glob', value: 'ls', ...at() }]), false);
+    // A prefix entry next to an exact one does not disturb the exact one.
+    const mixed = [{ kind: 'command', match: 'prefix', value: 'npm', ...at() }, { kind: 'command', match: 'exact', value: "bash -c 'x'", ...at() }];
+    assert.equal(isAllowedByList('ws_exec', { command: "bash -c 'x'" }, mixed), true);
+    assert.equal(isAllowedByList('ws_exec', { command: 'npm test' }, mixed), false);
   });
 
-  await check('suggestions: exec -> exact + first word + first two words; control -> exact only', () => {
-    assert.deepEqual(allowSuggestions('ws_exec', { command: 'make test -j4' }), [
-      { kind: 'command', match: 'exact', value: 'make test -j4' },
-      { kind: 'command', match: 'prefix', value: 'make' },
-      { kind: 'command', match: 'prefix', value: 'make test' },
-    ]);
-    // npm needs a subcommand: no one-word prefix.
-    assert.deepEqual(allowSuggestions('ws_exec', { command: 'npm run build' }), [
-      { kind: 'command', match: 'exact', value: 'npm run build' },
-      { kind: 'command', match: 'prefix', value: 'npm run' },
-    ]);
-    // Interpreter/wrapper as the first word: no one-word prefix.
-    assert.deepEqual(allowSuggestions('ws_exec', { command: 'git status --short' }), [
-      { kind: 'command', match: 'exact', value: 'git status --short' },
-      { kind: 'command', match: 'prefix', value: 'git status' },
-    ]);
-    assert.deepEqual(allowSuggestions('ws_exec', { command: 'bash' }), [
-      { kind: 'command', match: 'exact', value: 'bash' },
-    ]);
-    for (const cmd of ["bash -c 'x'", 'env FOO=1 make', 'find . -name x', 'npx tsc --noEmit', 'sudo apt update']) {
+  await check('POST input: match prefix -> 400 for every value; exact accepted for the same values', () => {
+    for (const [value] of FORMER_PREFIX_CASES) {
+      assert.throws(
+        () => allowModule.parseAgentAllowInput({ kind: 'command', match: 'prefix', value }),
+        (e) => e.getStatus() === 400 && /prefix rules are no longer supported; allow the exact command/.test(e.message),
+        value,
+      );
+      assert.deepEqual(allowModule.parseAgentAllowInput({ kind: 'command', match: 'exact', value }), { kind: 'command', match: 'exact', value });
+    }
+  });
+
+  await check('isInactiveAllowEntry: only command entries that are not exact', () => {
+    assert.equal(allowModule.isInactiveAllowEntry({ kind: 'command', match: 'prefix', value: 'x' }), true);
+    assert.equal(allowModule.isInactiveAllowEntry({ kind: 'command', value: 'x' }), true);
+    assert.equal(allowModule.isInactiveAllowEntry({ kind: 'command', match: 'exact', value: 'x' }), false);
+    assert.equal(allowModule.isInactiveAllowEntry({ kind: 'files.write' }), false);
+  });
+
+  await check('suggestions: exec -> only the exact command, whatever it contains', () => {
+    for (const cmd of [
+      'make test -j4', 'npm run build', 'git status --short', 'bash', "bash -c 'x'", 'env FOO=1 make',
+      'npm test (x)', 'a; b', 'a && b | c > d', 'echo a\necho b', 'ls',
+    ]) {
       assert.deepEqual(allowSuggestions('ws_exec', { command: cmd }), [{ kind: 'command', match: 'exact', value: cmd }], cmd);
     }
-    assert.deepEqual(allowSuggestions('ws_exec', { command: 'npm test (x)' }), [
-      { kind: 'command', match: 'exact', value: 'npm test (x)' },
-    ]);
-    assert.deepEqual(allowSuggestions('ws_exec', { command: '  ls  ' }), [
-      { kind: 'command', match: 'exact', value: 'ls' },
-      { kind: 'command', match: 'prefix', value: 'ls' },
-    ]);
-    assert.deepEqual(allowSuggestions('ws_exec', { command: 'a; b' }), [
-      { kind: 'command', match: 'exact', value: 'a; b' },
-    ]);
+    assert.deepEqual(allowSuggestions('ws_exec', { command: '  ls \t' }), [{ kind: 'command', match: 'exact', value: 'ls' }]);
+    // NBSP is not edge whitespace: it stays part of the value.
+    assert.deepEqual(allowSuggestions('ws_exec', { command: ' ls\u00a0 ' }), [{ kind: 'command', match: 'exact', value: 'ls\u00a0' }]);
+    assert.deepEqual(allowSuggestions('ws_exec', { command: 'x'.repeat(500) }).length, 1);
     assert.deepEqual(allowSuggestions('ws_exec', { command: 'x'.repeat(501) }), []);
+    assert.deepEqual(allowSuggestions('ws_exec', { command: '   ' }), []);
     assert.deepEqual(allowSuggestions('ws_exec', {}), []);
   });
 
@@ -228,7 +167,7 @@ async function pureChecks() {
   });
 
   await check('every suggestion is accepted by parseAgentAllowInput', () => {
-    for (const cmd of ['git status --short', 'npm test', 'a; b', 'make', 'env FOO=1 make', 'node x.js']) {
+    for (const cmd of ['git status --short', 'npm test', 'a; b', 'make', 'env FOO=1 make', 'node x.js', 'a\nb']) {
       for (const s of allowSuggestions('ws_exec', { command: cmd })) {
         assert.deepEqual(allowModule.parseAgentAllowInput(s), s);
       }

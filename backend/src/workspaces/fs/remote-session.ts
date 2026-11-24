@@ -149,13 +149,14 @@ export type RemoteDriverFactory<C = unknown> = (
  * One exec: which of rg/git/base64 exist, whether `timeout` is usable, and the remote
  * uid/gid. Parsed by `parseProbeOutput`. `timeout` is tested by running it:
  * old busybox builds only accept `timeout -t SECS`, so their `timeout 1 true`
- * fails just like `timeout -s TERM 18 rg …` would.
+ * fails just like `timeout -s TERM 18 rg …` would. `base64` likewise: it
+ * must decode with `-d` (old macOS only knows `-D`), which agent commands rely on.
  */
 export const PROBE_COMMAND =
   'command -v rg >/dev/null 2>&1 && echo rg=1 || echo rg=0; '
   + 'command -v git >/dev/null 2>&1 && echo git=1 || echo git=0; '
   + 'timeout 1 true >/dev/null 2>&1 && echo timeout=1 || echo timeout=0; '
-  + 'command -v base64 >/dev/null 2>&1 && echo base64=1 || echo base64=0; '
+  + '[ "$(printf %s eA== | base64 -d 2>/dev/null)" = x ] && echo base64=1 || echo base64=0; '
   + 'echo "uid=$(id -u 2>/dev/null)"; '
   + 'echo "gid=$(id -g 2>/dev/null)"';
 

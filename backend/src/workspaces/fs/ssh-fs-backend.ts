@@ -675,12 +675,15 @@ export class SshFsBackend implements WorkspaceFsBackend {
   }
 
   /**
-   * Agent command on the server. The script `cd -- <root> && <command>` (the
-   * command is a shell command line on purpose) travels base64-encoded inside
+   * Agent command on the server. The script is `cd -- <root> || exit 1`, a
+   * line break, then the command (a shell command line on purpose): a failed
+   * cd ends the script, whereas `cd … && <command>` would only guard the
+   * first list element and run the rest of `a; b` in the login directory.
+   * It travels base64-encoded inside
    * a fixed wrapper, `agentExecWrapper`: the remote user's login shell (zsh,
    * fish, csh …) only ever sees `[A-Za-z0-9+/=]` inside single quotes, so its
    * own quoting rules cannot change the command; /bin/sh decodes and runs it.
-   * Needs `base64` on the server (probed; missing -> 409). No
+   * Needs a `base64` on the server that decodes with `-d` (probed; else 409). No
    * env (no DevGrimoire credentials to the server), never retried, and not
    * wrapped in `timeout` (commands may legitimately run up to 600 s): the
    * exec timeout ends it with TERM, like an abort. Output beyond the cap is
@@ -695,7 +698,7 @@ export class SshFsBackend implements WorkspaceFsBackend {
     try {
       const res = await this.run(async (s) => {
         if (!(await s.probe()).base64) throw fail(409, 'base64 not available on server');
-        return s.exec(agentExecWrapper(`cd -- ${shq(this.root)} && ${command}`), {
+        return s.exec(agentExecWrapper(`cd -- ${shq(this.root)} || exit 1\n${command}`), {
           timeoutMs,
           maxOutputBytes,
           terminateOnTimeout: true,
