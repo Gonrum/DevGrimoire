@@ -167,12 +167,30 @@ export class WorkspaceClient {
     }
   }
 
-  clone(workspaceId: string, repoUrl: string, branch?: string): Promise<CloneResponse> {
-    return this.post<CloneResponse>('/clone', { workspaceId, repoUrl, branch }, this.cloneTimeoutMs);
+  /**
+   * `auth` travels beside the URL, never inside it: the sidecar gives it to
+   * git via the clone process's env, so it never lands in `.git/config`.
+   */
+  clone(
+    workspaceId: string,
+    repoUrl: string,
+    branch?: string,
+    auth?: { username: string; password: string } | null,
+  ): Promise<CloneResponse> {
+    return this.post<CloneResponse>(
+      '/clone',
+      { workspaceId, repoUrl, branch, ...(auth ? { auth } : {}) },
+      this.cloneTimeoutMs,
+    );
   }
 
-  pull(workspaceId: string): Promise<PullResponse> {
-    return this.post<PullResponse>('/pull', { workspaceId }, this.cloneTimeoutMs);
+  /** `gitEnv` = GH_TOKEN/GITLAB_TOKEN/… as `WorkspaceGitTokensService.resolveForWorkspace` returns it. */
+  pull(workspaceId: string, gitEnv?: Record<string, string>): Promise<PullResponse> {
+    return this.post<PullResponse>(
+      '/pull',
+      { workspaceId, ...(gitEnv && Object.keys(gitEnv).length ? { env: gitEnv } : {}) },
+      this.cloneTimeoutMs,
+    );
   }
 
   tree(workspaceId: string, path?: string, depth?: number): Promise<TreeResponse> {

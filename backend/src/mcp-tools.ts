@@ -6912,17 +6912,15 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const id = requireString(a, 'id');
           const ws = await loadContainerWorkspace(workspacesService, sshService, id);
           assertWorkspaceWithinClientRoots(ws, await getClientRoots(server));
-          // Auto-embed the matching git token in the clone URL so private repos
-          // work without manual `oauth2:$TOKEN@host` gymnastics. No-op if URL
-          // is already authenticated or no token matches.
-          const authenticatedUrl = await workspaceGitTokens.buildAuthenticatedCloneUrl(
-            ws,
-            requireString(a, 'repoUrl'),
-          );
+          // The matching git token goes to the sidecar beside the URL, never
+          // inside it — an embedded token would end up in .git/config (T-541).
+          const repoUrl = requireString(a, 'repoUrl');
+          const auth = await workspaceGitTokens.resolveCloneAuth(ws, repoUrl);
           const sidecar = await workspaceClient.clone(
             ws._id.toString(),
-            authenticatedUrl,
+            repoUrl,
             optionalString(a, 'branch'),
+            auth,
           );
           // Pull a fresh size after clone so the UI reflects disk usage.
           let sizeBytes: number | undefined;
@@ -6940,7 +6938,8 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const id = requireString(a, 'id');
           const ws = await loadContainerWorkspace(workspacesService, sshService, id);
           assertWorkspaceWithinClientRoots(ws, await getClientRoots(server));
-          const sidecar = await workspaceClient.pull(ws._id.toString());
+          const gitEnv = await workspaceGitTokens.resolveForWorkspace(ws);
+          const sidecar = await workspaceClient.pull(ws._id.toString(), gitEnv);
           await workspacesService.touch(id);
           result = { pulled: true, id, sidecar };
           break;

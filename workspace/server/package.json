@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node index.js",
     "lint": "eslint .",
-    "check": "node test/fs-ops-check.cjs && node test/terminal-idle-check.cjs"
+    "check": "node test/fs-ops-check.cjs && node test/terminal-idle-check.cjs && node test/git-credentials-check.cjs"
   },
   "engines": {
     "node": ">=22"

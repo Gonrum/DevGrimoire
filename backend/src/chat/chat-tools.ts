@@ -2736,14 +2736,14 @@ export class ChatToolsService {
         }
         case 'workspace_clone': {
           const w = await this.loadContainerWorkspace(requireString(args, 'id'));
-          const authenticatedUrl = await this.workspaceGitTokens.buildAuthenticatedCloneUrl(
-            w,
-            requireString(args, 'repoUrl'),
-          );
+          // Token beside the URL, never inside it (T-541, see mcp-tools.ts).
+          const repoUrl = requireString(args, 'repoUrl');
+          const auth = await this.workspaceGitTokens.resolveCloneAuth(w, repoUrl);
           const sidecar = await this.workspaceClient.clone(
             w._id.toString(),
-            authenticatedUrl,
+            repoUrl,
             optionalString(args, 'branch'),
+            auth,
           );
           let sizeBytes: number | undefined;
           try {
@@ -2756,7 +2756,8 @@ export class ChatToolsService {
         }
         case 'workspace_pull': {
           const w = await this.loadContainerWorkspace(requireString(args, 'id'));
-          const sidecar = await this.workspaceClient.pull(w._id.toString());
+          const gitEnv = await this.workspaceGitTokens.resolveForWorkspace(w);
+          const sidecar = await this.workspaceClient.pull(w._id.toString(), gitEnv);
           await this.workspaces.touch(w._id.toString());
           return { success: true, result: { pulled: true, sidecar } };
         }

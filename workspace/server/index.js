@@ -365,25 +365,198 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true, root: ROOT });
 });
 
+/*
+ * Git credentials (T-541). The token used to be embedded in the clone URL
+ * (`https://x-access-token:<TOKEN>@host/...`), so git stored it as the
+ * `origin` URL in `.git/config`, readable by every command in the workspace.
+ * Now the remote URL is always credential-free and the token reaches git only
+ * through the ENVIRONMENT of the one git process that needs it, via the
+ * credential helper `git-credential-dg.sh`. Env rather than argv: argv is
+ * visible to every user in `ps`, `/proc/<pid>/environ` only to the same uid
+ * and only while that git process runs. Nothing is written to disk.
+ */
+const GIT_CREDENTIAL_HELPER = path.join(__dirname, 'git-credential-dg.sh');
+// Token env the backend may pass to /clone and /pull — the same keys
+// `workspace_exec` injects, which the image-wide helper maps to hosts.
+const GIT_TOKEN_ENV_KEYS = ['GH_TOKEN', 'GITLAB_TOKEN', 'GITLAB_HOST', 'GITEA_TOKEN', 'GITEA_HOST'];
+const GIT_CREDENTIAL_MAX_LEN = 4096;
+
+function shellSingleQuote(value) {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * `-c` options for git operations that talk to a remote. The empty
+ * `credential.helper=` resets every helper configured so far — including one
+ * planted in the repo's own `.git/config`, which would otherwise receive the
+ * token — before our env-only helper is added. Hooks and fsmonitor are off so
+ * a prepared `.git/config` cannot run code while the token is in the env.
+ */
+function gitRemoteArgs() {
+  return [
+    '-c', 'credential.helper=',
+    '-c', `credential.helper=!${shellSingleQuote(GIT_CREDENTIAL_HELPER)}`,
+    '-c', 'core.hooksPath=/dev/null',
+    '-c', 'core.fsmonitor=false',
+  ];
+}
+
+/** True for a string git's credential protocol can carry (no NUL/CR/LF). */
+function isCredentialValue(value, maxLen) {
+  return typeof value === 'string' && value.length > 0 && value.length <= maxLen && !/[\0\r\n]/.test(value);
+}
+
+/**
+ * Splits userinfo off an http(s) URL. Returns `{ url, credentials }` with
+ * `credentials = { host, username, password }` when the URL carried any, else
+ * `credentials = null` and the URL unchanged. Non-URLs come back unchanged.
+ */
+function splitUrlCredentials(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return { url: rawUrl, credentials: null };
+  }
+  if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || (!parsed.username && !parsed.password)) {
+    return { url: rawUrl, credentials: null };
+  }
+  const decode = (s) => {
+    try { return decodeURIComponent(s); } catch { return s; }
+  };
+  const credentials = { host: parsed.host, username: decode(parsed.username), password: decode(parsed.password) };
+  parsed.username = '';
+  parsed.password = '';
+  return { url: parsed.toString(), credentials };
+}
+
+/** One-shot helper env for exactly one host. */
+function oneShotCredentialEnv(credentials) {
+  if (!credentials || !credentials.password) return {};
+  return {
+    DG_GIT_HOST: credentials.host,
+    DG_GIT_USERNAME: credentials.username || 'oauth2',
+    DG_GIT_PASSWORD: credentials.password,
+  };
+}
+
+/**
+ * Token env from the request body, restricted to GIT_TOKEN_ENV_KEYS. Returns
+ * `{ env }` or `{ error }`.
+ */
+function parseGitTokenEnv(raw) {
+  if (raw === undefined || raw === null) return { env: {} };
+  if (typeof raw !== 'object' || Array.isArray(raw)) return { error: 'env must be an object' };
+  const env = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!GIT_TOKEN_ENV_KEYS.includes(key)) return { error: `env key ${key} is not allowed` };
+    if (!isCredentialValue(value, GIT_CREDENTIAL_MAX_LEN)) return { error: `env ${key} must be a non-empty single-line string` };
+    env[key] = value;
+  }
+  return { env };
+}
+
+/** The secret values of a token env (hosts are not secret). */
+function tokenValues(env) {
+  return Object.entries(env).filter(([key]) => key.endsWith('_TOKEN')).map(([, value]) => value);
+}
+
+/**
+ * Masks credentials in git output before it leaves the sidecar: userinfo of
+ * any URL plus every known secret value verbatim (raw and URL-encoded).
+ */
+function redactGitOutput(text, secrets) {
+  let out = String(text).replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@'"]*@/gi, '$1***@');
+  for (const secret of secrets) {
+    if (typeof secret !== 'string' || secret.length < 4) continue;
+    for (const form of new Set([secret, encodeURIComponent(secret)])) {
+      out = out.split(form).join('***');
+    }
+  }
+  return out;
+}
+
+function redactResult(result, secrets) {
+  return { ...result, stdout: redactGitOutput(result.stdout, secrets), stderr: redactGitOutput(result.stderr, secrets) };
+}
+
+/**
+ * Rewrites every remote URL/pushurl of the repo at `root` that embeds
+ * credentials to its credential-free form (legacy workspaces cloned before
+ * T-541). Returns the removed credentials keyed by config key so a caller
+ * can still use them for the current operation.
+ */
+async function scrubRemoteCredentials(root) {
+  const list = await runProcess('git', ['config', '--local', '--get-regexp', '^remote\\..*\\.(url|pushurl)$'], { cwd: root, timeoutMs: 30_000 });
+  // Exit code 1 = no remote configured.
+  if (list.exitCode !== 0) return [];
+  const removed = [];
+  for (const line of list.stdout.split('\n')) {
+    const sep = line.indexOf(' ');
+    if (sep < 0) continue;
+    const key = line.slice(0, sep);
+    const value = line.slice(sep + 1);
+    const { url, credentials } = splitUrlCredentials(value);
+    if (!credentials) continue;
+    const r = await runProcess('git', ['config', '--local', '--fixed-value', '--replace-all', key, url, value], { cwd: root, timeoutMs: 30_000 });
+    if (r.exitCode !== 0) {
+      // Never echo `value` — it holds the token.
+      console.error(JSON.stringify({ type: 'git-credential-scrub-failed', key, exitCode: r.exitCode }));
+      continue;
+    }
+    removed.push({ key, credentials });
+  }
+  return removed;
+}
+
 app.post('/clone', async (req, res) => {
   const id = requireWorkspaceId(req, res); if (!id) return;
   const repoUrl = req.body?.repoUrl;
   const branch = req.body?.branch;
+  const auth = req.body?.auth;
   if (typeof repoUrl !== 'string' || !/^https?:\/\//i.test(repoUrl)) {
     return res.status(400).json({ error: 'repoUrl must be http(s) URL' });
   }
   if (branch !== undefined && (typeof branch !== 'string' || !/^[A-Za-z0-9._/-]{1,128}$/.test(branch))) {
     return res.status(400).json({ error: 'branch must match [A-Za-z0-9._/-]{1,128}' });
   }
+  if (auth !== undefined && auth !== null && (
+    typeof auth !== 'object'
+    || !isCredentialValue(auth.username, 256)
+    || !isCredentialValue(auth.password, GIT_CREDENTIAL_MAX_LEN)
+  )) {
+    return res.status(400).json({ error: 'auth must be { username, password } as non-empty single-line strings' });
+  }
+  const tokenEnv = parseGitTokenEnv(req.body?.env);
+  if (tokenEnv.error) return res.status(400).json({ error: tokenEnv.error });
+
+  // Credentials in the URL itself (typed by a user) win over the backend's
+  // `auth`, as before; either way the URL git stores is the plain one.
+  let cloneHost;
+  try {
+    cloneHost = new URL(repoUrl).host;
+  } catch {
+    return res.status(400).json({ error: 'repoUrl is not a valid URL' });
+  }
+  const split = splitUrlCredentials(repoUrl);
+  let credentials = split.credentials;
+  if (!credentials && auth) {
+    credentials = { host: cloneHost, username: auth.username, password: auth.password };
+  }
+  const secrets = [credentials?.password, ...tokenValues(tokenEnv.env)];
+
   const root = await ensureWorkspaceDir(id);
   const dotGit = path.join(root, '.git');
   if (fs.existsSync(dotGit)) {
     return res.status(409).json({ error: 'workspace already contains a git repository — use /pull' });
   }
-  const args = ['clone', '--depth', '1'];
+  const args = [...gitRemoteArgs(), 'clone', '--depth', '1'];
   if (branch) args.push('--branch', branch);
-  args.push('--', repoUrl, root);
-  const result = await runProcess('git', args, { timeoutMs: GIT_TIMEOUT_MS });
+  args.push('--', split.url, root);
+  const result = redactResult(await runProcess('git', args, {
+    timeoutMs: GIT_TIMEOUT_MS,
+    env: { ...tokenEnv.env, ...oneShotCredentialEnv(credentials) },
+  }), secrets);
   if (result.exitCode !== 0) {
     return res.status(500).json({ error: 'git clone failed', ...result });
   }
@@ -392,6 +565,8 @@ app.post('/clone', async (req, res) => {
 
 app.post('/pull', async (req, res) => {
   const id = requireWorkspaceId(req, res); if (!id) return;
+  const tokenEnv = parseGitTokenEnv(req.body?.env);
+  if (tokenEnv.error) return res.status(400).json({ error: tokenEnv.error });
   if (!await workspaceExists(id)) {
     return res.status(404).json({ error: 'workspace directory does not exist' });
   }
@@ -399,7 +574,16 @@ app.post('/pull', async (req, res) => {
   if (!fs.existsSync(path.join(root, '.git'))) {
     return res.status(409).json({ error: 'workspace contains no git repository' });
   }
-  const result = await runProcess('git', ['pull', '--ff-only'], { cwd: root, timeoutMs: GIT_TIMEOUT_MS });
+  // Legacy clone with the token in `origin`: clean the config first, but keep
+  // using that token for this pull so the workspace does not break.
+  const removed = await scrubRemoteCredentials(root);
+  const legacy = removed.find((r) => r.key === 'remote.origin.url') || removed[0];
+  const secrets = [...removed.map((r) => r.credentials.password), ...tokenValues(tokenEnv.env)];
+  const result = redactResult(await runProcess('git', [...gitRemoteArgs(), 'pull', '--ff-only'], {
+    cwd: root,
+    timeoutMs: GIT_TIMEOUT_MS,
+    env: { ...tokenEnv.env, ...oneShotCredentialEnv(legacy?.credentials) },
+  }), secrets);
   if (result.exitCode !== 0) {
     return res.status(500).json({ error: 'git pull failed', ...result });
   }
@@ -1103,6 +1287,8 @@ app.post('/status', async (req, res) => {
   if (!fs.existsSync(path.join(root, '.git'))) {
     return res.status(409).json({ error: 'workspace contains no git repository' });
   }
+  // The IDE polls /status, so legacy token URLs get cleaned without a pull.
+  await scrubRemoteCredentials(root);
   const result = await runProcess('git', ['-c', 'core.quotepath=false', 'status', '--porcelain=v1', '--branch'], { cwd: root, timeoutMs: 30_000 });
   if (result.exitCode !== 0) return res.status(500).json({ error: 'git status failed', ...result });
   res.json({ status: result.stdout });

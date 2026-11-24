@@ -99,56 +99,54 @@ export class WorkspaceGitTokensService {
   }
 
   /**
-   * Rewrites `repoUrl` to embed the matching git token so private clones
-   * work without manual `https://oauth2:$TOKEN@host/...` gymnastics. Used by
-   * `workspace_clone`. Returns the original URL unchanged if no token applies
-   * (already-authenticated URL, host mismatch, or no token configured).
+   * Credentials for cloning `repoUrl`, so private clones work without manual
+   * `https://oauth2:$TOKEN@host/...` gymnastics. Used by `workspace_clone`.
+   *
+   * Deliberately NOT embedded in the URL (T-541): git stores the clone URL as
+   * the `origin` remote in `.git/config`, where every command in the
+   * workspace could read the token. The sidecar hands these to git through
+   * the environment of the clone process only. `null` if no token applies
+   * (URL already carries userinfo, not http(s), or no token configured).
    *
    * Match priority:
    *   1. workspace.gitRepoId (explicit pin)
    *   2. host of repoUrl matches a project gitRepository's host
    *   3. provider deduced from URL (github.com → first GitHub repo, GitLab host → first GitLab repo)
    *
-   * Token user prefix is provider-specific:
-   *   - GitLab: `oauth2:<TOKEN>` (any username works with PAT)
-   *   - GitHub: `x-access-token:<TOKEN>` (GitHub's accepted form for HTTPS)
+   * Username is provider-specific:
+   *   - GitLab/Gitea: `oauth2` (any username works with a PAT)
+   *   - GitHub: `x-access-token` (GitHub's accepted form for HTTPS)
    */
-  async buildAuthenticatedCloneUrl(
+  async resolveCloneAuth(
     workspace: WorkspaceDocument,
     repoUrl: string,
-  ): Promise<string> {
+  ): Promise<GitCloneAuth | null> {
     assertContainerWorkspace(workspace);
-    if (!repoUrl) return repoUrl;
+    if (!repoUrl) return null;
     let parsed: URL;
     try {
       parsed = new URL(repoUrl);
     } catch {
-      return repoUrl;
+      return null;
     }
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return repoUrl;
-    if (parsed.username || parsed.password) return repoUrl; // already authenticated
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (parsed.username || parsed.password) return null; // caller brought its own
 
     let project;
     try {
       project = await this.projects.findById(workspace.projectId.toString());
     } catch {
-      return repoUrl;
+      return null;
     }
     const repos = project.gitRepositories ?? [];
-    if (!repos.length) return repoUrl;
+    if (!repos.length) return null;
 
     const matched = pickRepoForUrl(repos, parsed.host, workspace.gitRepoId);
-    if (!matched?.tokenSecretId) return repoUrl;
+    if (!matched?.tokenSecretId) return null;
     const token = await this.decrypt(matched.tokenSecretId, workspace.projectId.toString());
-    if (!token) return repoUrl;
+    if (!token) return null;
 
-    const userPrefix =
-      matched.provider === 'github' ? 'x-access-token' :
-      matched.provider === 'gitlab' ? 'oauth2' :
-      /* gitea */ 'oauth2';
-    parsed.username = userPrefix;
-    parsed.password = encodeURIComponent(token);
-    return parsed.toString();
+    return { username: matched.provider === 'github' ? 'x-access-token' : 'oauth2', password: token };
   }
 
   /**
@@ -167,6 +165,12 @@ export class WorkspaceGitTokensService {
       return null;
     }
   }
+}
+
+/** Basic-auth credentials for one git clone, sent to the sidecar separately from the URL. */
+export interface GitCloneAuth {
+  username: string;
+  password: string;
 }
 
 interface RepoLike {

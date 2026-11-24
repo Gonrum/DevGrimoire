@@ -61,6 +61,14 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --chown=workspace:workspace server/ ./
 
+# Git credentials come only from the environment of the calling git process
+# (T-541): GH_TOKEN / GITLAB_TOKEN(+GITLAB_HOST) / GITEA_TOKEN+GITEA_HOST, as
+# workspace_exec injects them. No token in .git/config, nothing on disk; a
+# command without injected credentials gets none. Root-owned so the
+# workspace user cannot swap the helper.
+RUN chown root:root /app/git-credential-dg.sh && chmod 0755 /app/git-credential-dg.sh \
+    && git config --system credential.helper /app/git-credential-dg.sh
+
 # DevGrimoire workspace CLI (T-168). Bash script + python3 (already in image)
 # for JSON encoding. Reads DG_API_URL/DG_API_TOKEN/DG_WORKSPACE_ID from env
 # that the backend auto-injects at every workspace_exec call.

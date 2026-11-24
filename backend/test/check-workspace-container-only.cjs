@@ -95,7 +95,7 @@ const rel = (p) => path.relative(SRC, p).split(path.sep).join('/');
     await t('git token env + clone URL refuse ssh workspace', async () => {
       const svc = new WorkspaceGitTokensService({}, {});
       await assert.rejects(svc.resolveForWorkspace(sshWs), (e) => e.getStatus() === 409);
-      await assert.rejects(svc.buildAuthenticatedCloneUrl(sshWs, 'https://h/r.git'), (e) => e.getStatus() === 409);
+      await assert.rejects(svc.resolveCloneAuth(sshWs, 'https://h/r.git'), (e) => e.getStatus() === 409);
     });
   }
 
