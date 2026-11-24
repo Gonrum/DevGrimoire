@@ -30,6 +30,19 @@ export interface ChatJobPayload {
 const FALLBACK_TEMPERATURE = 0.7;
 const FALLBACK_MAX_TOKENS = 2048;
 
+/** How often the worker looks at the relay's cancel flag while a turn streams. */
+const CANCEL_POLL_MS = 500;
+
+/**
+ * Minimum gap between two `progress` relay events of one job. Well below the
+ * gateway idle window (POOL_WAIT_TIMEOUT_MS, default 120 s); overridable for
+ * the regression check.
+ */
+function progressIntervalMs(): number {
+  const n = Number(process.env.LLM_PROGRESS_INTERVAL_MS);
+  return Number.isFinite(n) && n > 0 ? n : 5_000;
+}
+
 /**
  * Fehler eines Turns, der bereits Tokens an den Client zugestellt hat.
  *
@@ -160,6 +173,30 @@ export class ChatRunner {
     // reads it off a thrown error to decide whether failover would duplicate
     // output (unsafe once true) or is still safe (connect/first-fetch failed).
     let published = false;
+
+    // Liveness: a tool call (or reasoning) can stream for minutes without
+    // producing a single forwardable event — the client buffers tool-call
+    // deltas until the end of the turn. Without this the gateway's idle timer
+    // (POOL_WAIT_TIMEOUT_MS) killed healthy, actively streaming turns.
+    // Throttled: the relay replays every event, so one per interval is enough.
+    let lastProgressAt = 0;
+    const onActivity = (): void => {
+      const now = Date.now();
+      if (now - lastProgressAt < progressIntervalMs()) return;
+      lastProgressAt = now;
+      this.relay.publish(jobId, { type: 'progress' });
+    };
+
+    // Cancellation (client abort or gateway idle timeout) only sets a flag on
+    // the relay. Checking it between events was not enough: while the upstream
+    // is silent or buffering, no event arrives, so the job kept its pool slot
+    // until the provider finished on its own. Abort the request instead.
+    const abort = new AbortController();
+    const cancelPoll = setInterval(() => {
+      if (this.relay.isCancelled(jobId)) abort.abort(new Error('chat job cancelled'));
+    }, CANCEL_POLL_MS);
+    cancelPoll.unref?.();
+
     try {
       if (payload.withTools) {
         const opts: ChatToolCallOpts = {
@@ -172,6 +209,8 @@ export class ChatRunner {
           temperature: payload.temperature ?? FALLBACK_TEMPERATURE,
           maxTokens: payload.maxTokens ?? FALLBACK_MAX_TOKENS,
           images: payload.images,
+          signal: abort.signal,
+          onActivity,
         };
         const iter = slot.provider === 'anthropic'
           ? this.client.chatStreamAnthropicTools(opts)
@@ -191,6 +230,8 @@ export class ChatRunner {
           temperature: payload.temperature ?? FALLBACK_TEMPERATURE,
           maxTokens: payload.maxTokens ?? FALLBACK_MAX_TOKENS,
           images: payload.images,
+          signal: abort.signal,
+          onActivity,
         };
         for await (const token of this.client.chatStream(opts)) {
           if (this.relay.isCancelled(jobId)) break;
@@ -200,11 +241,20 @@ export class ChatRunner {
       }
       this.relay.publish(jobId, { type: 'done', usage: { ...ZERO_USAGE } });
     } catch (err: unknown) {
+      // Our own abort after a cancel is not an endpoint failure: end the stream
+      // like the `break` above does, so the processor neither fails over to
+      // another endpoint nor marks this one unhealthy.
+      if (abort.signal.aborted && this.relay.isCancelled(jobId)) {
+        this.relay.publish(jobId, { type: 'done', usage: { ...ZERO_USAGE } });
+        return;
+      }
       // `errorMessage` statt `String(err)`: ein geworfenes Objekt wurde vorher
       // zu "[object Object]" — bei abgebrochenen Streams genau der Fall.
       const e: CommittedError = err instanceof Error ? err : new Error(errorMessage(err));
       e.committed = published;
       throw e;
+    } finally {
+      clearInterval(cancelPoll);
     }
   }
 }

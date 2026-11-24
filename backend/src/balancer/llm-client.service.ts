@@ -123,6 +123,12 @@ export interface ChatCallOpts {
   maxTokens: number;
   images?: ChatImageInput[];
   signal?: AbortSignal;
+  /**
+   * Called for every chunk received from the upstream, whether or not it yields
+   * an event. Lets the balancer worker report liveness while a tool call or
+   * reasoning is being streamed (both are buffered/dropped here).
+   */
+  onActivity?: () => void;
 }
 
 /**
@@ -268,6 +274,7 @@ export class LlmClient {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        o.onActivity?.();
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
@@ -502,6 +509,7 @@ export class LlmClient {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        o.onActivity?.();
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
@@ -677,7 +685,7 @@ export class LlmClient {
     yield* this.parseSseStream(res.body, (data) => {
       if (data === '[DONE]') return null;
       return readOpenAiChoiceDelta(parseJsonRecord(data))?.content ?? '';
-    });
+    }, o.onActivity);
   }
 
   /**
@@ -758,12 +766,13 @@ export class LlmClient {
       }
       // Ignore message_start/stop/ping/message_delta etc. for plain streaming
       return '';
-    });
+    }, o.onActivity);
   }
 
   private async *parseSseStream(
     body: ReadableStream<Uint8Array>,
     extract: (data: string) => string | null,
+    onActivity?: () => void,
   ): AsyncIterable<string> {
     const reader = body.getReader();
     const decoder = new TextDecoder();
@@ -772,6 +781,7 @@ export class LlmClient {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        onActivity?.();
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';

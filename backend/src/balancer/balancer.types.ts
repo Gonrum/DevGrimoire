@@ -117,4 +117,10 @@ export type RelayEvent =
   | { type: 'result'; data: EmbedRelayResult; usage: TokenUsage }
   | { type: 'done'; usage: TokenUsage }
   | { type: 'error'; status: number; message: string }
-  | { type: 'cancel' };
+  | { type: 'cancel' }
+  /**
+   * Liveness only: the upstream is still sending bytes, but nothing the client
+   * could use yet (tool-call deltas are buffered until the end of the turn,
+   * reasoning is dropped). Re-arms the gateway's idle timer, carries no data.
+   */
+  | { type: 'progress' };

@@ -216,7 +216,8 @@ export class BalancerGateway {
         } else if (ev.type === 'error') {
           throw new Error(ev.message);
         }
-        // 'result' / 'cancel' — not expected on the chat path; ignore.
+        // 'progress' only re-arms the idle timer (it woke us); 'result' /
+        // 'cancel' are not expected on the chat path. Ignore all three.
       }
     } finally {
       sub.unsubscribe();
