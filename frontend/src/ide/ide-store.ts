@@ -30,7 +30,14 @@ export interface RevealTarget {
   column: number;
 }
 
-export type SidePanel = 'files' | 'search';
+export type SidePanel = 'files' | 'search' | 'agent';
+
+/** A request to the file tree to reload directories (`all`: every expanded one). */
+export interface TreeRefresh {
+  seq: number;
+  dirs: string[];
+  all: boolean;
+}
 export type BlockedReason = null | 'archived' | 'gone' | 'forbidden';
 
 interface IdeState {
@@ -55,6 +62,8 @@ interface IdeState {
   blocked: BlockedReason;
   /** Bumped after every successful write or tree change; the git status fetch listens to it. */
   saveTick: number;
+  /** Bumped when something outside the tree (the IDE agent) changed files; the tree reloads. */
+  treeRefresh: TreeRefresh;
 
   /** Switches the IDE to a workspace; a call for the current one only updates `rootPath`. */
   setWorkspace: (workspaceId: string, rootPath?: string) => void;
@@ -97,6 +106,12 @@ interface IdeState {
   clearTerminalInput: (id: number) => void;
   openTerminalAt: (dir: string) => void;
   setBlocked: (blocked: BlockedReason) => void;
+  /**
+   * The IDE agent changed these paths (`'.'` = anything, after a command): reload the
+   * parent folders in the tree, the git status and every open tab at or under a path
+   * that has no unsaved changes. Tabs with unsaved changes are left alone.
+   */
+  applyWorkspaceChanged: (paths: string[]) => void;
 }
 
 const LAYOUT_KEY = 'dg.ide.layout';
@@ -137,6 +152,17 @@ function persistLayout(sidebarWidth: number, terminalHeight: number): void {
 
 function isUnder(path: string, prefix: string): boolean {
   return path === prefix || path.startsWith(`${prefix}/`);
+}
+
+/** Workspace-relative form of a reported path: no `./` in front, no `/` at the end. */
+function normalizeChangedPath(path: string): string {
+  const trimmed = path.trim().replace(/^(\.\/)+/, '').replace(/\/+$/, '');
+  return trimmed === '' ? '.' : trimmed;
+}
+
+function parentDir(path: string): string {
+  const i = path.lastIndexOf('/');
+  return i <= 0 ? '.' : path.slice(0, i);
 }
 
 const IMAGE_MAX_BYTES = 2 * 1024 * 1024;
@@ -289,6 +315,7 @@ export const useIdeStore = create<IdeState>((set, get) => ({
   reveal: null,
   blocked: null,
   saveTick: 0,
+  treeRefresh: { seq: 0, dirs: [], all: false },
   ...loadLayout(),
 
   setWorkspace: (workspaceId, rootPath) => {
@@ -603,4 +630,19 @@ export const useIdeStore = create<IdeState>((set, get) => ({
   },
 
   setBlocked: (blocked) => set({ blocked }),
+
+  applyWorkspaceChanged: (paths) => {
+    const changed = [...new Set(paths.map(normalizeChangedPath))];
+    if (changed.length === 0) return;
+    const all = changed.includes('.');
+    // A changed path may itself be an expanded folder (mkdir over a listed one, a move target).
+    const dirs = all ? ['.'] : [...new Set(changed.flatMap((p) => [parentDir(p), p]))];
+    const { treeRefresh, saveTick, tabs } = get();
+    set({ treeRefresh: { seq: treeRefresh.seq + 1, dirs, all }, saveTick: saveTick + 1 });
+    // recheckFromDisk adopts the disk version only for an untouched tab and skips saves in flight.
+    const affected = tabs.filter(
+      (t) => t.kind === 'text' && !t.dirty && (all || changed.some((p) => isUnder(t.path, p))),
+    );
+    for (const tab of affected) void get().recheckFromDisk(tab.path);
+  },
 }));

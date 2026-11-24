@@ -50,7 +50,7 @@ interface StreamingToolCall {
  */
 const STREAMING_PHASES = ['queued', 'context', 'thinking', 'tool_call', 'responding'] as const;
 
-type StreamingPhase = (typeof STREAMING_PHASES)[number];
+export type StreamingPhase = (typeof STREAMING_PHASES)[number];
 
 interface StreamingState {
   content: string;
@@ -1467,7 +1467,7 @@ export default function ChatDock() {
   );
 }
 
-function StreamingActivity({ phase, activeToolName }: { phase: StreamingPhase; activeToolName?: string }) {
+export function StreamingActivity({ phase, activeToolName }: { phase: StreamingPhase; activeToolName?: string }) {
   const { t } = useTranslation();
   const label = phase === 'tool_call' && activeToolName
     ? t(streamingStatusKey(phase), { tool: activeToolName })
@@ -1489,7 +1489,7 @@ function StreamingActivity({ phase, activeToolName }: { phase: StreamingPhase; a
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+export function MessageBubble({ message }: { message: ChatMessage }) {
   const { t } = useTranslation();
   const isUser = message.role === 'user';
   const [expanded, setExpanded] = useState(false);

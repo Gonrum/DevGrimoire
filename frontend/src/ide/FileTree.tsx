@@ -189,6 +189,17 @@ export function FileTree({ workspaceId, activePath, onOpenFile, marks, initialRo
     restored.current = workspaceId;
   }, [workspaceId, expandDir]);
 
+  // Changes made outside the tree (the IDE agent): reload what the store asks for, once per request.
+  const treeRefresh = useIdeStore((s) => s.treeRefresh);
+  const handledRefresh = useRef(treeRefresh.seq);
+  useEffect(() => {
+    if (handledRefresh.current === treeRefresh.seq) return;
+    handledRefresh.current = treeRefresh.seq;
+    void Promise.resolve()
+      .then(() => (treeRefresh.all ? refresh() : reloadTreeDirs(treeRefresh.dirs)))
+      .catch(() => undefined);
+  }, [treeRefresh, refresh, reloadTreeDirs]);
+
   // Persist the expanded set (minus the always-open root) whenever it changes.
   useEffect(() => {
     if (restored.current !== workspaceId) return;

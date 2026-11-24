@@ -1768,11 +1768,54 @@ export interface Workspace {
   remotePath?: string;
   /** Resolved connection of an ssh workspace; `null` when the connection no longer exists. */
   ssh?: WorkspaceSshInfo | null;
+  /** IDE agent: ask before writing ws_* calls (`confirm`) or run them straight away (`direct`). */
+  agentMode?: WorkspaceAgentMode;
+  /** What the IDE agent may do without asking in mode `confirm`. */
+  agentAllow?: WorkspaceAgentAllowEntry[];
+  /** Agent commands get git tokens / DG_* (container workspaces only). */
+  agentCredentials?: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
 export type WorkspaceLocation = 'container' | 'ssh';
+
+export type WorkspaceAgentMode = 'confirm' | 'direct';
+
+export type AgentAllowFileKind = 'files.write' | 'files.structure' | 'files.delete';
+
+/** One stored "always allow" rule of a workspace. */
+export type WorkspaceAgentAllowEntry =
+  | { _id: string; kind: AgentAllowFileKind; createdAt: string; inactive?: true }
+  | { _id: string; kind: 'command'; match: string; value: string; createdAt: string; inactive?: true };
+
+/** An "always allow" option the server offers on a confirm card (resume `alwaysAllow`). */
+export type AgentAllowSuggestion =
+  | { kind: AgentAllowFileKind }
+  | { kind: 'command'; match: 'exact'; value: string };
+
+/** Server-side preview of a paused ws_* call. */
+export interface WsPreview {
+  kind: 'file' | 'paths' | 'command';
+  path?: string;
+  /** Current content; `null` = the file does not exist yet. */
+  before?: string | null;
+  after?: string;
+  baseHash?: string | null;
+  from?: string;
+  to?: string;
+  command?: string;
+  timeoutSec?: number;
+  cwd?: string;
+  credentials?: boolean;
+}
+
+export interface AgentRoleInfo {
+  id: string;
+  name: string;
+  description: string;
+  allowedTools: string[];
+}
 
 export interface WorkspaceSshInfo {
   connectionId: string;
@@ -2125,9 +2168,18 @@ export interface ChatStreamHandlers {
   onToolResult?: (result: { id: string; success: boolean; summary: string }) => void;
   /**
    * Der Server hat vor einem schreibenden Tool angehalten. Der Stream endet
-   * danach; Fortsetzung über `api.chat.resumeTool`.
+   * danach; Fortsetzung über `api.chat.resumeTool`. IDE agent calls (ws_*)
+   * carry a server-side `preview` and the `allowSuggestions` for the card.
    */
-  onToolConfirm?: (call: { id: string; name: string; arguments: string }) => void;
+  onToolConfirm?: (call: {
+    id: string;
+    name: string;
+    arguments: string;
+    preview?: WsPreview;
+    allowSuggestions?: AgentAllowSuggestion[];
+  }) => void;
+  /** An IDE agent tool changed these workspace paths (`'.'` = anything). */
+  onWorkspaceChanged?: (paths: string[]) => void;
   onStatus?: (status: { phase: string; name?: string; state?: string }) => void;
   onMetrics?: (metrics: ChatResponseMetrics) => void;
   onDone?: (reason?: string) => void;
@@ -2185,7 +2237,16 @@ async function consumeChatStream(res: Response, handlers: ChatStreamHandlers): P
           else if (event.type === 'token') handlers.onToken?.(event.content);
           else if (event.type === 'tool_call') handlers.onToolCall?.({ id: event.id, name: event.name, arguments: event.arguments });
           else if (event.type === 'tool_result') handlers.onToolResult?.({ id: event.id, success: event.success, summary: event.summary });
-          else if (event.type === 'tool_confirm') handlers.onToolConfirm?.({ id: event.id, name: event.name, arguments: event.arguments });
+          else if (event.type === 'tool_confirm') {
+            handlers.onToolConfirm?.({
+              id: event.id,
+              name: event.name,
+              arguments: event.arguments,
+              preview: event.preview,
+              allowSuggestions: event.allowSuggestions,
+            });
+          }
+          else if (event.type === 'workspace_changed') handlers.onWorkspaceChanged?.(event.paths);
           else if (event.type === 'status') handlers.onStatus?.({ phase: event.phase, name: event.name, state: event.state });
           else if (event.type === 'tool_status') handlers.onStatus?.({ phase: event.phase ?? 'tool_call', name: event.name, state: event.state });
           else if (event.type === 'metrics') {
@@ -3160,8 +3221,13 @@ export const api = {
       location?: WorkspaceLocation; sshConnectionId?: string; remotePath?: string;
     }) =>
       request<Workspace>('/workspaces', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: string, data: Partial<Pick<Workspace, 'name' | 'description' | 'repoUrl' | 'branch' | 'gitRepoId'>>) =>
+    update: (
+      id: string,
+      data: Partial<Pick<Workspace, 'name' | 'description' | 'repoUrl' | 'branch' | 'gitRepoId' | 'agentMode' | 'agentCredentials'>>,
+    ) =>
       request<Workspace>(`/workspaces/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    removeAgentAllow: (id: string, entryId: string) =>
+      request<void>(`/workspaces/${id}/agent-allow/${encodeURIComponent(entryId)}`, { method: 'DELETE' }),
     archive: (id: string) =>
       request<Workspace>(`/workspaces/${id}/archive`, { method: 'POST' }),
     delete: (id: string) =>
@@ -3614,6 +3680,9 @@ export const api = {
       return request<{ indexed: number }>(`/rag/reindex${qs}`, { method: 'POST' });
     },
   },
+  agentRoles: {
+    list: () => request<AgentRoleInfo[]>('/agent-roles'),
+  },
   chat: {
     getConfig: () => request<ChatConfig>('/chat/config'),
     updateConfig: (data: Partial<ChatConfig>) =>
@@ -3623,18 +3692,24 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(endpoint),
       }),
-    listSessions: (owner: { projectId?: string; customerId?: string }, includeArchived = false) => {
+    /** With `workspaceId` (requires `projectId`): only that workspace's IDE agent sessions. */
+    listSessions: (owner: { projectId?: string; customerId?: string; workspaceId?: string }, includeArchived = false) => {
       const params = new URLSearchParams();
       if (owner.projectId) params.set('projectId', owner.projectId);
       if (owner.customerId) params.set('customerId', owner.customerId);
+      if (owner.workspaceId) params.set('workspaceId', owner.workspaceId);
       if (includeArchived) params.set('includeArchived', 'true');
       return request<ChatSession[]>(`/chat/sessions?${params}`);
     },
     getSession: (id: string) => request<ChatSession>(`/chat/sessions/${id}`),
-    createSession: (owner: { projectId?: string; customerId?: string }, title?: string) =>
+    createSession: (
+      owner: { projectId?: string; customerId?: string },
+      title?: string,
+      binding?: { workspaceId: string; ideAgent: true },
+    ) =>
       request<ChatSession>('/chat/sessions', {
         method: 'POST',
-        body: JSON.stringify({ ...owner, title }),
+        body: JSON.stringify({ ...owner, title, ...binding }),
       }),
     updateSession: (id: string, title: string) =>
       request<ChatSession>(`/chat/sessions/${id}`, {
@@ -3682,6 +3757,7 @@ export const api = {
       signal?: AbortSignal,
       workspaceId?: string | null,
       briefingMode?: boolean,
+      agentRoleId?: string,
     ): Promise<void> => {
       const res = await postChatStream(
         `/chat/sessions/${sessionId}/message`,
@@ -3690,6 +3766,7 @@ export const api = {
           attachmentIds,
           workspaceId: workspaceId ?? undefined,
           briefingMode: briefingMode ?? undefined,
+          agentRoleId: agentRoleId || undefined,
         },
         signal,
       );
@@ -3706,7 +3783,7 @@ export const api = {
      */
     resumeTool: async (
       sessionId: string,
-      body: { callId: string; approved: boolean },
+      body: { callId: string; approved: boolean; alwaysAllow?: AgentAllowSuggestion },
       handlers: ChatStreamHandlers,
       signal?: AbortSignal,
     ): Promise<void> => {
@@ -4151,7 +4228,15 @@ export type ChatStreamEvent =
   | { type: 'tool_call'; id: string; name: string; arguments: string }
   | { type: 'tool_result'; id: string; success: boolean; summary: string }
   /** Server hält vor einem schreibenden Tool an und beendet den Stream (T-415). */
-  | { type: 'tool_confirm'; id: string; name: string; arguments: string }
+  | {
+      type: 'tool_confirm';
+      id: string;
+      name: string;
+      arguments: string;
+      preview?: WsPreview;
+      allowSuggestions?: AgentAllowSuggestion[];
+    }
+  | { type: 'workspace_changed'; paths: string[] }
   | { type: 'status'; phase: string; name?: string; state?: string }
   | { type: 'tool_status'; phase?: string; name?: string; state?: string }
   | ({ type: 'metrics' } & ChatResponseMetrics)
@@ -4176,6 +4261,9 @@ export interface ChatSession {
   messages: ChatMessage[];
   archived: boolean;
   model?: string;
+  /** IDE agent sessions: bound to this workspace for good. */
+  workspaceId?: string;
+  ideAgent?: boolean;
   createdAt: string;
   updatedAt: string;
 }

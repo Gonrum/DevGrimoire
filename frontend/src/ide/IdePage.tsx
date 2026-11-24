@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Files, Search, SquareTerminal } from 'lucide-react';
+import { Bot, Files, Search, SquareTerminal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api, ApiError, type Workspace } from '../api/client';
 import { LoadingText } from '../components/ui/LoadingSpinner';
@@ -18,6 +18,8 @@ import { useWorkspaceStatus } from './useWorkspaceStatus';
 
 // Monaco lives in its own chunk: the header and the file tree show up before it has loaded.
 const EditorPane = lazy(() => import('./EditorPane').then((m) => ({ default: m.EditorPane })));
+// The agent tab shows Monaco diffs too: same chunk reasoning, and it loads only when first opened.
+const AgentPanel = lazy(() => import('./AgentPanel').then((m) => ({ default: m.AgentPanel })));
 
 type LoadState =
   | { kind: 'loading' }
@@ -253,6 +255,8 @@ function Workbench({
   const terminalDivider = useDivider('y', getTerminalHeight, setTerminalHeight, true);
   const { branch, marks } = useWorkspaceStatus(workspaceId);
   const isSsh = isSshWorkspace(workspace);
+  // Mounted on first use, then kept: hiding the tab must not end a running agent turn.
+  const [agentMounted, setAgentMounted] = useState(() => useIdeStore.getState().panel === 'agent');
 
   // Ctrl/Cmd+` toggles the terminal from anywhere on the page, including from inside the terminal.
   useEffect(() => {
@@ -291,6 +295,16 @@ function Workbench({
               {id === 'files' ? <Files size={18} /> : <Search size={18} />}
             </RailButton>
           ))}
+          <RailButton
+            label={t('ide.agent.title')}
+            pressed={panel === 'agent'}
+            onClick={() => {
+              setAgentMounted(true);
+              setPanel('agent');
+            }}
+          >
+            <Bot size={18} />
+          </RailButton>
           <div className="flex-1" />
           <RailButton label={t('ide.terminal')} pressed={terminalOpen} onClick={() => setTerminalOpen(!terminalOpen)}>
             <SquareTerminal size={18} />
@@ -317,6 +331,13 @@ function Workbench({
           <div className={panel === 'search' ? 'h-full' : 'hidden'}>
             <SearchPanel key={workspaceId} workspaceId={workspaceId} />
           </div>
+          {agentMounted && (
+            <div className={panel === 'agent' ? 'h-full' : 'hidden'}>
+              <Suspense fallback={<LoadingText text={t('ide.loading')} />}>
+                <AgentPanel key={workspaceId} workspace={workspace} />
+              </Suspense>
+            </div>
+          )}
         </aside>
         <div
           role="separator"
