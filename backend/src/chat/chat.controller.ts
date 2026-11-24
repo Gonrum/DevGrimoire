@@ -41,6 +41,7 @@ import { ChatActivityService } from './chat-activity.service';
 import { AgentRolesService } from '../agent-roles/agent-roles.service';
 import { ChatAttachmentRef, ChatResponseMetrics, ChatToolCallRecord } from './schemas/chat-session.schema';
 import { redactToolRecord } from './chat-redaction';
+import { MAX_TOOL_RESULT_CHARS } from './tool-result-limit';
 import { ChatActivityToolUse } from './schemas/chat-activity.schema';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
@@ -59,7 +60,6 @@ import {
   UpdateChatSessionDto,
 } from './dto/chat.dto';
 
-const MAX_TOOL_RESULT_CHARS = 8000;
 const MAX_ATTACHMENT_FILE_SIZE = parseInt(process.env.MINIO_MAX_FILE_SIZE || String(50 * 1024 * 1024), 10);
 
 /**

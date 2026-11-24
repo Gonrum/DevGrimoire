@@ -17,6 +17,7 @@ import {
 import type { FsLimits } from '../workspaces/fs/workspace-fs-backend';
 import { FS_EXEC_MAX_COMMAND_LENGTH } from '../workspaces/fs/workspace-fs-backend';
 import { headTailText } from '../workspaces/fs/head-tail-output';
+import { MAX_TOOL_RESULT_CHARS } from './tool-result-limit';
 import { RequestContext } from '../common/request-context';
 import { errorMessage, isRecord } from '../common/narrow';
 import { optionalBoolean, optionalNumber, optionalStringArray, type ToolArgs } from '../common/tool-args';
@@ -108,13 +109,77 @@ export interface WsPreview {
 export type WsToolResult = ToolExecutionResult & { changedPaths?: string[] };
 export type WsPreviewResult = { ok: true; preview: WsPreview } | { ok: false; error: string };
 
-/** Spec: output (stdout + stderr) handed to the LLM is cut to 64 KiB. */
+/**
+ * Spec: absolute upper bound of the output (stdout + stderr) collected for the
+ * LLM, 64 KiB. What actually goes into the result is smaller: it is shaped by
+ * `fitExecResult` to stay within `MAX_TOOL_RESULT_CHARS`.
+ */
 export const WS_EXEC_OUTPUT_LIMIT = 64 * 1024;
 /**
  * Per stream: half of the limit, as head + `… N bytes omitted …` + tail (the
  * backends collect it that way and never stop a command for its output).
  */
 const WS_EXEC_STREAM_LIMIT = WS_EXEC_OUTPUT_LIMIT / 2;
+/** Head kept per stream in the result; the tail (where errors are) gets the rest. */
+const WS_EXEC_RESULT_HEAD_BYTES = 1024;
+/** Share of the output budget for stdout when both streams need more than they get. */
+const WS_EXEC_STDOUT_SHARE = 0.75;
+
+export interface WsExecResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  truncated: boolean;
+  timedOut: boolean;
+  aborted: boolean;
+}
+
+/**
+ * Shapes a ws_exec result so its JSON stays within `maxChars` (the chat loop's
+ * generic cut keeps the head of the JSON and would drop the tail of the
+ * output). Each stream keeps a small head plus as much tail as fits, joined by
+ * the `… N bytes omitted …` marker; stdout gets the larger share, a stream
+ * that needs less leaves the rest to the other. The flags are always present.
+ * The budget is in UTF-8 bytes while the limit is in JSON characters, so the
+ * budget shrinks until the JSON fits; the last step (budget / 6, the worst
+ * escape inflation `\u0000`) always fits.
+ */
+export function fitExecResult(
+  r: { exitCode: number | null; stdout: string; stderr: string; truncated: boolean; timedOut: boolean; aborted: boolean },
+  maxChars: number = MAX_TOOL_RESULT_CHARS,
+): WsExecResult {
+  const build = (stdoutBytes: number, stderrBytes: number): WsExecResult => {
+    const stdout = headTailText(r.stdout, stdoutBytes, WS_EXEC_RESULT_HEAD_BYTES);
+    const stderr = headTailText(r.stderr, stderrBytes, WS_EXEC_RESULT_HEAD_BYTES);
+    return {
+      exitCode: r.exitCode,
+      stdout: stdout.text,
+      stderr: stderr.text,
+      truncated: r.truncated || stdout.cut || stderr.cut,
+      timedOut: r.timedOut,
+      aborted: r.aborted,
+    };
+  };
+  const split = (budget: number): [number, number] => {
+    const outLen = Buffer.byteLength(r.stdout, 'utf8');
+    const errLen = Buffer.byteLength(r.stderr, 'utf8');
+    const outShare = Math.floor(budget * WS_EXEC_STDOUT_SHARE);
+    if (errLen <= budget - outShare) return [budget - errLen, errLen];
+    if (outLen <= outShare) return [outLen, budget - outLen];
+    return [outShare, budget - outShare];
+  };
+  // Room the fields take without any output (`truncated: true` is the longer form).
+  const overhead = JSON.stringify({ ...build(0, 0), stdout: '', stderr: '', truncated: true }).length;
+  const room = Math.max(0, maxChars - overhead);
+  let budget = room;
+  for (let attempt = 0; attempt < 6 && budget > 0; attempt += 1) {
+    const result = build(...split(budget));
+    const length = JSON.stringify(result).length;
+    if (length <= maxChars) return result;
+    budget = Math.floor((budget * room) / Math.max(1, length - overhead) * 0.95);
+  }
+  return build(...split(Math.floor(room / 6)));
+}
 const WS_EXEC_DEFAULT_TIMEOUT_SEC = 60;
 const WS_EXEC_MAX_TIMEOUT_SEC = 600;
 const PATH_MAX = 4096;
@@ -217,7 +282,8 @@ export const WORKSPACE_AGENT_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
     name: 'ws_exec',
     description:
       'Runs a shell command line (POSIX sh syntax) in the workspace root, without a TTY. timeoutSec default 60, max 600. '
-      + 'Returns exitCode, stdout, stderr (each at most 32 KiB: start + "… N bytes omitted …" + end), '
+      + 'Returns exitCode, stdout, stderr (long output is shortened to its start + "… N bytes omitted …" + its end; '
+      + 'about 7,000 characters in total, the end is kept), '
       + 'truncated, timedOut, aborted.',
     parameters: {
       type: 'object',
@@ -689,17 +755,8 @@ export class WorkspaceAgentTools {
       maxOutputBytes: WS_EXEC_STREAM_LIMIT,
       ...(ctx.signal ? { signal: ctx.signal } : {}),
     });
-    // The backends already keep head + tail within the limit; this only guards it.
-    const stdout = headTailText(r.stdout, WS_EXEC_STREAM_LIMIT);
-    const stderr = headTailText(r.stderr, WS_EXEC_STREAM_LIMIT);
-    const result = {
-      exitCode: r.exitCode,
-      stdout: stdout.text,
-      stderr: stderr.text,
-      truncated: r.truncated || stdout.cut || stderr.cut,
-      timedOut: r.timedOut,
-      aborted: r.aborted,
-    };
+    // The backends keep head + tail within WS_EXEC_STREAM_LIMIT; the result fits the chat budget.
+    const result = fitExecResult(r);
     this.audit(gate, `exec: ${input.command}`, {
       tool: input.tool,
       command: input.command.slice(0, 2000),

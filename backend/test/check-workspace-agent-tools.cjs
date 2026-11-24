@@ -198,6 +198,56 @@ async function headTailChecks() {
     assert.equal(small.truncated, false);
     assert.equal(EXEC_HEAD_BYTES, 8 * 1024);
     assert.deepEqual(headTailText('abc', 10), { text: 'abc', cut: false });
+    // A smaller head on request; the tail gets the rest.
+    const cut = headTailText('h'.repeat(5000) + 'TAIL', 2000, 100);
+    assert.ok(cut.cut && cut.text.startsWith('h'.repeat(100) + '\n…') && cut.text.endsWith('TAIL'));
+  });
+
+  const { fitExecResult } = agent;
+  const { MAX_TOOL_RESULT_CHARS } = loadCompiled('chat/tool-result-limit.js');
+  const base = { exitCode: 1, truncated: false, timedOut: false, aborted: false };
+  const fits = (label, r) => {
+    const out = fitExecResult(r);
+    const json = JSON.stringify(out);
+    assert.ok(json.length <= MAX_TOOL_RESULT_CHARS, `${label}: ${json.length}`);
+    assert.deepEqual(JSON.parse(json), out, label);
+    for (const k of ['exitCode', 'stdout', 'stderr', 'truncated', 'timedOut', 'aborted']) assert.ok(k in out, `${label}: ${k}`);
+    return out;
+  };
+  await check('fitExecResult: 3 MiB output fits the result budget, last line kept, valid JSON', () => {
+    const lines = [];
+    for (let i = 0, len = 0; len < 3 * 1024 * 1024; i += 1) {
+      const line = `line ${i} building module ${i % 97}`;
+      lines.push(line);
+      len += line.length + 1;
+    }
+    const last = 'error TS2304: Cannot find name \'LAST_LINE_MARKER\'.';
+    const out = fits('3 MiB', { ...base, stdout: `${lines.join('\n')}\n${last}\n`, stderr: 'npm ERR! failed\n' });
+    assert.ok(out.stdout.endsWith(`${last}\n`), 'last stdout line');
+    assert.ok(out.stdout.startsWith('line 0 building'), 'head kept');
+    assert.match(out.stdout, /… \d+ bytes omitted …/);
+    assert.equal(out.stderr, 'npm ERR! failed\n', 'a short stderr stays whole');
+    assert.equal(out.truncated, true);
+    // stdout got the room stderr did not need.
+    assert.ok(out.stdout.length > MAX_TOOL_RESULT_CHARS * 0.8, String(out.stdout.length));
+  });
+  await check('fitExecResult: both streams large -> stdout larger share, both tails kept', () => {
+    const big = (tag) => `${tag}-start\n${'x'.repeat(2 * 1024 * 1024)}\n${tag}-END`;
+    const out = fits('both', { ...base, stdout: big('OUT'), stderr: big('ERR') });
+    assert.ok(out.stdout.endsWith('OUT-END') && out.stderr.endsWith('ERR-END'));
+    assert.ok(out.stdout.length > out.stderr.length);
+  });
+  await check('fitExecResult: escape-heavy and multibyte output still fits', () => {
+    const ctl = '\u0001\u0002"\\\t'.repeat(400000) + 'CTL-END';
+    const out = fits('control', { ...base, stdout: ctl, stderr: '' });
+    assert.ok(out.stdout.endsWith('CTL-END'));
+    const uni = '😀ä€'.repeat(500000) + 'UNI-END';
+    const out2 = fits('unicode', { ...base, stdout: '', stderr: uni });
+    assert.ok(out2.stderr.endsWith('UNI-END') && !out2.stderr.includes('\uFFFD'));
+  });
+  await check('fitExecResult: small output unchanged, flags passed through', () => {
+    const out = fits('small', { exitCode: null, stdout: 'ok\n', stderr: '', truncated: false, timedOut: true, aborted: false });
+    assert.deepEqual(out, { exitCode: null, stdout: 'ok\n', stderr: '', truncated: false, timedOut: true, aborted: false });
   });
 }
 

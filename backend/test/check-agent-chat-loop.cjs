@@ -449,6 +449,24 @@ async function main() {
 
   const silentEnd = [{ type: 'finish', reason: 'stop' }];
 
+  await check('ws_exec with 3 MiB output: result within the budget, valid JSON, last line kept, no generic cut', async () => {
+    const env = makeEnv({ agentMode: 'direct', rounds: [round(tc('x1', 'ws_exec', { command: 'npm run build' }))] });
+    const body = Array.from({ length: 150000 }, (_, i) => `compiling file ${i}.ts`).join('\n');
+    assert.ok(body.length > 3 * 1024 * 1024 - 1, String(body.length));
+    env.fake.switches.execScript = { code: 2, stdout: `${body}\nFINAL: 3 errors found\n`, stderr: '' };
+    const res = await send(env);
+    const [result] = ofType(res, 'tool_result').filter((e) => e.id === 'x1');
+    const { MAX_TOOL_RESULT_CHARS } = loadCompiled('chat/tool-result-limit.js');
+    const llmSees = toolMessage(env, 'x1').content;
+    assert.ok(llmSees.length <= MAX_TOOL_RESULT_CHARS, String(llmSees.length));
+    assert.ok(!llmSees.includes('…[truncated]'));
+    const parsed = JSON.parse(llmSees);
+    assert.equal(parsed.exitCode, 2);
+    assert.ok(parsed.stdout.endsWith('FINAL: 3 errors found\n'), parsed.stdout.slice(-80));
+    assert.ok(!result.result.includes('…[truncated]'));
+    assert.ok(JSON.parse(result.result).stdout.endsWith('FINAL: 3 errors found\n'));
+  });
+
   await check('ws_* tool_result carries the stored result live (exec output + exit code)', async () => {
     const env = makeEnv({ agentMode: 'direct', rounds: [round(tc('x1', 'ws_exec', { command: 'npm test' }))] });
     env.fake.switches.execScript = { code: 3, stdout: 'hello out', stderr: 'bad' };

@@ -23,13 +23,14 @@ export class HeadTailOutput {
   private tailLen = 0;
   private total = 0;
 
-  constructor(maxBytes: number) {
+  /** `headBytes`: upper bound of the head (default `EXEC_HEAD_BYTES`); the tail gets the rest. */
+  constructor(maxBytes: number, headBytes = EXEC_HEAD_BYTES) {
     const max = Math.max(0, Math.floor(maxBytes));
     if (max <= 2 * MARKER_RESERVE) {
       this.headMax = max;
       this.tailMax = 0;
     } else {
-      this.headMax = Math.min(EXEC_HEAD_BYTES, Math.floor((max - MARKER_RESERVE) / 2));
+      this.headMax = Math.min(Math.max(0, Math.floor(headBytes)), Math.floor((max - MARKER_RESERVE) / 2));
       this.tailMax = max - MARKER_RESERVE - this.headMax;
     }
   }
@@ -99,9 +100,13 @@ export class HeadTailOutput {
 }
 
 /** `text` cut to head + marker + tail within `maxBytes`; unchanged when it fits. */
-export function headTailText(text: string, maxBytes: number): { text: string; cut: boolean } {
+export function headTailText(
+  text: string,
+  maxBytes: number,
+  headBytes = EXEC_HEAD_BYTES,
+): { text: string; cut: boolean } {
   if (Buffer.byteLength(text, 'utf8') <= maxBytes) return { text, cut: false };
-  const out = new HeadTailOutput(maxBytes);
+  const out = new HeadTailOutput(maxBytes, headBytes);
   out.push(text);
   return { text: out.text(), cut: true };
 }
