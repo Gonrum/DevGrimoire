@@ -6,6 +6,8 @@
  *   workspace's allow list does not cover the call; other write tools pause as before
  * - server-side preview in `tool_confirm`, pinned hash, resume, "always allow"
  * - `workspace_changed`, `proposal_expired`, abort reaches ws_exec
+ * - Stop: a client disconnect over a REAL HTTP connection (express body parser,
+ *   fetch + AbortController) stops the loop before any further tool runs
  *
  * Drives `ChatController.sendMessage` / `resumeTool` with a scripted fake LLM,
  * the real `ChatToolsService.execute` routing and the real `WorkspaceAgentTools`
@@ -118,9 +120,11 @@ function makeEnv(opts = {}) {
       enabled: true, toolsEnabled: true, topK: 3, historyLimit: 10, toolsMaxIterations: 10,
       toolsAllowlist: opts.allowlist ?? [...WORKSPACE_AGENT_TOOLS, 'todo_create', 'todo_list'],
     }),
-    async *streamChatWithTools(conversation, toolDefs) {
-      llmCalls.push({ conversation: conversation.map((m) => ({ ...m })), tools: toolDefs.map((t) => t.function.name) });
+    async *streamChatWithTools(conversation, toolDefs, o) {
+      llmCalls.push({ conversation: conversation.map((m) => ({ ...m })), tools: toolDefs.map((t) => t.function.name), signal: o?.signal });
       const round = rounds.shift() ?? [{ type: 'content', delta: 'fertig' }, { type: 'finish', reason: 'stop' }];
+      // A function round is an async generator: it can wait before yielding (a slow model).
+      if (typeof round === 'function') { yield* round(); return; }
       for (const ev of round) yield ev;
     },
   };
@@ -137,6 +141,7 @@ function makeEnv(opts = {}) {
   const context = {
     build: async (owner, content, history, o) => {
       contextCalls.push(o);
+      if (opts.contextDelayMs) await new Promise((r) => setTimeout(r, opts.contextDelayMs));
       return { messages: [{ role: 'user', content }], contextRefs: [], images: undefined };
     },
   };
@@ -156,8 +161,8 @@ function fakeReq(user = ADMIN) {
 }
 
 function fakeRes() {
-  const res = {
-    events: [], ended: false, headers: {},
+  const res = Object.assign(new EventEmitter(), {
+    events: [], ended: false, headers: {}, destroyed: false,
     get writableEnded() { return this.ended; },
     setHeader(k, v) { this.headers[k] = v; },
     flushHeaders() {},
@@ -167,7 +172,7 @@ function fakeRes() {
       }
     },
     end() { this.ended = true; },
-  };
+  });
   return res;
 }
 
@@ -175,8 +180,7 @@ const tc = (id, name, args) => ({ type: 'tool_call', id, name, arguments: JSON.s
 const round = (...calls) => [...calls, { type: 'finish', reason: 'tool_calls' }];
 const ofType = (res, type) => res.events.filter((e) => e.type === type);
 
-async function send(env, content = 'go', req = fakeReq()) {
-  const res = fakeRes();
+async function send(env, content = 'go', req = fakeReq(), res = fakeRes()) {
   await env.c.sendMessage(String(env.session._id), { content, workspaceId: String(env.otherWs._id) }, req, res);
   return res;
 }
@@ -190,6 +194,70 @@ function toolMessage(env, id) {
   const last = env.llmCalls[env.llmCalls.length - 1];
   return last.conversation.find((m) => m.role === 'tool' && m.tool_call_id === id);
 }
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** A model that answers after `ms` — and ignores the abort signal while doing so. */
+const delayed = (ms, events) => async function* () { await sleep(ms); for (const ev of events) yield ev; };
+
+/**
+ * Runs one controller call behind a real HTTP server (express + json body
+ * parser, as in Nest) and a real fetch client. The client aborts when
+ * `abortWhen(event)` matches or after `abortAfterMs`; the handler is awaited
+ * to its end, so everything it still did after the disconnect is visible.
+ */
+async function overHttp(call, body, { abortWhen, abortAfterMs } = {}) {
+  const express = nm('express');
+  const app = express();
+  app.use(express.json());
+  let handler;
+  app.post('/t', (req, res) => {
+    req.user = ADMIN;
+    req.apiKey = undefined;
+    handler = call(req, res);
+    handler.catch(() => { if (!res.writableEnded) res.end(); });
+  });
+  const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+  const events = [];
+  try {
+    const ac = new AbortController();
+    if (abortAfterMs !== undefined) setTimeout(() => ac.abort(), abortAfterMs);
+    try {
+      const resp = await fetch(`http://127.0.0.1:${srv.address().port}/t`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: ac.signal,
+      });
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        let stop = false;
+        for (const part of parts) {
+          if (!part.startsWith('data: ')) continue;
+          const ev = JSON.parse(part.slice(6));
+          events.push(ev);
+          if (abortWhen && abortWhen(ev)) stop = true;
+        }
+        if (stop) { ac.abort(); break; }
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') throw err;
+    }
+    // Give the server time to see the FIN, then wait for the handler to finish.
+    while (!handler) await sleep(5);
+    await handler;
+  } finally {
+    srv.closeAllConnections();
+    srv.close();
+  }
+  return events;
+}
+const storedCalls = (env) => env.appended.filter((m) => m.role === 'assistant').flatMap((m) => m.toolCalls ?? []).map((t) => t.id);
+const GREET = 'function greet(name) {\n  return "Hallo " + name;\n}\n';
+const EDIT = { path: 'greet.js', oldText: '"Hallo " + name', newText: '"Hallo " + name + "!"' };
 
 async function main() {
   await check('non-IDE session: no ws_* offered; ws_* call errors without asking', async () => {
@@ -414,11 +482,13 @@ async function main() {
   await check('abort during ws_exec -> the signal reaches the backend', async () => {
     const env = makeEnv({ agentMode: 'direct', rounds: [round(tc('x1', 'ws_exec', { command: 'sleep 100' }))] });
     env.fake.switches.execScript = { stdout: 'partial', delayMs: 5000 };
-    const req = fakeReq();
+    const res = fakeRes();
     const started = Date.now();
-    const p = send(env, 'go', req);
+    const p = send(env, 'go', fakeReq(), res);
     await new Promise((r) => setTimeout(r, 100));
-    req.emit('close');
+    // The client is gone: Node closes the response, not the (long consumed) request.
+    res.destroyed = true;
+    res.emit('close');
     await p;
     assert.equal(env.fake.calls.aborts, 1);
     assert.ok(Date.now() - started < 3000, 'the exec must end on abort');
@@ -596,6 +666,75 @@ async function main() {
     const env = makeEnv({ ide: false, rounds: [round(tc('l1', 'todo_list', {})), silentEnd] });
     await send(env);
     assert.equal(env.appended.filter((m) => m.role === 'assistant').length, 0);
+  });
+  // Stop (client disconnect) over a real HTTP connection. A fake `req`
+  // EventEmitter hid the bug: for a POST, Node emits the request's 'close' as
+  // soon as the body parser has read the body — before the handler runs.
+  await check('stop: client disconnects after ws_read -> the ws_edit the model sends afterwards is not executed', async () => {
+    const env = makeEnv({
+      agentMode: 'direct',
+      rounds: [round(tc('r1', 'ws_read', { path: 'greet.js' })), delayed(300, round(tc('e1', 'ws_edit', EDIT)))],
+    });
+    fs.writeFileSync(env.f('greet.js'), GREET);
+    const events = await overHttp(
+      (req, res) => env.c.sendMessage(String(env.session._id), { content: 'go' }, req, res),
+      { content: 'go' },
+      { abortWhen: (ev) => ev.type === 'tool_result' && ev.id === 'r1' },
+    );
+    assert.ok(events.some((e) => e.type === 'tool_result' && e.id === 'r1'), JSON.stringify(events));
+    assert.equal(fs.readFileSync(env.f('greet.js'), 'utf8'), GREET, 'ws_edit must not run after Stop');
+    assert.ok(!storedCalls(env).includes('e1'), JSON.stringify(storedCalls(env)));
+    assert.equal(env.llmCalls[1].signal.aborted, true, 'the disconnect must reach the LLM stream');
+  });
+
+  await check('stop: client disconnects during the first of two queued calls -> the queued ws_edit is not executed', async () => {
+    const env = makeEnv({
+      agentMode: 'direct',
+      rounds: [round(tc('x1', 'ws_exec', { command: 'sleep 100' }), tc('e1', 'ws_edit', EDIT))],
+    });
+    fs.writeFileSync(env.f('greet.js'), GREET);
+    env.fake.switches.execScript = { stdout: 'partial', delayMs: 1500 };
+    await overHttp(
+      (req, res) => env.c.sendMessage(String(env.session._id), { content: 'go' }, req, res),
+      { content: 'go' },
+      { abortWhen: (ev) => ev.type === 'tool_call' && ev.id === 'x1' },
+    );
+    assert.equal(fs.readFileSync(env.f('greet.js'), 'utf8'), GREET, 'queued ws_edit must not run after Stop');
+    assert.ok(!storedCalls(env).includes('e1'), JSON.stringify(storedCalls(env)));
+    assert.equal(env.fake.calls.aborts, 1, 'the running ws_exec must be aborted');
+  });
+
+  await check('stop: client gone before the stream starts (during context build) -> no tool runs', async () => {
+    const env = makeEnv({ agentMode: 'direct', contextDelayMs: 400, rounds: [round(tc('e1', 'ws_edit', EDIT))] });
+    fs.writeFileSync(env.f('greet.js'), GREET);
+    await overHttp(
+      (req, res) => env.c.sendMessage(String(env.session._id), { content: 'go' }, req, res),
+      { content: 'go' },
+      { abortAfterMs: 100 },
+    );
+    assert.equal(fs.readFileSync(env.f('greet.js'), 'utf8'), GREET);
+    assert.ok(!storedCalls(env).includes('e1'), JSON.stringify(storedCalls(env)));
+  });
+
+  await check('stop on resume: client disconnects after the approved call -> the next ws_edit is not executed', async () => {
+    const env = makeEnv({
+      agentMode: 'direct',
+      allowlist: WIDE_ALLOWLIST,
+      agentToolSets: ['knowledge'],
+      rounds: [round(tc('k1', 'knowledge_save', { title: 't', content: 'c' })), delayed(300, round(tc('e1', 'ws_edit', EDIT)))],
+    });
+    fs.writeFileSync(env.f('greet.js'), GREET);
+    const first = await send(env);
+    assert.equal(ofType(first, 'tool_confirm').length, 1);
+    const body = { callId: 'k1', approved: true };
+    await overHttp(
+      (req, res) => env.c.resumeTool(String(env.session._id), body, req, res),
+      body,
+      { abortWhen: (ev) => ev.type === 'tool_result' && ev.id === 'k1' },
+    );
+    assert.deepEqual(env.otherExecuted, ['knowledge_save']);
+    assert.equal(fs.readFileSync(env.f('greet.js'), 'utf8'), GREET, 'ws_edit must not run after Stop');
+    assert.ok(!storedCalls(env).includes('e1'), JSON.stringify(storedCalls(env)));
   });
 }
 

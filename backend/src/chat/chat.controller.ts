@@ -50,6 +50,7 @@ import { WorkspaceDocument } from '../workspaces/schemas/workspace.schema';
 import { MinioService } from '../minio/minio.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/schemas/user.schema';
+import { onClientDisconnect } from './client-disconnect';
 import {
   CreateChatSessionDto,
   ExecuteChatToolDto,
@@ -1037,8 +1038,8 @@ export class ChatController {
     }, 15000);
 
     const abort = new AbortController();
-    const onClose = () => abort.abort();
-    req.on('close', onClose);
+    // The response's close, not the request's: see client-disconnect.ts.
+    const stopListening = onClientDisconnect(res, () => abort.abort());
 
     send({ type: 'status', phase: 'context' });
     send({ type: 'context', refs: built.contextRefs });
@@ -1132,7 +1133,7 @@ export class ChatController {
             pinned: loop.paused.pinned,
           });
           clearInterval(heartbeat);
-          req.off('close', onClose);
+          stopListening();
           if (!res.writableEnded) res.end();
           return;
         }
@@ -1147,7 +1148,7 @@ export class ChatController {
       send({ type: 'error', message: streamError });
     } finally {
       clearInterval(heartbeat);
-      req.off('close', onClose);
+      stopListening();
     }
 
     const endMs = Date.now();
@@ -1289,8 +1290,8 @@ export class ChatController {
       if (!res.writableEnded) res.write(': ping\n\n');
     }, 15000);
     const abort = new AbortController();
-    const onClose = () => abort.abort();
-    req.on('close', onClose);
+    // The response's close, not the request's: see client-disconnect.ts.
+    const stopListening = onClientDisconnect(res, () => abort.abort());
 
     // Kein erneutes `getOptions()`: `maxIter` und die Allowlist kommen aus dem
     // gemerkten Zustand. Ändert ein Admin die Einstellungen zwischen Anhalten
@@ -1374,7 +1375,7 @@ export class ChatController {
           createdAtMs: Date.now(),
         });
         clearInterval(heartbeat);
-        req.off('close', onClose);
+        stopListening();
         if (!res.writableEnded) res.end();
         return;
       }
@@ -1385,7 +1386,7 @@ export class ChatController {
       send({ type: 'error', message: streamError });
     } finally {
       clearInterval(heartbeat);
-      req.off('close', onClose);
+      stopListening();
     }
 
     const endMs = Date.now();
@@ -1594,6 +1595,8 @@ export class ChatController {
         }
 
         queue = queue.slice(1);
+        // The confirm decision above may have awaited (preview): re-check Stop.
+        if (p.abort.signal.aborted) break;
         await this.executeToolCall(tc, callParams);
       }
 
@@ -1683,6 +1686,8 @@ export class ChatController {
    * turn's workspace; `pinned` is the hash of a confirmed preview.
    */
   private async executeToolCall(tc: PendingToolCall, p: ToolCallParams, pinned?: PinnedHash): Promise<void> {
+    // Stop wins over everything: a call reached after the client left is not run.
+    if (p.signal?.aborted) return;
     p.send({ type: 'tool_status', phase: 'tool_call', name: tc.name, state: 'running' });
     p.send({ type: 'tool_call', id: tc.id, name: tc.name, arguments: tc.arguments });
 
