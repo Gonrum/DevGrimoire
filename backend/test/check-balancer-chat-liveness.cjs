@@ -8,7 +8,11 @@
  * 2. Same for the Anthropic tool stream (input_json_delta is buffered too).
  * 3. A cancelled job (client abort / gateway idle timeout) must abort the
  *    upstream request instead of holding the pool slot until the provider
- *    finishes on its own, and must not fail over to another endpoint.
+ *    finishes on its own — also when the cancel is seen between two content
+ *    events — and must not fail over to another endpoint.
+ * 4. SSE keep-alive comments (`: ping`) are not activity: a stream that only
+ *    sends those still times out. The progress interval is clamped below the
+ *    idle window.
  *
  * Real LlmClient + ChatRunner + StreamRelay + BalancerGateway; `fetch` is a
  * scripted fake. No network, no Redis. Loads from dist/ (run `npm run build`).
@@ -37,6 +41,8 @@ const { LlmClient } = loadCompiled('balancer/llm-client.service.js');
 const { ChatRunner } = loadCompiled('balancer/chat-runner.service.js');
 const { StreamRelay } = loadCompiled('balancer/stream-relay.service.js');
 const { BalancerGateway } = loadCompiled('balancer/balancer-gateway.service.js');
+const { GatewayProcessor } = loadCompiled('balancer/gateway.processor.js');
+const { progressIntervalMs } = loadCompiled('balancer/chat-runner.service.js');
 
 const enc = new TextEncoder();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -162,11 +168,103 @@ async function cancelAbortsUpstream() {
   }
 }
 
+/** Endless SSE stream: `line` every 40 ms until the request is aborted. */
+function endless(line) {
+  return new Proxy([], { get: (t, k) => (k === 'length' ? Infinity : typeof k === 'string' && /^\d+$/.test(k) ? line : t[k]) });
+}
+
+async function cancelMidStreamAbortsUpstream() {
+  const realFetch = global.fetch;
+  const realSetInterval = global.setInterval;
+  let upstreamSignal = null;
+  const contentLine = `data: ${JSON.stringify({ choices: [{ delta: { content: 'x' } }] })}\n\n`;
+  global.fetch = async (_url, init) => {
+    upstreamSignal = init && init.signal;
+    return sseResponse(endless(contentLine), 40, upstreamSignal, { i: 0 });
+  };
+  // Disable the cancel poll so only the loop's own `break` path is exercised:
+  // that path must end the upstream request by itself.
+  global.setInterval = () => ({ unref() {}, ref() {} });
+  try {
+    const relay = new StreamRelay();
+    const runner = new ChatRunner(new LlmClient(), relay);
+    const slot = { id: 'ep', provider: 'openai-compatible', baseUrl: 'http://fake', model: 'm', timeoutMs: 30000 };
+    const run = runner.run('job-m', slot, null, { withTools: true, messages: MESSAGES, tools: TOOLS });
+    await sleep(200);
+    relay.cancel('job-m');
+    const outcome = await Promise.race([
+      run.then(() => 'resolved', (e) => `rejected: ${e && e.message}`),
+      sleep(2000).then(() => 'still running'),
+    ]);
+    assert.equal(outcome, 'resolved');
+    assert.ok(upstreamSignal, 'the upstream request must carry an abort signal');
+    assert.equal(upstreamSignal.aborted, true, 'breaking out of a cancelled content stream must abort the upstream request');
+  } finally {
+    global.fetch = realFetch;
+    global.setInterval = realSetInterval;
+  }
+}
+
+async function keepAliveOnlyStreamStillTimesOut() {
+  const realFetch = global.fetch;
+  let upstreamSignal = null;
+  global.fetch = async (_url, init) => {
+    upstreamSignal = init && init.signal;
+    return sseResponse(endless(': ping\n\n'), 40, upstreamSignal, { i: 0 });
+  };
+  try {
+    const { gateway } = wire({ id: 'ep', provider: 'openai-compatible', baseUrl: 'http://fake', model: 'm', timeoutMs: 30000 });
+    const t0 = Date.now();
+    const outcome = await Promise.race([
+      collect(gateway).then(() => 'completed', (e) => `rejected: ${e && e.message}`),
+      sleep(IDLE_MS * 6).then(() => 'still running'),
+    ]);
+    assert.match(outcome, /chat pool wait timeout/, `keep-alive comments must not count as activity (got ${outcome})`);
+    assert.ok(Date.now() - t0 < IDLE_MS * 3, 'idle timeout should fire roughly after one idle window');
+    await sleep(800); // cancel poll interval
+    assert.equal(upstreamSignal && upstreamSignal.aborted, true, 'the timed-out turn must abort its upstream request');
+  } finally {
+    global.fetch = realFetch;
+  }
+}
+
+function progressIntervalIsClamped() {
+  const saved = process.env.LLM_PROGRESS_INTERVAL_MS;
+  try {
+    process.env.LLM_PROGRESS_INTERVAL_MS = String(IDLE_MS * 10);
+    assert.ok(progressIntervalMs() <= IDLE_MS / 4, `interval ${progressIntervalMs()} must stay below a quarter of the idle window ${IDLE_MS}`);
+    process.env.LLM_PROGRESS_INTERVAL_MS = '50';
+    assert.equal(progressIntervalMs(), 50);
+  } finally {
+    process.env.LLM_PROGRESS_INTERVAL_MS = saved;
+  }
+}
+
+async function noFailoverAfterCancel() {
+  const relay = new StreamRelay();
+  const slots = [{ id: 'a', provider: 'openai-compatible', baseUrl: 'http://a', model: 'm', timeoutMs: 1 }, { id: 'b', provider: 'openai-compatible', baseUrl: 'http://b', model: 'm', timeoutMs: 1 }];
+  const allocator = { acquire: async (_p, f) => slots.find((s) => !(f && f.exclude && f.exclude.has(s.id))) ?? null, release() {} };
+  const runs = [];
+  const chatRunner = {
+    run: async (jobId, slot) => { runs.push(slot.id); relay.cancel(jobId); throw new Error('provider 500'); },
+  };
+  const proc = new GatewayProcessor(allocator, { getDecryptedApiKey: async () => null }, {}, { recordSuccess() {}, recordFailure() {} }, { record: async () => {} }, relay, chatRunner);
+  const events = [];
+  relay.subscribe('job-f').subscribe({ next: (e) => events.push(e) });
+  await proc.process({ id: 'job-f', token: 't', timestamp: Date.now(), data: { purpose: 'chat', payload: {} } });
+  assert.deepEqual(runs, ['a'], 'a cancelled job must not fail over to another endpoint');
+  assert.ok(events.some((e) => e.type === 'error'), 'the job still ends its relay stream');
+}
+
 (async () => {
   const cases = [
     ['openai tool call streaming longer than the idle window', () => slowToolCallDoesNotIdleOut('openai-compatible', openAiToolChunks(20))],
     ['anthropic tool call streaming longer than the idle window', () => slowToolCallDoesNotIdleOut('anthropic', anthropicToolChunks(20))],
     ['cancel aborts the upstream request and frees the worker', cancelAbortsUpstream],
+    ['cancel seen between content events aborts the upstream request', cancelMidStreamAbortsUpstream],
+    ['a keep-alive-only stream still hits the idle timeout', keepAliveOnlyStreamStillTimesOut],
+    ['progress interval is clamped below the idle window', progressIntervalIsClamped],
+    ['no failover once the job is cancelled', noFailoverAfterCancel],
   ];
   let failed = 0;
   for (const [name, fn] of cases) {

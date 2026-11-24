@@ -125,6 +125,12 @@ export class GatewayProcessor extends WorkerHost {
           this.relay.publish(jobId, { type: 'error', status: 502, message: lastErrMessage });
           return;
         }
+        // The client is gone: a failover would only start a new generation
+        // nobody reads, on another endpoint's slot.
+        if (this.relay.isCancelled(jobId)) {
+          this.relay.publish(jobId, { type: 'error', status: 499, message: `abgebrochen: ${lastErrMessage}` });
+          return;
+        }
         tried.add(slot.id);
         // loop → next free healthy endpoint
       }

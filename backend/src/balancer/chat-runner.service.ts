@@ -34,13 +34,17 @@ const FALLBACK_MAX_TOKENS = 2048;
 const CANCEL_POLL_MS = 500;
 
 /**
- * Minimum gap between two `progress` relay events of one job. Well below the
- * gateway idle window (POOL_WAIT_TIMEOUT_MS, default 120 s); overridable for
- * the regression check.
+ * Minimum gap between two `progress` relay events of one job. Clamped to a
+ * quarter of the gateway idle window (POOL_WAIT_TIMEOUT_MS, default 120 s):
+ * an interval at or above that window would let the gateway time out healthy
+ * turns again, so a misconfiguration cannot reintroduce the stall.
  */
-function progressIntervalMs(): number {
+export function progressIntervalMs(): number {
+  const idle = Number(process.env.POOL_WAIT_TIMEOUT_MS);
+  const idleMs = Number.isFinite(idle) && idle > 0 ? idle : 120_000;
   const n = Number(process.env.LLM_PROGRESS_INTERVAL_MS);
-  return Number.isFinite(n) && n > 0 ? n : 5_000;
+  const configured = Number.isFinite(n) && n > 0 ? n : 5_000;
+  return Math.min(configured, idleMs / 4);
 }
 
 /**
@@ -255,6 +259,11 @@ export class ChatRunner {
       throw e;
     } finally {
       clearInterval(cancelPoll);
+      // Always end the upstream request. On a `break` after a cancel the
+      // generator's own cleanup only releases the reader lock — the provider
+      // would keep generating for a slot the processor already gave back.
+      // After a normal end the body is consumed, so this is a no-op.
+      abort.abort(new Error('chat job finished'));
     }
   }
 }

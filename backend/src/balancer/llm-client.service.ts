@@ -124,9 +124,10 @@ export interface ChatCallOpts {
   images?: ChatImageInput[];
   signal?: AbortSignal;
   /**
-   * Called for every chunk received from the upstream, whether or not it yields
-   * an event. Lets the balancer worker report liveness while a tool call or
-   * reasoning is being streamed (both are buffered/dropped here).
+   * Called for every SSE data line received from the upstream, whether or not
+   * it yields an event (keep-alive comments do not count). Lets the balancer
+   * worker report liveness while a tool call or reasoning is being streamed
+   * (both are buffered/dropped here).
    */
   onActivity?: () => void;
 }
@@ -274,13 +275,15 @@ export class LlmClient {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        o.onActivity?.();
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed.startsWith('data:')) continue;
+          // Only data lines count as activity: SSE comments (`: ping`) are
+          // keep-alives and must not keep a stalled turn alive.
+          o.onActivity?.();
           const data = trimmed.slice(5).trim();
           if (!data || data === '[DONE]') continue;
           // `undefined` deckt beides ab, was vorher der try/catch abfing: nicht
@@ -509,13 +512,15 @@ export class LlmClient {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        o.onActivity?.();
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed.startsWith('data:')) continue;
+          // Only data lines count as activity: SSE comments (`: ping`) are
+          // keep-alives and must not keep a stalled turn alive.
+          o.onActivity?.();
           const data = trimmed.slice(5).trim();
           if (!data) continue;
           // Ein nicht parsebarer Chunk ergibt `{}` und fällt damit in den
@@ -781,13 +786,15 @@ export class LlmClient {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        onActivity?.();
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed.startsWith('data:')) continue;
+          // Only data lines count as activity: SSE comments (`: ping`) are
+          // keep-alives and must not keep a stalled turn alive.
+          onActivity?.();
           const data = trimmed.slice(5).trim();
           if (!data) continue;
           const text = extract(data);
