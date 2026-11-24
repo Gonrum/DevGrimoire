@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const { StringDecoder } = require('string_decoder');
 const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const fsp = require('fs/promises');
 const path = require('path');
 const { WebSocketServer } = require('ws');
@@ -371,39 +372,91 @@ app.get('/health', (_req, res) => {
  * `origin` URL in `.git/config`, readable by every command in the workspace.
  * Now the remote URL is always credential-free and the token reaches git only
  * through the ENVIRONMENT of the one git process that needs it, via the
- * credential helper `git-credential-dg.sh`. Env rather than argv: argv is
- * visible to every user in `ps`, `/proc/<pid>/environ` only to the same uid
- * and only while that git process runs. Nothing is written to disk.
+ * credential helper `git-credential-dg.sh`, bound to one host and https.
+ * Env rather than argv: argv is visible to every user in `ps`,
+ * `/proc/<pid>/environ` only to the same uid and only while that git process
+ * runs (known limit: the workspace user IS that uid). Nothing is written to
+ * disk.
+ *
+ * The workspace's own git configuration is attacker-controlled (any command
+ * in the workspace can write `.git/config`, `.git/info/attributes` and
+ * `~/.gitconfig`). So no git process that carries the token may read it:
+ *   - /clone clones with `--no-checkout` under the token and global/system
+ *     config disabled (the new repo's config is git's own), then checks out
+ *     in a second process WITHOUT any credential in the env;
+ *   - /pull fetches through a throw-away git dir with a clean config that
+ *     writes straight into the workspace's object store, then fast-forwards
+ *     in the workspace in a second process WITHOUT any credential.
+ * Filters, hooks, uploadpack, askpass, proxies or insteadOf planted in the
+ * workspace therefore never run next to the token.
  */
 const GIT_CREDENTIAL_HELPER = path.join(__dirname, 'git-credential-dg.sh');
-// Token env the backend may pass to /clone and /pull — the same keys
-// `workspace_exec` injects, which the image-wide helper maps to hosts.
-const GIT_TOKEN_ENV_KEYS = ['GH_TOKEN', 'GITLAB_TOKEN', 'GITLAB_HOST', 'GITEA_TOKEN', 'GITEA_HOST'];
 const GIT_CREDENTIAL_MAX_LEN = 4096;
+// Test-only escape hatch: lets the checks use a local plain-http git server.
+// Never set in production; without it credentials only ever go over https.
+const GIT_ALLOW_HTTP = process.env.DG_GIT_ALLOW_HTTP === '1';
+const GIT_REF_PATTERN = /^refs\/heads\/[A-Za-z0-9._/-]{1,200}$/;
 
 function shellSingleQuote(value) {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 /**
- * `-c` options for git operations that talk to a remote. The empty
- * `credential.helper=` resets every helper configured so far — including one
- * planted in the repo's own `.git/config`, which would otherwise receive the
- * token — before our env-only helper is added. Hooks and fsmonitor are off so
- * a prepared `.git/config` cannot run code while the token is in the env.
+ * `-c` options for the one git process that carries a credential. The empty
+ * `credential.helper=` resets every helper configured so far before our
+ * env-only helper is added; only https (plus http in test mode) is allowed as
+ * a transport, so `ext::`, `file://`, ssh and friends cannot be reached
+ * through a rewritten URL.
  */
-function gitRemoteArgs() {
+function gitCredentialArgs({ allowHttp }) {
   return [
+    '-c', 'protocol.allow=never',
+    '-c', 'protocol.https.allow=always',
+    ...(allowHttp ? ['-c', 'protocol.http.allow=always'] : []),
     '-c', 'credential.helper=',
     '-c', `credential.helper=!${shellSingleQuote(GIT_CREDENTIAL_HELPER)}`,
+    '-c', 'core.askPass=',
+    '-c', 'core.sshCommand=',
     '-c', 'core.hooksPath=/dev/null',
     '-c', 'core.fsmonitor=false',
+    '-c', 'http.proxy=',
+    '-c', 'http.sslVerify=true',
+    '-c', 'gc.auto=0',
+    '-c', 'maintenance.auto=false',
+    '-c', 'fetch.writeCommitGraph=false',
   ];
+}
+
+/** Env for that process: no global/system config, plus the one credential. */
+function gitCredentialEnv(credentials) {
+  return {
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_SYSTEM: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    ...(GIT_ALLOW_HTTP ? { DG_GIT_ALLOW_HTTP: '1' } : {}),
+    ...(credentials ? {
+      DG_GIT_HOST: credentials.host,
+      DG_GIT_USERNAME: credentials.username || 'oauth2',
+      DG_GIT_PASSWORD: credentials.password,
+    } : {}),
+  };
 }
 
 /** True for a string git's credential protocol can carry (no NUL/CR/LF). */
 function isCredentialValue(value, maxLen) {
   return typeof value === 'string' && value.length > 0 && value.length <= maxLen && !/[\0\r\n]/.test(value);
+}
+
+/** May a credential for `host` be sent to `url`? Only https on that host. */
+function credentialTransportOk(url, host) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const protocolOk = parsed.protocol === 'https:' || (GIT_ALLOW_HTTP && parsed.protocol === 'http:');
+  return protocolOk && parsed.host === host && !parsed.username && !parsed.password;
 }
 
 /**
@@ -430,35 +483,16 @@ function splitUrlCredentials(rawUrl) {
   return { url: parsed.toString(), credentials };
 }
 
-/** One-shot helper env for exactly one host. */
-function oneShotCredentialEnv(credentials) {
-  if (!credentials || !credentials.password) return {};
-  return {
-    DG_GIT_HOST: credentials.host,
-    DG_GIT_USERNAME: credentials.username || 'oauth2',
-    DG_GIT_PASSWORD: credentials.password,
-  };
-}
-
-/**
- * Token env from the request body, restricted to GIT_TOKEN_ENV_KEYS. Returns
- * `{ env }` or `{ error }`.
- */
-function parseGitTokenEnv(raw) {
-  if (raw === undefined || raw === null) return { env: {} };
-  if (typeof raw !== 'object' || Array.isArray(raw)) return { error: 'env must be an object' };
-  const env = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (!GIT_TOKEN_ENV_KEYS.includes(key)) return { error: `env key ${key} is not allowed` };
-    if (!isCredentialValue(value, GIT_CREDENTIAL_MAX_LEN)) return { error: `env ${key} must be a non-empty single-line string` };
-    env[key] = value;
+/** Validates `{ username, password }` (+ `host` when `withHost`) from a body. */
+function parseAuth(auth, { withHost }) {
+  if (auth === undefined || auth === null) return { auth: null };
+  if (typeof auth !== 'object'
+    || !isCredentialValue(auth.username, 256)
+    || !isCredentialValue(auth.password, GIT_CREDENTIAL_MAX_LEN)
+    || (withHost && !isCredentialValue(auth.host, 256))) {
+    return { error: `auth must be { username, password${withHost ? ', host' : ''} } as non-empty single-line strings` };
   }
-  return { env };
-}
-
-/** The secret values of a token env (hosts are not secret). */
-function tokenValues(env) {
-  return Object.entries(env).filter(([key]) => key.endsWith('_TOKEN')).map(([, value]) => value);
+  return { auth: { username: auth.username, password: auth.password, ...(withHost ? { host: auth.host } : {}) } };
 }
 
 /**
@@ -480,6 +514,16 @@ function redactResult(result, secrets) {
   return { ...result, stdout: redactGitOutput(result.stdout, secrets), stderr: redactGitOutput(result.stderr, secrets) };
 }
 
+/** Concatenates two process results; the first failure decides the outcome. */
+function joinResults(first, second) {
+  return {
+    ...second,
+    stdout: `${first.stdout}${second.stdout}`,
+    stderr: `${first.stderr}${second.stderr}`,
+    truncated: first.truncated || second.truncated,
+  };
+}
+
 /**
  * Rewrites every remote URL/pushurl of the repo at `root` that embeds
  * credentials to its credential-free form (legacy workspaces cloned before
@@ -487,15 +531,17 @@ function redactResult(result, secrets) {
  * can still use them for the current operation.
  */
 async function scrubRemoteCredentials(root) {
-  const list = await runProcess('git', ['config', '--local', '--get-regexp', '^remote\\..*\\.(url|pushurl)$'], { cwd: root, timeoutMs: 30_000 });
+  // -z: entries end in NUL, key and value are split by the first newline —
+  // remote names may contain spaces.
+  const list = await runProcess('git', ['config', '-z', '--local', '--get-regexp', '^remote\\..*\\.(url|pushurl)$'], { cwd: root, timeoutMs: 30_000 });
   // Exit code 1 = no remote configured.
   if (list.exitCode !== 0) return [];
   const removed = [];
-  for (const line of list.stdout.split('\n')) {
-    const sep = line.indexOf(' ');
+  for (const entry of list.stdout.split('\0')) {
+    const sep = entry.indexOf('\n');
     if (sep < 0) continue;
-    const key = line.slice(0, sep);
-    const value = line.slice(sep + 1);
+    const key = entry.slice(0, sep);
+    const value = entry.slice(sep + 1);
     const { url, credentials } = splitUrlCredentials(value);
     if (!credentials) continue;
     const r = await runProcess('git', ['config', '--local', '--fixed-value', '--replace-all', key, url, value], { cwd: root, timeoutMs: 30_000 });
@@ -509,64 +555,156 @@ async function scrubRemoteCredentials(root) {
   return removed;
 }
 
+/** `remote.origin.url` after scrubbing, or null. */
+async function originUrl(root) {
+  const r = await runProcess('git', ['config', '--local', '--get', 'remote.origin.url'], { cwd: root, timeoutMs: 30_000 });
+  const url = r.stdout.trim();
+  return r.exitCode === 0 && url ? url : null;
+}
+
+/** Trimmed stdout of a plain (credential-free) git call, or null on failure. */
+async function gitValue(root, args) {
+  const r = await runProcess('git', args, { cwd: root, timeoutMs: 30_000 });
+  const out = r.stdout.trim();
+  return r.exitCode === 0 && out ? out : null;
+}
+
+/**
+ * Authenticated pull without exposing the token to the workspace's git
+ * config. Step 1 fetches the upstream branch through a fresh git dir in
+ * /tmp — clean config, no hooks, no attributes — whose object directory is
+ * the workspace's, so the objects land where they belong and the workspace's
+ * shallow boundary is honoured. Step 2 fast-forwards the workspace in a plain
+ * process without any credential. Returns a runProcess-like result or
+ * `{ error, status }` for a precondition failure.
+ */
+async function authenticatedPull(root, url, credentials) {
+  const gitDir = path.join(root, '.git');
+  const objectsDir = path.join(gitDir, 'objects');
+  if (!fs.statSync(gitDir).isDirectory() || !fs.existsSync(objectsDir)) {
+    return { status: 409, error: 'workspace .git must be a plain git directory' };
+  }
+  const branch = await gitValue(root, ['symbolic-ref', '-q', '--short', 'HEAD']);
+  if (!branch) return { status: 409, error: 'workspace is not on a branch' };
+  const mergeRef = (await gitValue(root, ['config', '--get', `branch.${branch}.merge`])) || `refs/heads/${branch}`;
+  if (!GIT_REF_PATTERN.test(mergeRef)) return { status: 409, error: 'upstream branch has an unsupported name' };
+  const head = await gitValue(root, ['rev-parse', '-q', '--verify', 'HEAD^{commit}']);
+
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'dg-fetch-'));
+  try {
+    const plainTmpEnv = { ...gitCredentialEnv(null), GIT_DIR: tmp, GIT_OBJECT_DIRECTORY: objectsDir };
+    const init = await runProcess('git', ['init', '-q', '--bare', '--template=', tmp], { env: gitCredentialEnv(null), timeoutMs: 30_000 });
+    if (init.exitCode !== 0) return init;
+    const shallowFile = path.join(gitDir, 'shallow');
+    const hadShallow = fs.existsSync(shallowFile);
+    if (hadShallow) await fsp.copyFile(shallowFile, path.join(tmp, 'shallow'));
+    // Tell the server what we already have, so only new objects travel.
+    if (head) {
+      const have = await runProcess('git', ['update-ref', 'refs/dg/have', head], { cwd: tmp, env: plainTmpEnv, timeoutMs: 30_000 });
+      if (have.exitCode !== 0) return have;
+    }
+    const fetch = await runProcess('git', [
+      ...gitCredentialArgs({ allowHttp: GIT_ALLOW_HTTP }),
+      'fetch', '--no-tags', '--no-auto-gc', '--', url, `+${mergeRef}:refs/dg/fetched`,
+    ], {
+      cwd: tmp,
+      env: { ...plainTmpEnv, ...gitCredentialEnv(credentials) },
+      timeoutMs: GIT_TIMEOUT_MS,
+    });
+    if (fetch.exitCode !== 0) return fetch;
+    const fetched = await runProcess('git', ['rev-parse', '--verify', 'refs/dg/fetched^{commit}'], { cwd: tmp, env: plainTmpEnv, timeoutMs: 30_000 });
+    const sha = fetched.stdout.trim();
+    if (fetched.exitCode !== 0 || !/^[0-9a-f]{40,64}$/.test(sha)) return joinResults(fetch, fetched);
+    // The fetch may have moved the shallow boundary; carry that back.
+    const tmpShallow = path.join(tmp, 'shallow');
+    if (fs.existsSync(tmpShallow)) await fsp.copyFile(tmpShallow, shallowFile);
+    else if (hadShallow) await fsp.rm(shallowFile, { force: true });
+
+    // Step 2: everything that touches the worktree (and so may run filters
+    // or hooks from the workspace's config) runs without any credential.
+    const tracking = `refs/remotes/origin/${mergeRef.slice('refs/heads/'.length)}`;
+    await runProcess('git', ['update-ref', tracking, sha], { cwd: root, timeoutMs: 30_000 });
+    const merge = await runProcess('git', ['merge', '--ff-only', sha], { cwd: root, timeoutMs: GIT_TIMEOUT_MS });
+    return joinResults(fetch, merge);
+  } finally {
+    await fsp.rm(tmp, { recursive: true, force: true });
+  }
+}
+
 app.post('/clone', async (req, res) => {
   const id = requireWorkspaceId(req, res); if (!id) return;
   const repoUrl = req.body?.repoUrl;
   const branch = req.body?.branch;
-  const auth = req.body?.auth;
   if (typeof repoUrl !== 'string' || !/^https?:\/\//i.test(repoUrl)) {
     return res.status(400).json({ error: 'repoUrl must be http(s) URL' });
   }
   if (branch !== undefined && (typeof branch !== 'string' || !/^[A-Za-z0-9._/-]{1,128}$/.test(branch))) {
     return res.status(400).json({ error: 'branch must match [A-Za-z0-9._/-]{1,128}' });
   }
-  if (auth !== undefined && auth !== null && (
-    typeof auth !== 'object'
-    || !isCredentialValue(auth.username, 256)
-    || !isCredentialValue(auth.password, GIT_CREDENTIAL_MAX_LEN)
-  )) {
-    return res.status(400).json({ error: 'auth must be { username, password } as non-empty single-line strings' });
-  }
-  const tokenEnv = parseGitTokenEnv(req.body?.env);
-  if (tokenEnv.error) return res.status(400).json({ error: tokenEnv.error });
-
-  // Credentials in the URL itself (typed by a user) win over the backend's
-  // `auth`, as before; either way the URL git stores is the plain one.
+  const parsedAuth = parseAuth(req.body?.auth, { withHost: false });
+  if (parsedAuth.error) return res.status(400).json({ error: parsedAuth.error });
   let cloneHost;
   try {
     cloneHost = new URL(repoUrl).host;
   } catch {
     return res.status(400).json({ error: 'repoUrl is not a valid URL' });
   }
+  // Credentials in the URL itself (typed by a user) win over the backend's
+  // `auth`, as before; either way the URL git stores is the plain one.
   const split = splitUrlCredentials(repoUrl);
   let credentials = split.credentials;
-  if (!credentials && auth) {
-    credentials = { host: cloneHost, username: auth.username, password: auth.password };
+  if (!credentials && parsedAuth.auth) credentials = { host: cloneHost, ...parsedAuth.auth };
+  if (credentials && !credentialTransportOk(split.url, credentials.host)) {
+    return res.status(400).json({ error: 'credentials are only sent over https' });
   }
-  const secrets = [credentials?.password, ...tokenValues(tokenEnv.env)];
+  const secrets = [credentials?.password];
 
   const root = await ensureWorkspaceDir(id);
   const dotGit = path.join(root, '.git');
   if (fs.existsSync(dotGit)) {
     return res.status(409).json({ error: 'workspace already contains a git repository — use /pull' });
   }
-  const args = [...gitRemoteArgs(), 'clone', '--depth', '1'];
+  // Step 1 (with credential): objects and refs only, no checkout, no
+  // global/system config.
+  const args = [...gitCredentialArgs({ allowHttp: !credentials || GIT_ALLOW_HTTP }), 'clone', '--no-checkout', '--depth', '1'];
   if (branch) args.push('--branch', branch);
   args.push('--', split.url, root);
-  const result = redactResult(await runProcess('git', args, {
-    timeoutMs: GIT_TIMEOUT_MS,
-    env: { ...tokenEnv.env, ...oneShotCredentialEnv(credentials) },
-  }), secrets);
+  const clone = await runProcess('git', args, { timeoutMs: GIT_TIMEOUT_MS, env: gitCredentialEnv(credentials) });
+  if (clone.exitCode !== 0) {
+    return res.status(500).json({ error: 'git clone failed', ...redactResult(clone, secrets) });
+  }
+  // Step 2 (no credential): populate the worktree. An empty repository has
+  // no HEAD commit and nothing to check out.
+  let result = clone;
+  if (await gitValue(root, ['rev-parse', '-q', '--verify', 'HEAD^{commit}'])) {
+    result = joinResults(clone, await runProcess('git', ['checkout', '-f', '-q'], { cwd: root, timeoutMs: GIT_TIMEOUT_MS }));
+  }
+  result = redactResult(result, secrets);
   if (result.exitCode !== 0) {
-    return res.status(500).json({ error: 'git clone failed', ...result });
+    return res.status(500).json({ error: 'git checkout failed', ...result });
   }
   res.json({ ok: true, ...result });
 });
 
+/**
+ * Credential-free `origin` URL of a workspace (legacy token URLs are scrubbed
+ * first). The backend resolves the matching token against it and passes the
+ * result back to /pull bound to that host.
+ */
+app.post('/origin', async (req, res) => {
+  const id = requireWorkspaceId(req, res); if (!id) return;
+  const root = workspaceRoot(id);
+  if (!fs.existsSync(path.join(root, '.git'))) {
+    return res.status(409).json({ error: 'workspace contains no git repository' });
+  }
+  await scrubRemoteCredentials(root);
+  res.json({ url: await originUrl(root) });
+});
+
 app.post('/pull', async (req, res) => {
   const id = requireWorkspaceId(req, res); if (!id) return;
-  const tokenEnv = parseGitTokenEnv(req.body?.env);
-  if (tokenEnv.error) return res.status(400).json({ error: tokenEnv.error });
+  const parsedAuth = parseAuth(req.body?.auth, { withHost: true });
+  if (parsedAuth.error) return res.status(400).json({ error: parsedAuth.error });
   if (!await workspaceExists(id)) {
     return res.status(404).json({ error: 'workspace directory does not exist' });
   }
@@ -577,13 +715,22 @@ app.post('/pull', async (req, res) => {
   // Legacy clone with the token in `origin`: clean the config first, but keep
   // using that token for this pull so the workspace does not break.
   const removed = await scrubRemoteCredentials(root);
-  const legacy = removed.find((r) => r.key === 'remote.origin.url') || removed[0];
-  const secrets = [...removed.map((r) => r.credentials.password), ...tokenValues(tokenEnv.env)];
-  const result = redactResult(await runProcess('git', [...gitRemoteArgs(), 'pull', '--ff-only'], {
-    cwd: root,
-    timeoutMs: GIT_TIMEOUT_MS,
-    env: { ...tokenEnv.env, ...oneShotCredentialEnv(legacy?.credentials) },
-  }), secrets);
+  const legacy = removed.find((r) => r.key === 'remote.origin.url');
+  const url = await originUrl(root);
+  const secrets = [...removed.map((r) => r.credentials.password), parsedAuth.auth?.password];
+  // A credential only goes to the host it was resolved for, over https.
+  const candidates = [legacy?.credentials, parsedAuth.auth].filter(Boolean);
+  const credentials = url ? candidates.find((c) => credentialTransportOk(url, c.host)) : undefined;
+
+  let result;
+  if (credentials) {
+    result = await authenticatedPull(root, url, credentials);
+    if (result.error) return res.status(result.status).json({ error: result.error });
+  } else {
+    // No credential involved: nothing to steal, plain pull as always.
+    result = await runProcess('git', ['pull', '--ff-only'], { cwd: root, timeoutMs: GIT_TIMEOUT_MS });
+  }
+  result = redactResult(result, secrets);
   if (result.exitCode !== 0) {
     return res.status(500).json({ error: 'git pull failed', ...result });
   }

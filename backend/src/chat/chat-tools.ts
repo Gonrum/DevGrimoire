@@ -2756,8 +2756,11 @@ export class ChatToolsService {
         }
         case 'workspace_pull': {
           const w = await this.loadContainerWorkspace(requireString(args, 'id'));
-          const gitEnv = await this.workspaceGitTokens.resolveForWorkspace(w);
-          const sidecar = await this.workspaceClient.pull(w._id.toString(), gitEnv);
+          // Only a token for the origin's own host, never the whole token
+          // env: the workspace's git config is not trusted (T-541).
+          const { url: originUrl } = await this.workspaceClient.origin(w._id.toString());
+          const pullAuth = await this.workspaceGitTokens.resolvePullAuth(w, originUrl);
+          const sidecar = await this.workspaceClient.pull(w._id.toString(), pullAuth);
           await this.workspaces.touch(w._id.toString());
           return { success: true, result: { pulled: true, sidecar } };
         }

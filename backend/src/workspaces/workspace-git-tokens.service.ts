@@ -106,7 +106,8 @@ export class WorkspaceGitTokensService {
    * the `origin` remote in `.git/config`, where every command in the
    * workspace could read the token. The sidecar hands these to git through
    * the environment of the clone process only. `null` if no token applies
-   * (URL already carries userinfo, not http(s), or no token configured).
+   * (URL already carries userinfo, not https, or no token configured) — a
+   * token never travels over plain http.
    *
    * Match priority:
    *   1. workspace.gitRepoId (explicit pin)
@@ -129,24 +130,59 @@ export class WorkspaceGitTokensService {
     } catch {
       return null;
     }
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (parsed.protocol !== 'https:') return null;
     if (parsed.username || parsed.password) return null; // caller brought its own
 
-    let project;
+    const repos = await this.repositoriesOf(workspace);
+    return this.authFor(workspace, pickRepoForUrl(repos, parsed.host, workspace.gitRepoId));
+  }
+
+  /**
+   * Credentials for `workspace_pull`, bound to the workspace's current
+   * `origin` URL as the sidecar reports it. Stricter than the clone case:
+   * the origin is writable by any command in the workspace, so the token
+   * goes only to the exact host its repository is configured for — no
+   * gitRepoId pin that ignores the host, no provider fallback. Returns the
+   * host so the sidecar can refuse a remote that changed in between.
+   */
+  async resolvePullAuth(
+    workspace: WorkspaceDocument,
+    originUrl: string | null,
+  ): Promise<(GitCloneAuth & { host: string }) | null> {
+    assertContainerWorkspace(workspace);
+    if (!originUrl) return null;
+    let parsed: URL;
     try {
-      project = await this.projects.findById(workspace.projectId.toString());
+      parsed = new URL(originUrl);
     } catch {
       return null;
     }
-    const repos = project.gitRepositories ?? [];
-    if (!repos.length) return null;
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return null;
+    const repos = (await this.repositoriesOf(workspace)).filter((r) => repoHostMatches(r, parsed.host));
+    const pinned = workspace.gitRepoId
+      ? repos.find((r) => idToString(r._id) === workspace.gitRepoId)
+      : undefined;
+    const auth = await this.authFor(workspace, pinned ?? repos.find((r) => r.tokenSecretId) ?? null);
+    return auth ? { ...auth, host: parsed.host } : null;
+  }
 
-    const matched = pickRepoForUrl(repos, parsed.host, workspace.gitRepoId);
-    if (!matched?.tokenSecretId) return null;
-    const token = await this.decrypt(matched.tokenSecretId, workspace.projectId.toString());
+  private async repositoriesOf(workspace: WorkspaceDocument) {
+    try {
+      const project = await this.projects.findById(workspace.projectId.toString());
+      return project.gitRepositories ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async authFor(
+    workspace: WorkspaceDocument,
+    repo: RepoLike | null,
+  ): Promise<GitCloneAuth | null> {
+    if (!repo?.tokenSecretId) return null;
+    const token = await this.decrypt(repo.tokenSecretId, workspace.projectId.toString());
     if (!token) return null;
-
-    return { username: matched.provider === 'github' ? 'x-access-token' : 'oauth2', password: token };
+    return { username: repo.provider === 'github' ? 'x-access-token' : 'oauth2', password: token };
   }
 
   /**
@@ -189,15 +225,7 @@ function pickRepoForUrl<T extends RepoLike>(
     const explicit = repos.find((r) => idToString(r._id) === explicitGitRepoId);
     if (explicit) return explicit;
   }
-  const hostMatch = repos.find((r) => {
-    if (r.provider === 'github') return urlHost === 'github.com';
-    if (r.provider === 'gitea') {
-      const cfgHost = normaliseGiteaHost(r.baseUrl);
-      return cfgHost !== null && urlHost === cfgHost;
-    }
-    const cfgHost = normaliseGitlabHost(r.baseUrl) ?? 'gitlab.com';
-    return cfgHost === urlHost;
-  });
+  const hostMatch = repos.find((r) => repoHostMatches(r, urlHost));
   if (hostMatch) return hostMatch;
   if (urlHost === 'github.com') return repos.find((r) => r.provider === 'github') ?? null;
   return (
@@ -205,6 +233,17 @@ function pickRepoForUrl<T extends RepoLike>(
     repos.find((r) => r.provider === 'gitlab') ??
     null
   );
+}
+
+/** Is `urlHost` the host this repository's token was issued for? */
+function repoHostMatches(r: RepoLike, urlHost: string): boolean {
+  if (r.provider === 'github') return urlHost === 'github.com';
+  if (r.provider === 'gitea') {
+    const cfgHost = normaliseGiteaHost(r.baseUrl);
+    return cfgHost !== null && urlHost === cfgHost;
+  }
+  const cfgHost = normaliseGitlabHost(r.baseUrl) ?? 'gitlab.com';
+  return cfgHost === urlHost;
 }
 
 function idToString(id: unknown): string | null {

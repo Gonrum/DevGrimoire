@@ -184,11 +184,23 @@ export class WorkspaceClient {
     );
   }
 
-  /** `gitEnv` = GH_TOKEN/GITLAB_TOKEN/… as `WorkspaceGitTokensService.resolveForWorkspace` returns it. */
-  pull(workspaceId: string, gitEnv?: Record<string, string>): Promise<PullResponse> {
+  /** Credential-free `origin` URL (the sidecar scrubs legacy token URLs first). */
+  origin(workspaceId: string): Promise<{ url: string | null }> {
+    return this.post<{ url: string | null }>('/origin', { workspaceId });
+  }
+
+  /**
+   * `auth` is bound to `auth.host`: the sidecar uses it only if `origin` is
+   * https on that host, and only in a git process that reads none of the
+   * workspace's own git configuration.
+   */
+  pull(
+    workspaceId: string,
+    auth?: { username: string; password: string; host: string } | null,
+  ): Promise<PullResponse> {
     return this.post<PullResponse>(
       '/pull',
-      { workspaceId, ...(gitEnv && Object.keys(gitEnv).length ? { env: gitEnv } : {}) },
+      { workspaceId, ...(auth ? { auth } : {}) },
       this.cloneTimeoutMs,
     );
   }

@@ -55,6 +55,7 @@ async function main() {
   await t('URL that already carries userinfo / non-http / garbage: no auth', async () => {
     assert.equal(await svc.resolveCloneAuth(ws, 'https://u:p@github.com/o/r.git'), null);
     assert.equal(await svc.resolveCloneAuth(ws, 'ssh://github.com/o/r.git'), null);
+    assert.equal(await svc.resolveCloneAuth(ws, 'http://github.com/o/r.git'), null, 'token over plain http');
     assert.equal(await svc.resolveCloneAuth(ws, 'not a url'), null);
   });
 
@@ -67,15 +68,30 @@ async function main() {
     await assert.rejects(svc.resolveCloneAuth({ ...ws, location: 'ssh' }, 'https://github.com/o/r.git'), (e) => e.getStatus() === 409);
   });
 
-  await t('client: clone sends auth beside the plain URL, pull sends token env', async () => {
+  await t('pull auth: only for the exact configured host, over https, host attached', async () => {
+    assert.deepEqual(await svc.resolvePullAuth(ws, 'https://github.com/o/r.git'), { username: 'x-access-token', password: 'ghp_TOKEN/with+chars', host: 'github.com' });
+    assert.deepEqual(await svc.resolvePullAuth(ws, 'https://git.corp.example/g/r.git'), { username: 'oauth2', password: 'glpat-TOKEN', host: 'git.corp.example' });
+    // origin is workspace-writable: no provider fallback, no pin across hosts.
+    assert.equal(await svc.resolvePullAuth(ws, 'https://evil.example/o/r.git'), null);
+    assert.equal(await svc.resolvePullAuth({ ...ws, gitRepoId: 'r-gl' }, 'https://evil.example/o/r.git'), null);
+    assert.deepEqual(await svc.resolvePullAuth({ ...ws, gitRepoId: 'r-gl' }, 'https://github.com/o/r.git'), { username: 'x-access-token', password: 'ghp_TOKEN/with+chars', host: 'github.com' });
+    assert.equal(await svc.resolvePullAuth(ws, 'http://github.com/o/r.git'), null);
+    assert.equal(await svc.resolvePullAuth(ws, 'https://u:p@github.com/o/r.git'), null);
+    assert.equal(await svc.resolvePullAuth(ws, null), null);
+    await assert.rejects(svc.resolvePullAuth({ ...ws, location: 'ssh' }, 'https://github.com/o/r.git'), (e) => e.getStatus() === 409);
+  });
+
+  await t('client: clone sends auth beside the plain URL, pull sends host-bound auth', async () => {
     const calls = [];
     const client = Object.create(WorkspaceClient.prototype);
     client.cloneTimeoutMs = 1;
     client.post = (endpoint, body) => { calls.push({ endpoint, body }); return Promise.resolve({ ok: true }); };
     await client.clone('w1', 'https://github.com/o/r.git', 'main', { username: 'x-access-token', password: 'tok' });
-    await client.pull('w1', { GH_TOKEN: 'tok' });
+    await client.pull('w1', { username: 'x-access-token', password: 'tok', host: 'github.com' });
+    await client.pull('w1', null);
     assert.deepEqual(calls[0], { endpoint: '/clone', body: { workspaceId: 'w1', repoUrl: 'https://github.com/o/r.git', branch: 'main', auth: { username: 'x-access-token', password: 'tok' } } });
-    assert.deepEqual(calls[1], { endpoint: '/pull', body: { workspaceId: 'w1', env: { GH_TOKEN: 'tok' } } });
+    assert.deepEqual(calls[1], { endpoint: '/pull', body: { workspaceId: 'w1', auth: { username: 'x-access-token', password: 'tok', host: 'github.com' } } });
+    assert.deepEqual(calls[2], { endpoint: '/pull', body: { workspaceId: 'w1' } });
   });
 
   await t('MCP and chat clone/pull pass credentials, never a token URL', () => {
@@ -83,7 +99,8 @@ async function main() {
       const src = fs.readFileSync(path.join(SRC, rel), 'utf8');
       assert.ok(!src.includes('buildAuthenticatedCloneUrl'), `${rel} still builds a token URL`);
       assert.match(src, /resolveCloneAuth\(/, `${rel} does not resolve clone auth`);
-      assert.ok(/orkspaceClient\.pull\(\w+\._id\.toString\(\), gitEnv\)/.test(src), `${rel} pull without token env`);
+      assert.ok(/orkspaceClient\.pull\(\w+\._id\.toString\(\), pullAuth\)/.test(src), `${rel} pull without host-bound auth`);
+      assert.match(src, /resolvePullAuth\(\w+, originUrl\)/, `${rel} does not bind pull auth to the origin`);
     }
   });
 

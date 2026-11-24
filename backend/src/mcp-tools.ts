@@ -6938,8 +6938,11 @@ export function registerMcpTools(server: Server, services: McpServices): void {
           const id = requireString(a, 'id');
           const ws = await loadContainerWorkspace(workspacesService, sshService, id);
           assertWorkspaceWithinClientRoots(ws, await getClientRoots(server));
-          const gitEnv = await workspaceGitTokens.resolveForWorkspace(ws);
-          const sidecar = await workspaceClient.pull(ws._id.toString(), gitEnv);
+          // Only a token for the origin's own host, never the whole token
+          // env: the workspace's git config is not trusted (T-541).
+          const { url: originUrl } = await workspaceClient.origin(ws._id.toString());
+          const pullAuth = await workspaceGitTokens.resolvePullAuth(ws, originUrl);
+          const sidecar = await workspaceClient.pull(ws._id.toString(), pullAuth);
           await workspacesService.touch(id);
           result = { pulled: true, id, sidecar };
           break;

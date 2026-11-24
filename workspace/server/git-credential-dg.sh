@@ -12,19 +12,27 @@
 #   GITLAB_TOKEN [+ GITLAB_HOST]  -> GITLAB_HOST, default gitlab.com (oauth2)
 #   GITEA_TOKEN + GITEA_HOST      -> GITEA_HOST          (oauth2)
 #
-# A token is never offered to a host it was not configured for. Only the
-# `get` action answers; `store`/`erase` are no-ops (nothing to persist).
+# A token is never offered to a host it was not configured for, and only
+# over https (plain http only with the test-only DG_GIT_ALLOW_HTTP=1). Only
+# the `get` action answers; `store`/`erase` are no-ops (nothing to persist).
 
 [ "$1" = "get" ] || exit 0
 
 host=""
+protocol=""
 while IFS= read -r line; do
   [ -z "$line" ] && break
   case "$line" in
     host=*) host="${line#host=}" ;;
+    protocol=*) protocol="${line#protocol=}" ;;
   esac
 done
 [ -n "$host" ] || exit 0
+case "$protocol" in
+  https) ;;
+  http) [ "$DG_GIT_ALLOW_HTTP" = "1" ] || exit 0 ;;
+  *) exit 0 ;;
+esac
 
 emit() {
   printf 'username=%s\npassword=%s\n' "$1" "$2"
