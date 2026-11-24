@@ -66,6 +66,7 @@ function makeEnv(opts = {}) {
   const wsDoc = {
     _id: wsId, projectId, name: 'w', status: 'active', location: 'container',
     agentMode: opts.agentMode ?? 'confirm', agentAllow: opts.agentAllow ?? [],
+    ...(opts.agentToolSets !== undefined ? { agentToolSets: opts.agentToolSets } : {}),
   };
   const otherWsId = oid();
   const otherWs = { ...wsDoc, _id: otherWsId, agentAllow: [] };
@@ -103,7 +104,8 @@ function makeEnv(opts = {}) {
   const otherExecuted = [];
   const realExecute = tools.execute;
   tools.execute = async function (name, args, ctx, allowlist, pinned) {
-    if (name.startsWith('ws_')) return realExecute.call(this, name, args, ctx, allowlist, pinned);
+    // Outside the allowlist the real routing refuses before touching anything.
+    if (name.startsWith('ws_') || !allowlist.includes(name)) return realExecute.call(this, name, args, ctx, allowlist, pinned);
     otherExecuted.push(name);
     return { success: true, result: { ok: true } };
   };
@@ -507,6 +509,87 @@ async function main() {
     assert.ok(assistant, JSON.stringify(env.appended));
     assert.equal(assistant.content, '');
     assert.deepEqual(assistant.toolCalls.map((t) => t.id), ['w1']);
+  });
+
+  // Task 5b: per-workspace tool sets (spec "Werkzeugumfang des IDE-Agenten").
+  const TODO_TOOLS = ['todo_list', 'todo_get', 'todo_create', 'todo_comment'];
+  const KNOWLEDGE_TOOLS = ['rag_search', 'knowledge_search', 'knowledge_get', 'knowledge_save'];
+  const WIDE_ALLOWLIST = [
+    ...WORKSPACE_AGENT_TOOLS, ...TODO_TOOLS, ...KNOWLEDGE_TOOLS,
+    'todo_update', 'milestone_list', 'web_search', 'knowledge_update', 'snippet_search',
+  ];
+  const offered = (env) => [...env.llmCalls[0].tools].sort();
+
+  await check('tool sets []: an IDE turn offers only ws_*', async () => {
+    const env = makeEnv({ allowlist: WIDE_ALLOWLIST, agentToolSets: [] });
+    await send(env);
+    assert.deepEqual(offered(env), [...WORKSPACE_AGENT_TOOLS].sort());
+  });
+
+  await check("tool sets ['todos']: ws_* + the four todo tools, nothing else", async () => {
+    const env = makeEnv({ allowlist: WIDE_ALLOWLIST, agentToolSets: ['todos'] });
+    await send(env);
+    assert.deepEqual(offered(env), [...WORKSPACE_AGENT_TOOLS, ...TODO_TOOLS].sort());
+  });
+
+  await check('legacy workspace without agentToolSets: ws_* + todos + knowledge', async () => {
+    const env = makeEnv({ allowlist: WIDE_ALLOWLIST });
+    await send(env);
+    assert.deepEqual(offered(env), [...WORKSPACE_AGENT_TOOLS, ...TODO_TOOLS, ...KNOWLEDGE_TOOLS].sort());
+  });
+
+  await check('tool sets stay inside the global allowlist (no set tool is added)', async () => {
+    const env = makeEnv({ allowlist: [...WORKSPACE_AGENT_TOOLS, 'todo_list'], agentToolSets: ['todos', 'knowledge'] });
+    await send(env);
+    assert.deepEqual(offered(env), [...WORKSPACE_AGENT_TOOLS, 'todo_list'].sort());
+  });
+
+  await check('a tool outside the sets is refused at execution, without asking', async () => {
+    const env = makeEnv({
+      allowlist: WIDE_ALLOWLIST,
+      agentToolSets: ['todos'],
+      rounds: [round(tc('m1', 'milestone_list', {}), tc('k1', 'knowledge_save', { title: 't', content: 'c' }))],
+    });
+    const res = await send(env);
+    assert.equal(ofType(res, 'tool_confirm').length, 0);
+    assert.deepEqual(env.otherExecuted, []);
+    assert.match(toolMessage(env, 'm1').content, /not in the allowlist/);
+    assert.match(toolMessage(env, 'k1').content, /not in the allowlist/);
+  });
+
+  await check('direct mode: knowledge_save (in the set) still pauses for confirmation', async () => {
+    const env = makeEnv({
+      agentMode: 'direct',
+      allowlist: WIDE_ALLOWLIST,
+      agentToolSets: ['knowledge'],
+      rounds: [round(tc('k1', 'knowledge_save', { title: 't', content: 'c' }))],
+    });
+    const res = await send(env);
+    const confirm = ofType(res, 'tool_confirm');
+    assert.equal(confirm.length, 1);
+    assert.equal(confirm[0].name, 'knowledge_save');
+    assert.deepEqual(env.otherExecuted, []);
+    await resume(env, { callId: 'k1', approved: true });
+    assert.deepEqual(env.otherExecuted, ['knowledge_save']);
+  });
+
+  await check('direct mode: todo_comment (in the set) still pauses for confirmation', async () => {
+    const env = makeEnv({
+      agentMode: 'direct',
+      allowlist: WIDE_ALLOWLIST,
+      agentToolSets: ['todos'],
+      rounds: [round(tc('c1', 'todo_comment', { todoId: 'x', content: 'c' }))],
+    });
+    const res = await send(env);
+    assert.equal(ofType(res, 'tool_confirm').length, 1);
+    assert.deepEqual(env.otherExecuted, []);
+  });
+
+  await check('non-IDE session ignores tool sets (main chat unchanged)', async () => {
+    const env = makeEnv({ ide: false, allowlist: WIDE_ALLOWLIST, agentToolSets: [] });
+    await send(env);
+    assert.ok(offered(env).includes('milestone_list'));
+    assert.ok(offered(env).includes('knowledge_save'));
   });
 
   await check('non-IDE turn with tool calls but no text stays unstored (unchanged)', async () => {

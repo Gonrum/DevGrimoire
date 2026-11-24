@@ -4,7 +4,9 @@ import { Link } from 'react-router-dom';
 import { Archive, Code2, Copy, SquareTerminal, Trash2 } from 'lucide-react';
 import {
   api, ApiError, Workspace, WorkspaceLocation, WorkspaceStatus, GitRepository, SshConnectionListItem,
+  WORKSPACE_AGENT_TOOL_SETS, type WorkspaceAgentToolSet,
 } from '../api/client';
+import { AgentToolSetsField } from './AgentToolSetsField';
 import { optionOr } from '../lib/narrow';
 import { useToast } from './Toast';
 import Card from './ui/Card';
@@ -31,6 +33,7 @@ interface CreateForm {
   location: WorkspaceLocation;
   sshConnectionId: string;
   remotePath: string;
+  agentToolSets: WorkspaceAgentToolSet[];
 }
 
 const emptyCreate = (): CreateForm => ({
@@ -42,6 +45,7 @@ const emptyCreate = (): CreateForm => ({
   location: 'container',
   sshConnectionId: '',
   remotePath: '',
+  agentToolSets: [...WORKSPACE_AGENT_TOOL_SETS],
 });
 
 function gitRepoLabel(repo: GitRepository): string {
@@ -427,6 +431,7 @@ function CreateWorkspaceForm({
               location: 'ssh',
               sshConnectionId: form.sshConnectionId,
               remotePath: form.remotePath.trim(),
+              agentToolSets: form.agentToolSets,
             }
           : {
               projectId,
@@ -435,6 +440,7 @@ function CreateWorkspaceForm({
               repoUrl: form.repoUrl.trim() || undefined,
               branch: form.branch.trim() || undefined,
               gitRepoId: form.gitRepoId || undefined,
+              agentToolSets: form.agentToolSets,
             },
       );
       showSuccess(t('workspaces.created'));
@@ -577,6 +583,7 @@ function CreateWorkspaceForm({
       )}
       </>
       )}
+      <AgentToolSetsField value={form.agentToolSets} onChange={(agentToolSets) => update({ agentToolSets })} />
       {submitError && (
         <div role="alert" className="text-sm text-red-400">
           <p>{submitError.message}</p>

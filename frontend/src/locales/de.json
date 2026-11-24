@@ -1334,7 +1334,13 @@
     "formSshConnection": "SSH-Verbindung",
     "formSshConnectionPlaceholder": "Verbindung wählen …",
     "formRemotePath": "Verzeichnis (absoluter Pfad)",
-    "remotePathHint": "Der Pfad muss absolut sein und mit / beginnen."
+    "remotePathHint": "Der Pfad muss absolut sein und mit / beginnen.",
+    "agentToolSets": "Agent-Werkzeuge",
+    "agentToolSetTodos": "Todos",
+    "agentToolSetKnowledge": "Wissen",
+    "agentToolSetTodosTools": "todo_list, todo_get, todo_create, todo_comment",
+    "agentToolSetKnowledgeTools": "rag_search, knowledge_search, knowledge_get, knowledge_save",
+    "agentToolSetsHint": "Zusätzlich zu den Werkstatt-Werkzeugen (ws_*), die der IDE-Agent immer hat. Anlegen, Kommentieren und Speichern fragen immer nach."
   },
   "terminal": {
     "workspace": "Workspace",
@@ -3429,7 +3435,11 @@
       "execTimedOut": "Zeitlimit überschritten",
       "execAborted": "abgebrochen",
       "execTruncated": "Ausgabe gekürzt",
-      "execNoOutput": "Keine Ausgabe."
+      "execNoOutput": "Keine Ausgabe.",
+      "show": "Agent-Seitenleiste einblenden",
+      "hide": "Agent-Seitenleiste ausblenden",
+      "resize": "Breite der Agent-Seitenleiste",
+      "modelThinking": "Modell denkt …"
     }
   }
 }

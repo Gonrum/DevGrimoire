@@ -9,6 +9,7 @@ import { Workspace, WorkspaceDocument, WorkspaceStatus } from './schemas/workspa
 import { isDuplicateKeyError } from '../common/narrow';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
+import { normalizeAgentToolSets } from './agent-tool-sets';
 import { PROJECT_CHANGED } from '../events/project-event';
 import { RequestContext } from '../common/request-context';
 import { actorCanAccessProject } from '../common/permissions';
@@ -127,6 +128,7 @@ export class WorkspacesService {
         sizeBytes: 0,
         lastActivityAt: new Date(),
         createdBySessionId: dto.createdBySessionId,
+        ...(dto.agentToolSets ? { agentToolSets: normalizeAgentToolSets(dto.agentToolSets) } : {}),
       });
       this.emit(ws, 'created', `Workspace "${ws.name}" erstellt`);
       return ws;
@@ -180,7 +182,15 @@ export class WorkspacesService {
     }
     try {
       const ws = await this.workspaceModel
-        .findByIdAndUpdate(id, { ...dto, lastActivityAt: new Date() }, { new: true })
+        .findByIdAndUpdate(
+          id,
+          {
+            ...dto,
+            ...(dto.agentToolSets ? { agentToolSets: normalizeAgentToolSets(dto.agentToolSets) } : {}),
+            lastActivityAt: new Date(),
+          },
+          { new: true },
+        )
         .exec();
       if (!ws) throw new NotFoundException(`Workspace ${id} not found`);
       this.emit(ws, 'updated', `Workspace "${ws.name}" aktualisiert`);

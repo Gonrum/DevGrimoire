@@ -1467,11 +1467,20 @@ export default function ChatDock() {
   );
 }
 
-export function StreamingActivity({ phase, activeToolName }: { phase: StreamingPhase; activeToolName?: string }) {
+export function StreamingActivity({
+  phase,
+  activeToolName,
+  label: labelOverride,
+}: {
+  phase: StreamingPhase;
+  activeToolName?: string;
+  /** Replaces the phase text (the IDE agent shows "model is thinking" after a silent wait). */
+  label?: string;
+}) {
   const { t } = useTranslation();
-  const label = phase === 'tool_call' && activeToolName
+  const label = labelOverride ?? (phase === 'tool_call' && activeToolName
     ? t(streamingStatusKey(phase), { tool: activeToolName })
-    : t(streamingStatusKey(phase));
+    : t(streamingStatusKey(phase)));
 
   return (
     <div className="inline-flex items-center gap-2 rounded-full border border-violet-800/40 bg-gray-900/60 px-3 py-1.5 text-xs text-gray-400 shadow-[0_0_24px_rgba(124,58,237,0.08)]">

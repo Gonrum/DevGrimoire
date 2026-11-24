@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Bot, Files, Search, SquareTerminal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -9,7 +9,7 @@ import { errorMessage } from '../lib/narrow';
 import { sshTarget } from '../lib/ssh-target';
 import { FileTree } from './FileTree';
 import { ideApi, IdeApiError } from './ide-api';
-import { useIdeStore, type SidePanel } from './ide-store';
+import { AGENT_RANGE, useIdeStore, type SidePanel } from './ide-store';
 import type { TreeListing } from './useWorkspaceFileTree';
 import { SearchPanel } from './SearchPanel';
 import { TerminalPanel } from './TerminalPanel';
@@ -18,7 +18,7 @@ import { useWorkspaceStatus } from './useWorkspaceStatus';
 
 // Monaco lives in its own chunk: the header and the file tree show up before it has loaded.
 const EditorPane = lazy(() => import('./EditorPane').then((m) => ({ default: m.EditorPane })));
-// The agent tab shows Monaco diffs too: same chunk reasoning, and it loads only when first opened.
+// The agent sidebar shows Monaco diffs too: same chunk reasoning, and it loads only when first opened.
 const AgentPanel = lazy(() => import('./AgentPanel').then((m) => ({ default: m.AgentPanel })));
 
 type LoadState =
@@ -40,6 +40,9 @@ const isSshWorkspace = (ws: Workspace): boolean => ws.location === 'ssh';
 
 const getSidebarWidth = (): number => useIdeStore.getState().sidebarWidth;
 const getTerminalHeight = (): number => useIdeStore.getState().terminalHeight;
+const getAgentWidth = (): number => useIdeStore.getState().agentWidth;
+/** Room the editor keeps next to both sidebars while the agent sidebar is dragged wider. */
+const EDITOR_MIN_WIDTH = 320;
 
 function RailButton({ label, pressed, onClick, children }: { label: string; pressed: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
@@ -251,12 +254,26 @@ function Workbench({
   const setTerminalOpen = useIdeStore((s) => s.setTerminalOpen);
   const panel = useIdeStore((s) => s.panel);
   const setPanel = useIdeStore((s) => s.setPanel);
+  const agentOpen = useIdeStore((s) => s.agentOpen);
+  const setAgentOpen = useIdeStore((s) => s.setAgentOpen);
+  const agentWidth = useIdeStore((s) => s.agentWidth);
+  const setAgentWidth = useIdeStore((s) => s.setAgentWidth);
+  // Dragging the agent sidebar wider stops where the editor would get too narrow.
+  const setAgentWidthBounded = useCallback((width: number) => {
+    const room = window.innerWidth - useIdeStore.getState().sidebarWidth - 48 - EDITOR_MIN_WIDTH;
+    setAgentWidth(Math.min(width, Math.max(AGENT_RANGE[0], room)));
+  }, [setAgentWidth]);
   const sidebarDivider = useDivider('x', getSidebarWidth, setSidebarWidth);
   const terminalDivider = useDivider('y', getTerminalHeight, setTerminalHeight, true);
+  const agentDivider = useDivider('x', getAgentWidth, setAgentWidthBounded, true);
   const { branch, marks } = useWorkspaceStatus(workspaceId);
   const isSsh = isSshWorkspace(workspace);
-  // Mounted on first use, then kept: hiding the tab must not end a running agent turn.
-  const [agentMounted, setAgentMounted] = useState(() => useIdeStore.getState().panel === 'agent');
+  // Mounted on first open, then kept: collapsing the sidebar must not end a running agent turn.
+  const [agentMounted, setAgentMounted] = useState(() => useIdeStore.getState().agentOpen);
+  const toggleAgent = (): void => {
+    if (!agentOpen) setAgentMounted(true);
+    setAgentOpen(!agentOpen);
+  };
 
   // Ctrl/Cmd+` toggles the terminal from anywhere on the page, including from inside the terminal.
   useEffect(() => {
@@ -295,17 +312,10 @@ function Workbench({
               {id === 'files' ? <Files size={18} /> : <Search size={18} />}
             </RailButton>
           ))}
-          <RailButton
-            label={t('ide.agent.title')}
-            pressed={panel === 'agent'}
-            onClick={() => {
-              setAgentMounted(true);
-              setPanel('agent');
-            }}
-          >
+          <div className="flex-1" />
+          <RailButton label={t(agentOpen ? 'ide.agent.hide' : 'ide.agent.show')} pressed={agentOpen} onClick={toggleAgent}>
             <Bot size={18} />
           </RailButton>
-          <div className="flex-1" />
           <RailButton label={t('ide.terminal')} pressed={terminalOpen} onClick={() => setTerminalOpen(!terminalOpen)}>
             <SquareTerminal size={18} />
           </RailButton>
@@ -331,13 +341,6 @@ function Workbench({
           <div className={panel === 'search' ? 'h-full' : 'hidden'}>
             <SearchPanel key={workspaceId} workspaceId={workspaceId} />
           </div>
-          {agentMounted && (
-            <div className={panel === 'agent' ? 'h-full' : 'hidden'}>
-              <Suspense fallback={<LoadingText text={t('ide.loading')} />}>
-                <AgentPanel key={workspaceId} workspace={workspace} />
-              </Suspense>
-            </div>
-          )}
         </aside>
         <div
           role="separator"
@@ -370,6 +373,27 @@ function Workbench({
             <TerminalPanel key={workspaceId} workspaceId={workspaceId} ssh={isSsh} />
           </div>
         </div>
+        {agentOpen && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t('ide.agent.resize')}
+            className="w-1 shrink-0 cursor-col-resize touch-none bg-gray-700 hover:bg-cyan-400/60"
+            {...agentDivider}
+          />
+        )}
+        {/* Mounted on first open, then only hidden: collapsing keeps a running turn streaming. */}
+        {agentMounted && (
+          <aside
+            className={agentOpen ? 'min-h-0 shrink-0 bg-gray-900' : 'hidden'}
+            style={{ width: agentWidth, maxWidth: '70vw' }}
+            aria-label={t('ide.agent.title')}
+          >
+            <Suspense fallback={<LoadingText text={t('ide.loading')} />}>
+              <AgentPanel key={workspaceId} workspace={workspace} onCollapse={() => setAgentOpen(false)} />
+            </Suspense>
+          </aside>
+        )}
       </div>
     </div>
   );

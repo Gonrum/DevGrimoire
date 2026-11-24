@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { AGENT_ALLOW_KINDS, AGENT_ALLOW_MATCHES, AgentAllowEntry } from '../agent-allow';
+import { DEFAULT_AGENT_TOOL_SETS, WORKSPACE_AGENT_TOOL_SETS, WorkspaceAgentToolSet } from '../agent-tool-sets';
 
 export type WorkspaceDocument = HydratedDocument<Workspace>;
 
@@ -68,6 +69,13 @@ export class Workspace {
    */
   @Prop({ type: Boolean, default: false })
   agentCredentials: boolean;
+
+  /**
+   * Extra tool sets the IDE agent is offered besides ws_* (see agent-tool-sets.ts).
+   * Legacy documents without the field: both.
+   */
+  @Prop({ type: [{ type: String, enum: WORKSPACE_AGENT_TOOL_SETS }], default: () => [...DEFAULT_AGENT_TOOL_SETS] })
+  agentToolSets: WorkspaceAgentToolSet[];
 
   /** "Always allow" rules of the IDE agent; at most 100, see agent-allow.ts. */
   @Prop({

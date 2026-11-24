@@ -1,4 +1,5 @@
-import { IsBoolean, IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { WORKSPACE_AGENT_TOOL_SETS, WorkspaceAgentToolSet } from '../agent-tool-sets';
 import { WORKSPACE_AGENT_MODES, WORKSPACE_NAME_PATTERN, WorkspaceAgentMode } from '../schemas/workspace.schema';
 
 export class UpdateWorkspaceDto {
@@ -39,4 +40,11 @@ export class UpdateWorkspaceDto {
   @IsOptional()
   @IsBoolean()
   agentCredentials?: boolean;
+
+  /** Extra tool sets of the IDE agent besides ws_*; each entry one of WORKSPACE_AGENT_TOOL_SETS. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(WORKSPACE_AGENT_TOOL_SETS.length * 2)
+  @IsIn(WORKSPACE_AGENT_TOOL_SETS, { each: true })
+  agentToolSets?: WorkspaceAgentToolSet[];
 }

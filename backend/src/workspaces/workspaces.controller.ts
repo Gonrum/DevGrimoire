@@ -8,6 +8,7 @@ import { buildWorkspaceExecEnv } from './workspace-exec-env';
 import { WorkspaceCliTokenService } from './workspace-cli-token.service';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
+import { agentToolSetsOf } from './agent-tool-sets';
 import { AddAgentAllowDto } from './dto/agent-allow.dto';
 import { isInactiveAllowEntry } from './agent-allow';
 import { ExecWorkspaceDto } from './dto/exec-workspace.dto';
@@ -51,6 +52,7 @@ export class WorkspacesController {
         ...json,
         agentMode: doc.agentMode ?? 'confirm',
         agentCredentials: doc.agentCredentials === true,
+        agentToolSets: agentToolSetsOf(doc),
         // `inactive` is computed here, never stored: legacy prefix rules no longer apply.
         agentAllow: (json.agentAllow ?? []).map((e) => (isInactiveAllowEntry(e) ? { ...e, inactive: true } : e)),
       };

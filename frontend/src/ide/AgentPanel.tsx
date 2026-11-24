@@ -9,6 +9,7 @@ import {
   Info,
   Loader2,
   MessageSquarePlus,
+  PanelRightClose,
   Send,
   Square,
   Trash2,
@@ -22,7 +23,9 @@ import {
   type Workspace,
   type WorkspaceAgentAllowEntry,
   type WorkspaceAgentMode,
+  type WorkspaceAgentToolSet,
 } from '../api/client';
+import { AgentToolSetsField } from '../components/AgentToolSetsField';
 import { MessageBubble, StreamingActivity } from '../components/ChatDock';
 import Markdown from '../components/Markdown';
 import { useToast } from '../components/Toast';
@@ -302,6 +305,24 @@ function AllowList({
   );
 }
 
+/** No stream event for this long while the model is asked: it is most likely reasoning. */
+const THINKING_AFTER_MS = 10_000;
+
+/**
+ * True once `key` has stayed the same for `ms` (null = not waiting). The
+ * backend sends nothing while a model reasons, so a long silence in the
+ * thinking/responding phase is shown as "model is thinking".
+ */
+function useSilentFor(key: string | null, ms: number): boolean {
+  const [silentKey, setSilentKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (key === null) return undefined;
+    const timer = window.setTimeout(() => setSilentKey(key), ms);
+    return () => window.clearTimeout(timer);
+  }, [key, ms]);
+  return key !== null && silentKey === key;
+}
+
 function Hint({ children }: { children: React.ReactNode }) {
   return (
     <p className="flex items-start gap-1 px-2 py-1 text-[11px] text-amber-300">
@@ -311,8 +332,8 @@ function Hint({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Agent tab of the IDE: a chat bound to this workspace, with confirm cards and the allow list. */
-export function AgentPanel({ workspace: initial }: { workspace: Workspace }) {
+/** Agent sidebar of the IDE: a chat bound to this workspace, with confirm cards and the allow list. */
+export function AgentPanel({ workspace: initial, onCollapse }: { workspace: Workspace; onCollapse?: () => void }) {
   const { t } = useTranslation();
   const { showError } = useToast();
   const [workspace, setWorkspace] = useState(initial);
@@ -322,9 +343,12 @@ export function AgentPanel({ workspace: initial }: { workspace: Workspace }) {
   const [browserMode, setBrowserMode] = useState(false);
   const [draft, setDraft] = useState('');
   const [modeBusy, setModeBusy] = useState(false);
+  const [toolSetsBusy, setToolSetsBusy] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
   const isSsh = workspace.location === 'ssh';
   const mode: WorkspaceAgentMode = workspace.agentMode === 'direct' ? 'direct' : 'confirm';
+  // Missing on records from before tool sets existed: the backend treats that as both.
+  const toolSets: WorkspaceAgentToolSet[] = workspace.agentToolSets ?? ['todos', 'knowledge'];
 
   const reloadWorkspace = useCallback((next: Workspace | null) => {
     if (next) {
@@ -361,6 +385,13 @@ export function AgentPanel({ workspace: initial }: { workspace: Workspace }) {
   const messageCount = chat.messages.length;
   const streamedLength = chat.streaming?.content.length ?? 0;
   const streamedCalls = chat.streaming?.toolCalls.length ?? 0;
+  const streamedResults = chat.streaming?.toolCalls.filter((tc) => tc.success !== undefined).length ?? 0;
+  const phase = chat.streaming?.phase;
+  // Waiting on the model (first answer, or the next round after a tool): any event resets the clock.
+  const waitKey = chat.streaming && !chat.proposal && (phase === 'thinking' || phase === 'responding')
+    ? `${phase}|${streamedLength}|${streamedCalls}|${streamedResults}`
+    : null;
+  const modelThinking = useSilentFor(waitKey, THINKING_AFTER_MS);
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
   }, [messageCount, streamedLength, streamedCalls, chat.proposal, chat.notes.length]);
@@ -375,6 +406,21 @@ export function AgentPanel({ workspace: initial }: { workspace: Workspace }) {
       },
       (err: unknown) => {
         setModeBusy(false);
+        showError(errorMessage(err));
+      },
+    );
+  };
+
+  const setToolSets = (next: WorkspaceAgentToolSet[]): void => {
+    if (toolSetsBusy) return;
+    setToolSetsBusy(true);
+    api.workspaces.update(workspace._id, { agentToolSets: next }).then(
+      (ws) => {
+        setToolSetsBusy(false);
+        setWorkspace(ws);
+      },
+      (err: unknown) => {
+        setToolSetsBusy(false);
         showError(errorMessage(err));
       },
     );
@@ -407,6 +453,17 @@ export function AgentPanel({ workspace: initial }: { workspace: Workspace }) {
         >
           <MessageSquarePlus size={14} />
         </button>
+        {onCollapse && (
+          <button
+            type="button"
+            title={t('ide.agent.hide')}
+            aria-label={t('ide.agent.hide')}
+            className="rounded-sm p-1 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
+            onClick={onCollapse}
+          >
+            <PanelRightClose size={14} />
+          </button>
+        )}
       </div>
 
       <div className="space-y-1.5 border-b border-gray-700 px-2 py-1.5 text-xs">
@@ -439,6 +496,7 @@ export function AgentPanel({ workspace: initial }: { workspace: Workspace }) {
             {t('ide.agent.sshDirectWarning')}
           </p>
         )}
+        <AgentToolSetsField compact value={toolSets} disabled={toolSetsBusy} onChange={setToolSets} />
         {roles.length > 0 && (
           <label className="flex items-center gap-2">
             <span className="text-gray-400">{t('ide.agent.role')}</span>
@@ -483,7 +541,11 @@ export function AgentPanel({ workspace: initial }: { workspace: Workspace }) {
               </div>
             )}
             {!chat.proposal && (
-              <StreamingActivity phase={chat.streaming.phase} activeToolName={chat.streaming.activeToolName} />
+              <StreamingActivity
+                phase={chat.streaming.phase}
+                activeToolName={chat.streaming.activeToolName}
+                label={modelThinking ? t('ide.agent.modelThinking') : undefined}
+              />
             )}
           </div>
         )}

@@ -34,6 +34,7 @@ import {
   type WsPreview,
 } from './workspace-agent-tools';
 import { parseAgentAllowInput, type AgentAllowEntry, type AgentAllowInput } from '../workspaces/agent-allow';
+import { agentToolSetsOf, ideAgentAllowlist } from '../workspaces/agent-tool-sets';
 import type { ToolContext } from './chat-tools';
 import { ChatContextRef } from './schemas/chat-session.schema';
 import { ResumeChatToolDto } from './dto/resume-chat-tool.dto';
@@ -1007,6 +1008,16 @@ export class ChatController {
       effectiveAllowlist = extendAllowlistForBriefing(effectiveAllowlist);
     }
 
+    // IDE agent turns get only ws_* plus the workspace's chosen tool sets,
+    // read at turn start like `agentMode`; an unreadable workspace adds no set.
+    if (agent) {
+      effectiveAllowlist = ideAgentAllowlist(
+        effectiveAllowlist,
+        activeWorkspace ? agentToolSetsOf(activeWorkspace) : [],
+        isWorkspaceAgentTool,
+      );
+    }
+
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
@@ -1551,7 +1562,10 @@ export class ChatController {
          * abgearbeiteten Aufrufe dieses Durchlaufs wandern mit in den
          * gemerkten Zustand — sonst ginge ihre Reihenfolge verloren.
          */
-        if (p.confirmWrites && WRITE_TOOL_NAMES.has(tc.name)) {
+        // IDE agent: a tool outside the turn's allowlist is refused by `execute`
+        // below; asking the user about a call that cannot run would be noise.
+        const outsideAgentScope = p.agent !== undefined && !p.effectiveAllowlist.includes(tc.name);
+        if (p.confirmWrites && WRITE_TOOL_NAMES.has(tc.name) && !outsideAgentScope) {
           // ws_* decide per call (mode + allow list + preview); all others ask as before.
           const decision: ConfirmDecision = isWorkspaceAgentTool(tc.name)
             ? await this.agentConfirmDecision(tc, callParams)

@@ -1,4 +1,5 @@
-import { IsIn, IsMongoId, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsMongoId, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { WORKSPACE_AGENT_TOOL_SETS, WorkspaceAgentToolSet } from '../agent-tool-sets';
 import { WORKSPACE_LOCATIONS, WORKSPACE_NAME_PATTERN, WorkspaceLocation } from '../schemas/workspace.schema';
 
 export class CreateWorkspaceDto {
@@ -50,4 +51,11 @@ export class CreateWorkspaceDto {
   @IsString()
   @MaxLength(4096)
   remotePath?: string;
+
+  /** Extra tool sets of the IDE agent besides ws_*; each entry one of WORKSPACE_AGENT_TOOL_SETS. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(WORKSPACE_AGENT_TOOL_SETS.length * 2)
+  @IsIn(WORKSPACE_AGENT_TOOL_SETS, { each: true })
+  agentToolSets?: WorkspaceAgentToolSet[];
 }

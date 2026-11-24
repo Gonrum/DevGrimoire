@@ -1334,7 +1334,13 @@
     "formSshConnection": "SSH connection",
     "formSshConnectionPlaceholder": "Select a connection …",
     "formRemotePath": "Directory (absolute path)",
-    "remotePathHint": "The path must be absolute and start with /."
+    "remotePathHint": "The path must be absolute and start with /.",
+    "agentToolSets": "Agent tools",
+    "agentToolSetTodos": "Todos",
+    "agentToolSetKnowledge": "Knowledge",
+    "agentToolSetTodosTools": "todo_list, todo_get, todo_create, todo_comment",
+    "agentToolSetKnowledgeTools": "rag_search, knowledge_search, knowledge_get, knowledge_save",
+    "agentToolSetsHint": "In addition to the workspace tools (ws_*) the IDE agent always has. Creating, commenting and saving always ask first."
   },
   "terminal": {
     "workspace": "Workspace",
@@ -3430,7 +3436,11 @@
       "execTimedOut": "timed out",
       "execAborted": "aborted",
       "execTruncated": "output truncated",
-      "execNoOutput": "No output."
+      "execNoOutput": "No output.",
+      "show": "Show agent sidebar",
+      "hide": "Hide agent sidebar",
+      "resize": "Agent sidebar width",
+      "modelThinking": "Model is thinking …"
     }
   }
 }

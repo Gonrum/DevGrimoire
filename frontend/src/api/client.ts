@@ -1774,6 +1774,8 @@ export interface Workspace {
   agentAllow?: WorkspaceAgentAllowEntry[];
   /** Agent commands get git tokens / DG_* (container workspaces only). */
   agentCredentials?: boolean;
+  /** Extra tool sets the IDE agent is offered besides ws_* (missing = both). */
+  agentToolSets?: WorkspaceAgentToolSet[];
   createdAt: string;
   updatedAt: string;
 }
@@ -1781,6 +1783,11 @@ export interface Workspace {
 export type WorkspaceLocation = 'container' | 'ssh';
 
 export type WorkspaceAgentMode = 'confirm' | 'direct';
+
+/** Optional tool sets of the IDE agent (todos: todo_list/get/create/comment; knowledge: rag/knowledge search/get/save). */
+export type WorkspaceAgentToolSet = 'todos' | 'knowledge';
+
+export const WORKSPACE_AGENT_TOOL_SETS: readonly WorkspaceAgentToolSet[] = ['todos', 'knowledge'];
 
 export type AgentAllowFileKind = 'files.write' | 'files.structure' | 'files.delete';
 
@@ -3227,11 +3234,12 @@ export const api = {
     create: (data: {
       projectId: string; name: string; description?: string; repoUrl?: string; branch?: string; gitRepoId?: string;
       location?: WorkspaceLocation; sshConnectionId?: string; remotePath?: string;
+      agentToolSets?: WorkspaceAgentToolSet[];
     }) =>
       request<Workspace>('/workspaces', { method: 'POST', body: JSON.stringify(data) }),
     update: (
       id: string,
-      data: Partial<Pick<Workspace, 'name' | 'description' | 'repoUrl' | 'branch' | 'gitRepoId' | 'agentMode' | 'agentCredentials'>>,
+      data: Partial<Pick<Workspace, 'name' | 'description' | 'repoUrl' | 'branch' | 'gitRepoId' | 'agentMode' | 'agentCredentials' | 'agentToolSets'>>,
     ) =>
       request<Workspace>(`/workspaces/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     removeAgentAllow: (id: string, entryId: string) =>

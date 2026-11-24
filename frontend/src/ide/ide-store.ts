@@ -30,7 +30,7 @@ export interface RevealTarget {
   column: number;
 }
 
-export type SidePanel = 'files' | 'search' | 'agent';
+export type SidePanel = 'files' | 'search';
 
 /** A request to the file tree to reload directories (`all`: every expanded one). */
 export interface TreeRefresh {
@@ -52,6 +52,9 @@ interface IdeState {
   sidebarWidth: number;
   terminalHeight: number;
   terminalOpen: boolean;
+  /** Right-hand agent sidebar: shown or collapsed, and its width (both persisted). */
+  agentOpen: boolean;
+  agentWidth: number;
   /** Terminal tabs: each id is one live PTY session component. */
   terminals: number[];
   activeTerminal: number | null;
@@ -99,6 +102,8 @@ interface IdeState {
   setSidebarWidth: (width: number) => void;
   setTerminalHeight: (height: number) => void;
   setTerminalOpen: (open: boolean) => void;
+  setAgentOpen: (open: boolean) => void;
+  setAgentWidth: (width: number) => void;
   addTerminal: (initialInput?: string) => void;
   closeTerminal: (id: number) => void;
   setActiveTerminal: (id: number) => void;
@@ -117,6 +122,7 @@ interface IdeState {
 const LAYOUT_KEY = 'dg.ide.layout';
 const SIDEBAR_RANGE = [180, 560] as const;
 const TERMINAL_RANGE = [120, 800] as const;
+export const AGENT_RANGE = [280, 900] as const;
 
 let nextTerminalId = 1;
 
@@ -128,23 +134,35 @@ function numberOr(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-function loadLayout(): { sidebarWidth: number; terminalHeight: number } {
+interface Layout {
+  sidebarWidth: number;
+  terminalHeight: number;
+  agentOpen: boolean;
+  agentWidth: number;
+}
+
+const DEFAULT_LAYOUT: Layout = { sidebarWidth: 260, terminalHeight: 256, agentOpen: false, agentWidth: 380 };
+
+function loadLayout(): Layout {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : null;
     const source = isRecord(parsed) ? parsed : {};
     return {
-      sidebarWidth: clamp(numberOr(source.sidebarWidth, 260), ...SIDEBAR_RANGE),
-      terminalHeight: clamp(numberOr(source.terminalHeight, 256), ...TERMINAL_RANGE),
+      sidebarWidth: clamp(numberOr(source.sidebarWidth, DEFAULT_LAYOUT.sidebarWidth), ...SIDEBAR_RANGE),
+      terminalHeight: clamp(numberOr(source.terminalHeight, DEFAULT_LAYOUT.terminalHeight), ...TERMINAL_RANGE),
+      agentOpen: source.agentOpen === true,
+      agentWidth: clamp(numberOr(source.agentWidth, DEFAULT_LAYOUT.agentWidth), ...AGENT_RANGE),
     };
   } catch {
-    return { sidebarWidth: 260, terminalHeight: 256 };
+    return { ...DEFAULT_LAYOUT };
   }
 }
 
-function persistLayout(sidebarWidth: number, terminalHeight: number): void {
+function persistLayout(layout: Layout): void {
   try {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ sidebarWidth, terminalHeight }));
+    const { sidebarWidth, terminalHeight, agentOpen, agentWidth } = layout;
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ sidebarWidth, terminalHeight, agentOpen, agentWidth }));
   } catch {
     /* storage full/blocked — layout just won't persist */
   }
@@ -574,16 +592,27 @@ export const useIdeStore = create<IdeState>((set, get) => ({
   setSidebarWidth: (width) => {
     const sidebarWidth = clamp(Math.round(width), ...SIDEBAR_RANGE);
     set({ sidebarWidth });
-    persistLayout(sidebarWidth, get().terminalHeight);
+    persistLayout(get());
   },
 
   setTerminalHeight: (height) => {
     const terminalHeight = clamp(Math.round(height), ...TERMINAL_RANGE);
     set({ terminalHeight });
-    persistLayout(get().sidebarWidth, terminalHeight);
+    persistLayout(get());
   },
 
   setTerminalOpen: (open) => set({ terminalOpen: open }),
+
+  setAgentOpen: (open) => {
+    set({ agentOpen: open });
+    persistLayout(get());
+  },
+
+  setAgentWidth: (width) => {
+    const agentWidth = clamp(Math.round(width), ...AGENT_RANGE);
+    set({ agentWidth });
+    persistLayout(get());
+  },
 
   addTerminal: (initialInput) => {
     const id = nextTerminalId++;

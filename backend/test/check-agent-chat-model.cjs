@@ -24,6 +24,8 @@ const { plainToInstance } = nm('class-transformer');
 const { WorkspacesService } = loadCompiled('workspaces/workspaces.service.js');
 const { WorkspacesController } = loadCompiled('workspaces/workspaces.controller.js');
 const { UpdateWorkspaceDto } = loadCompiled('workspaces/dto/update-workspace.dto.js');
+const { CreateWorkspaceDto } = loadCompiled('workspaces/dto/create-workspace.dto.js');
+const { agentToolSetsOf } = loadCompiled('workspaces/agent-tool-sets.js');
 const { WorkspaceSchema } = loadCompiled('workspaces/schemas/workspace.schema.js');
 const { ChatSessionSchema } = loadCompiled('chat/schemas/chat-session.schema.js');
 const { CreateChatSessionDto } = loadCompiled('chat/dto/chat.dto.js');
@@ -245,6 +247,47 @@ const USER = oid().toString();
     assert.deepEqual(ws.agentAllow.map((e) => e.match), ['exact', undefined]);
     ws.agentAllow = [];
     assert.equal((await ctrl.update(String(ws._id), { agentMode: 'confirm' })).agentMode, 'confirm');
+  });
+
+  // ---- agentToolSets (Task 5b)
+  await check('DTOs: agentToolSets accepts todos/knowledge/[]; rejects unknown entries and non-arrays', async () => {
+    const base = { projectId: String(PROJECT), name: 'w' };
+    for (const sets of [[], ['todos'], ['knowledge'], ['todos', 'knowledge']]) {
+      assert.equal((await validate(plainToInstance(UpdateWorkspaceDto, { agentToolSets: sets }))).length, 0, JSON.stringify(sets));
+      assert.equal((await validate(plainToInstance(CreateWorkspaceDto, { ...base, agentToolSets: sets }))).length, 0, JSON.stringify(sets));
+    }
+    for (const bad of [['web'], 'todos', [1], ['todos', 'ws_exec'], ['todos', 'todos', 'todos', 'todos', 'todos']]) {
+      assert.ok((await validate(plainToInstance(UpdateWorkspaceDto, { agentToolSets: bad }))).length >= 1, JSON.stringify(bad));
+      assert.ok((await validate(plainToInstance(CreateWorkspaceDto, { ...base, agentToolSets: bad }))).length >= 1, JSON.stringify(bad));
+    }
+  });
+  await check('schema default and legacy reading: both sets; stored [] stays []', () => {
+    assert.deepEqual(WorkspaceSchema.path('agentToolSets').options.default(), ['todos', 'knowledge']);
+    assert.deepEqual(agentToolSetsOf({}), ['todos', 'knowledge']);
+    assert.deepEqual(agentToolSetsOf(null), ['todos', 'knowledge']);
+    assert.deepEqual(agentToolSetsOf({ agentToolSets: [] }), []);
+    assert.deepEqual(agentToolSetsOf({ agentToolSets: ['knowledge', 'bogus', 'knowledge'] }), ['knowledge']);
+  });
+  await check('update stores normalised agentToolSets; responses carry them (legacy -> both)', async () => {
+    const ws = makeWorkspace();
+    const svc = wsService([ws]);
+    await svc.update(String(ws._id), { agentToolSets: ['knowledge', 'todos', 'knowledge'] });
+    assert.deepEqual(ws.agentToolSets, ['todos', 'knowledge']);
+    const legacy = { _id: oid(), projectId: PROJECT, name: 'l', location: 'container', toJSON() { return { _id: this._id, name: 'l' }; } };
+    svc.findByProject = async () => [legacy, ws];
+    const ctrl = new WorkspacesController(svc, {}, {}, {}, {}, {}, { findManyByIds: async () => [] });
+    const list = await ctrl.findAll(PROJECT.toString());
+    assert.deepEqual(list[0].agentToolSets, ['todos', 'knowledge']);
+    assert.deepEqual((await ctrl.update(String(ws._id), { agentToolSets: [] })).agentToolSets, []);
+  });
+  await check('create passes agentToolSets through (normalised); without the field the schema default applies', async () => {
+    const created = [];
+    const model = { create: async (d) => { created.push(d); return { ...d, name: d.name }; } };
+    const svc = new WorkspacesService(model, events, {});
+    await svc.create({ projectId: String(PROJECT), name: 'a', agentToolSets: ['knowledge'] });
+    await svc.create({ projectId: String(PROJECT), name: 'b' });
+    assert.deepEqual(created[0].agentToolSets, ['knowledge']);
+    assert.ok(!('agentToolSets' in created[1]));
   });
 
   // ---- chat sessions
