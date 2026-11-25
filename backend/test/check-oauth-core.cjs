@@ -309,17 +309,142 @@ const allStored = (env) => JSON.stringify(Object.values(env.models).flatMap((m) 
     await expectThrow(env.svc.decide(id, USER, { approve: true }));
   });
 
-  await check('decide twice with the same request id → second throws; after 10 min → throws', async () => {
+  await check('decide: expired request (10 min) → throws, no connection', async () => {
     const env = setup();
-    const a = await approvedCode(env);
-    await expectThrow(env.svc.decide(a.requestId, USER, { approve: true }));
-    assert.equal(env.models.apiKey.docs.length, 1);
-    const { challenge } = pkce();
-    const id = await env.svc.createAuthRequest(a.client, { codeChallenge: challenge, redirectUri: CLAUDE_CB });
+    const client = await register(env.svc);
+    const id = await env.svc.createAuthRequest(client, { codeChallenge: pkce().challenge, redirectUri: CLAUDE_CB });
     env.advance(10 * 60 * 1000 + 1);
     assert.equal(await env.svc.getAuthRequest(id), null);
     await expectThrow(env.svc.decide(id, USER, { approve: true }));
+    assert.equal(env.models.apiKey.docs.length, 0);
+  });
+
+  // ------------------------------------------------------------ repeated decision (lost response)
+  const statusOf = (err) => (typeof err.getStatus === 'function' ? err.getStatus() : err.message);
+
+  await check('repeat approve within 60 s by the same user → new code, same key, old code invalid, one audit row', async () => {
+    const env = setup();
+    const a = await approvedCode(env);
+    assert.equal(env.models.request.docs[0].decision, 'approve');
+    assert.equal(String(env.models.request.docs[0].decidedBy), USER);
+    env.advance(30 * 1000);
+    const again = await env.svc.decide(a.requestId, USER, { approve: true });
+    const url = new URL(again.redirectUrl);
+    const code2 = url.searchParams.get('code');
+    assert.ok(code2 && code2 !== a.code);
+    assert.equal(url.searchParams.get('state'), 'st-123');
+    assert.equal(`${url.origin}${url.pathname}`, CLAUDE_CB);
+    assert.equal(env.models.apiKey.docs.length, 1, 'no second connection');
+    assert.equal(String(env.models.code.docs[0].apiKeyId), String(env.models.apiKey.docs[0]._id));
+    assert.equal(env.models.code.docs.length, 1, 'old code deleted');
+    assert.equal(env.audit.records.filter((r) => r.action === 'oauth.consent.approved').length, 1);
+    await expectOAuthError(env.svc.exchangeCode(a.client.client_id, a.code, a.verifier, CLAUDE_CB), 'invalid_grant');
+    assert.equal(env.models.apiKey.docs[0].active, true, 'unknown old code is no replay');
+    const t = await env.svc.exchangeCode(a.client.client_id, code2, a.verifier, CLAUDE_CB);
+    const info = await env.svc.verifyAccessToken(t.access_token);
+    assert.equal(info.apiKeyId, String(env.models.apiKey.docs[0]._id));
+  });
+
+  await check('repeat approve: after 61 s, other user, other decision, other projects → 404', async () => {
+    const env = setup();
+    const a = await approvedCode(env);
+    assert.equal(statusOf(await expectThrow(env.svc.decide(a.requestId, OTHER_USER, { approve: true }))), 404);
+    assert.equal(statusOf(await expectThrow(env.svc.decide(a.requestId, USER, { approve: false }))), 404);
+    assert.equal(statusOf(await expectThrow(env.svc.decide(a.requestId, USER, { approve: true, projectIds: [String(P1)] }))), 404);
+    env.advance(61 * 1000);
+    assert.equal(statusOf(await expectThrow(env.svc.decide(a.requestId, USER, { approve: true }))), 404);
     assert.equal(env.models.apiKey.docs.length, 1);
+    // still one live code: the original one (expired by now, but not replaced)
+    assert.equal(env.models.code.docs.length, 1);
+  });
+
+  await check('repeat approve with the same project restriction → allowed', async () => {
+    const env = setup();
+    const a = await approvedCode(env, { projectIds: [String(P1)] });
+    const again = await env.svc.decide(a.requestId, USER, { approve: true, projectIds: [String(P1)] });
+    assert.ok(new URL(again.redirectUrl).searchParams.get('code'));
+    assert.equal(env.models.apiKey.docs.length, 1);
+  });
+
+  await check('repeat approve after the code was redeemed, or after revocation → 404', async () => {
+    const env = setup();
+    const a = await tokens(env);
+    assert.equal(statusOf(await expectThrow(env.svc.decide(a.requestId, USER, { approve: true }))), 404);
+    const b = await approvedCode(env);
+    await env.svc.revokeConnection(String(env.models.apiKey.docs[1]._id));
+    assert.equal(statusOf(await expectThrow(env.svc.decide(b.requestId, USER, { approve: true }))), 404);
+  });
+
+  await check('repeat deny within 60 s → deny redirect again; other user → 404', async () => {
+    const env = setup();
+    const client = await register(env.svc);
+    const id = await env.svc.createAuthRequest(client, { codeChallenge: pkce().challenge, redirectUri: CLAUDE_CB, state: 'zz' });
+    const first = await env.svc.decide(id, USER, { approve: false });
+    const again = await env.svc.decide(id, USER, { approve: false });
+    assert.equal(again.redirectUrl, first.redirectUrl);
+    assert.equal(new URL(again.redirectUrl).searchParams.get('error'), 'access_denied');
+    assert.equal(env.audit.records.filter((r) => r.action === 'oauth.consent.denied').length, 1);
+    assert.equal(statusOf(await expectThrow(env.svc.decide(id, OTHER_USER, { approve: false }))), 404);
+    env.advance(61 * 1000);
+    assert.equal(statusOf(await expectThrow(env.svc.decide(id, USER, { approve: false }))), 404);
+    assert.equal(env.models.apiKey.docs.length, 0);
+  });
+
+  await check('parallel repeats: only one mints a code', async () => {
+    const env = setup();
+    const a = await approvedCode(env);
+    const results = await Promise.allSettled([
+      env.svc.decide(a.requestId, USER, { approve: true }),
+      env.svc.decide(a.requestId, USER, { approve: true }),
+    ]);
+    // The fake model is synchronous per call, so the CAS lets the first through.
+    assert.ok(results.filter((r) => r.status === 'fulfilled').length >= 1);
+    assert.equal(env.models.code.docs.filter((c) => !c.usedAt).length, 1);
+  });
+
+  // ------------------------------------------------------------ re-authorization
+  await check('first redemption revokes the user\'s older connections of the same client only', async () => {
+    const env = setup();
+    const client = await register(env.svc);
+    const connect = async (userId) => {
+      const { verifier, challenge } = pkce();
+      const id = await env.svc.createAuthRequest(client, { codeChallenge: challenge, redirectUri: CLAUDE_CB });
+      const { redirectUrl } = await env.svc.decide(id, userId, { approve: true });
+      return env.svc.exchangeCode(client.client_id, new URL(redirectUrl).searchParams.get('code'), verifier, CLAUDE_CB);
+    };
+    const old = await connect(USER);
+    const otherUser = await connect(OTHER_USER);
+    const otherClient = await tokens(env); // USER, but a different client
+    const oldInfo = await env.svc.verifyAccessToken(old.access_token);
+    env.events.emitted.length = 0;
+    const fresh = await connect(USER);
+    await expectOAuthError(env.svc.verifyAccessToken(old.access_token), 'invalid_token');
+    await env.svc.verifyAccessToken(fresh.access_token);
+    await env.svc.verifyAccessToken(otherUser.access_token);
+    await env.svc.verifyAccessToken(otherClient.t.access_token);
+    assert.deepEqual(env.events.emitted.map((e) => e.payload), [{ apiKeyId: oldInfo.apiKeyId, reason: 'replaced' }]);
+    assert.ok(env.audit.records.some((r) => r.action === 'oauth.connection.revoked' && r.meta.reason === 'replaced' && r.entityId === oldInfo.apiKeyId));
+    assert.equal(env.models.apiKey.docs.filter((k) => k.active).length, 3);
+  });
+
+  // ------------------------------------------------------------ connection lifetime
+  await check('refresh extends the connection to now + 1 year', async () => {
+    const env = setup();
+    const a = await tokens(env);
+    const key = env.models.apiKey.docs[0];
+    const firstExpiry = key.expiresAt.getTime();
+    env.advance(20 * 24 * 3600 * 1000);
+    await env.svc.exchangeRefresh(a.client.client_id, a.t.refresh_token);
+    assert.equal(key.expiresAt.getTime(), env.clock.t + 365 * 24 * 3600 * 1000);
+    assert.ok(key.expiresAt.getTime() > firstExpiry);
+  });
+
+  // ------------------------------------------------------------ own-origin redirect
+  await check('registerClient: redirect_uri on our own origin (any case) rejected', async () => {
+    const { svc } = setup();
+    await expectOAuthError(svc.registerClient({ client_name: 'x', redirect_uris: ['https://dg.example.test/oauth/cb'] }), 'invalid_client_metadata');
+    await expectOAuthError(svc.registerClient({ client_name: 'x', redirect_uris: [CLAUDE_CB, 'https://DG.Example.TEST:443/x'] }), 'invalid_client_metadata');
+    await svc.registerClient({ client_name: 'x', redirect_uris: ['https://dg.example.test:8443/cb', 'https://sub.dg.example.test/cb'] });
   });
 
   await check('decide: invalid user id / empty or invalid projectIds rejected', async () => {

@@ -1,7 +1,8 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 
 export type OAuthAuthRequestDocument = HydratedDocument<OAuthAuthRequest>;
+export type OAuthDecisionKind = 'approve' | 'deny';
 
 /**
  * A validated /authorize request waiting for the user's decision on the
@@ -41,6 +42,25 @@ export class OAuthAuthRequest {
   /** Set when the request is decided; a used request can never be decided again. */
   @Prop()
   usedAt?: Date;
+
+  /**
+   * Who decided and how, recorded when the request is consumed. Lets the
+   * same user repeat the same decision shortly afterwards when the first
+   * response was lost on the way to the browser.
+   */
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'User' })
+  decidedBy?: Types.ObjectId;
+
+  @Prop({ type: String, enum: ['approve', 'deny'] })
+  decision?: OAuthDecisionKind;
+
+  /** Approval only: the connection created for this request. */
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'ApiKey' })
+  apiKeyId?: Types.ObjectId;
+
+  /** Last repeated decision; compare-and-set guard against parallel repeats. */
+  @Prop()
+  retriedAt?: Date;
 
   createdAt?: Date;
   updatedAt?: Date;

@@ -29,6 +29,12 @@ export const CONNECTION_TTL_MS = 365 * 24 * 60 * 60 * 1000;
  * leave a token-less connection behind for a year.
  */
 export const PENDING_CONNECTION_TTL_MS = 10 * 60 * 1000;
+/**
+ * How long the same user may repeat the same consent decision on a request
+ * that is already used (the first response got lost on its way to the
+ * browser). Matches the code lifetime.
+ */
+export const DECISION_RETRY_WINDOW_MS = 60 * 1000;
 /** `lastUsedAt` of a connection is written at most this often. */
 export const LAST_USED_WRITE_INTERVAL_MS = 60 * 1000;
 /**
@@ -141,6 +147,20 @@ export function redirectUriProblem(uri: unknown): string | null {
   if (url.protocol === 'https:') return null;
   if (url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname)) return null;
   return 'redirect_uri must use https, or http on localhost/127.0.0.1/[::1]';
+}
+
+/**
+ * Whether a redirect URI points back at this server itself (same origin as
+ * `resource`). Such a client would hand codes to our own origin, where any
+ * page or open redirect could pick them up; nothing legitimate needs it.
+ */
+export function isOwnOrigin(uri: string, resource: string | null): boolean {
+  if (!resource) return false;
+  try {
+    return new URL(uri).origin === new URL(resource).origin;
+  } catch {
+    return false;
+  }
 }
 
 /**

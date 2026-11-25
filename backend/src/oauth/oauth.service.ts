@@ -26,7 +26,11 @@ import {
   CustomerProjectLinkStatus,
 } from '../customers/schemas/customer-project-link.schema';
 import { OAuthClient, OAuthClientDocument } from './schemas/oauth-client.schema';
-import { OAuthAuthRequest, OAuthAuthRequestDocument } from './schemas/oauth-auth-request.schema';
+import {
+  OAuthAuthRequest,
+  OAuthAuthRequestDocument,
+  OAuthDecisionKind,
+} from './schemas/oauth-auth-request.schema';
 import { OAuthCode, OAuthCodeDocument } from './schemas/oauth-code.schema';
 import { OAuthToken, OAuthTokenDocument, OAuthTokenType } from './schemas/oauth-token.schema';
 import {
@@ -35,6 +39,7 @@ import {
   AUTH_CODE_TTL_MS,
   AUTH_REQUEST_TTL_MS,
   CONNECTION_TTL_MS,
+  DECISION_RETRY_WINDOW_MS,
   LAST_USED_WRITE_INTERVAL_MS,
   MAX_ECHO_LENGTH,
   MAX_REDIRECT_URIS,
@@ -47,6 +52,7 @@ import {
   canonicalResource,
   clientNameProblem,
   hashSecret,
+  isOwnOrigin,
   isValidPkceValue,
   newAccessToken,
   newAuthCode,
@@ -68,7 +74,9 @@ export type OAuthRevokeReason =
   | 'account'
   | 'code_replay'
   | 'refresh_replay'
-  | 'token_revocation';
+  | 'token_revocation'
+  /** Superseded by a newer connection of the same user and client. */
+  | 'replaced';
 
 export interface OAuthConnectionRevokedEvent {
   apiKeyId: string;
@@ -131,6 +139,14 @@ function isClientId(value: unknown): value is string {
 
 function isSecretString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= MAX_SECRET_LENGTH;
+}
+
+/** Whether a repeated approval asks for the same project scope as the connection has. */
+function sameProjectSelection(key: ApiKey, projectIds: string[] | undefined): boolean {
+  if (projectIds === undefined) return key.projectScopeMode === 'all';
+  if (key.projectScopeMode !== 'allowlist') return false;
+  const have = new Set((key.allowedProjectIds ?? []).map(String));
+  return have.size === projectIds.length && projectIds.every((id) => have.has(id));
 }
 
 interface TokenGrant {
@@ -209,6 +225,9 @@ export class OAuthService {
       const problem = redirectUriProblem(uri);
       if (problem !== null || typeof uri !== 'string') {
         throw new InvalidClientMetadataError(problem ?? 'invalid redirect_uri');
+      }
+      if (isOwnOrigin(uri, this.options.resource)) {
+        throw new InvalidClientMetadataError('redirect_uri must not point at this server');
       }
       redirectUris.push(uri);
     }
@@ -335,6 +354,11 @@ export class OAuthService {
    * `userId`) and a 60 s code bound to it. `projectIds` restricts the
    * connection to those projects and to the customers linked to them; it
    * must be omitted (not empty) for an unrestricted connection.
+   *
+   * A used request can be decided again only as a repeat of a lost
+   * response: same user, same decision, same project selection, within
+   * {@link DECISION_RETRY_WINDOW_MS}, and (approval) the connection still
+   * waiting for its first redemption. See {@link repeatDecision}.
    */
   async decide(
     requestId: string,
@@ -347,16 +371,27 @@ export class OAuthService {
       throw new BadRequestException('Invalid userId');
     }
     const projectIds = d.approve ? this.validateProjectIds(d.projectIds) : undefined;
+    const decision: OAuthDecisionKind = d.approve ? 'approve' : 'deny';
+    const userOid = new Types.ObjectId(userId);
+    const requestHash = hashSecret(requestId);
 
     const now = this.now();
     const req = await this.requestModel
       .findOneAndUpdate(
-        { requestHash: hashSecret(requestId), usedAt: { $exists: false }, expiresAt: { $gt: new Date(now) } },
-        { $set: { usedAt: new Date(now) } },
+        { requestHash, usedAt: { $exists: false }, expiresAt: { $gt: new Date(now) } },
+        {
+          $set: {
+            usedAt: new Date(now),
+            decidedBy: userOid,
+            decision,
+            // A used request is only kept for the repeat window.
+            expiresAt: new Date(now + DECISION_RETRY_WINDOW_MS),
+          },
+        },
       )
       .lean<OAuthAuthRequest>()
       .exec();
-    if (!req) throw new NotFoundException('Authorization request not found, expired or already used');
+    if (!req) return this.repeatDecision(requestHash, userOid, decision, projectIds);
 
     const redirect = new URL(req.redirectUri);
     const consentMeta = { clientId: req.clientId, clientName: req.clientName, redirectHost: redirect.host };
@@ -367,9 +402,7 @@ export class OAuthService {
         meta: consentMeta,
         actor: { userId },
       });
-      redirect.searchParams.set('error', 'access_denied');
-      if (req.state !== undefined) redirect.searchParams.set('state', req.state);
-      return { redirectUrl: redirect.href };
+      return { redirectUrl: this.denyRedirect(req) };
     }
 
     const client = await this.findLiveClient(req.clientId);
@@ -384,6 +417,7 @@ export class OAuthService {
       expiresAt: new Date(now + PENDING_CONNECTION_TTL_MS),
       ...(projectIds ? { projectIds, customerIds } : {}),
     });
+    await this.requestModel.updateOne({ requestHash }, { $set: { apiKeyId: key._id } }).exec();
     await this.auditLog.record({
       action: 'oauth.consent.approved',
       entityType: 'apikey',
@@ -394,22 +428,84 @@ export class OAuthService {
     // An approved client no longer expires as "never used".
     await this.clientModel.updateOne({ clientId: client.clientId }, { $unset: { expiresAt: '' } }).exec();
 
+    return { redirectUrl: await this.issueCode(req, key._id, userOid) };
+  }
+
+  /**
+   * Repeat of a decision whose response never reached the browser (seen
+   * live: the POST ended as nginx 499 after the backend had approved). The
+   * same user may repeat the same decision within the window; an approval
+   * gets a fresh code for the SAME pending connection (no second key) and
+   * all earlier unredeemed codes of it are deleted. Everything else is the
+   * usual 404. Not audited again: the decision itself was recorded once.
+   */
+  private async repeatDecision(
+    requestHash: string,
+    userId: Types.ObjectId,
+    decision: OAuthDecisionKind,
+    projectIds: string[] | undefined,
+  ): Promise<{ redirectUrl: string }> {
+    const notFound = new NotFoundException('Authorization request not found, expired or already used');
+    const now = this.now();
+    const req = await this.requestModel
+      .findOne({ requestHash, usedAt: { $exists: true } })
+      .lean<OAuthAuthRequest & { _id: Types.ObjectId }>()
+      .exec();
+    if (!req || !req.usedAt || !req.decidedBy || !req.decision) throw notFound;
+    if (!req.decidedBy.equals(userId) || req.decision !== decision) throw notFound;
+    if (now - req.usedAt.getTime() > DECISION_RETRY_WINDOW_MS) throw notFound;
+
+    if (decision === 'approve') {
+      if (!req.apiKeyId) throw notFound;
+      const key = await this.apiKeyModel
+        .findOne({ _id: req.apiKeyId, userId, kind: 'oauth', active: true, oauthPending: true })
+        .lean<ApiKey>()
+        .exec();
+      if (!key || (key.expiresAt && key.expiresAt.getTime() <= now)) throw notFound;
+      if (!sameProjectSelection(key, projectIds)) throw notFound;
+      if (!(await this.findLiveClient(req.clientId))) throw notFound;
+    }
+
+    // Compare-and-set, so two parallel repeats cannot both mint a code.
+    const claimed = await this.requestModel
+      .findOneAndUpdate(
+        { _id: req._id, retriedAt: req.retriedAt ?? { $exists: false } },
+        { $set: { retriedAt: new Date(now) } },
+      )
+      .lean<OAuthAuthRequest>()
+      .exec();
+    if (!claimed) throw notFound;
+
+    if (decision === 'deny' || !req.apiKeyId) return { redirectUrl: this.denyRedirect(req) };
+    await this.codeModel.deleteMany({ apiKeyId: req.apiKeyId, usedAt: { $exists: false } }).exec();
+    return { redirectUrl: await this.issueCode(req, req.apiKeyId, userId) };
+  }
+
+  private denyRedirect(req: OAuthAuthRequest): string {
+    const redirect = new URL(req.redirectUri);
+    redirect.searchParams.set('error', 'access_denied');
+    if (req.state !== undefined) redirect.searchParams.set('state', req.state);
+    return redirect.href;
+  }
+
+  /** Mints a 60 s code for the connection and returns the client redirect carrying it. */
+  private async issueCode(req: OAuthAuthRequest, apiKeyId: Types.ObjectId, userId: Types.ObjectId): Promise<string> {
     const code = newAuthCode();
     await this.codeModel.create({
       codeHash: hashSecret(code),
-      clientId: client.clientId,
-      apiKeyId: key._id,
-      userId: new Types.ObjectId(userId),
+      clientId: req.clientId,
+      apiKeyId,
+      userId,
       redirectUri: req.redirectUri,
       codeChallenge: req.codeChallenge,
       scopes: req.scopes,
       resource: req.resource,
-      expiresAt: new Date(now + AUTH_CODE_TTL_MS),
+      expiresAt: new Date(this.now() + AUTH_CODE_TTL_MS),
     });
-
+    const redirect = new URL(req.redirectUri);
     redirect.searchParams.set('code', code);
     if (req.state !== undefined) redirect.searchParams.set('state', req.state);
-    return { redirectUrl: redirect.href };
+    return redirect.href;
   }
 
   private validateProjectIds(projectIds: unknown): string[] | undefined {
@@ -509,18 +605,46 @@ export class OAuthService {
       throw new InvalidGrantError('Connection was revoked');
     }
     // First redemption: the provisional connection becomes a real one.
+    // Returns the document as it was before, so `oauthPending` tells whether
+    // this was the first redemption.
     const activated = await this.apiKeyModel
-      .updateOne(
+      .findOneAndUpdate(
         { _id: doc.apiKeyId, kind: 'oauth', active: true },
         { $set: { expiresAt: new Date(this.now() + CONNECTION_TTL_MS) }, $unset: { oauthPending: '' } },
       )
+      .lean<ApiKey>()
       .exec();
     // Revoked between the check above and here: mint no orphan tokens.
-    if (activated.matchedCount === 0) throw new InvalidGrantError('Connection was revoked');
+    if (!activated) throw new InvalidGrantError('Connection was revoked');
+    if (activated.oauthPending) await this.revokeReplaced(doc.apiKeyId, activated);
     return this.issueTokens(
       { clientId: doc.clientId, apiKeyId: doc.apiKeyId, userId: doc.userId, resource: doc.resource },
       'authorization_code',
     );
+  }
+
+  /**
+   * Re-authorizing a client (new login after a lost session, reconnect)
+   * creates a new connection; the user's older connections to the SAME
+   * client are revoked so they do not pile up in "connected apps". Other
+   * clients and other users are untouched.
+   */
+  private async revokeReplaced(current: Types.ObjectId, key: ApiKey): Promise<void> {
+    if (typeof key.oauthClientId !== 'string' || !key.oauthClientId) return;
+    const others = await this.apiKeyModel
+      .find({
+        userId: key.userId,
+        kind: 'oauth',
+        active: true,
+        oauthClientId: key.oauthClientId,
+        _id: { $ne: current },
+      })
+      .select('_id')
+      .lean<{ _id: Types.ObjectId }[]>()
+      .exec();
+    for (const other of others) {
+      await this.revokeConnection(other._id.toString(), 'replaced');
+    }
   }
 
   // ------------------------------------------------------------------ tokens
@@ -619,6 +743,13 @@ export class OAuthService {
       .exec();
     // A parallel refresh with the same token won; it got the new pair.
     if (!rotated) throw new InvalidGrantError('Refresh token already used');
+    // A connection in use stays alive: another year from the last refresh.
+    await this.apiKeyModel
+      .updateOne(
+        { _id: doc.apiKeyId, kind: 'oauth', active: true, oauthPending: { $ne: true } },
+        { $set: { expiresAt: new Date(now + CONNECTION_TTL_MS) } },
+      )
+      .exec();
 
     return this.issueTokens(
       { clientId: doc.clientId, apiKeyId: doc.apiKeyId, userId: doc.userId, resource: doc.resource },

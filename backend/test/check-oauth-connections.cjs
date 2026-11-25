@@ -364,12 +364,12 @@ const revokedEvents = (env) => env.events.emitted.filter((e) => e.name === OAUTH
   await check('exchangeCode: connection revoked before activation → invalid_grant, no tokens', async () => {
     const env = setup();
     const a = await approvedCode(env);
-    const realUpdateOne = env.models.apiKey.updateOne;
+    const realActivate = env.models.apiKey.findOneAndUpdate;
     // Simulate a revoke landing between the active check and the activation.
-    env.models.apiKey.updateOne = (f, u) => {
+    env.models.apiKey.findOneAndUpdate = (f, u, o) => {
       env.models.apiKey.docs[0].active = false;
-      env.models.apiKey.updateOne = realUpdateOne;
-      return realUpdateOne(f, u);
+      env.models.apiKey.findOneAndUpdate = realActivate;
+      return realActivate(f, u, o);
     };
     await assert.rejects(
       () => env.svc.exchangeCode(a.client.client_id, a.code, a.verifier, CLAUDE_CB, new URL(RESOURCE)),
