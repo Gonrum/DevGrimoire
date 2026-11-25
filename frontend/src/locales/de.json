@@ -3475,7 +3475,9 @@
     "missingId": "Es fehlt die Anfrage-ID in der Adresse.",
     "forbidden": "Mit einem API-Schlüssel kann keine Freigabe erteilt werden. Melde dich im Browser als Nutzer an.",
     "loadFailed": "Die Anfrage konnte nicht geladen werden: {{message}}",
-    "decideFailed": "Die Entscheidung konnte nicht gesendet werden: {{message}}"
+    "decideFailed": "Die Entscheidung konnte nicht gesendet werden: {{message}}",
+    "responseLost": "Antwort verloren – erneut versuchen",
+    "retry": "Erneut versuchen"
   },
   "connectedApps": {
     "description": "MCP-Clients (Claude Code, claude.ai, Claude Desktop …), denen du per Anmeldung Zugriff gegeben hast. Ein Widerruf wirkt sofort, auch auf offene Verbindungen.",

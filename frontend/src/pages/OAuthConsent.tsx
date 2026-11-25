@@ -14,6 +14,17 @@ type LoadState =
   | { kind: 'forbidden' }
   | { kind: 'error'; message: string };
 
+type Decision = { approve: boolean; projectIds?: string[] };
+
+/**
+ * The decision may have reached the backend even though no answer came
+ * back: a failed fetch (TypeError, aborted connection) or a gateway error.
+ */
+function isLostResponse(err: unknown): boolean {
+  if (err instanceof ApiError) return err.status === 502 || err.status === 503 || err.status === 504;
+  return true;
+}
+
 /**
  * Consent page of the MCP OAuth flow (`/authorize` redirects here with
  * `?request=<id>`). It sits behind the normal login gate, so an anonymous
@@ -33,6 +44,9 @@ export default function OAuthConsent() {
   const [selected, setSelected] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // The decision whose response got lost; "try again" repeats exactly this
+  // one (the backend accepts a repeat only with the same choice).
+  const [lost, setLost] = useState<Decision | null>(null);
 
   useEffect(() => {
     if (!requestId) return;
@@ -65,24 +79,35 @@ export default function OAuthConsent() {
     setSelected((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   };
 
-  const decide = async (approve: boolean) => {
+  const send = async (decision: Decision) => {
     setSubmitting(true);
     setSubmitError(null);
+    setLost(null);
     try {
-      const { redirectUrl } = await api.oauth.decide(requestId, {
-        approve,
-        ...(approve && selected.length > 0 ? { projectIds: selected } : {}),
-      });
-      window.location.assign(redirectUrl);
+      let result: { redirectUrl: string };
+      try {
+        result = await api.oauth.decide(requestId, decision);
+      } catch (err) {
+        if (!isLostResponse(err)) throw err;
+        // The backend may have decided already; it accepts one repeat of
+        // the same decision for a short while.
+        result = await api.oauth.decide(requestId, decision);
+      }
+      window.location.assign(result.redirectUrl);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         setState({ kind: 'expired' });
+      } else if (isLostResponse(err)) {
+        setLost(decision);
       } else {
         setSubmitError(t('oauthConsent.decideFailed', { message: errorMessage(err) }));
       }
       setSubmitting(false);
     }
   };
+
+  const decide = (approve: boolean) =>
+    send({ approve, ...(approve && selected.length > 0 ? { projectIds: selected } : {}) });
 
   let body: React.ReactNode;
   if (state.kind === 'loading') {
@@ -137,7 +162,7 @@ export default function OAuthConsent() {
                     type="checkbox"
                     checked={selected.includes(p._id)}
                     onChange={() => toggle(p._id)}
-                    disabled={submitting}
+                    disabled={submitting || lost !== null}
                   />
                   <span className="truncate">{p.name}</span>
                 </label>
@@ -146,15 +171,24 @@ export default function OAuthConsent() {
           )}
         </fieldset>
 
+        {lost && (
+          <div className="bg-red-900/20 border border-red-800 rounded-sm px-3 py-2 text-sm text-red-400 flex items-center justify-between gap-2">
+            <span>{t('oauthConsent.responseLost')}</span>
+            <Button variant="secondary" disabled={submitting} onClick={() => { void send(lost); }}>
+              {t('oauthConsent.retry')}
+            </Button>
+          </div>
+        )}
+
         {submitError && (
           <div className="bg-red-900/20 border border-red-800 rounded-sm px-3 py-2 text-sm text-red-400">{submitError}</div>
         )}
 
         <div className="flex gap-2 justify-end">
-          <Button variant="secondary" disabled={submitting} onClick={() => { void decide(false); }}>
+          <Button variant="secondary" disabled={submitting || lost !== null} onClick={() => { void decide(false); }}>
             {t('oauthConsent.deny')}
           </Button>
-          <Button variant="primary" disabled={submitting} onClick={() => { void decide(true); }}>
+          <Button variant="primary" disabled={submitting || lost !== null} onClick={() => { void decide(true); }}>
             {submitting ? t('oauthConsent.working') : t('oauthConsent.allow')}
           </Button>
         </div>

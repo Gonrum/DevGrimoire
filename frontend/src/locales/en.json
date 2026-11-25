@@ -3476,7 +3476,9 @@
     "missingId": "The request ID is missing from the address.",
     "forbidden": "An API key cannot grant access. Sign in to the browser as a user.",
     "loadFailed": "The request could not be loaded: {{message}}",
-    "decideFailed": "The decision could not be sent: {{message}}"
+    "decideFailed": "The decision could not be sent: {{message}}",
+    "responseLost": "Response lost – try again",
+    "retry": "Try again"
   },
   "connectedApps": {
     "description": "MCP clients (Claude Code, claude.ai, Claude Desktop …) you granted access by signing in. Revoking takes effect immediately, open connections included.",
