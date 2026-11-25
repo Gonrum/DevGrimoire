@@ -3453,7 +3453,8 @@
   },
   "oauthConsent": {
     "title": "Grant access",
-    "intro": "<strong>{{client}}</strong> wants to access DevGrimoire as <strong>{{user}}</strong>.",
+    "intro": "<client/> wants to access DevGrimoire as <user/>.",
+    "projectsFailed": "Couldn't load the project list – restriction not possible.",
     "unnamedClient": "An unknown client",
     "redirectTo": "Returning to:",
     "redirectUri": "Full address: {{uri}}",

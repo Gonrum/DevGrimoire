@@ -3452,7 +3452,8 @@
   },
   "oauthConsent": {
     "title": "Zugriff freigeben",
-    "intro": "<strong>{{client}}</strong> möchte als <strong>{{user}}</strong> auf DevGrimoire zugreifen.",
+    "intro": "<client/> möchte als <user/> auf DevGrimoire zugreifen.",
+    "projectsFailed": "Projektliste konnte nicht geladen werden – Einschränkung nicht möglich.",
     "unnamedClient": "Ein unbekannter Client",
     "redirectTo": "Rücksprung an:",
     "redirectUri": "Vollständige Adresse: {{uri}}",

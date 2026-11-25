@@ -29,6 +29,7 @@ export default function OAuthConsent() {
 
   const [state, setState] = useState<LoadState>(requestId ? { kind: 'loading' } : { kind: 'expired' });
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsFailed, setProjectsFailed] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -40,10 +41,14 @@ export default function OAuthConsent() {
       try {
         const [request, list] = await Promise.all([
           api.oauth.getRequest(requestId),
-          api.projects.list().catch(() => [] as Project[]),
+          api.projects.list().then(
+            (items) => ({ items, failed: false }),
+            () => ({ items: [] as Project[], failed: true }),
+          ),
         ]);
         if (cancelled) return;
-        setProjects(list);
+        setProjects(list.items);
+        setProjectsFailed(list.failed);
         setState({ kind: 'ready', request });
       } catch (err) {
         if (cancelled) return;
@@ -101,8 +106,12 @@ export default function OAuthConsent() {
         <p className="text-sm text-gray-300">
           <Trans
             i18nKey="oauthConsent.intro"
-            values={{ client: request.clientName ?? t('oauthConsent.unnamedClient'), user: user?.username ?? '' }}
-            components={{ strong: <strong className="text-gray-100" /> }}
+            components={{
+              // Attacker-controlled names go in as React children, never as
+              // i18n interpolation values (those are not escaped).
+              client: <strong className="text-gray-100">{request.clientName ?? t('oauthConsent.unnamedClient')}</strong>,
+              user: <strong className="text-gray-100">{user?.username ?? ''}</strong>,
+            }}
           />
         </p>
 
@@ -116,7 +125,9 @@ export default function OAuthConsent() {
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium text-gray-300">{t('oauthConsent.restrict')}</legend>
           <p className="text-xs text-gray-500">{t('oauthConsent.restrictHint')}</p>
-          {projects.length === 0 ? (
+          {projectsFailed ? (
+            <p className="text-xs text-red-400">{t('oauthConsent.projectsFailed')}</p>
+          ) : projects.length === 0 ? (
             <p className="text-xs text-gray-500">{t('oauthConsent.noProjects')}</p>
           ) : (
             <div className="max-h-60 overflow-y-auto space-y-1 border border-gray-800 rounded-sm p-2">
