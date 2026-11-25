@@ -3449,5 +3449,25 @@
       "resize": "Breite der Agent-Seitenleiste",
       "modelThinking": "Modell denkt …"
     }
+  },
+  "oauthConsent": {
+    "title": "Zugriff freigeben",
+    "intro": "<strong>{{client}}</strong> möchte als <strong>{{user}}</strong> auf DevGrimoire zugreifen.",
+    "unnamedClient": "Ein unbekannter Client",
+    "redirectTo": "Rücksprung an:",
+    "redirectUri": "Vollständige Adresse: {{uri}}",
+    "warning": "Gib den Zugriff nur frei, wenn du diesen Client selbst gestartet hast und die Adresse oben stimmt.",
+    "restrict": "Nur diese Projekte",
+    "restrictHint": "Ohne Auswahl bekommt der Client Zugriff auf alles, was du selbst sehen darfst.",
+    "noProjects": "Keine Projekte vorhanden.",
+    "allow": "Erlauben",
+    "deny": "Ablehnen",
+    "working": "Wird gesendet …",
+    "expiredTitle": "Anfrage abgelaufen",
+    "expired": "Diese Freigabe-Anfrage ist unbekannt, abgelaufen oder wurde schon beantwortet. Starte die Verbindung im Client erneut.",
+    "missingId": "Es fehlt die Anfrage-ID in der Adresse.",
+    "forbidden": "Mit einem API-Schlüssel kann keine Freigabe erteilt werden. Melde dich im Browser als Nutzer an.",
+    "loadFailed": "Die Anfrage konnte nicht geladen werden: {{message}}",
+    "decideFailed": "Die Entscheidung konnte nicht gesendet werden: {{message}}"
   }
 }

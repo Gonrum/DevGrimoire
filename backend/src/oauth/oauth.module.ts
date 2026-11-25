@@ -11,12 +11,12 @@ import { OAuthCode, OAuthCodeSchema } from './schemas/oauth-code.schema';
 import { OAuthToken, OAuthTokenSchema } from './schemas/oauth-token.schema';
 import { OAUTH_OPTIONS, OAuthCoreOptions, OAuthService } from './oauth.service';
 import { oauthConfig } from './oauth-config';
+import { OAuthController } from './oauth.controller';
 
 /**
- * MCP OAuth core. No HTTP routes here; the SDK router (main.ts, via
- * `createOAuthRouter`) and the consent endpoint are wired on top of
- * `OAuthService`. `ApiKeysService` comes from
- * the global `ApiKeysModule`.
+ * MCP OAuth core. The SDK router (main.ts, via `createOAuthRouter`) is wired
+ * on top of `OAuthService`; the only Nest route is the consent endpoint.
+ * `ApiKeysService` comes from the global `ApiKeysModule`.
  */
 @Module({
   imports: [
@@ -31,6 +31,7 @@ import { oauthConfig } from './oauth-config';
       { name: CustomerProjectLink.name, schema: CustomerProjectLinkSchema },
     ]),
   ],
+  controllers: [OAuthController],
   providers: [
     {
       provide: OAUTH_OPTIONS,

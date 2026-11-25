@@ -25,6 +25,7 @@
     "check:workspace-orphans": "node test/check-workspace-orphans.cjs",
     "check:oauth-core": "node test/check-oauth-core.cjs",
     "check:oauth-mcp": "node test/check-oauth-mcp.cjs",
+    "check:oauth-consent": "node test/check-oauth-consent.cjs",
     "check:workspace-git-credentials": "node test/check-workspace-git-credentials.cjs",
     "check:workspace-agent-tools": "node test/check-workspace-agent-tools.cjs",
     "check:agent-chat-model": "node test/check-agent-chat-model.cjs",

@@ -37,6 +37,7 @@ import WorkflowEditorPage from './pages/WorkflowEditorPage';
 import Docs from './pages/Docs';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
+import OAuthConsent from './pages/OAuthConsent';
 import Profile from './pages/Profile';
 import NotificationBell from './components/NotificationBell';
 import ConnectionStatus from './components/ConnectionStatus';
@@ -478,6 +479,7 @@ function AppShell() {
           <Route path="/workflows" element={<WorkflowsListPage />} />
           <Route path="/workflows/:id" element={<WorkflowEditorPage />} />
           <Route path="/projects/:id/settings" element={<ProjectSettings />} />
+          <Route path="/oauth/consent" element={<OAuthConsent />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/docs" element={<Docs />} />
           <Route path="/settings" element={<Settings />} />

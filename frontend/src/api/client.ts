@@ -155,6 +155,13 @@ export interface ProjectComponent {
   path?: string;
 }
 
+export interface OAuthConsentRequest {
+  clientName: string | null;
+  redirectHost: string;
+  redirectUri: string;
+  expiresAt: string;
+}
+
 export interface Project {
   _id: string;
   name: string;
@@ -3138,6 +3145,15 @@ export const api = {
       request<ApiKeyInfo>(`/api-keys/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/api-keys/${id}`, { method: 'DELETE' }),
+  },
+  oauth: {
+    getRequest: (id: string) =>
+      request<OAuthConsentRequest>(`/oauth/requests/${encodeURIComponent(id)}`),
+    decide: (id: string, data: { approve: boolean; projectIds?: string[] }) =>
+      request<{ redirectUrl: string }>(`/oauth/requests/${encodeURIComponent(id)}/decision`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
   mcp: {
     tools: () =>
