@@ -318,8 +318,13 @@ export class ApiKeysService {
     return rows;
   }
 
-  /** Sort, owner username, `kind` default for legacy rows, no `keyHash`. */
-  private ownerLookupStages(): PipelineStage[] {
+  /**
+   * Sort, owner username, `kind` default for legacy rows, no `keyHash`.
+   * `usableOwnersOnly` drops keys whose owner is deleted or deactivated: such
+   * a key opens nothing (validate/MCP auth reject it), so it must not be
+   * listed as access.
+   */
+  private ownerLookupStages(opts: { usableOwnersOnly?: boolean } = {}): PipelineStage[] {
     return [
       { $sort: { createdAt: -1 } },
       {
@@ -328,16 +333,20 @@ export class ApiKeysService {
           localField: 'userId',
           foreignField: '_id',
           as: 'owner',
-          pipeline: [{ $project: { username: 1 } }],
+          pipeline: [{ $project: { username: 1, active: 1 } }],
         },
       },
       {
         $addFields: {
           ownerUsername: { $arrayElemAt: ['$owner.username', 0] },
+          ownerActive: { $arrayElemAt: ['$owner.active', 0] },
           kind: { $ifNull: ['$kind', 'standard'] },
         },
       },
-      { $project: { keyHash: 0, owner: 0 } },
+      ...(opts.usableOwnersOnly
+        ? [{ $match: { ownerUsername: { $exists: true }, ownerActive: { $ne: false } } }]
+        : []),
+      { $project: { keyHash: 0, owner: 0, ownerActive: 0 } },
     ];
   }
 
@@ -367,7 +376,7 @@ export class ApiKeysService {
           ],
         },
       },
-      ...this.ownerLookupStages(),
+      ...this.ownerLookupStages({ usableOwnersOnly: true }),
     ]).exec();
     return rows;
   }

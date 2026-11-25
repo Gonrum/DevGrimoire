@@ -476,6 +476,21 @@ const revokedEvents = (env) => env.events.emitted.filter((e) => e.name === OAUTH
     assert.equal(oauth.oauthClientName, 'Claude');
   });
 
+  await check('findByProjectAccess: keys of deactivated or deleted owners do not count as access', async () => {
+    const env = setup();
+    const ghostUser = new Types.ObjectId().toString(); // no user document
+    env.models.apiKey.users.find((u) => String(u._id) === OTHER_USER).active = false;
+    const mine = await env.apiKeys.generate(USER, 'alice-cli');
+    await env.apiKeys.generate(OTHER_USER, 'bob-cli');
+    await env.apiKeys.generate(ghostUser, 'ghost-cli');
+    const rows = await env.apiKeys.findByProjectAccess(String(P1));
+    assert.deepEqual(rows.map((r) => String(r._id)), [String(mine.apiKey._id)]);
+    assert.equal(rows[0].ownerActive, undefined, 'helper field is projected away');
+    // The admin overview still lists them (it is the place to clean up).
+    const all = await env.apiKeys.findAllWithOwners();
+    assert.ok(all.some((r) => r.name === 'bob-cli'));
+  });
+
   // ------------------------------------------------------------ /api/api-keys guard
   await check('/api/api-keys revoke and update refuse OAuth connections (400), standard keys still work', async () => {
     const env = setup();
