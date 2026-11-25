@@ -14,6 +14,7 @@ import {
 import { User, UserDocument, UserRole } from '../auth/schemas/user.schema';
 import { PROJECT_CHANGED, ProjectChangeEvent } from '../events/project-event';
 import { errorMessage } from '../common/narrow';
+import type { CodeRef } from './code-refs';
 import { assertSafeCascadeId } from '../common/cascade-guard';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { assertOwnerInScope, assertOwnerParamsInScope } from '../common/scope-guard';
@@ -25,6 +26,7 @@ interface AppendMessageInput {
   toolCalls?: ChatToolCallRecord[];
   attachments?: ChatAttachmentRef[];
   metrics?: ChatResponseMetrics;
+  codeRefs?: CodeRef[];
 }
 
 @Injectable()
@@ -192,6 +194,9 @@ export class ChatService implements OnModuleInit {
       }
       if (input.attachments && input.attachments.length > 0) {
         payload.attachments = input.attachments;
+      }
+      if (input.codeRefs && input.codeRefs.length > 0) {
+        payload.codeRefs = input.codeRefs;
       }
       if (input.metrics) {
         payload.metrics = input.metrics;

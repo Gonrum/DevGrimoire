@@ -34,6 +34,7 @@ require(path.resolve(__dirname, '..', 'node_modules', 'reflect-metadata'));
 const { WorkspaceAgentTools, WORKSPACE_AGENT_TOOLS } = loadCompiled('chat/workspace-agent-tools.js');
 const { ChatToolsService } = loadCompiled('chat/chat-tools.js');
 const { ChatController } = loadCompiled('chat/chat.controller.js');
+const { parseCodeRefs } = loadCompiled('chat/code-refs.js');
 const { WorkspacesService } = loadCompiled('workspaces/workspaces.service.js');
 const { RemoteError } = loadCompiled('workspaces/fs/remote-session.js');
 const { SshFsBackend } = loadCompiled('workspaces/fs/ssh-fs-backend.js');
@@ -270,6 +271,38 @@ async function main() {
     assert.match(toolMessage(env, 'w1').content, /only available in the IDE agent/);
     // The message's workspaceId is the context hint for normal sessions (unchanged).
     assert.equal(String(env.contextCalls[0].activeWorkspace._id), String(env.otherWs._id));
+  });
+
+  await check('codeRefs: IDE session accepts refs without text; stored + sent to the LLM', async () => {
+    const env = makeEnv({ rounds: [[{ type: 'content', delta: 'hi' }, { type: 'finish', reason: 'stop' }]] });
+    const refs = [{ kind: 'selection', path: 'src/a.ts', startLine: 2, endLine: 3, text: 'const x = 1;' }];
+    const res = fakeRes();
+    await env.c.sendMessage(String(env.session._id), { content: '', codeRefs: refs }, fakeReq(), res);
+    assert.equal(ofType(res, 'done').length, 1, JSON.stringify(res.events));
+    const lastUser = env.llmCalls[0].conversation.filter((m) => m.role === 'user').pop();
+    assert.match(lastUser.content, /src\/a\.ts/);
+    assert.match(lastUser.content, /const x = 1;/);
+    const stored = env.appended.find((m) => m.role === 'user');
+    assert.equal(stored.content, '');
+    assert.equal(stored.codeRefs.length, 1);
+  });
+
+  await check('codeRefs: rejected for non-IDE sessions, bad refs, empty message; prepare rejects too', async () => {
+    const rejects = async (env, body, re) => {
+      await assert.rejects(env.c.sendMessage(String(env.session._id), body, fakeReq(), fakeRes()),
+        (e) => e.getStatus?.() === 400 && re.test(String(e.message)));
+      assert.equal(env.appended.length, 0);
+    };
+    const file = [{ kind: 'file', path: 'a.ts' }];
+    await rejects(makeEnv({ ide: false }), { content: 'x', codeRefs: file }, /./);
+    await rejects(makeEnv({}), { content: '' }, /content is required/);
+    const many = Array.from({ length: 11 }, (_, i) => ({ kind: 'file', path: `f${i}.ts` }));
+    const bad = parseCodeRefs(many);
+    assert.equal(bad.ok, false);
+    await rejects(makeEnv({}), { content: 'x', codeRefs: many }, new RegExp(bad.error.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    const env = makeEnv({});
+    await assert.rejects(env.c.prepareMessage(String(env.session._id), { content: 'x', codeRefs: file }, fakeReq()),
+      (e) => e.getStatus?.() === 400);
   });
 
   await check('IDE session: ws_* offered; context hint from the session, message workspaceId ignored', async () => {

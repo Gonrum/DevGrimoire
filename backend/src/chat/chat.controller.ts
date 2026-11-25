@@ -22,6 +22,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { RequestContext, type AuthRequest } from '../common/request-context';
 import { errorMessage, isRecord, isUnknownArray } from '../common/narrow';
+import { parseCodeRefs, withCodeRefs } from './code-refs';
 import { actorMayWriteContent, assertContentWrite } from '../common/scope-guard';
 import { ChatService } from './chat.service';
 import { ChatLlmService, LlmMessageWithTools, LlmImageInput } from './chat-llm.service';
@@ -746,6 +747,9 @@ export class ChatController {
     if (!dto?.content?.trim()) {
       throw new BadRequestException('content is required');
     }
+    if (isUnknownArray(dto.codeRefs) && dto.codeRefs.length > 0) {
+      throw new BadRequestException('codeRefs are only supported in IDE agent sessions');
+    }
     const userId = req.user?.userId;
     const session = await this.chatService.findById(id, userId);
     const projectId = session.projectId?.toString();
@@ -946,12 +950,18 @@ export class ChatController {
     @Res() res: Response,
   ): Promise<void> {
     await this.assertEnabled();
-    if (!dto?.content?.trim()) {
+    const parsedRefs = parseCodeRefs(dto?.codeRefs);
+    if (!parsedRefs.ok) throw new BadRequestException(parsedRefs.error);
+    const codeRefs = parsedRefs.refs;
+    if (!dto?.content?.trim() && codeRefs.length === 0) {
       throw new BadRequestException('content is required');
     }
 
     const userId = req.user?.userId;
     const session = await this.chatService.findById(id, userId);
+    if (codeRefs.length > 0 && session.ideAgent !== true) {
+      throw new BadRequestException('codeRefs are only supported in IDE agent sessions');
+    }
     // A new message abandons a turn still waiting for a confirmation: its
     // proposal must not be resumable alongside (or after) this turn.
     this.pendingConfirmations.delete(id);
@@ -973,6 +983,7 @@ export class ChatController {
       role: 'user',
       content: dto.content,
       attachments: attachmentRefs.length > 0 ? attachmentRefs : undefined,
+      codeRefs: codeRefs.length > 0 ? codeRefs : undefined,
     }, userId);
 
     const afterUser = await this.chatService.findById(id, userId);
@@ -991,7 +1002,7 @@ export class ChatController {
     const agent: AgentTurn | undefined = agentWorkspaceId
       ? { workspaceId: agentWorkspaceId, mode: activeWorkspace?.agentMode === 'direct' ? 'direct' : 'confirm' }
       : undefined;
-    const built = await this.context.build({ projectId, customerId }, dto.content, historyWithoutCurrent, {
+    const built = await this.context.build({ projectId, customerId }, withCodeRefs(dto.content, codeRefs), historyWithoutCurrent, {
       topK: opts.topK,
       historyLimit: opts.historyLimit,
       toolsEnabled: opts.toolsEnabled,

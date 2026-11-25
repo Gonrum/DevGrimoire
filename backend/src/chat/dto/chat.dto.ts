@@ -45,6 +45,11 @@ export class SendChatMessageDto {
   @IsString()
   content: string;
 
+  // Attached code selections/files (IDE agent sessions only); validated by parseCodeRefs.
+  @IsOptional()
+  @IsArray()
+  codeRefs?: unknown[];
+
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -193,6 +198,11 @@ export class PrepareChatMessageDto {
   @IsOptional()
   @IsMongoId()
   workspaceId?: string;
+
+  // Browser-side chat has no code refs; declared so the field is not stripped and can be refused.
+  @IsOptional()
+  @IsArray()
+  codeRefs?: unknown[];
 }
 
 export class PersistedContextRefDto {
