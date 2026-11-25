@@ -70,6 +70,7 @@ import { KubeAuditService } from './kube/kube-audit.service';
 import { KubeWritesService } from './kube/kube-writes.service';
 import { UserRole } from './auth/schemas/user.schema';
 import { registerMcpTools } from './mcp-tools';
+import { mcpServerInfo } from './mcp-server-info';
 
 // Load .env from project root (parent of backend/)
 try {
@@ -116,7 +117,7 @@ async function bootstrap() {
   }
 
   const server = new Server(
-    { name: 'DevGrimoire', version: '1.0.0' },
+    mcpServerInfo(),
     // M-35: declare `resources` capability so hosts query us via
     // `resources/list`. UI-resources for the MCP Apps extension
     // (io.modelcontextprotocol/ui) live alongside the tool catalog.

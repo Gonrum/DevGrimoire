@@ -100,6 +100,7 @@ import { accessTokenUserId } from './common/access-token';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OAUTH_CONNECTION_REVOKED, OAuthService } from './oauth/oauth.service';
 import { oauthConfig } from './oauth/oauth-config';
+import { mcpServerInfo } from './mcp-server-info';
 import { createOAuthRouter } from './oauth/oauth-provider';
 import {
   McpRequest,
@@ -112,7 +113,7 @@ import {
 
 function createMcpServer(services: McpServices): Server {
   const server = new Server(
-    { name: 'DevGrimoire', version: '1.0.0' },
+    mcpServerInfo(),
     // M-35: declare `resources` capability so registerMcpTools can install
     // the ListResources/ReadResource handlers for the MCP Apps extension
     // (io.modelcontextprotocol/ui). Without this the SDK throws
