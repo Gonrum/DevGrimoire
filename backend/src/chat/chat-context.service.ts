@@ -78,6 +78,8 @@ export class ChatContextService {
       agentRoleId?: string;
       /** Briefing Mode (T-424). Prepends a Briefing-Block that steers the LLM to elicit requirements iteratively. */
       briefingMode?: boolean;
+      /** Query for the RAG search when it must differ from the user message (e.g. attached code). */
+      ragQuery?: string;
     } = {},
   ): Promise<ContextBuildResult> {
     const ownerObj = typeof owner === 'string' ? { projectId: owner } : owner;
@@ -114,7 +116,7 @@ export class ChatContextService {
 
     let ragResults: Awaited<ReturnType<RagService['search']>> = [];
     try {
-      ragResults = await this.rag.search(userMessage, projectId, undefined, topK, customerId);
+      ragResults = await this.rag.search(options.ragQuery ?? userMessage, projectId, undefined, topK, customerId);
     } catch (err: unknown) {
       this.logger.warn(`RAG search unavailable: ${errorMessage(err)}`);
     }

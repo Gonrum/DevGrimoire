@@ -282,6 +282,8 @@ async function main() {
     const lastUser = env.llmCalls[0].conversation.filter((m) => m.role === 'user').pop();
     assert.match(lastUser.content, /src\/a\.ts/);
     assert.match(lastUser.content, /const x = 1;/);
+    assert.equal(lastUser.content.split('[Attached by the user from the workspace').length - 1, 1);
+    assert.equal(env.contextCalls[0].ragQuery, 'src/a.ts');
     const stored = env.appended.find((m) => m.role === 'user');
     assert.equal(stored.content, '');
     assert.equal(stored.codeRefs.length, 1);
@@ -294,7 +296,7 @@ async function main() {
       assert.equal(env.appended.length, 0);
     };
     const file = [{ kind: 'file', path: 'a.ts' }];
-    await rejects(makeEnv({ ide: false }), { content: 'x', codeRefs: file }, /./);
+    await rejects(makeEnv({ ide: false }), { content: 'x', codeRefs: file }, /only supported in IDE agent sessions/);
     await rejects(makeEnv({}), { content: '' }, /content is required/);
     const many = Array.from({ length: 11 }, (_, i) => ({ kind: 'file', path: `f${i}.ts` }));
     const bad = parseCodeRefs(many);
@@ -302,7 +304,16 @@ async function main() {
     await rejects(makeEnv({}), { content: 'x', codeRefs: many }, new RegExp(bad.error.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     const env = makeEnv({});
     await assert.rejects(env.c.prepareMessage(String(env.session._id), { content: 'x', codeRefs: file }, fakeReq()),
-      (e) => e.getStatus?.() === 400);
+      (e) => e.getStatus?.() === 400 && /only supported in IDE agent sessions/.test(String(e.message)));
+  });
+
+  await check('codeRefs: ragQuery is the typed text; unset without refs', async () => {
+    const env = makeEnv({});
+    await env.c.sendMessage(String(env.session._id), { content: ' frage ', codeRefs: [{ kind: 'file', path: 'a.ts' }] }, fakeReq(), fakeRes());
+    assert.equal(env.contextCalls[0].ragQuery, 'frage');
+    const env2 = makeEnv({});
+    await send(env2);
+    assert.equal(env2.contextCalls[0].ragQuery, undefined);
   });
 
   await check('IDE session: ws_* offered; context hint from the session, message workspaceId ignored', async () => {

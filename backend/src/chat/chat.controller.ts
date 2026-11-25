@@ -1011,6 +1011,8 @@ export class ChatController {
       activeWorkspace,
       agentRoleId: dto.agentRoleId,
       briefingMode: dto.briefingMode,
+      // Attached code must not flow into the embedding query.
+      ragQuery: codeRefs.length > 0 ? (dto.content.trim() || codeRefs.map((r) => r.path).join(' ')) : undefined,
     });
 
     // Agent-Rollen schneiden die globale Tool-Allowlist (T-264) — eine Rolle
