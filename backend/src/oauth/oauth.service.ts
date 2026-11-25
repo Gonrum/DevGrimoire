@@ -34,6 +34,7 @@ import {
   AUTH_REQUEST_TTL_MS,
   MAX_ECHO_LENGTH,
   MAX_REDIRECT_URIS,
+  OAUTH_SCOPE,
   REFRESH_REUSE_GRACE_MS,
   REFRESH_TOKEN_PREFIX,
   REFRESH_TOKEN_TTL_MS,
@@ -116,7 +117,6 @@ interface TokenGrant {
   apiKeyId: Types.ObjectId;
   userId: Types.ObjectId;
   resource: string;
-  scopes: string[];
 }
 
 /**
@@ -269,7 +269,9 @@ export class OAuthService {
       redirectUri,
       codeChallenge: params.codeChallenge,
       ...(params.state !== undefined ? { state: params.state } : {}),
-      scopes,
+      // Only our single scope exists; anything else the client asked for is
+      // dropped here and never echoed back in a token response.
+      scopes: [OAUTH_SCOPE],
       resource,
       expiresAt: new Date(this.now() + AUTH_REQUEST_TTL_MS),
     });
@@ -425,8 +427,9 @@ export class OAuthService {
   }
 
   /**
-   * Redeems a code. `verifier` is checked when given; the SDK token handler
-   * verifies PKCE itself (via `challengeForCode`) and then passes none.
+   * Redeems a code. PKCE is checked here and is mandatory: a missing
+   * verifier fails closed. The SDK token handler forwards the verifier
+   * because the provider sets `skipLocalPkceValidation`.
    * `redirectUri` must equal the one of the authorization request when sent.
    */
   async exchangeCode(
@@ -437,7 +440,7 @@ export class OAuthService {
     resource?: URL,
   ): Promise<OAuthTokens> {
     const doc = await this.loadCode(clientId, code);
-    if (verifier !== undefined && !verifyPkce(verifier, doc.codeChallenge)) {
+    if (typeof verifier !== 'string' || !verifyPkce(verifier, doc.codeChallenge)) {
       throw new InvalidGrantError('code_verifier does not match the challenge');
     }
     if (redirectUri !== undefined && redirectUri !== doc.redirectUri) {
@@ -464,7 +467,6 @@ export class OAuthService {
       apiKeyId: doc.apiKeyId,
       userId: doc.userId,
       resource: doc.resource,
-      scopes: doc.scopes,
     });
   }
 
@@ -479,7 +481,7 @@ export class OAuthService {
       apiKeyId: grant.apiKeyId,
       userId: grant.userId,
       resource: grant.resource,
-      scopes: grant.scopes,
+      scopes: [OAUTH_SCOPE],
     };
     await this.tokenModel.create({
       ...base,
@@ -498,7 +500,7 @@ export class OAuthService {
       token_type: 'bearer',
       expires_in: Math.floor(ACCESS_TOKEN_TTL_MS / 1000),
       refresh_token: refreshToken,
-      ...(grant.scopes.length ? { scope: grant.scopes.join(' ') } : {}),
+      scope: OAUTH_SCOPE,
     };
   }
 
@@ -551,14 +553,19 @@ export class OAuthService {
       apiKeyId: doc.apiKeyId,
       userId: doc.userId,
       resource: doc.resource,
-      scopes: doc.scopes,
     });
   }
 
-  /** Checked on every MCP request, so revocation takes effect immediately. */
+  /**
+   * Checked on every MCP request, so revocation takes effect immediately.
+   * The token must be bound to our resource (audience check); with OAuth
+   * unconfigured no token is valid.
+   */
   async verifyAccessToken(token: string): Promise<OAuthAccessTokenInfo> {
+    const resource = this.options.resource;
     const doc = await this.findToken(token, 'access');
     if (!doc || doc.expiresAt.getTime() <= this.now()) throw new InvalidTokenError('Invalid or expired access token');
+    if (!resource || doc.resource !== resource) throw new InvalidTokenError('Invalid or expired access token');
     if (!(await this.findActiveConnection(doc.apiKeyId))) {
       throw new InvalidTokenError('Invalid or expired access token');
     }

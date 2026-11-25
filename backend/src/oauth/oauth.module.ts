@@ -10,11 +10,12 @@ import { OAuthAuthRequest, OAuthAuthRequestSchema } from './schemas/oauth-auth-r
 import { OAuthCode, OAuthCodeSchema } from './schemas/oauth-code.schema';
 import { OAuthToken, OAuthTokenSchema } from './schemas/oauth-token.schema';
 import { OAUTH_OPTIONS, OAuthCoreOptions, OAuthService } from './oauth.service';
-import { oauthResourceFromBaseUrl } from './oauth-tokens';
+import { oauthConfig } from './oauth-config';
 
 /**
- * MCP OAuth core. No HTTP routes here; the SDK router and the consent
- * endpoint are wired on top of `OAuthService`. `ApiKeysService` comes from
+ * MCP OAuth core. No HTTP routes here; the SDK router (main.ts, via
+ * `createOAuthRouter`) and the consent endpoint are wired on top of
+ * `OAuthService`. `ApiKeysService` comes from
  * the global `ApiKeysModule`.
  */
 @Module({
@@ -34,7 +35,8 @@ import { oauthResourceFromBaseUrl } from './oauth-tokens';
     {
       provide: OAUTH_OPTIONS,
       useFactory: (): OAuthCoreOptions => ({
-        resource: oauthResourceFromBaseUrl(process.env.PUBLIC_BASE_URL),
+        // Same switch as the router in main.ts: no valid config, no valid token.
+        resource: oauthConfig().resourceUrl?.href ?? null,
         now: () => Date.now(),
       }),
     },

@@ -200,6 +200,9 @@ services:
       # Express genau einen Hop vertraut und der Client selbst dieser Hop ist.
       # Der Default 127.0.0.1 schliesst das aus.
       TRUST_PROXY: ${TRUST_PROXY:-1}
+      # MCP login via OAuth: public base URL of this instance (issuer; the
+      # protected resource is <PUBLIC_BASE_URL>/mcp). Empty = OAuth off.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       AUTH_USERNAME: ${AUTH_USERNAME:?AUTH_USERNAME must be set — without it the instance runs WITHOUT authentication}
       AUTH_PASSWORD: ${AUTH_PASSWORD:?AUTH_PASSWORD must be set — without it the instance runs WITHOUT authentication}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (openssl rand -hex 32)}

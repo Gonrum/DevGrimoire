@@ -11,6 +11,9 @@ export const ACCESS_TOKEN_PREFIX = 'dgo_at_';
 /** Prefix of OAuth refresh tokens. */
 export const REFRESH_TOKEN_PREFIX = 'dgo_rt_';
 
+/** The only scope this server knows; every token carries exactly this one. */
+export const OAUTH_SCOPE = 'mcp';
+
 export const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000;
 export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const AUTH_CODE_TTL_MS = 60 * 1000;

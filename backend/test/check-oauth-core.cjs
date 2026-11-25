@@ -402,6 +402,44 @@ const allStored = (env) => JSON.stringify(Object.values(env.models).flatMap((m) 
     assert.match(t.access_token, /^dgo_at_/);
   });
 
+  await check('missing verifier → invalid_grant (PKCE fail-closed, code not burned)', async () => {
+    const env = setup();
+    const a = await approvedCode(env);
+    await expectOAuthError(env.svc.exchangeCode(a.client.client_id, a.code, undefined, CLAUDE_CB), 'invalid_grant');
+    await expectOAuthError(env.svc.exchangeCode(a.client.client_id, a.code, '', CLAUDE_CB), 'invalid_grant');
+    const t = await env.svc.exchangeCode(a.client.client_id, a.code, a.verifier, CLAUDE_CB);
+    assert.match(t.access_token, /^dgo_at_/);
+  });
+
+  await check('token responses only ever carry scope "mcp"', async () => {
+    const env = setup();
+    const client = await register(env.svc);
+    const { verifier, challenge } = pkce();
+    const id = await env.svc.createAuthRequest(client, { codeChallenge: challenge, redirectUri: CLAUDE_CB, scopes: ['mcp', 'admin', 'openid'] });
+    const { redirectUrl } = await env.svc.decide(id, USER, { approve: true });
+    const code = new URL(redirectUrl).searchParams.get('code');
+    const t = await env.svc.exchangeCode(client.client_id, code, verifier, CLAUDE_CB);
+    assert.equal(t.scope, 'mcp');
+    const r = await env.svc.exchangeRefresh(client.client_id, t.refresh_token);
+    assert.equal(r.scope, 'mcp');
+    const plain = await tokens(env);
+    assert.equal(plain.t.scope, 'mcp');
+    assert.ok(!allStored(env).includes('admin'), 'unknown scope must not be persisted on tokens');
+  });
+
+  await check('verifyAccessToken: token for another resource or OAuth unconfigured → invalid_token', async () => {
+    const env = setup();
+    const a = await tokens(env);
+    await env.svc.verifyAccessToken(a.t.access_token);
+    const m = env.models;
+    const other = new OAuthService(m.client, m.request, m.code, m.token, m.apiKey, m.link, env.apiKeys, env.events,
+      { resource: 'https://other.example.test/mcp', now: () => env.clock.t });
+    await expectOAuthError(other.verifyAccessToken(a.t.access_token), 'invalid_token');
+    const off = new OAuthService(m.client, m.request, m.code, m.token, m.apiKey, m.link, env.apiKeys, env.events,
+      { resource: null, now: () => env.clock.t });
+    await expectOAuthError(off.verifyAccessToken(a.t.access_token), 'invalid_token');
+  });
+
   await check('different redirect_uri than at authorize → invalid_grant', async () => {
     const env = setup();
     const a = await approvedCode(env);

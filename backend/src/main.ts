@@ -1,14 +1,12 @@
 import { NestFactory } from '@nestjs/core';
 import { HttpException, Logger, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { randomUUID } from 'node:crypto';
 import helmet from 'helmet';
 import { json } from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { AppModule } from './app.module';
 import { MongooseErrorFilter } from './common/mongoose-error.filter';
 import { runObjectIdMigrationOnce } from './common/objectid-migration.boot';
@@ -99,6 +97,18 @@ import { ProjectChangeEvent } from './events/project-event';
 import { Subscription } from 'rxjs';
 import { ScalarQueryPipe } from './common/scalar-query.pipe';
 import { accessTokenUserId } from './common/access-token';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { OAUTH_CONNECTION_REVOKED, OAuthService } from './oauth/oauth.service';
+import { oauthConfig } from './oauth/oauth-config';
+import { createOAuthRouter } from './oauth/oauth-provider';
+import {
+  McpRequest,
+  McpSessionOwners,
+  closeSessionsOnRevoke,
+  createMcpAuthMiddleware,
+  createStreamableHttpHandler,
+  singleValue,
+} from './mcp-http-auth';
 
 function createMcpServer(services: McpServices): Server {
   const server = new Server(
@@ -114,38 +124,8 @@ function createMcpServer(services: McpServices): Server {
   return server;
 }
 
-/**
- * Express-Request, wie die MCP-Auth-Middleware ihn anreichert.
- *
- * Eine Deklaration statt `req: any` pro Handler: die acht MCP-Handler in dieser
- * Datei trugen zusammen über 100 Lint-Findings, weil jeder Zugriff auf einem
- * `any` stattfand — inklusive `req.headers` und `res.status()`, wo Express längst
- * präzise Typen liefert.
- */
 /** How often /messages re-checks the API key behind an open SSE session. */
 const MCP_SESSION_REVALIDATE_MS = 60_000;
-
-interface McpRequest extends Request {
-  user?: RequestUser;
-  apiKey?: ApiKey;
-}
-
-/**
- * Ein einzelner String-Wert aus Query oder Header.
- *
- * Express typisiert Query-Werte als `string | string[] | ParsedQs | ParsedQs[]`
- * und Header als `string | string[]`. Ein `as string` darauf ist eine Lüge:
- * `?apiKey=a&apiKey=b` liefert ein Array, `?apiKey[x]=y` ein Objekt — beides
- * lief vorher als „String" weiter in die Schlüsselprüfung. Genau dieselbe Lücke
- * wurde im JwtAuthGuard beim `?token=`-Parameter gefunden.
- *
- * Mehrfach- und verschachtelte Werte gelten hier als „nicht gesetzt": ein JWT
- * oder eine Session-Id ist niemals mehrwertig, und beide Wege endeten ohnehin
- * in einer Ablehnung.
- */
-function singleValue(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
 
 /**
  * Adapter für einen async `upgrade`-Handler.
@@ -244,6 +224,21 @@ async function bootstrap() {
     bigLimitBytes: FS_FILE_BODY_LIMIT_BYTES,
     parser: json({ limit: FS_FILE_BODY_LIMIT_BYTES }),
   }));
+
+  // MCP OAuth authorization server (/authorize, /token, /register, /revoke,
+  // /.well-known/oauth-*). Mounted before the global 100 MB JSON parser so
+  // the SDK handlers keep their own small body limits.
+  const mcpOAuth = oauthConfig();
+  const bootLogger = new Logger('Bootstrap');
+  if (mcpOAuth.enabled && mcpOAuth.baseUrl && mcpOAuth.resourceUrl) {
+    expressApp.use(createOAuthRouter(app.get(OAuthService), {
+      baseUrl: mcpOAuth.baseUrl,
+      resourceUrl: mcpOAuth.resourceUrl,
+    }));
+    bootLogger.log(`MCP OAuth on: issuer ${mcpOAuth.baseUrl.href}, resource ${mcpOAuth.resourceUrl.href}`);
+  } else {
+    bootLogger.log(`MCP OAuth off${mcpOAuth.problem ? ` (${mcpOAuth.problem})` : ' (PUBLIC_BASE_URL unset)'}`);
+  }
 
   // JSON body parser for all routes (100MB limit for MCP + replication payloads with attachments)
   expressApp.use(json({ limit: '100mb' }));
@@ -473,86 +468,27 @@ async function bootstrap() {
   expressApp.get('/.well-known/mcp-server.json', mcpRegistryManifestHandler);
   expressApp.get('/server.json', mcpRegistryManifestHandler);
 
-  const mcpAuthMiddleware = async (req: McpRequest, res: Response, next: NextFunction) => {
-    // Skip auth if auth is not enabled — still set a default user so per-user
-    // scoped tools (chat_*) can resolve an owner.
-    if (!authService.isAuthEnabled()) {
-      req.user = { userId: 'system', username: 'system', role: 'admin' } satisfies RequestUser;
-      return next();
-    }
-
-    // Extract API key from Authorization header (Bearer cv_...) or query param
-    let apiKey: string | undefined;
-    const authHeader = req.headers.authorization;
-    if (authHeader?.startsWith('Bearer cv_')) {
-      apiKey = authHeader.slice(7);
-    } else if (req.query?.apiKey) {
-      apiKey = singleValue(req.query.apiKey);
-    }
-
-    if (!apiKey) {
-      res.status(401).json({
-        jsonrpc: '2.0',
-        error: { code: -32001, message: 'Unauthorized: API key required. Pass via Authorization: Bearer cv_... header or ?apiKey= query param.' },
-        id: null,
-      });
-      return;
-    }
-
-    const validated = await apiKeysService.validate(apiKey);
-    if (!validated) {
-      res.status(401).json({
-        jsonrpc: '2.0',
-        error: { code: -32001, message: 'Unauthorized: Invalid or expired API key.' },
-        id: null,
-      });
-      return;
-    }
-
-    // Mirror JwtAuthGuard pattern so RequestContext + per-user scoped tools work.
-    const owner = await authService.findUserById(validated.userId.toString());
-    if (!owner) {
-      res.status(401).json({
-        jsonrpc: '2.0',
-        error: { code: -32001, message: 'Unauthorized: API key owner no longer exists.' },
-        id: null,
-      });
-      return;
-    }
-    // Wie JwtAuthGuard: der Key eines deaktivierten Besitzers öffnet nichts mehr.
-    if (owner.active === false) {
-      res.status(401).json({
-        jsonrpc: '2.0',
-        error: { code: -32001, message: 'Unauthorized: API key owner is deactivated.' },
-        id: null,
-      });
-      return;
-    }
-    // Derselbe Actor-Aufbau wie in JwtAuthGuard — über die gemeinsame Funktion
-    // statt einer zweiten Abschrift. Vorher standen hier nur drei Felder:
-    //
-    //     req.user = { userId, username, role }
-    //
-    // mit dem Kommentar „Mirror JwtAuthGuard pattern so RequestContext +
-    // per-user scoped tools work". Gespiegelt war damit aber nur die Hälfte,
-    // und die fehlende Hälfte war die sicherheitsrelevante:
-    // `actorCanAccessProject()` macht `actor.projectScopeMode ?? 'all'`, ein
-    // Actor ohne das Feld ist also uneingeschränkt. Ein API-Key, der bewusst
-    // auf 'allowlist' oder 'none' verengt wurde, war über /mcp, /sse und
-    // /messages vollständig offen — inklusive secret_get, das Klartextwerte
-    // liefert. Da MCP-Tools prompt-gesteuert sind, war das zugleich der Weg,
-    // auf dem ein injizierter Agent an Credentials anderer Projekte kam.
-    //
-    // /messages erbt den korrigierten Actor automatisch: der Pfad stellt
-    // `cached.user` aus der /sse-Authentifizierung wieder her.
-    req.user = actorFromApiKey(validated, owner);
-    req.apiKey = validated;
-
-    next();
+  const mcpOAuthService = mcpOAuth.enabled && mcpOAuth.resourceUrl ? app.get(OAuthService) : null;
+  const mcpAuthDeps = {
+    authEnabled: () => authService.isAuthEnabled(),
+    apiKeys: apiKeysService,
+    findUserById: (id: string) => authService.findUserById(id),
+    oauth: mcpOAuthService && mcpOAuth.resourceUrl
+      ? {
+        verifyAccessToken: (token: string) => mcpOAuthService.verifyAccessToken(token),
+        resourceUrl: mcpOAuth.resourceUrl,
+      }
+      : null,
   };
+  // Both build the actor through actorFromApiKey (same as JwtAuthGuard), so a
+  // key or connection narrowed to 'allowlist'/'none' stays narrowed on MCP.
+  // /messages inherits it: it restores `cached.user` from the /sse auth.
+  // OAuth access tokens only on /mcp; /sse and /messages stay API-key paths.
+  const mcpAuthMiddleware = createMcpAuthMiddleware(mcpAuthDeps, { acceptOAuth: true });
+  const legacyMcpAuthMiddleware = createMcpAuthMiddleware(mcpAuthDeps, { acceptOAuth: false });
 
   expressApp.use('/mcp', mcpAuthMiddleware);
-  expressApp.use('/sse', mcpAuthMiddleware);
+  expressApp.use('/sse', legacyMcpAuthMiddleware);
   expressApp.use('/messages', async (req: McpRequest, res: Response, next: NextFunction) => {
     // Skip auth if not enabled but still attach a default user
     if (!authService.isAuthEnabled()) {
@@ -561,6 +497,17 @@ async function bootstrap() {
     }
     // /messages requests belong to an SSE session authenticated on /sse — restore
     // both user AND apiKey so per-key tool allowlists keep being enforced.
+    // OAuth tokens are not accepted on the SSE paths, not even next to a
+    // valid session id.
+    const presentedHeader = singleValue(req.headers.authorization);
+    if (presentedHeader?.startsWith('Bearer dgo_') || singleValue(req.query?.apiKey)?.startsWith('dgo_')) {
+      res.status(401).json({
+        jsonrpc: '2.0',
+        error: { code: -32001, message: 'Unauthorized: OAuth access tokens are accepted only on /mcp.' },
+        id: null,
+      });
+      return;
+    }
     const sessionId = singleValue(req.query?.sessionId);
     const cached = sessionId ? authenticatedSessions.get(sessionId) : undefined;
     if (cached && sessionId) {
@@ -606,64 +553,21 @@ async function bootstrap() {
       return next();
     }
     // Fallback: check API key directly
-    return mcpAuthMiddleware(req, res, next);
+    return legacyMcpAuthMiddleware(req, res, next);
   });
 
-  // Streamable HTTP endpoint (protocol version 2025-11-25)
-  expressApp.all('/mcp', async (req: McpRequest, res: Response) => {
-    try {
-      const sessionId = singleValue(req.headers['mcp-session-id']);
-      let transport: StreamableHTTPServerTransport;
-
-      if (sessionId && transports[sessionId]) {
-        const existing = transports[sessionId];
-        if (existing instanceof StreamableHTTPServerTransport) {
-          transport = existing;
-        } else {
-          res.status(400).json({
-            jsonrpc: '2.0',
-            error: { code: -32000, message: 'Session uses a different transport protocol' },
-            id: null,
-          });
-          return;
-        }
-      } else if (!sessionId && req.method === 'POST' && isInitializeRequest(req.body)) {
-        transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID(),
-          onsessioninitialized: (sid) => {
-            transports[sid] = transport;
-            mcpLogger.log(`streamable-http session opened (${sid.slice(0, 8)}…, total=${Object.keys(transports).length})`);
-          },
-        });
-        transport.onclose = () => {
-          const sid = transport.sessionId;
-          if (sid) {
-            delete transports[sid];
-            mcpLogger.log(`streamable-http session closed (${sid.slice(0, 8)}…, total=${Object.keys(transports).length})`);
-          }
-        };
-        const server = createMcpServer(services);
-        await server.connect(transport);
-      } else {
-        res.status(400).json({
-          jsonrpc: '2.0',
-          error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
-          id: null,
-        });
-        return;
-      }
-
-      await RequestContext.run(req.user, req.apiKey, () => transport.handleRequest(req, res, req.body));
-    } catch {
-      if (!res.headersSent) {
-        res.status(500).json({
-          jsonrpc: '2.0',
-          error: { code: -32603, message: 'Internal server error' },
-          id: null,
-        });
-      }
-    }
-  });
+  // Streamable HTTP endpoint (protocol version 2025-11-25). Each session
+  // is bound to the credential that opened it (API key or OAuth connection).
+  const streamableOwners = new McpSessionOwners();
+  expressApp.all('/mcp', createStreamableHttpHandler({
+    transports,
+    owners: streamableOwners,
+    createServer: () => createMcpServer(services),
+    log: (message) => mcpLogger.log(message),
+  }));
+  // Revoking a connection ends its open sessions (each request is checked
+  // anyway; this also cuts streams that are already open).
+  closeSessionsOnRevoke(app.get(EventEmitter2), OAUTH_CONNECTION_REVOKED, streamableOwners, (m) => mcpLogger.warn(m));
 
   // Legacy SSE endpoint (protocol version 2024-11-05)
   expressApp.get('/sse', async (req: McpRequest, res: Response) => {
