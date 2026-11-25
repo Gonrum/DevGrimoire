@@ -12,6 +12,7 @@ import ChatLogSettings from '../components/settings/ChatLogSettings';
 import InstructionsSettings from '../components/settings/InstructionsSettings';
 import HarnessSettings from '../components/settings/HarnessSettings';
 import ApiKeysSettings from '../components/settings/ApiKeysSettings';
+import ConnectedAppsSettings from '../components/settings/ConnectedAppsSettings';
 import MyLlmSettings from '../components/settings/MyLlmSettings';
 import LlmEndpointsSettings from '../components/settings/LlmEndpointsSettings';
 import OnboardingBanner from '../components/settings/OnboardingBanner';
@@ -28,7 +29,7 @@ import { matchOption } from '../lib/narrow';
  * rendert (leere Settings-Seite), sondern still ignoriert wird.
  */
 const SETTINGS_TABS = [
-  'instructions', 'harness', 'apikeys', 'notifications', 'myllm', 'llmEndpoints', 'chatlog',
+  'instructions', 'harness', 'apikeys', 'connectedApps', 'notifications', 'myllm', 'llmEndpoints', 'chatlog',
   'websearch', 'users', 'auditlog', 'replication', 'backups', 'customerTemplates', 'ssh', 'workspaces',
 ] as const;
 
@@ -52,6 +53,7 @@ export default function Settings() {
     { key: 'websearch', label: t('settings.tabWebSearch'), group: t('settings.groupAgentStack'), adminOnly: true },
 
     { key: 'apikeys', label: t('settings.tabApiKeys'), group: t('settings.groupAccess') },
+    { key: 'connectedApps', label: t('settings.tabConnectedApps'), group: t('settings.groupAccess') },
     { key: 'users', label: t('settings.tabUsers'), group: t('settings.groupAccess'), adminOnly: true },
 
     { key: 'backups', label: t('settings.tabBackups'), group: t('settings.groupInfra'), adminOnly: true },
@@ -80,6 +82,7 @@ export default function Settings() {
       {tab === 'instructions' && <InstructionsSettings />}
       {tab === 'harness' && isAdmin && <HarnessSettings />}
       {tab === 'apikeys' && <ApiKeysSettings />}
+      {tab === 'connectedApps' && <ConnectedAppsSettings />}
       {tab === 'notifications' && <NotificationsSettings />}
       {tab === 'myllm' && <MyLlmSettings />}
       {tab === 'llmEndpoints' && isAdmin && <LlmEndpointsSettings />}

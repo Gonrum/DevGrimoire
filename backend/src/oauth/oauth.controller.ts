@@ -1,17 +1,36 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, NotFoundException, Param, Post, Req } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  ForbiddenException,
+  Get,
+  NotFoundException,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { Types } from 'mongoose';
 import { actorCanAccessProject } from '../common/permissions';
 import { isRecord } from '../common/narrow';
 import type { AuthRequest, RequestUser } from '../common/request-context';
 import { OAuthDecisionDto } from './dto/oauth-decision.dto';
 import { OAuthService } from './oauth.service';
+import { Public } from '../auth/decorators/public.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { UserRole } from '../auth/schemas/user.schema';
+import { AdminPermission, PermissionGate } from '../auth/decorators/permission-gate.decorator';
+import { Permission } from '../common/permissions';
 
 /**
- * Consent REST endpoint for the MCP OAuth flow. Not `@Public()`: the global
- * JWT guard authenticates the logged-in user in the browser. API-key actors
- * are refused — a key must never be able to mint another connection.
+ * REST side of the MCP OAuth flow: the consent endpoint and "connected apps".
+ * Not `@Public()` (except `info`): the global JWT guard authenticates the
+ * logged-in user in the browser. API-key actors are refused — a key must
+ * never be able to mint, list or revoke connections.
  */
-@Controller('oauth/requests')
+@Controller('oauth')
 export class OAuthController {
   constructor(private readonly oauth: OAuthService) {}
 
@@ -24,7 +43,14 @@ export class OAuthController {
     return req.user;
   }
 
-  @Get(':id')
+  /** Whether OAuth login is offered and the MCP URL to connect to. */
+  @Public()
+  @Get('info')
+  info() {
+    return this.oauth.info();
+  }
+
+  @Get('requests/:id')
   async getRequest(@Param('id') id: string, @Req() req: AuthRequest) {
     this.requireUser(req);
     const info = await this.oauth.getAuthRequest(id);
@@ -37,7 +63,7 @@ export class OAuthController {
     };
   }
 
-  @Post(':id/decision')
+  @Post('requests/:id/decision')
   async decide(@Param('id') id: string, @Body() body: OAuthDecisionDto, @Req() req: AuthRequest) {
     const actor = this.requireUser(req);
     // Checked again here so the endpoint is safe even without the ValidationPipe.
@@ -63,5 +89,36 @@ export class OAuthController {
       throw new ForbiddenException('No access to one of the selected projects');
     }
     return this.oauth.decide(id, actor.userId, { approve: true, projectIds });
+  }
+
+  /** The signed-in user's connected apps. */
+  @Get('connections')
+  async listConnections(@Req() req: AuthRequest) {
+    const actor = this.requireUser(req);
+    return this.oauth.listConnections(actor.userId);
+  }
+
+  /**
+   * Revokes one of the user's own connections; foreign or unknown → 404.
+   * `service`: taking access away must not need `project:write` — the
+   * service checks ownership itself.
+   */
+  @PermissionGate('service')
+  @Delete('connections/:id')
+  async revokeConnection(@Param('id') id: string, @Req() req: AuthRequest) {
+    const actor = this.requireUser(req);
+    await this.oauth.revokeOwnConnection(actor.userId, id);
+    return { revoked: true };
+  }
+
+  /** Admin: revokes any user's connection (admin key overview). */
+  @Delete('admin/connections/:id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @AdminPermission(Permission.ADMIN_APIKEY_MANAGE)
+  async adminRevokeConnection(@Param('id') id: string, @Req() req: AuthRequest) {
+    this.requireUser(req);
+    await this.oauth.revokeAnyConnection(id);
+    return { revoked: true };
   }
 }

@@ -1195,7 +1195,8 @@
     "toolsScoped": "{{count}} allowed",
     "scopeAll": "all projects",
     "scopeAllowlist": "{{count}} in allowlist",
-    "scopeNone": "none"
+    "scopeNone": "none",
+    "oauthBadge": "OAuth"
   },
   "oracle": {
     "openCount": "Open risks",
@@ -1970,7 +1971,12 @@
     "pushDeviceTitle": "Push notifications on this device",
     "pushDeviceDesc": "Without a subscription on this device, the categories below will not reach it. Applies per browser.",
     "pushDeviceUnsupported": "This browser does not support push notifications (or the page is not served over HTTPS).",
-    "pushDeviceDenied": "Blocked by the browser — allow it in the site settings, then switch it on here."
+    "pushDeviceDenied": "Blocked by the browser — allow it in the site settings, then switch it on here.",
+    "tabConnectedApps": "Connected apps",
+    "apiKeyOAuthBadge": "OAuth",
+    "apiKeyOAuthPrefix": "OAuth token",
+    "apiKeyOAuthFixed": "Scope fixed",
+    "apiKeyOAuthFixedHint": "The scope of an OAuth connection was set at consent and cannot be edited. Revoke and reconnect to change it."
   },
   "chat": {
     "open": "Open chat",
@@ -3471,5 +3477,30 @@
     "forbidden": "An API key cannot grant access. Sign in to the browser as a user.",
     "loadFailed": "The request could not be loaded: {{message}}",
     "decideFailed": "The decision could not be sent: {{message}}"
+  },
+  "connectedApps": {
+    "description": "MCP clients (Claude Code, claude.ai, Claude Desktop …) you granted access by signing in. Revoking takes effect immediately, open connections included.",
+    "listTitle": "Connected apps",
+    "empty": "No app connected yet.",
+    "client": "Client",
+    "scope": "Scope",
+    "created": "Connected",
+    "lastUsed": "Last used",
+    "revoke": "Revoke",
+    "revokeConfirm": "Really revoke?",
+    "scopeAll": "Everything you can see",
+    "scopeNone": "No projects",
+    "scopeProjects_one": "{{count}} project",
+    "scopeProjects_other": "{{count}} projects"
+  },
+  "mcpConnect": {
+    "title": "Connect",
+    "claudeCode": "Claude Code",
+    "claudeCodeHint": "Then run /mcp in Claude Code → devgrimoire → Authenticate. The browser opens the consent page.",
+    "connector": "claude.ai / Claude Desktop",
+    "connectorHint": "Settings → Connectors → Add custom connector → enter this URL.",
+    "apiKeyToggle": "Alternative: with an API key",
+    "apiKeyIntro": "With an API key from Settings → API Keys (Streamable HTTP, header):",
+    "apiKeySse": "Or via SSE with a query parameter (for clients without custom headers):"
   }
 }

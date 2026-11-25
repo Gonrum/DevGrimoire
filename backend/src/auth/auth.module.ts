@@ -11,6 +11,7 @@ import { RolesGuard } from './guards/roles.guard';
 import { RefreshToken, RefreshTokenSchema } from './schemas/refresh-token.schema';
 import { User, UserSchema } from './schemas/user.schema';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
+import { OAuthModule } from '../oauth/oauth.module';
 import { EncryptionService } from '../common/encryption.service';
 import { resolveJwtSecret } from '../common/jwt-secret';
 import { JWT_ALGORITHM } from '../common/access-token';
@@ -36,6 +37,8 @@ import { JWT_ALGORITHM } from '../common/access-token';
       { name: User.name, schema: UserSchema },
     ]),
     ApiKeysModule,
+    // Account events (password change, deactivation, deletion) revoke OAuth connections.
+    OAuthModule,
   ],
   controllers: [AuthController, UsersController],
   providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard, EncryptionService],

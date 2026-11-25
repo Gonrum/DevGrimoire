@@ -144,10 +144,10 @@ function setup() {
   const events = { emitted: [], emit(name, payload) { events.emitted.push({ name, payload }); return true; } };
   const svc = new OAuthService(
     models.client, models.request, models.code, models.token, models.apiKey, models.link,
-    apiKeys, events, { resource: RESOURCE, now: () => clock.t },
+    apiKeys, events, audit, { resource: RESOURCE, now: () => clock.t },
   );
   const advance = (ms) => { clock.t += ms; };
-  return { svc, apiKeys, models, events, clock, advance };
+  return { svc, apiKeys, models, events, audit, clock, advance };
 }
 
 const b64url = (buf) => buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -292,7 +292,7 @@ const allStored = (env) => JSON.stringify(Object.values(env.models).flatMap((m) 
     assert.equal(key.oauthClientId, client.client_id);
     assert.equal(String(key.userId), USER);
     assert.equal(key.active, true);
-    assert.equal(key.expiresAt.getTime() > Date.now() + 360 * 24 * 3600 * 1000, true);
+    assert.equal(key.expiresAt.getTime() > env.clock.t + 360 * 24 * 3600 * 1000, true);
   });
 
   await check('deny: error=access_denied with state, no connection, request consumed', async () => {
@@ -432,10 +432,10 @@ const allStored = (env) => JSON.stringify(Object.values(env.models).flatMap((m) 
     const a = await tokens(env);
     await env.svc.verifyAccessToken(a.t.access_token);
     const m = env.models;
-    const other = new OAuthService(m.client, m.request, m.code, m.token, m.apiKey, m.link, env.apiKeys, env.events,
+    const other = new OAuthService(m.client, m.request, m.code, m.token, m.apiKey, m.link, env.apiKeys, env.events, env.audit,
       { resource: 'https://other.example.test/mcp', now: () => env.clock.t });
     await expectOAuthError(other.verifyAccessToken(a.t.access_token), 'invalid_token');
-    const off = new OAuthService(m.client, m.request, m.code, m.token, m.apiKey, m.link, env.apiKeys, env.events,
+    const off = new OAuthService(m.client, m.request, m.code, m.token, m.apiKey, m.link, env.apiKeys, env.events, env.audit,
       { resource: null, now: () => env.clock.t });
     await expectOAuthError(off.verifyAccessToken(a.t.access_token), 'invalid_token');
   });
@@ -545,7 +545,7 @@ const allStored = (env) => JSON.stringify(Object.values(env.models).flatMap((m) 
     await tokens(env);
     const standard = await env.apiKeys.generate(USER, 'cli');
     // an oauth key of another user
-    await env.apiKeys.createOAuthConnection({ userId: OTHER_USER, clientId: 'c', clientName: 'Other' });
+    await env.apiKeys.createOAuthConnection({ userId: OTHER_USER, clientId: 'c', clientName: 'Other', expiresAt: new Date(env.clock.t + 60000) });
     const n = await env.svc.revokeAllForUser(USER);
     assert.equal(n, 2);
     const byId = (id) => env.models.apiKey.docs.find((k) => String(k._id) === String(id));
@@ -575,25 +575,27 @@ const allStored = (env) => JSON.stringify(Object.values(env.models).flatMap((m) 
   await check('ApiKeysService.list hides oauth connections', async () => {
     const env = setup();
     await env.apiKeys.generate(USER, 'cli');
-    await env.apiKeys.createOAuthConnection({ userId: USER, clientId: 'c', clientName: 'Claude' });
+    await env.apiKeys.createOAuthConnection({ userId: USER, clientId: 'c', clientName: 'Claude', expiresAt: new Date(env.clock.t + 60000) });
     const listed = await env.apiKeys.list(USER);
     assert.equal(listed.length, 1);
     assert.equal(listed[0].name, 'cli');
   });
 
-  await check('createOAuthConnection: no usable secret, 1-year expiry, refused for API-key actors', async () => {
+  await check('createOAuthConnection: no usable secret, pending with the given expiry, refused for API-key actors', async () => {
     const env = setup();
-    const key = await env.apiKeys.createOAuthConnection({ userId: USER, clientId: 'c', clientName: 'Claude', projectIds: [String(P1)], customerIds: [] });
+    const expiresAt = new Date(env.clock.t + 10 * 60 * 1000);
+    const key = await env.apiKeys.createOAuthConnection({ userId: USER, clientId: 'c', clientName: 'Claude', expiresAt, projectIds: [String(P1)], customerIds: [] });
     assert.equal(key.kind, 'oauth');
     assert.equal(key.projectScopeMode, 'allowlist');
     assert.equal(key.customerScopeMode, 'none');
     assert.match(key.keyHash, /^[0-9a-f]{64}$/);
-    const days = (key.expiresAt.getTime() - Date.now()) / 86400000;
-    assert.ok(days > 364 && days < 367, `expiry ${days} days`);
+    assert.equal(key.expiresAt.getTime(), expiresAt.getTime());
+    assert.equal(key.oauthPending, true);
+    assert.equal(key.oauthClientName, 'Claude');
     assert.equal(await env.apiKeys.validate('cv_whatever'), null);
     const actor = { userId: USER, username: 'u', role: 'user', apiKeyId: 'k1' };
-    await expectThrow(RequestContext.run(actor, undefined, () => env.apiKeys.createOAuthConnection({ userId: USER, clientId: 'c', clientName: 'x' })));
-    await expectThrow(env.apiKeys.createOAuthConnection({ userId: 'bad', clientId: 'c', clientName: 'x' }));
+    await expectThrow(RequestContext.run(actor, undefined, () => env.apiKeys.createOAuthConnection({ userId: USER, clientId: 'c', clientName: 'x', expiresAt })));
+    await expectThrow(env.apiKeys.createOAuthConnection({ userId: 'bad', clientId: 'c', clientName: 'x', expiresAt }));
   });
 
   console.log(`\n${total - failures}/${total} passed`);

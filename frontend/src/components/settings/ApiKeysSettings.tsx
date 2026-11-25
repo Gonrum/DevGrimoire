@@ -5,6 +5,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { errorMessage } from '../../lib/narrow';
 import ApiKeyToolEditor from '../ApiKeyToolEditor';
 import ApiKeyScopeEditor from '../ApiKeyScopeEditor';
+import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import ConfirmButton from '../ui/ConfirmButton';
 import { FormInput } from '../ui/FormField';
@@ -93,6 +94,17 @@ export default function ApiKeysSettings() {
       setApiKeyError(e instanceof Error ? e.message : t('common.errorCreating'));
     } finally {
       setApiKeyCreating(false);
+    }
+  };
+
+  // OAuth connections appear only in the admin overview; they are revoked
+  // through the OAuth route (tokens die, open MCP streams close).
+  const revokeOAuthConnection = async (id: string) => {
+    try {
+      await api.oauth.adminRevokeConnection(id);
+      setApiKeys((prev) => prev.filter((k) => k._id !== id));
+    } catch (e) {
+      setApiKeyError(e instanceof Error ? e.message : t('common.error'));
     }
   };
 
@@ -209,7 +221,8 @@ export default function ApiKeysSettings() {
               </thead>
               <tbody>
                 {apiKeys.map((key) => {
-                  const isAllTools = !Array.isArray(key.allowedTools);
+                  const isOAuth = key.kind === 'oauth';
+                  const isAllTools = !isOAuth && !Array.isArray(key.allowedTools);
                   const isExpired = key.expiresAt && new Date(key.expiresAt) < new Date();
                   const isSelected = editingApiKeyId === key._id;
                   return (
@@ -223,14 +236,21 @@ export default function ApiKeysSettings() {
                           {isAllTools && (
                             <span title={t('settings.apiKeyRiskAllTools')} className="inline-block h-2 w-2 shrink-0 rounded-full bg-amber-500" />
                           )}
-                          {key.name}
+                          {isOAuth ? (
+                            <>
+                              <Badge color="bg-cyan-900/60 text-cyan-300">{t('settings.apiKeyOAuthBadge')}</Badge>
+                              {key.oauthClientName ?? key.name}
+                            </>
+                          ) : key.name}
                         </div>
                       </td>
                       {isAdmin && (
                         <td className="px-4 py-3 text-gray-400">{key.ownerUsername ?? '—'}</td>
                       )}
                       <td className="px-4 py-3">
-                        <code className="font-mono text-xs text-gray-400">{key.prefix}...</code>
+                        {isOAuth
+                          ? <span className="text-xs text-gray-500">{t('settings.apiKeyOAuthPrefix')}</span>
+                          : <code className="font-mono text-xs text-gray-400">{key.prefix}...</code>}
                       </td>
                       <td className="px-4 py-3 text-gray-400">
                         {new Date(key.createdAt).toLocaleDateString(dateLocale)}
@@ -242,6 +262,20 @@ export default function ApiKeysSettings() {
                         {key.expiresAt ? new Date(key.expiresAt).toLocaleDateString(dateLocale) : t('common.noExpiry')}
                       </td>
                       <td className="px-4 py-3 text-right">
+                        {isOAuth ? (
+                          <div className="flex items-center justify-end gap-2">
+                            <span className="text-xs text-gray-500" title={t('settings.apiKeyOAuthFixedHint')}>
+                              {t('settings.apiKeyOAuthFixed')}
+                            </span>
+                            <ConfirmButton
+                              onConfirm={() => revokeOAuthConnection(key._id)}
+                              label={t('connectedApps.revoke')}
+                              confirmLabel={t('connectedApps.revokeConfirm')}
+                              variant="danger"
+                              size="xs"
+                            />
+                          </div>
+                        ) : (
                         <div className="flex items-center justify-end gap-2">
                           <Button
                             variant={isSelected ? 'primary' : 'secondary'}
@@ -283,6 +317,7 @@ export default function ApiKeysSettings() {
                             size="xs"
                           />
                         </div>
+                        )}
                       </td>
                     </tr>
                   );

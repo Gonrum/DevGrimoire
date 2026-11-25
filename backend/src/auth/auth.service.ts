@@ -12,6 +12,7 @@ import { EncryptionService } from '../common/encryption.service';
 import { errorMessage, isDuplicateKeyError } from '../common/narrow';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { ACCESS_TOKEN_TYPE } from '../common/access-token';
+import { OAuthService } from '../oauth/oauth.service';
 
 const API_KEY_MASK = '***';
 // AES-GCM encrypted values use the format `<ivHex>:<tagHex>:<cipherHex>` —
@@ -82,6 +83,7 @@ export class AuthService {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private readonly encryptionService: EncryptionService,
     private readonly auditLog: AuditLogService,
+    private readonly oauth: OAuthService,
   ) {
     // Der Seed läuft unbeobachtet los, damit ein langsames bcrypt.hash() den
     // Nest-Bootstrap nicht aufhält.
@@ -567,6 +569,12 @@ export class AuthService {
       });
     }
 
+    // Deactivation ends every OAuth connection of the user (API keys stay,
+    // they stop working through the owner check anyway).
+    if (result && data.active === false) {
+      await this.oauth.revokeAllForUser(id);
+    }
+
     // M-7: wie alle anderen Leser — vorher kam hier das Chiffrat (oder ohne
     // SECRETS_ENCRYPTION_KEY der Klartext) von llmConfig.apiKey zurück.
     return result ? this.maskUserSecrets(result) : null;
@@ -577,6 +585,7 @@ export class AuthService {
     if (result) {
       // Delete all refresh tokens for this user
       await this.refreshTokenModel.deleteMany({ userId: id }).exec();
+      await this.oauth.revokeAllForUser(id);
       await this.auditLog.record({
         action: 'user.deleted',
         entityType: 'user',
@@ -596,6 +605,8 @@ export class AuthService {
 
     user.passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
     await user.save();
+    // A new password ends every OAuth connection granted with the old one.
+    await this.oauth.revokeAllForUser(userId);
   }
 
   async updateProfile(

@@ -111,9 +111,16 @@ export default function ProjectAccessTab({ projectId }: Props) {
               <tbody>
                 {data.apiKeys.map((k) => (
                   <tr key={k._id} className="border-t border-gray-800">
-                    <td className="px-4 py-2 text-gray-200">{k.name}</td>
+                    <td className="px-4 py-2 text-gray-200">
+                      {k.kind === 'oauth' ? (
+                        <span className="flex items-center gap-2">
+                          <Badge color="bg-cyan-900/60 text-cyan-300">{t('projectAccess.oauthBadge')}</Badge>
+                          {k.oauthClientName ?? k.name}
+                        </span>
+                      ) : k.name}
+                    </td>
                     <td className="px-4 py-2 text-gray-400">{k.ownerUsername ?? '—'}</td>
-                    <td className="px-4 py-2 font-mono text-xs text-gray-500">{k.prefix}...</td>
+                    <td className="px-4 py-2 font-mono text-xs text-gray-500">{k.kind === 'oauth' ? '—' : `${k.prefix}...`}</td>
                     <td className="px-4 py-2">
                       <ScopeBadge mode={k.projectScopeMode} allowedCount={k.allowedProjectIds?.length ?? 0} />
                     </td>

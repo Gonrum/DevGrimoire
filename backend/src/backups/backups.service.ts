@@ -52,8 +52,13 @@ const RETENTION_CONFIRMATION = 'DELETE_EXPIRED_BACKUPS';
  * Collections, die nie ins Backup gehören (H-37). `refreshtokens` sind live
  * einlösbare Sessions — als Hash zwar nicht mehr direkt nutzbar (H-8), aber
  * ein Restore soll ohnehin keine alten Sessions wiederbeleben.
+ *
+ * Same for the MCP OAuth grants: tokens, codes and pending consent requests
+ * are short-lived bearer material (stored as SHA-256 hashes). After a restore
+ * clients re-authorize. `oauthclients` holds only public registration data
+ * and stays in; the connection records live in `apikeys` (hash only).
  */
-const EXCLUDED_BACKUP_COLLECTIONS: string[] = ['refreshtokens'];
+const EXCLUDED_BACKUP_COLLECTIONS: string[] = ['refreshtokens', 'oauthtokens', 'oauthcodes', 'oauthauthrequests'];
 
 /** Ehrliche Aufzählung des Credential-Materials im Dump, fürs Manifest. */
 const CREDENTIAL_MATERIAL_ITEMS: string[] = [

@@ -64,6 +64,16 @@ export class ApiKey {
   @Prop()
   oauthClientId?: string;
 
+  // Client name at consent time, for "connected apps" and access listings.
+  @Prop()
+  oauthClientName?: string;
+
+  // true between approval and the first code redemption: the connection has
+  // no tokens yet and a short expiry. Pending connections are not listed and
+  // do not count as access.
+  @Prop()
+  oauthPending?: boolean;
+
   // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
   // nicht am Typ — ohne Deklaration brauchten Leser dafür ein `as any`.
   createdAt?: Date;

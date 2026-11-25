@@ -400,11 +400,22 @@ async function bootstrap() {
       ],
       auth: {
         required: authService.isAuthEnabled(),
-        schemes: ['devgrimoire-api-key'],
+        schemes: mcpOAuth.enabled ? ['devgrimoire-api-key', 'oauth2'] : ['devgrimoire-api-key'],
         headerName: 'Authorization',
         headerScheme: 'Bearer',
         apiKeyPrefix: 'cv_',
         queryParameter: 'apiKey',
+        // OAuth (authorization code + PKCE) only on /mcp; the SSE paths stay API-key only.
+        ...(mcpOAuth.enabled && mcpOAuth.resourceUrl
+          ? {
+            oauth: {
+              endpoint: '/mcp',
+              resource: mcpOAuth.resourceUrl.href,
+              protectedResourceMetadata: '/.well-known/oauth-protected-resource/mcp',
+              authorizationServerMetadata: '/.well-known/oauth-authorization-server',
+            },
+          }
+          : {}),
       },
       capabilities: {
         tools: true,

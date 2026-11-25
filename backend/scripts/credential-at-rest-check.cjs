@@ -141,7 +141,10 @@ function settingsModel(initial = {}) {
   });
 
   await check('H-37: Backup lässt refreshtokens aus, Manifest benennt das Credential-Material', async () => {
-    const data = { refreshtokens: [{ token: 'h' }], todos: [{ title: 't' }], 'system.views': [{}] };
+    const data = {
+      refreshtokens: [{ token: 'h' }], oauthtokens: [{ tokenHash: 'h' }], oauthcodes: [{ codeHash: 'h' }],
+      oauthauthrequests: [{ requestHash: 'h' }], oauthclients: [{ clientId: 'c' }], todos: [{ title: 't' }], 'system.views': [{}],
+    };
     const connection = {
       db: {
         listCollections: () => ({ toArray: async () => Object.keys(data).map((name) => ({ name })) }),
@@ -152,7 +155,7 @@ function settingsModel(initial = {}) {
     let json = '';
     for await (const chunk of svc.exportDatabaseStream()) json += chunk;
     const dump = JSON.parse(json);
-    assert.deepEqual(Object.keys(dump.collections), ['todos']);
+    assert.deepEqual(Object.keys(dump.collections), ['oauthclients', 'todos']);
     const manifest = svc.buildManifest({
       jobId: 'j', startedAt: new Date(), finishedAt: new Date(), mode: 'full_system', trigger: 'manual',
       bucket: 'b', objectPrefix: 'p', includeAttachments: false, artifacts: [],
@@ -160,7 +163,7 @@ function settingsModel(initial = {}) {
     assert.equal(manifest.includes.plaintextSecrets, undefined, 'das irreführende Feld muss weg sein');
     assert.equal(manifest.credentialMaterial.containsCredentialMaterial, true);
     assert.ok(manifest.credentialMaterial.items.some((i) => i.includes('passwordHash')));
-    assert.deepEqual(manifest.excludedCollections, ['refreshtokens']);
+    assert.deepEqual(manifest.excludedCollections, ['refreshtokens', 'oauthtokens', 'oauthcodes', 'oauthauthrequests']);
   });
 
   console.log(`\n${total - failures}/${total} passed`);

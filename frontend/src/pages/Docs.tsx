@@ -1,7 +1,18 @@
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import i18n from '../i18n';
+import McpConnectBox from '../components/McpConnectBox';
+import { SERVER_PLACEHOLDER, serverBaseFrom, useOAuthInfo } from '../hooks/useOAuthInfo';
+
+/** Instance address that replaces `http://[server]` in code samples, when known. */
+const ServerBaseContext = createContext<string>(SERVER_PLACEHOLDER);
+
+function useWithServer(): (node: React.ReactNode) => React.ReactNode {
+  const base = useContext(ServerBaseContext);
+  return (node) =>
+    typeof node === 'string' && base !== SERVER_PLACEHOLDER ? node.split(SERVER_PLACEHOLDER).join(base) : node;
+}
 
 type DocsSection = 'overview' | 'setup' | 'auth' | 'mcp' | 'ui' | 'projektarbeit' | 'wissen' | 'crm' | 'ops' | 'rag' | 'chat' | 'workflows' | 'replication' | 'api' | 'logs' | 'git' | 'architecture';
 
@@ -9,6 +20,7 @@ export default function Docs() {
   const [active, setActive] = useState<DocsSection>('overview');
   const { t } = useTranslation();
   const isDE = i18n.language === 'de';
+  const serverBase = serverBaseFrom(useOAuthInfo());
 
   const sections: { key: DocsSection; label: string }[] = [
     { key: 'overview', label: t('docs.navOverview') },
@@ -31,6 +43,7 @@ export default function Docs() {
   ];
 
   return (
+    <ServerBaseContext.Provider value={serverBase}>
     <div className="max-w-5xl mx-auto flex gap-8">
       {/* Sidebar Navigation */}
       <nav className="hidden md:block shrink-0 w-44 sticky top-8 self-start">
@@ -94,6 +107,7 @@ export default function Docs() {
         {active === 'architecture' && <ArchitectureSection />}
       </div>
     </div>
+    </ServerBaseContext.Provider>
   );
 }
 
@@ -736,6 +750,9 @@ function McpSection() {
   const countLabel = tools.length || '\u2026';
   return (
     <>
+      <div className="mb-10">
+        <McpConnectBox />
+      </div>
       <Section title={isDE ? `MCP-Tools (${countLabel})` : `MCP Tools (${countLabel})`}>
         <p className="text-gray-400 text-sm mb-4">
           {isDE
@@ -2123,15 +2140,17 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 }
 
 function Code({ children }: { children: React.ReactNode }) {
+  const withServer = useWithServer();
   return (
     <pre className="bg-gray-900 border border-gray-800 rounded-lg p-4 text-sm text-gray-300 overflow-x-auto">
-      <code>{children}</code>
+      <code>{withServer(children)}</code>
     </pre>
   );
 }
 
 function Mono({ children }: { children: React.ReactNode }) {
-  return <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded-sm text-xs">{children}</code>;
+  const withServer = useWithServer();
+  return <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded-sm text-xs">{withServer(children)}</code>;
 }
 
 function Hint({ children }: { children: React.ReactNode }) {

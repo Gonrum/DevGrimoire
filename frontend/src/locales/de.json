@@ -1195,7 +1195,8 @@
     "toolsScoped": "{{count}} erlaubt",
     "scopeAll": "alle Projekte",
     "scopeAllowlist": "{{count}} in Allowlist",
-    "scopeNone": "keine"
+    "scopeNone": "keine",
+    "oauthBadge": "OAuth"
   },
   "oracle": {
     "openCount": "Offene Risiken",
@@ -1970,7 +1971,12 @@
     "pushDeviceTitle": "Push-Benachrichtigungen auf diesem Gerät",
     "pushDeviceDesc": "Ohne Abo auf diesem Gerät kommen die Kategorien unten hier nicht an. Gilt pro Browser.",
     "pushDeviceUnsupported": "Dieser Browser unterstützt keine Push-Benachrichtigungen (oder die Seite läuft nicht über HTTPS).",
-    "pushDeviceDenied": "Im Browser blockiert — in den Website-Einstellungen erlauben und dann hier einschalten."
+    "pushDeviceDenied": "Im Browser blockiert — in den Website-Einstellungen erlauben und dann hier einschalten.",
+    "tabConnectedApps": "Verbundene Apps",
+    "apiKeyOAuthBadge": "OAuth",
+    "apiKeyOAuthPrefix": "OAuth-Token",
+    "apiKeyOAuthFixed": "Umfang fest",
+    "apiKeyOAuthFixedHint": "Der Umfang einer OAuth-Verbindung wurde bei der Freigabe festgelegt und lässt sich nicht bearbeiten. Zum Ändern widerrufen und neu verbinden."
   },
   "chat": {
     "open": "Chat öffnen",
@@ -3470,5 +3476,30 @@
     "forbidden": "Mit einem API-Schlüssel kann keine Freigabe erteilt werden. Melde dich im Browser als Nutzer an.",
     "loadFailed": "Die Anfrage konnte nicht geladen werden: {{message}}",
     "decideFailed": "Die Entscheidung konnte nicht gesendet werden: {{message}}"
+  },
+  "connectedApps": {
+    "description": "MCP-Clients (Claude Code, claude.ai, Claude Desktop …), denen du per Anmeldung Zugriff gegeben hast. Ein Widerruf wirkt sofort, auch auf offene Verbindungen.",
+    "listTitle": "Verbundene Apps",
+    "empty": "Noch keine App verbunden.",
+    "client": "Client",
+    "scope": "Umfang",
+    "created": "Verbunden am",
+    "lastUsed": "Zuletzt benutzt",
+    "revoke": "Widerrufen",
+    "revokeConfirm": "Wirklich widerrufen?",
+    "scopeAll": "Alles, was du sehen darfst",
+    "scopeNone": "Keine Projekte",
+    "scopeProjects_one": "{{count}} Projekt",
+    "scopeProjects_other": "{{count}} Projekte"
+  },
+  "mcpConnect": {
+    "title": "Verbinden",
+    "claudeCode": "Claude Code",
+    "claudeCodeHint": "Danach in Claude Code /mcp aufrufen → devgrimoire → Authenticate. Der Browser öffnet die Freigabe-Seite.",
+    "connector": "claude.ai / Claude Desktop",
+    "connectorHint": "Einstellungen → Connectors → Eigenen Connector hinzufügen → diese URL eintragen.",
+    "apiKeyToggle": "Alternative: mit API-Key",
+    "apiKeyIntro": "Mit einem API-Key aus Einstellungen → API Keys (Streamable HTTP, Header):",
+    "apiKeySse": "Oder per SSE mit Query-Parameter (für Clients ohne eigene Header):"
   }
 }

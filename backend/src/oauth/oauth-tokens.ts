@@ -24,6 +24,14 @@ export const REFRESH_REUSE_GRACE_MS = 10 * 1000;
 /** Lifetime of the hidden API key behind an approved connection. */
 export const CONNECTION_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 /**
+ * Lifetime of a connection between approval and the first code redemption.
+ * The code itself lives 60 s; an approval that is never redeemed must not
+ * leave a token-less connection behind for a year.
+ */
+export const PENDING_CONNECTION_TTL_MS = 10 * 60 * 1000;
+/** `lastUsedAt` of a connection is written at most this often. */
+export const LAST_USED_WRITE_INTERVAL_MS = 60 * 1000;
+/**
  * Used codes are kept this long past their expiry so a late replay is still
  * recognised as a replay (and revokes the connection) rather than as unknown.
  */

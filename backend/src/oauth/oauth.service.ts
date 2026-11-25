@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, Logger, NotFoundException } fr
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
+import type { ScopeMode } from '../common/permissions';
 import type { AuthorizationParams } from '@modelcontextprotocol/sdk/server/auth/provider.js';
 import {
   InvalidClientMetadataError,
@@ -18,6 +19,7 @@ import type {
 } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { ApiKey, ApiKeyDocument } from '../api-keys/schemas/api-key.schema';
 import { ApiKeysService } from '../api-keys/api-keys.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import {
   CustomerProjectLink,
   CustomerProjectLinkDocument,
@@ -32,9 +34,12 @@ import {
   ACCESS_TOKEN_TTL_MS,
   AUTH_CODE_TTL_MS,
   AUTH_REQUEST_TTL_MS,
+  CONNECTION_TTL_MS,
+  LAST_USED_WRITE_INTERVAL_MS,
   MAX_ECHO_LENGTH,
   MAX_REDIRECT_URIS,
   OAUTH_SCOPE,
+  PENDING_CONNECTION_TTL_MS,
   REFRESH_REUSE_GRACE_MS,
   REFRESH_TOKEN_PREFIX,
   REFRESH_TOKEN_TTL_MS,
@@ -56,9 +61,10 @@ import {
 /** EventEmitter2 event, payload {@link OAuthConnectionRevokedEvent}. */
 export const OAUTH_CONNECTION_REVOKED = 'oauth.connection.revoked';
 
-/** Why a connection was revoked — for the audit trail wired in later. */
+/** Why a connection was revoked (event payload and audit trail). */
 export type OAuthRevokeReason =
   | 'user'
+  | 'admin'
   | 'account'
   | 'code_replay'
   | 'refresh_replay'
@@ -88,6 +94,21 @@ export interface OAuthAuthRequestInfo {
   scopes: string[];
   expiresAt: Date;
 }
+
+/** One entry of the "connected apps" list. No secret material. */
+export interface OAuthConnectionInfo {
+  id: string;
+  clientId: string;
+  clientName: string;
+  projectScopeMode: ScopeMode;
+  allowedProjectIds: string[];
+  createdAt?: Date;
+  lastUsedAt?: Date;
+  expiresAt?: Date;
+}
+
+/** Public switch for the UI: whether OAuth login is offered, and where. */
+export type OAuthInfo = { enabled: false } | { enabled: true; mcpUrl: string };
 
 export interface OAuthAccessTokenInfo {
   apiKeyId: string;
@@ -119,6 +140,8 @@ interface TokenGrant {
   resource: string;
 }
 
+type GrantType = 'authorization_code' | 'refresh_token';
+
 /**
  * MCP OAuth authorization server core: clients, consent requests, codes and
  * tokens. One approved consent = one hidden API key (`kind: 'oauth'`, the
@@ -145,11 +168,18 @@ export class OAuthService {
     @InjectModel(CustomerProjectLink.name) private readonly linkModel: Model<CustomerProjectLinkDocument>,
     private readonly apiKeys: ApiKeysService,
     private readonly events: EventEmitter2,
+    private readonly auditLog: AuditLogService,
     @Inject(OAUTH_OPTIONS) private readonly options: OAuthCoreOptions,
   ) {}
 
   private now(): number {
     return this.options.now();
+  }
+
+  /** Whether OAuth login is offered; safe to expose without authentication. */
+  info(): OAuthInfo {
+    const resource = this.options.resource;
+    return resource ? { enabled: true, mcpUrl: resource } : { enabled: false };
   }
 
   private requireResource(): string {
@@ -329,7 +359,14 @@ export class OAuthService {
     if (!req) throw new NotFoundException('Authorization request not found, expired or already used');
 
     const redirect = new URL(req.redirectUri);
+    const consentMeta = { clientId: req.clientId, clientName: req.clientName, redirectHost: redirect.host };
     if (!d.approve) {
+      await this.auditLog.record({
+        action: 'oauth.consent.denied',
+        entityType: 'oauth_client',
+        meta: consentMeta,
+        actor: { userId },
+      });
       redirect.searchParams.set('error', 'access_denied');
       if (req.state !== undefined) redirect.searchParams.set('state', req.state);
       return { redirectUrl: redirect.href };
@@ -343,7 +380,16 @@ export class OAuthService {
       userId,
       clientId: client.clientId,
       clientName: client.clientName ?? client.clientId,
+      // Provisional until the code is redeemed (see exchangeCode).
+      expiresAt: new Date(now + PENDING_CONNECTION_TTL_MS),
       ...(projectIds ? { projectIds, customerIds } : {}),
+    });
+    await this.auditLog.record({
+      action: 'oauth.consent.approved',
+      entityType: 'apikey',
+      entityId: key._id.toString(),
+      meta: { ...consentMeta, projectIds: projectIds ?? 'all', customerIds: customerIds ?? 'all' },
+      actor: { userId },
     });
     // An approved client no longer expires as "never used".
     await this.clientModel.updateOne({ clientId: client.clientId }, { $unset: { expiresAt: '' } }).exec();
@@ -462,17 +508,22 @@ export class OAuthService {
     if (!(await this.findActiveConnection(doc.apiKeyId))) {
       throw new InvalidGrantError('Connection was revoked');
     }
-    return this.issueTokens({
-      clientId: doc.clientId,
-      apiKeyId: doc.apiKeyId,
-      userId: doc.userId,
-      resource: doc.resource,
-    });
+    // First redemption: the provisional connection becomes a real one.
+    await this.apiKeyModel
+      .updateOne(
+        { _id: doc.apiKeyId, kind: 'oauth', active: true },
+        { $set: { expiresAt: new Date(this.now() + CONNECTION_TTL_MS) }, $unset: { oauthPending: '' } },
+      )
+      .exec();
+    return this.issueTokens(
+      { clientId: doc.clientId, apiKeyId: doc.apiKeyId, userId: doc.userId, resource: doc.resource },
+      'authorization_code',
+    );
   }
 
   // ------------------------------------------------------------------ tokens
 
-  private async issueTokens(grant: TokenGrant): Promise<OAuthTokens> {
+  private async issueTokens(grant: TokenGrant, grantType: GrantType): Promise<OAuthTokens> {
     const now = this.now();
     const accessToken = newAccessToken();
     const refreshToken = newRefreshToken();
@@ -494,6 +545,14 @@ export class OAuthService {
       tokenHash: hashSecret(refreshToken),
       type: 'refresh',
       expiresAt: new Date(now + REFRESH_TOKEN_TTL_MS),
+    });
+    // Never the tokens themselves, not even a prefix of them.
+    await this.auditLog.record({
+      action: 'oauth.token.issued',
+      entityType: 'apikey',
+      entityId: grant.apiKeyId.toString(),
+      meta: { clientId: grant.clientId, grant: grantType },
+      actor: { userId: grant.userId.toString(), apiKeyId: grant.apiKeyId.toString() },
     });
     return {
       access_token: accessToken,
@@ -529,6 +588,13 @@ export class OAuthService {
     if (doc.replacedAt) {
       if (now - doc.replacedAt.getTime() > REFRESH_REUSE_GRACE_MS) {
         this.logger.warn(`OAuth refresh token reused; revoking connection ${doc.apiKeyId.toString()}`);
+        await this.auditLog.record({
+          action: 'oauth.refresh.reused',
+          entityType: 'apikey',
+          entityId: doc.apiKeyId.toString(),
+          meta: { clientId: doc.clientId, replacedAt: doc.replacedAt },
+          actor: { userId: doc.userId.toString(), apiKeyId: doc.apiKeyId.toString() },
+        });
         await this.revokeConnection(doc.apiKeyId.toString(), 'refresh_replay');
       }
       throw new InvalidGrantError('Refresh token already used');
@@ -548,12 +614,10 @@ export class OAuthService {
     // A parallel refresh with the same token won; it got the new pair.
     if (!rotated) throw new InvalidGrantError('Refresh token already used');
 
-    return this.issueTokens({
-      clientId: doc.clientId,
-      apiKeyId: doc.apiKeyId,
-      userId: doc.userId,
-      resource: doc.resource,
-    });
+    return this.issueTokens(
+      { clientId: doc.clientId, apiKeyId: doc.apiKeyId, userId: doc.userId, resource: doc.resource },
+      'refresh_token',
+    );
   }
 
   /**
@@ -566,15 +630,22 @@ export class OAuthService {
     const doc = await this.findToken(token, 'access');
     if (!doc || doc.expiresAt.getTime() <= this.now()) throw new InvalidTokenError('Invalid or expired access token');
     if (!resource || doc.resource !== resource) throw new InvalidTokenError('Invalid or expired access token');
-    if (!(await this.findActiveConnection(doc.apiKeyId))) {
-      throw new InvalidTokenError('Invalid or expired access token');
-    }
+    const connection = await this.findActiveConnection(doc.apiKeyId);
+    if (!connection) throw new InvalidTokenError('Invalid or expired access token');
+    await this.touchConnection(doc.apiKeyId, connection.lastUsedAt);
     return {
       apiKeyId: doc.apiKeyId.toString(),
       clientId: doc.clientId,
       expiresAt: Math.floor(doc.expiresAt.getTime() / 1000),
       resource: doc.resource,
     };
+  }
+
+  /** "Last used" for the connected-apps list, written at most once a minute. */
+  private async touchConnection(apiKeyId: Types.ObjectId, lastUsedAt: Date | undefined): Promise<void> {
+    const now = this.now();
+    if (lastUsedAt && now - lastUsedAt.getTime() < LAST_USED_WRITE_INTERVAL_MS) return;
+    await this.apiKeyModel.updateOne({ _id: apiKeyId }, { $set: { lastUsedAt: new Date(now) } }).exec();
   }
 
   private async findActiveConnection(apiKeyId: Types.ObjectId): Promise<ApiKey | null> {
@@ -597,15 +668,89 @@ export class OAuthService {
   async revokeConnection(apiKeyId: string, reason: OAuthRevokeReason = 'user'): Promise<void> {
     if (typeof apiKeyId !== 'string' || !Types.ObjectId.isValid(apiKeyId)) return;
     const id = new Types.ObjectId(apiKeyId);
-    const res = await this.apiKeyModel
-      .updateOne({ _id: id, kind: 'oauth' }, { $set: { active: false } })
+    // Only an active connection is switched off (and reported); tokens and
+    // codes are cleared either way.
+    const before = await this.apiKeyModel
+      .findOneAndUpdate({ _id: id, kind: 'oauth', active: true }, { $set: { active: false } })
+      .lean<ApiKey>()
       .exec();
     await this.tokenModel.deleteMany({ apiKeyId: id }).exec();
     await this.codeModel.deleteMany({ apiKeyId: id }).exec();
-    if (res.matchedCount > 0) {
+    if (before) {
       const payload: OAuthConnectionRevokedEvent = { apiKeyId: id.toString(), reason };
       this.events.emit(OAUTH_CONNECTION_REVOKED, payload);
+      await this.auditLog.record({
+        action: 'oauth.connection.revoked',
+        entityType: 'apikey',
+        entityId: id.toString(),
+        meta: {
+          reason,
+          clientId: before.oauthClientId,
+          clientName: before.oauthClientName,
+          ownerUserId: before.userId.toString(),
+        },
+      });
     }
+  }
+
+  // ------------------------------------------------------------------ connected apps
+
+  /**
+   * The user's connections that currently grant access ("connected apps"):
+   * active, not expired, and redeemed (pending approvals are left out).
+   */
+  async listConnections(userId: string): Promise<OAuthConnectionInfo[]> {
+    if (typeof userId !== 'string' || !Types.ObjectId.isValid(userId)) return [];
+    const keys = await this.apiKeyModel
+      .find({ userId: new Types.ObjectId(userId), kind: 'oauth', active: true, oauthPending: { $ne: true } })
+      .select('-keyHash')
+      .sort({ createdAt: -1 })
+      .lean<(ApiKey & { _id: Types.ObjectId })[]>()
+      .exec();
+    const now = this.now();
+    return keys
+      .filter((k) => !k.expiresAt || k.expiresAt.getTime() > now)
+      .map((k) => ({
+        id: k._id.toString(),
+        clientId: k.oauthClientId ?? '',
+        clientName: k.oauthClientName ?? k.name,
+        projectScopeMode: k.projectScopeMode,
+        allowedProjectIds: (k.allowedProjectIds ?? []).map(String),
+        createdAt: k.createdAt,
+        lastUsedAt: k.lastUsedAt,
+        expiresAt: k.expiresAt,
+      }));
+  }
+
+  /** Revokes one of the user's own connections; anything else is 404. */
+  async revokeOwnConnection(userId: string, apiKeyId: string): Promise<void> {
+    if (typeof userId !== 'string' || !Types.ObjectId.isValid(userId)) {
+      throw new NotFoundException('Connection not found');
+    }
+    await this.revokeMatching({ userId: new Types.ObjectId(userId) }, apiKeyId, 'user');
+  }
+
+  /** Admin: revokes any user's connection; standard API keys are 404. */
+  async revokeAnyConnection(apiKeyId: string): Promise<void> {
+    await this.revokeMatching({}, apiKeyId, 'admin');
+  }
+
+  private async revokeMatching(
+    owner: { userId?: Types.ObjectId },
+    apiKeyId: string,
+    reason: OAuthRevokeReason,
+  ): Promise<void> {
+    if (typeof apiKeyId !== 'string' || !Types.ObjectId.isValid(apiKeyId)) {
+      throw new NotFoundException('Connection not found');
+    }
+    const id = new Types.ObjectId(apiKeyId);
+    const key = await this.apiKeyModel
+      .findOne({ _id: id, kind: 'oauth', active: true, ...owner })
+      .select('_id')
+      .lean()
+      .exec();
+    if (!key) throw new NotFoundException('Connection not found');
+    await this.revokeConnection(id.toString(), reason);
   }
 
   /** Revokes every active OAuth connection of a user; returns how many. */

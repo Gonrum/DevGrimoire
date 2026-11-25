@@ -1,12 +1,11 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, PipelineStage, Types } from 'mongoose';
 import { randomBytes, createHash, timingSafeEqual } from 'crypto';
 import { ApiKey, ApiKeyDocument } from './schemas/api-key.schema';
 import type { ScopeMode } from '../common/permissions';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { RequestContext } from '../common/request-context';
-import { CONNECTION_TTL_MS as OAUTH_CONNECTION_TTL_MS } from '../oauth/oauth-tokens';
 
 interface ScopeFields {
   permissions?: string[];
@@ -31,6 +30,16 @@ interface ScopePatch {
   allowedProjectIds?: Types.ObjectId[];
   customerScopeMode?: ScopeMode;
   allowedCustomerIds?: Types.ObjectId[];
+}
+
+/** Not expired at `now` (keys without `expiresAt` never expire). */
+function notExpired(now: Date) {
+  return { $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }] };
+}
+
+/** An OAuth connection that grants access: revoked, pending or expired ones do not. */
+function liveOAuthConnection(now: Date) {
+  return { kind: 'oauth', active: true, oauthPending: { $ne: true }, ...notExpired(now) };
 }
 
 /** Eine `$lookup`-angereicherte API-Key-Zeile aus der Aggregation. */
@@ -188,6 +197,9 @@ export class ApiKeysService {
    * Scope per axis: ids omitted = 'all' (the user's own rights), ids given =
    * 'allowlist', an empty list = 'none' (fail closed, never "everything").
    *
+   * The connection starts out pending (`oauthPending`, short `expiresAt`):
+   * `OAuthService` activates it when the first code is redeemed.
+   *
    * Requires a user session like every other key mutation — a narrowed API
    * key must not mint itself an unrestricted connection.
    */
@@ -195,6 +207,8 @@ export class ApiKeysService {
     userId: string;
     clientId: string;
     clientName: string;
+    /** Provisional expiry; extended when the first code is redeemed. */
+    expiresAt: Date;
     projectIds?: string[];
     customerIds?: string[];
   }): Promise<ApiKeyDocument> {
@@ -216,9 +230,11 @@ export class ApiKeysService {
       prefix: 'oauth',
       name: `OAuth: ${input.clientName}`,
       userId: new Types.ObjectId(input.userId),
-      expiresAt: new Date(Date.now() + OAUTH_CONNECTION_TTL_MS),
+      expiresAt: input.expiresAt,
       kind: 'oauth',
       oauthClientId: input.clientId,
+      oauthClientName: input.clientName,
+      oauthPending: true,
       permissions: [],
       projectScopeMode: projects.mode,
       allowedProjectIds: projects.ids,
@@ -294,6 +310,17 @@ export class ApiKeysService {
     // damit untypisiert bis in den Controller. Der Parameter ändert nichts an
     // der Pipeline, macht aber die deklarierte Rückgabe zur geprüften Aussage.
     const rows = await this.apiKeyModel.aggregate<ApiKeyRowWithOwner>([
+      // OAuth connections are listed (marked via `kind`) only while they
+      // grant access: revoked and not yet redeemed ones are left out.
+      { $match: { $or: [{ kind: { $ne: 'oauth' } }, liveOAuthConnection(new Date())] } },
+      ...this.ownerLookupStages(),
+    ]).exec();
+    return rows;
+  }
+
+  /** Sort, owner username, `kind` default for legacy rows, no `keyHash`. */
+  private ownerLookupStages(): PipelineStage[] {
+    return [
       { $sort: { createdAt: -1 } },
       {
         $lookup: {
@@ -307,17 +334,18 @@ export class ApiKeysService {
       {
         $addFields: {
           ownerUsername: { $arrayElemAt: ['$owner.username', 0] },
+          kind: { $ifNull: ['$kind', 'standard'] },
         },
       },
       { $project: { keyHash: 0, owner: 0 } },
-    ]).exec();
-    return rows;
+    ];
   }
 
   /**
    * T-337: reverse lookup — which API keys can access the given project?
    * Match `projectScopeMode === 'all'` (broad) OR allowedProjectIds includes
-   * the id (narrow allowlist). Includes owner usernames.
+   * the id (narrow allowlist). Includes owner usernames; OAuth connections
+   * are marked by `kind: 'oauth'` and `oauthClientName`.
    */
   async findByProjectAccess(
     projectId: string,
@@ -329,28 +357,17 @@ export class ApiKeysService {
     const rows = await this.apiKeyModel.aggregate<ApiKeyRowWithOwner>([
       {
         $match: {
-          $or: [
-            { projectScopeMode: 'all' },
-            { allowedProjectIds: pid },
+          // Only keys that can be used right now count as access: active,
+          // not expired, and no OAuth connection still waiting for its code.
+          active: true,
+          oauthPending: { $ne: true },
+          $and: [
+            { $or: [{ projectScopeMode: 'all' }, { allowedProjectIds: pid }] },
+            notExpired(new Date()),
           ],
         },
       },
-      { $sort: { createdAt: -1 } },
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'userId',
-          foreignField: '_id',
-          as: 'owner',
-          pipeline: [{ $project: { username: 1 } }],
-        },
-      },
-      {
-        $addFields: {
-          ownerUsername: { $arrayElemAt: ['$owner.username', 0] },
-        },
-      },
-      { $project: { keyHash: 0, owner: 0 } },
+      ...this.ownerLookupStages(),
     ]).exec();
     return rows;
   }
@@ -362,6 +379,7 @@ export class ApiKeysService {
   ): Promise<ApiKeyDocument> {
     this.assertUserSession('Updating an API key');
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException(`API Key ${id} not found`);
+    await this.refuseOAuthConnection(id, userId, 'edited');
     const patch: Record<string, unknown> = {};
     const unset: Record<string, unknown> = {};
 
@@ -385,7 +403,7 @@ export class ApiKeysService {
     if (Object.keys(unset).length) ops.$unset = unset;
 
     const apiKey = await this.apiKeyModel
-      .findOneAndUpdate({ _id: id, userId }, ops, { new: true })
+      .findOneAndUpdate({ _id: id, userId, kind: { $ne: 'oauth' } }, ops, { new: true })
       .select('-keyHash')
       .exec();
     if (!apiKey) throw new NotFoundException(`API Key ${id} not found`);
@@ -413,12 +431,33 @@ export class ApiKeysService {
     return apiKey;
   }
 
+  /**
+   * OAuth connections are not managed through the API-key routes: their
+   * scope is fixed at consent, and revoking must go through `OAuthService`
+   * (tokens deleted, event emitted, open MCP sessions closed). Deleting the
+   * key here would skip all of that.
+   */
+  private async refuseOAuthConnection(id: string, userId: string, verb: 'edited' | 'revoked'): Promise<void> {
+    const key = await this.apiKeyModel
+      .findOne({ _id: new Types.ObjectId(id), userId, kind: 'oauth' })
+      .select('_id')
+      .lean()
+      .exec();
+    if (key) {
+      throw new BadRequestException(
+        `OAuth connections cannot be ${verb} here; use "Connected apps" (DELETE /api/oauth/connections/:id)`,
+      );
+    }
+  }
+
   async revoke(keyId: string, userId: string): Promise<void> {
     this.assertUserSession('Revoking an API key');
     if (!Types.ObjectId.isValid(keyId)) throw new NotFoundException(`API Key ${keyId} not found`);
+    await this.refuseOAuthConnection(keyId, userId, 'revoked');
     const result = await this.apiKeyModel.findOneAndDelete({
       _id: keyId,
       userId,
+      kind: { $ne: 'oauth' },
     }).exec();
     if (!result) throw new NotFoundException(`API Key ${keyId} not found`);
     await this.auditLog.record({

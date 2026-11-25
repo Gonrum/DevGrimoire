@@ -162,6 +162,24 @@ export interface OAuthConsentRequest {
   expiresAt: string;
 }
 
+/** One entry of "Connected apps" (`GET /api/oauth/connections`). */
+export interface OAuthConnection {
+  id: string;
+  clientId: string;
+  clientName: string;
+  projectScopeMode: ScopeMode;
+  allowedProjectIds: string[];
+  createdAt?: string;
+  lastUsedAt?: string;
+  expiresAt?: string;
+}
+
+/** `GET /api/oauth/info` (public): whether OAuth login is offered, and the MCP URL. */
+export interface OAuthInfo {
+  enabled: boolean;
+  mcpUrl?: string;
+}
+
 export interface Project {
   _id: string;
   name: string;
@@ -1484,6 +1502,9 @@ export interface ApiKeyInfo {
   ownerUsername?: string;
   /** T-337: only set on admin-list endpoint. */
   userId?: string;
+  /** 'oauth' = connection of an MCP client (admin list and project access only). */
+  kind?: 'standard' | 'oauth';
+  oauthClientName?: string;
 }
 
 export interface ProjectAccess {
@@ -3154,6 +3175,13 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+    info: () => request<OAuthInfo>('/oauth/info'),
+    connections: () => request<OAuthConnection[]>('/oauth/connections'),
+    revokeConnection: (id: string) =>
+      request<{ revoked: boolean }>(`/oauth/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** Admin: revoke any user's connection (admin key overview). */
+    adminRevokeConnection: (id: string) =>
+      request<{ revoked: boolean }>(`/oauth/admin/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
   mcp: {
     tools: () =>
