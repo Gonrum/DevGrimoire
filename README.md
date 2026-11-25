@@ -167,8 +167,11 @@ Environment variables in `.env`:
 | `MINIO_ACCESS_KEY` | MinIO access key | For Files |
 | `MINIO_SECRET_KEY` | MinIO secret key | For Files |
 | `MINIO_BUCKET` | Bucket name (default: `devgrimoire`) | No |
+| `PUBLIC_BASE_URL` | Public https origin of this instance, e.g. `https://devgrimoire.example.com` (no path). Enables MCP login via OAuth and the server icon in MCP clients | For OAuth |
+| `TRUST_PROXY` | Number of reverse-proxy hops in front of the backend (default `1` = nginx). Behind an extra proxy (Traefik, Caddy, …) use `2`, so rate limits and login throttling see the real client IP | No |
+| `LLM_FIRST_TOKEN_TIMEOUT_MS` | How long a chat turn may wait for the model's first byte (model load + prompt processing), default `290000` | No |
 
-\* Without `AUTH_USERNAME`/`AUTH_PASSWORD`, authentication is disabled.
+\* Without `AUTH_USERNAME`/`AUTH_PASSWORD`, authentication is disabled (and with it OAuth).
 
 ```bash
 # Generate encryption key:
@@ -177,20 +180,42 @@ openssl rand -hex 32
 
 ## MCP Configuration
 
-### Remote Connection (HTTP/SSE -- recommended)
+### Login via OAuth (recommended: Claude Code, claude.ai, Claude Desktop)
+
+With `PUBLIC_BASE_URL` set (public https address) and authentication enabled, MCP clients connect without an API key: they open a browser, you log in to DevGrimoire and approve the client.
+
+```bash
+# Claude Code
+claude mcp add --transport http devgrimoire https://<your-instance>/mcp
+# then in Claude Code: /mcp → devgrimoire → Authenticate
+```
+
+**claude.ai / Claude Desktop:** Settings → Connectors → Add custom connector → URL `https://<your-instance>/mcp`.
+
+- The consent page shows the client name, the redirect host and lets you restrict access to selected projects (customers are limited to those linked to the chosen projects). Without a selection the client gets exactly your own rights.
+- **Settings → Connected apps** lists all approved clients and revokes them immediately (open MCP sessions are closed). Password change, deactivation or deletion of your account revokes all of them.
+- OAuth works **only on `/mcp`** (Streamable HTTP) and only with the exact `PUBLIC_BASE_URL` address -- not with a LAN IP or `localhost`. `/sse` stays an API-key transport and answers with a hint to `/mcp`.
+- The settings page and the in-app docs show the ready-made command and connector URL for your instance.
+- Tokens: access 1 h, refresh 30 days (rotating, re-use revokes the connection), PKCE mandatory, all tokens stored as hashes only.
+
+### Remote Connection with API key (HTTP/SSE)
 
 When the Docker stack is running, Claude can access DevGrimoire from any machine on the network -- no local installation required.
 
 Connect through nginx on port 80 (`/mcp`, `/sse`, `/messages`). The backend's direct port 3200 is bound to `127.0.0.1` by default; set `BACKEND_BIND=0.0.0.0` in `.env` only if a client really has to bypass nginx.
 
-In `~/.claude.json` (Claude Code) or `claude_desktop_config.json` (Claude Desktop):
+```bash
+claude mcp add --transport http devgrimoire http://<hostname>/mcp --header "Authorization: Bearer cv_..."
+```
+
+Or in `~/.claude.json` (Claude Code) or `claude_desktop_config.json` (Claude Desktop):
 
 ```json
 {
   "mcpServers": {
     "devgrimoire": {
       "type": "sse",
-      "url": "http://<hostname>/sse"
+      "url": "http://<hostname>/sse?apiKey=cv_..."
     }
   }
 }
@@ -206,7 +231,11 @@ In `~/.claude.json` (Claude Code) or `claude_desktop_config.json` (Claude Deskto
 | `GET /.well-known/mcp-server.json` | Same manifest under a well-known path |
 | `GET /sse` | Legacy SSE (Claude Code, Claude Desktop) |
 | `POST /messages` | Legacy SSE message endpoint |
-| `POST\|GET\|DELETE /mcp` | Streamable HTTP (newer clients) |
+| `POST\|GET\|DELETE /mcp` | Streamable HTTP (newer clients); accepts API keys and OAuth tokens |
+| `GET /.well-known/oauth-protected-resource/mcp`, `GET /.well-known/oauth-authorization-server` | OAuth metadata (only with `PUBLIC_BASE_URL`) |
+| `GET /authorize`, `POST /token`, `POST /register`, `POST /revoke` | OAuth authorization server (dynamic client registration, PKCE) |
+
+The `initialize` response carries `title`, `websiteUrl` and `icons` (from `PUBLIC_BASE_URL`), so connector lists can show the DevGrimoire icon; `/favicon.ico` serves the same icon.
 
 Discovery and manifest endpoints intentionally expose only server metadata: supported transports, auth hints, capability counts, registry-style remote URLs, and a link to `/api/mcp/tools`. The generated `server.json` uses the local namespace `local.devgrimoire/devgrimoire`, explicitly does not opt into public Registry publishing, and contains no project/customer/user data or secrets. The tool catalog and all project/customer data remain protected by normal API/MCP authentication when auth is enabled.
 
@@ -238,7 +267,7 @@ For MCP clients that do not speak HTTP/SSE directly, proxy the running HTTP MCP 
 
 Drop `--allow-http` when the endpoint is served over HTTPS. Generate the API key via the DevGrimoire UI (Settings → API Keys) and scope it explicitly -- the key is what authorises the MCP session.
 
-> **Note:** When authentication is enabled, the HTTP MCP transports require a DevGrimoire API key (`Authorization: Bearer cv_...` or `?apiKey=cv_...`). When authentication is disabled, all endpoints including MCP are open and must be restricted via firewall or VPN.
+> **Note:** When authentication is enabled, the HTTP MCP transports require a DevGrimoire API key (`Authorization: Bearer cv_...` or `?apiKey=cv_...`) or, on `/mcp`, an OAuth login (see above). When authentication is disabled, all endpoints including MCP are open and must be restricted via firewall or VPN.
 
 For GitHub Copilot Cloud Agent, use a dedicated scoped API key and explicit `tools` allowlist. See [GitHub Copilot Cloud Agent MCP Preset](docs/copilot-cloud-agent-mcp.md).
 
@@ -257,7 +286,8 @@ DevGrimoire supports multi-user authentication with roles:
 - **Refresh Token** -- Opaque, valid for 7 days, stored in MongoDB with TTL index, rotated on use
 - **API Keys** -- For programmatic access (e.g., CI/CD), restrictable by user role, explicit MCP `allowedTools`, and project/customer scopes
 - **SSE** -- Auth via `?token=...` query parameter for UI event streams (EventSource does not support headers)
-- **MCP Server** -- stdio is local-process only; HTTP/SSE transports require a DevGrimoire API key when authentication is enabled
+- **MCP Server** -- stdio is local-process only; HTTP/SSE transports require a DevGrimoire API key when authentication is enabled; `/mcp` additionally accepts OAuth logins (Claude Code, claude.ai, Claude Desktop) when `PUBLIC_BASE_URL` is set
+- **Connected apps** -- OAuth clients approved by a user; listed and revocable under Settings → Connected apps, audited (approval, denial, first token, refresh misuse, revocation)
 
 On first startup, an admin account is created from `AUTH_USERNAME`/`AUTH_PASSWORD`. Additional users can be created in the dashboard under user management.
 

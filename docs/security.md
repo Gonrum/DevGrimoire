@@ -51,6 +51,18 @@ For legacy SSE clients that cannot send headers:
 
 The local stdio MCP server remains local-process only and does not use HTTP auth.
 
+### OAuth login on `/mcp`
+
+With `PUBLIC_BASE_URL` set (https, no path) and authentication enabled, `/mcp` additionally accepts OAuth access tokens (`Authorization: Bearer dgo_at_…`, header only) issued by DevGrimoire's built-in authorization server (MCP SDK auth router):
+
+- Metadata: `/.well-known/oauth-protected-resource/mcp`, `/.well-known/oauth-authorization-server`; endpoints `/authorize`, `/token`, `/register`, `/revoke`. Every 401 on `/mcp` carries `WWW-Authenticate: Bearer resource_metadata="…"`.
+- Dynamic client registration with public clients only (`token_endpoint_auth_method: none`); redirect URIs must be https or loopback, never the instance's own origin. PKCE S256 is mandatory; tokens are bound to the resource `<PUBLIC_BASE_URL>/mcp`.
+- The user approves each client on a consent page that shows client name and redirect host and can restrict the connection to selected projects (customers follow the projects). A connection is a hidden API key (`kind: 'oauth'`), so the existing scope checks (`actorFromApiKey`) apply and a connection never exceeds its user.
+- Access tokens 1 h, refresh tokens 30 days, rotating; re-use of a replaced refresh token after a 10 s grace window revokes the connection. Codes are single-use (60 s); replay revokes. Tokens, codes and consent request ids are stored as SHA-256 hashes only and excluded from backups and logs.
+- Revocation (Settings → Connected apps, admin, password change, deactivation, deletion) is immediate and closes the connection's open MCP sessions.
+- `/sse` and `/messages` stay API-key transports; OAuth tokens there are refused with a hint to `/mcp`.
+- Behind additional reverse proxies set `TRUST_PROXY` to the hop count so rate limits (`/register` 10/h, `/token` 60/min, `/authorize` 30/min per IP) and login throttling see the real client IP.
+
 ### GitHub Copilot Cloud Agent
 
 For GitHub Copilot Cloud Agent, configure a dedicated API key and an explicit MCP `tools` allowlist. GitHub documents that the cloud agent can call configured MCP tools autonomously, so do not provide wildcard `*` or an unrestricted production key. Use `COPILOT_MCP_...` GitHub secrets/variables for the DevGrimoire URL and API key, and start with a read-only preset. See [GitHub Copilot Cloud Agent MCP Preset](copilot-cloud-agent-mcp.md).

@@ -288,14 +288,24 @@ openssl rand -hex 32`}</Code>
               ? (<>Empfohlen: <Mono>claude mcp add</Mono> registriert den Server in der CLI &mdash; ohne manuelles Editieren von <Mono>~/.claude.json</Mono>.</>)
               : (<>Recommended: <Mono>claude mcp add</Mono> registers the server in the CLI &mdash; no manual editing of <Mono>~/.claude.json</Mono> required.</>)}
           </p>
-          <Code>{`# Ohne Auth (Streamable HTTP, empfohlen)
+          <Code>{isDE ? `# Browser-Login per OAuth (empfohlen, braucht PUBLIC_BASE_URL)
 claude mcp add --transport http devgrimoire http://[server]/mcp
+# danach in Claude Code: /mcp → devgrimoire → Authenticate
 
-# Mit API-Key (Header — empfohlen, Streamable HTTP)
+# Mit API-Key (Header, Streamable HTTP)
 claude mcp add --transport http devgrimoire http://[server]/mcp \\
   --header "Authorization: Bearer cv_..."
 
-# Mit API-Key (Query-Parameter, SSE)
+# Mit API-Key (Query-Parameter, SSE — ohne OAuth)
+claude mcp add --transport sse devgrimoire "http://[server]/sse?apiKey=cv_..."` : `# Browser login via OAuth (recommended, needs PUBLIC_BASE_URL)
+claude mcp add --transport http devgrimoire http://[server]/mcp
+# then in Claude Code: /mcp → devgrimoire → Authenticate
+
+# With API key (header, Streamable HTTP)
+claude mcp add --transport http devgrimoire http://[server]/mcp \\
+  --header "Authorization: Bearer cv_..."
+
+# With API key (query parameter, SSE — no OAuth)
 claude mcp add --transport sse devgrimoire "http://[server]/sse?apiKey=cv_..."`}</Code>
           <Hint>
             {isDE ? (
@@ -333,6 +343,21 @@ claude mcp add --transport sse devgrimoire "http://[server]/sse?apiKey=cv_..."`}
         </Step>
 
         <Step n={2} title="Claude Desktop App">
+          <p className="text-gray-400 text-sm mb-2">
+            {isDE ? (
+              <>
+                Empfohlen (mit <Mono>PUBLIC_BASE_URL</Mono>): Einstellungen &rarr; Connectors &rarr; Eigenen Connector hinzuf&uuml;gen,
+                URL <Mono>http://[server]/mcp</Mono>, dann im Browser bei DevGrimoire anmelden und freigeben &mdash; gilt genauso f&uuml;r claude.ai.
+                Verbundene Clients stehen unter Einstellungen &rarr; Verbundene Apps. Alternativ ohne OAuth:
+              </>
+            ) : (
+              <>
+                Recommended (with <Mono>PUBLIC_BASE_URL</Mono>): Settings &rarr; Connectors &rarr; Add custom connector,
+                URL <Mono>http://[server]/mcp</Mono>, then log in to DevGrimoire in the browser and approve &mdash; works the same for claude.ai.
+                Approved clients are listed under Settings &rarr; Connected apps. Alternatively without OAuth:
+              </>
+            )}
+          </p>
           <p className="text-gray-400 text-sm mb-2">
             {isDE ? (
               <>
