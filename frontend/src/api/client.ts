@@ -8,6 +8,7 @@ import {
   readErrorMessageFromText,
 } from './http-boundary';
 import type { ResearchDepth, ResearchStatus } from '../lib/research';
+import type { ChatCodeRef } from '../ide/code-refs';
 const BASE_URL = '/api';
 
 let getAccessToken: (() => string | null) | null = null;
@@ -3774,6 +3775,7 @@ export const api = {
       workspaceId?: string | null,
       briefingMode?: boolean,
       agentRoleId?: string,
+      codeRefs?: ChatCodeRef[],
     ): Promise<void> => {
       const res = await postChatStream(
         `/chat/sessions/${sessionId}/message`,
@@ -3783,6 +3785,7 @@ export const api = {
           workspaceId: workspaceId ?? undefined,
           briefingMode: briefingMode ?? undefined,
           agentRoleId: agentRoleId || undefined,
+          codeRefs: codeRefs && codeRefs.length > 0 ? codeRefs : undefined,
         },
         signal,
       );
@@ -4266,6 +4269,8 @@ export interface ChatMessage {
   contextUsed?: ChatContextRef[];
   toolCalls?: ChatToolCallRecord[];
   attachments?: ChatAttachmentRef[];
+  /** Code attached to a user message in an IDE agent session. */
+  codeRefs?: ChatCodeRef[];
   metrics?: ChatResponseMetrics;
 }
 

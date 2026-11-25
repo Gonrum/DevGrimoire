@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { isRecord } from '../lib/narrow';
 import { clearDraft, clearDraftsUnder, loadDraft, moveDraftsUnder, saveDraft } from './drafts';
+import { addCodeRef, type AddCodeRefResult, type ChatCodeRef } from './code-refs';
 import { ideApi, IdeApiError, IdeConflictError, type IdeFile } from './ide-api';
 
 /** POSIX single-quote escaping — workspace shells are always sh-like. */
@@ -55,6 +56,10 @@ interface IdeState {
   /** Right-hand agent sidebar: shown or collapsed, and its width (both persisted). */
   agentOpen: boolean;
   agentWidth: number;
+  /** Code attached to the next agent message (not persisted, cleared on workspace change). */
+  codeRefs: ChatCodeRef[];
+  /** Bumped on each attach so the agent input can take focus. */
+  codeRefFocusTick: number;
   /** Terminal tabs: each id is one live PTY session component. */
   terminals: number[];
   activeTerminal: number | null;
@@ -103,6 +108,9 @@ interface IdeState {
   setTerminalHeight: (height: number) => void;
   setTerminalOpen: (open: boolean) => void;
   setAgentOpen: (open: boolean) => void;
+  attachCodeRef: (ref: ChatCodeRef) => AddCodeRefResult;
+  removeCodeRef: (index: number) => void;
+  clearCodeRefs: () => void;
   setAgentWidth: (width: number) => void;
   addTerminal: (initialInput?: string) => void;
   closeTerminal: (id: number) => void;
@@ -332,6 +340,8 @@ export const useIdeStore = create<IdeState>((set, get) => ({
   terminalInputs: {},
   reveal: null,
   blocked: null,
+  codeRefs: [],
+  codeRefFocusTick: 0,
   saveTick: 0,
   treeRefresh: { seq: 0, dirs: [], all: false },
   ...loadLayout(),
@@ -350,6 +360,7 @@ export const useIdeStore = create<IdeState>((set, get) => ({
         terminals: [],
         activeTerminal: null,
         terminalInputs: {},
+        codeRefs: [],
       });
     } else if (rootPath !== undefined && get().workspaceRoot !== rootPath) {
       set({ workspaceRoot: rootPath });
@@ -607,6 +618,19 @@ export const useIdeStore = create<IdeState>((set, get) => ({
     set({ agentOpen: open });
     persistLayout(get());
   },
+
+  attachCodeRef: (ref) => {
+    const { list, result } = addCodeRef(get().codeRefs, ref);
+    if (result === 'added' || result === 'duplicate') {
+      set({ codeRefs: list, agentOpen: true, codeRefFocusTick: get().codeRefFocusTick + 1 });
+      persistLayout(get());
+    }
+    return result;
+  },
+
+  removeCodeRef: (index) => set({ codeRefs: get().codeRefs.filter((_, i) => i !== index) }),
+
+  clearCodeRefs: () => set({ codeRefs: [] }),
 
   setAgentWidth: (width) => {
     const agentWidth = clamp(Math.round(width), ...AGENT_RANGE);
