@@ -70,6 +70,12 @@ export function createMcpAuthMiddleware(
 ): (req: McpRequest, res: Response, next: NextFunction) => void {
   const oauth = opts.acceptOAuth ? deps.oauth : null;
   const resourceMetadata = oauth ? getOAuthProtectedResourceMetadataUrl(oauth.resourceUrl) : null;
+  // On the legacy transports (/sse, /messages) with OAuth configured: point
+  // clients at the endpoint that does accept a browser login.
+  const oauthElsewhere = !opts.acceptOAuth && deps.oauth ? deps.oauth.resourceUrl.href : null;
+  const oauthHint = oauthElsewhere
+    ? ` Browser login (OAuth) works only on ${oauthElsewhere} — reconnect with: claude mcp add --transport http devgrimoire ${oauthElsewhere}`
+    : '';
 
   const unauthorized = (res: Response, message: string, tokenError?: string) => {
     if (resourceMetadata) {
@@ -112,6 +118,16 @@ export function createMcpAuthMiddleware(
 
     if (authHeader?.startsWith(`Bearer ${OAUTH_TOKEN_PREFIX}`)) {
       const token = authHeader.slice(7);
+      if (oauthElsewhere) {
+        // 400, not 401: a 401 makes OAuth clients refresh and retry the same
+        // transport in a loop. This is a wrong endpoint, not a bad token.
+        return jsonRpcError(
+          res,
+          400,
+          -32001,
+          `OAuth access tokens are not accepted on this transport.${oauthHint}`,
+        );
+      }
       if (!oauth || !token.startsWith(ACCESS_TOKEN_PREFIX)) {
         return unauthorized(res, 'Unauthorized: OAuth access tokens are accepted only on /mcp.', 'invalid_token');
       }
@@ -136,7 +152,7 @@ export function createMcpAuthMiddleware(
     if (!apiKey) {
       return unauthorized(
         res,
-        'Unauthorized: API key required. Pass via Authorization: Bearer cv_... header or ?apiKey= query param.',
+        `Unauthorized: API key required. Pass via Authorization: Bearer cv_... header or ?apiKey= query param.${oauthHint}`,
       );
     }
     const validated = await deps.apiKeys.validate(apiKey);

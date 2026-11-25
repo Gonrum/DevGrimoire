@@ -306,17 +306,23 @@ const FORM = { 'content-type': 'application/x-www-form-urlencoded' };
       assert.equal((await mcp(on, { auth: 'dgo_at_forged' })).status, 401);
     });
 
-    await check('OAuth token in the query or on /sse → 401 (no OAuth hint on /sse)', async () => {
+    await check('OAuth token in the query or on /sse → refused, /sse points to /mcp (no WWW-Authenticate)', async () => {
       const q = await mcp(on, { query: '?apiKey=dgo_at_alice' });
       assert.equal(q.status, 401);
+      // Header token on /sse: 400 (wrong endpoint), so OAuth clients do not
+      // loop refresh → retry; the message names the /mcp URL.
       const sse = await fetch(`${on.url}/sse`, { headers: { authorization: 'Bearer dgo_at_alice' } });
-      assert.equal(sse.status, 401);
+      assert.equal(sse.status, 400);
       assert.equal(sse.headers.get('www-authenticate'), null);
+      const sseBody = await sse.json();
+      assert.match(sseBody.error.message, /only on https:\/\/[^ ]+\/mcp/);
+      assert.match(sseBody.error.message, /claude mcp add --transport http devgrimoire https:\/\//);
       const sseQ = await fetch(`${on.url}/sse?apiKey=dgo_at_alice`);
       assert.equal(sseQ.status, 401);
       const none = await fetch(`${on.url}/sse`);
       assert.equal(none.status, 401);
       assert.equal(none.headers.get('www-authenticate'), null);
+      assert.match((await none.json()).error.message, /API key required\..*only on https:\/\/[^ ]+\/mcp/);
     });
 
     await check('cv_ keys unchanged: header on /mcp, ?apiKey= on /sse and /mcp', async () => {
