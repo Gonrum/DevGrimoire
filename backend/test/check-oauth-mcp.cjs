@@ -338,19 +338,28 @@ const FORM = { 'content-type': 'application/x-www-form-urlencoded' };
     });
 
     // ------------------------------------------------------------ sessions
-    await check('session bound to its credential: other key/connection → 403, same connection with new token → ok', async () => {
+    await check('session bound to its credential: other key/connection → 404 like an unknown session, same connection with new token → ok', async () => {
       on.svc.tokens.set('dgo_at_alice2', tokenInfo(on.fx.conn));
       const sOauth = await openSession(on, 'dgo_at_alice');
       const sKey = await openSession(on, 'cv_bob');
       assert.equal((await ping(on, 'dgo_at_alice', sOauth)).status, 200);
       assert.equal((await ping(on, 'dgo_at_alice2', sOauth, 3)).status, 200, 'rotated access token, same connection');
-      assert.equal((await ping(on, 'cv_bob', sOauth, 4)).status, 403);
-      assert.equal((await ping(on, 'cv_alice', sOauth, 5)).status, 403, 'same user, different credential');
-      assert.equal((await ping(on, 'dgo_at_alice', sKey, 6)).status, 403);
+      const foreign = await ping(on, 'cv_bob', sOauth, 4);
+      const unknown = await ping(on, 'cv_bob', '00000000-0000-4000-8000-000000000000', 4);
+      assert.equal(foreign.status, 404, 'foreign session looks like an unknown one');
+      assert.equal(unknown.status, 404);
+      assert.equal(foreign.text, unknown.text, 'same body as an unknown session');
+      assert.equal((await ping(on, 'cv_alice', sOauth, 5)).status, 404, 'same user, different credential');
+      assert.equal((await ping(on, 'dgo_at_alice', sKey, 6)).status, 404);
       assert.equal((await ping(on, 'cv_bob', sKey, 7)).status, 200);
     });
 
-    await check('revocation event closes the sessions of that connection only', async () => {
+    await check('non-initialize request without session id → 400 (malformed, not 404)', async () => {
+      const r = await mcp(on, { auth: 'cv_alice', body: { jsonrpc: '2.0', id: 3, method: 'ping' } });
+      assert.equal(r.status, 400);
+    });
+
+  await check('revocation event closes the sessions of that connection only', async () => {
       on.svc.tokens.set('dgo_at_bob', tokenInfo(on.fx.conn2));
       const sX = await openSession(on, 'dgo_at_alice');
       const sX2 = await openSession(on, 'dgo_at_alice');
@@ -361,7 +370,7 @@ const FORM = { 'content-type': 'application/x-www-form-urlencoded' };
       await tick();
       assert.equal(on.transports[sX], undefined);
       assert.equal(on.transports[sX2], undefined);
-      assert.equal((await ping(on, 'dgo_at_alice', sX)).status, 400, 'closed session is gone');
+      assert.equal((await ping(on, 'dgo_at_alice', sX)).status, 404, 'closed session → 404 so the client re-initializes');
       assert.equal((await ping(on, 'dgo_at_bob', sY)).status, 200);
       assert.equal((await ping(on, 'cv_bob', sK)).status, 200);
       on.events.emit(OAUTH_CONNECTION_REVOKED, { apiKeyId: { $ne: 'x' } });

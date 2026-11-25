@@ -200,6 +200,11 @@ export interface StreamableHandlerDeps {
   log: (message: string) => void;
 }
 
+/** Same status, code and text as the SDK transport for an unknown session id. */
+function sessionNotFound(res: Response): void {
+  jsonRpcError(res, 404, -32001, 'Session not found');
+}
+
 /** `/mcp` (Streamable HTTP, protocol 2025-11-25); runs after the auth middleware. */
 export function createStreamableHttpHandler(deps: StreamableHandlerDeps): (req: McpRequest, res: Response) => Promise<void> {
   const { transports, owners } = deps;
@@ -215,8 +220,11 @@ export function createStreamableHttpHandler(deps: StreamableHandlerDeps): (req: 
           jsonRpcError(res, 400, -32000, 'Session uses a different transport protocol');
           return;
         }
+        // Same answer as an unknown session: it must not confirm that the id
+        // exists, and a 404 makes the client re-initialize under its own
+        // credential (it would get stuck on a 403).
         if (!owners.matches(sessionId, principal)) {
-          jsonRpcError(res, 403, -32001, 'Forbidden: session belongs to a different credential');
+          sessionNotFound(res);
           return;
         }
         transport = existing;
@@ -239,6 +247,11 @@ export function createStreamableHttpHandler(deps: StreamableHandlerDeps): (req: 
         };
         await deps.createServer().connect(created);
         transport = created;
+      } else if (sessionId) {
+        // Unknown or closed (e.g. revoked) session: per the Streamable HTTP
+        // spec 404, so the client starts a new session.
+        sessionNotFound(res);
+        return;
       } else {
         jsonRpcError(res, 400, -32000, 'Bad Request: No valid session ID provided');
         return;
