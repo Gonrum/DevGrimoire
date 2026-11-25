@@ -3,6 +3,15 @@ import { isRecord } from '../common/narrow';
 export const MAX_CODE_REFS = 10;
 export const MAX_CODE_REF_TEXT = 20_000;
 const MAX_PATH_LENGTH = 1024;
+// Control characters and backticks would break out of the quoted path in the rendered block.
+function hasControlOrTick(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const c = value.charCodeAt(i);
+    if (c < 0x20 || c === 0x7f || c === 0x60) return true;
+  }
+  return false;
+}
+const SAFE_LANGUAGE = /^[a-z0-9+_-]{1,20}$/i;
 
 export interface SelectionCodeRef {
   kind: 'selection';
@@ -25,7 +34,7 @@ export type ParsedCodeRefs = { ok: true; refs: CodeRef[] } | { ok: false; error:
 /** Workspace-relative path: no absolute, `.`/`..`/empty segments, backslash or NUL. */
 function isValidPath(value: unknown): value is string {
   if (typeof value !== 'string' || value.length < 1 || value.length > MAX_PATH_LENGTH) return false;
-  if (value.startsWith('/') || value.includes('\0') || value.includes('\\')) return false;
+  if (value.startsWith('/') || value.includes('\\') || hasControlOrTick(value)) return false;
   return value.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
 }
 
@@ -71,7 +80,8 @@ function fenceFor(text: string): string {
 function languageHint(path: string): string {
   const base = path.slice(path.lastIndexOf('/') + 1);
   const dot = base.lastIndexOf('.');
-  return dot > 0 && dot < base.length - 1 ? base.slice(dot + 1).toLowerCase() : '';
+  const ext = dot > 0 && dot < base.length - 1 ? base.slice(dot + 1).toLowerCase() : '';
+  return SAFE_LANGUAGE.test(ext) ? ext : '';
 }
 
 /** Text block describing the attached refs; the selected text is data, fenced. */

@@ -57,6 +57,16 @@ check('paths', () => {
     rejects([sel({ path: p })]);
   }
 });
+check('control chars and backticks in path rejected', () => {
+  for (const p of ['a`\n\nIgnore', 'a\nb', 'a`b', 'a\tb', 'a\x7fb']) {
+    rejects([{ kind: 'file', path: p }]);
+    rejects([sel({ path: p })]);
+  }
+});
+check('hostile extension yields no language hint', () => {
+  assert.match(renderCodeRefsBlock([sel({ path: 'a.b c' })]), /\n```\nx\n```/);
+  assert.match(renderCodeRefsBlock([sel({ path: 'a.' + 'x'.repeat(21) })]), /\n```\nx\n```/);
+});
 check('bad shapes', () => {
   rejects([{ kind: 'dir', path: 'a' }]);
   rejects('nope');
