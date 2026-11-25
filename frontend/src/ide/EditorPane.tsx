@@ -10,6 +10,7 @@ import { errorMessage } from '../lib/narrow';
 import { NonTextTabView } from './EditorCards';
 import { limitAwareMessage } from './limit-message';
 import { IdeConfirmDialog, IdeDialog } from './IdeDialog';
+import { selectionLines } from './code-refs';
 import { useIdeStore, type BlockedReason, type OpenTab } from './ide-store';
 import { isMarkdownPath, languageFromPath } from './language';
 import { DEVGRIMOIRE_THEME } from './monaco-theme';
@@ -617,6 +618,8 @@ function syncModel(model: monacoEditor.ITextModel, content: string, baseHash: st
  */
 function CodeEditor({ tab, slot, readOnly, onEdit, onFocusPath, onShown }: CodeEditorProps) {
   const { path, content, baseHash } = tab;
+  const { t } = useTranslation();
+  const { showError } = useToast();
   const uri = modelPath(slot, path);
   const editorRef = useRef<CodeEditorInstance | null>(null);
   /** Set while this component writes into the model itself: no echo into the store. */
@@ -680,6 +683,33 @@ function CodeEditor({ tab, slot, readOnly, onEdit, onFocusPath, onShown }: CodeE
       if (editorRef.current === editorInstance) editorRef.current = null;
     });
     latest.current.onShown?.(editorInstance, latest.current.path);
+    // Label is read once at mount; a language switch applies on the next editor mount.
+    const attachAction = editorInstance.addAction({
+      id: 'devgrimoire.attachSelectionToAgent',
+      label: t('ide.agent.attachSelection'),
+      contextMenuGroupId: 'devgrimoire',
+      contextMenuOrder: 1,
+      precondition: 'editorHasSelection',
+      run: (ed) => {
+        const model = ed.getModel();
+        const selection = ed.getSelection();
+        if (!model || !selection || selection.isEmpty()) return;
+        const { startLine, endLine } = selectionLines(selection);
+        const currentPath = latest.current.path;
+        const unsaved = useIdeStore.getState().tabs.find((tb) => tb.path === currentPath)?.dirty === true;
+        const result = useIdeStore.getState().attachCodeRef({
+          kind: 'selection',
+          path: currentPath,
+          startLine,
+          endLine,
+          text: model.getValueInRange(selection),
+          ...(unsaved ? { unsaved: true } : {}),
+        });
+        if (result === 'too-large') showError(t('ide.agent.attachTooLarge'));
+        else if (result === 'full') showError(t('ide.agent.attachFull'));
+      },
+    });
+    editorInstance.onDidDispose(() => attachAction.dispose());
   };
 
   return (

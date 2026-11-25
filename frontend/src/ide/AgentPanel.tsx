@@ -32,6 +32,8 @@ import { useToast } from '../components/Toast';
 import Switch from '../components/ui/Switch';
 import { LoadingText } from '../components/ui/LoadingSpinner';
 import { errorMessage, isRecord } from '../lib/narrow';
+import { codeRefLabel, type ChatCodeRef } from './code-refs';
+import { useIdeStore } from './ide-store';
 import { AgentConfirmCard } from './AgentConfirmCard';
 import { messageKey, useAgentChat, type AgentToolCall } from './useAgentChat';
 
@@ -156,6 +158,35 @@ function AgentToolRow({ call }: { call: AgentToolCall }) {
   );
 }
 
+function CodeRefChips({ refs, onRemove }: { refs: readonly ChatCodeRef[]; onRemove?: (index: number) => void }) {
+  const { t } = useTranslation();
+  if (refs.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {refs.map((ref, i) => (
+        <span
+          key={`${ref.kind}:${ref.path}:${ref.kind === 'selection' ? `${ref.startLine}-${ref.endLine}` : ''}`}
+          title={ref.kind === 'selection' && ref.unsaved ? `${ref.path} (${t('ide.agent.attachUnsaved')})` : ref.path}
+          className="inline-flex max-w-full items-center gap-1 rounded-sm border border-gray-700 bg-gray-800 px-1.5 py-0.5 font-mono text-[11px] text-cyan-300"
+        >
+          <span className="truncate">{codeRefLabel(ref)}</span>
+          {ref.kind === 'selection' && ref.unsaved && <span className="shrink-0 text-amber-300">*</span>}
+          {onRemove && (
+            <button
+              type="button"
+              aria-label={t('ide.agent.attachRemove')}
+              className="shrink-0 text-gray-500 hover:text-red-300"
+              onClick={() => onRemove(i)}
+            >
+              <X size={11} />
+            </button>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function AgentMessage({ message }: { message: ChatMessage }) {
   if (message.role === 'system') {
     return <p className="px-1 text-xs italic text-gray-500">{message.content}</p>;
@@ -173,7 +204,8 @@ function AgentMessage({ message }: { message: ChatMessage }) {
           ))}
         </div>
       )}
-      {(message.role === 'user' || message.content.trim() !== '') && (
+      {message.role === 'user' && message.codeRefs && <CodeRefChips refs={message.codeRefs} />}
+      {(message.role === 'user' ? message.content.trim() !== '' || !message.codeRefs?.length : message.content.trim() !== '') && (
         <MessageBubble message={{ ...message, toolCalls: undefined }} />
       )}
     </div>
@@ -349,6 +381,9 @@ export function AgentPanel({ workspace: initial, onCollapse }: { workspace: Work
   const [modeBusy, setModeBusy] = useState(false);
   const [toolSetsBusy, setToolSetsBusy] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const codeRefs = useIdeStore((s) => s.codeRefs);
+  const codeRefFocusTick = useIdeStore((s) => s.codeRefFocusTick);
   const isSsh = workspace.location === 'ssh';
   const mode: WorkspaceAgentMode = workspace.agentMode === 'direct' ? 'direct' : 'confirm';
   // Missing on records from before tool sets existed: the backend treats that as both.
@@ -430,12 +465,18 @@ export function AgentPanel({ workspace: initial, onCollapse }: { workspace: Work
     );
   };
 
+  useEffect(() => {
+    if (codeRefFocusTick > 0) textareaRef.current?.focus();
+  }, [codeRefFocusTick]);
+
   const submit = (): void => {
     const text = draft;
-    if (!text.trim() || chat.busy) return;
+    const refs = codeRefs;
+    if ((!text.trim() && refs.length === 0) || chat.busy) return;
     setDraft('');
-    void chat.send(text, roleId || undefined).then((sent) => {
-      if (!sent) setDraft((d) => (d === '' ? text : d));
+    void chat.send(text, roleId || undefined, refs).then((sent) => {
+      if (sent) useIdeStore.getState().clearCodeRefs();
+      else setDraft((d) => (d === '' ? text : d));
     });
   };
 
@@ -575,8 +616,14 @@ export function AgentPanel({ workspace: initial, onCollapse }: { workspace: Work
       </div>
 
       <div className="border-t border-gray-700 p-2">
+        {codeRefs.length > 0 && (
+          <div className="mb-1.5">
+            <CodeRefChips refs={codeRefs} onRemove={(i) => useIdeStore.getState().removeCodeRef(i)} />
+          </div>
+        )}
         <div className="flex items-end gap-1.5">
           <textarea
+            ref={textareaRef}
             className="max-h-40 min-h-[2.5rem] min-w-0 flex-1 resize-y rounded-sm border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-gray-200 outline-none focus:border-cyan-400"
             rows={2}
             value={draft}
@@ -605,7 +652,7 @@ export function AgentPanel({ workspace: initial, onCollapse }: { workspace: Work
               type="button"
               title={t('ide.agent.send')}
               aria-label={t('ide.agent.send')}
-              disabled={disabled || !draft.trim()}
+              disabled={disabled || (!draft.trim() && codeRefs.length === 0)}
               className="rounded-sm bg-cyan-400/15 p-2 text-cyan-300 hover:bg-cyan-400/25 disabled:opacity-40"
               onClick={submit}
             >

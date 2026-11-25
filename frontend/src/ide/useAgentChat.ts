@@ -14,6 +14,7 @@ import {
 } from '../api/client';
 import type { StreamingPhase } from '../components/ChatDock';
 import { errorMessage, isRecord, optionOr } from '../lib/narrow';
+import { codeRefLabel, type ChatCodeRef } from './code-refs';
 import { useIdeStore } from './ide-store';
 
 const PHASES = ['queued', 'context', 'thinking', 'tool_call', 'responding'] as const satisfies readonly StreamingPhase[];
@@ -317,15 +318,16 @@ export function useAgentChat(context: AgentChatContext, hooks: AgentChatHooks = 
     }
   }, [finish, syncFromServer, t]);
 
-  const send = useCallback(async (content: string, agentRoleId?: string): Promise<boolean> => {
+  const send = useCallback(async (content: string, agentRoleId?: string, codeRefs?: ChatCodeRef[]): Promise<boolean> => {
     const text = content.trim();
-    if (!text || streamRef.current) return false;
+    const refs = codeRefs && codeRefs.length > 0 ? codeRefs : undefined;
+    if ((!text && !refs) || streamRef.current) return false;
     setError(null);
     setNotes([]);
     let current = session;
     if (!current) {
       try {
-        current = await api.chat.createSession({ projectId }, text.slice(0, 60), { workspaceId, ideAgent: true });
+        current = await api.chat.createSession({ projectId }, (text || (refs ? codeRefLabel(refs[0]) : '')).slice(0, 60), { workspaceId, ideAgent: true });
         setSession(current);
       } catch (err) {
         setError(errorMessage(err, t('common.error')));
@@ -333,14 +335,14 @@ export function useAgentChat(context: AgentChatContext, hooks: AgentChatHooks = 
       }
     }
     const sessionId = current._id;
-    const userMessage: ChatMessage = { role: 'user', content: text, timestamp: new Date().toISOString() };
+    const userMessage: ChatMessage = { role: 'user', content: text, timestamp: new Date().toISOString(), ...(refs ? { codeRefs: refs } : {}) };
     setSession((prev) => (prev && prev._id === sessionId ? { ...prev, messages: [...prev.messages, userMessage] } : prev));
     const abort = new AbortController();
     abortRef.current = abort;
     pausedRef.current = false;
     setStreaming({ content: '', contextRefs: [], toolCalls: [], phase: 'queued' });
     await runStream(sessionId, abort, () =>
-      api.chat.streamMessage(sessionId, text, undefined, handlers(sessionId), abort.signal, undefined, undefined, agentRoleId),
+      api.chat.streamMessage(sessionId, text, undefined, handlers(sessionId), abort.signal, undefined, undefined, agentRoleId, refs),
     );
     return true;
   }, [session, projectId, workspaceId, handlers, runStream, setStreaming, t]);

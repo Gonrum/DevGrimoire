@@ -387,6 +387,13 @@ export function FileTree({ workspaceId, activePath, onOpenFile, marks, initialRo
     }
     return [
       { label: t('ide.openToSide'), action: () => void useIdeStore.getState().openInSplit(entry.path).catch((e: unknown) => showError(errorMessage(e))) },
+      {
+        label: t('ide.agent.sendToChat'),
+        action: () => {
+          const result = useIdeStore.getState().attachCodeRef({ kind: 'file', path: entry.path });
+          if (result === 'full') showError(t('ide.agent.attachFull'));
+        },
+      },
       { label: t('ide.rename'), action: () => setRenaming(entry.path) },
       { label: t('ide.delete'), danger: true, action: () => void remove(entry) },
       { label: t('ide.copyPath'), action: () => copyPath(entry.path) },
