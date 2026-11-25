@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, matchPath, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Sparkles } from 'lucide-react';
@@ -1498,7 +1498,7 @@ export function StreamingActivity({
   );
 }
 
-export function MessageBubble({ message }: { message: ChatMessage }) {
+export function MessageBubble({ message, extra }: { message: ChatMessage; extra?: ReactNode }) {
   const { t } = useTranslation();
   const isUser = message.role === 'user';
   const [expanded, setExpanded] = useState(false);
@@ -1535,9 +1535,12 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
           ))}
         </div>
       )}
-      <div className="text-gray-200 text-sm">
-        <Markdown>{message.content}</Markdown>
-      </div>
+      {extra && <div className="mb-2">{extra}</div>}
+      {(message.content.trim() !== '' || !extra) && (
+        <div className="text-gray-200 text-sm">
+          <Markdown>{message.content}</Markdown>
+        </div>
+      )}
       {message.attachments && message.attachments.length > 0 && (
         <div className="mt-2 pt-2 border-t border-gray-700/60 flex flex-wrap gap-1.5">
           {message.attachments.map((att) => {

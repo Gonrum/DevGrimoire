@@ -318,7 +318,7 @@ export function useAgentChat(context: AgentChatContext, hooks: AgentChatHooks = 
     }
   }, [finish, syncFromServer, t]);
 
-  const send = useCallback(async (content: string, agentRoleId?: string, codeRefs?: ChatCodeRef[]): Promise<boolean> => {
+  const send = useCallback(async (content: string, agentRoleId?: string, codeRefs?: ChatCodeRef[], onAccepted?: () => void): Promise<boolean> => {
     const text = content.trim();
     const refs = codeRefs && codeRefs.length > 0 ? codeRefs : undefined;
     if ((!text && !refs) || streamRef.current) return false;
@@ -337,6 +337,7 @@ export function useAgentChat(context: AgentChatContext, hooks: AgentChatHooks = 
     const sessionId = current._id;
     const userMessage: ChatMessage = { role: 'user', content: text, timestamp: new Date().toISOString(), ...(refs ? { codeRefs: refs } : {}) };
     setSession((prev) => (prev && prev._id === sessionId ? { ...prev, messages: [...prev.messages, userMessage] } : prev));
+    onAccepted?.();
     const abort = new AbortController();
     abortRef.current = abort;
     pausedRef.current = false;

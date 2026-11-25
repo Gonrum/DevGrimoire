@@ -2007,7 +2007,7 @@
     "attachFile": "Attach file",
     "attachDropHere": "Drop file here",
     "attachTooLarge": "File too large (max 50 MB)",
-    "attachRemove": "Remove",
+    "attachRemove": "Remove attachment: {{label}}",
     "attachUploadInProgress": "Please wait for uploads to finish.",
     "attachNoVisionEndpoint": "No vision-capable endpoint active. Enable \"Vision model\" in chat settings or switch to Claude 3+/GPT-4o.",
     "streamQueued": "Request starting…",

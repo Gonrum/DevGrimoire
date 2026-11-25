@@ -174,7 +174,7 @@ function CodeRefChips({ refs, onRemove }: { refs: readonly ChatCodeRef[]; onRemo
           {onRemove && (
             <button
               type="button"
-              aria-label={t('ide.agent.attachRemove')}
+              aria-label={t('ide.agent.attachRemove', { label: codeRefLabel(ref) })}
               className="shrink-0 text-gray-500 hover:text-red-300"
               onClick={() => onRemove(i)}
             >
@@ -204,9 +204,11 @@ function AgentMessage({ message }: { message: ChatMessage }) {
           ))}
         </div>
       )}
-      {message.role === 'user' && message.codeRefs && <CodeRefChips refs={message.codeRefs} />}
-      {(message.role === 'user' ? message.content.trim() !== '' || !message.codeRefs?.length : message.content.trim() !== '') && (
-        <MessageBubble message={{ ...message, toolCalls: undefined }} />
+      {(message.role === 'user' || message.content.trim() !== '') && (
+        <MessageBubble
+          message={{ ...message, toolCalls: undefined }}
+          extra={message.role === 'user' && message.codeRefs?.length ? <CodeRefChips refs={message.codeRefs} /> : undefined}
+        />
       )}
     </div>
   );
@@ -382,6 +384,7 @@ export function AgentPanel({ workspace: initial, onCollapse }: { workspace: Work
   const [toolSetsBusy, setToolSetsBusy] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const submittingRef = useRef(false);
   const codeRefs = useIdeStore((s) => s.codeRefs);
   const codeRefFocusTick = useIdeStore((s) => s.codeRefFocusTick);
   const isSsh = workspace.location === 'ssh';
@@ -472,12 +475,18 @@ export function AgentPanel({ workspace: initial, onCollapse }: { workspace: Work
   const submit = (): void => {
     const text = draft;
     const refs = codeRefs;
-    if ((!text.trim() && refs.length === 0) || chat.busy) return;
-    setDraft('');
-    void chat.send(text, roleId || undefined, refs).then((sent) => {
-      if (sent) useIdeStore.getState().clearCodeRefs();
-      else setDraft((d) => (d === '' ? text : d));
-    });
+    if ((!text.trim() && refs.length === 0) || chat.busy || submittingRef.current) return;
+    // Draft and sent refs are cleared as soon as the message is accepted (before streaming);
+    // a rejected send leaves both untouched. The guard covers the session-creation await.
+    submittingRef.current = true;
+    void chat
+      .send(text, roleId || undefined, refs, () => {
+        setDraft('');
+        useIdeStore.getState().removeSentCodeRefs(refs);
+      })
+      .finally(() => {
+        submittingRef.current = false;
+      });
   };
 
   const disabled = config?.enabled === false;

@@ -111,6 +111,8 @@ interface IdeState {
   attachCodeRef: (ref: ChatCodeRef) => AddCodeRefResult;
   removeCodeRef: (index: number) => void;
   clearCodeRefs: () => void;
+  /** Drops exactly the given (already sent) refs by identity; refs attached since stay. */
+  removeSentCodeRefs: (sent: readonly ChatCodeRef[]) => void;
   setAgentWidth: (width: number) => void;
   addTerminal: (initialInput?: string) => void;
   closeTerminal: (id: number) => void;
@@ -631,6 +633,7 @@ export const useIdeStore = create<IdeState>((set, get) => ({
   removeCodeRef: (index) => set({ codeRefs: get().codeRefs.filter((_, i) => i !== index) }),
 
   clearCodeRefs: () => set({ codeRefs: [] }),
+  removeSentCodeRefs: (sent) => set({ codeRefs: get().codeRefs.filter((r) => !sent.includes(r)) }),
 
   setAgentWidth: (width) => {
     const agentWidth = clamp(Math.round(width), ...AGENT_RANGE);
