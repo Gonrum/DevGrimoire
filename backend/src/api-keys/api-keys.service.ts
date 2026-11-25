@@ -6,6 +6,7 @@ import { ApiKey, ApiKeyDocument } from './schemas/api-key.schema';
 import type { ScopeMode } from '../common/permissions';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { RequestContext } from '../common/request-context';
+import { CONNECTION_TTL_MS as OAUTH_CONNECTION_TTL_MS } from '../oauth/oauth-tokens';
 
 interface ScopeFields {
   permissions?: string[];
@@ -177,6 +178,56 @@ export class ApiKeysService {
   }
 
   /**
+   * Creates the hidden API key behind an approved MCP OAuth connection.
+   *
+   * The key carries the connection's scope so the existing permission path
+   * (`actorFromApiKey`, narrowed by the owner's own scope) applies unchanged
+   * to OAuth requests. It has no usable secret: `keyHash` is the hash of a
+   * random value that is discarded right here.
+   *
+   * Scope per axis: ids omitted = 'all' (the user's own rights), ids given =
+   * 'allowlist', an empty list = 'none' (fail closed, never "everything").
+   *
+   * Requires a user session like every other key mutation — a narrowed API
+   * key must not mint itself an unrestricted connection.
+   */
+  async createOAuthConnection(input: {
+    userId: string;
+    clientId: string;
+    clientName: string;
+    projectIds?: string[];
+    customerIds?: string[];
+  }): Promise<ApiKeyDocument> {
+    this.assertUserSession('Creating an OAuth connection');
+    if (!Types.ObjectId.isValid(input.userId)) {
+      throw new BadRequestException(`Invalid userId: ${input.userId}`);
+    }
+    const axis = (ids: string[] | undefined, label: string): { mode: ScopeMode; ids: Types.ObjectId[] } => {
+      if (ids === undefined) return { mode: 'all', ids: [] };
+      const oids = this.toObjectIds(ids, label);
+      return oids.length ? { mode: 'allowlist', ids: oids } : { mode: 'none', ids: [] };
+    };
+    const projects = axis(input.projectIds, 'projectId');
+    const customers = axis(input.customerIds, 'customerId');
+
+    const discarded = randomBytes(32).toString('hex');
+    return this.apiKeyModel.create({
+      keyHash: this.hashKey(`oauth_${discarded}`),
+      prefix: 'oauth',
+      name: `OAuth: ${input.clientName}`,
+      userId: new Types.ObjectId(input.userId),
+      expiresAt: new Date(Date.now() + OAUTH_CONNECTION_TTL_MS),
+      kind: 'oauth',
+      oauthClientId: input.clientId,
+      permissions: [],
+      projectScopeMode: projects.mode,
+      allowedProjectIds: projects.ids,
+      customerScopeMode: customers.mode,
+      allowedCustomerIds: customers.ids,
+    });
+  }
+
+  /**
    * Whether `plainKey` is the key behind `apiKey` (constant-time hash compare,
    * no DB access). Used by MCP `/messages` to make sure a request that presents
    * a key presents the SAME key its SSE session was opened with.
@@ -190,7 +241,11 @@ export class ApiKeysService {
 
   async validate(plainKey: string): Promise<ApiKeyDocument | null> {
     const keyHash = this.hashKey(plainKey);
-    const apiKey = await this.apiKeyModel.findOne({ keyHash, active: true }).exec();
+    // OAuth connections are never valid as `cv_` keys (their hash belongs to
+    // a discarded value anyway; this keeps it that way by construction).
+    const apiKey = await this.apiKeyModel
+      .findOne({ keyHash, active: true, kind: { $ne: 'oauth' } })
+      .exec();
     if (!apiKey) return null;
 
     if (apiKey.expiresAt && apiKey.expiresAt < new Date()) {
@@ -220,9 +275,10 @@ export class ApiKeysService {
     return apiKey;
   }
 
+  /** The user's own API keys. OAuth connections are listed under "Connected apps". */
   async list(userId: string): Promise<ApiKeyDocument[]> {
     return this.apiKeyModel
-      .find({ userId })
+      .find({ userId, kind: { $ne: 'oauth' } })
       .select('-keyHash')
       .sort({ createdAt: -1 })
       .exec();

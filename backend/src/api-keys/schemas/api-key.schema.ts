@@ -3,6 +3,7 @@ import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import type { ScopeMode } from '../../common/permissions';
 
 export type ApiKeyDocument = HydratedDocument<ApiKey>;
+export type ApiKeyKind = 'standard' | 'oauth';
 
 @Schema({ timestamps: true })
 export class ApiKey {
@@ -52,6 +53,17 @@ export class ApiKey {
   @Prop({ type: [{ type: SchemaTypes.ObjectId, ref: 'Customer' }], default: [] })
   allowedCustomerIds: Types.ObjectId[];
 
+  // 'oauth' = hidden key behind an approved MCP OAuth connection. Its keyHash
+  // belongs to a discarded random value, so it can never be presented as a
+  // `cv_` key; requests authenticate with the connection's OAuth tokens.
+  // Legacy documents without the field are standard keys.
+  @Prop({ type: String, enum: ['standard', 'oauth'], default: 'standard' })
+  kind: ApiKeyKind;
+
+  // OAuth client the connection was granted to (kind 'oauth' only).
+  @Prop()
+  oauthClientId?: string;
+
   // `timestamps: true` legt diese Felder zur Laufzeit an, deklariert sie aber
   // nicht am Typ — ohne Deklaration brauchten Leser dafür ein `as any`.
   createdAt?: Date;
@@ -60,6 +72,7 @@ export class ApiKey {
 
 export const ApiKeySchema = SchemaFactory.createForClass(ApiKey);
 ApiKeySchema.index({ userId: 1 });
+ApiKeySchema.index({ userId: 1, kind: 1 });
 // Der Unique-Index auf `keyHash` entsteht schon über `@Prop({ unique: true })`;
 // ein zweites `schema.index` erzeugte dieselbe Definition und eine
 // Mongoose-Warnung bei jedem Laden des Schemas.
