@@ -1428,8 +1428,37 @@ app.post('/ensure', async (req, res) => {
   }
 });
 
-// Removes a workspace directory (delete of the workspace record). Never
-// follows links: a symlinked root is unlinked, its target is left alone.
+// Running exec children per workspace (process group leaders), so a destroy
+// can stop them before the directory goes away.
+const execChildren = new Map();
+
+function trackExecChild(workspaceId, child) {
+  if (typeof workspaceId !== 'string' || !child.pid) return;
+  let set = execChildren.get(workspaceId);
+  if (!set) { set = new Set(); execChildren.set(workspaceId, set); }
+  set.add(child);
+  child.once('close', () => {
+    set.delete(child);
+    if (set.size === 0 && execChildren.get(workspaceId) === set) execChildren.delete(workspaceId);
+  });
+}
+
+/** Stops terminals and running exec commands of a workspace (before its dir is removed). */
+function stopWorkspaceProcesses(id) {
+  const prefix = `ws:${id}:`;
+  for (const [key, term] of activeTerminals) {
+    if (!key.startsWith(prefix)) continue;
+    try { term.ws.close(1001, 'workspace_destroyed'); } catch { /* socket dying */ }
+    try { term.pty.kill(); } catch { /* already dead */ }
+    activeTerminals.delete(key);
+  }
+  for (const child of execChildren.get(id) ?? []) {
+    try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ }
+  }
+}
+
+// Removes a workspace directory (delete of the workspace record).
+// Never follows links: a symlinked root is unlinked, its target is left alone.
 // Idempotent: a missing directory is `existed: false`, not an error.
 async function destroyWorkspaceRoot(id) {
   const root = workspaceRoot(id);
@@ -1445,8 +1474,10 @@ async function destroyWorkspaceRoot(id) {
     if (err.code === 'ENOENT') return false;
     throw err;
   }
+  stopWorkspaceProcesses(id);
   if (st.isSymbolicLink() || !st.isDirectory()) await fsp.unlink(root);
   else await fsp.rm(root, { recursive: true, force: true });
+  await fsp.rm(cwdStatePath(id), { force: true }).catch(() => undefined);
   return true;
 }
 
@@ -1454,7 +1485,6 @@ app.post('/destroy', async (req, res) => {
   const id = requireWorkspaceId(req, res); if (!id) return;
   try {
     const existed = await destroyWorkspaceRoot(id);
-    await fsp.rm(`${CWD_STATE_DIR}/${id}`, { force: true }).catch(() => undefined);
     res.json({ ok: true, existed });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1464,6 +1494,9 @@ app.post('/destroy', async (req, res) => {
 // Only real workspace ids (24 hex) are ever considered orphans; other names
 // in the root (scratch dirs such as `ptytest`) are never listed or touched.
 const ORPHAN_ID_PATTERN = /^[a-f0-9]{24}$/;
+// Directories touched more recently than this are never orphans: a record
+// may have been created after the caller read its id list.
+const ORPHAN_MIN_AGE_MS = positiveIntEnv('ORPHAN_MIN_AGE_MS', 10 * 60_000);
 
 /** Total size in bytes of a tree, without following symlinks. */
 async function treeBytes(dir) {
@@ -1488,36 +1521,60 @@ async function treeBytes(dir) {
   return total;
 }
 
+// Body: { knownIds, cutoffSec, delete?, deleteIds? }. A candidate is a 24-hex
+// dir that is not known, whose ObjectId timestamp is <= cutoffSec (the caller
+// reads its id list first and passes read time minus a margin) and whose
+// mtime is older than ORPHAN_MIN_AGE_MS. Deleting additionally requires the
+// id to be listed in `deleteIds` (what the dry run showed).
 app.post('/orphans', async (req, res) => {
-  const known = req.body?.knownIds;
+  const { knownIds: known, cutoffSec, deleteIds } = req.body ?? {};
   if (!Array.isArray(known) || known.some((k) => typeof k !== 'string')) {
     return res.status(400).json({ error: 'knownIds must be an array of strings' });
+  }
+  if (typeof cutoffSec !== 'number' || !Number.isFinite(cutoffSec) || cutoffSec < 0) {
+    return res.status(400).json({ error: 'cutoffSec must be a non-negative number' });
   }
   if (req.body?.delete !== undefined && typeof req.body.delete !== 'boolean') {
     return res.status(400).json({ error: 'delete must be a boolean' });
   }
   const del = req.body?.delete === true;
+  if (deleteIds !== undefined && (!Array.isArray(deleteIds) || deleteIds.some((k) => typeof k !== 'string'))) {
+    return res.status(400).json({ error: 'deleteIds must be an array of strings' });
+  }
+  if (del && (!Array.isArray(deleteIds) || deleteIds.length === 0)) {
+    return res.status(400).json({ error: 'delete requires a non-empty deleteIds list' });
+  }
   const knownSet = new Set(known.map((k) => k.toLowerCase()));
+  const wanted = new Set((deleteIds ?? []).map((k) => k.toLowerCase()));
   try {
     let names;
     try {
       names = await fsp.readdir(ROOT);
     } catch (err) {
-      if (err.code === 'ENOENT') return res.json({ orphans: [], deleted: [] });
+      if (err.code === 'ENOENT') return res.json({ orphans: [], deleted: [], failed: [], skipped: [] });
       throw err;
     }
     const orphans = [];
     const deleted = [];
+    const failed = [];
+    const skipped = [];
+    const now = Date.now();
     for (const name of names.sort()) {
       if (!ORPHAN_ID_PATTERN.test(name) || knownSet.has(name)) continue;
-      const bytes = await treeBytes(workspaceRoot(name));
-      orphans.push({ id: name, bytes });
-      if (del) {
-        await destroyWorkspaceRoot(name);
-        deleted.push(name);
+      try {
+        if (parseInt(name.slice(0, 8), 16) > cutoffSec) { skipped.push({ id: name, reason: 'too_new' }); continue; }
+        const st = await fsp.lstat(workspaceRoot(name));
+        if (now - st.mtimeMs < ORPHAN_MIN_AGE_MS) { skipped.push({ id: name, reason: 'recent' }); continue; }
+        orphans.push({ id: name, bytes: await treeBytes(workspaceRoot(name)) });
+        if (del && wanted.has(name)) {
+          await destroyWorkspaceRoot(name);
+          deleted.push(name);
+        }
+      } catch (err) {
+        failed.push({ id: name, error: err.message });
       }
     }
-    res.json({ orphans, deleted });
+    res.json({ orphans, deleted, failed, skipped });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1560,7 +1617,7 @@ function isCommandBlacklisted(command) {
  * expansion. Detached so we own the whole process group and can SIGKILL
  * children of children on timeout.
  */
-function runExec({ command, cwd, timeoutMs, env }) {
+function runExec({ command, cwd, timeoutMs, env, workspaceId }) {
   return new Promise((resolve) => {
     const child = spawn('/bin/bash', ['-lc', command], {
       cwd,
@@ -1568,6 +1625,7 @@ function runExec({ command, cwd, timeoutMs, env }) {
       detached: true,                  // own process group
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    trackExecChild(workspaceId, child);
     const startedAt = Date.now();
     let stdout = Buffer.alloc(0);
     let stderr = Buffer.alloc(0);
@@ -1640,11 +1698,12 @@ function runExec({ command, cwd, timeoutMs, env }) {
  * EXEC_STREAM_LINE_MAX is sent in pieces; every piece but the last carries
  * `partial: true` (no newline follows it).
  */
-function runExecStream({ command, cwd, timeoutMs, env, abortSignal, fullOutput = false, writable = null }, onEvent) {
+function runExecStream({ command, cwd, timeoutMs, env, abortSignal, fullOutput = false, writable = null, workspaceId }, onEvent) {
   return new Promise((resolve) => {
     const child = spawn('/bin/bash', ['-lc', command], {
       cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
     });
+    trackExecChild(workspaceId, child);
     const startedAt = Date.now();
     let stdoutBytes = 0;
     let stderrBytes = 0;
@@ -1802,7 +1861,7 @@ app.post('/exec', async (req, res) => {
   const wrappedCommand = wrapWithCwdState(command, startCwd, cwdStatePath(id), cwd);
   const env = buildExecEnv(req.body?.env);
 
-  const result = await runExec({ command: wrappedCommand, cwd, timeoutMs, env });
+  const result = await runExec({ command: wrappedCommand, cwd, timeoutMs, env, workspaceId: id });
   // Echo the resulting cwd back so callers can show it in a prompt.
   result.cwd = (await readCwdState(id)) || cwd;
   console.log(JSON.stringify({
@@ -1877,7 +1936,7 @@ app.post('/exec/stream', async (req, res) => {
   let lastEvent = null;
   // `fullOutput: true` (strict boolean): no 1 MiB cap, flow control instead.
   const fullOutput = req.body?.fullOutput === true;
-  await runExecStream({ command: wrappedCommand, cwd, timeoutMs, env, abortSignal: abort.signal, fullOutput, writable: res }, (ev) => {
+  await runExecStream({ command: wrappedCommand, cwd, timeoutMs, env, abortSignal: abort.signal, fullOutput, writable: res, workspaceId: id }, (ev) => {
     lastEvent = ev;
     // Inject the resulting cwd into the done event so the frontend can
     // render it in the prompt without an extra round-trip.
@@ -1910,17 +1969,13 @@ app.post('/exec/stream', async (req, res) => {
 
 app.post('/cleanup', async (req, res) => {
   const id = requireWorkspaceId(req, res); if (!id) return;
-  const root = workspaceRoot(id);
-  // Defence-in-depth: reject if root somehow resolved outside ROOT.
-  if (!root.startsWith(ROOT + path.sep)) {
-    return res.status(500).json({ error: 'computed workspace root is outside ROOT' });
+  try {
+    // Shares destroyWorkspaceRoot: a symlinked root is only unlinked, and the
+    // per-workspace cwd state goes with it.
+    res.json({ ok: true, removed: await destroyWorkspaceRoot(id) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  if (!await workspaceExists(id)) return res.json({ ok: true, removed: false });
-  await fsp.rm(root, { recursive: true, force: true });
-  // Drop the per-workspace cwd state too so a re-created workspace with
-  // the same id (TTL-resurrection corner case) starts at root.
-  await fsp.rm(cwdStatePath(id), { force: true });
-  res.json({ ok: true, removed: true });
 });
 
 app.post('/size', async (req, res) => {

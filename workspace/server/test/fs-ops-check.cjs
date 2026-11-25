@@ -603,8 +603,6 @@ async function main() {
 
     // --- T-547: /destroy and /orphans ---
     const ID_A = 'a'.repeat(24);
-    const ID_B = 'b'.repeat(24);
-    const ID_C = 'c'.repeat(24);
     const ID_L = 'd'.repeat(24);
     const mk = (id, name, data) => {
       fs.mkdirSync(path.join(root, id, 'sub'), { recursive: true });
@@ -652,47 +650,141 @@ async function main() {
       assert.equal(fs.readFileSync(path.join(outside, 'precious.txt'), 'utf8'), 'keep');
     });
 
+    // ObjectId-style ids: first 8 hex chars are the creation time in seconds.
+    const oid = (sec, fill) => sec.toString(16).padStart(8, '0') + fill.repeat(16);
+    const OLD = 1_700_000_000;
+    const O_A = oid(OLD, 'a');
+    const O_B = oid(OLD, 'b');
+    const O_C = oid(OLD, 'c');
+    const O_NEW = oid(Math.floor(Date.now() / 1000), 'e');
+    const CUT = Math.floor(Date.now() / 1000) - 300;
+    const age = (id) => {
+      const t = new Date(Date.now() - 3600_000);
+      fs.utimesSync(path.join(root, id), t, t);
+    };
+    const mkOld = (id, name, data) => { mk(id, name, data); age(id); };
+
     await check('orphans: dry run lists unknown valid-id dirs with size and deletes nothing', async () => {
-      mk(ID_A, 'f.txt', 'x'.repeat(100));
-      mk(ID_B, 'f.txt', 'y'.repeat(50));
-      mk(ID_C, 'f.txt', 'z');
+      mkOld(O_A, 'f.txt', 'x'.repeat(100));
+      mkOld(O_B, 'f.txt', 'y'.repeat(50));
+      mkOld(O_C, 'f.txt', 'z');
       fs.mkdirSync(path.join(root, 'ptytest'));
       fs.writeFileSync(path.join(root, 'ptytest', 'f'), 'scratch');
-      const r = await post('/orphans', { knownIds: [ID_C] });
+      const r = await post('/orphans', { knownIds: [O_C], cutoffSec: CUT });
       assert.equal(r.status, 200);
       assert.deepEqual(r.body.deleted, []);
-      assert.deepEqual(r.body.orphans, [{ id: ID_A, bytes: 100 }, { id: ID_B, bytes: 50 }]);
-      for (const id of [ID_A, ID_B, ID_C, 'ptytest', 'ws1']) assert.ok(fs.existsSync(path.join(root, id)), id);
-      const dry = await post('/orphans', { knownIds: [ID_C], delete: false });
+      assert.deepEqual(r.body.orphans, [{ id: O_A, bytes: 100 }, { id: O_B, bytes: 50 }]);
+      for (const id of [O_A, O_B, O_C, 'ptytest', 'ws1']) assert.ok(fs.existsSync(path.join(root, id)), id);
+      const dry = await post('/orphans', { knownIds: [O_C], cutoffSec: CUT, delete: false });
       assert.deepEqual(dry.body.deleted, []);
-      assert.ok(fs.existsSync(path.join(root, ID_A)));
+      assert.ok(fs.existsSync(path.join(root, O_A)));
     });
 
-    await check('orphans: delete removes only unknown valid-id dirs', async () => {
-      const r = await post('/orphans', { knownIds: [ID_C], delete: true });
+    await check('orphans: delete requires deleteIds and removes only the listed orphans', async () => {
+      const none = await post('/orphans', { knownIds: [O_C], cutoffSec: CUT, delete: true });
+      assert.equal(none.status, 400);
+      const empty = await post('/orphans', { knownIds: [O_C], cutoffSec: CUT, delete: true, deleteIds: [] });
+      assert.equal(empty.status, 400);
+      assert.ok(fs.existsSync(path.join(root, O_A)));
+      // O_C is known, 'ptytest' is not a workspace id: asking for them deletes nothing
+      const r = await post('/orphans', { knownIds: [O_C], cutoffSec: CUT, delete: true, deleteIds: [O_A, O_C, 'ptytest', 'ws1'] });
       assert.equal(r.status, 200);
-      assert.deepEqual(r.body.deleted, [ID_A, ID_B]);
-      assert.equal(fs.existsSync(path.join(root, ID_A)), false);
-      assert.equal(fs.existsSync(path.join(root, ID_B)), false);
-      for (const id of [ID_C, 'ptytest', 'ws1']) assert.ok(fs.existsSync(path.join(root, id)), id);
-      const again = await post('/orphans', { knownIds: [ID_C], delete: true });
-      assert.deepEqual(again.body, { orphans: [], deleted: [] });
+      assert.deepEqual(r.body.deleted, [O_A]);
+      assert.equal(fs.existsSync(path.join(root, O_A)), false);
+      assert.ok(fs.existsSync(path.join(root, O_B)), 'orphan not in deleteIds stays');
+      for (const id of [O_C, 'ptytest', 'ws1']) assert.ok(fs.existsSync(path.join(root, id)), id);
+    });
+
+    await check('orphans: empty knownIds + delete cannot wipe dirs missing from deleteIds', async () => {
+      const r = await post('/orphans', { knownIds: [], cutoffSec: CUT, delete: true, deleteIds: [O_B] });
+      assert.deepEqual(r.body.deleted, [O_B]);
+      assert.ok(fs.existsSync(path.join(root, O_C)));
+    });
+
+    await check('orphans: ObjectId newer than cutoffSec is skipped (race guard), even when listed', async () => {
+      mkOld(O_NEW, 'f.txt', 'fresh record');
+      const r = await post('/orphans', { knownIds: [], cutoffSec: CUT, delete: true, deleteIds: [O_NEW] });
+      assert.deepEqual(r.body.deleted, []);
+      assert.ok(r.body.skipped.some((e) => e.id === O_NEW && e.reason === 'too_new'));
+      assert.ok(fs.existsSync(path.join(root, O_NEW)));
+      // boundary: timestamp == cutoffSec is still a candidate
+      const edge = await post('/orphans', { knownIds: [], cutoffSec: Math.floor(Date.now() / 1000) });
+      assert.ok(edge.body.orphans.some((e) => e.id === O_NEW));
+    });
+
+    await check('orphans: dir modified in the last 10 minutes is skipped', async () => {
+      const O_R = oid(OLD, 'f');
+      mk(O_R, 'f.txt', 'just written');
+      const r = await post('/orphans', { knownIds: [], cutoffSec: CUT, delete: true, deleteIds: [O_R] });
+      assert.deepEqual(r.body.deleted, []);
+      assert.ok(r.body.skipped.some((e) => e.id === O_R && e.reason === 'recent'));
+      assert.ok(fs.existsSync(path.join(root, O_R)));
     });
 
     await check('orphans: a symlinked orphan is unlinked without touching its target', async () => {
-      fs.symlinkSync(outside, path.join(root, ID_L));
-      const r = await post('/orphans', { knownIds: [], delete: true });
-      assert.ok(r.body.deleted.includes(ID_L));
-      assert.equal(fs.existsSync(path.join(root, ID_L)), false);
+      const O_L = oid(OLD, '1');
+      fs.symlinkSync(outside, path.join(root, O_L));
+      const old = new Date(Date.now() - 3600_000);
+      fs.lutimesSync(path.join(root, O_L), old, old);
+      const r = await post('/orphans', { knownIds: [], cutoffSec: CUT, delete: true, deleteIds: [O_L] });
+      assert.deepEqual(r.body.deleted, [O_L]);
+      assert.equal(fs.existsSync(path.join(root, O_L)), false);
       assert.equal(fs.readFileSync(path.join(outside, 'precious.txt'), 'utf8'), 'keep');
       assert.ok(fs.existsSync(path.join(root, 'ptytest')));
     });
 
+    await check('orphans: one failing entry does not abort the sweep (failed[])', async () => {
+      const O_F = oid(OLD, '2');
+      const O_G = oid(OLD, '3');
+      mkOld(O_F, 'f.txt', 'a');
+      mkOld(O_G, 'f.txt', 'b');
+      // a read-only parent cannot be emptied -> rm fails for O_F only
+      fs.chmodSync(path.join(root, O_F, 'sub'), 0o500);
+      const r = await post('/orphans', { knownIds: [], cutoffSec: CUT, delete: true, deleteIds: [O_F, O_G] });
+      fs.chmodSync(path.join(root, O_F, 'sub'), 0o700);
+      assert.equal(r.status, 200);
+      if (process.getuid && process.getuid() === 0) return; // root ignores permissions
+      assert.deepEqual(r.body.failed.map((f) => f.id), [O_F]);
+      assert.ok(r.body.deleted.includes(O_G));
+      assert.equal(fs.existsSync(path.join(root, O_G)), false);
+    });
+
     await check('orphans: malformed body is 400', async () => {
       assert.equal((await post('/orphans', {})).status, 400);
-      assert.equal((await post('/orphans', { knownIds: 'x' })).status, 400);
-      assert.equal((await post('/orphans', { knownIds: [1] })).status, 400);
-      assert.equal((await post('/orphans', { knownIds: [], delete: 'yes' })).status, 400);
+      assert.equal((await post('/orphans', { knownIds: [], cutoffSec: CUT, delete: 'yes' })).status, 400);
+      assert.equal((await post('/orphans', { knownIds: 'x', cutoffSec: CUT })).status, 400);
+      assert.equal((await post('/orphans', { knownIds: [1], cutoffSec: CUT })).status, 400);
+      assert.equal((await post('/orphans', { knownIds: [] })).status, 400, 'cutoffSec is mandatory');
+      assert.equal((await post('/orphans', { knownIds: [], cutoffSec: 'x' })).status, 400);
+      assert.equal((await post('/orphans', { knownIds: [], cutoffSec: CUT, deleteIds: 'x' })).status, 400);
+    });
+
+    await check('cleanup: delegates to destroy (symlinked root only unlinked, idempotent)', async () => {
+      const ID_S = '9'.repeat(24);
+      fs.symlinkSync(outside, path.join(root, ID_S));
+      const r = await post('/cleanup', { workspaceId: ID_S });
+      assert.deepEqual(r.body, { ok: true, removed: true });
+      assert.equal(fs.existsSync(path.join(root, ID_S)), false);
+      assert.equal(fs.readFileSync(path.join(outside, 'precious.txt'), 'utf8'), 'keep');
+      assert.deepEqual((await post('/cleanup', { workspaceId: ID_S })).body, { ok: true, removed: false });
+    });
+
+    await check('destroy: a running exec command of that workspace is killed', async () => {
+      const ID_X = '8'.repeat(24);
+      fs.mkdirSync(path.join(root, ID_X));
+      const marker = path.join(tmp, 'exec-alive');
+      const pending = fetch(`${base}/exec`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: ID_X, command: `sleep 30; touch ${marker}`, timeoutMs: 60000 }),
+      }).then((r) => r.json()).catch(() => ({}));
+      await new Promise((r) => setTimeout(r, 800));
+      const t0 = Date.now();
+      assert.equal((await post('/destroy', { workspaceId: ID_X })).body.existed, true);
+      const out = await pending;
+      assert.ok(Date.now() - t0 < 10_000, 'exec ended promptly');
+      assert.notEqual(out.exitCode, 0);
+      assert.equal(fs.existsSync(marker), false);
     });
   } finally {
     cleanup();

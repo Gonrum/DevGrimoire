@@ -105,12 +105,23 @@ const rel = (p) => path.relative(SRC, p).split(path.sep).join('/');
     r === 'workspaces/workspace-fs.controller.ts' ||
     r.startsWith('workspaces/fs/') ||
     r === 'workspaces/workspace-ttl.scheduler.ts' ||
-    // Delete/sweep path: skips SSH records itself (destroyContainerDirs).
+    // workspaces.service.ts is checked separately below (method allowlist).
     r === 'workspaces/workspaces.service.ts' ||
     r === 'main.ts' ||
     r === 'workspaces/container-only.ts';
   const CALL = /\b(?:this\.)?workspaceClient\.\w+\(|this\.client\.\w+\(/g;
   const RESOLVER = ['mcp-tools.ts', 'chat/chat-tools.ts'];
+
+  // WorkspacesService may only use the directory-lifecycle methods, and must
+  // never alias the client (an alias would hide calls from this check).
+  await t('workspaces.service.ts: only destroyDir/listOrphans, no client alias', () => {
+    const text = fs.readFileSync(path.join(SRC, 'workspaces/workspaces.service.ts'), 'utf8');
+    const ALLOWED = new Set(['destroyDir', 'listOrphans']);
+    const methods = [...text.matchAll(/\bworkspaceClient\??\.(\w+)/g)].map((m) => m[1]);
+    assert.ok(methods.length > 0, 'expected sidecar calls');
+    for (const m of methods) assert.ok(ALLOWED.has(m), `workspaces.service.ts calls workspaceClient.${m}`);
+    assert.ok(!/=\s*this\.workspaceClient\b(?!\s*\??\.)/.test(text), 'workspaceClient is aliased');
+  });
 
   for (const file of walk(SRC)) {
     const r = rel(file);

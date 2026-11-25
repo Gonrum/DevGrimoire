@@ -27,6 +27,8 @@ import { WorkspaceClient, OrphansResponse } from './workspace-client.service';
 import { errorMessage } from '../common/narrow';
 
 const TOUCH_THROTTLE_MS = 60_000;
+const ORPHAN_CUTOFF_MARGIN_SEC = 300;
+const OBJECT_ID_PATTERN = /^[a-f0-9]{24}$/;
 
 @Injectable()
 export class WorkspacesService {
@@ -271,8 +273,8 @@ export class WorkspacesService {
     const ws = await this.workspaceModel.findByIdAndDelete(id).exec();
     if (!ws) throw new NotFoundException(`Workspace ${id} not found`);
     this.sessions?.drop(ws._id.toString());
-    await this.destroyContainerDirs([{ id: ws._id.toString(), location: ws.location }]);
     this.emit(ws, 'deleted', `Workspace "${ws.name}" gelöscht`);
+    this.scheduleDestroy([{ id: ws._id.toString(), location: ws.location }]);
   }
 
   async removeByProject(projectId: string): Promise<void> {
@@ -280,9 +282,18 @@ export class WorkspacesService {
     const filter = { projectId: new Types.ObjectId(projectId) };
     const affected = await this.workspaceModel.find(filter, { location: 1 }).lean().exec();
     await this.workspaceModel.deleteMany(filter).exec();
-    await this.destroyContainerDirs(
-      affected.map((w) => ({ id: String(w._id), location: w.location })),
-    );
+    this.scheduleDestroy(affected.map((w) => ({ id: String(w._id), location: w.location })));
+  }
+
+  /**
+   * Directory removal must not hold up the delete (the sidecar call can take
+   * minutes for a big tree): fire and forget. A lost call leaves an orphan
+   * dir that the admin orphan sweep picks up.
+   */
+  private scheduleDestroy(items: Array<{ id: string; location?: string }>): void {
+    void this.destroyContainerDirs(items).catch((err: unknown) => {
+      this.logger.warn(`sidecar directory removal failed: ${errorMessage(err)}`);
+    });
   }
 
   /**
@@ -293,12 +304,11 @@ export class WorkspacesService {
   private async destroyContainerDirs(
     items: Array<{ id: string; location?: string }>,
   ): Promise<void> {
-    const client = this.workspaceClient;
-    if (!client) return;
+    if (!this.workspaceClient) return;
     for (const item of items) {
       if (item.location === 'ssh') continue;
       try {
-        await client.destroyDir(item.id);
+        await this.workspaceClient.destroyDir(item.id);
       } catch (err: unknown) {
         this.logger.warn(`sidecar directory removal failed for ${item.id}: ${errorMessage(err)}`);
       }
@@ -308,12 +318,44 @@ export class WorkspacesService {
   /**
    * Admin sweep of sidecar directories whose workspace record is gone. The
    * known set is every workspace id in Mongo (any status, any location), so
-   * archived and SSH records protect their ids. Dry run unless `del` is true.
+   * archived and SSH records protect their ids. Without `deleteIds` this is a
+   * dry run. Deleting needs the explicit list the dry run showed; each id is
+   * re-checked against Mongo right before the sidecar call, and the sidecar
+   * deletes nothing outside that list.
    */
-  async sweepOrphans(del: boolean): Promise<OrphansResponse & { totalBytes: number }> {
+  async sweepOrphans(deleteIds?: string[]): Promise<OrphansResponse & { totalBytes: number }> {
     if (!this.workspaceClient) throw new ServiceUnavailableException('Workspace sidecar client unavailable');
+    if (deleteIds) {
+      if (deleteIds.length === 0 || !deleteIds.every((id) => OBJECT_ID_PATTERN.test(id))) {
+        throw new BadRequestException('ids must be a non-empty list of 24-hex workspace ids');
+      }
+      const existing = await this.workspaceModel
+        .find({ _id: { $in: deleteIds.map((id) => new Types.ObjectId(id)) } }, { _id: 1 })
+        .lean()
+        .exec();
+      if (existing.length > 0) {
+        throw new ConflictException(
+          `Workspace records exist for: ${existing.map((d) => String(d._id)).join(', ')}`,
+        );
+      }
+    }
+    const readAtMs = Date.now();
     const docs = await this.workspaceModel.find({}, { _id: 1 }).lean().exec();
-    const res = await this.workspaceClient.listOrphans(docs.map((d) => String(d._id)), del);
+    const knownIds = docs.map((d) => String(d._id));
+    // Margin: records created shortly before the read may not have a dir yet,
+    // and clock skew between backend and sidecar must not matter.
+    const cutoffSec = Math.floor(readAtMs / 1000) - ORPHAN_CUTOFF_MARGIN_SEC;
+    if (knownIds.length === 0) {
+      // An empty id set with directories on disk looks like a wrong/empty DB.
+      const probe = await this.workspaceClient.listOrphans([], cutoffSec);
+      if (probe.orphans.length > 0) {
+        throw new ConflictException(
+          'No workspace records found but the sidecar holds workspace directories; refusing to sweep',
+        );
+      }
+      return { ...probe, totalBytes: 0 };
+    }
+    const res = await this.workspaceClient.listOrphans(knownIds, cutoffSec, deleteIds);
     return { ...res, totalBytes: res.orphans.reduce((sum, o) => sum + o.bytes, 0) };
   }
 

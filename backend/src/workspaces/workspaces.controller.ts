@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseEnumPipe, Post, Put, Query, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Param, ParseEnumPipe, Post, Put, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { WorkspacesService } from './workspaces.service';
 import { WorkspaceClient } from './workspace-client.service';
@@ -94,7 +94,13 @@ export class WorkspacesController {
   @HttpCode(200)
   @Roles(UserRole.ADMIN)
   sweepOrphans(@Body() dto: SweepOrphansDto) {
-    return this.workspacesService.sweepOrphans(dto.delete === true);
+    if (dto.delete === true) {
+      if (!dto.ids || dto.ids.length === 0) {
+        throw new BadRequestException('delete requires the ids list from a dry run');
+      }
+      return this.workspacesService.sweepOrphans(dto.ids);
+    }
+    return this.workspacesService.sweepOrphans();
   }
 
   @Post()

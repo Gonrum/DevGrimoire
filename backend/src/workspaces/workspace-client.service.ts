@@ -98,6 +98,8 @@ export interface ExecResponse {
 export interface OrphansResponse {
   orphans: Array<{ id: string; bytes: number }>;
   deleted: string[];
+  failed?: Array<{ id: string; error: string }>;
+  skipped?: Array<{ id: string; reason: string }>;
 }
 
 @Injectable()
@@ -456,11 +458,17 @@ export class WorkspaceClient {
   }
 
   /**
-   * Lists (and with `del` removes) sidecar directories named like a workspace
-   * id that are not in `knownIds`. Without `del` nothing is touched.
+   * Lists sidecar directories named like a workspace id that are not in
+   * `knownIds`. `cutoffSec` protects records created after the id list was
+   * read (the sidecar skips newer ObjectIds). With `deleteIds` (and only
+   * then) the sidecar removes the listed orphans; it never deletes more.
    */
-  listOrphans(knownIds: string[], del: boolean): Promise<OrphansResponse> {
-    return this.post<OrphansResponse>('/orphans', { knownIds, delete: del }, 10 * 60_000);
+  listOrphans(knownIds: string[], cutoffSec: number, deleteIds?: string[]): Promise<OrphansResponse> {
+    return this.post<OrphansResponse>(
+      '/orphans',
+      { knownIds, cutoffSec, ...(deleteIds ? { delete: true, deleteIds } : {}) },
+      10 * 60_000,
+    );
   }
 
   /** `maxBytes` (editor limit) is optional: without it the sidecar's own READ_MAX_BYTES applies. */
