@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
+import type { CodeRef } from '../code-refs';
 
 export type ChatSessionDocument = HydratedDocument<ChatSession>;
 
@@ -43,7 +44,6 @@ export interface ChatResponseMetrics {
   /** True when token count is estimated locally (chars/4) instead of from provider usage. */
   estimated: boolean;
 }
-
 @Schema({ _id: false })
 export class ChatMessage {
   @Prop({ type: String, enum: ['system', 'user', 'assistant'], required: true })
@@ -84,6 +84,23 @@ export class ChatMessage {
     default: undefined,
   })
   toolCalls?: ChatToolCallRecord[];
+
+  /** Editor selections / files the user attached (IDE agent sessions only). */
+  @Prop({
+    type: [
+      {
+        _id: false,
+        kind: { type: String, enum: ['selection', 'file'], required: true },
+        path: { type: String, required: true },
+        startLine: Number,
+        endLine: Number,
+        text: String,
+        unsaved: Boolean,
+      },
+    ],
+    default: undefined,
+  })
+  codeRefs?: CodeRef[];
 
   @Prop({
     type: [

@@ -1,5 +1,6 @@
 import { isRecord } from '../common/narrow';
 import type { LlmMessage } from './chat-llm.service';
+import { withCodeRefs } from './code-refs';
 import type { ChatMessage } from './schemas/chat-session.schema';
 
 /** Upper bound of the synthetic text replayed for a tool-only assistant turn. */
@@ -73,7 +74,8 @@ export function historyToLlmMessages(history: readonly ChatMessage[], limit: num
       if (m.toolCalls && m.toolCalls.length > 0) out.push({ role: 'assistant', content: summarizeToolCalls(m.toolCalls) });
       continue;
     }
-    out.push({ role: m.role, content: m.content });
+    const content = m.role === 'user' && m.codeRefs && m.codeRefs.length > 0 ? withCodeRefs(m.content, m.codeRefs) : m.content;
+    out.push({ role: m.role, content });
   }
   return out;
 }
