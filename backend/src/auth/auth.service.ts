@@ -585,13 +585,14 @@ export class AuthService {
     if (result) {
       // Delete all refresh tokens for this user
       await this.refreshTokenModel.deleteMany({ userId: id }).exec();
-      await this.oauth.revokeAllForUser(id);
+      // Audit first: the deletion happened even if revoking fails below.
       await this.auditLog.record({
         action: 'user.deleted',
         entityType: 'user',
         entityId: id,
         meta: { username: result.username, role: result.role },
       });
+      await this.oauth.revokeAllForUser(id);
     }
     return !!result;
   }

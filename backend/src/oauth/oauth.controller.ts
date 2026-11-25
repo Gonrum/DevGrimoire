@@ -63,6 +63,10 @@ export class OAuthController {
     };
   }
 
+  // `service`: an account action, not a content write. The connection never
+  // exceeds the owner's own rights, and a project restriction is checked
+  // against the actor via actorCanAccessProject below.
+  @PermissionGate('service')
   @Post('requests/:id/decision')
   async decide(@Param('id') id: string, @Body() body: OAuthDecisionDto, @Req() req: AuthRequest) {
     const actor = this.requireUser(req);
@@ -112,6 +116,7 @@ export class OAuthController {
   }
 
   /** Admin: revokes any user's connection (admin key overview). */
+  @PermissionGate('service')
   @Delete('admin/connections/:id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN)

@@ -27,6 +27,8 @@ const { AuthService } = load('auth/auth.service.js');
 const { RequestContext } = load('common/request-context.js');
 const { ROLES_KEY } = load('auth/decorators/roles.decorator.js');
 const { IS_PUBLIC_KEY } = load('auth/decorators/public.decorator.js');
+const { PermissionGateGuard } = load('auth/guards/permission-gate.guard.js');
+const { Reflector } = require(path.resolve(__dirname, '..', 'node_modules', '@nestjs/core'));
 const backendModules = path.resolve(__dirname, '..', 'node_modules');
 const { Types } = require(path.join(backendModules, 'mongoose'));
 const bcrypt = require(path.join(backendModules, 'bcryptjs'));
@@ -344,6 +346,38 @@ const revokedEvents = (env) => env.events.emitted.filter((e) => e.name === OAUTH
     assert.deepEqual(off.info(), { enabled: false });
   });
 
+  await check('entry gate: user without project:write may decide consent and revoke (own + admin)', async () => {
+    const readOnly = { userId: USER, username: 'u', role: 'user', permissions: ['project:read'], projectScopeMode: 'all', allowedProjectIds: [] };
+    const guard = new PermissionGateGuard(new Reflector());
+    const run = (handler, method) => guard.canActivate({
+      getType: () => 'http', getHandler: () => handler, getClass: () => OAuthController,
+      switchToHttp: () => ({ getRequest: () => ({ method, user: readOnly }) }),
+    });
+    assert.equal(run(OAuthController.prototype.decide, 'POST'), true);
+    assert.equal(run(OAuthController.prototype.revokeConnection, 'DELETE'), true);
+    assert.equal(run(OAuthController.prototype.adminRevokeConnection, 'DELETE'), true);
+    // Control: an ungated write handler is still refused for this actor.
+    function plainWrite() {}
+    assert.throws(() => run(plainWrite, 'POST'), (e) => e.getStatus() === 403);
+  });
+
+  await check('exchangeCode: connection revoked before activation → invalid_grant, no tokens', async () => {
+    const env = setup();
+    const a = await approvedCode(env);
+    const realUpdateOne = env.models.apiKey.updateOne;
+    // Simulate a revoke landing between the active check and the activation.
+    env.models.apiKey.updateOne = (f, u) => {
+      env.models.apiKey.docs[0].active = false;
+      env.models.apiKey.updateOne = realUpdateOne;
+      return realUpdateOne(f, u);
+    };
+    await assert.rejects(
+      () => env.svc.exchangeCode(a.client.client_id, a.code, a.verifier, CLAUDE_CB, new URL(RESOURCE)),
+      (e) => e.errorCode === 'invalid_grant',
+    );
+    assert.equal(env.models.token.docs.length, 0);
+  });
+
   // ------------------------------------------------------------ account events
   function authWith(oauthCalls, user) {
     const auth = Object.create(AuthService.prototype);
@@ -384,6 +418,15 @@ const revokedEvents = (env) => env.events.emitted.filter((e) => e.name === OAUTH
     const auth = authWith(calls, null);
     assert.equal(await auth.deleteUser(USER), true);
     assert.deepEqual(calls, [USER]);
+  });
+
+  await check('deleteUser records the audit row even if revoking the connections fails', async () => {
+    const auth = authWith([], null);
+    const audited = [];
+    auth.auditLog = { record: async (r) => { audited.push(r.action); } };
+    auth.oauth = { revokeAllForUser: async () => { throw new Error('db down'); } };
+    await assert.rejects(() => auth.deleteUser(USER), /db down/);
+    assert.deepEqual(audited, ['user.deleted']);
   });
 
   await check('revokeAllForUser also ends pending connections, reason account', async () => {
@@ -467,7 +510,7 @@ const revokedEvents = (env) => env.events.emitted.filter((e) => e.name === OAUTH
     const actions = env.audit.records.map((r) => r.action);
     assert.ok(actions.includes('oauth.consent.approved'), actions.join());
     assert.ok(actions.includes('oauth.consent.denied'), actions.join());
-    assert.equal(actions.filter((a) => a === 'oauth.token.issued').length, 2);
+    assert.equal(actions.filter((a) => a === 'oauth.token.issued').length, 1, 'only the code exchange is audited, not the refresh');
     assert.ok(actions.includes('oauth.refresh.reused'));
     const revoked = env.audit.records.find((r) => r.action === 'oauth.connection.revoked');
     assert.equal(revoked.meta.reason, 'refresh_replay');
@@ -476,7 +519,8 @@ const revokedEvents = (env) => env.events.emitted.filter((e) => e.name === OAUTH
     assert.equal(approved.meta.redirectHost, 'claude.ai');
     assert.equal(approved.actor.userId, USER);
     const issued = env.audit.records.filter((r) => r.action === 'oauth.token.issued');
-    assert.deepEqual(issued.map((r) => r.meta.grant), ['authorization_code', 'refresh_token']);
+    assert.deepEqual(issued.map((r) => r.meta.grant), ['authorization_code']);
+    assert.ok(!issued.some((r) => r.meta.grant === 'refresh_token'));
     assert.equal(issued[0].actor.apiKeyId, c.apiKeyId);
     const dump = JSON.stringify(env.audit.records);
     for (const secret of [c.code, c.t.access_token, c.t.refresh_token, t2.access_token, t2.refresh_token, req]) {

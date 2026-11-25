@@ -420,7 +420,7 @@ export class BackupsService implements OnModuleInit {
         restoreRequiresSameEncryptionKey: true,
       },
       restore: {
-        note: 'Restore into a stopped or maintenance-mode instance. Verify checksums, restore MongoDB first, copy attachments, then reindex RAG content.',
+        note: 'Restore into a stopped or maintenance-mode instance. Verify checksums, restore MongoDB first, copy attachments, then reindex RAG content. OAuth tokens are not part of the backup: MCP clients connected via OAuth must re-authorize; stale entries can be revoked under "Connected apps".',
       },
       artifacts: input.artifacts,
     };

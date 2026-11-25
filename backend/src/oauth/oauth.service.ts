@@ -509,12 +509,14 @@ export class OAuthService {
       throw new InvalidGrantError('Connection was revoked');
     }
     // First redemption: the provisional connection becomes a real one.
-    await this.apiKeyModel
+    const activated = await this.apiKeyModel
       .updateOne(
         { _id: doc.apiKeyId, kind: 'oauth', active: true },
         { $set: { expiresAt: new Date(this.now() + CONNECTION_TTL_MS) }, $unset: { oauthPending: '' } },
       )
       .exec();
+    // Revoked between the check above and here: mint no orphan tokens.
+    if (activated.matchedCount === 0) throw new InvalidGrantError('Connection was revoked');
     return this.issueTokens(
       { clientId: doc.clientId, apiKeyId: doc.apiKeyId, userId: doc.userId, resource: doc.resource },
       'authorization_code',
@@ -546,14 +548,18 @@ export class OAuthService {
       type: 'refresh',
       expiresAt: new Date(now + REFRESH_TOKEN_TTL_MS),
     });
+    // Only the first issuance per connection: routine hourly refreshes would
+    // flood the trail (refresh misuse and revocations are audited separately).
     // Never the tokens themselves, not even a prefix of them.
-    await this.auditLog.record({
-      action: 'oauth.token.issued',
-      entityType: 'apikey',
-      entityId: grant.apiKeyId.toString(),
-      meta: { clientId: grant.clientId, grant: grantType },
-      actor: { userId: grant.userId.toString(), apiKeyId: grant.apiKeyId.toString() },
-    });
+    if (grantType === 'authorization_code') {
+      await this.auditLog.record({
+        action: 'oauth.token.issued',
+        entityType: 'apikey',
+        entityId: grant.apiKeyId.toString(),
+        meta: { clientId: grant.clientId, grant: grantType },
+        actor: { userId: grant.userId.toString(), apiKeyId: grant.apiKeyId.toString() },
+      });
+    }
     return {
       access_token: accessToken,
       token_type: 'bearer',
