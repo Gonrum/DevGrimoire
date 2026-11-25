@@ -48,6 +48,16 @@ export function progressIntervalMs(): number {
 }
 
 /**
+ * Upper bound for the silent phase before the first data line of an upstream
+ * response (model load, prompt prefill). LLM_FIRST_TOKEN_TIMEOUT_MS, default
+ * 10 minutes; non-finite or non-positive values fall back to the default.
+ */
+export function firstTokenTimeoutMs(): number {
+  const n = Number(process.env.LLM_FIRST_TOKEN_TIMEOUT_MS);
+  return Number.isFinite(n) && n > 0 ? n : 600_000;
+}
+
+/**
  * Fehler eines Turns, der bereits Tokens an den Client zugestellt hat.
  *
  * Der Processor entscheidet daran, ob ein Failover auf einen anderen Endpunkt
@@ -184,7 +194,23 @@ export class ChatRunner {
     // (POOL_WAIT_TIMEOUT_MS) killed healthy, actively streaming turns.
     // Throttled: the relay replays every event, so one per interval is enough.
     let lastProgressAt = 0;
+    let gotFirstByte = false;
+    // Pre-first-byte phase: the upstream may legitimately send nothing for
+    // minutes (model load, prefill). Without a heartbeat the gateway's idle
+    // timer would fail the turn although the endpoint is working; the limit
+    // below bounds the phase so a dead upstream still fails.
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let firstByteTimer: ReturnType<typeof setTimeout> | undefined;
+    let firstByteTimedOut = false;
+    const stopFirstByteWatch = (): void => {
+      if (heartbeat !== undefined) { clearInterval(heartbeat); heartbeat = undefined; }
+      if (firstByteTimer !== undefined) { clearTimeout(firstByteTimer); firstByteTimer = undefined; }
+    };
     const onActivity = (): void => {
+      if (!gotFirstByte) {
+        gotFirstByte = true;
+        stopFirstByteWatch();
+      }
       const now = Date.now();
       if (now - lastProgressAt < progressIntervalMs()) return;
       lastProgressAt = now;
@@ -200,6 +226,18 @@ export class ChatRunner {
       if (this.relay.isCancelled(jobId)) abort.abort(new Error('chat job cancelled'));
     }, CANCEL_POLL_MS);
     cancelPoll.unref?.();
+
+    const firstTokenMs = firstTokenTimeoutMs();
+    heartbeat = setInterval(() => {
+      this.relay.publish(jobId, { type: 'progress' });
+    }, progressIntervalMs());
+    heartbeat.unref?.();
+    firstByteTimer = setTimeout(() => {
+      firstByteTimedOut = true;
+      stopFirstByteWatch();
+      abort.abort(new Error('first byte timeout'));
+    }, firstTokenMs);
+    firstByteTimer.unref?.();
 
     try {
       if (payload.withTools) {
@@ -252,6 +290,15 @@ export class ChatRunner {
         this.relay.publish(jobId, { type: 'done', usage: { ...ZERO_USAGE } });
         return;
       }
+      if (firstByteTimedOut && !gotFirstByte) {
+        // Nothing was published (no data line arrived), so the processor may
+        // still fail over to another endpoint, like for any connect failure.
+        const timeoutErr: CommittedError = new Error(
+          `no response from model within ${Math.round(firstTokenMs / 1000)} s (model load / prompt processing)`,
+        );
+        timeoutErr.committed = published;
+        throw timeoutErr;
+      }
       // `errorMessage` statt `String(err)`: ein geworfenes Objekt wurde vorher
       // zu "[object Object]" — bei abgebrochenen Streams genau der Fall.
       const e: CommittedError = err instanceof Error ? err : new Error(errorMessage(err));
@@ -259,6 +306,7 @@ export class ChatRunner {
       throw e;
     } finally {
       clearInterval(cancelPoll);
+      stopFirstByteWatch();
       // Always end the upstream request. On a `break` after a cancel the
       // generator's own cleanup only releases the reader lock — the provider
       // would keep generating for a slot the processor already gave back.

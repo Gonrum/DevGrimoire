@@ -10,6 +10,9 @@
  *    upstream request instead of holding the pool slot until the provider
  *    finishes on its own — also when the cancel is seen between two content
  *    events — and must not fail over to another endpoint.
+ * 5. First byte (model load / prefill, 2026-11-25): before the first data line
+ *    the worker heartbeats for up to LLM_FIRST_TOKEN_TIMEOUT_MS, so a silent
+ *    upstream outlives the idle window; after it the idle window applies again.
  * 4. SSE keep-alive comments (`: ping`) are not activity: a stream that only
  *    sends those still times out. The progress interval is clamped below the
  *    idle window.
@@ -36,6 +39,9 @@ require(path.resolve(__dirname, '..', 'node_modules', 'reflect-metadata'));
 const IDLE_MS = 400;
 process.env.POOL_WAIT_TIMEOUT_MS = String(IDLE_MS);
 process.env.LLM_PROGRESS_INTERVAL_MS = '50';
+// Pre-first-byte limit for this check (read at call time by ChatRunner.run).
+const FIRST_TOKEN_MS = 1500;
+process.env.LLM_FIRST_TOKEN_TIMEOUT_MS = String(FIRST_TOKEN_MS);
 
 const { LlmClient } = loadCompiled('balancer/llm-client.service.js');
 const { ChatRunner } = loadCompiled('balancer/chat-runner.service.js');
@@ -217,10 +223,12 @@ async function keepAliveOnlyStreamStillTimesOut() {
     const t0 = Date.now();
     const outcome = await Promise.race([
       collect(gateway).then(() => 'completed', (e) => `rejected: ${e && e.message}`),
-      sleep(IDLE_MS * 6).then(() => 'still running'),
+      sleep(FIRST_TOKEN_MS * 3).then(() => 'still running'),
     ]);
-    assert.match(outcome, /chat pool wait timeout/, `keep-alive comments must not count as activity (got ${outcome})`);
-    assert.ok(Date.now() - t0 < IDLE_MS * 3, 'idle timeout should fire roughly after one idle window');
+    // Pings are not data lines, so the turn never leaves the pre-first-byte
+    // phase: the heartbeat carries it, bounded by the first-token limit.
+    assert.match(outcome, /no response from model within/, `keep-alive comments must not count as activity (got ${outcome})`);
+    assert.ok(Date.now() - t0 >= FIRST_TOKEN_MS * 0.9, 'bounded by the first-token limit, not the idle window');
     await sleep(800); // cancel poll interval
     assert.equal(upstreamSignal && upstreamSignal.aborted, true, 'the timed-out turn must abort its upstream request');
   } finally {
@@ -237,6 +245,146 @@ function progressIntervalIsClamped() {
     assert.equal(progressIntervalMs(), 50);
   } finally {
     process.env.LLM_PROGRESS_INTERVAL_MS = saved;
+  }
+}
+
+/** SSE response with an explicit delay before each chunk; honours the request signal. */
+function delayedSse(chunks, delays, signal) {
+  let i = 0;
+  const body = new ReadableStream({
+    async pull(controller) {
+      if (i >= chunks.length) { controller.close(); return; }
+      const d = delays[i] ?? 0;
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(resolve, d);
+        if (signal) {
+          if (signal.aborted) { clearTimeout(t); reject(signal.reason ?? new Error('aborted')); return; }
+          signal.addEventListener('abort', () => { clearTimeout(t); reject(signal.reason ?? new Error('aborted')); }, { once: true });
+        }
+      });
+      controller.enqueue(enc.encode(chunks[i++]));
+    },
+  });
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+}
+
+const CONTENT_LINE = `data: ${JSON.stringify({ choices: [{ delta: { content: 'hi' } }] })}\n\n`;
+const FINISH_LINE = `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`;
+const OA_SLOT = { id: 'ep', provider: 'openai-compatible', baseUrl: 'http://fake', model: 'm', timeoutMs: 30000 };
+
+async function silentBeforeFirstByteSurvivesIdleWindow() {
+  const realFetch = global.fetch;
+  global.fetch = async (_url, init) => delayedSse([CONTENT_LINE, FINISH_LINE, 'data: [DONE]\n\n'], [IDLE_MS * 2.5, 10, 10], init && init.signal);
+  try {
+    const { gateway } = wire(OA_SLOT);
+    const t0 = Date.now();
+    const events = await collect(gateway);
+    const took = Date.now() - t0;
+    assert.ok(took > IDLE_MS * 2 && took < FIRST_TOKEN_MS, `silence must exceed the idle window but not the first-token limit (took ${took} ms)`);
+    assert.ok(events.some((e) => e.type === 'content' && e.delta === 'hi'), `content expected, got ${JSON.stringify(events)}`);
+  } finally {
+    global.fetch = realFetch;
+  }
+}
+
+async function silentBeyondFirstTokenLimitFails() {
+  const realFetch = global.fetch;
+  let upstreamSignal = null;
+  global.fetch = async (_url, init) => {
+    upstreamSignal = init && init.signal;
+    return delayedSse([CONTENT_LINE], [FIRST_TOKEN_MS * 10], upstreamSignal);
+  };
+  try {
+    let runErr = null;
+    const { gateway } = wire(OA_SLOT, (e) => { runErr = e; });
+    const t0 = Date.now();
+    const outcome = await Promise.race([
+      collect(gateway).then(() => 'completed', (e) => `rejected: ${e && e.message}`),
+      sleep(FIRST_TOKEN_MS * 4).then(() => 'still running'),
+    ]);
+    assert.match(outcome, /no response from model within \d+ s/, `got ${outcome}`);
+    assert.ok(Date.now() - t0 >= FIRST_TOKEN_MS * 0.9, 'must not fail before the first-token limit');
+    await sleep(100);
+    assert.ok(runErr, 'the runner must throw');
+    assert.equal(runErr.committed, false, 'nothing was published: not committed');
+    assert.equal(upstreamSignal && upstreamSignal.aborted, true, 'the upstream request must be aborted');
+  } finally {
+    global.fetch = realFetch;
+  }
+}
+
+async function silenceAfterFirstChunkStillIdlesOut() {
+  const realFetch = global.fetch;
+  let upstreamSignal = null;
+  global.fetch = async (_url, init) => {
+    upstreamSignal = init && init.signal;
+    return delayedSse([CONTENT_LINE, CONTENT_LINE], [20, FIRST_TOKEN_MS * 10], upstreamSignal);
+  };
+  try {
+    const { gateway } = wire(OA_SLOT);
+    const t0 = Date.now();
+    const outcome = await Promise.race([
+      collect(gateway).then(() => 'completed', (e) => `rejected: ${e && e.message}`),
+      sleep(IDLE_MS * 6).then(() => 'still running'),
+    ]);
+    assert.match(outcome, /chat pool wait timeout/, `idle window must apply after the first byte (got ${outcome})`);
+    assert.ok(Date.now() - t0 < IDLE_MS * 3, 'idle timeout should fire roughly after one idle window');
+    await sleep(800);
+    assert.equal(upstreamSignal && upstreamSignal.aborted, true, 'the timed-out turn must abort its upstream request');
+  } finally {
+    global.fetch = realFetch;
+  }
+}
+
+async function noEndpointStillTimesOut() {
+  const relay = new StreamRelay();
+  // Never leased: the job is enqueued but no worker ever runs it.
+  const gateway = new BalancerGateway({ enqueue: async () => 'job-none' }, relay, {}, {}, {});
+  const t0 = Date.now();
+  const outcome = await Promise.race([
+    collect(gateway).then(() => 'completed', (e) => `rejected: ${e && e.message}`),
+    sleep(IDLE_MS * 6).then(() => 'still running'),
+  ]);
+  assert.match(outcome, /chat pool wait timeout/);
+  assert.ok(Date.now() - t0 < IDLE_MS * 3, 'must time out after POOL_WAIT_TIMEOUT_MS, not the first-token limit');
+}
+
+async function noLeakedTimersAfterRun() {
+  const realSetInterval = global.setInterval;
+  const realClearInterval = global.clearInterval;
+  const realSetTimeout = global.setTimeout;
+  const realClearTimeout = global.clearTimeout;
+  const liveIntervals = new Set();
+  const liveTimeouts = new Set();
+  const firstTokenHandles = new Set();
+  let sawFirstTokenTimer = false;
+  const realFetch = global.fetch;
+  global.fetch = async (_url, init) => delayedSse([CONTENT_LINE, FINISH_LINE, 'data: [DONE]\n\n'], [150, 5, 5], init && init.signal);
+  try {
+    const relay = new StreamRelay();
+    const runner = new ChatRunner(new LlmClient(), relay);
+    const started = [];
+    global.setInterval = (fn, ms, ...a) => { const h = realSetInterval(fn, ms, ...a); liveIntervals.add(h); started.push(h); return h; };
+    global.clearInterval = (h) => { liveIntervals.delete(h); return realClearInterval(h); };
+    global.setTimeout = (fn, ms, ...a) => {
+      const h = realSetTimeout(fn, ms, ...a);
+      liveTimeouts.add(h);
+      if (ms === FIRST_TOKEN_MS) { sawFirstTokenTimer = true; firstTokenHandles.add(h); }
+      return h;
+    };
+    global.clearTimeout = (h) => { liveTimeouts.delete(h); return realClearTimeout(h); };
+    await runner.run('job-t', OA_SLOT, null, { withTools: true, messages: MESSAGES, tools: TOOLS });
+    assert.ok(started.length >= 1);
+    assert.equal(liveIntervals.size, 0, 'every interval must be cleared on success');
+    // The first-token timer (recognised by its delay) must have been cleared too.
+    assert.ok(sawFirstTokenTimer, 'the first-token timer must exist during the run');
+    assert.equal([...liveTimeouts].filter((h) => firstTokenHandles.has(h)).length, 0, 'first-token timer must be cleared on success');
+  } finally {
+    global.setInterval = realSetInterval;
+    global.clearInterval = realClearInterval;
+    global.setTimeout = realSetTimeout;
+    global.clearTimeout = realClearTimeout;
+    global.fetch = realFetch;
   }
 }
 
@@ -262,9 +410,14 @@ async function noFailoverAfterCancel() {
     ['anthropic tool call streaming longer than the idle window', () => slowToolCallDoesNotIdleOut('anthropic', anthropicToolChunks(20))],
     ['cancel aborts the upstream request and frees the worker', cancelAbortsUpstream],
     ['cancel seen between content events aborts the upstream request', cancelMidStreamAbortsUpstream],
-    ['a keep-alive-only stream still hits the idle timeout', keepAliveOnlyStreamStillTimesOut],
+    ['a keep-alive-only stream hits the first-token limit', keepAliveOnlyStreamStillTimesOut],
     ['progress interval is clamped below the idle window', progressIntervalIsClamped],
     ['no failover once the job is cancelled', noFailoverAfterCancel],
+    ['silence before the first byte outlives the idle window', silentBeforeFirstByteSurvivesIdleWindow],
+    ['silence beyond the first-token limit fails (not committed, upstream aborted)', silentBeyondFirstTokenLimitFails],
+    ['silence after the first chunk still hits the idle timeout', silenceAfterFirstChunkStillIdlesOut],
+    ['no endpoint still times out after POOL_WAIT_TIMEOUT_MS', noEndpointStillTimesOut],
+    ['no timer outlives a finished run', noLeakedTimersAfterRun],
   ];
   let failed = 0;
   for (const [name, fn] of cases) {
