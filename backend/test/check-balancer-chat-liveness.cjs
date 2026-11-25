@@ -288,6 +288,13 @@ async function silentBeforeFirstByteSurvivesIdleWindow() {
 }
 
 async function silentBeyondFirstTokenLimitFails() {
+  const realSetInterval = global.setInterval, realClearInterval = global.clearInterval;
+  const realSetTimeout = global.setTimeout, realClearTimeout = global.clearTimeout;
+  const liveIntervals = new Set(), liveTimeouts = new Set(), ftHandles = new Set();
+  global.setInterval = (fn, ms, ...a) => { const h = realSetInterval(fn, ms, ...a); liveIntervals.add(h); return h; };
+  global.clearInterval = (h) => { liveIntervals.delete(h); return realClearInterval(h); };
+  global.setTimeout = (fn, ms, ...a) => { const h = realSetTimeout(fn, ms, ...a); liveTimeouts.add(h); if (ms === FIRST_TOKEN_MS) ftHandles.add(h); return h; };
+  global.clearTimeout = (h) => { liveTimeouts.delete(h); return realClearTimeout(h); };
   const realFetch = global.fetch;
   let upstreamSignal = null;
   global.fetch = async (_url, init) => {
@@ -308,7 +315,12 @@ async function silentBeyondFirstTokenLimitFails() {
     assert.ok(runErr, 'the runner must throw');
     assert.equal(runErr.committed, false, 'nothing was published: not committed');
     assert.equal(upstreamSignal && upstreamSignal.aborted, true, 'the upstream request must be aborted');
+    assert.ok(runErr.cause instanceof Error, 'the abort reason must be attached as cause');
+    assert.equal(liveIntervals.size, 0, 'every interval must be cleared on the timeout path');
+    assert.equal([...liveTimeouts].filter((h) => ftHandles.has(h)).length, 0, 'first-token timer must be cleared on the timeout path');
   } finally {
+    global.setInterval = realSetInterval; global.clearInterval = realClearInterval;
+    global.setTimeout = realSetTimeout; global.clearTimeout = realClearTimeout;
     global.fetch = realFetch;
   }
 }

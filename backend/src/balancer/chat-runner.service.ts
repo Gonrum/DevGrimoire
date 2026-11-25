@@ -50,11 +50,16 @@ export function progressIntervalMs(): number {
 /**
  * Upper bound for the silent phase before the first data line of an upstream
  * response (model load, prompt prefill). LLM_FIRST_TOKEN_TIMEOUT_MS, default
- * 10 minutes; non-finite or non-positive values fall back to the default.
+ * 290 s; non-finite or non-positive values fall back to the default.
+ *
+ * The default sits just below Node's fetch (undici) headersTimeout/bodyTimeout
+ * of 300 s: both run until the first body chunk, so an upstream that sends no
+ * SSE keep-alives is cut by fetch itself after ~300 s ("fetch failed"). Larger
+ * values are honoured but only take effect when the upstream sends keep-alives.
  */
 export function firstTokenTimeoutMs(): number {
   const n = Number(process.env.LLM_FIRST_TOKEN_TIMEOUT_MS);
-  return Number.isFinite(n) && n > 0 ? n : 600_000;
+  return Number.isFinite(n) && n > 0 ? n : 290_000;
 }
 
 /**
@@ -229,13 +234,16 @@ export class ChatRunner {
 
     const firstTokenMs = firstTokenTimeoutMs();
     heartbeat = setInterval(() => {
+      if (this.relay.isCancelled(jobId)) return;
       this.relay.publish(jobId, { type: 'progress' });
     }, progressIntervalMs());
     heartbeat.unref?.();
+    let firstByteReason: Error | undefined;
     firstByteTimer = setTimeout(() => {
       firstByteTimedOut = true;
       stopFirstByteWatch();
-      abort.abort(new Error('first byte timeout'));
+      firstByteReason = new Error('first byte timeout');
+      abort.abort(firstByteReason);
     }, firstTokenMs);
     firstByteTimer.unref?.();
 
@@ -295,6 +303,7 @@ export class ChatRunner {
         // still fail over to another endpoint, like for any connect failure.
         const timeoutErr: CommittedError = new Error(
           `no response from model within ${Math.round(firstTokenMs / 1000)} s (model load / prompt processing)`,
+          { cause: firstByteReason ?? err },
         );
         timeoutErr.committed = published;
         throw timeoutErr;
