@@ -1,6 +1,6 @@
 import {
   BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException,
-  Optional,
+  Optional, ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -23,6 +23,8 @@ import {
   parseAgentAllowInput,
 } from './agent-allow';
 import { SshWorkspaceSessions } from './fs/ssh-workspace-sessions.service';
+import { WorkspaceClient, OrphansResponse } from './workspace-client.service';
+import { errorMessage } from '../common/narrow';
 
 const TOUCH_THROTTLE_MS = 60_000;
 
@@ -37,6 +39,8 @@ export class WorkspacesService {
     private readonly ssh: SshService,
     // Optional so checks can build the service without the session holder.
     @Optional() private readonly sessions?: SshWorkspaceSessions,
+    // Optional for the same reason; without it no sidecar directory is removed.
+    @Optional() private readonly workspaceClient?: WorkspaceClient,
   ) {}
 
   /**
@@ -267,14 +271,50 @@ export class WorkspacesService {
     const ws = await this.workspaceModel.findByIdAndDelete(id).exec();
     if (!ws) throw new NotFoundException(`Workspace ${id} not found`);
     this.sessions?.drop(ws._id.toString());
+    await this.destroyContainerDirs([{ id: ws._id.toString(), location: ws.location }]);
     this.emit(ws, 'deleted', `Workspace "${ws.name}" gelöscht`);
   }
 
   async removeByProject(projectId: string): Promise<void> {
     assertSafeCascadeId(projectId, 'projectId');
-    await this.workspaceModel
-      .deleteMany({ projectId: new Types.ObjectId(projectId) })
-      .exec();
+    const filter = { projectId: new Types.ObjectId(projectId) };
+    const affected = await this.workspaceModel.find(filter, { location: 1 }).lean().exec();
+    await this.workspaceModel.deleteMany(filter).exec();
+    await this.destroyContainerDirs(
+      affected.map((w) => ({ id: String(w._id), location: w.location })),
+    );
+  }
+
+  /**
+   * Best-effort removal of the sidecar directories of deleted container
+   * workspaces. SSH workspaces are skipped: the remote server is never
+   * touched. A failure is logged and never fails the delete.
+   */
+  private async destroyContainerDirs(
+    items: Array<{ id: string; location?: string }>,
+  ): Promise<void> {
+    const client = this.workspaceClient;
+    if (!client) return;
+    for (const item of items) {
+      if (item.location === 'ssh') continue;
+      try {
+        await client.destroyDir(item.id);
+      } catch (err: unknown) {
+        this.logger.warn(`sidecar directory removal failed for ${item.id}: ${errorMessage(err)}`);
+      }
+    }
+  }
+
+  /**
+   * Admin sweep of sidecar directories whose workspace record is gone. The
+   * known set is every workspace id in Mongo (any status, any location), so
+   * archived and SSH records protect their ids. Dry run unless `del` is true.
+   */
+  async sweepOrphans(del: boolean): Promise<OrphansResponse & { totalBytes: number }> {
+    if (!this.workspaceClient) throw new ServiceUnavailableException('Workspace sidecar client unavailable');
+    const docs = await this.workspaceModel.find({}, { _id: 1 }).lean().exec();
+    const res = await this.workspaceClient.listOrphans(docs.map((d) => String(d._id)), del);
+    return { ...res, totalBytes: res.orphans.reduce((sum, o) => sum + o.bytes, 0) };
   }
 
   /**

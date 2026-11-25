@@ -11,6 +11,7 @@ import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { agentToolSetsOf } from './agent-tool-sets';
 import { AddAgentAllowDto } from './dto/agent-allow.dto';
 import { isInactiveAllowEntry } from './agent-allow';
+import { SweepOrphansDto } from './dto/sweep-orphans.dto';
 import { ExecWorkspaceDto } from './dto/exec-workspace.dto';
 import { WORKSPACE_STATUSES, WorkspaceDocument, WorkspaceStatus } from './schemas/workspace.schema';
 import { SshService } from '../ssh/ssh.service';
@@ -83,6 +84,17 @@ export class WorkspacesController {
   @Roles(UserRole.ADMIN)
   triggerTtlSweep() {
     return this.ttl.sweep();
+  }
+
+  /**
+   * Finds (and with `delete: true` removes) sidecar directories that belong
+   * to no workspace record. Dry run by default. Admin only.
+   */
+  @Post('orphans/sweep')
+  @HttpCode(200)
+  @Roles(UserRole.ADMIN)
+  sweepOrphans(@Body() dto: SweepOrphansDto) {
+    return this.workspacesService.sweepOrphans(dto.delete === true);
   }
 
   @Post()

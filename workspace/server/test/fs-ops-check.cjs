@@ -600,6 +600,100 @@ async function main() {
       assert.equal(res.status, 200);
       assert.equal((await res.arrayBuffer()).byteLength, 6 * MIB);
     });
+
+    // --- T-547: /destroy and /orphans ---
+    const ID_A = 'a'.repeat(24);
+    const ID_B = 'b'.repeat(24);
+    const ID_C = 'c'.repeat(24);
+    const ID_L = 'd'.repeat(24);
+    const mk = (id, name, data) => {
+      fs.mkdirSync(path.join(root, id, 'sub'), { recursive: true });
+      fs.writeFileSync(path.join(root, id, 'sub', name), data);
+    };
+
+    await check('destroy: removes the directory tree, idempotent afterwards', async () => {
+      mk(ID_A, 'f.txt', 'hello');
+      const r = await post('/destroy', { workspaceId: ID_A });
+      assert.equal(r.status, 200);
+      assert.deepEqual(r.body, { ok: true, existed: true });
+      assert.equal(fs.existsSync(path.join(root, ID_A)), false);
+      const again = await post('/destroy', { workspaceId: ID_A });
+      assert.equal(again.status, 200);
+      assert.deepEqual(again.body, { ok: true, existed: false });
+    });
+
+    await check('destroy: invalid ids and traversal are rejected with 400, nothing touched', async () => {
+      fs.writeFileSync(path.join(tmp, 'keep.txt'), 'x');
+      for (const bad of ['..', '../outside', 'a/b', '', '.', '/etc', 'x'.repeat(65), 5, null]) {
+        const r = await post('/destroy', { workspaceId: bad });
+        assert.equal(r.status, 400, `id ${JSON.stringify(bad)}`);
+      }
+      assert.equal((await post('/destroy', {})).status, 400);
+      assert.ok(fs.existsSync(path.join(tmp, 'keep.txt')));
+      assert.ok(fs.existsSync(outside));
+      assert.ok(fs.existsSync(ws));
+    });
+
+    await check('destroy: a symlinked root is unlinked, the target stays', async () => {
+      fs.writeFileSync(path.join(outside, 'precious.txt'), 'keep');
+      fs.symlinkSync(outside, path.join(root, ID_L));
+      const r = await post('/destroy', { workspaceId: ID_L });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.existed, true);
+      assert.equal(fs.existsSync(path.join(root, ID_L)), false);
+      assert.equal(fs.readFileSync(path.join(outside, 'precious.txt'), 'utf8'), 'keep');
+    });
+
+    await check('destroy: symlinks inside the tree are not followed', async () => {
+      mk(ID_A, 'f.txt', 'hello');
+      fs.symlinkSync(outside, path.join(root, ID_A, 'sub', 'link'));
+      assert.equal((await post('/destroy', { workspaceId: ID_A })).status, 200);
+      assert.equal(fs.existsSync(path.join(root, ID_A)), false);
+      assert.equal(fs.readFileSync(path.join(outside, 'precious.txt'), 'utf8'), 'keep');
+    });
+
+    await check('orphans: dry run lists unknown valid-id dirs with size and deletes nothing', async () => {
+      mk(ID_A, 'f.txt', 'x'.repeat(100));
+      mk(ID_B, 'f.txt', 'y'.repeat(50));
+      mk(ID_C, 'f.txt', 'z');
+      fs.mkdirSync(path.join(root, 'ptytest'));
+      fs.writeFileSync(path.join(root, 'ptytest', 'f'), 'scratch');
+      const r = await post('/orphans', { knownIds: [ID_C] });
+      assert.equal(r.status, 200);
+      assert.deepEqual(r.body.deleted, []);
+      assert.deepEqual(r.body.orphans, [{ id: ID_A, bytes: 100 }, { id: ID_B, bytes: 50 }]);
+      for (const id of [ID_A, ID_B, ID_C, 'ptytest', 'ws1']) assert.ok(fs.existsSync(path.join(root, id)), id);
+      const dry = await post('/orphans', { knownIds: [ID_C], delete: false });
+      assert.deepEqual(dry.body.deleted, []);
+      assert.ok(fs.existsSync(path.join(root, ID_A)));
+    });
+
+    await check('orphans: delete removes only unknown valid-id dirs', async () => {
+      const r = await post('/orphans', { knownIds: [ID_C], delete: true });
+      assert.equal(r.status, 200);
+      assert.deepEqual(r.body.deleted, [ID_A, ID_B]);
+      assert.equal(fs.existsSync(path.join(root, ID_A)), false);
+      assert.equal(fs.existsSync(path.join(root, ID_B)), false);
+      for (const id of [ID_C, 'ptytest', 'ws1']) assert.ok(fs.existsSync(path.join(root, id)), id);
+      const again = await post('/orphans', { knownIds: [ID_C], delete: true });
+      assert.deepEqual(again.body, { orphans: [], deleted: [] });
+    });
+
+    await check('orphans: a symlinked orphan is unlinked without touching its target', async () => {
+      fs.symlinkSync(outside, path.join(root, ID_L));
+      const r = await post('/orphans', { knownIds: [], delete: true });
+      assert.ok(r.body.deleted.includes(ID_L));
+      assert.equal(fs.existsSync(path.join(root, ID_L)), false);
+      assert.equal(fs.readFileSync(path.join(outside, 'precious.txt'), 'utf8'), 'keep');
+      assert.ok(fs.existsSync(path.join(root, 'ptytest')));
+    });
+
+    await check('orphans: malformed body is 400', async () => {
+      assert.equal((await post('/orphans', {})).status, 400);
+      assert.equal((await post('/orphans', { knownIds: 'x' })).status, 400);
+      assert.equal((await post('/orphans', { knownIds: [1] })).status, 400);
+      assert.equal((await post('/orphans', { knownIds: [], delete: 'yes' })).status, 400);
+    });
   } finally {
     cleanup();
   }

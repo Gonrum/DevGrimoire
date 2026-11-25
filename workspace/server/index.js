@@ -1428,6 +1428,101 @@ app.post('/ensure', async (req, res) => {
   }
 });
 
+// Removes a workspace directory (delete of the workspace record). Never
+// follows links: a symlinked root is unlinked, its target is left alone.
+// Idempotent: a missing directory is `existed: false`, not an error.
+async function destroyWorkspaceRoot(id) {
+  const root = workspaceRoot(id);
+  // Defense in depth: the id pattern has no separators or dots, but the
+  // target must in any case be a direct child of the workspaces root.
+  if (path.dirname(root) !== path.resolve(ROOT) || path.basename(root) !== id) {
+    throw new Error('workspace path escapes the workspaces root');
+  }
+  let st;
+  try {
+    st = await fsp.lstat(root);
+  } catch (err) {
+    if (err.code === 'ENOENT') return false;
+    throw err;
+  }
+  if (st.isSymbolicLink() || !st.isDirectory()) await fsp.unlink(root);
+  else await fsp.rm(root, { recursive: true, force: true });
+  return true;
+}
+
+app.post('/destroy', async (req, res) => {
+  const id = requireWorkspaceId(req, res); if (!id) return;
+  try {
+    const existed = await destroyWorkspaceRoot(id);
+    await fsp.rm(`${CWD_STATE_DIR}/${id}`, { force: true }).catch(() => undefined);
+    res.json({ ok: true, existed });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Only real workspace ids (24 hex) are ever considered orphans; other names
+// in the root (scratch dirs such as `ptytest`) are never listed or touched.
+const ORPHAN_ID_PATTERN = /^[a-f0-9]{24}$/;
+
+/** Total size in bytes of a tree, without following symlinks. */
+async function treeBytes(dir) {
+  let total = 0;
+  let entries;
+  try {
+    // A symlinked root counts as the link itself, never as its target.
+    if ((await fsp.lstat(dir)).isSymbolicLink()) return 0;
+    entries = await fsp.readdir(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    const abs = path.join(dir, entry.name);
+    try {
+      if (entry.isDirectory()) total += await treeBytes(abs);
+      else total += (await fsp.lstat(abs)).size;
+    } catch {
+      // vanished while walking
+    }
+  }
+  return total;
+}
+
+app.post('/orphans', async (req, res) => {
+  const known = req.body?.knownIds;
+  if (!Array.isArray(known) || known.some((k) => typeof k !== 'string')) {
+    return res.status(400).json({ error: 'knownIds must be an array of strings' });
+  }
+  if (req.body?.delete !== undefined && typeof req.body.delete !== 'boolean') {
+    return res.status(400).json({ error: 'delete must be a boolean' });
+  }
+  const del = req.body?.delete === true;
+  const knownSet = new Set(known.map((k) => k.toLowerCase()));
+  try {
+    let names;
+    try {
+      names = await fsp.readdir(ROOT);
+    } catch (err) {
+      if (err.code === 'ENOENT') return res.json({ orphans: [], deleted: [] });
+      throw err;
+    }
+    const orphans = [];
+    const deleted = [];
+    for (const name of names.sort()) {
+      if (!ORPHAN_ID_PATTERN.test(name) || knownSet.has(name)) continue;
+      const bytes = await treeBytes(workspaceRoot(name));
+      orphans.push({ id: name, bytes });
+      if (del) {
+        await destroyWorkspaceRoot(name);
+        deleted.push(name);
+      }
+    }
+    res.json({ orphans, deleted });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/status', async (req, res) => {
   const id = requireWorkspaceId(req, res); if (!id) return;
   const root = workspaceRoot(id);

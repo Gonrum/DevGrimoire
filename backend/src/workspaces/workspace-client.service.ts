@@ -95,6 +95,11 @@ export interface ExecResponse {
  * pattern + path-traversal guard), not ownership or existence in our
  * Mongo. See T-146 design notes.
  */
+export interface OrphansResponse {
+  orphans: Array<{ id: string; bytes: number }>;
+  deleted: string[];
+}
+
 @Injectable()
 export class WorkspaceClient {
   private readonly logger = new Logger(WorkspaceClient.name);
@@ -440,6 +445,22 @@ export class WorkspaceClient {
   /** Creates the workspace directory in the sidecar if it is missing (idempotent). */
   async ensureDir(workspaceId: string): Promise<void> {
     await this.postFs<{ ok: true }>('/ensure', { workspaceId });
+  }
+
+  /**
+   * Removes the workspace directory from the sidecar (idempotent: a missing
+   * directory answers `existed: false`). Used when the record is deleted.
+   */
+  destroyDir(workspaceId: string): Promise<{ ok: true; existed: boolean }> {
+    return this.post<{ ok: true; existed: boolean }>('/destroy', { workspaceId }, this.cloneTimeoutMs);
+  }
+
+  /**
+   * Lists (and with `del` removes) sidecar directories named like a workspace
+   * id that are not in `knownIds`. Without `del` nothing is touched.
+   */
+  listOrphans(knownIds: string[], del: boolean): Promise<OrphansResponse> {
+    return this.post<OrphansResponse>('/orphans', { knownIds, delete: del }, 10 * 60_000);
   }
 
   /** `maxBytes` (editor limit) is optional: without it the sidecar's own READ_MAX_BYTES applies. */

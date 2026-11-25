@@ -10,7 +10,7 @@
  *  - Every file that calls WorkspaceClient methods (`workspaceClient.` or
  *    `this.client.`) must contain `assertContainerWorkspace(` or go through the
  *    guarded resolver. Excluded: the client itself, workspace-fs.controller.ts,
- *    fs/**, workspace-ttl.scheduler.ts, and main.ts (the terminal upgrade);
+ *    fs/**, workspace-ttl.scheduler.ts, workspaces.service.ts (delete path), and main.ts (the terminal upgrade);
  *    later tasks replace those code paths.
  *  - mcp-tools.ts and chat-tools.ts load workspaces for sidecar tools ONLY via
  *    one guarded resolver (`loadContainerWorkspace`). Heuristic: every
@@ -105,6 +105,8 @@ const rel = (p) => path.relative(SRC, p).split(path.sep).join('/');
     r === 'workspaces/workspace-fs.controller.ts' ||
     r.startsWith('workspaces/fs/') ||
     r === 'workspaces/workspace-ttl.scheduler.ts' ||
+    // Delete/sweep path: skips SSH records itself (destroyContainerDirs).
+    r === 'workspaces/workspaces.service.ts' ||
     r === 'main.ts' ||
     r === 'workspaces/container-only.ts';
   const CALL = /\b(?:this\.)?workspaceClient\.\w+\(|this\.client\.\w+\(/g;

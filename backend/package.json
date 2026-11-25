@@ -22,6 +22,7 @@
     "check:ssh-terminal-bridge": "node test/check-ssh-terminal-bridge.cjs",
     "check:workspace-fs": "node scripts/workspace-fs-scope-check.cjs",
     "check:workspace-exec": "node test/check-workspace-exec.cjs",
+    "check:workspace-orphans": "node test/check-workspace-orphans.cjs",
     "check:workspace-git-credentials": "node test/check-workspace-git-credentials.cjs",
     "check:workspace-agent-tools": "node test/check-workspace-agent-tools.cjs",
     "check:agent-chat-model": "node test/check-agent-chat-model.cjs",
