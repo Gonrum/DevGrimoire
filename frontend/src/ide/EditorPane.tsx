@@ -707,6 +707,7 @@ function CodeEditor({ tab, slot, readOnly, onEdit, onFocusPath, onShown }: CodeE
         });
         if (result === 'too-large') showError(t('ide.agent.attachTooLarge'));
         else if (result === 'full') showError(t('ide.agent.attachFull'));
+        else if (result === 'invalid') showError(t('ide.agent.attachInvalid'));
       },
     });
     editorInstance.onDidDispose(() => attachAction.dispose());

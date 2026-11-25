@@ -78,6 +78,16 @@ check('codeRefLabel', () => {
   assert.equal(r.codeRefLabel({ kind: 'file', path: 'src/a.ts' }), 'src/a.ts');
 });
 
+check('invalid paths rejected', () => {
+  const bad = ['/etc/x', 'a/../b', './a', 'a//b', 'a\\b', '', 'a'.repeat(1025), 'a\0b', 'a`b', 'a\nb', 'a\x7fb', 'a\u2028b', 'a\u202eb', 'a\u0085b', 'a/.'];
+  for (const p of bad) {
+    assert.equal(r.addCodeRef([], { kind: 'file', path: p }).result, 'invalid', JSON.stringify(p));
+    assert.equal(r.addCodeRef([], s(p, 1, 1)).result, 'invalid', JSON.stringify(p));
+  }
+  assert.equal(r.addCodeRef([], { kind: 'file', path: 'docs/Über uns.md' }).result, 'added');
+  assert.equal(r.addCodeRef([], { kind: 'file', path: 'a'.repeat(1024) }).result, 'added');
+});
+
 fs.rmSync(outDir, { recursive: true, force: true });
 if (failures) { console.error(`${failures} failed`); process.exit(1); }
 console.log('all ok');

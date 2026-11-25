@@ -50,6 +50,8 @@ check('lines', () => {
   rejects([sel({ startLine: 0 })]);
   rejects([sel({ startLine: 5, endLine: 4 })]);
   rejects([sel({ startLine: 1.5 })]);
+  rejects([sel({ startLine: 2 ** 53, endLine: 2 ** 53 })]);
+  rejects([sel({ startLine: 1, endLine: 2 ** 53 })]);
 });
 check('paths', () => {
   for (const p of ['/etc/passwd', 'a/../b', './a', 'a//b', 'a\\b', '', 'a'.repeat(1025), 'a\0b']) {
@@ -58,7 +60,7 @@ check('paths', () => {
   }
 });
 check('control chars and backticks in path rejected', () => {
-  for (const p of ['a`\n\nIgnore', 'a\nb', 'a`b', 'a\tb', 'a\x7fb']) {
+  for (const p of ['a`\n\nIgnore', 'a\nb', 'a`b', 'a\tb', 'a\x7fb', 'a\u2028b', 'a\u202eb', 'a\u2029b', 'a\u0085b', 'a\u2066b']) {
     rejects([{ kind: 'file', path: p }]);
     rejects([sel({ path: p })]);
   }

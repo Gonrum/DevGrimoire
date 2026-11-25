@@ -44,6 +44,7 @@ export interface ChatResponseMetrics {
   /** True when token count is estimated locally (chars/4) instead of from provider usage. */
   estimated: boolean;
 }
+
 @Schema({ _id: false })
 export class ChatMessage {
   @Prop({ type: String, enum: ['system', 'user', 'assistant'], required: true })

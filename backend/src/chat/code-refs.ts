@@ -7,7 +7,14 @@ const MAX_PATH_LENGTH = 1024;
 function hasControlOrTick(value: string): boolean {
   for (let i = 0; i < value.length; i += 1) {
     const c = value.charCodeAt(i);
-    if (c < 0x20 || c === 0x7f || c === 0x60) return true;
+    if (
+      c < 0x20
+      || (c >= 0x7f && c <= 0x9f) // DEL and C1 controls
+      || c === 0x60
+      || c === 0x2028 || c === 0x2029
+      || (c >= 0x202a && c <= 0x202e) // bidi embeddings/overrides
+      || (c >= 0x2066 && c <= 0x2069) // bidi isolates
+    ) return true;
   }
   return false;
 }
@@ -46,7 +53,7 @@ function parseOne(raw: unknown, index: number): CodeRef | string {
   if (raw.kind !== 'selection') return `${at}.kind must be 'selection' or 'file'`;
   const { startLine, endLine, text, unsaved } = raw;
   if (typeof startLine !== 'number' || typeof endLine !== 'number'
-    || !Number.isInteger(startLine) || !Number.isInteger(endLine)
+    || !Number.isSafeInteger(startLine) || !Number.isSafeInteger(endLine)
     || startLine < 1 || endLine < startLine) {
     return `${at} needs integer lines with 1 <= startLine <= endLine`;
   }

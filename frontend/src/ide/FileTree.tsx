@@ -392,6 +392,7 @@ export function FileTree({ workspaceId, activePath, onOpenFile, marks, initialRo
         action: () => {
           const result = useIdeStore.getState().attachCodeRef({ kind: 'file', path: entry.path });
           if (result === 'full') showError(t('ide.agent.attachFull'));
+          else if (result === 'invalid') showError(t('ide.agent.attachInvalid'));
         },
       },
       { label: t('ide.rename'), action: () => setRenaming(entry.path) },

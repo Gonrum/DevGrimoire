@@ -165,7 +165,7 @@ function CodeRefChips({ refs, onRemove }: { refs: readonly ChatCodeRef[]; onRemo
     <div className="flex flex-wrap gap-1">
       {refs.map((ref, i) => (
         <span
-          key={`${ref.kind}:${ref.path}:${ref.kind === 'selection' ? `${ref.startLine}-${ref.endLine}` : ''}`}
+          key={`${i}:${ref.kind}:${ref.path}:${ref.kind === 'selection' ? `${ref.startLine}-${ref.endLine}` : ''}`}
           title={ref.kind === 'selection' && ref.unsaved ? `${ref.path} (${t('ide.agent.attachUnsaved')})` : ref.path}
           className="inline-flex max-w-full items-center gap-1 rounded-sm border border-gray-700 bg-gray-800 px-1.5 py-0.5 font-mono text-[11px] text-cyan-300"
         >
@@ -481,7 +481,7 @@ export function AgentPanel({ workspace: initial, onCollapse }: { workspace: Work
     submittingRef.current = true;
     void chat
       .send(text, roleId || undefined, refs, () => {
-        setDraft('');
+        setDraft((d) => (d === text ? '' : d));
         useIdeStore.getState().removeSentCodeRefs(refs);
       })
       .finally(() => {
