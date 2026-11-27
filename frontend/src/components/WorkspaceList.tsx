@@ -205,10 +205,7 @@ export default function WorkspaceList({ projectId }: Props) {
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-100">{t('workspaces.title')}</h2>
-          <p className="text-xs text-gray-500 mt-0.5">{t('workspaces.subtitle')}</p>
-        </div>
+        <p className="text-xs text-gray-500">{t('workspaces.subtitle')}</p>
         <div className="flex items-center gap-2">
           <select
             value={filter}

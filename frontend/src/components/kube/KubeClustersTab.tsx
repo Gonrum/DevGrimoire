@@ -67,14 +67,14 @@ export function KubeClustersTab({ scope }: KubeClustersTabProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-medium text-gray-200">{t('kube.tab.title')}</h2>
-        {!creating && (
+      {/* The detail page's tab shell already shows the title. */}
+      {!creating && (
+        <div className="flex justify-end">
           <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
             + {t('kube.tab.addCluster')}
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       {creating && (
         <KubeClusterForm

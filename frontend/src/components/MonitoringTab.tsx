@@ -202,7 +202,6 @@ export default function MonitoringTab({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-lg font-medium text-gray-200">{t('monitoring.title')}</h2>
           {summary.total > 0 && (
             <>
               {summary.healthy > 0 && <Badge color={STATUS_COLORS.healthy}>{summary.healthy} {t('monitoring.status.healthy')}</Badge>}

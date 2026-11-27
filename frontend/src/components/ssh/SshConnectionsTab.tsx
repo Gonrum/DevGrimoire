@@ -250,8 +250,8 @@ export default function SshConnectionsTab({ scope }: SshConnectionsTabProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-medium text-gray-200">{t('ssh.tab.title')}</h2>
+      {/* The detail page's tab shell already shows the title. */}
+      <div className="flex justify-end">
         <Button variant="primary" size="sm" onClick={openCreate}>
           + {t('ssh.tab.newServer')}
         </Button>
